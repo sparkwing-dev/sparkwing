@@ -29,6 +29,7 @@ type LocalAdmission struct {
 	Version string
 
 	ParentLeaseToken string
+	ParentRunID      string
 
 	Origin wingwire.Origin
 
@@ -67,12 +68,12 @@ func NewReservedNodeAdmission(home, version, leaseToken string, origin wingwire.
 	}
 }
 
-func (la *LocalAdmission) attachReservedNode(ctx context.Context, priority int) (context.Context, bool) {
+func (la *LocalAdmission) attachReservedNode(ctx context.Context, runID string, priority int) (context.Context, bool) {
 	if la == nil || la.reservedNodeLeaseToken == "" {
 		return ctx, false
 	}
 	token := la.reservedNodeLeaseToken
-	return withLocalAdmission(ctx, la, token, token, true, priority, runCharge{}), true
+	return withLocalAdmission(ctx, la, runID, token, token, true, priority, runCharge{}), true
 }
 
 const defaultQueueHeartbeat = 30 * time.Second
@@ -344,7 +345,12 @@ func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Back
 			profile = p
 		}
 	}
-	res := capacity.Resolve(pin, profile, runtime.NumCPU(), "")
+	var planHash string
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if state.plan != nil && profile != nil && pin.Empty() {
+		planHash = capacityFingerprint(state.plan)
+	}
+	res := capacity.Resolve(pin, profile, runtime.NumCPU(), planHash)
 	res, overCap := la.applyHostCeiling(ctx, res, key)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
@@ -403,6 +409,7 @@ func (la *LocalAdmission) attachChildRun(
 		Repo:             currentRepoShortName(),
 		PID:              os.Getpid(),
 		ParentLeaseToken: la.ParentLeaseToken,
+		ParentRunID:      la.ParentRunID,
 		Origin:           la.Origin,
 	}, nil)
 	if err != nil {
@@ -1019,7 +1026,9 @@ func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
 type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
+	plan         *sparkwing.Plan
 	la           *LocalAdmission
+	runID        string
 	token        string
 	childToken   string
 	hostAdmitted bool
@@ -1029,6 +1038,7 @@ type localAdmissionState struct {
 func withLocalAdmission(
 	ctx context.Context,
 	la *LocalAdmission,
+	runID string,
 	leaseToken string,
 	childToken string,
 	hostAdmitted bool,
@@ -1039,21 +1049,30 @@ func withLocalAdmission(
 		return ctx
 	}
 	ctx = withAdmittedCharge(ctx, charge)
+	prior, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
 	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
+		plan:         prior.plan,
 		la:           la,
+		runID:        runID,
 		token:        leaseToken,
 		childToken:   childToken,
 		hostAdmitted: hostAdmitted,
 		priority:     priority,
 	})
 	if leaseToken != "" {
-		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken}
+		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken, "SPARKWING_RUN_ID": runID}
 		if childToken != "" {
 			env[wingwire.ChildLeaseTokenEnv] = childToken
 		}
 		ctx = sparkwing.WithCommandEnv(ctx, env)
 	}
 	return ctx
+}
+
+func withLocalAdmissionPlan(ctx context.Context, plan *sparkwing.Plan) context.Context {
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	state.plan = plan
+	return context.WithValue(ctx, localAdmissionCtxKey{}, state)
 }
 
 func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string, bool) {
@@ -1106,6 +1125,14 @@ func leaseTriggerEnv(ctx context.Context) map[string]string {
 		return nil
 	}
 	return map[string]string{wingwire.LeaseTokenEnv: token}
+}
+
+func parentRunIDFromContext(ctx context.Context) string {
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if ok && state.token != "" {
+		return state.runID
+	}
+	return os.Getenv("SPARKWING_RUN_ID")
 }
 
 func childAttachTokenFromEnv(env map[string]string) string {

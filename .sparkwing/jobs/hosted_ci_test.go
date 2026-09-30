@@ -1,10 +1,10 @@
 package jobs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -190,7 +190,43 @@ func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	}
 }
 
-func TestCanonicalWorkflowLeavesRoomAroundWorkDeadlines(t *testing.T) {
+func TestCanonicalPreReleaseUsesItsPostgresService(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	job := mappingValue(mappingValue(&doc, "jobs"), "gate")
+	image := mappingValue(mappingValue(mappingValue(job, "services"), "postgres"), "image")
+	if image == nil || image.Value != "${{ matrix.gate == 'pre-release' && 'postgres:17' || '' }}" {
+		t.Fatal("PostgreSQL service must start only for pre-release")
+	}
+	if mappingValue(mappingValue(job, "env"), "SPARKWING_TEST_PG_URL") != nil {
+		t.Fatal("PostgreSQL URL must be scoped to the pre-release step")
+	}
+	steps := mappingValue(job, "steps")
+	if steps == nil {
+		t.Fatal("canonical workflow has no steps")
+	}
+	found := false
+	for _, step := range steps.Content {
+		name := mappingValue(step, "name")
+		url := mappingValue(mappingValue(step, "env"), "SPARKWING_TEST_PG_URL")
+		if name != nil && name.Value == "Run canonical pre-release" {
+			found = true
+			if url == nil || url.Value != "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" {
+				t.Fatal("pre-release does not address its PostgreSQL service")
+			}
+		} else if url != nil {
+			t.Fatal("PostgreSQL URL escaped the pre-release step")
+		}
+	}
+	if !found {
+		t.Fatal("canonical workflow has no pre-release step")
+	}
+}
+
+func TestCanonicalWorkflowLeavesRoomAroundDeclaredDeadlines(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
@@ -200,15 +236,11 @@ func TestCanonicalWorkflowLeavesRoomAroundWorkDeadlines(t *testing.T) {
 	if minutesNode == nil {
 		t.Fatal("canonical gate job declares no workflow timeout")
 	}
-	minutes, err := strconv.Atoi(minutesNode.Value)
-	if err != nil {
-		t.Fatalf("canonical gate timeout-minutes = %q: %v", minutesNode.Value, err)
-	}
-	if room := time.Duration(minutes)*time.Minute - gateRunTimeout; room < 5*time.Minute {
-		t.Fatalf("canonical workflow leaves %s around the %s gate deadline, want at least 5m for setup and cleanup", room, gateRunTimeout)
-	}
-	if room := time.Duration(minutes)*time.Minute - preReleaseRunTimeout; room < 5*time.Minute {
-		t.Fatalf("canonical workflow leaves %s around the pre-release deadline, want at least 5m for setup and cleanup", room)
+	want := fmt.Sprintf("${{ matrix.gate == 'pre-release' && %d || %d }}",
+		int((preReleaseRunTimeout+10*time.Minute)/time.Minute),
+		int((gateRunTimeout+5*time.Minute)/time.Minute))
+	if minutesNode.Value != want {
+		t.Fatalf("canonical workflow timeout = %q, want %q to allow setup and cleanup", minutesNode.Value, want)
 	}
 }
 

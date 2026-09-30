@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io/fs"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +61,109 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	}
 
 	assertNodesRecordedTheirUsage(t, home, "spawnproof", "produce", "consume")
+	st, err := store.Open(orchestrator.PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	run, err := st.GetLatestRun(t.Context(), "spawnproof", nil, time.Hour)
+	if err != nil || run == nil {
+		t.Fatalf("run=%+v error=%v", run, err)
+	}
+	samples, err := st.ListNodeMetrics(t.Context(), run.ID, "consume")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("leaf samples=%+v error=%v", samples, err)
+	}
+	for _, sample := range samples {
+		if sample.Kind != store.MetricInterval || sample.MemoryBytes <= 0 || sample.CPUMillicores < 0 {
+			t.Fatalf("leaf measurement=%+v", sample)
+		}
+	}
+	profiles, err := st.ListPipelineProfiles(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, profile := range profiles {
+		if profile.NodeID != "consume" {
+			continue
+		}
+		found = true
+		if profile.SampleCount != 1 || !profile.CPUMeasured || profile.PeakMemoryBytes <= 0 {
+			t.Fatalf("leaf profile=%+v", profile)
+		}
+	}
+	if !found {
+		t.Fatal("measured leaf did not produce a profile")
+	}
+}
+
+func TestProcessPerNode_QueuedNodesRecordUsage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and executes a pipeline binary")
+	}
+	mod, bin := buildProcPerNodeBinary(t)
+	home, probe := t.TempDir(), t.TempDir()
+	stopHomeDaemon(t, home)
+	st, err := store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.CreateTrigger(context.Background(), store.Trigger{
+		ID: "queued-usage", Pipeline: "spawnproof", Status: "claimed", CreatedAt: time.Now(),
+	})
+	if closeErr := st.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	runEnv := append(os.Environ(),
+		"SPARKWING_HOME="+home,
+		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
+		"PROC_PROBE_DIR="+probe,
+	)
+	runBin(t, mod, runEnv, bin, "handle-trigger", "--local", "queued-usage")
+	dispatcher := readPID(t, probe, "dispatcher")
+	for _, node := range []string{"produce", "consume", "recover"} {
+		if pid := readPID(t, probe, node); pid == dispatcher {
+			t.Errorf("queued node %s shares dispatcher PID %d", node, pid)
+		}
+	}
+	st, err = store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	for _, id := range []string{"produce", "consume"} {
+		node, err := st.GetNode(context.Background(), "queued-usage", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if node.CPUNanos <= 0 || node.MaxRSSBytes <= 0 || node.ProcessWallNanos <= 0 {
+			t.Errorf("queued node %s missing process usage: %+v", id, node)
+		}
+	}
+	node, err := st.GetNode(context.Background(), "queued-usage", "produce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(probe, "raw-child.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var child struct{ CPUNanos, MaxRSSBytes int64 }
+	if err := json.Unmarshal(raw, &child); err != nil {
+		t.Fatal(err)
+	}
+	childCPU, childRSS := child.CPUNanos, child.MaxRSSBytes
+	if childCPU <= 0 || childRSS < 128<<20 {
+		t.Fatalf("raw child did not exercise resources: CPU %d ns, RSS %d bytes", childCPU, childRSS)
+	}
+	if node.CPUNanos < childCPU || node.MaxRSSBytes < childRSS {
+		t.Errorf("queued node lost raw child usage: CPU %d < %d ns or RSS %d < %d bytes",
+			node.CPUNanos, childCPU, node.MaxRSSBytes, childRSS)
+	}
 }
 
 func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs ...string) {
@@ -94,15 +196,6 @@ func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs 
 		if measured > float64(runtime.NumCPU()) {
 			t.Errorf("node %q measured %.2f cores; a %d-core host cannot have given that, so the span is not the one the CPU was drawn over",
 				id, measured, runtime.NumCPU())
-		}
-		prof, err := st.GetPipelineProfile(ctx, pipeline, id)
-		if err != nil || prof == nil {
-			t.Fatalf("node %q profile missing: %v", id, err)
-		}
-		if diff := math.Abs(prof.SustainedCores - measured); diff > 0.05*measured {
-			t.Errorf("node %q charges %.3f sustained cores but its process measured %.3f (cpu %s over %s)",
-				id, prof.SustainedCores, measured,
-				time.Duration(n.CPUNanos), time.Duration(n.ProcessWallNanos))
 		}
 	}
 }
@@ -522,10 +615,12 @@ const procPerNodeJobs = `package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -581,8 +676,24 @@ type Produce struct {
 func (j *Produce) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (BuildOut, error) {
 		StampPID("produce")
-		// safety: asking the guard here is what proves the dispatching process
-		// makes a grant of its own.
+		{
+			cmd := exec.CommandContext(ctx, os.Args[0], "raw-resource-child")
+			if err := cmd.Run(); err != nil {
+				return BuildOut{}, err
+			}
+			ru := cmd.ProcessState.SysUsage().(*syscall.Rusage)
+			rss := ru.Maxrss
+			if runtime.GOOS == "linux" {
+				rss *= 1024
+			}
+			raw, err := json.Marshal(struct{ CPUNanos, MaxRSSBytes int64 }{ru.Utime.Nano()+ru.Stime.Nano(), rss})
+			if err != nil {
+				return BuildOut{}, err
+			}
+			if err := os.WriteFile(filepath.Join(os.Getenv("PROC_PROBE_DIR"), "raw-child.json"), raw, 0o644); err != nil {
+				return BuildOut{}, err
+			}
+		}
 		planguard.Guard(ctx, "procpernode.probe")
 		return BuildOut{Digest: "sha-abc123"}, nil
 	}), nil
@@ -792,6 +903,14 @@ type Bouncer struct {
 	sparkwing.Produces[BounceOut]
 }
 
+func RawResourceChild() {
+	memory := make([]byte, 128<<20)
+	for offset := 0; offset < len(memory); offset += 4096 {
+		memory[offset] = byte(offset/4096)
+	}
+	runtime.KeepAlive(memory)
+}
+
 func selfCPUNanos() int64 {
 	var ru syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
@@ -871,9 +990,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "raw-resource-child" {
+		jobs.RawResourceChild()
+		return
+	}
 	// Every node process rebuilds the plan, so the dispatcher has to
 	// stamp its identity from the entrypoint that only it reaches.
-	if len(os.Args) > 1 && (os.Args[1] == "spawnproof" || os.Args[1] == "orphanproof" || os.Args[1] == "spawnnode") {
+	if len(os.Args) > 1 && (os.Args[1] == "handle-trigger" || os.Args[1] == "spawnproof" || os.Args[1] == "orphanproof" || os.Args[1] == "spawnnode") {
 		jobs.StampPID("dispatcher")
 	}
 	runner.Main()

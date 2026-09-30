@@ -279,3 +279,22 @@ func TestClientReconcileOrphansIsAdminOnly(t *testing.T) {
 		t.Error("a runner token swept the machine's orphaned runs, want 403")
 	}
 }
+
+func TestClientMetricKindsRoundTrip(t *testing.T) {
+	f := newCoordinationFixture(t)
+	for i, kind := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {
+		sample := store.MetricSample{Kind: kind, TS: time.Unix(int64(i+1), 0), MemoryBytes: 400}
+		if err := f.runner.AddNodeMetricSample(f.ctx, "r1", "build", sample); err != nil {
+			t.Fatal(err)
+		}
+	}
+	samples, err := f.runner.ListNodeMetrics(f.ctx, "r1", "build")
+	if err != nil || len(samples) != 3 {
+		t.Fatalf("samples=%+v, %v", samples, err)
+	}
+	for i, want := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {
+		if samples[i].Kind != want || samples[i].CPUTime != 0 || samples[i].CPUMillicores != 0 || samples[i].MemoryBytes != 400 {
+			t.Fatalf("sample %d=%+v; want kind %q with zero CPU and 400 bytes", i, samples[i], want)
+		}
+	}
+}

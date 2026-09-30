@@ -612,8 +612,8 @@ func TestPodResources_KeepsBurstLimits(t *testing.T) {
 	if got := milli(rr.Limits[corev1.ResourceCPU]); got != 8000 {
 		t.Errorf("cpu limit = %dm, want 8000m (2x request)", got)
 	}
-	if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != int64(float64(8<<30)*podMemoryLimitFactor) {
-		t.Errorf("mem limit = %d, want %d (1.25x request)", got, int64(float64(8<<30)*podMemoryLimitFactor))
+	if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != int64(10<<30) {
+		t.Errorf("mem limit = %d, want %d (1.25x request)", got, int64(10<<30))
 	}
 }
 
@@ -649,7 +649,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 			wantCPUReq: 2000,
 			wantCPULim: 2000,
 			wantMemReq: 1 << 30,
-			wantMemLim: int64(float64(1<<30) * podMemoryLimitFactor),
+			wantMemLim: 1280 << 20,
 		},
 		{
 			name:       "pin over the memory ceiling is capped, burst included",
@@ -676,7 +676,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 			wantCPUReq: 500,
 			wantCPULim: 1000,
 			wantMemReq: 1 << 30,
-			wantMemLim: int64(float64(1<<30) * podMemoryLimitFactor),
+			wantMemLim: 1280 << 20,
 		},
 		{
 			name:       "the unmeasured fallback size is capped by the ceiling as well",
@@ -694,7 +694,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 			wantCPUReq: 64000,
 			wantCPULim: int64(64000 * podCPULimitFactor),
 			wantMemReq: 128 << 30,
-			wantMemLim: int64(float64(128<<30) * podMemoryLimitFactor),
+			wantMemLim: 160 << 30,
 		},
 	}
 	for _, tc := range cases {
@@ -1025,8 +1025,7 @@ func TestBuildJob_OmitsTheClaimFenceWhenNoClaimWasAwarded(t *testing.T) {
 }
 
 func TestRunNode_ClaimsTheNodeBeforeItCreatesTheJob(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -1059,7 +1058,10 @@ func TestRunNode_ClaimsTheNodeBeforeItCreatesTheJob(t *testing.T) {
 		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
 	}, nil)
 
-	r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	r.RunNode(runCtx, runner.Request{RunID: "run-1", NodeID: "build"})
 
 	n, err := st.GetNode(ctx, "run-1", "build")
 	if err != nil {
@@ -1166,8 +1168,7 @@ func TestParseJobDeadline(t *testing.T) {
 // A Job Kubernetes killed at its deadline must not read like the unfenced-write
 // defect: the pod is gone, so the Job condition is the only evidence.
 func TestRunNode_DeadlineKillIsReportedAsItsOwnFailure(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -1198,7 +1199,10 @@ func TestRunNode_DeadlineKillIsReportedAsItsOwnFailure(t *testing.T) {
 		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
 	}, nil)
 
-	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	res := r.RunNode(runCtx, runner.Request{RunID: "run-1", NodeID: "build"})
 	if res.Outcome != sparkwing.Failed {
 		t.Fatalf("outcome = %q, want failed", res.Outcome)
 	}

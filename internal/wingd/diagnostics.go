@@ -3,6 +3,7 @@ package wingd
 import (
 	"fmt"
 	"runtime"
+	"time"
 )
 
 const diagnosticsStackBytes = 2 << 20
@@ -33,8 +34,17 @@ func (d *Daemon) writeDiagnosticDump() {
 	if _, err := RotateLogOverCap(d.cfg.Home); err != nil {
 		d.cfg.logf("diagnostics: could not rotate the daemon log: %v", err)
 	}
-	d.cfg.logf("diagnostics: %s", d.diagnosticSummary())
-	d.cfg.logf("diagnostics: goroutine dump\n%s", dumpGoroutineStacks(diagnosticsStackBytes))
+	summary, stacks := d.diagnosticSummary(), dumpGoroutineStacks(diagnosticsStackBytes)
+	path, err := LogPath(d.cfg.Home)
+	if err == nil {
+		dump := fmt.Sprintf("%s %s\n%s", d.now().UTC().Format(time.RFC3339Nano), summary, stacks)
+		err = writeAtomicFile(path+".stacks", []byte(dump))
+	}
+	if err != nil {
+		d.cfg.logf("diagnostics: could not save the goroutine dump: %v", err)
+	}
+	d.cfg.logf("diagnostics: %s", summary)
+	d.cfg.logf("diagnostics: goroutine dump\n%s", stacks)
 }
 
 func dumpGoroutineStacks(maxBytes int) string {

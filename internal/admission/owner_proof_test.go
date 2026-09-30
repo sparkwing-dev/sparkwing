@@ -5,7 +5,7 @@ import "testing"
 func TestProvesOwnerAcceptsAMemberAttachedToTheLease(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	parent := mustGrant(t, l, Request{ID: "parent-run", Cores: 1})
-	if err := l.Attach(parent.ID, "child-run"); err != nil {
+	if err := l.Attach(parent.ID, "child-run", "parent-run"); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 
@@ -26,7 +26,7 @@ func TestProvesOwnerAcceptsAMemberAttachedToTheLease(t *testing.T) {
 func TestProvesOwnerRejectsAMemberAfterItReleases(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	parent := mustGrant(t, l, Request{ID: "parent-run", Cores: 1})
-	if err := l.Attach(parent.ID, "child-run"); err != nil {
+	if err := l.Attach(parent.ID, "child-run", "parent-run"); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 	if _, err := l.Release(parent.ID, "child-run"); err != nil {

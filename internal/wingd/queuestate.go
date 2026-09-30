@@ -15,7 +15,22 @@ func stallRecoveryCommand(runID string) string {
 	return fmt.Sprintf("sparkwing runs cancel --run %s", runID)
 }
 
-func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
+// perf: ETA simulation can outlast a health probe on a deep queue. Only the snapshot
+// holds d.mu. Concurrent readers share the returned slices; callers must leave them unchanged.
+func (d *Daemon) readQueueState() wingwire.QueueState {
+	//nolint:errcheck // The callback always returns a nil error.
+	result, _, _ := d.queueStateReads.Do("", func() (any, error) {
+		d.mu.Lock()
+		qs, snap := d.buildQueueStateLocked()
+		d.mu.Unlock()
+		annotateETA(&qs, snap)
+		annotateSemaphoreETA(&qs, snap)
+		return qs, nil
+	})
+	return result.(wingwire.QueueState)
+}
+
+func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapshot) {
 	snap := d.ledger.Snapshot()
 	var qs wingwire.QueueState
 	qs.DaemonVersion = d.cfg.Version
@@ -189,6 +204,10 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		c := d.byRun[w.RequestID]
 		rowID := queueRowIdentity(w.RequestID, c)
 		rationale := d.costRationale(c)
+		blocking := w
+		if w.SoftCores && admission.SoftCoresFit(w.MilliCores, usedMilli, snap.TotalMilliCores, snap.HeadroomMilliCores) {
+			blocking.MilliCores = 0
+		}
 		waiter := wingwire.Waiter{
 			RunID:           rowID.runID,
 			ParticipantID:   rowID.participantID,
@@ -204,8 +223,8 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			},
 			Burst:          w.BurstCores,
 			Semaphores:     claimKeys(w.Claims),
-			WaitingOn:      waitingOn(w, remaining),
-			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
+			WaitingOn:      waitingOn(blocking, remaining),
+			BlockingReason: hostBlockingReason(float64(blocking.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
 			CostRationale:  rationale,
 		}
 		waiter.BlockingReason = queueBlockingReason(waiter.BlockingReason, waiter.WaitingOn, i+1)
@@ -232,9 +251,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 
 	annotateAdmissionWaiting(&qs)
-	annotateETA(&qs, snap)
-	annotateSemaphoreETA(&qs, snap)
-	return qs
+	return qs, snap
 }
 
 func leaseHoldsResources(snap admission.Snapshot, ls admission.LeaseState) bool {
@@ -634,7 +651,8 @@ func effectiveCapacity(ss admission.SemaphoreState) int {
 	return eff
 }
 
-func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale string) string {
+func (d *Daemon) hostBlockingReasonLocked(c *conn) string {
+	res := c.resources
 	if res.Cores <= 0 && res.MemoryBytes <= 0 {
 		return ""
 	}
@@ -664,7 +682,11 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributed)},
 		"memory": {Key: "memory", Available: grantMem, External: extMem, ExternalSource: externalSource(d.memMeasured)},
 	}
-	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)
+	if softCoreCostSource(wingwire.CostSource(c.costSource)) &&
+		admission.SoftCoresFit(int64(math.Round(res.Cores*1000)), usedMilli, snap.TotalMilliCores, snap.HeadroomMilliCores) {
+		res.Cores = 0
+	}
+	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, d.costRationale(c))
 }
 
 func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {

@@ -241,7 +241,7 @@ func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	cmd.Stdout = logF
 	cmd.Stderr = logF
 
-	cmd.Env = setEnv(os.Environ(), "SPARKWING_HOME", layout.Home)
+	cmd.Env = withWingdHost(setEnv(os.Environ(), "SPARKWING_HOME", layout.Home))
 	cmd.SysProcAttr = newDetachSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("spawn trigger consumer: %w", err)

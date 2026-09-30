@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -276,6 +277,43 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, logger)
 	}
 
+	executionDir := filepath.Dir(sparkwingDir)
+	source, sourceErr := projectconfig.PipelineSource(executionDir, trigger.Pipeline)
+	if sourceErr != nil {
+		return awaitHeartbeat(), sourceErr
+	}
+	revision := trigger.TriggerEnv[orchestrator.PipelineRevKey]
+	if source != "" || revision != "" {
+		if trigger.RetryOf != "" && revision == "" {
+			return awaitHeartbeat(), fmt.Errorf("retry %s did not record its declared pipeline source revision", trigger.ID)
+		}
+		sourceDir := workDir + "-pipeline"
+		defer func() {
+			if err := os.RemoveAll(sourceDir); err != nil {
+				logger.Warn("remove pipeline source checkout", "error", err)
+			}
+		}()
+		sourceRef := source
+		if revision != "" {
+			sourceRef = revision
+		}
+		sparkwingDir, fetchErr = fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
+			return fetchPipelineRefFn(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant, repoURL, sourceRef, sourceDir)
+		}, revision, logger, trigger.ID)
+
+		if fetchErr != nil {
+			return awaitHeartbeat(), fmt.Errorf("fetch pipeline source: %w", fetchErr)
+		}
+		out, err := exec.CommandContext(ctx, "git", "-C", filepath.Dir(sparkwingDir), "rev-parse", "HEAD").Output()
+		if err != nil {
+			return awaitHeartbeat(), fmt.Errorf("record pipeline source: %w", err)
+		}
+		if trigger.TriggerEnv == nil {
+			trigger.TriggerEnv = make(map[string]string)
+		}
+		trigger.TriggerEnv[orchestrator.PipelineRevKey] = strings.TrimSpace(string(out))
+	}
+
 	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, opts, grant, trigger.ID, logger)
 	if buildErr != nil {
 		shipCompileOutput(ctx, opts, trigger.ID, buildErr, logger)
@@ -284,7 +322,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	logBinaryReady(logger, trigger.ID, binary)
 	defer binary.release()
 
-	execErr := execHandleTrigger(childCtx, binary.path, filepath.Dir(sparkwingDir), trigger, opts, grant, logger)
+	execErr := execHandleTrigger(childCtx, binary.path, executionDir, trigger, opts, grant, logger)
 	return awaitHeartbeat(), execErr
 }
 
@@ -314,7 +352,8 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	cmd.Env = append(triggerChildEnv(ctx, os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
+	env := append(triggerChildEnv(ctx, os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
+	cmd.Env = orchestrator.PipelineSourceEnvironment(env, trigger.TriggerEnv[orchestrator.PipelineRevKey])
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	logger.Info("trigger loop: exec child",
@@ -393,7 +432,10 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	}
 }
 
-var fetchSourceFn = bincache.FetchPipelineSourceWithCredentials
+var (
+	fetchPipelineRefFn = bincache.FetchPipelineRef
+	fetchSourceFn      = bincache.FetchPipelineSourceWithCredentials
+)
 
 var (
 	triggerFetchMaxAttempts = 3

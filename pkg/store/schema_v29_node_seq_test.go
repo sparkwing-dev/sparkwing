@@ -163,14 +163,21 @@ func TestSchemaV29_ReplayLeavesTheV28CascadeIntact(t *testing.T) {
 	defer func() { _ = replayed.Close() }()
 
 	ctx := context.Background()
+	previous := countNodeMetrics(t, replayed.DB())
 	seedRunWithMetricSample(t, replayed, "doomed", time.Now())
-	if got := countNodeMetrics(t, replayed.DB()); got != 1 {
-		t.Fatalf("seeded node_metrics = %d, want 1", got)
+	if samples, err := replayed.ListNodeMetrics(ctx, "doomed", "build"); err != nil || len(samples) != 1 {
+		t.Fatalf("doomed metrics before deletion = %v, %v; want one sample", samples, err)
+	}
+	if got := countNodeMetrics(t, replayed.DB()); got != previous+1 {
+		t.Fatalf("seeded node_metrics = %d, want %d", got, previous+1)
 	}
 	if err := replayed.DeleteRun(ctx, "doomed"); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
 	}
-	if got := countNodeMetrics(t, replayed.DB()); got != 0 {
-		t.Errorf("node_metrics after DeleteRun = %d, want 0: replaying v29 lost v28's cascade", got)
+	if samples, err := replayed.ListNodeMetrics(ctx, "doomed", "build"); err != nil || len(samples) != 0 {
+		t.Fatalf("doomed metrics after deletion = %v, %v; want no samples", samples, err)
+	}
+	if got := countNodeMetrics(t, replayed.DB()); got != previous {
+		t.Errorf("node_metrics after DeleteRun = %d, want %d: replaying v29 lost v28's cascade", got, previous)
 	}
 }

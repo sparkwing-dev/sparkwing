@@ -4,6 +4,26 @@ Sparkwing's admission daemon decides when work may consume CPU and memory on one
 machine. It does not assess job risk. Risk declarations and approvals remain
 deterministic pipeline contracts and are unaffected by admission mode.
 
+For a run that waited, was refused, or lost its daemon, see [Diagnosing admission](diagnosing-admission.md).
+
+The daemon advances a heartbeat counter about once a second after passing through
+its admission state lock. On Unix it stores the counter in a shared mapping, so
+each tick avoids filesystem calls. The supervisor reads the counter when health probes
+fail. It replaces a daemon after three failed probes only when several samples
+confirm that the counter has made no progress for a minute. A whole-machine pause
+restarts that stale window when the supervisor resumes. Continuous probe failure
+still forces replacement after five minutes of observed failure, even if the
+counter advances. An advancing counter also extends startup while the daemon
+opens its state. The supervisor logs which limit caused a replacement.
+
+Lease holders and queued runs retry with capped backoff for up to twelve minutes
+after a connection breaks. A missing daemon host fails immediately, and a daemon
+host that exits before serving gets at most three attempts. Each handshake can
+wait a minute for an overloaded daemon. The replacement daemon keeps restored
+leases for two minutes after it starts, so clients can reattach after the
+supervisor's stop, backoff, and startup delay. These waits require no admission
+setting.
+
 The default `classic` mode preserves Sparkwing's admission behavior from before
 selectable modes. To change the machine-wide
 policy, set it in the `admission` section of `~/.config/sparkwing/config.yaml`

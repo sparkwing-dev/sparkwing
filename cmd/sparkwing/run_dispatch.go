@@ -80,6 +80,7 @@ type runFlags struct {
 	runHandleFile string
 
 	detached           bool
+	pipelineRef        string
 	idempotencyKey     string
 	requestID          string
 	consumerIdle       string
@@ -349,6 +350,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case argument == "--sw-detached":
 			flags.detached = true
 			argumentIndex++
+		case argument == "--sw-pipeline-ref":
+			if argumentIndex+1 < len(args) {
+				flags.pipelineRef = args[argumentIndex+1]
+				argumentIndex += 2
+				continue
+			}
+			passthroughArgs = append(passthroughArgs, argument)
+			argumentIndex++
+		case strings.HasPrefix(argument, "--sw-pipeline-ref="):
+			flags.pipelineRef = strings.TrimPrefix(argument, "--sw-pipeline-ref=")
+			argumentIndex++
 		case argument == "--sw-idempotency-key":
 			if argumentIndex+1 < len(args) {
 				flags.idempotencyKey = args[argumentIndex+1]
@@ -473,6 +485,7 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 		return "", "", nil, fmt.Errorf("mkdir tmp: %w", err)
 	}
 
+	// #nosec G702 -- the generated directory and resolved commit ID follow an explicit --.
 	out, err := exec.Command("git", "-C", repoRoot,
 		"worktree", "add", "--detach", "--quiet", "--", temporaryDir, string(commit)).CombinedOutput()
 	if err != nil {

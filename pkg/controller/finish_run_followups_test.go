@@ -36,11 +36,15 @@ func seedFinishRunFollowUpState(t *testing.T, st *store.Store, runID string) str
 	for i := range followUpNodeCount {
 		nodeID := fmt.Sprintf("node-%02d", i)
 		last = nodeID
-		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "success"}); err != nil {
+		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 			t.Fatalf("CreateNode %s: %v", nodeID, err)
+		}
+		if err := st.FinishNode(ctx, runID, nodeID, "success", "", nil); err != nil {
+			t.Fatal(err)
 		}
 		for s := range 5 {
 			if err := st.AddNodeMetricSample(ctx, runID, nodeID, store.MetricSample{
+				Kind:          store.MetricInterval,
 				TS:            time.Now().UTC().Add(time.Duration(s) * time.Second),
 				CPUMillicores: 500,
 				MemoryBytes:   1 << 20,

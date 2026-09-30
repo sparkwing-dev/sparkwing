@@ -27,20 +27,21 @@ type Snapshot struct {
 }
 
 type LeaseState struct {
-	Seq         uint64       `json:"seq"`
-	Admit       uint64       `json:"admit,omitempty"`
-	OwnerID     string       `json:"owner_id,omitempty"`
-	OwnerAdmit  uint64       `json:"owner_admit,omitempty"`
-	ID          LeaseID      `json:"id"`
-	Token       string       `json:"token"`
-	RequestID   string       `json:"request_id"`
-	MilliCores  int64        `json:"milli_cores"`
-	SoftCores   bool         `json:"soft_cores,omitempty"`
-	StrictCores bool         `json:"strict_cores,omitempty"`
-	BurstCores  bool         `json:"burst_cores,omitempty"`
-	MemoryBytes uint64       `json:"memory_bytes"`
-	Claims      []ClaimState `json:"claims,omitempty"`
-	Members     []string     `json:"members"`
+	Seq         uint64            `json:"seq"`
+	Admit       uint64            `json:"admit,omitempty"`
+	OwnerID     string            `json:"owner_id,omitempty"`
+	OwnerAdmit  uint64            `json:"owner_admit,omitempty"`
+	ID          LeaseID           `json:"id"`
+	Token       string            `json:"token"`
+	RequestID   string            `json:"request_id"`
+	MilliCores  int64             `json:"milli_cores"`
+	SoftCores   bool              `json:"soft_cores,omitempty"`
+	StrictCores bool              `json:"strict_cores,omitempty"`
+	BurstCores  bool              `json:"burst_cores,omitempty"`
+	MemoryBytes uint64            `json:"memory_bytes"`
+	Claims      []ClaimState      `json:"claims,omitempty"`
+	Members     []string          `json:"members"`
+	Parents     map[string]string `json:"parents,omitempty"`
 }
 
 type ClaimState struct {
@@ -129,6 +130,7 @@ func (l *Ledger) Snapshot() Snapshot {
 			MemoryBytes: le.memory,
 			Claims:      claimStates(le.claims),
 			Members:     members,
+			Parents:     cloneParents(le.parents),
 		})
 	}
 	keys := make([]string, 0, len(l.sems))
@@ -179,6 +181,17 @@ func claimStates(claims []claim) []ClaimState {
 		out = append(out, ClaimState{Key: c.key, Capacity: c.capacity, Cost: c.cost, Policy: c.policy})
 	}
 	return out
+}
+
+func cloneParents(parents map[string]string) map[string]string {
+	if len(parents) == 0 {
+		return nil
+	}
+	copy := make(map[string]string, len(parents))
+	for child, parent := range parents {
+		copy[child] = parent
+	}
+	return copy
 }
 
 func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
@@ -319,6 +332,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		memory:      ls.MemoryBytes,
 		claims:      claims,
 		members:     make(map[string]struct{}, len(ls.Members)),
+		parents:     make(map[string]string, len(ls.Members)),
 	}
 	for _, m := range ls.Members {
 		if m == "" {
@@ -329,6 +343,33 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		}
 		le.members[m] = struct{}{}
 		l.memberOf[m] = ls.ID
+	}
+	for child, parent := range ls.Parents {
+		if child == ls.RequestID || parent == "" || parent == child {
+			return fmt.Errorf("%w: invalid parent for member %q", ErrInvalidSnapshot, child)
+		}
+		le.parents[child] = parent
+	}
+	for child := range le.members {
+		if child == ls.RequestID {
+			continue
+		}
+		if _, ok := le.parents[child]; !ok {
+			le.parents[child] = ls.RequestID
+		}
+	}
+	for child := range le.parents {
+		for parent, seen := le.parents[child], map[string]bool{child: true}; parent != ls.RequestID && parent != ls.OwnerID; parent = le.parents[parent] {
+			if parent == "" || seen[parent] {
+				return fmt.Errorf("%w: cyclic or missing parent for %q", ErrInvalidSnapshot, child)
+			}
+			if _, ok := le.parents[parent]; !ok {
+				if _, live := le.members[parent]; !live {
+					return fmt.Errorf("%w: unknown parent %q", ErrInvalidSnapshot, parent)
+				}
+			}
+			seen[parent] = true
+		}
 	}
 	l.leases[ls.ID] = le
 	l.tokens[ls.Token] = ls.ID

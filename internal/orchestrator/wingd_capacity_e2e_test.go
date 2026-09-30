@@ -2,22 +2,21 @@ package orchestrator
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type wingdBurnerPipe struct{ sparkwing.Base }
+type wingdCommandOnlyPipe struct{ sparkwing.Base }
 
-func (wingdBurnerPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "burn", func(ctx context.Context) error {
-		const script = "for i in 0 1 2 3 4 5 6 7; do awk 'BEGIN{s=0;for(i=0;i<20000000;i++)s+=i}' & done; wait"
-		_, err := sparkwing.Exec(ctx, "sh", "-c", script).Run()
+func (wingdCommandOnlyPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "command", func(ctx context.Context) error {
+		_, err := sparkwing.Exec(ctx, "sh", "-c", ":").Run()
 		return err
 	})
 	return nil
@@ -27,39 +26,53 @@ var wingdCapacityE2ERegister sync.Once
 
 func registerWingdCapacityE2EPipelines() {
 	wingdCapacityE2ERegister.Do(func() {
-		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-burner",
-			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdBurnerPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-command-only",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdCommandOnlyPipe{} })
 	})
 }
 
-func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
-	}
+func TestWingd_UnownedCommandRunDoesNotLearnResourceProfile(t *testing.T) {
+	t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 	registerWingdCapacityE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 64)
 	backends, st, _ := openWingdBackends(t, home)
 
 	res, err := Run(context.Background(), backends, Options{
-		Pipeline:  "wingd-e2e-burner",
-		RunID:     "burner-run",
+		Pipeline:  "wingd-e2e-command-only",
+		RunID:     "command-only-run",
 		Admission: testWingdAdmission(home, nil),
 	})
 	if err != nil || res == nil || res.Status != "success" {
-		t.Fatalf("burner run: status=%v err=%v", res, err)
+		t.Fatalf("command run: status=%v err=%v", res, err)
 	}
 
-	prof, err := st.GetPipelineProfile(context.Background(), currentProfileKey("wingd-e2e-burner"), "")
-	if err != nil || prof == nil {
-		t.Fatalf("burner profile missing: %v", err)
+	samples, err := st.ListNodeMetrics(t.Context(), "command-only-run", "command")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("command evidence missing: %+v, %v", samples, err)
 	}
-	host := float64(runtime.NumCPU())
-	if prof.PeakCores <= 0 {
-		t.Fatalf("profile peak = %v, want a positive measured peak from the burst", prof.PeakCores)
+	command, unknown := false, false
+	for _, sample := range samples {
+		switch sample.Kind {
+		case store.MetricCommand:
+			command = true
+		case store.MetricUnknown:
+			unknown = true
+		default:
+			t.Fatalf("unowned execution contains interval evidence: %+v", sample)
+		}
 	}
-	if prof.PeakCores > host {
-		t.Fatalf("profile peak = %v exceeds host %v; the reap-burst overshoot was not clamped", prof.PeakCores, host)
+	if !command || !unknown {
+		t.Fatalf("command=%v unknown=%v, want both command usage and unknown attribution", command, unknown)
+	}
+	for _, node := range []string{"", "command"} {
+		prof, err := st.GetPipelineProfile(t.Context(), currentProfileKey("wingd-e2e-command-only"), node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prof != nil && (prof.SampleCount != 0 || prof.CPUMeasured || prof.PeakCores != 0 || prof.PeakMemoryBytes != 0) {
+			t.Fatalf("command-only %q learned a resource profile: %+v", node, prof)
+		}
 	}
 }
 

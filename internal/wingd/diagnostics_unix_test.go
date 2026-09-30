@@ -17,10 +17,12 @@ import (
 )
 
 func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
+	home := t.TempDir()
+	seedOversizedLog(t, home)
 	var mu sync.Mutex
 	var lines []string
 	d := &Daemon{
-		cfg: Config{Version: "v0.0.0-test", Logf: func(format string, args ...any) {
+		cfg: Config{Home: home, Version: "v0.0.0-test", Logf: func(format string, args ...any) {
 			mu.Lock()
 			defer mu.Unlock()
 			lines = append(lines, format)
@@ -90,6 +92,13 @@ func TestDiagnosticsRotatesAnOversizedLogBeforeDumping(t *testing.T) {
 	}}
 	d.writeDiagnosticDump()
 	d.writeDiagnosticDump()
+	dump, err := os.ReadFile(path + ".stacks")
+	if err != nil {
+		t.Fatalf("read separate goroutine dump: %v", err)
+	}
+	if !bytes.Contains(dump, []byte("goroutine ")) || !bytes.Contains(dump, []byte("version=v0.0.0-test")) {
+		t.Fatalf("dump omits stacks or daemon identity: %s", dump)
+	}
 
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -115,6 +124,14 @@ func TestDiagnosticsRotatesAnOversizedLogBeforeDumping(t *testing.T) {
 	}
 	if got := strings.Count(string(dumped), "goroutine dump"); got != 2 {
 		t.Fatalf("d.log holds %d dumps, want both of them:\n%s", got, truncate(string(dumped), 400))
+	}
+	seedOversizedLog(t, home)
+	if _, err := RotateLogOverCap(home); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := os.ReadFile(path + ".stacks")
+	if err != nil || !bytes.Equal(retained, dump) {
+		t.Fatalf("operational log rotation changed the saved dump: %v", err)
 	}
 }
 

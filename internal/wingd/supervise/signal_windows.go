@@ -11,3 +11,5 @@ func signalTerminate(p *os.Process) error {
 func signalKill(p *os.Process) error {
 	return p.Kill()
 }
+
+func signalDump(*os.Process) error { return os.ErrInvalid }

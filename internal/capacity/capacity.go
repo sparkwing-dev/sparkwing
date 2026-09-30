@@ -56,6 +56,23 @@ type Resolution struct {
 // ExpectedDuration is filled from the profile whenever one exists, even when
 // a pin sets the cost, so ETA still has a duration to simulate with.
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+	var cores, previous float64
+	if profile != nil {
+		cores, previous = chargedCores(profile), carriedCores(profile)
+	}
+	return resolve(pin, profile, numCPU, planHash, cores, previous)
+}
+
+// ResolvePeak uses peak CPU demand for an enforced allocation.
+func ResolvePeak(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+	var cores, previous float64
+	if profile != nil {
+		cores, previous = profile.PeakCores, profile.PrevPeakCores
+	}
+	return resolve(pin, profile, numCPU, planHash, cores, previous)
+}
+
+func resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string, cores, previous float64) Resolution {
 	res := Resolution{}
 	if profile != nil {
 		res.ExpectedDuration = profile.P50Duration
@@ -66,19 +83,19 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 		res.Source = store.CostSourcePin
 		return res
 	}
-	if profile == nil {
+	if profile == nil || !profile.CPUMeasured {
 		res.Cores = coldStartCores(numCPU)
 		res.Source = store.CostSourceDefault
 		return res
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
-	if !versionChanged && measurementQualifies(profile) {
-		res.Cores = math.Max(chargedCores(profile), MeasuredCoreFloor)
+	if !versionChanged && profile.SampleCount >= MinSamples {
+		res.Cores = math.Max(cores, MeasuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 		return res
 	}
-	return measuringResolution(res, profile, numCPU, versionChanged)
+	return measuringResolution(res, profile, numCPU, versionChanged, cores, previous)
 }
 
 func chargedCores(profile *store.PipelineProfile) float64 {
@@ -95,18 +112,18 @@ func carriedCores(profile *store.PipelineProfile) float64 {
 	return profile.PrevPeakCores
 }
 
-func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool) Resolution {
+func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool, current, previous float64) Resolution {
 	var prevCores float64
 	var prevMem int64
 	var floorCores float64
 	var floorMem int64
 	if versionChanged {
-		prevCores, prevMem = chargedCores(profile), profile.PeakMemoryBytes
+		prevCores, prevMem = current, profile.PeakMemoryBytes
 		if prevCores == 0 {
-			prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
+			prevCores, prevMem = previous, profile.PrevPeakMemoryBytes
 		}
 	} else {
-		prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
+		prevCores, prevMem = previous, profile.PrevPeakMemoryBytes
 		floorCores, floorMem = profile.FloorCores, profile.FloorMemoryBytes
 	}
 
@@ -124,11 +141,12 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	}
 	res.Cores = math.Max(cores, MeasuredCoreFloor)
 
-	mem := int64(WarmStartMultiple * float64(prevMem))
-	if fm := int64(SafetyMultiple * float64(floorMem)); fm > mem {
-		mem = fm
+	// safety: saturate unrepresentable demand before configured ceilings are applied.
+	floorMemory := int64(math.MaxInt64)
+	if floorMem <= math.MaxInt64/2 {
+		floorMemory = floorMem * 2
 	}
-	res.MemoryBytes = mem
+	res.MemoryBytes = max(prevMem, floorMemory)
 	return res
 }
 
@@ -169,19 +187,14 @@ func ApplyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64
 	return res
 }
 
-func measurementQualifies(profile *store.PipelineProfile) bool {
-	return profile != nil && profile.SampleCount >= MinSamples &&
-		(profile.PeakCores > 0 || profile.CPUMeasured)
-}
-
 func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
-	if profile == nil || grantableCores <= 0 {
+	if profile == nil || !profile.CPUMeasured || grantableCores <= 0 {
 		return false
 	}
 	if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
 		return false
 	}
-	if measurementQualifies(profile) {
+	if profile.SampleCount >= MinSamples {
 		return false
 	}
 	return profile.FloorCores > 0 && SafetyMultiple*profile.FloorCores >= grantableCores
@@ -209,7 +222,7 @@ type Drift struct {
 }
 
 func CheckDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
-	if pin.Empty() || profile == nil || profile.SampleCount < MinSamples {
+	if pin.Empty() || profile == nil || !profile.CPUMeasured || profile.SampleCount < MinSamples {
 		return nil
 	}
 	if charged := chargedCores(profile); pin.Cores > 0 && charged > 0 {

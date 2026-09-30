@@ -3,7 +3,7 @@ package nodemetrics
 import (
 	"context"
 	"errors"
-	"log"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -11,13 +11,14 @@ import (
 )
 
 type Sample struct {
+	Valid         bool
 	TS            time.Time
 	CPUMillicores int64
 	MemoryBytes   int64
 }
 
 type Sink interface {
-	Push(ctx context.Context, sample Sample) error
+	Push(context.Context, Sample) error
 }
 
 // ErrSinkFull is what a Sink returns to stop receiving samples for good.
@@ -39,137 +40,103 @@ func Interval() time.Duration {
 	return defaultInterval
 }
 
-var (
-	cpuReader = readCPUTime
-	rssReader = readMemoryBytes
-)
-
-func CPUAccountingAvailable() bool {
-	_, ok := readCPUTime()
-	return ok
+type reading struct {
+	at        time.Time
+	cpu       time.Duration
+	memory    int64
+	valid     bool
+	processes map[int]processSample
 }
 
-var reportedChildCPU atomic.Int64
+var usageReader = func() reading { return processTreeUsage(os.Getpid()) }
 
-func AddReportedChildCPU(d time.Duration) {
-	if d > 0 {
-		reportedChildCPU.Add(int64(d))
+func intervalSample(previous, current reading) Sample {
+	sample := Sample{TS: current.at}
+	if current.valid && current.memory >= 0 {
+		sample.MemoryBytes = current.memory
 	}
-}
-
-var blindOnce sync.Once
-
-type attachment struct {
-	ctx  context.Context
-	sink Sink
-}
-
-type sharedSampler struct {
-	mu    sync.Mutex
-	sinks map[*attachment]struct{}
-	stop  chan struct{}
-}
-
-var shared = &sharedSampler{sinks: make(map[*attachment]struct{})}
-
-var loopsRunning sync.WaitGroup
-
-func Attach(ctx context.Context, sink Sink) (detach func()) {
-	a := &attachment{ctx: ctx, sink: sink}
-	shared.add(a)
-	return func() { shared.remove(a) }
-}
-
-func (s *sharedSampler) add(a *attachment) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sinks[a] = struct{}{}
-	if s.stop == nil {
-		stop := make(chan struct{})
-		s.stop = stop
-		loopsRunning.Add(1)
-		go s.loop(stop, Interval())
+	sample.Valid = previous.valid && current.valid && previous.cpu >= 0 && current.cpu >= previous.cpu && previous.memory >= 0 && current.memory >= 0 && current.at.After(previous.at)
+	if sample.Valid {
+		sample.CPUMillicores = intervalMillicores(current.cpu-previous.cpu, current.at.Sub(previous.at))
 	}
+	return sample
 }
 
-func (s *sharedSampler) remove(a *attachment) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sinks, a)
-	if len(s.sinks) == 0 && s.stop != nil {
-		close(s.stop)
-		s.stop = nil
-	}
-}
-
-func (s *sharedSampler) liveSinks(stop chan struct{}) []*attachment {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stop != stop {
-		return nil
-	}
-	for a := range s.sinks {
-		if a.ctx.Err() != nil {
-			delete(s.sinks, a)
+// Attach samples a dedicated node process until finish collects its final reading.
+// Finish joins collection and returns the first delivery error, including on repeated calls.
+func Attach(ctx context.Context, sink Sink) (finish func() error) {
+	previous := usageReader()
+	stop, done := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var firstError error
+	full := false
+	push := func(sample Sample) {
+		if full {
+			return
+		}
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		err := sink.Push(writeCtx, sample)
+		if errors.Is(err, ErrSinkFull) {
+			full = true
+			return
+		}
+		if firstError == nil {
+			firstError = err
 		}
 	}
-	if len(s.sinks) == 0 {
-		close(stop)
-		s.stop = nil
-		return nil
+	if !previous.valid || previous.cpu < 0 || previous.memory < 0 {
+		push(Sample{TS: previous.at})
 	}
-	live := make([]*attachment, 0, len(s.sinks))
-	for a := range s.sinks {
-		live = append(live, a)
+	observed := make(map[int]processSample)
+	for pid, p := range previous.processes {
+		observed[pid] = p
 	}
-	return live
-}
-
-func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
-	defer loopsRunning.Done()
-	prevCPU, havePrev := cpuReader()
-	if !havePrev {
-		blindOnce.Do(func() {
-			log.Printf("nodemetrics: CPU accounting unavailable on %s; CPU samples will be zero", runtime.GOOS)
-		})
-	}
-	prevWall := time.Now()
-
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case now := <-t.C:
-			var totalCPU int64
-			if cpu, ok := cpuReader(); ok && havePrev {
-				totalCPU = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
-				prevCPU = cpu
-				prevWall = now
+	incomplete := false
+	initialMemory := previous.memory
+	initialMemoryValid := previous.valid && initialMemory >= 0
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(Interval())
+		defer ticker.Stop()
+		collect := func(final bool) {
+			current := usageReader()
+			sample := intervalSample(previous, current)
+			if initialMemoryValid {
+				sample.MemoryBytes = max(sample.MemoryBytes, initialMemory)
+				initialMemoryValid = false
 			}
-			live := s.liveSinks(stop)
-			if len(live) == 0 {
-				return
-			}
-			// perf: RSS costs a subprocess on darwin, so it is read only once
-			// the tick is known to have somewhere to go.
-			totalRSS := rssReader()
-			// safety: the process total is clamped before it is divided, so
-			// the shares sum to a rate the host could serve rather than to a
-			// multiple of it.
-			share := int64(len(live))
-			sample := Sample{
-				TS:            now,
-				CPUMillicores: totalCPU / share,
-				MemoryBytes:   totalRSS / share,
-			}
-			for _, a := range live {
-				if err := a.sink.Push(a.ctx, sample); errors.Is(err, ErrSinkFull) {
-					s.remove(a)
+			if current.valid {
+				for pid, p := range observed {
+					q, exists := current.processes[pid]
+					if !exists || p.birth != q.birth || p.parent != q.parent {
+						incomplete = true
+					}
+				}
+				for pid, p := range current.processes {
+					observed[pid] = p
 				}
 			}
+			if incomplete || (final && len(current.processes) > 1) {
+				sample.Valid = false
+			}
+			push(sample)
+			previous = current
 		}
+		for {
+			select {
+			case <-stop:
+				collect(true)
+				return
+			case <-ticker.C:
+				collect(false)
+			}
+		}
+	}()
+	return func() error {
+		once.Do(func() { close(stop) })
+		<-done
+		return firstError
 	}
 }
 
@@ -177,21 +144,12 @@ func intervalMillicores(cpu, wall time.Duration) int64 {
 	if wall <= 0 {
 		return 0
 	}
-	millicores := int64(cpu.Seconds() / wall.Seconds() * 1000.0)
+	millicores := cpu.Seconds() / wall.Seconds() * 1000.0
 	if millicores < 0 {
 		return 0
 	}
-	if hostMilli := int64(runtime.NumCPU()) * 1000; millicores > hostMilli {
+	if hostMilli := int64(runtime.NumCPU()) * 1000; millicores > float64(hostMilli) {
 		return hostMilli
 	}
-	return millicores
-}
-
-func readMemoryBytes() int64 {
-	if rss, ok := processRSS(); ok {
-		return rss
-	}
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return int64(m.Sys)
+	return int64(millicores)
 }

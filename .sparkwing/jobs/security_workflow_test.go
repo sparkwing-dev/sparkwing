@@ -340,6 +340,21 @@ func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 
 func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 	body := readHostedCIFile(t, ".gitleaks.toml")
+	const artifactException = `[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "SHA-256 of the empty artifact blob"
+condition = "AND"
+paths = ['''(^|/)internal/orchestrator/direct_artifact\.go$''']
+regexes = ['''^artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855$''']`
+	if strings.Count(body, artifactException) != 1 {
+		t.Fatal("gitleaks artifact exception must match the exact rule, path and empty-content hash")
+	}
+	body = strings.Replace(body, artifactException, "", 1)
+	if regexp.MustCompile(`(?m)^\s*\[\[\s*rules(?:\s*\]\]|\s*\.)`).MatchString(body) {
+		t.Fatal("unexpected gitleaks rule override")
+	}
 	if strings.Contains(body, "paths =") {
 		t.Fatal("gitleaks allow-list excludes a repository path")
 	}

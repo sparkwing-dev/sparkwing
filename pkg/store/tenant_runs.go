@@ -74,6 +74,47 @@ func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) er
 	return tx.Commit()
 }
 
+// FinishRunIfActive records a terminal outcome for one of t's runs once and
+// reports whether this call committed it. A run already terminal keeps the
+// outcome it has and reports false whatever status the retry names, so a
+// retried completion cannot rewrite what followers already acted on.
+func (t *Tenant) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error) {
+	if !isTerminalRunStatus(status) {
+		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+		return false, err
+	}
+	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, finishRunStmt,
+		status, errMsg, time.Now().UnixNano(), runID, string(t.team))
+	if err != nil {
+		return false, err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if count == 1 && status == outcomeSuccess {
+		if err := RecordBusinessEvent(tx, BusinessEvent{
+			Team: t.team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": runID},
+		}); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return count == 1, nil
+}
+
 // FinishRunsIfActive atomically finalizes the named non-terminal runs
 // of t's team. A failure rolls back every member, so one shared lease
 // cannot be partly cancelled, and a member of another team fails the

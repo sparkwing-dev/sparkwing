@@ -1008,14 +1008,14 @@ unlock.
   `event_bytes` and `event_count` counters, backfilled by the v52 migration,
   so the per-run check reads one row.
 
-- **docs:** A backup, restore and upgrade runbook for self-hosted controllers
-  Covers both database shapes, names what a restore needs beside the database,
-  and says what rollback means at each stage of an upgrade. The store suite
-  runs the same procedure end to end for SQLite and, against a configured
-  server, for PostgreSQL.
 
 ### Changed
 
+- **store (Breaking):** The local state database moves to schema 89, and the
+  first open copies it to `$SPARKWING_HOME/backups/` and prints where before
+  upgrading it. v0.65.1 and older refuse the upgraded database. A database
+  v0.65.0 or v0.65.1 wrote, whose v50 and v51 were metric migrations, gains the
+  team migrations those numbers hold here. See the [migration guide](docs/migrations/_unreleased.md#upgrading-a-local-install).
 - **cloud:** Cloud builds fetch packages from the upstream registries. The
   Cloud cache runs with `--disable-proxy` and its runners with
   `--dependency-proxy=off`, because the proxy takes no credential and its
@@ -1276,72 +1276,11 @@ unlock.
   runner, and `agent.yaml` refuses `cache_token`. See
   [migration guide](docs/migrations/_unreleased.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
 
-- **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
-  replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
-  dependencies allowed to run build scripts, and the local build, dev server and
-  hosted workflows call pnpm. Worktrees that share a lockfile now hard-link one
-  copy of the dependency tree out of pnpm's store instead of each holding their
-  own. The security gate runs `pnpm audit`, reading the legacy report shape pnpm
-  answers in and keying its recorded pass on `web/pnpm-lock.yaml`; recorded npm
-  passes do not carry over. The build-reuse proof keys on pnpm's version and
-  configuration, and now orders that configuration at every depth, so a cache key
-  no longer depends on the order pnpm happens to print nested settings in.
-
-- **runner:** a node queues when the Kubernetes fleet is full instead of failing
-  A pod no node would take failed its node after five minutes, whatever the
-  reason, so an hour busy enough to fill the runner pool turned ordinary builds
-  into failures. The runner now measures the pod's requests against the
-  `allocatable` of the pool machines its own node selector admits. A machine of
-  that shape is running and merely busy, so the node queues for up to nine
-  minutes with `status_detail` reading `queued: the runner fleet is full`, a
-  `capacity_queued` event opening the wait, and the run starting the moment a
-  machine frees; the wait ends in `queue_timeout` with a
-  `capacity_queue_timeout` event. No machine in the pool could hold the pod
-  even when empty, so waiting cures nothing and the five-minute failure stands.
-- **controller + runner:** the default credit rate table stops at the 8-core class
-  The 16, 32 and 64-core entries are gone from the default ladder, and the
-  `large` cpu band the classes above 8 cores selected goes with them: one
-  `sparkwing.dev/cpu-band: small` pool now serves every class above the warm
-  one. No pool could schedule a 64-core pod, so choosing that class reserved a
-  team's credits and failed five minutes later. A node pinned above 8 cores is
-  refused when its class is chosen, naming the largest class still priced. A
-  rate table an operator stored keeps every class it names, so a cluster
-  provisioned for the larger classes is unaffected.
 
 
-- **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
-  `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
-  and response fields are `pipeline`, and the `?repo=` query parameter on
-  `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
-  `CreateSecretForRepo`, `GetSecretForRepo` and `DeleteSecretForRepo` are
-  `CreateSecretForPipeline`, `GetSecretForPipeline` and
-  `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
-  `secrets.pipeline` and keeps every stored value, so a row scoped to a
-  repository slug survives the upgrade, answers no run, and is re-keyed to a
-  pipeline by an admin.
 
-- **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
-  `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
-  repository a submitter typed grants nothing and the name should say so.
-  A run still serializes the field as `repo` and the `?repo=` list filter is
-  unchanged, because a CLI and a controller version independently and the
-  run-create decoder refuses an unknown field.
-- **web (Breaking):** the dashboard's session and CSRF cookies carry the
-  `__Host-` prefix
-  Host-only scoping stops a sibling host under the same registrable domain
-  reading these cookies and does nothing to stop one writing a same-named
-  cookie with a `Domain` attribute and a longer `Path`, which sorts first in
-  the `Cookie` header and is the one the server reads. A browser refuses a
-  `__Host-` cookie that carries `Domain`, which is that write. The CSRF token
-  is an HMAC of the session id rather than independent state, so a planted
-  session carries its own matching token and that layer does not catch the
-  swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
-  `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
-  See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
-  Summary: every signed-in browser signs in once more, and a custom browser
-  client reads `__Host-sw_csrf` before `sw_csrf`.
 
-- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
+
 
 ### Fixed
 
@@ -1708,45 +1647,7 @@ unlock.
   read the `default` team, which is the only team a local or single-tenant
   install has, so its behavior is unchanged and it is asked for no new
   configuration.
-- **sdk:** a project root is a directory holding `.sparkwing/sparkwing.yaml`,
-  not one holding a `.sparkwing` directory
-  The machine's own state lives in `~/.sparkwing`, so a pipeline running
-  anywhere beneath a home directory with no nearer project resolved
-  `sparkwing.WorkDir()` to that home, and `Path` and `ReadFile` then answered
-  against it instead of refusing. The CLI already resolved the stricter marker
-  and says so when it finds none. A real project is unaffected, because a
-  project without that file is not one the CLI will run either.
 
-- **store:** the backup drill skips a Postgres client older than the server
-  instead of failing
-  Its comment claimed `SPARKWING_PG_BIN` names a client at least as new as the
-  server, and nothing checked. The pre-release lane runs an embedded Postgres
-  17 and takes whatever `pg_dump` the runner has, which is 16 on the hosted
-  image, so the drill failed the lane rather than reporting an environment it
-  could not run in. The conformance lane keeps its no-skip guard, so the drill
-  still has one place it must actually run.
-- **wingd:** an admission refusal is counted in the events window before the
-  refusal is sent, not after
-  A caller that had its answer could query the window and find the rejection it
-  had just been told about missing, because `rejectInvalid` replied first and
-  recorded last. The hosted gate caught it as a count of 2 where 3 were
-  expected.
-- **config:** every config write from a command under its own `SPARKWING_HOME`
-  is refused, not sent to the machine's config
-  The profiles fix in v0.60.0 left the rest of this class alone.
-  `sparkwing secrets set|delete`, `sparkwing version hold --set|--clear`,
-  `sparkwing fleet init` and the repo registry all resolved
-  `~/.config/sparkwing/` whatever home the command ran under, so a drill under
-  a scratch `SPARKWING_HOME` reached the operator's own files and nothing in
-  the invocation said it would. `SPARKWING_HOME` still does not move them,
-  because what lives there is machine-wide and outlives any one home; each
-  write now fails naming both paths and the value that keeps it inside the
-  home. The local secret stores had no per-file override at all and now answer
-  to `SPARKWING_SECRETS` (masked) and `SPARKWING_CONFIG_ENV` (`--plain`);
-  `version-hold` has none, and `SPARKWING_VERSION_HOLD` holds one shell without
-  writing it. A command with no `SPARKWING_HOME`, or one whose
-  `SPARKWING_HOME` is the operator's own `~/.sparkwing`, writes where it always
-  did.
 
 ### Security
 
@@ -1955,26 +1856,7 @@ unlock.
   stay globally unique, because they are system-generated secrets and a
   collision there is a security bug rather than a namespace question.
 
-- **controller:** a run's repository is metadata and grants nothing (Breaking)
-  A run's repository was a free-text field its submitter typed, and three
-  checks read it as proof of which repository the caller was working in: the
-  secret read, the two store helpers behind it, and the Git cache proxy. A
-  caller that typed another team's repository reached that team's secrets and
-  the controller's cached clone of its source. Secrets now scope to the
-  pipeline a caller holds live work in, `runs.repo` is `runs.declared_repo` and
-  no authorization reads it, and the Git cache serves only a repository an
-  operator connected to the pipeline of a run a signed webhook delivery
-  created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
-  `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
-  about pipelines.
 
-- **controller:** `runs.control` separates operator actions from runner reports (Breaking)
-  `runs.write` covered both starting work and acting on a run somebody else
-  started, and a token that could submit a trigger could also retry an
-  arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
-  and the cron writes now require `runs.control`. `runs.write` keeps trigger
-  submission and the Git cache refresh. Add `runs.control` to operator and
-  dashboard tokens; runner tokens neither had it nor need it.
 
 - **controller:** only the operator binds a GitHub repository to a webhook (Breaking)
   `POST` and `DELETE /api/v1/webhooks/github/bindings` admitted `team.admin`,
@@ -2094,6 +1976,355 @@ unlock.
   creation. Sparkwing Cloud operators use the private `sparkwing-ops` tool for
   credit and metering operations. The controller's credit and token routes
   remain available to that tool. See the [migration guide](docs/migrations/_unreleased.md#cloud-operator-commands-leave-the-public-cli).
+
+## [v0.65.1] - 2026-09-30
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.65.0, so a fresh scaffold compiles against that release.
+
+
+### Fixed
+
+- **local execution:** Queued nodes execute their registered pipeline instead of attempting remote compilation when the trigger records a repository URL.
+
+## [v0.65.0] - 2026-09-29
+### Changed
+
+- **runs-store (Breaking):** Schema 51 requires metric sample kinds and process-tree
+  accounting support. Stop all writers before upgrading; older writers cannot
+  reopen the database. See [migration guidance](docs/migrations/v0.65.0.md#metric-sample-kinds).
+
+- **metrics (Breaking):** Sample dedicated node process trees on Linux and macOS.
+  Exclude incomplete executions from profile learning and prevent historical measurements
+  from rebuilding incompatible profiles. See [migration guidance](docs/migrations/v0.65.0.md#local-process-measurements).
+
+- **profile API (Breaking):** Require measured CPU before learning or admitting resource costs. See [migration guidance](docs/migrations/v0.65.0.md#profile-observations).
+
+- **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/v0.65.0.md#metric-sample-kinds).
+
+### Fixed
+
+- **SDK:** Wait for launched children to stop when a spawn generator fails.
+
+- **daemon:** Record each run profile once through the host orchestrator.
+  Clients using the daemon completion API must submit profile observations
+  separately.
+- **daemon:** Wait for connection cleanup before final persistence and journal closure.
+- **pipeline cache:** Avoid an invalid pruning request when bounded discovery has found no excess entries or bytes.
+
+- **controller:** Preserve terminal run outcomes across completion retries
+  Only the first terminal transition attempts profile folding; failed folds are
+  not retried. GitHub status retries use the stored outcome. Completion requests
+  require `success`, `failed`, or `cancelled`.
+- **execution:** Propagate spawn cancellation through child execution and waits, and join child cleanup before returning.
+
+- **object-store metrics:** Reject invalid sample kinds and negative resource
+  values before appending state.
+
+- **orchestrator:** Return node completion-write errors instead of reporting success
+
+- **metrics:** Reject conflicting readings at the same node timestamp; identical retries remain accepted.
+
+- **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+- Tests: verify disk-space units without relying on concurrent filesystem activity.
+
+- Tests: declare measured inputs in admission and profile migration fixtures.
+
+- Controller profiles: withhold multi-node run observations whose simultaneous CPU and memory totals cannot be established; retain valid node profiles. [Migration guide](docs/migrations/v0.65.0.md#controller-run-profiles).
+
+- **metrics:** Exclude unavailable CPU and RSS readings from learned costs; reject RSS conversion overflow and clamp CPU rates before integer conversion.
+
+- **tests:** Start Kubernetes runner deadlines after database setup.
+- **checks:** Parse only changed Go files when checking comments in a staged or branch diff.
+
+- **capacity:** Withhold run estimates when an uncached node has missing or unreadable measurements; retain explicit pins and valid node estimates.
+- **tests:** Include metric sample kinds in database requirement expectations.
+- **CI:** Supply PostgreSQL 17 to the hosted pre-release check through its existing server URL.
+
+- **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.
+
+- **tests:** Measure pause timeout over the recorded pause rather than the entire run.
+
+- **tests:** Finish credit-ledger worker iterations before cancelling their database context.
+- **tests:** Check the exact empty-artifact hash exception in the secret-scan policy.
+- **store:** Discard obsolete learned resource estimates before reading or updating profiles; preserve explicit pins and wait statistics.
+- **security checks:** Recognize the empty artifact content hash in the history scanner.
+- **tests:** Start Kubernetes execution deadlines after fixture setup and retain fallback outcomes.
+
+- **admission:** Remeasure node costs when the available plan fingerprint changes; retain explicit resource pins.
+
+- **Kubernetes:** Size pod CPU requests and limits from peak demand, and retain measured memory when CPU uses the default estimate.
+- **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
+
+- **accounting:** Negative node resource observations and CPU or wall-time overflow reject the entire update without changing stored usage.
+- **accounting:** Queued local nodes retain process exit CPU, memory, and wall time. CPU sampling resumes after failed reads and timestamps observations at collection.
+- **orchestrator:** Reject overflowing run-profile totals before learning CPU or memory costs.
+
+- **store:** Retain concurrent profile updates, preserve integer percentiles, and reject invalid resource observations
+- **orchestrator:** Stop charging command lifetime CPU to its completion interval
+- **scaffold:** Use the published v0.64.0 SDK when the CLI build has no version stamp.
+- **docs:** Add admission diagnostics to the navigation.
+- **security checks:** Document trusted temporary paths and intentional local pipeline execution for the source scanner.
+
+## [v0.64.0] - 2026-09-28
+### Added
+
+- **admission + cli:** `sparkwing daemon events` and `sparkwing daemon explain` show why runs queued, started or stopped
+  The admission daemon keeps a size-capped journal of its decisions in its own
+  directory: requests, what blocked a queued run, grants with the headroom and
+  external load behind them, node slots, child attaches, cancels with the
+  requesting process, releases and reattaches. `daemon explain --run <id>`
+  tells one run's admission story in plain sentences, including its nodes and
+  child runs; `daemon events` filters the raw records, with `-o json` for
+  tools. Both read the journal directly, so they work while the daemon is
+  down. Before replacing a daemon, the supervisor records why and saves a
+  goroutine dump. See [diagnosing admission](docs/diagnosing-admission.md).
+
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.63.0, so a fresh scaffold compiles against that release
+
+### Fixed
+
+- **admission:** A busy or swapping machine no longer gets its admission daemon replaced while it is still working
+  The supervisor replaces the daemon only when health probes fail and its
+  heartbeat has not moved for a minute, or after five minutes with no answer.
+  Time the whole machine spent frozen does not count against it.
+- **admission:** Runs survive an admission daemon replacement
+  A running or queued run keeps reconnecting for up to 12 minutes, and the
+  replacement holds each run's lease for two minutes. A lease released during
+  that recovery can stay reserved until the two minutes pass. A missing daemon
+  binary fails at once, and a daemon that exits before serving gets three tries.
+- **admission:** Cancelling a child run no longer cancels its parent and siblings
+  `sparkwing runs cancel` on a child cancels that run and its descendants;
+  cancelling the root run still cancels everything attached to it, including
+  after a daemon restart. A child whose parent has already exited attaches
+  under the nearest live ancestor.
+
+### Docs
+
+- **cli:** Document `SPARKWING_PIPELINE_REV`, the pipeline commit a run compiled from
+
+## [v0.63.0] - 2026-09-27
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.62.0, so a fresh scaffold compiles against that release.
+
+
+### Added
+
+- **cli:** Pipelines can declare `source: origin/main` to compile from a selected
+  Git ref while jobs execute in the submitting checkout. Foreground runs,
+  detached submissions, and triggers honor the declaration. Conflicting
+  `--sw-pipeline-ref` overrides are refused.
+
+### Fixed
+
+- **cli:** On macOS, session identity checks query the requested process directly,
+  avoiding failures caused by unrelated changes to the full process table.
+- **cli:** Detached submissions create their trigger and run together. Idempotent
+  resubmissions refuse a missing run record, and failed receipt writes return an
+  error instead of reporting success without output.
+
+## [v0.62.0] - 2026-09-27
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.61.0, so a fresh scaffold compiles against that release.
+
+- **cli (Breaking):** Local run retries require a new submission
+  `runs retry` refuses local retries because their original execution environment
+  is unavailable. Submit a new run from the intended environment.
+  Controller-backed retries keep their configured execution context.
+  See [local retry migration](docs/migrations/v0.62.0.md#local-run-retries).
+
+### Fixed
+
+- **cli:** Detached submission rejects a pipeline absent from its selected source
+  The name and risk checks inspect the same compiled pipeline before queuing work.
+- **orchestrator:** Cancelling a local child also stops its owned descendants
+  Child completion waits for process cleanup, including setup commands and
+  local node process groups.
+- **orchestrator:** Queued local retries fail before dispatch when their execution
+  environment is unavailable, instead of inheriting the consumer's environment.
+
+## [v0.61.0] - 2026-09-26
+### Added
+
+- **cli:** `run --sw-detached --sw-pipeline-ref <ref>` compiles the pipeline from
+  the selected commit and executes it in the submitting checkout. Queued runs
+  and retries preserve that pipeline commit when the ref moves.
+
+- **docs:** A backup, restore and upgrade runbook for self-hosted controllers
+  Covers both database shapes, names what a restore needs beside the database,
+  and says what rollback means at each stage of an upgrade. The store suite
+  runs the same procedure end to end for SQLite and, against a configured
+  server, for PostgreSQL.
+
+### Changed
+
+- **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
+  replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
+  dependencies allowed to run build scripts, and the local build, dev server and
+  hosted workflows call pnpm. Worktrees that share a lockfile now hard-link one
+  copy of the dependency tree out of pnpm's store instead of each holding their
+  own. The security gate runs `pnpm audit`, reading the legacy report shape pnpm
+  answers in and keying its recorded pass on `web/pnpm-lock.yaml`; recorded npm
+  passes do not carry over. The build-reuse proof keys on pnpm's version and
+  configuration, and now orders that configuration at every depth, so a cache key
+  no longer depends on the order pnpm happens to print nested settings in.
+
+- **runner:** a node queues when the Kubernetes fleet is full instead of failing
+  A pod no node would take failed its node after five minutes, whatever the
+  reason, so an hour busy enough to fill the runner pool turned ordinary builds
+  into failures. The runner now measures the pod's requests against the
+  `allocatable` of the pool machines its own node selector admits. A machine of
+  that shape is running and merely busy, so the node queues for up to nine
+  minutes with `status_detail` reading `queued: the runner fleet is full`, a
+  `capacity_queued` event opening the wait, and the run starting the moment a
+  machine frees; the wait ends in `queue_timeout` with a
+  `capacity_queue_timeout` event. No machine in the pool could hold the pod
+  even when empty, so waiting cures nothing and the five-minute failure stands.
+- **controller + runner:** the default credit rate table stops at the 8-core class
+  The 16, 32 and 64-core entries are gone from the default ladder, and the
+  `large` cpu band the classes above 8 cores selected goes with them: one
+  `sparkwing.dev/cpu-band: small` pool now serves every class above the warm
+  one. No pool could schedule a 64-core pod, so choosing that class reserved a
+  team's credits and failed five minutes later. A node pinned above 8 cores is
+  refused when its class is chosen, naming the largest class still priced. A
+  rate table an operator stored keeps every class it names, so a cluster
+  provisioned for the larger classes is unaffected.
+
+
+- **api + secrets (Breaking):** a secret is scoped by `--pipeline`, not `--repo`
+  `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
+  and response fields are `pipeline`, and the `?repo=` query parameter on
+  `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
+  `CreateSecretForRepo`, `GetSecretForRepo` and `DeleteSecretForRepo` are
+  `CreateSecretForPipeline`, `GetSecretForPipeline` and
+  `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
+  `secrets.pipeline` and keeps every stored value, so a row scoped to a
+  repository slug survives the upgrade, answers no run, and is re-keyed to a
+  pipeline by an admin. See [migration guide](docs/migrations/v0.61.0.md#secrets-are-scoped-to-pipelines).
+
+- **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
+  `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
+  repository a submitter typed grants nothing and the name should say so.
+  A run still serializes the field as `repo` and the `?repo=` list filter is
+  unchanged, because a CLI and a controller version independently and the
+  run-create decoder refuses an unknown field.
+- **web (Breaking):** the dashboard's session and CSRF cookies carry the
+  `__Host-` prefix
+  Host-only scoping stops a sibling host under the same registrable domain
+  reading these cookies and does nothing to stop one writing a same-named
+  cookie with a `Domain` attribute and a longer `Path`, which sorts first in
+  the `Cookie` header and is the one the server reads. A browser refuses a
+  `__Host-` cookie that carries `Domain`, which is that write. The CSRF token
+  is an HMAC of the session id rather than independent state, so a planted
+  session carries its own matching token and that layer does not catch the
+  swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
+  `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
+  See [migration guide](docs/migrations/v0.61.0.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
+  Summary: every signed-in browser signs in once more, and a custom browser
+  client reads `__Host-sw_csrf` before `sw_csrf`.
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
+
+### Fixed
+
+- **ci:** pin the dashboard package manager version when setting up hosted
+  checks and release builds.
+
+- **ci:** accept waits inside `testing/synctest.Test` bodies while continuing
+  to reject wall-clock waits outside them.
+
+- **daemon:** preserve the latest diagnostic stack dump in `d.log.stacks`
+  so operational log rotation cannot erase it.
+
+- **daemon:** queue explanations use soft CPU admission rules for estimated
+  demands, so a semaphore or memory wait no longer reports a false core shortage.
+
+- **store:** schema compatibility errors distinguish unsupported requirements
+  from conflicting version labels instead of recommending an installed release.
+
+- **daemon:** concurrent clients share one starter while a missing socket comes
+  online. The supervisor allows 30 seconds for startup and backs off repeated
+  replacements, resetting its delay after sustained successful health probes.
+  Cancellation logs identify the requesting process on Linux and macOS and list
+  the affected run IDs.
+
+- **orchestrator:** Queued runs retain the consumer's local daemon executable
+  A detached run can restart admission even when its captured PATH omits the CLI.
+
+- **daemon:** Keep queue ETA calculations from blocking health probes
+  Concurrent queue readers share one calculation outside the daemon lock.
+  The simulation computes each resource reservation once per queue scan.
+
+- **store:** Restore the missing node claim column when upgrading existing databases
+  Settlement reads resume without losing recorded node durations.
+
+- **sdk:** a project root is a directory holding `.sparkwing/sparkwing.yaml`,
+  not one holding a `.sparkwing` directory
+  The machine's own state lives in `~/.sparkwing`, so a pipeline running
+  anywhere beneath a home directory with no nearer project resolved
+  `sparkwing.WorkDir()` to that home, and `Path` and `ReadFile` then answered
+  against it instead of refusing. The CLI already resolved the stricter marker
+  and says so when it finds none. A real project is unaffected, because a
+  project without that file is not one the CLI will run either.
+
+- **store:** the backup drill skips a Postgres client older than the server
+  instead of failing
+  Its comment claimed `SPARKWING_PG_BIN` names a client at least as new as the
+  server, and nothing checked. The pre-release lane runs an embedded Postgres
+  17 and takes whatever `pg_dump` the runner has, which is 16 on the hosted
+  image, so the drill failed the lane rather than reporting an environment it
+  could not run in. The conformance lane keeps its no-skip guard, so the drill
+  still has one place it must actually run.
+- **wingd:** an admission refusal is counted in the events window before the
+  refusal is sent, not after
+  A caller that had its answer could query the window and find the rejection it
+  had just been told about missing, because `rejectInvalid` replied first and
+  recorded last. The hosted gate caught it as a count of 2 where 3 were
+  expected.
+- **config:** every config write from a command under its own `SPARKWING_HOME`
+  is refused, not sent to the machine's config
+  The profiles fix in v0.60.0 left the rest of this class alone.
+  `sparkwing secrets set|delete`, `sparkwing version hold --set|--clear`,
+  `sparkwing fleet init` and the repo registry all resolved
+  `~/.config/sparkwing/` whatever home the command ran under, so a drill under
+  a scratch `SPARKWING_HOME` reached the operator's own files and nothing in
+  the invocation said it would. `SPARKWING_HOME` still does not move them,
+  because what lives there is machine-wide and outlives any one home; each
+  write now fails naming both paths and the value that keeps it inside the
+  home. The local secret stores had no per-file override at all and now answer
+  to `SPARKWING_SECRETS` (masked) and `SPARKWING_CONFIG_ENV` (`--plain`);
+  `version-hold` has none, and `SPARKWING_VERSION_HOLD` holds one shell without
+  writing it. A command with no `SPARKWING_HOME`, or one whose
+  `SPARKWING_HOME` is the operator's own `~/.sparkwing`, writes where it always
+  did.
+
+### Security
+
+- **controller (Breaking):** a run's repository is metadata and grants nothing
+  A run's repository was a free-text field its submitter typed, and three
+  checks read it as proof of which repository the caller was working in: the
+  secret read, the two store helpers behind it, and the Git cache proxy. A
+  caller that typed another team's repository reached that team's secrets and
+  the controller's cached clone of its source. Secrets now scope to the
+  pipeline a caller holds live work in, `runs.repo` is `runs.declared_repo` and
+  no authorization reads it, and the Git cache serves only a repository an
+  operator connected to the pipeline of a run a signed webhook delivery
+  created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
+  `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
+  about pipelines. See [migration guide](docs/migrations/v0.61.0.md#repository-metadata-grants-no-access).
+
+- **controller (Breaking):** `runs.control` separates operator actions from runner reports
+  `runs.write` covered both starting work and acting on a run somebody else
+  started, and a token that could submit a trigger could also retry an
+  arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
+  and the cron writes now require `runs.control`. `runs.write` keeps trigger
+  submission and the Git cache refresh. Add `runs.control` to operator and
+  dashboard tokens; runner tokens neither had it nor need it.
+  See [migration guide](docs/migrations/v0.61.0.md#operator-tokens-require-runscontrol).
 
 ## [v0.60.0] - 2026-09-21
 ### Added
@@ -2606,7 +2837,7 @@ unlock.
   sweep reached the index without it, and opening it failed with
   `no such column: claim_principal`. Both dialects now carry the columns.
 
-- **CLI + cluster:** `sparkwing cluster worker` and the in-process worker loop now name
+- **CLI + cluster:** `sparkwing worker` and the in-process worker loop now name
   themselves to the controller, honor `X-Sparkwing-Poll-After`, and back off on
   a `Retry-After` instead of repolling at their own cadence. They had no runner
   identity, so a fleet under a per-runner budget shared one bucket, and a shed

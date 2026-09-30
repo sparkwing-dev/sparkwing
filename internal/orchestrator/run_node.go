@@ -115,7 +115,8 @@ func RunNodeOnce(
 		}
 		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
 	}
-	if shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
+	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
+	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -285,8 +286,9 @@ func RunNodeOnce(
 	}
 
 	if admission != nil {
+		ctx = withLocalAdmissionPlan(ctx, plan)
 		priority := planPriorityFromSnapshot(run.PlanSnapshot)
-		if reservedCtx, ok := admission.attachReservedNode(ctx, priority); ok {
+		if reservedCtx, ok := admission.attachReservedNode(ctx, runID, priority); ok {
 			ctx = reservedCtx
 		} else {
 			lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node, priority)
@@ -294,7 +296,7 @@ func RunNodeOnce(
 				return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
 			}
 			defer lease.release()
-			ctx = withLocalAdmission(ctx, admission, lease.token, lease.childToken, lease.hostAdmitted, priority, lease.charge)
+			ctx = withLocalAdmission(ctx, admission, runID, lease.token, lease.childToken, lease.hostAdmitted, priority, lease.charge)
 		}
 	}
 
@@ -457,6 +459,7 @@ func runNodeCLI(args []string) error {
 			_ = os.Unsetenv(name)
 		}
 	}
+	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
 		selectLocalRenderer(), slog.Default(), nil, runOpts...)
 	if err != nil {

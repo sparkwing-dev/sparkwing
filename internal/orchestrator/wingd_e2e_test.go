@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -198,6 +200,25 @@ type wingdQuickPipe struct{ sparkwing.Base }
 func (wingdQuickPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(0.5))
 	sparkwing.Job(plan, "quick", func(context.Context) error { return nil })
+	return nil
+}
+
+type wingdNestedInlinePipe struct{ sparkwing.Base }
+
+func (wingdNestedInlinePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "spawn-grandchild", func(ctx context.Context) error {
+		launch := wingdE2EChild.Load()
+		la := testWingdAdmission(launch.home, nil)
+		la.ParentLeaseToken = childAttachTokenFromProcessEnv()
+		res, err := Run(ctx, launch.backends, Options{Pipeline: "wingd-e2e-unpinned", RunID: "grandchild", Admission: la})
+		if err != nil {
+			return err
+		}
+		if res.Status != "success" {
+			return fmt.Errorf("grandchild status %s: %w", res.Status, res.Error)
+		}
+		return nil
+	})
 	return nil
 }
 
@@ -493,6 +514,8 @@ func registerWingdE2EPipelines() {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdHoldPipe{cores: 1.5} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-quick",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdQuickPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-nested-inline",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdNestedInlinePipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-unpinned",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdUnpinnedHoldPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-attach-parent",
@@ -601,6 +624,72 @@ func acquireWingd(t *testing.T, cl *wingdclient.Client, req wingwire.AdmissionRe
 	return lease
 }
 
+func TestWingdNestedInlineGrandchildUsesImmediateParent(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 4)
+	backends, _, _ := openWingdBackends(t, home)
+	wingdE2EChild.Store(&wingdChildLaunch{home: home, backends: backends})
+	t.Setenv("SPARKWING_RUN_ID", "root")
+	rootClient, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rootClient.Close() })
+	rootLease := acquireWingd(t, rootClient, wingwire.AdmissionRequest{RunID: "root", Resources: wingwire.HostResources{Cores: 1}})
+	t.Setenv(wingwire.ChildLeaseTokenEnv, rootLease.Token)
+	t.Cleanup(func() { _ = rootLease.Release() })
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		cancelRun()
+		select {
+		case <-gate.release:
+		default:
+			close(gate.release)
+		}
+		<-done
+	})
+	var result *Result
+	go func() {
+		la := testWingdAdmission(home, nil)
+		la.ParentLeaseToken = rootLease.Token
+		result, _ = Run(runCtx, backends, Options{Pipeline: "wingd-e2e-nested-inline", RunID: "child", Admission: la})
+		close(done)
+	}()
+	gate.awaitStarted(t, "grandchild")
+	data, err := os.ReadFile(filepath.Join(home, "wingd", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Snapshot struct {
+			Leases []struct {
+				Parents map[string]string `json:"parents"`
+			} `json:"leases"`
+		} `json:"snapshot"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	for _, lease := range state.Snapshot.Leases {
+		if parent, ok := lease.Parents["grandchild"]; ok {
+			if parent != "child" {
+				t.Fatalf("grandchild parent = %q, want child", parent)
+			}
+			close(gate.release)
+			<-done
+			if result == nil || result.Status != "success" {
+				t.Fatalf("child result = %+v, want success", result)
+			}
+			return
+		}
+	}
+	t.Fatalf("grandchild lineage missing from daemon state: %+v", state.Snapshot.Leases)
+}
+
 func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
@@ -682,7 +771,8 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: 20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
+		CPUMeasured: true,
+		Duration:    20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
 	}, 3)
 
 	gate := newWingdGate()
@@ -789,7 +879,8 @@ func TestWingd_UnderPinnedRunCarriesDriftWarning(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedProfile(t, st, "wingd-e2e-hold", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
 	}, 4)
 
 	gate := newWingdGate()
@@ -888,7 +979,8 @@ func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
 	startWingd(t, home, 2)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 2, PeakMemoryBytes: 1 << 20,
+		CPUMeasured: true,
+		Duration:    time.Second, PeakCores: 2, PeakMemoryBytes: 1 << 20,
 	}, 3)
 
 	gate := newWingdGate()
@@ -946,14 +1038,16 @@ func TestWingd_LocalRunAdmitsReadyNodeAtNodeCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedProfile(t, st, "wingd-e2e-profiled-stage", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
 	}, 4)
 	seedNodeProfile(t, st, "wingd-e2e-profiled-stage", "quick", store.ProfileObservation{
 		Duration: 100 * time.Millisecond, PeakCores: 0.1, PeakMemoryBytes: 64 << 20,
 		CPUMeasured: true,
 	}, 4)
 	seedNodeProfile(t, st, "wingd-e2e-profiled-stage", "heavy", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1010,7 +1104,8 @@ func TestWingd_SemaphoresOnlyRunStillAdmitsNodeHostCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeProfile(t, st, "wingd-e2e-plan-sem-unpinned", "hold", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1069,7 +1164,8 @@ func TestWingd_RecoveryNodeAdmitsHostCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeProfile(t, st, "wingd-e2e-recovery-unpinned", "recover", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1133,7 +1229,8 @@ func TestWingd_ChildTriggerInheritsRunSemaphoreWhileNodeHasHostLease(t *testing.
 	wingdE2EChild.Store(launch)
 
 	seedNodeProfile(t, st, "wingd-e2e-plan-sem-spawn-child", "spawn-child", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	res, err := Run(context.Background(), backends, Options{
@@ -1207,7 +1304,8 @@ func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeProfile(t, st, "wingd-e2e-cached-unpinned", "cached", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1634,7 +1732,7 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 1)
-	backends, _, _ := openWingdBackends(t, home)
+	backends, st, _ := openWingdBackends(t, home)
 	la := testWingdAdmission(home, nil)
 
 	holderClient, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "test"})
@@ -1660,8 +1758,14 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 	node := sparkwing.Job(plan, "locked", func(context.Context) error { return nil }).
 		Resources(sparkwing.Cores(1)).
 		Concurrency(group)
+	if err := st.CreateRun(t.Context(), store.Run{ID: "node-waiter", Pipeline: "wingd-e2e-host-first", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(t.Context(), store.Node{RunID: "node-waiter", NodeID: node.ID(), Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
 	r := NewNodeExecutor(backends)
-	ctx := withLocalAdmission(context.Background(), la, "", "", false, 0, runCharge{})
+	ctx := withLocalAdmission(context.Background(), la, "test-run", "", "", false, 0, runCharge{})
 
 	result := make(chan runner.Result, 1)
 	go func() {

@@ -83,9 +83,8 @@ func (d *Daemon) applyCapacity(stat HostStat) {
 		ToCores:   applyCores,
 		AtMS:      d.now().UnixMilli(),
 	}
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 
 	d.cfg.logf("capacity changed: %.1f -> %.1f cores", oldCores, applyCores)
-	d.flush(nil, snap)
+	d.flush(nil)
 }

@@ -1,7 +1,9 @@
 package wingd
 
 import (
+	"bytes"
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -12,8 +14,16 @@ import (
 
 func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+	ledger, err := admission.New(admission.Config{TotalCores: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ledger.Submit(admission.Request{ID: "first", Cores: 1}); err != nil {
+		t.Fatal(err)
+	}
 	d := &Daemon{
 		layout:        layout{state: path},
+		ledger:        ledger,
 		cancelledRuns: map[string]struct{}{},
 	}
 	entered := make(chan struct{})
@@ -27,10 +37,13 @@ func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testin
 		return writeStateWithCancellations(path, snap, events, cancelled)
 	}
 	oldDone := make(chan error, 1)
-	go func() { oldDone <- d.persistState(admission.Snapshot{EventSeq: 1}) }()
+	go func() { oldDone <- d.persistState() }()
 	<-entered
+	if _, _, err := ledger.Submit(admission.Request{ID: "second", Cores: 1}); err != nil {
+		t.Fatal(err)
+	}
 	newDone := make(chan error, 1)
-	go func() { newDone <- d.persistState(admission.Snapshot{EventSeq: 2}) }()
+	go func() { newDone <- d.persistState() }()
 	close(release)
 	if err := <-oldDone; err != nil {
 		t.Fatal(err)
@@ -44,6 +57,98 @@ func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testin
 	}
 	if snap.EventSeq != 2 {
 		t.Fatalf("persisted event sequence = %d, want 2", snap.EventSeq)
+	}
+}
+
+func TestPersistStateKeepsNewerChildLineageAfterDelayedCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	ledger, err := admission.New(admission.Config{TotalCores: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, _, err := ledger.Submit(admission.Request{ID: "parent", Cores: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Attach(dec.Lease.ID, "first", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{layout: layout{state: path}, ledger: ledger}
+	enteredOlder := make(chan struct{})
+	resumeOlder := make(chan struct{})
+	d.persistWrite = func(path string, snap admission.Snapshot, events []admissionEvent, cancelled []string) error {
+		if len(snap.Leases[0].Members) == 2 {
+			close(enteredOlder)
+			<-resumeOlder
+		}
+		return writeStateWithCancellations(path, snap, events, cancelled)
+	}
+	olderDone := make(chan error, 1)
+	go func() { olderDone <- d.persistState() }()
+	<-enteredOlder
+	if err := ledger.Attach(dec.Lease.ID, "second", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	newerDone := make(chan error, 1)
+	go func() { newerDone <- d.persistState() }()
+	close(resumeOlder)
+	if err := <-olderDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-newerDone; err != nil {
+		t.Fatal(err)
+	}
+	snap, _, _, err := readStateWithCancellations(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Leases) != 1 || len(snap.Leases[0].Members) != 3 || snap.Leases[0].Parents["second"] != "parent" {
+		t.Fatalf("persisted lineage = %+v, want both children", snap.Leases)
+	}
+}
+
+func TestRestoreStateWithoutParentsKeepsFlatRootLineage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	ledger, err := admission.New(admission.Config{TotalCores: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, _, err := ledger.Submit(admission.Request{ID: "root", Cores: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"child", "grandchild"} {
+		if err := ledger.Attach(dec.Lease.ID, id, "root"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ledger.Release(dec.Lease.ID, "root"); err != nil {
+		t.Fatal(err)
+	}
+	snap := ledger.Snapshot()
+	snap.Leases[0].Parents = nil
+	if err := writeState(path, snap, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 || bytes.Contains(data, []byte(`"parents"`)) {
+		t.Fatal("legacy state file unexpectedly has parents")
+	}
+	read, _, err := readState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := admission.Restore(*read, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"child", "grandchild"} {
+		if got := restored.Snapshot().Leases[0].Parents[id]; got != "root" {
+			t.Fatalf("%s parent = %q, want root", id, got)
+		}
 	}
 }
 

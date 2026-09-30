@@ -13,6 +13,7 @@ import (
 )
 
 type usageSample struct {
+	kind          store.MetricKind
 	at            time.Duration
 	cpuMillicores int64
 	memoryBytes   int64
@@ -115,7 +116,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 2 << 30,
 		},
 		{
-			name:      "sequential commands in one window integrate rather than sum",
+			name:      "sequential command reports do not establish interval CPU",
 			hostCores: 2,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{{
@@ -128,13 +129,11 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 				},
 			}},
 
-			wantNodes:   []wantNode{{id: "serial", sustained: 2.0, peak: 2.0, peakMem: 512 << 20}},
-			wantSustain: 1.6,
-			wantPeak:    1.6,
-			wantPeakMem: 512 << 20,
+			wantNodes:    []wantNode{{id: "serial", absent: true}},
+			wantNoRollup: true,
 		},
 		{
-			name:      "concurrent commands in one window still sum",
+			name:      "concurrent command reports do not establish interval CPU",
 			hostCores: 2,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{
@@ -147,30 +146,25 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 					samples: []usageSample{command(3*time.Microsecond, 1000, 256<<20, 2*time.Second)},
 				},
 			},
-			wantNodes: []wantNode{
-				{id: "cmd-a", sustained: 1.0, peak: 1.0, peakMem: 256 << 20},
-				{id: "cmd-b", sustained: 1.0, peak: 1.0, peakMem: 256 << 20},
-			},
-			wantSustain: 2.0,
-			wantPeak:    2.0,
-			wantPeakMem: 512 << 20,
+			wantNodes:    []wantNode{{id: "cmd-a", absent: true}, {id: "cmd-b", absent: true}},
+			wantNoRollup: true,
 		},
 		{
-			name:      "a window adds its tick to one command mark, not to every one",
+			name:      "command reports preserve interval CPU and the individual memory peak",
 			hostCores: 1,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{{
 				id: "mixed", dur: 2 * time.Second, wall: 2 * time.Second,
 				samples: []usageSample{
-					{at: 0, cpuMillicores: 100, memoryBytes: 128 << 20},
+					{kind: store.MetricInterval, at: 0, cpuMillicores: 100, memoryBytes: 128 << 20},
 					command(500*time.Millisecond, 500, 512<<20, 200*time.Millisecond),
 					command(1200*time.Millisecond, 500, 512<<20, 200*time.Millisecond),
 				},
 			}},
-			wantNodes:   []wantNode{{id: "mixed", sustained: 0.5, peak: 0.5, peakMem: 512 << 20}},
-			wantSustain: 0.3,
-			wantPeak:    0.3,
-			wantPeakMem: 640 << 20,
+			wantNodes:   []wantNode{{id: "mixed", sustained: 0.1, peak: 0.1, peakMem: 512 << 20}},
+			wantSustain: 0.1,
+			wantPeak:    0.1,
+			wantPeakMem: 512 << 20,
 		},
 		{
 			name:      "peak memory comes from the kernel high-water mark",
@@ -193,11 +187,11 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			nodes: []usageNode{{
 				id: "pod", dur: 10 * time.Second,
 				samples: []usageSample{
-					{at: 0, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 2 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 4 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 6 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 8 * time.Second, cpuMillicores: 2000, memoryBytes: 2 << 30},
+					{kind: store.MetricInterval, at: 0, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 2 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 4 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 6 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 8 * time.Second, cpuMillicores: 2000, memoryBytes: 2 << 30},
 				},
 			}},
 			wantNodes:   []wantNode{{id: "pod", sustained: 0.8, peak: 2.0, peakMem: 2 << 30}},
@@ -276,6 +270,7 @@ func ticks(n int, cpuMillicores, memoryBytes int64) []usageSample {
 	out := make([]usageSample, n)
 	for i := range out {
 		out[i] = usageSample{
+			kind:          store.MetricInterval,
 			at:            time.Duration(i) * nodemetrics.Interval(),
 			cpuMillicores: cpuMillicores,
 			memoryBytes:   memoryBytes,
@@ -285,7 +280,7 @@ func ticks(n int, cpuMillicores, memoryBytes int64) []usageSample {
 }
 
 func command(at time.Duration, cpuMillicores, memoryBytes int64, cpu time.Duration) usageSample {
-	return usageSample{at: at, cpuMillicores: cpuMillicores, memoryBytes: memoryBytes, cpuTime: cpu}
+	return usageSample{kind: store.MetricCommand, at: at, cpuMillicores: cpuMillicores, memoryBytes: memoryBytes, cpuTime: cpu}
 }
 
 func fanNode(id string, jitter time.Duration) usageNode {
@@ -319,6 +314,7 @@ func seedUsageRun(t *testing.T, pipeline string, nodes []usageNode) (*store.Stor
 		}
 		for _, s := range n.samples {
 			if err := st.AddNodeMetricSample(ctx, "r1", n.id, store.MetricSample{
+				Kind:          s.kind,
 				TS:            start.Add(n.start + s.at),
 				CPUMillicores: s.cpuMillicores,
 				MemoryBytes:   s.memoryBytes,
@@ -380,7 +376,7 @@ func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	}
 }
 
-func TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt(t *testing.T) {
+func TestRecordRunProfile_RetriedNodeRetainsUsageWithoutLearning(t *testing.T) {
 	st, start := seedUsageRun(t, "retried", nil)
 	ctx := context.Background()
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "flaky", Status: "pending"}); err != nil {
@@ -395,17 +391,21 @@ func TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt(t *testing.T) {
 		}
 	}
 
+	if err := st.FinishNode(ctx, "r1", "flaky", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, "UPDATE nodes SET attempts_consumed = 2 WHERE run_id = 'r1' AND node_id = 'flaky'"); err != nil {
+		t.Fatal(err)
+	}
+	node, err := st.GetNode(ctx, "r1", "flaky")
+	if err != nil || node == nil || node.CPUNanos != int64(time.Second) || node.ProcessWallNanos != int64(2*time.Second) || node.MaxRSSBytes != 128<<20 {
+		t.Fatalf("attempt usage was not retained: %+v, %v", node, err)
+	}
 	recordRunProfile(ctx, localState{st: st}, "retried", "r1", nil, "", runCharge{}, false, start, start.Add(2*time.Second))
-
-	prof, err := st.GetPipelineProfile(ctx, "retried", "flaky")
-	if err != nil || prof == nil {
-		t.Fatalf("node profile missing: %v", err)
-	}
-	assertCores(t, "node SustainedCores", prof.SustainedCores, 0.5)
-	if prof.PeakMemoryBytes != 128<<20 {
-		t.Errorf("PeakMemoryBytes = %d, want the 128MiB high-water across attempts", prof.PeakMemoryBytes)
-	}
-	if prof.P50Duration != 2*time.Second {
-		t.Errorf("P50Duration = %s, want both attempts' occupancy", prof.P50Duration)
+	for _, id := range []string{"", "flaky"} {
+		profile, err := st.GetPipelineProfile(ctx, "retried", id)
+		if err != nil || (profile != nil && profile.SampleCount != 0) {
+			t.Fatalf("retried node qualified for learning: %+v, %v", profile, err)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"runtime"
 	"time"
@@ -51,61 +52,99 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	if err != nil {
 		return
 	}
+	if pin.Empty() {
+		err = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
+	} else {
+		err = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "record pipeline resource pin failed", "pipeline", pipeline, "err", err)
+	}
 	dominant := cacheDominant(nodes)
-	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	bucket := nodemetrics.Interval()
 	intervals := map[int64]intervalTotal{}
-	var cpuIntegral time.Duration
-	var exactPeakMem int64
+	var cpuIntegral int64
+	var peakNodeMemory int64
+	runValid := true
+	add := func(total *int64, value int64) {
+		if *total < 0 || value < 0 || *total > math.MaxInt64-value {
+			runValid = false
+			return
+		}
+		*total += value
+	}
 	measured := false
+	hasRunCPU := false
 	for _, n := range nodes {
 		if n.Outcome == string(sparkwing.Cached) {
 			continue
 		}
+		attempts := 0
+		for _, attempt := range n.ExecutionAttempts {
+			if attempt.RunID == runID {
+				attempts++
+			}
+		}
+		if n.Status != "done" || n.Outcome != string(sparkwing.Success) || n.AttemptsConsumed > 1 || attempts > 1 {
+			runValid = false
+			continue
+		}
 		samples, err := st.ListNodeMetrics(ctx, runID, n.NodeID)
 		if err != nil {
+			runValid = false
 			continue
 		}
 		exactCPU, exactMem, exactWall := nodeUsage(n)
 		if len(samples) == 0 && exactCPU == 0 && exactMem == 0 {
+			runValid = false
 			continue
 		}
 		measured = true
 		var observedCores float64
+		hasNodeCPU := false
+		unknown := false
 		var peakMem int64
-		commandMem := map[int64]int64{}
+		nodeIntervals := map[int64]intervalTotal{}
 		for _, s := range samples {
-			observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
+			if s.Kind == store.MetricUnknown {
+				unknown, runValid = true, false
+			}
 			if s.MemoryBytes > peakMem {
 				peakMem = s.MemoryBytes
 			}
 			key := s.TS.Truncate(bucket).UnixNano()
-			total := intervals[key]
-			if s.OneShot() {
-				total.cpuMillicores += bucketMillicores(s.CPUTime, bucket)
-				commandMem[key] = max(commandMem[key], s.MemoryBytes)
-			} else {
-				total.cpuMillicores += s.CPUMillicores
-				total.memoryBytes += s.MemoryBytes
+			total := nodeIntervals[key]
+			if s.Kind == store.MetricInterval {
+				hasNodeCPU, hasRunCPU, total.hasCPU = true, true, true
+				observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
+				if s.CPUMillicores < 0 || s.MemoryBytes < 0 {
+					unknown, runValid = true, false
+				}
+				total.cpuMillicores = max(total.cpuMillicores, s.CPUMillicores)
+				total.memoryBytes = max(total.memoryBytes, s.MemoryBytes)
 			}
-			intervals[key] = total
+			nodeIntervals[key] = total
 		}
-		for key, mem := range commandMem {
+		for key, nodeTotal := range nodeIntervals {
 			total := intervals[key]
-			total.oneShotMemoryBytes += mem
+			total.hasCPU = total.hasCPU || nodeTotal.hasCPU
+			add(&total.cpuMillicores, nodeTotal.cpuMillicores)
+			add(&total.memoryBytes, nodeTotal.memoryBytes)
 			intervals[key] = total
 		}
-		cpuIntegral += exactCPU
-		if exactMem > exactPeakMem {
-			exactPeakMem = exactMem
-		}
+		add(&cpuIntegral, int64(exactCPU))
 		if exactMem > peakMem {
 			peakMem = exactMem
 		}
+		peakNodeMemory = max(peakNodeMemory, peakMem)
 		occupancy := nodeOccupancy(n, samples, exactWall)
 		meanCores := exactMeanCores(exactCPU, occupancy)
 		peakCores := capLocalPeakCores(ctx, pipeline, n.NodeID, math.Max(observedCores, meanCores))
-		if contended {
+		if !hasNodeCPU && exactCPU == 0 {
+			runValid = false
+			continue
+		}
+		if unknown || contended {
 			continue
 		}
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
@@ -113,19 +152,23 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			PeakCores:       peakCores,
 			SustainedCores:  math.Min(sustainedNodeCores(samples, meanCores), peakCores),
 			PeakMemoryBytes: peakMem,
-			CPUMeasured:     cpuMeasured,
+			CPUMeasured:     true,
 			PlanHash:        planHash,
 		})
 	}
-	if dominant || !measured {
+	if !runValid {
+		slog.WarnContext(ctx, "run resource measurements are incomplete or exceed the supported range", "pipeline", pipeline, "run_id", runID)
+		return
+	}
+	if dominant || !measured || (!hasRunCPU && cpuIntegral == 0) {
 		return
 	}
 	runDur := execEnd.Sub(execStart)
 	if runDur < 0 {
 		runDur = 0
 	}
-	runMeanCores := exactMeanCores(cpuIntegral, runDur)
-	runPeakCores, runPeakMem := peakProcessReading(ctx, pipeline, intervals, runMeanCores, exactPeakMem)
+	runMeanCores := exactMeanCores(time.Duration(cpuIntegral), runDur)
+	runPeakCores, runPeakMem := peakProcessReading(ctx, pipeline, intervals, runMeanCores, peakNodeMemory)
 	runSustainedCores := math.Min(sustainedProcessCores(intervals, runMeanCores), runPeakCores)
 	if contended {
 		// safety: use peaks for the pre-graduation floor; contention suppresses
@@ -139,7 +182,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			floorMem = max(floorMem, charge.MemoryBytes)
 		}
 		_ = st.RecordProfileObservation(ctx, pipeline, "", store.ProfileObservation{
-			CPUMeasured:      cpuMeasured,
+			CPUMeasured:      true,
 			PlanHash:         planHash,
 			Contended:        true,
 			FloorCores:       floorCores,
@@ -152,29 +195,15 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		PeakCores:       runPeakCores,
 		SustainedCores:  runSustainedCores,
 		PeakMemoryBytes: runPeakMem,
-		CPUMeasured:     cpuMeasured,
+		CPUMeasured:     true,
 		PlanHash:        planHash,
 	})
-	if pin.Empty() {
-		_ = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
-		return
-	}
-	_ = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
 }
 
 type intervalTotal struct {
-	cpuMillicores      int64
-	memoryBytes        int64
-	oneShotMemoryBytes int64
-}
-
-func (t intervalTotal) memory() int64 { return t.memoryBytes + t.oneShotMemoryBytes }
-
-func bucketMillicores(cpu, window time.Duration) int64 {
-	if cpu <= 0 || window <= 0 {
-		return 0
-	}
-	return int64(cpu.Seconds() / window.Seconds() * 1000.0)
+	hasCPU        bool
+	cpuMillicores int64
+	memoryBytes   int64
 }
 
 func peakProcessReading(ctx context.Context, pipeline string, intervals map[int64]intervalTotal, meanCores float64, meanMem int64) (float64, int64) {
@@ -182,7 +211,7 @@ func peakProcessReading(ctx context.Context, pipeline string, intervals map[int6
 	peakMem := meanMem
 	for _, total := range intervals {
 		peakCores = math.Max(peakCores, float64(total.cpuMillicores)/1000.0)
-		if mem := total.memory(); mem > peakMem {
+		if mem := total.memoryBytes; mem > peakMem {
 			peakMem = mem
 		}
 	}
@@ -192,15 +221,20 @@ func peakProcessReading(ctx context.Context, pipeline string, intervals map[int6
 func sustainedProcessCores(intervals map[int64]intervalTotal, meanCores float64) float64 {
 	cores := make([]float64, 0, len(intervals))
 	for _, total := range intervals {
+		if !total.hasCPU {
+			continue
+		}
 		cores = append(cores, float64(total.cpuMillicores)/1000.0)
 	}
 	return sustainedLevel(cores, meanCores)
 }
 
 func sustainedNodeCores(samples []store.MetricSample, meanCores float64) float64 {
-	cores := make([]float64, len(samples))
-	for i, s := range samples {
-		cores[i] = float64(s.CPUMillicores) / 1000.0
+	cores := make([]float64, 0, len(samples))
+	for _, s := range samples {
+		if s.Kind == store.MetricInterval {
+			cores = append(cores, float64(s.CPUMillicores)/1000.0)
+		}
 	}
 	return sustainedLevel(cores, meanCores)
 }

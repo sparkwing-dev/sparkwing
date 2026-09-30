@@ -511,7 +511,7 @@ func writeRetryTestRepo(t *testing.T, dir, remoteURL, behavior string) (string, 
 	if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := "pipelines:\n  - name: pre-push\n    steps:\n      - shared-step\n"
+	manifest := "pipelines:\n  - name: pre-push\n    entrypoint: Fixture\n"
 	if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "sparkwing.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -702,9 +702,17 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 			}
 			ctx := context.Background()
 			const id = "local-setup-failure"
+			// safety: a local submission carries its captured environment, and the
+			// child fixture reads its switches from it.
+			if err := CaptureSubmissionEnvironment(home, id, append(os.Environ(),
+				"SPARKWING_SUBMIT_ENV_ALLOW=SPARKWING_LOCAL_SETUP_TEST_*"), quietLogger()); err != nil {
+				t.Fatal(err)
+			}
 			if err := st.CreateTrigger(ctx, store.Trigger{
 				ID: id, Pipeline: "orch-ok", CreatedAt: time.Now(),
-				TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
+				TriggerEnv: map[string]string{
+					SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned, SubmissionEnvironmentCapturedKey: "1",
+				},
 			}); err != nil {
 				t.Fatal(err)
 			}

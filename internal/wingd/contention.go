@@ -38,7 +38,7 @@ func (d *Daemon) updateContentionLocked(saturated bool, intervalMS int64, now ti
 			c.holdSampledMS, c.holdSaturatedMS, minSampledMS); ok {
 			c.contended = true
 			c.contentionReason = reason
-			d.events.record(now, admissionEvent{Kind: eventContended})
+			d.recordWindow(now, admissionEvent{Kind: eventContended}, c, nil)
 		}
 	}
 }

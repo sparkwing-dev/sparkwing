@@ -125,7 +125,12 @@ type stateMetricsSink struct {
 }
 
 func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) error {
+	kind := store.MetricUnknown
+	if sample.Valid {
+		kind = store.MetricInterval
+	}
 	err := s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
+		Kind:          kind,
 		TS:            sample.TS,
 		CPUMillicores: sample.CPUMillicores,
 		MemoryBytes:   sample.MemoryBytes,
@@ -203,7 +208,7 @@ func (r *NodeExecutor) executeNodeWithAdmission(ctx context.Context, req runner.
 	if childToken == "" {
 		childToken = lease.token
 	}
-	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted, priority, lease.charge)
+	nodeCtx := withLocalAdmission(ctx, la, req.RunID, lease.token, childToken, lease.hostAdmitted, priority, lease.charge)
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
@@ -272,15 +277,23 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		handOverNodeLog(ctx, nlog)
 	}
 
-	samplerCtx, stopSampler := context.WithCancel(ctx)
-	detachSampler := nodemetrics.Attach(samplerCtx, stateMetricsSink{
+	metricErrors := make(chan error, 1)
+	ctx = context.WithValue(ctx, metricErrorsKey{}, metricErrors)
+	sink := stateMetricsSink{
 		backend: r.backends.State,
 		runID:   runID,
 		nodeID:  node.ID(),
-	})
+	}
+	finishSamples := func() error { return nil }
+	if ownsProcessNode(ctx, runID, node.ID()) {
+		finishSamples = nodemetrics.Attach(ctx, sink)
+	} else if err := sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}); err != nil {
+		return nil, fmt.Errorf("record unknown node accounting: %w", err)
+	}
 	defer func() {
-		detachSampler()
-		stopSampler()
+		if err := finishSamples(); err != nil {
+			sparkwing.Debug(ctx, "finish node resource sampling: %v", err)
+		}
 	}()
 
 	wedgeBudget, err := storeWedgeBudget()
@@ -295,13 +308,14 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
 	nodeCtx = sparkwing.WithToolSlotProvider(nodeCtx, r.toolSlotProvider(runID, node.ID(), delegate))
 	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
-		nodemetrics.AddReportedChildCPU(s.CPUTime)
-		_ = r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
+		err := r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
+			Kind:          store.MetricCommand,
 			TS:            time.Now(),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
 			CPUTime:       s.CPUTime,
 		})
+		retainMetricError(ctx, err)
 	})
 
 	if err := r.writeDispatchSnapshot(nodeCtx, runID, node); err != nil {
@@ -390,8 +404,9 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			return nil, fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), invocationBudget)
 		}
 	} else if localOnly && errors.Is(err, store.ErrNotFound) {
-		// safety: with no node row there is nothing to sequence an attempt
-		// against, so the node runs unattributed rather than failing.
+		if err := sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}); err != nil {
+			return nil, fmt.Errorf("record unknown execution accounting: %w", err)
+		}
 		localExecutor = ""
 		attemptRecorder = nil
 	} else if attemptRecorder != nil || !errors.Is(err, store.ErrNotFound) {
@@ -493,13 +508,16 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 				start.ExecutorID = localExecutor
 			}
 			if err := attemptRecorder.AcknowledgeNodeExecutionStart(attemptCtx, runID, node.ID(), start); err != nil {
-				// safety: an unclaimed local attempt is attribution, not a
-				// fence, and the state backend may predate it, so the node runs
-				// on unattributed rather than failing over a display record.
 				if localOnly {
-					sparkwing.Debug(nodeCtx, "local execution attempt %d not recorded: %v", ordinal, err)
-					localExecutor = ""
-					attemptRecorder = nil
+					if err := sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}); err == nil {
+						localExecutor = ""
+						attemptRecorder = nil
+					} else {
+						for i := len(cancels) - 1; i >= 0; i-- {
+							cancels[i]()
+						}
+						return nil, fmt.Errorf("record unknown execution accounting: %w", err)
+					}
 				} else {
 					for i := len(cancels) - 1; i >= 0; i-- {
 						cancels[i]()
@@ -702,6 +720,14 @@ done:
 		noteEvent(ctx, r.backends.State, runID, node.ID(), "artifacts_published", payload)
 	}
 
+	if err := finishSamples(); err != nil {
+		return nil, fmt.Errorf("finish node accounting: %w", err)
+	}
+	select {
+	case err := <-metricErrors:
+		return nil, fmt.Errorf("record node accounting: %w", err)
+	default:
+	}
 	emitNodeEnd(sparkwing.Success, "")
 	if fatal := nodeLogFatal(nlog); fatal != nil {
 		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
@@ -733,6 +759,7 @@ done:
 
 	if err := r.backends.State.FinishNode(writeCtx, runID, node.ID(), string(sparkwing.Success), "", outBytes); err != nil {
 		noteLostStateWrite(writeCtx, "finish node", runID, err)
+		return nil, fmt.Errorf("finish node: %w", err)
 	}
 	noteEvent(writeCtx, r.backends.State, runID, node.ID(), "node_succeeded", nil)
 

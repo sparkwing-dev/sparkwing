@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -89,12 +90,8 @@ type PipelineProfile struct {
 	WaitP99 time.Duration `json:"wait_p99_ns,omitempty"`
 	// WaitSampleCount is how many wait observations back WaitP50/WaitP99.
 	WaitSampleCount int `json:"wait_sample_count,omitempty"`
-	// CPUMeasured records whether the sampler that produced these
-	// observations could actually measure CPU on this platform. A healthy
-	// sampler sets it true even when the peak is a genuine near-zero (a
-	// sleep-heavy pipeline), so admission can cost the pipeline at its real
-	// tiny cost; a blind sampler leaves it false, keeping the conservative
-	// default. Meaningful only on the rollup row.
+	// CPUMeasured records that profile observations included measured CPU.
+	// Admission uses learned resource values only when it is true.
 	CPUMeasured bool      `json:"cpu_measured"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// PinnedCores and PinnedMemoryBytes record the explicit .Resources()
@@ -150,9 +147,8 @@ type ProfileObservation struct {
 	// charged core figure is computed from; left zero it degrades the
 	// profile to peak pricing rather than to free.
 	SustainedCores float64
-	// CPUMeasured reports whether the sampler could measure CPU for this
-	// run. It gates whether a near-zero peak is trusted as a real
-	// measurement or treated as a blind sampler's uninformative zero.
+	// CPUMeasured must be true to update learned resource values.
+	// False observations are validated but leave the profile unchanged.
 	CPUMeasured bool
 	// PlanHash is the DAG-topology fingerprint of the version this run
 	// executed. When it differs from the stored profile's hash the version
@@ -183,9 +179,7 @@ type profileSample struct {
 	S float64 `json:"s,omitempty"`
 }
 
-const profileSchemaCurrent = 4
-
-const profileSchemaOldest = 3
+const profileSchemaCurrent = 11
 
 type profileWindowDoc struct {
 	Schema  int             `json:"schema"`
@@ -222,7 +216,33 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 // RecordProfileObservation folds one observation into t's profile for
 // the (pipeline, node). See [Store.RecordProfileObservation].
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
-	st, err := t.loadProfileMutState(ctx, pipeline, nodeID)
+	if obs.Duration < 0 || obs.PeakMemoryBytes < 0 || obs.FloorMemoryBytes < 0 {
+		return errors.New("profile duration and memory must be nonnegative")
+	}
+	for _, value := range []float64{obs.PeakCores, obs.SustainedCores, obs.FloorCores} {
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return errors.New("profile CPU values must be finite and nonnegative")
+		}
+	}
+	if !obs.CPUMeasured {
+		return nil
+	}
+	return retryOnBusy(func() error { return t.recordProfileObservation(ctx, pipeline, nodeID, obs) })
+}
+
+func (t *Tenant) recordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) (err error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_profiles
+ (team,pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,updated_at)
+ VALUES (?,?,?,0,0,0,0,0,?) ON CONFLICT (team,pipeline,node_id) DO NOTHING`,
+		string(t.team), pipeline, nodeID, time.Now().UnixNano()); err != nil {
+		return err
+	}
+	st, err := loadProfileMutState(ctx, tx, t.team, pipeline, nodeID)
 	if err != nil {
 		return err
 	}
@@ -248,7 +268,7 @@ func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 	cpuMeasured := obs.CPUMeasured
 	if obs.Contended {
 		floorCores = foldFloor(floorCores, obs.FloorCores)
-		floorMemoryBytes = int64(foldFloor(float64(floorMemoryBytes), float64(obs.FloorMemoryBytes)))
+		floorMemoryBytes = max(obs.FloorMemoryBytes, floorMemoryBytes/2)
 		cpuMeasured = st.cpuMeasured || obs.CPUMeasured
 	} else {
 		window = append(window, profileSample{
@@ -264,8 +284,7 @@ func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 	if err != nil {
 		return err
 	}
-	return retryOnBusy(func() error {
-		_, err := t.s.exec(ctx, `
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO pipeline_profiles
     (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json,
      plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores)
@@ -286,14 +305,16 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
     prev_peak_memory_bytes = excluded.prev_peak_memory_bytes,
     sustained_cores       = excluded.sustained_cores,
     prev_sustained_cores  = excluded.prev_sustained_cores`,
-			string(t.team), pipeline, nodeID,
-			prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
-			prof.PeakCores, prof.PeakMemoryBytes, len(window),
-			boolToInt(cpuMeasured), time.Now().UnixNano(), raw,
-			planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
-			prof.SustainedCores, prevSustainedCores)
+		string(t.team), pipeline, nodeID,
+		prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
+		prof.PeakCores, prof.PeakMemoryBytes, len(window),
+		boolToInt(cpuMeasured), time.Now().UnixNano(), raw,
+		planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
+		prof.SustainedCores, prevSustainedCores)
+	if err != nil {
 		return err
-	})
+	}
+	return tx.Commit()
 }
 
 // safety: resolve missing sustained cores before storing; a literal zero can
@@ -312,16 +333,16 @@ func foldFloor(stored, observed float64) float64 {
 	return math.Max(observed, floorDecayFactor*stored)
 }
 
-func (t *Tenant) loadProfileMutState(ctx context.Context, pipeline, nodeID string) (profileMutState, error) {
+func loadProfileMutState(ctx context.Context, tx *storeTx, team Team, pipeline, nodeID string) (profileMutState, error) {
 	var (
 		raw      []byte
 		st       profileMutState
 		measured int
 	)
-	err := t.s.queryRow(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT samples_json, plan_hash, peak_cores, peak_memory_bytes, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, cpu_measured, sustained_cores, prev_sustained_cores
-		   FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`,
-		string(t.team), pipeline, nodeID).Scan(&raw, &st.planHash, &st.peakCores, &st.peakMemoryBytes,
+		   FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`+tx.forUpdate(),
+		string(team), pipeline, nodeID).Scan(&raw, &st.planHash, &st.peakCores, &st.peakMemoryBytes,
 		&st.floorCores, &st.floorMemoryBytes, &st.prevPeakCores, &st.prevPeakMemoryBytes, &measured,
 		&st.sustainedCores, &st.prevSustainedCores)
 	if err != nil {
@@ -331,9 +352,11 @@ func (t *Tenant) loadProfileMutState(ctx context.Context, pipeline, nodeID strin
 		return profileMutState{}, err
 	}
 	st.cpuMeasured = measured != 0
-	if samples, ok := decodeProfileWindow(raw); ok {
-		st.window = samples
+	samples, ok := decodeProfileWindow(raw)
+	if !ok {
+		return profileMutState{}, nil
 	}
+	st.window = samples
 	return st, nil
 }
 
@@ -369,12 +392,8 @@ func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wai
 	if len(window) > profileWindow {
 		window = window[len(window)-profileWindow:]
 	}
-	xs := make([]float64, len(window))
-	for i, ms := range window {
-		xs[i] = float64(ms)
-	}
-	p50 := int64(percentile(xs, 0.50))
-	p99 := int64(percentile(xs, 0.99))
+	p50 := percentile(window, 0.50)
+	p99 := percentile(window, 0.99)
 	raw, err := json.Marshal(waitWindowDoc{Schema: waitSchemaCurrent, Samples: window})
 	if err != nil {
 		return err
@@ -783,7 +802,7 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		return nil, err
 	}
 	samples, samplesCurrent := decodeProfileWindow(samplesRaw)
-	if count > 0 && !samplesCurrent {
+	if !samplesCurrent {
 		p50 = 0
 		p99 = 0
 		cores = 0
@@ -796,6 +815,7 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		prevPeakMem = 0
 		sustainedCores = 0
 		prevSustained = 0
+		planHash = ""
 	}
 	prof := &PipelineProfile{
 		P50Duration:         time.Duration(p50) * time.Millisecond,
@@ -828,14 +848,8 @@ func decodeProfileWindow(raw []byte) ([]profileSample, bool) {
 		return nil, false
 	}
 	var doc profileWindowDoc
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Samples) == 0 ||
-		doc.Schema < profileSchemaOldest || doc.Schema > profileSchemaCurrent {
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != profileSchemaCurrent {
 		return nil, false
-	}
-	if doc.Schema < profileSchemaCurrent {
-		for i := range doc.Samples {
-			doc.Samples[i].S = doc.Samples[i].C
-		}
 	}
 	return doc.Samples, true
 }
@@ -845,34 +859,34 @@ func annotateResourcePercentiles(prof *PipelineProfile, samples []profileSample)
 		return
 	}
 	cores := make([]float64, len(samples))
-	mems := make([]float64, len(samples))
+	mems := make([]int64, len(samples))
 	for i, s := range samples {
 		cores[i] = s.C
-		mems[i] = float64(s.M)
+		mems[i] = s.M
 	}
 	prof.CPUP50 = percentile(cores, 0.50)
 	prof.CPUP95 = percentile(cores, 0.95)
-	prof.MemoryP50Bytes = int64(percentile(mems, 0.50))
-	prof.MemoryP95Bytes = int64(percentile(mems, 0.95))
+	prof.MemoryP50Bytes = percentile(mems, 0.50)
+	prof.MemoryP95Bytes = percentile(mems, 0.95)
 }
 
 func profileFromWindow(window []profileSample) PipelineProfile {
-	durations := make([]float64, len(window))
+	durations := make([]int64, len(window))
 	cores := make([]float64, len(window))
 	sustained := make([]float64, len(window))
-	mems := make([]float64, len(window))
+	mems := make([]int64, len(window))
 	for i, s := range window {
-		durations[i] = float64(s.D)
+		durations[i] = s.D
 		cores[i] = s.C
 		sustained[i] = s.S
-		mems[i] = float64(s.M)
+		mems[i] = s.M
 	}
 	return PipelineProfile{
-		P50Duration:     time.Duration(int64(percentile(durations, 0.50))),
-		P99Duration:     time.Duration(int64(percentile(durations, 0.99))),
+		P50Duration:     time.Duration(percentile(durations, 0.50)),
+		P99Duration:     time.Duration(percentile(durations, 0.99)),
 		PeakCores:       percentile(cores, peakPercentile),
 		SustainedCores:  percentile(sustained, peakPercentile),
-		PeakMemoryBytes: int64(percentile(mems, peakPercentile)),
+		PeakMemoryBytes: percentile(mems, peakPercentile),
 		SampleCount:     len(window),
 	}
 }
@@ -913,12 +927,12 @@ func NearestRankIndex(xs []float64, q float64) int {
 	return order[nearestRank(len(xs), q)]
 }
 
-func percentile(xs []float64, q float64) float64 {
+func percentile[T ~int64 | ~float64](xs []T, q float64) T {
 	if len(xs) == 0 {
 		return 0
 	}
-	sorted := append([]float64(nil), xs...)
-	sort.Float64s(sorted)
+	sorted := slices.Clone(xs)
+	slices.Sort(sorted)
 	return sorted[nearestRank(len(sorted), q)]
 }
 

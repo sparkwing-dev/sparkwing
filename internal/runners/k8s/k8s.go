@@ -819,7 +819,7 @@ const scratchVolumeName = "scratch"
 const (
 	podCPULimitFactor = 2.0
 
-	podMemoryLimitFactor = 1.25
+	podMemoryHeadroomDivisor = 4
 
 	podDefaultRefCPU = 1
 )
@@ -843,7 +843,7 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 			_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
 		}
 	}
-	res := capacity.Resolve(pin, profile, podDefaultRefCPU, "")
+	res := capacity.ResolvePeak(pin, profile, podDefaultRefCPU, "")
 	if w := ceilingWarning(res, r.cfg.CPUCeiling, r.cfg.MemoryCeiling); w != "" {
 		r.logger.Warn("resource ceiling clamped the pod",
 			"pipeline", pipeline, "node", req.NodeID, "detail", w)
@@ -1197,9 +1197,13 @@ func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequiremen
 		}
 	}
 
-	if measured && res.MemoryBytes > 0 {
+	if res.MemoryBytes > 0 {
 		req[corev1.ResourceMemory] = *resource.NewQuantity(res.MemoryBytes, resource.BinarySI)
-		burst := int64(float64(res.MemoryBytes) * podMemoryLimitFactor)
+		headroom := res.MemoryBytes / podMemoryHeadroomDivisor
+		burst := int64(math.MaxInt64)
+		if res.MemoryBytes <= math.MaxInt64-headroom {
+			burst = res.MemoryBytes + headroom
+		}
 		lim[corev1.ResourceMemory] = *resource.NewQuantity(cappedBytes(burst, cfg.MemoryCeiling), resource.BinarySI)
 	} else {
 		memoryRequest := cfg.MemoryRequest

@@ -19,7 +19,7 @@ func TestDispatchState_TerminalWritesSurviveACancelledRunContext(t *testing.T) {
 		{
 			name:    "cancelled",
 			nodeID:  "waiter",
-			mark:    func(s *dispatchState, id string) { s.markCancelled(id, "ctx-cancelled") },
+			mark:    func(s *dispatchState, id string) { s.markCancelled(s.ctx, id, "ctx-cancelled") },
 			outcome: sparkwing.Cancelled,
 		},
 		{

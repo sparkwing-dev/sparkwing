@@ -447,3 +447,15 @@ func TestReleaseSectionDateReadsTheHeadingTheCutWrote(t *testing.T) {
 		t.Errorf("date = %q, want empty for a section that is not there", got)
 	}
 }
+
+func TestMigrationIndexEscapesPipes(t *testing.T) {
+	for _, summary := range []string{"Use `set|get|delete`.", "Use `set\\|get\\|delete`."} {
+		got, err := insertMigrationIndexRow(migrationIndexFixture, "v0.9.0", "2026-03-04", summary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "| Use `set\\|get\\|delete`. |") {
+			t.Fatalf("summary split across table cells: %s", got)
+		}
+	}
+}

@@ -605,7 +605,7 @@ func TestScan_FailsAFileItCannotParse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	violations, unread, err := scan(dir)
+	violations, unread, err := scan(dir, nil)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -620,17 +620,34 @@ func TestScan_FailsAFileItCannotParse(t *testing.T) {
 	}
 }
 
-func TestOnlyChanged_DropsFilesOutsideTheDiff(t *testing.T) {
+func TestScanParsesOnlyTheRequestedFiles(t *testing.T) {
 	root := t.TempDir()
-	unread := []unreadable{
-		{file: filepath.Join(root, "touched.go"), err: errors.New("parse")},
-		{file: filepath.Join(root, "untouched.go"), err: errors.New("parse")},
+	for _, name := range []string{"touched.go", "untouched.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package widget\nfunc Broken( {\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	added := map[string]map[int]bool{"touched.go": {3: true}}
-
-	got := onlyChanged(unread, root, added)
-	if len(got) != 1 || filepath.Base(got[0].file) != "touched.go" {
-		t.Fatalf("onlyChanged = %+v, want only the file the diff touched", got)
+	for _, tc := range []struct {
+		name  string
+		added map[string]map[int]bool
+		want  int
+	}{
+		{"full", nil, 2},
+		{"deletion only", map[string]map[int]bool{"touched.go": {}}, 1},
+		{"empty", map[string]map[int]bool{}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, unread, err := scan(root, tc.added)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(unread) != tc.want {
+				t.Fatalf("parsed %d malformed files, want %d", len(unread), tc.want)
+			}
+			if tc.want == 1 && filepath.Base(unread[0].file) != "touched.go" {
+				t.Fatalf("parsed %s, want touched.go", unread[0].file)
+			}
+		})
 	}
 }
 

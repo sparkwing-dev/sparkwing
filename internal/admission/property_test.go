@@ -220,7 +220,7 @@ func randomAttach(t *testing.T, l *Ledger, rng *rand.Rand, n int) {
 		return
 	}
 	ls := snap.Leases[rng.Intn(len(snap.Leases))]
-	if err := l.Attach(ls.ID, fmt.Sprintf("att-%d", n)); err != nil {
+	if err := l.Attach(ls.ID, fmt.Sprintf("att-%d", n), ls.Members[0]); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 }

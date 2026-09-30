@@ -205,7 +205,8 @@ type Client struct {
 	opts Options
 	sock string
 
-	closed atomic.Bool
+	closed           atomic.Bool
+	reconnectAttempt func(context.Context) error
 
 	probe bool
 }
@@ -377,15 +378,21 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 }
 
 func (cl *Client) connect(ctx context.Context) error {
+	return cl.connectPaced(ctx, dialPaceMax)
+}
+
+func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error {
 	opts := cl.opts
 	spawns := 0
 	takeovers := &takeoverBudget{}
 	drainWait := newRetry("wait for draining daemon", 0)
-	dialWait := newRetryCapped("wait for daemon socket", 0, dialPaceMax)
-	electionWait := newRetryCapped("wait for predecessor daemon", 0, electionPaceMax)
+	dialWait := newRetryCapped("wait for daemon socket", 0, dialMax)
+	electionWait := newRetryCapped("wait for predecessor daemon", 0, max(dialMax, electionPaceMax))
 	var lastDial error
 	var predecessorDeadline time.Time
 	var socketDeadline time.Time
+	releaseStart := func() {}
+	defer func() { releaseStart() }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
@@ -397,9 +404,22 @@ func (cl *Client) connect(ctx context.Context) error {
 			}
 			lastDial = derr
 			if socketDeadline.IsZero() || !time.Now().Before(socketDeadline) {
+				releaseStart()
+				releaseStart = func() {}
 				if spawns >= maxSpawnAttempts {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
+				release, claimed, cerr := wingd.ClaimDaemonStart(opts.Home)
+				if cerr != nil {
+					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("claim daemon start: %w", cerr), lastDial)
+				}
+				if !claimed {
+					if err := dialWait.wait(ctx, derr); err != nil {
+						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
+					}
+					continue
+				}
+				releaseStart = release
 				preparation, lerr := wingd.PrepareDaemonSocket(opts.Home)
 				if lerr != nil && preparation != wingd.SocketPreparationCleanupFailed {
 					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("check predecessor election: %w", lerr), lastDial)
@@ -444,7 +464,16 @@ func (cl *Client) connect(ctx context.Context) error {
 			}
 			continue
 		}
+		releaseStart()
+		releaseStart = func() {}
 		cl.setConn(nc)
+		deadline := time.Now().Add(connectHandshakeTimeout)
+		if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+			deadline = end
+		}
+		if err := cl.setReadDeadline(nc, deadline); err != nil {
+			return errors.Join(err, cl.Close())
+		}
 		ack, herr := cl.handshake(opts.Version)
 		if herr != nil {
 			cl.Close()
@@ -452,6 +481,9 @@ func (cl *Client) connect(ctx context.Context) error {
 				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 			}
 			continue
+		}
+		if err := cl.setReadDeadline(nc, time.Time{}); err != nil {
+			return errors.Join(err, cl.Close())
 		}
 
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
@@ -511,15 +543,42 @@ func (cl *Client) connect(ctx context.Context) error {
 	}
 }
 
-const defaultReattachTimeout = 8 * time.Second
+const (
+	connectHandshakeTimeout = wingd.HeartbeatStaleWindow
+	defaultReconnectTimeout = 8 * time.Second
+	// safety: a lost socket can precede the old child's five-minute failure
+	// ceiling, then wait through a successor's slow startup and restart backoff.
+	defaultReattachTimeout = 12 * time.Minute
+)
 
-func (cl *Client) reconnect(ctx context.Context) error {
-	rctx, cancel := context.WithTimeout(ctx, defaultReattachTimeout)
+func (cl *Client) reconnect(ctx context.Context, within time.Duration) error {
+	rctx, cancel := context.WithTimeout(ctx, within)
 	defer cancel()
-	if err := cl.connect(rctx); err != nil {
-		return fmt.Errorf("wingd/client: admission daemon restarted and did not come back: %w", err)
+	retry := newRetry("reconnect to admission daemon", 0)
+	hostFailures := 0
+	attempt := func(ctx context.Context) error { return cl.connectPaced(ctx, retryMaxDelay) }
+	if cl.reconnectAttempt != nil {
+		attempt = cl.reconnectAttempt
 	}
-	return nil
+	for {
+		err := attempt(rctx)
+		if err == nil {
+			return nil
+		}
+		switch {
+		case errors.Is(err, ErrDaemonHostFailed):
+			hostFailures++
+			if hostFailures >= 3 {
+				return fmt.Errorf("wingd/client: admission daemon host failed after %d attempts: %w", hostFailures, err)
+			}
+		case errors.Is(err, ErrDaemonUnreachable), errors.Is(err, ErrNoDaemon):
+		default:
+			return fmt.Errorf("wingd/client: admission daemon restart failed: %w", err)
+		}
+		if werr := retry.wait(rctx, err); werr != nil {
+			return fmt.Errorf("wingd/client: admission daemon restarted and did not come back: %w", werr)
+		}
+	}
 }
 
 func (cl *Client) recoverConn(ctx context.Context) error {
@@ -529,7 +588,17 @@ func (cl *Client) recoverConn(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return cl.reconnect(ctx)
+	return cl.reconnect(ctx, defaultReconnectTimeout)
+}
+
+func (cl *Client) recoverAdmissionConn(ctx context.Context) error {
+	if cl.closed.Load() {
+		return net.ErrClosed
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return cl.reconnect(ctx, defaultReattachTimeout)
 }
 
 func (cl *Client) takeover(ctx context.Context, opts Options) error {
@@ -655,6 +724,15 @@ func (cl *Client) setConn(nc net.Conn) {
 		_ = nc.SetReadDeadline(time.Now())
 		_ = nc.SetWriteDeadline(time.Now())
 	}
+}
+
+func (cl *Client) setReadDeadline(nc net.Conn, deadline time.Time) error {
+	cl.connMu.Lock()
+	defer cl.connMu.Unlock()
+	if cl.waitCancelled {
+		deadline = time.Now()
+	}
+	return nc.SetReadDeadline(deadline)
 }
 
 func (cl *Client) conn() net.Conn {

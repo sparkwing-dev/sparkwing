@@ -378,7 +378,7 @@ func runClaimedTrigger(
 ) {
 	book := context.WithoutCancel(ctx)
 	p := Paths{Root: home}
-	if withinRefWorktrees(p, strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])) {
+	if withinRefWorktrees(p, submittedWorktreeDir(trig)) {
 		hold, ok, herr := HoldRefWorktree(p, trig.ID)
 		if herr != nil || !ok {
 			finishClaimedTriggerFailure(book, st, trig, logger,
@@ -419,10 +419,17 @@ func runClaimedTrigger(
 	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
 }
 
+func submittedWorktreeDir(trig *store.Trigger) string {
+	if strings.TrimSpace(trig.TriggerEnv[PipelineRevKey]) != "" {
+		return strings.TrimSpace(trig.TriggerEnv[PipelineDirKey])
+	}
+	return strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])
+}
+
 func cleanupRefWorktree(
 	ctx context.Context, st *store.Store, p Paths, trig *store.Trigger, logger *slog.Logger,
 ) {
-	dir := strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])
+	dir := submittedWorktreeDir(trig)
 	if dir == "" || !withinRefWorktrees(p, dir) {
 		return
 	}

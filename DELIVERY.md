@@ -101,9 +101,9 @@ file. Other syntax and workflow checks remain active.
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
   a 40-minute execution deadline, which gives the dispatcher 41 minutes with
-  its drain margin. Pre-release declares a 75-minute execution deadline, which
-  gives the dispatcher 76 minutes. Their shared hosted job allows 80 minutes,
-  leaving five minutes beyond the longer node deadline for setup and cleanup.
+  its drain margin, inside a 45-minute hosted job. Pre-release declares a
+  120-minute execution deadline inside a 130-minute hosted job, leaving ten
+  minutes beyond the node deadline for setup and cleanup.
   These are liveness boundaries, not claims that either check normally takes
   that long. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
@@ -132,7 +132,9 @@ file. Other syntax and workflow checks remain active.
   pre-release run without this step took 13m03s, so 40m23s is a local estimate
   for the whole release check, not a hosted measurement. Hosted four-core CPU
   and memory use still need verification. Each shard has a 55-minute test
-  timeout, followed by later checks under the 75-minute node deadline.
+  timeout, followed by later checks under the 120-minute node deadline and a
+  130-minute hosted job deadline. The hosted `gate` job keeps its 45-minute
+  deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries
@@ -442,6 +444,12 @@ file. Other syntax and workflow checks remain active.
   seconds end to end. The limit leaves room for the gate's concurrent race
   suite and stays inside the step's thirty minutes, so a hung test still
   reports its stack. The first run may also download the Postgres binaries.
+
+- **Hosted pre-release PostgreSQL:** the canonical pre-release job supplies a
+  PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`
+  uses that server without downloading embedded binaries. The separate
+  Postgres conformance job verifies the backup drill with a matching client
+  and rejects skipped tests.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

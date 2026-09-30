@@ -37,13 +37,17 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: pipeline, Status: "running", StartedAt: start}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "node-1", Status: "running"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "node-1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "run-1", "node-1", "success", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now()
 	for i := range 3 {
 		if err := st.AddNodeMetricSample(ctx, "run-1", "node-1", store.MetricSample{
-			TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
+			Kind: store.MetricInterval,
+			TS:   base.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -100,13 +104,17 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-2", Pipeline: "build", Status: "running", StartedAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-2", NodeID: "node-1", Status: "running"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-2", NodeID: "node-1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "run-2", "node-1", "success", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now()
 	for i := range 2 {
 		_ = st.AddNodeMetricSample(ctx, "run-2", "node-1", store.MetricSample{
-			TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: 2000, MemoryBytes: 2 << 30,
+			Kind: store.MetricInterval,
+			TS:   base.Add(time.Duration(i) * time.Second), CPUMillicores: 2000, MemoryBytes: 2 << 30,
 		})
 	}
 
@@ -115,6 +123,11 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	c := client.New(srv.URL, nil)
 	if err := c.FinishRun(ctx, "run-2", "success", ""); err != nil {
 		t.Fatalf("finish run: %v", err)
+	}
+
+	profile, err := st.GetPipelineProfile(ctx, "build", "node-1")
+	if err != nil || profile == nil || profile.SampleCount != 4 {
+		t.Fatalf("unpinned node was not folded: %+v, %v", profile, err)
 	}
 
 	events, _ := st.ListEventsAfter(ctx, "run-2", 0, 100)

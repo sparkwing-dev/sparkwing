@@ -55,13 +55,15 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	}
 
 	retries := 0
-	releaseOnRetry := func(time.Duration) {
+	releaseOnRetry := func(delay time.Duration) {
+		if delay != 50*time.Millisecond {
+			t.Fatalf("retry delay = %v, want 50ms", delay)
+		}
 		retries++
 		if err := lockTx.Rollback(); err != nil {
 			t.Fatalf("release write lock: %v", err)
 		}
 	}
-	started := time.Now()
 	expires, _, err := hb.defaultTenant().heartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second, releaseOnRetry)
 	if err != nil {
 		t.Fatalf("heartbeat under transient busy: %v", err)
@@ -72,22 +74,17 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	if !expires.After(time.Now()) {
 		t.Errorf("lease not extended into the future: %v", expires)
 	}
-	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
-		t.Fatalf("transient-busy heartbeat took %s, want under 100ms", elapsed)
-	}
 }
 
 func TestHeartbeatConcurrencySlot_LostHolderDoesNotRetry(t *testing.T) {
 	s := openStoreT(t)
 	ctx := context.Background()
 
-	start := time.Now()
-	_, _, err := s.HeartbeatConcurrencySlot(ctx, "missing", "h", 10*time.Second)
+	_, _, err := s.defaultTenant().heartbeatConcurrencySlot(ctx, "missing", "h", 10*time.Second, func(delay time.Duration) {
+		t.Fatalf("lost-holder heartbeat retried with delay %v", delay)
+	})
 	if !errors.Is(err, ErrLockHeld) {
 		t.Fatalf("err = %v, want ErrLockHeld", err)
-	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("lost-holder heartbeat took %v; should not have retried", elapsed)
 	}
 }
 

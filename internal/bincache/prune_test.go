@@ -9,26 +9,20 @@ import (
 	"testing"
 )
 
-func TestPruneToLimitsCannotSatisfyGoalFromPartialDiscovery(t *testing.T) {
+func TestPruneToLimitsWithoutObservedExcess(t *testing.T) {
 	originalStatus := statusForLimits
-	originalPrune := pruneForLimits
-	t.Cleanup(func() {
-		statusForLimits = originalStatus
-		pruneForLimits = originalPrune
-	})
-	statusForLimits = func(context.Context, string) (CacheStatus, error) {
-		return CacheStatus{DiscoveryExhausted: true}, nil
-	}
-	pruneForLimits = func(context.Context, PruneOptions) (PruneResult, error) {
-		return PruneResult{GoalSatisfied: true}, nil
-	}
-
-	result, err := PruneToLimits(context.Background(), DefaultMaxCacheBytes, DefaultMaxCacheEntries, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.GoalSatisfied || !result.WorkBoundExhausted {
-		t.Fatalf("partial discovery result = %+v, want unsatisfied and exhausted", result)
+	t.Cleanup(func() { statusForLimits = originalStatus })
+	for _, exhausted := range []bool{false, true} {
+		statusForLimits = func(context.Context, string) (CacheStatus, error) {
+			return CacheStatus{ObservedBytes: 100, EntryCount: 2, DiscoveryExhausted: exhausted}, nil
+		}
+		result, err := pruneToLimitsAtRoot(t.Context(), t.TempDir(), 200, 3, false)
+		if err != nil {
+			t.Fatalf("exhausted=%v: %v", exhausted, err)
+		}
+		if result.GoalSatisfied != !exhausted || result.WorkBoundExhausted != exhausted || result.LogicalRemovedBytes != 0 || result.ReclaimedEntries != 0 {
+			t.Fatalf("exhausted=%v: result=%+v", exhausted, result)
+		}
 	}
 }
 
@@ -39,24 +33,26 @@ func TestPruneToLimitsUsesLogicalRemovalForCacheByteCeiling(t *testing.T) {
 		statusForLimits = originalStatus
 		pruneForLimits = originalPrune
 	})
-	statusForLimits = func(context.Context, string) (CacheStatus, error) {
-		return CacheStatus{ObservedBytes: 100, EntryCount: 2}, nil
-	}
-	var request PruneOptions
-	pruneForLimits = func(_ context.Context, opts PruneOptions) (PruneResult, error) {
-		request = opts
-		return PruneResult{LogicalRemovedBytes: 60, ReclaimedEntries: 1, GoalSatisfied: true}, nil
-	}
+	for _, exhausted := range []bool{false, true} {
+		statusForLimits = func(context.Context, string) (CacheStatus, error) {
+			return CacheStatus{ObservedBytes: 100, EntryCount: 2, DiscoveryExhausted: exhausted}, nil
+		}
+		var request PruneOptions
+		pruneForLimits = func(_ context.Context, opts PruneOptions) (PruneResult, error) {
+			request = opts
+			return PruneResult{LogicalRemovedBytes: 60, ReclaimedEntries: 1, GoalSatisfied: true}, nil
+		}
 
-	result, err := PruneToLimits(context.Background(), 50, 0, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if request.RemoveBytes != 50 || request.ReclaimBytes != 0 || request.MaxEntries != 2 {
-		t.Fatalf("prune request = %+v", request)
-	}
-	if !result.GoalSatisfied || result.LogicalRemovedBytes != 60 {
-		t.Fatalf("prune result = %+v", result)
+		result, err := PruneToLimits(context.Background(), 50, 0, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if request.RemoveBytes != 50 || request.ReclaimBytes != 0 || request.MaxEntries != 2 {
+			t.Fatalf("prune request = %+v", request)
+		}
+		if result.GoalSatisfied != !exhausted || result.WorkBoundExhausted != exhausted || result.LogicalRemovedBytes != 60 {
+			t.Fatalf("prune result = %+v", result)
+		}
 	}
 }
 

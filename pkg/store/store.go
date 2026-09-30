@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -112,6 +113,7 @@ type Store struct {
 	prepareCursors  map[string]executorPrepareCursor
 	launchResumeMu  sync.Mutex
 	launchResume    *launchCursor
+	backupDir       string
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -170,7 +172,11 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := openSQL("sqlite", dsn, DialectSQLite)
+	backupDir := ""
+	if !newDatabase {
+		backupDir = filepath.Join(filepath.Dir(path), "backups")
+	}
+	st, err := openSQLAt("sqlite", dsn, DialectSQLite, backupDir)
 	if err != nil {
 		return nil, err
 	}
@@ -451,6 +457,11 @@ func OpenPostgres(_ context.Context, dsn string) (*Store, error) {
 }
 
 func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
+	return openSQLAt(driver, dsn, dialect, "")
+}
+
+// safety: a non-empty backupDir is where a SQLite schema upgrade copies the database before changing it.
+func openSQLAt(driver, dsn string, dialect Dialect, backupDir string) (*Store, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
@@ -464,7 +475,7 @@ func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
 		db.SetConnMaxIdleTime(5 * time.Minute)
 	}
 
-	s := &Store{db: db, dialect: dialect}
+	s := &Store{db: db, dialect: dialect, backupDir: backupDir}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -1063,7 +1074,9 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 88
+const expectedSchemaVersion = 89
+
+var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1671,6 +1684,9 @@ func IsProtocolErr(err error) bool {
 }
 
 func (s *Store) migrateSQLite(ctx context.Context) error {
+	if err := s.backupBeforeUpgrade(ctx); err != nil {
+		return err
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin migration inspection: %w", err)
@@ -1697,6 +1713,9 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		if err := bridgeMainLineageTenantKey(ctx, tx, current, false); err != nil {
 			return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 		}
+		if err := bridgeMainLineageMetricKind(ctx, tx, current, listed, false); err != nil {
+			return fmt.Errorf("complete main-lineage schema v%d: %w", current, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration inspection: %w", err)
@@ -1714,6 +1733,34 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// safety: the upgrade cannot be undone and an older sparkwing refuses the upgraded file, so a copy comes first.
+func (s *Store) backupBeforeUpgrade(ctx context.Context) error {
+	if s.backupDir == "" {
+		return nil
+	}
+	var current int
+	if err := s.queryRow(ctx, `SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if current == 0 || current >= expectedSchemaVersion {
+		return nil
+	}
+	if err := os.MkdirAll(s.backupDir, 0o700); err != nil {
+		return fmt.Errorf("create backup directory %s: %w", s.backupDir, err)
+	}
+	target := filepath.Join(s.backupDir, fmt.Sprintf("state-v%d-%s.db", current, time.Now().UTC().Format("20060102T150405Z")))
+	if err := preparePrivateSQLite(target); err != nil {
+		return err
+	}
+	if _, err := s.exec(ctx, `VACUUM INTO ?`, target); err != nil {
+		return fmt.Errorf("back up the state database to %s before upgrading it: %w", target, err)
+	}
+	fmt.Fprintf(os.Stderr, "sparkwing: upgrading the state database from schema v%d to v%d; a copy of it is at %s\n",
+		current, expectedSchemaVersion, target)
+	s.backupDir = ""
 	return nil
 }
 
@@ -1803,6 +1850,9 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if err := bridgeMainLineageTenantKey(ctx, tx, current, true); err != nil {
 		return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 	}
+	if err := bridgeMainLineageMetricKind(ctx, tx, current, listed, true); err != nil {
+		return fmt.Errorf("complete main-lineage schema v%d: %w", current, err)
+	}
 	if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
 		if err := insertRequirements(ctx, tx, backfill); err != nil {
 			return fmt.Errorf("record schema requirements: %w", err)
@@ -1861,12 +1911,17 @@ var migrationRequirements = map[int][]string{
 	80: {billingTrustRequirement},
 	87: {cardBillingRequirement},
 	88: {claimCacheScopeRequirement},
+	89: {metricSampleKindRequirement, "process-tree-accounting"},
 }
 
 // safety: v88 scopes a claim token's binaries by repository and git ref, and a
 // binary predating it reads them unscoped, so a feature branch's binary could
 // reach main; the requirement makes that binary refuse the store instead.
 const claimCacheScopeRequirement = "claim-cache-scope-v1"
+
+// safety: v89 is main's v50 and v51, and its first name marks a database that
+// took them under those numbers, which bridgeMainLineageMetricKind completes.
+const metricSampleKindRequirement = "metric-sample-kind"
 
 // safety: v48 renames two columns, so a binary predating it writes the names
 // that are gone; both halves are declared rather than left additive.
@@ -2136,6 +2191,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyCardBillingMigration(ctx, tx, false)
 	case 88:
 		return applyCacheRefMigration(ctx, tx, false)
+	case 89:
+		if err := ensureColumnsSQLite(ctx, tx, "node_metrics", nodeMetricKindCols); err != nil {
+			return err
+		}
+		return applyMetricSampleKindMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2593,6 +2653,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyCardBillingMigration(ctx, tx, true)
 	case 88:
 		return applyCacheRefMigration(ctx, tx, true)
+	case 89:
+		if err := addColumnsTx(ctx, tx, "node_metrics", nodeMetricKindCols); err != nil {
+			return err
+		}
+		return applyMetricSampleKindMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3930,6 +3995,12 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 	return tx.Commit()
 }
 
+// FinishRunIfActive records a terminal outcome once and reports whether it
+// committed the transition. See [Tenant.FinishRunIfActive].
+func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error) {
+	return s.defaultTenant().FinishRunIfActive(ctx, runID, status, errMsg)
+}
+
 // FinishRunsIfActive atomically finalizes the named non-terminal runs. A
 // failure rolls back every member, so one shared lease cannot be partly
 // cancelled.
@@ -4864,22 +4935,51 @@ type NodeUsage struct {
 // once: an auto-retry runs a fresh process per attempt, and the machine
 // paid for every one of them, so CPU and wall accumulate. Peak RSS takes
 // the high-water instead, since the attempts did not hold their peaks at
-// the same time. A non-positive figure contributes nothing, and zero
-// stays the value every reader treats as absent.
-func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error {
-	cpuNanos := max(int64(u.CPUTime), 0)
-	wallNanos := max(int64(u.Wall), 0)
-	maxRSSBytes := max(u.MaxRSSBytes, 0)
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID, `
+// the same time. Negative inputs and overflowing totals reject the entire observation.
+// Zero stays the value every reader treats as absent.
+func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
+	if u.CPUTime < 0 || u.Wall < 0 || u.MaxRSSBytes < 0 {
+		return errors.New("node usage requires nonnegative CPU time, wall time and peak RSS")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		return err
+	}
+	var cpu, wall int64
+	err = tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes
+ WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&cpu, &wall)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if cpu < 0 || wall < 0 {
+		return errors.New("stored node usage has negative CPU or wall time")
+	}
+	if cpu > math.MaxInt64-int64(u.CPUTime) {
+		return errors.New("node CPU time overflow")
+	}
+	if wall > math.MaxInt64-int64(u.Wall) {
+		return errors.New("node wall time overflow")
+	}
+	result, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,
        process_wall_nanos = process_wall_nanos + ?,
        max_rss_bytes = CASE WHEN ? > max_rss_bytes THEN ? ELSE max_rss_bytes END
- WHERE run_id = ? AND node_id = ?`, cpuNanos, wallNanos, maxRSSBytes, maxRSSBytes, runID, nodeID)
+ WHERE run_id = ? AND node_id = ?`, int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, runID, nodeID)
 	if err != nil {
 		return err
 	}
-	return fencedRows(res, fenced)
+	if err := fencedRows(result, hasClaimFence(ctx)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListNodes returns the nodes for a run in insertion order, which the

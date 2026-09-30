@@ -28,7 +28,7 @@ func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
 		t.Fatalf("seed legacy node profile: %v", err)
 	}
 	if err := st.RecordProfileObservation(ctx, "zero-peak", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 0, PeakMemoryBytes: 128 << 20, CPUMeasured: false,
+		Duration: time.Second, PeakCores: 0, PeakMemoryBytes: 128 << 20, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("seed zero-peak profile: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get healthy: %v", err)
 	}
-	if !healthy.CPUMeasured {
+	if healthy == nil || !healthy.CPUMeasured {
 		t.Error("healthy sampler observation did not persist cpu_measured=true")
 	}
 
@@ -115,7 +115,7 @@ func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get blind: %v", err)
 	}
-	if blind.CPUMeasured {
-		t.Error("blind sampler observation persisted cpu_measured=true")
+	if blind != nil {
+		t.Errorf("unavailable observation created a profile: %+v", blind)
 	}
 }

@@ -554,7 +554,7 @@ func cronsBuildableRepo(t *testing.T) string {
 	t.Helper()
 	repo := cronsTestRepo(t, cronsMinutelyRepo)
 	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), "module submitfixture\n\ngo 1.22\n")
-	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "main.go"), submitFixtureSource)
+	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "main.go"), strings.ReplaceAll(submitFixtureSource, "fixture", "every-minute"))
 	return repo
 }
 

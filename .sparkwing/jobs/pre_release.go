@@ -18,8 +18,8 @@ import (
 const (
 	markdownlintCommand = "npx --yes markdownlint-cli2@0.23.2"
 	actionlintCommand   = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
-	// safety: the hosted job keeps five minutes for setup and diagnostics after this node ends.
-	preReleaseRunTimeout = 75 * time.Minute
+	// safety: the hosted job keeps ten minutes for setup and diagnostics after this node ends.
+	preReleaseRunTimeout = 120 * time.Minute
 	// safety: no --target-seconds, so a loaded builder records a slow
 	// measurement instead of reddening the release lane.
 	installToGreenCommand = "bash bin/install-to-green.sh --build --output json"

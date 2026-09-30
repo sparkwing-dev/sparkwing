@@ -31,6 +31,22 @@ const (
 
 var submissionEnvironmentReconcileCursors sync.Map
 
+type SubmissionEnvironmentUnavailableError struct {
+	RunID string
+}
+
+func (e *SubmissionEnvironmentUnavailableError) Error() string {
+	return fmt.Sprintf("run %s: submission execution environment is unavailable; submit a new run from the intended environment", e.RunID)
+}
+
+type RetryEnvironmentUnavailableError struct {
+	RunID string
+}
+
+func (e *RetryEnvironmentUnavailableError) Error() string {
+	return fmt.Sprintf("run %s: retry execution environment is unavailable; submit a new run from the intended environment", e.RunID)
+}
+
 type submissionEnvironmentSnapshot struct {
 	RunID       string   `json:"run_id"`
 	Environment []string `json:"environment"`
@@ -110,6 +126,9 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 	}
 	body, err := os.ReadFile(submissionEnvironmentPath(home, trig.ID))
 	if errors.Is(err, os.ErrNotExist) {
+		if trig.RetryOf != "" {
+			return nil, &RetryEnvironmentUnavailableError{RunID: trig.ID}
+		}
 		// safety: the snapshot dies at run start, so a redispatch fails closed rather than taking the consumer shell.
 		return nil, errors.New("submission environment snapshot is gone; this run already started once, submit it again")
 	}
@@ -194,6 +213,12 @@ func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []
 
 func consumeSubmissionEnvironment(home string, trig *store.Trigger, logger *slog.Logger) ([]string, error) {
 	env, err := submissionEnvironment(home, trig)
+	if err == nil && env == nil && trig.RetryOf != "" {
+		err = &RetryEnvironmentUnavailableError{RunID: trig.ID}
+	}
+	if err == nil && env == nil && (strings.HasPrefix(trig.TriggerSource, "runs-submit") || trig.TriggerEnv[SubmitRepoDirKey] != "") {
+		err = &SubmissionEnvironmentUnavailableError{RunID: trig.ID}
+	}
 	// safety: the snapshot's life ends when the run starts, not when it finishes.
 	if discardErr := DiscardSubmissionEnvironment(home, trig.ID); discardErr != nil {
 		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", discardErr)

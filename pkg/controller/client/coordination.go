@@ -145,10 +145,11 @@ func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]s
 		}
 		var body struct {
 			Points []struct {
-				TS            string `json:"ts"`
-				CPUMillicores int64  `json:"cpu_millicores"`
-				MemoryBytes   int64  `json:"memory_bytes"`
-				CPUTimeNanos  int64  `json:"cpu_time_nanos"`
+				Kind          store.MetricKind `json:"kind"`
+				TS            string           `json:"ts"`
+				CPUMillicores int64            `json:"cpu_millicores"`
+				MemoryBytes   int64            `json:"memory_bytes"`
+				CPUTimeNanos  int64            `json:"cpu_time_nanos"`
 			} `json:"points"`
 			NextCursor string `json:"next_cursor"`
 		}
@@ -161,6 +162,7 @@ func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]s
 				return nil, fmt.Errorf("metric sample ts %q: %w", p.TS, err)
 			}
 			out = append(out, store.MetricSample{
+				Kind:          p.Kind,
 				TS:            ts,
 				CPUMillicores: p.CPUMillicores,
 				MemoryBytes:   p.MemoryBytes,

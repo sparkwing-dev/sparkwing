@@ -351,6 +351,7 @@ func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
+func (s *Server) DaemonHandler() http.Handler
 func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler

@@ -21,6 +21,8 @@ type AdmissionRequest struct {
 
 	ParentLeaseToken string
 
+	ParentRunID string
+
 	SemaphoresOnly bool
 
 	SubLease bool

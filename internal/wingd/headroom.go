@@ -171,6 +171,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		d.cpuMeasured != stat.CPUMeasured ||
 		d.memMeasured != stat.MemoryMeasured ||
 		now.Sub(d.headroomAt) >= d.cfg.headroomMaxAge()
+	d.recordJournal("headroom_sample", nil, map[string]any{"total_cores": stat.TotalCores, "total_memory": stat.TotalMemoryBytes, "reserved_cores": reservedCores, "reserved_memory": reservedMem, "external_cores": externalCores, "external_memory": externalMem, "budget": journalBudget(d.cfg.Budget), "target_cores": targetCores, "target_memory": targetMem, "changed": changed})
 	if !changed {
 		d.mu.Unlock()
 		return
@@ -201,14 +202,13 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	if len(events) == 0 {
 		deliveries = append(deliveries, d.waiterDeliveriesLocked()...)
 	}
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,
 		externalWord(stat.CPUMeasured, fmt.Sprintf("%.1f", externalCores)))
 	if !stat.MemoryMeasured {
 		d.cfg.logf("headroom: memory external unmeasured (host sensor unavailable); none subtracted")
 	}
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 }
 
 func headroomFromReserveExternal(total, reserved, external uint64) uint64 {
@@ -339,13 +339,7 @@ func externalWord(measured bool, value string) string {
 }
 
 func (d *Daemon) usedLocked() (cores float64, mem uint64) {
-	snap := d.ledger.Snapshot()
-	var milli int64
-	for _, ls := range snap.Leases {
-		milli += ls.MilliCores
-		mem += ls.MemoryBytes
-	}
-	return float64(milli) / 1000.0, mem
+	return d.ledger.Used()
 }
 
 func absDiffU(a, b uint64) uint64 {

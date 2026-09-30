@@ -34,6 +34,9 @@ type Pipeline struct {
 	// entry (equals the struct name). Required.
 	Entrypoint string `yaml:"entrypoint"`
 
+	// Source selects the Git ref to compile; jobs still execute in the submitted checkout.
+	Source string `yaml:"source,omitempty"`
+
 	// Description is the one-line summary surfaced by `pipeline list`.
 	Description string `yaml:"description,omitempty"`
 
@@ -193,7 +196,7 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 
 func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
-		"name": {}, "entrypoint": {}, "description": {},
+		"name": {}, "entrypoint": {}, "description": {}, "source": {},
 		"on": {}, "hidden": {},
 		"guards": {}, "args": {}, "profile": {}, "requires": {},
 	}

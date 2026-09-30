@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,8 +10,28 @@ import (
 	"testing"
 	"time"
 
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestSubmissionUsesConsumerDaemonHost(t *testing.T) {
+	const host = "/opt/sparkwing/bin/sparkwing"
+	t.Setenv(wingdclient.HostBinEnv, host)
+	for _, captured := range [][]string{
+		{"PATH=/submit/bin"},
+		{wingdclient.HostBinEnv + "=/another/machine/sparkwing"},
+	} {
+		var hosts []string
+		for _, entry := range submissionExecutionEnvironment(captured, t.TempDir()) {
+			if value, ok := strings.CutPrefix(entry, wingdclient.HostBinEnv+"="); ok {
+				hosts = append(hosts, value)
+			}
+		}
+		if !slices.Equal(hosts, []string{host}) {
+			t.Errorf("daemon hosts = %v, want only the consumer's %s", hosts, host)
+		}
+	}
+}
 
 func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	home := t.TempDir()
@@ -329,5 +350,50 @@ func TestRequeuedRunDoesNotInheritTheConsumerShell(t *testing.T) {
 	}
 	if !strings.Contains(joined, "SPARKWING_HOME="+home) {
 		t.Fatalf("uncaptured dispatch environment does not force SPARKWING_HOME: %s", joined)
+	}
+}
+
+func TestRetryRequiresItsOwnSubmissionEnvironment(t *testing.T) {
+	for _, source := range []string{store.RetrySourceManual, store.RetrySourceAuto} {
+		for _, capture := range []string{"absent", "missing", "empty", "present"} {
+			t.Run(source+"/"+capture, func(t *testing.T) {
+				home := t.TempDir()
+				trig := &store.Trigger{ID: "retry", RetryOf: "source", RetrySource: source, TriggerEnv: map[string]string{}}
+				if capture != "absent" {
+					trig.TriggerEnv[SubmissionEnvironmentCapturedKey] = "1"
+				}
+				if capture == "empty" || capture == "present" {
+					env := []string{}
+					if capture == "present" {
+						env = append(env, "PATH=caller")
+					}
+					if err := CaptureSubmissionEnvironment(home, trig.ID, env, quietLogger()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
+				if capture == "absent" || capture == "missing" {
+					var unavailable *RetryEnvironmentUnavailableError
+					if !errors.As(err, &unavailable) {
+						t.Fatalf("environment = %v, %v; want typed refusal", env, err)
+					}
+				} else if err != nil || env == nil {
+					t.Fatalf("owned environment = %v, %v", env, err)
+				}
+			})
+		}
+	}
+}
+
+func TestDetachedTriggerRefusesMissingSubmissionEnvironment(t *testing.T) {
+	for _, trigger := range []*store.Trigger{
+		{ID: "missing-marker", TriggerSource: "runs-submit@host"},
+		{ID: "missing-path", TriggerEnv: map[string]string{SubmitRepoDirKey: "/checkout"}},
+	} {
+		env, err := consumeSubmissionEnvironment(t.TempDir(), trigger, quietLogger())
+		var missing *SubmissionEnvironmentUnavailableError
+		if !errors.As(err, &missing) || env != nil {
+			t.Fatalf("missing submission environment = %v, %v", env, err)
+		}
 	}
 }

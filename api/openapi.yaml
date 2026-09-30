@@ -8333,9 +8333,10 @@ components:
       x-sparkwing-go-type: pkg/controller.metricSample
       type: object
       description: |
-        One resource reading for a node. A zero `cpu_time_nanos` is a
-        sampler tick; a nonzero one is a single command's measurement.
+        One resource reading for a node. Kind identifies an interval reading or
+        a completed command. An empty kind means the source is unknown.
       properties:
+        kind: {type: string, enum: ["", interval, command]}
         ts: {type: string, format: date-time}
         cpu_millicores: {type: integer, format: int64}
         memory_bytes: {type: integer, format: int64}

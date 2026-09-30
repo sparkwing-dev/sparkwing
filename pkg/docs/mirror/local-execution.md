@@ -148,11 +148,29 @@ never collide:
 sparkwing run deploy --sw-detached --sw-idempotency-key k --env staging
 ```
 
-Four flags are read only by a detached launch and are refused without
+The following flags are read only by a detached launch and are refused without
 `--sw-detached` rather than silently ignored: `--sw-idempotency-key`,
 `--sw-request-id`, `--sw-consumer-idle`, and `--sw-consumer-claim-lease`.
 `--sw-output` selects the acknowledgment's format and is likewise
 detached-only.
+
+A pipeline may declare `source: origin/main` in its `sparkwing.yaml` entry.
+Foreground runs, detached submissions, and triggers compile that source and
+execute jobs in the submitting checkout. An explicit `--sw-pipeline-ref` must
+resolve to the same commit. Source declarations cannot be combined with
+`--sw-ref` or `--sw-fleet`; source-backed schedules must use `--follow`.
+
+`--sw-pipeline-ref <ref>` works in foreground and detached runs. It compiles the pipeline from a separate revision while
+executing it in the submitting checkout. The ref resolves to a commit at submission;
+a later branch update does not change the queued pipeline. It cannot be combined
+with `--sw-ref`, which changes the execution checkout too.
+The execution checkout must retain `.sparkwing/sparkwing.yaml`; its pipeline
+source may be missing or unbuildable.
+Retries preserve the selected pipeline commit and recreate its compile worktree.
+They execute in a snapshot of the original execution revision, following the
+same checkout rules as other retries.
+The pipeline process receives the selected commit as `SPARKWING_PIPELINE_REV`;
+Sparkwing also records it as `pipeline_revision` in the run invocation.
 
 #### Making a retry safe
 
@@ -187,11 +205,19 @@ pipeline as its own arguments.
 
 Because the trigger carries no allow, a launch of a pipeline whose step declares
 a risk is refused before the run is persisted, naming the step and its labels.
-The declarations are read from the checkout the run will execute, so a launch
+The declarations are read from the selected pipeline source, so a launch
 that names a ref is weighed at that ref rather than at your working tree, and a
-schedule is weighed the same way. `sparkwing runs retry` is not weighed yet: it
-re-queues the source run's own declarations, so a retry of a risk-declaring run
-is not refused. Run that pipeline in the foreground with `--sw-allow`.
+schedule is weighed the same way. Submission also refuses a pipeline name
+absent from that source before queuing work. Run a risk-declaring pipeline in
+the foreground with `--sw-allow`.
+
+`sparkwing runs retry` refuses local retries because the original execution
+environment is unavailable. Captured submission environments are deleted when
+execution starts. Submit a new run from the
+intended checkout and environment. A queued local retry also fails before
+dispatch if its execution environment is unavailable. Node retries within a
+live run keep that run's environment. Controller-backed retries use their
+configured execution context.
 
 `--sw-ref` and `--sw-priority` are the exceptions, because both ride on
 the trigger. A detached launch resolves the ref to a commit, builds the
@@ -266,8 +292,16 @@ consumer claims it, cancellation is a store transaction that marks the
 run cancelled and takes it off the queue -- no dashboard and no profile
 required. Once it is running, the admission daemon holding the run's
 process cancels it the same way it cancels any local run. Either way the
-cancellation names one run id and can only reach that run: a
-resubmission is a different run with a different id.
+cancellation names one run id. Cancelling a child also cancels runs
+attached through it, while its parent and siblings continue. Cancelling
+the lease's root run cancels every attached member. A resubmission is a
+different run with a different id.
+
+If a parent exits while another member keeps the lease alive, a later child
+attaches under the nearest live ancestor while a live descendant retains its
+lineage. Otherwise it attaches under the lease root and the daemon logs the
+requested and resolved parents. Clients that send only the inherited lease
+token also attach under the root.
 
 #### The consumer process
 
@@ -1582,8 +1616,12 @@ bounded rather than growing one file forever. The rotation copies the
 log aside and empties it in place rather than renaming it, so the
 daemon, the supervisor watching it, and anything else already writing
 to `d.log` all keep writing to `d.log`. Only the previous stretch is
-kept, so copy a dump you care about out of `d.log` before asking for
-several more.
+kept. A manual dump is also saved to `d.log.stacks` with its timestamp
+and daemon summary. That file is replaced atomically by the next dump;
+operational log rotation leaves it intact. Copy it before requesting
+another dump if you need to keep both. During supervised replacement,
+the supervisor also saves a numbered dump in the daemon directory and keeps
+the newest ten numbered copies.
 
 ### Capping sparkwing's share of the machine
 

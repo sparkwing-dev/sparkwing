@@ -132,13 +132,9 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 			PauseBefore: []string{"orch-pause-ok"},
 		},
 	}
-	started := time.Now()
 	res, err := orchestrator.Run(context.Background(), h.backends, opts)
 	if err != nil {
 		t.Fatalf("run: %v", err)
-	}
-	if elapsed, budget := time.Since(started), timingBudget(400*time.Millisecond); elapsed > budget {
-		t.Fatalf("pause timeout took %v, over its %s budget", elapsed, budget)
 	}
 	if res.Status != "success" {
 		t.Fatalf("status = %q, want success (timeout releases and run continues)", res.Status)
@@ -149,6 +145,16 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 	}
 	if len(ps) != 1 {
 		t.Fatalf("got %d pauses, want 1", len(ps))
+	}
+	pause := ps[0]
+	if span := pause.ExpiresAt.Sub(pause.PausedAt); span != 200*time.Millisecond {
+		t.Fatalf("pause duration = %v, want 200ms", span)
+	}
+	if pause.ReleasedAt == nil || pause.ReleasedAt.Before(pause.ExpiresAt) {
+		t.Fatalf("pause released at %v before expiry %v", pause.ReleasedAt, pause.ExpiresAt)
+	}
+	if elapsed, budget := pause.ReleasedAt.Sub(pause.PausedAt), timingBudget(400*time.Millisecond); elapsed > budget {
+		t.Fatalf("pause timeout took %v, over its %s budget", elapsed, budget)
 	}
 	if ps[0].ReleaseKind != store.PauseReleaseTimeout {
 		t.Fatalf("release_kind = %q, want %q", ps[0].ReleaseKind, store.PauseReleaseTimeout)

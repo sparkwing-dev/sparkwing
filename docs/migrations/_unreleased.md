@@ -1,5 +1,39 @@
 # Migrating to the next release
 
+## Upgrading a local install
+
+The first command that opens `state.db` after the upgrade (`sparkwing run`,
+`sparkwing secrets`, `sparkwing serve` or the daemon) moves it from the schema
+v0.65.1 or an earlier release wrote to schema 89. Before it changes anything it
+copies the database to `$SPARKWING_HOME/backups/state-v<old>-<UTC time>.db`,
+owner-only, and prints one line naming the copy. Stop the running daemon,
+`serve`, runs consumer and crons first (`sparkwing daemon stop`), because a
+process of the older release refuses the database once it is upgraded.
+
+The upgrade is one-way: v0.65.1 and older refuse schema 89 and name the
+requirements they lack. To go back, stop every sparkwing process, reinstall the
+older release, and copy the backup over `state.db` after deleting
+`state.db-wal` and `state.db-shm`. A controller on Postgres takes no automatic
+copy; dump it first as [Backup and restore](../backup-restore.md) describes.
+
+Releases v0.65.0 and v0.65.1 numbered their metric-kind migrations v50 and v51,
+the numbers this release uses for team credit state and team-scoped user keys.
+A database those releases wrote is recognized by its `metric-sample-kind`
+requirement, and the upgrade runs the team migrations it skipped before
+continuing; the metric migrations run again as schema 89.
+
+What else changes on a local machine:
+
+- Machine settings move into one `config.yaml`, copied automatically on first
+  use; see [One config.yaml for machine settings](#one-configyaml-for-machine-settings).
+- Local secrets move from `secrets.env` and `config.env` into `state.db`; see
+  [Local secrets in state.db](#local-secrets-in-statedb).
+- `sparkwing serve --allow-remote` now exposes this machine's local secrets to
+  every host that reaches the address.
+- Node metric reads are paged; see
+  [Node metric reads are paged](#node-metric-reads-are-paged).
+- Pipelines pinned to an older SDK keep running; no pin bump is needed.
+
 ## One config.yaml for machine settings
 
 Sparkwing reads every machine setting from one file,

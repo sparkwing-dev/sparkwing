@@ -119,6 +119,7 @@ func RunNodeCommand(args []string) error {
 		}
 	}
 
+	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID,
 		holderID, token, NewJSONRenderer(), slog.Default(), nil, runOpts...)
 	// safety: a step that swallows its cancellation must still leave the pod

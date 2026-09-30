@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -463,6 +464,18 @@ var cronsProver = func(noProve bool) crons.Prover {
 	}
 	names := map[string][]string{}
 	return func(ctx context.Context, repoRoot, pipeline string) (crons.Proof, error) {
+		revision, err := orchestrator.ResolvePipelineSource(ctx, repoRoot, pipeline, "")
+		if err != nil {
+			return crons.Proof{}, err
+		}
+		if revision != "" {
+			selected, _, cleanup, err := setupRefWorktree(filepath.Join(repoRoot, ".sparkwing"), string(revision))
+			if err != nil {
+				return crons.Proof{}, err
+			}
+			defer cleanup()
+			repoRoot = selected
+		}
 		proof, err := compileRepoPipelines(ctx, repoRoot)
 		if err != nil {
 			return crons.Proof{}, err

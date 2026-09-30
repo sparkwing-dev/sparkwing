@@ -168,14 +168,22 @@ type finishRunReq struct {
 const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
 
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
+	s.finishRun(w, r, s.foldRunProfiles)
+}
+
+func (s *Server) handleFinishDaemonRun(w http.ResponseWriter, r *http.Request) {
+	s.finishRun(w, r, nil)
+}
+
+func (s *Server) finishRun(w http.ResponseWriter, r *http.Request, recordProfile func(context.Context, *store.Tenant, *store.Run)) {
 	runID := r.PathValue("id")
 	var body finishRunReq
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if body.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("status is required"))
+	if body.Status != "success" && body.Status != "failed" && body.Status != "cancelled" {
+		writeError(w, http.StatusBadRequest, errors.New("run completion requires a terminal status"))
 		return
 	}
 	tenant, ok := s.requestTenant(w, r)
@@ -190,7 +198,8 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: runID, Pipeline: pipeline, Outcome: body.Status,
 	})
-	if err := tenant.FinishRun(r.Context(), runID, body.Status, body.Error); err != nil {
+	finished, err := tenant.FinishRunIfActive(r.Context(), runID, body.Status, body.Error)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -204,14 +213,27 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	}
 	follow, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), finishRunFollowUpTimeout)
 	defer cancel()
-	if runErr == nil && run != nil {
-		observeRunFinish(run.Pipeline, body.Status, time.Since(run.StartedAt))
-		refreshed, rerr := tenant.GetRun(follow, runID)
-		if rerr == nil {
-			s.foldRunProfiles(follow, tenant, refreshed)
+	refreshed, err := tenant.GetRun(follow, runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if finished {
+		observeRunFinish(refreshed.Pipeline, refreshed.Status, time.Since(refreshed.StartedAt))
+		if recordProfile != nil {
+			recordProfile(follow, tenant, refreshed)
 		}
 	}
-	s.reportGitHubRunState(follow, runID, body.Status)
+	s.reportGitHubRunState(follow, runID, refreshed.Status)
+	if !finished && (refreshed.Status != body.Status || refreshed.Error != body.Error) {
+		writeError(w, http.StatusBadRequest,
+			fmt.Errorf("%w: run %s already finished as %s", store.ErrInvalidInput, runID, refreshed.Status))
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -39,13 +39,32 @@ var cmdDaemon = Command{
 starts one. Restart replaces only an answering daemon with this installed
 build, using the same drain, durable lease, and reattachment path as automatic
 version takeover; a stopped daemon stays stopped. Stop drains an answering
-daemon and launches no successor.`,
-	SubcommandOrder: []string{"status", "restart", "stop", "recover-state"},
+daemon and launches no successor. The supervisor keeps a daemon whose heartbeat
+counter advances during failed health probes. A whole-machine pause restarts the
+stale window when the supervisor resumes. See [Diagnosing admission](diagnosing-admission.md)
+for event records and dump paths.`,
+	SubcommandOrder: []string{"status", "events", "explain", "restart", "stop", "recover-state"},
 	Examples: []Example{
 		{"Machine-readable status", "sparkwing daemon status -o json"},
 		{"Refresh only if already running", "sparkwing daemon restart"},
 		{"Stop it and leave it stopped", "sparkwing daemon stop"},
 	},
+}
+
+var cmdDaemonEvents = Command{
+	Path: "sparkwing daemon events", Synopsis: "Read retained admission events without starting the daemon",
+	Description: "Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.",
+	Flags:       []FlagSpec{{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect", Group: "Input"}, {Name: "run", Argument: "ID", Desc: "Filter by run ID", Group: "Input"}, {Name: "since", Argument: "DURATION", Desc: "Lookback duration", Group: "Input"}, {Name: "kind", Argument: "KIND", Desc: "Record kind (repeatable)", Group: "Input"}, {Name: "incarnation", Argument: "N", Desc: "Daemon incarnation", Group: "Input"}, {Name: "limit", Argument: "N", Desc: "Maximum records (default 50; 0 for all)", Group: "Input"}, {Name: "offset", Argument: "N", Desc: "Matching records to skip from newest", Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
+	GroupOrder:  []string{"Input", "Output", "Other"},
+	Examples:    []Example{{"Events for one run", "sparkwing daemon events --run abc -o json"}},
+}
+
+var cmdDaemonExplain = Command{
+	Path: "sparkwing daemon explain", Synopsis: "Explain one run's admission history from retained events",
+	Description: "Explains a run's admission history in sentences, including descendant node slots and attached children, without starting the daemon. Unreadable records are skipped and counted on stderr. JSON output retains the structured records.",
+	Flags:       []FlagSpec{{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect", Group: "Input"}, {Name: "run", Argument: "ID", Desc: "Run ID to explain", Required: true, Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
+	GroupOrder:  []string{"Input", "Output", "Other"},
+	Examples:    []Example{{"Explain a run", "sparkwing daemon explain --run abc"}},
 }
 
 var cmdDaemonStop = Command{
@@ -1695,9 +1714,10 @@ in. Address the run by that id afterwards:
   sparkwing runs logs   --run RUN_ID --follow
   sparkwing runs cancel --run RUN_ID
 
-Five flags are read only by a detached launch and are refused
-without --sw-detached: --sw-idempotency-key, --sw-request-id,
---sw-consumer-idle, --sw-consumer-claim-lease, and --sw-output,
+The following flags are read only by a detached launch and are refused
+without --sw-detached: --sw-idempotency-key,
+--sw-request-id, --sw-consumer-idle, --sw-consumer-claim-lease,
+and --sw-output,
 which picks the acknowledgment's format (pretty on a TTY, json
 when piped; plain prints the bare id for scripting).
 
@@ -1715,6 +1735,20 @@ even if the ref moves first; the consumer executes the worktree
 and removes it when the run ends. 'front' and 'back' stay
 unresolved until the consumer launches the run, so 'front' means
 ahead of the queue the run actually joins.
+
+A pipeline can declare source: origin/main in sparkwing.yaml. Every launch
+compiles that source while jobs execute in the submitting checkout.
+An explicit --sw-pipeline-ref must resolve to the declared source commit.
+Source-backed schedules use --follow rather than a pinned binary.
+
+--sw-pipeline-ref works in foreground and detached runs. It compiles
+the pipeline from another commit while
+the run executes in the checkout it was launched from.
+The execution checkout must retain .sparkwing/sparkwing.yaml;
+its pipeline source may be missing or unbuildable.
+The ref resolves when you
+launch; its tree is checked out only to compile and is removed when
+the run ends. It cannot be combined with --sw-ref.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 --profile, --sw-fleet, and the other run-shaping --sw- flags)
@@ -1744,6 +1778,7 @@ is running and exits after five idle minutes; see
 		{"Run from a different git ref", "sparkwing run fictional-build --sw-ref feature/xyz"},
 		{"Queue a run that outlives the terminal", "sparkwing run nightly-report --sw-detached"},
 		{"Capture the id for scripting", "RUN=$(sparkwing run build --sw-detached --sw-output plain)"},
+		{"Compile the pipeline from another ref", "sparkwing run fictional-build --sw-detached --sw-pipeline-ref main"},
 		{"Deduplicate a detached retry", "sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging"},
 		{"Detach a pipeline from another checkout", "sparkwing run lint --sw-detached --sw-cd ~/code/other-project"},
 		{"Retry a failed run", "sparkwing runs retry --run run-fictional --failed"},
@@ -2885,12 +2920,12 @@ var cmdJobsRetry = Command{
 	Description: `Issues a new trigger per source run with the same pipeline, args,
 branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
-For local runs, Sparkwing queues the retry in the same local store as
-'sparkwing run --sw-detached' and starts the resident consumer when no
-dashboard is running. The retry uses the source run's full origin identity,
-Git revision, and complete plan snapshot. Sparkwing compiles and runs an
-immutable detached snapshot of that revision. A missing source checkout or
-changed identity fails the retry before compilation.
+Local retries are refused because the original execution environment is
+unavailable. Captured submission environments are deleted when execution
+starts. Submit a new run from the intended environment.
+A queued local retry whose execution environment is unavailable also fails
+before execution. Controller-backed retries use their configured execution
+context; select one with --profile.
 
 A retry is not weighed against the pipeline's risk labels the way a launch is:
 it re-queues the source run's own declarations, so a retry of a run whose step
@@ -2917,8 +2952,8 @@ only when at least one id failed.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-fictional"},
-		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-fictional"},
+		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-fictional --profile prod"},
+		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-fictional --profile prod"},
 		{"Rerun every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --profile prod"},
 	},
 }
@@ -2999,7 +3034,12 @@ acknowledges. Already-finished runs surface a per-id error but
 don't abort the batch.
 
 Pass --run once per id (repeatable). Use --run - to read ids
-from stdin, one per line.`,
+from stdin, one per line. For local runs sharing an admission lease,
+cancelling a child also cancels its descendants. Its parent and siblings
+continue. Cancelling the root cancels every member of that lease.
+Children launched after a parent exits attach under its nearest live ancestor
+while a live descendant retains its lineage. Otherwise they attach under the
+lease root, and the daemon logs the parent resolution.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},

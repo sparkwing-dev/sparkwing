@@ -28,6 +28,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 |---|---|---|---|
 | `name` | `string` | **yes** | Name is the invocable name (`sparkwing run <name>`); must equal the string passed to the SDK's Register call. It must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. |
 | `entrypoint` | `string` | **yes** | Entrypoint is the Go pipeline struct type that implements this entry (equals the struct name). Required. |
+| `source` | `string` | no | Source selects the Git ref to compile; jobs still execute in the submitted checkout. |
 | `description` | `string` | no | Description is the one-line summary surfaced by `pipeline list`. |
 | `on` | `Triggers` | no | On declares the triggers that auto-fire this pipeline. Absent means manual-only (a command invoked by name). |
 | `hidden` | `bool` | no | Hidden omits the entry from default `pipeline list` output; it stays invocable by exact name and shows under `list --all`. |

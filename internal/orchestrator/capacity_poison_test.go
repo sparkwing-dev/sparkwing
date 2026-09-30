@@ -29,8 +29,12 @@ func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
-		TS: start, CPUMillicores: int64(peakCores * 1000), MemoryBytes: peakMemory,
+		Kind: store.MetricInterval,
+		TS:   start, CPUMillicores: int64(peakCores * 1000), MemoryBytes: peakMemory,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, runID, "build", "success", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	recordRunProfile(ctx, localState{st: st}, key, runID, nil, "B", charge, true, start, start.Add(time.Second))

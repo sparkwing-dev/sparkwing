@@ -18,6 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
@@ -175,7 +177,49 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return err
 	}
 	defer cleanup()
-	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
+	pipelineRepo := repoDir
+	if revision := strings.TrimSpace(trig.TriggerEnv[PipelineRevKey]); trig.RetryOf != "" && revision != "" {
+		var cleanupPipeline func()
+		pipelineRepo, cleanupPipeline, err = snapshotRetryRevision(ctx, repoDir, revision)
+		if err != nil {
+			return err
+		}
+		defer cleanupPipeline()
+	}
+	if trig.TriggerEnv[PipelineRevKey] == "" {
+		revision, err := ResolvePipelineSource(ctx, repoDir, trig.Pipeline, "")
+		if err != nil {
+			return err
+		}
+		if revision != "" {
+			if trig.RetryOf != "" {
+				return fmt.Errorf("retry %s did not record its declared pipeline source revision", trig.ID)
+			}
+			if trig.TriggerEnv[crons.PinnedBinaryEnvKey] != "" {
+				return fmt.Errorf("pipeline %q declares source and has a pinned schedule binary; re-arm the schedule with --follow", trig.Pipeline)
+			}
+			var cleanupPipeline func()
+			pipelineRepo, cleanupPipeline, err = snapshotRetryRevision(ctx, repoDir, string(revision))
+			if err != nil {
+				return err
+			}
+			defer cleanupPipeline()
+			if trig.TriggerEnv == nil {
+				trig.TriggerEnv = make(map[string]string)
+			}
+			trig.TriggerEnv[PipelineRevKey] = string(revision)
+			trig.TriggerEnv[PipelineDirKey] = pipelineRepo
+		}
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	env = PipelineSourceEnvironment(env, trig.TriggerEnv[PipelineRevKey])
+
+	sparkwingDir, err := submittedPipelineDir(trig, filepath.Join(pipelineRepo, ".sparkwing"))
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
 	}
@@ -211,18 +255,15 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 
 func submissionExecutionEnvironment(captured []string, home string) []string {
 	if captured == nil {
-		// safety: an uncaptured dispatch still passes the blocklist, so the consumer shell cannot shape the run.
 		captured = os.Environ()
 	}
 	blocked := map[string]struct{}{
+		wingdclient.HostBinEnv:      {},
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
 		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
-		// safety: a submitted run's priority rides on the trigger row, so an
-		// ambient one from the submitting shell is the consumer's environment
-		// shaping the run rather than the submission.
 		PriorityEnv:                    {},
 		AdmissionClassEnv:              {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
@@ -239,11 +280,14 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 			out = append(out, entry)
 		}
 	}
+	if host, _, ok := wingdclient.ResolveHostBin(); ok {
+		out = append(out, wingdclient.HostBinEnv+"="+host)
+	}
 	return append(out, "SPARKWING_HOME="+home)
 }
 
 func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []string) error {
-	cmd := exec.CommandContext(ctx, binPath, args...)
+	cmd := exec.Command(binPath, args...)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	tail := &stderrTail{limit: childStderrTailBytes}
@@ -252,7 +296,8 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
 	}
-	if err := cmd.Run(); err != nil {
+	outcome, startErr := runAssistedChildProcess(ctx, cmd, nil)
+	if err := errors.Join(startErr, outcome.waitErr, outcome.cancelCause); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {
 				return fmt.Errorf(
@@ -315,6 +360,15 @@ func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir 
 	}
 
 	revision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
+	return snapshotRetryRevision(ctx, repoDir, revision)
+}
+
+func snapshotRetryRevision(ctx context.Context, repoDir, revision string) (string, func(), error) {
+	if !gitObjectRE.MatchString(revision) {
+		return "", func() {}, &RetrySourceUnavailableError{
+			RepoDir: repoDir, Reason: fmt.Sprintf("recorded revision %q is not a git object id", revision),
+		}
+	}
 	tempRoot, err := os.MkdirTemp("", "sparkwing-retry-")
 	if err != nil {
 		return "", func() {}, &RetrySourceUnavailableError{
@@ -380,6 +434,24 @@ func triggerUsesParentRepo(trig *store.Trigger) bool {
 }
 
 const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
+
+const (
+	PipelineRevKey = retryprovenance.PipelineRevisionKey
+	PipelineDirKey = "_SPARKWING_SUBMIT_PIPELINE_DIR"
+)
+
+func submittedPipelineDir(trig *store.Trigger, runSparkwingDir string) (string, error) {
+	if trig.RetryOf != "" || strings.TrimSpace(trig.TriggerEnv[PipelineRevKey]) == "" {
+		return runSparkwingDir, nil
+	}
+	dir := filepath.Clean(strings.TrimSpace(trig.TriggerEnv[PipelineDirKey]))
+	sparkwingDir := filepath.Join(dir, ".sparkwing")
+	if info, err := os.Stat(sparkwingDir); !filepath.IsAbs(dir) || err != nil || !info.IsDir() {
+		return "", fmt.Errorf("submitted trigger %s: --sw-pipeline-ref %s source directory %q is unavailable; resubmit",
+			trig.ID, trig.TriggerEnv[PipelineRevKey], dir)
+	}
+	return sparkwingDir, nil
+}
 
 // SubmitPriorityKey carries `run --sw-detached --sw-priority` on the trigger row
 // rather than in the run's arguments: it shapes admission, not the pipeline,
@@ -538,6 +610,9 @@ func unlocatableChildError(pipeline string) error {
 }
 
 func repoDeclaresPipeline(repoDir, pipeline string) bool {
+	if source, err := projectconfig.PipelineSource(repoDir, pipeline); err == nil && source != "" {
+		return true
+	}
 	names, err := repos.PipelineNamesForRepo(repoDir)
 	if err != nil {
 		return false

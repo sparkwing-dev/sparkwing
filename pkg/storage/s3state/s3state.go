@@ -1209,7 +1209,13 @@ func (b *Backend) mutateStep(ctx context.Context, runID, nodeID, stepID string, 
 	return b.appendEnvelope(ctx, runID, env)
 }
 
+// AddNodeMetricSample validates resource kinds and values before queuing
+// a metric envelope for append.
 func (b *Backend) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
+	if err := sample.ValidateResourceValues(); err != nil {
+		return err
+	}
+
 	payload := struct {
 		NodeID string             `json:"node_id"`
 		Sample store.MetricSample `json:"sample"`

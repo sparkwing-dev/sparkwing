@@ -55,6 +55,7 @@ func (s *worktreeSnapshot) close() error {
 	}
 	dir := s.tempDir
 	s.tempDir = ""
+	// #nosec G703 -- dir is the private directory created by MkdirTemp for this snapshot.
 	return os.RemoveAll(dir)
 }
 
@@ -63,26 +64,32 @@ func (s *worktreeSnapshot) materialize(ctx context.Context) (string, string, err
 		return "", "", fmt.Errorf("working-tree snapshot is incomplete")
 	}
 	checkout := filepath.Join(s.tempDir, "checkout")
+	// #nosec G703 -- the fixed marker name is inside the snapshot's private temporary directory.
 	if err := os.WriteFile(filepath.Join(s.tempDir, ".sparkwing-fleet-owned"), []byte(s.SHA+"\n"), 0o600); err != nil {
 		return "", "", fmt.Errorf("mark exact source ownership: %w", err)
 	}
+	// #nosec G702 -- fixed git arguments target a generated temporary checkout without a shell.
 	if out, err := exec.CommandContext(ctx, "git", "init", "--quiet", checkout).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("initialize exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	ref := bincache.SeedRef(s.SHA)
+	// #nosec G702 -- the bundle is locally generated and the ref derives from its Git commit ID.
 	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "fetch", "--quiet", s.BundlePath, ref).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("import exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	// #nosec G702 -- SHA is the commit ID returned by git commit-tree for this snapshot.
 	if _, err := exec.CommandContext(ctx, "git", "-C", checkout, "checkout", "--detach", "--quiet", s.SHA).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("materialize exact source checkout: %w", snapshotGitError(err))
 	}
 	repoURL := ""
+	// #nosec G702 -- the selected local repository is a -C operand; origin is a fixed remote name.
 	if out, err := exec.CommandContext(ctx, "git", "-C", s.RepoRoot, "remote", "get-url", "origin").Output(); err == nil {
 		repoURL, _ = sourceurl.ValidateCloneURL(strings.TrimSpace(string(out)))
 	}
 	if repoURL == "" {
 		repoURL = "https://source.sparkwing.invalid/workspace-" + s.SHA[:16] + ".git"
 	}
+	// #nosec G702 -- the URL is validated by ValidateCloneURL or generated from the commit ID.
 	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "remote", "add", "origin", repoURL).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("bind exact source identity: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -727,6 +734,7 @@ func snapshotGitError(err error) error {
 
 func gitOutput(ctx context.Context, repoRoot string, env []string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", repoRoot}, args...)
+	// #nosec G702 -- Callers fix Git subcommands; repository paths are -C operands and filenames follow --.
 	cmd := exec.CommandContext(ctx, "git", fullArgs...)
 	cmd.Env = appendGitEnv(env)
 	out, err := cmd.CombinedOutput()

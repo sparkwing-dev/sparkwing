@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	goruntime "runtime"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -87,6 +89,12 @@ func (h *nodeSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID stri
 		return nil, spawnCancelledError(childID, ctx.Err())
 	}
 
+	if err := h.backends.State.AddNodeMetricSample(ctx, h.runID, parentNodeID, store.MetricSample{Kind: store.MetricUnknown, TS: time.Now()}); err != nil {
+		retainMetricError(ctx, err)
+		wrapped := fmt.Errorf("record parent accounting before spawn: %w", err)
+		h.runner.markFailed(ctx, h.runID, childID, wrapped)
+		return nil, wrapped
+	}
 	res := h.runner.RunNode(ctx, runner.Request{
 		RunID:    h.runID,
 		NodeID:   childID,

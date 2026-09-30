@@ -342,6 +342,31 @@ func bridgeMainLineageTenantKey(ctx context.Context, tx *storeTx, version int, p
 	}
 }
 
+// safety: v0.65.0 and v0.65.1 spent v50 and v51 on metric migrations (v89 here), so their databases lack
+// this lineage's v49 to v51; those idempotent migrations run before the loop resumes at v52.
+func bridgeMainLineageMetricKind(ctx context.Context, tx *storeTx, version int, listed []SchemaRequirement, postgres bool) error {
+	if version != 50 && version != 51 {
+		return nil
+	}
+	if !slices.ContainsFunc(listed, func(r SchemaRequirement) bool { return r.Name == metricSampleKindRequirement }) {
+		return nil
+	}
+	steps := []func(context.Context, *storeTx) error{
+		applyTenantKeyMigrationSQLite, applyTeamCreditStateMigrationSQLite, applyUserKeyTeamScopeMigrationSQLite,
+	}
+	if postgres {
+		steps = []func(context.Context, *storeTx) error{
+			applyTenantKeyMigrationPostgres, applyTeamCreditStateMigrationPostgres, applyUserKeyTeamScopeMigrationPostgres,
+		}
+	}
+	for _, step := range steps {
+		if err := step(ctx, tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func applyTenantKeyMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if _, err := tx.ExecContext(ctx, teamsTableSQLite); err != nil {
 		return err

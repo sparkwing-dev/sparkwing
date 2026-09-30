@@ -37,6 +37,7 @@ type pipelineRun struct {
 	goRun          bool
 	lease          *bincache.Lease
 	source         string
+	uncachedBinary string
 }
 
 func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
@@ -62,6 +63,14 @@ func (r *pipelineRun) materialize(env []string) error {
 	}
 	if r.goRun {
 		ensureDescribeFromSource(r.ctx, r.sparkwingDir, key, env)
+		if r.opts.ExecutionDir != "" && r.opts.ExecutionDir != r.sparkwingDir {
+			dir, err := os.MkdirTemp("", "sparkwing-source-bin-")
+			if err != nil {
+				return err
+			}
+			r.uncachedBinary = filepath.Join(dir, "pipeline")
+			return bincache.CompilePipeline(r.ctx, r.sparkwingDir, r.uncachedBinary)
+		}
 		return nil
 	}
 	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env)
@@ -74,9 +83,22 @@ func (r *pipelineRun) materialize(env []string) error {
 
 func (r *pipelineRun) exec(args, env []string) error {
 	env = withWingdHost(env)
+	if r.uncachedBinary != "" {
+		r.stopSignals()
+		return runExec(r.uncachedBinary, args, r.opts.ExecutionDir, env, func() {
+			r.stop()
+			if r.opts.AfterChild != nil {
+				r.opts.AfterChild()
+			}
+		})
+	}
 	if r.goRun {
 		r.stopSignals()
 		return runGo(r.sparkwingDir, append([]string{"run", "."}, args...), env, r.opts.AfterChild)
+	}
+	execDir := r.opts.ExecutionDir
+	if execDir == "" {
+		execDir = r.sparkwingDir
 	}
 	env = append(env, "SPARKWING_BINARY_SOURCE="+r.source)
 	if err := r.ctx.Err(); err != nil {
@@ -86,13 +108,19 @@ func (r *pipelineRun) exec(args, env []string) error {
 	// must stop catching signals it can no longer act on for that program.
 	r.stopSignals()
 	if fleetExecutionEnv(env) {
-		return runExec(r.lease.Path(), args, r.sparkwingDir, env, r.opts.AfterChild)
+		return runExec(r.lease.Path(), args, execDir, env, r.opts.AfterChild)
 	}
-	return r.lease.ExecReplace(args, r.sparkwingDir, env, r.opts.AfterChild)
+	return r.lease.ExecReplace(args, execDir, env, r.opts.AfterChild)
 }
 
 func (r *pipelineRun) stop() {
 	r.stopSignals()
+	if r.uncachedBinary != "" {
+		// #nosec G703 -- uncachedBinary is the fixed pipeline filename inside a MkdirTemp directory.
+		if err := os.RemoveAll(filepath.Dir(r.uncachedBinary)); err != nil {
+			slog.Default().Warn("remove temporary pipeline executable", "error", err)
+		}
+	}
 	if r.lease == nil {
 		return
 	}
@@ -248,7 +276,8 @@ func runGo(dir string, args, env []string, afterChild func()) error {
 }
 
 type compileOptions struct {
-	NoUpdate bool
+	ExecutionDir string
+	NoUpdate     bool
 
 	// safety: every exec path ends in os.Exit to carry the pipeline's status,
 	// which skips defers, so teardown has to travel with the call and run once

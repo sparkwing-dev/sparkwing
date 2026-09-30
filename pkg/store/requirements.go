@@ -267,6 +267,11 @@ func requirementSkew(dbVersion int, listed []SchemaRequirement) *SkewError {
 
 func (e *SkewError) requirementMessage() string {
 	installed := e.InstalledVersion
+	if semver.IsValid(installed) && semver.IsValid(e.MinVersion) && semver.Compare(e.MinVersion, installed) <= 0 {
+		return fmt.Sprintf("sparkwing: this build (%s) does not support the database requirements %s. "+
+			"The database writer was labeled %s; version labels do not establish schema compatibility. "+
+			"Use a build that supports these requirements.", installed, joinRequirements(e.Requirements), e.MinVersion)
+	}
 	if installed == "" || installed == "(devel)" {
 		installed = "an older build"
 	}

@@ -2,26 +2,26 @@ package nodemetrics
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 )
 
-type fullSink struct{ pushes atomic.Int32 }
+type fullSink struct{ pushes int }
 
 func (s *fullSink) Push(context.Context, Sample) error {
-	s.pushes.Add(1)
+	s.pushes++
 	return ErrSinkFull
 }
 
 func TestAttach_FullSinkStopsSampling(t *testing.T) {
-	stubReaders(t, clampingCPU(), func() int64 { return 1000 })
-	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{start, time.Second, 100, true, nil}, reading{start.Add(2 * time.Second), 2 * time.Second, 300, true, nil})
 	full := &fullSink{}
-	detach := Attach(context.Background(), full)
-	defer detach()
-	waitForSamplerStop(t)
-	if n := full.pushes.Load(); n != 1 {
-		t.Fatalf("a full sink got %d samples, want one and then none", n)
+	finish := Attach(t.Context(), full)
+	if err := finish(); err != nil {
+		t.Fatalf("finish after a full sink = %v, want nil", err)
+	}
+	if full.pushes != 1 {
+		t.Fatalf("a full sink got %d samples, want one and then none", full.pushes)
 	}
 }
