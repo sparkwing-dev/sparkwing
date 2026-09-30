@@ -113,8 +113,8 @@ The sweep runs every 10 seconds and judges at most 1,000 waiting nodes per
 tick, resuming after the last one on the next tick. A pass covers the nodes
 that were waiting when it began, so every waiting node is judged within
 ceil(N/1,000) ticks however many arrive meanwhile. On Postgres with 5,000
-waiting nodes a tick that rewrites 1,000 reasons took about 350 ms and a tick
-that changes none about 10 ms.
+waiting nodes a tick that rewrites the reason of every node in its batch took
+about 350 ms and a tick that changes none about 10 ms.
 
 The field clears when an agent claims the node, and on the next sweep once an
 eligible agent is online. The node waits up to its claim wait, 24 hours by
