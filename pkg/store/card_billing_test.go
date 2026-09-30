@@ -157,6 +157,51 @@ func TestADebtAtTheRungIsChargedOnce(t *testing.T) {
 	}
 }
 
+func TestConcurrentDebtChecksOpenOneCardCharge(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_rung", 12_050)
+
+	start := make(chan struct{})
+	type result struct {
+		work []store.CardChargeWork
+		err  error
+	}
+	done := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			work, _, err := s.DueCardCharges(ctx, now)
+			done <- result{work: work, err: err}
+		}()
+	}
+	close(start)
+	var issued []store.CardChargeWork
+	for range 2 {
+		res := <-done
+		if res.err != nil {
+			t.Fatal(res.err)
+		}
+		issued = append(issued, res.work...)
+	}
+	if len(issued) != 1 || issued[0].AmountCents != 12_050 || issued[0].ChargeID == "" || issued[0].AttemptID == "" {
+		t.Fatalf("concurrent due work = %+v, want one $120.50 attempt", issued)
+	}
+	var charges, attempts int
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM card_charges WHERE team = 'acme'`).Scan(&charges); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM card_attempts WHERE team = 'acme'`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if charges != 1 || attempts != 1 {
+		t.Fatalf("persisted charges = %d, attempts = %d; want one each", charges, attempts)
+	}
+}
+
 // A decline keeps the charge open, withdraws the card's credit and waits a
 // day to retry; the owner's "pay now" opens a recovery attempt, and only one
 // attempt is live at a time.
