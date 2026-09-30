@@ -294,6 +294,8 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 		if err != nil {
 			return ClaimInput{}, err
 		}
+		// safety: the hash is the claim's own; any entry it can name was written
+		// by this same repository's pipeline node, whose code sets the key anyway.
 		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != prefix+req.CacheKeyHash {
 			return ClaimInput{}, ErrInputUndeclared
 		}
