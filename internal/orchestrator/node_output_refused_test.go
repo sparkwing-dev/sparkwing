@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,5 +75,20 @@ func TestNodeExecutorFailsANodeWhoseOutputWasNotStored(t *testing.T) {
 				t.Fatalf("error = %q, want the refusal named", stored.Error)
 			}
 		})
+	}
+}
+
+func TestLocalOutputsReady_RefusesAStoreWithNoOutputDir(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := localOutputsReady(st); err != nil {
+		t.Fatalf("a sqlite store beside its output dir: %v", err)
+	}
+	st.SetOutputDir("")
+	if err := localOutputsReady(st); !errors.Is(err, ErrSharedStateOutputs) {
+		t.Fatalf("a store with no output dir: err = %v, want the shared-state refusal", err)
 	}
 }

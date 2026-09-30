@@ -774,6 +774,9 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 			if ownsState {
 				defer func() { _ = st.Close() }()
 			}
+			if err := localOutputsReady(st); err != nil {
+				return nil, err
+			}
 			backends = LocalBackends(paths, st, opts.ArtifactStore)
 		case *s3state.Backend:
 			if opts.LogStore == nil {
