@@ -255,15 +255,22 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 	if err != nil {
 		return StorageReservation{}, err
 	}
-	// safety: a small output never fails its node, so it skips both the
-	// slot and the share while its bytes still count.
-	small := req.SmallOutput && req.Bytes <= MaxUnpaidOutputBytes
-	if standing.Tier == TeamTierNone && !small {
-		return StorageReservation{}, freeStoragePaused(team)
-	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
 	if err != nil {
 		return StorageReservation{}, err
+	}
+	// safety: a small output never fails its node, so it skips the slot and
+	// the share, up to a fixed overage past the share, while its bytes count.
+	small := false
+	if req.SmallOutput && req.Bytes <= MaxUnpaidOutputBytes && standing.Tier != TeamTierFunded {
+		share := int64(0)
+		if standing.Tier == TeamTierFree {
+			share = req.Kind.share(standing.AllowanceBytes)
+		}
+		small = used+reserved+req.Bytes <= share+MaxSmallOutputOverage
+	}
+	if standing.Tier == TeamTierNone && !small {
+		return StorageReservation{}, freeStoragePaused(team)
 	}
 	out := StorageReservation{ID: id, Tier: standing.Tier, Granted: max(req.Bytes, 0), ExpiresAt: now.Add(ttl)}
 	if standing.Tier == TeamTierFree && !small {

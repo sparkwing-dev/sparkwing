@@ -615,3 +615,24 @@ func TestWriteOutputFileDurably_KeepsAMatchingFileAndReplacesAnother(t *testing.
 		t.Fatalf("a mismatched file = %s, want it replaced", got)
 	}
 }
+
+func TestReserveUpload_SmallOutputsStopAtTheOverage(t *testing.T) {
+	s := storetest.Open(t)
+	teamHandle(t, s, "team-over")
+	reserve := func(size int64) error {
+		key, _ := store.NewOutputKey("run-over", "n", 1, 0)
+		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
+			Team: "team-over", RunID: "run-over", Kind: store.StorageCache, Key: key, Size: size,
+			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
+		})
+		return err
+	}
+	for i := range store.MaxSmallOutputOverage / store.MaxUnpaidOutputBytes {
+		if err := reserve(store.MaxUnpaidOutputBytes); err != nil {
+			t.Fatalf("small output %d within the 64 MiB overage: %v", i, err)
+		}
+	}
+	if err := reserve(1); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("a small output past the overage: err = %v, want a storage refusal", err)
+	}
+}

@@ -22,6 +22,9 @@ const (
 	// MaxUnpaidOutputBytes is the largest output every team may store even
 	// with no storage room; a larger one needs room.
 	MaxUnpaidOutputBytes int64 = 1 << 20
+	// MaxSmallOutputOverage is how far past its share a team's small outputs
+	// may take its storage; past it, a small output needs room too.
+	MaxSmallOutputOverage int64 = 64 << 20
 )
 
 // OutputRetention is how long a run's outputs outlive the run, matching its logs.

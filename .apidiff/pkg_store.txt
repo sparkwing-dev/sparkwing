@@ -1335,6 +1335,7 @@ const MaxRunOutputBytes int64 = 1 << 30
 const MaxRunnerTokensPerTeam = 10
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
+const MaxSmallOutputOverage int64 = 64 << 20
 const MaxSourceMints = 3
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent

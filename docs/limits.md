@@ -103,13 +103,16 @@ URL it gets back, and commits them with `output-commit`; its finish or
 attempt report then names the committed object. Outputs count toward the
 cache share, so a free team whose cache is full has its node fail with the
 storage refusal as the reason, but only for an output over 1 MiB: every
-team may store outputs of up to 1 MiB each, whatever room it has, and they
-still count toward its storage.
+team may store outputs of up to 1 MiB each past its share, and they still
+count toward its storage. Those small outputs may take a team at most 64 MiB
+past its share (64 MiB in all for a team with no slot); past that, a small
+output needs room like any other.
 
 | Limit | Bound | Where |
 |---|---|---|
 | One output | 64 MiB, refused at reservation with `413` | `pkg/store/node_output.go` |
 | One run's outputs | 1 GiB across every node and attempt, refused at reservation with `413` | `pkg/store/node_output.go` |
+| Small outputs past the share | up to 1 MiB each, 64 MiB past the team's share in all | `pkg/store/team_storage.go` |
 | Retention | 30 days after the run finishes; each pipeline's newest successful run keeps its outputs | `pkg/controller/node_output.go` |
 
 A reader gets a one-minute URL and the SHA-256 the bytes must match. A
