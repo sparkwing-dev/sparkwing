@@ -122,6 +122,28 @@ type stateMetricsSink struct {
 	backend StateBackend
 	runID   string
 	nodeID  string
+	stamps  *metricStamps
+}
+
+// safety: the store keys a node's samples by timestamp and refuses a second
+// reading at one, and parallel commands can finish on the same clock reading,
+// so every sample a node writes takes a timestamp after the one before it.
+type metricStamps struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (m *metricStamps) next(at time.Time) time.Time {
+	if m == nil {
+		return at
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !at.After(m.last) {
+		at = m.last.Add(time.Nanosecond)
+	}
+	m.last = at
+	return at
 }
 
 func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) error {
@@ -131,7 +153,7 @@ func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) e
 	}
 	err := s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
 		Kind:          kind,
-		TS:            sample.TS,
+		TS:            s.stamps.next(sample.TS),
 		CPUMillicores: sample.CPUMillicores,
 		MemoryBytes:   sample.MemoryBytes,
 	})
@@ -279,10 +301,12 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 
 	metricErrors := make(chan error, 1)
 	ctx = context.WithValue(ctx, metricErrorsKey{}, metricErrors)
+	stamps := &metricStamps{}
 	sink := stateMetricsSink{
 		backend: r.backends.State,
 		runID:   runID,
 		nodeID:  node.ID(),
+		stamps:  stamps,
 	}
 	finishSamples := func() error { return nil }
 	if ownsProcessNode(ctx, runID, node.ID()) {
@@ -310,7 +334,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
 		err := r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
 			Kind:          store.MetricCommand,
-			TS:            time.Now(),
+			TS:            stamps.next(time.Now()),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
 			CPUTime:       s.CPUTime,

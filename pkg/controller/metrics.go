@@ -46,7 +46,7 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "add node metric", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -165,7 +165,7 @@ func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
 		MaxRSSBytes: body.MaxRSSBytes,
 		Wall:        time.Duration(body.WallNanos),
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "add node usage", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

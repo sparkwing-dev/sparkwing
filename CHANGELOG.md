@@ -1284,6 +1284,9 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A node whose parallel commands finish on the same clock
+  reading no longer fails with `record node accounting: controller 500`; each
+  of a node's resource samples now takes a timestamp after the one before it.
 - **store:** A queued concurrency group promotes its waiters in arrival order
   even when the host's wall clock steps backwards between two arrivals. Before,
   a node queued just after the step jumped ahead of every waiter stamped in the
