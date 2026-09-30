@@ -22,7 +22,7 @@ func TestPreReleasePlanAllowsStoreRace(t *testing.T) {
 	if len(nodes) != 1 {
 		t.Fatalf("nodes = %d, want one", len(nodes))
 	}
-	if got, want := nodes[0].TimeoutDuration(), 75*time.Minute; got != want {
+	if got, want := nodes[0].TimeoutDuration(), 120*time.Minute; got != want {
 		t.Fatalf("pre-release node timeout = %s, want %s for the sharded store race and later checks", got, want)
 	}
 }
