@@ -750,8 +750,7 @@ this user does not own.
 The ownership, mode, and peer-credential checks are unix-only. Windows
 reports no uid for a unix socket peer and has no sticky bit, so the
 per-user temp directory is the only separation there, and the daemon
-neither refuses a connection on credentials nor sweeps a stale socket
-directory away.
+does not refuse a connection on credentials.
 
 Root is not excluded by any of this; a root account on the host can read
 the daemon's memory whatever the socket says. On a shared host, give

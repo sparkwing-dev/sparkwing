@@ -11,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -354,6 +352,12 @@ func socketDirPrefix() string {
 	return fmt.Sprintf("sparkwing-%d-", uid)
 }
 
+// PeerSockets lists the other daemons answering in the shared socket base.
+//
+// safety: discovery never unlinks a socket. A dial cannot tell a dead socket
+// from one a starting daemon has bound but not yet listened on, so unlinking
+// what looked dead deleted live daemons' sockets. A killed daemon's socket
+// stays until that home's next daemon replaces it under its election lock.
 func PeerSockets(home string) ([]string, error) {
 	own, err := SocketPath(home)
 	if err != nil {
@@ -366,87 +370,40 @@ func PeerSockets(home string) ([]string, error) {
 	var peers []string
 	for _, dir := range dirs {
 		sock := filepath.Join(dir, "d.sock")
-		alive, dead := socketStatus(sock)
-		if dead {
-			reapSocketDir(sock)
-			continue
-		}
-		if alive && sock != own {
+		if sock != own && socketAlive(sock) {
 			peers = append(peers, sock)
 		}
+		pruneEmptySocketDir(dir)
 	}
 	return peers, nil
 }
 
-func socketStatus(sock string) (alive, dead bool) {
-	// safety: a directory this user does not own can hold an impostor listener,
-	// so leave it alone rather than opening a connection to it.
-	if err := ValidateSocketDir(sock); err != nil {
-		return false, false
-	}
-	info, err := os.Lstat(sock)
-	if err != nil {
-		return false, errors.Is(err, fs.ErrNotExist)
-	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return false, true
-	}
-	c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
-	if err != nil {
-		return false, socketDialMeansDead(err)
-	}
-	_ = c.Close()
-	return true, false
-}
-
-func socketDialMeansDead(err error) bool {
-	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist)
-}
-
-func reapSocketDir(sock string) {
-	dir := filepath.Dir(sock)
-	if filepath.Base(sock) != "d.sock" || !strings.HasPrefix(filepath.Base(dir), socketDirPrefix()) {
-		return
-	}
+// pruneEmptySocketDir removes a socket directory nothing has touched for a
+// day. Remove refuses a directory that still holds a socket, and a daemon
+// that loses a fresh bind to this removal fails its listen loudly.
+func pruneEmptySocketDir(dir string) {
 	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || !socketDirReapable(info) {
+	if err != nil || !info.IsDir() || !socketDirReapable(info) || time.Since(info.ModTime()) < staleSocketDirAge {
 		return
 	}
-	api := APISocketBeside(sock)
-	before, serr := os.Lstat(sock)
-	if errors.Is(serr, fs.ErrNotExist) {
-		if time.Since(info.ModTime()) < staleSocketDirAge {
-			return
-		}
-	} else if serr != nil || !socketStillDead(sock, before) {
-		return
-	}
-	beforeAPI, apiErr := os.Lstat(api)
-	if !errors.Is(apiErr, fs.ErrNotExist) {
-		if apiErr != nil || !socketStillDead(api, beforeAPI) {
-			return
-		}
-	}
-	// safety: a killed daemon leaves both sockets behind, and the directory
-	// removal fails silently while either is still there.
-	_ = os.Remove(sock)
-	_ = os.Remove(api)
 	_ = os.Remove(dir)
 }
 
-// safety: this sweep holds no election lock, and a hashed socket path does
-// not name the home whose lock it would take. A successor unlinks the socket
-// and listens on a fresh inode, so a path that answers again, that is gone,
-// or that no longer carries the file the dial found dead, is mid-takeover.
-func socketStillDead(sock string, before fs.FileInfo) bool {
-	if _, dead := socketStatus(sock); !dead {
+func socketAlive(sock string) bool {
+	// safety: a directory this user does not own can hold an impostor listener,
+	// so leave it alone rather than opening a connection to it.
+	if err := ValidateSocketDir(sock); err != nil {
 		return false
 	}
-	after, err := os.Lstat(sock)
+	info, err := os.Lstat(sock)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return false
+	}
+	c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
 	if err != nil {
 		return false
 	}
-	return os.SameFile(before, after)
+	return c.Close() == nil
 }
 
 func socketBaseDir() string {

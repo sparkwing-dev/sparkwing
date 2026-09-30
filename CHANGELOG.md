@@ -1311,6 +1311,12 @@ unlock.
 
 ### Fixed
 
+- **wingd + doctor:** A daemon no longer fails to start with `wingd: restrict
+  socket ...: chmod ...: no such file` when `sparkwing doctor` runs at the same
+  moment. The doctor's peer scan unlinked any socket that refused a dial, which
+  includes a starting daemon's socket between its bind and listen. The scan
+  now only reads; a killed daemon's socket directory stays in `/tmp` until that
+  home's next daemon starts.
 - **orchestrator:** A node whose parallel commands finish on the same clock
   reading no longer fails with `record node accounting: controller 500`; each
   of a node's resource samples now takes a timestamp after the one before it.

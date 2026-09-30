@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -49,15 +48,6 @@ func TestSocketPath_DistinctPerHome(t *testing.T) {
 	if a == b {
 		t.Fatalf("distinct homes shared socket %q", a)
 	}
-}
-
-func bindPlaceholderSocket(t *testing.T, home string) string {
-	t.Helper()
-	sock, err := SocketPath(home)
-	if err != nil {
-		t.Fatalf("socket path for %s: %v", home, err)
-	}
-	return writeSocketPlaceholder(t, sock)
 }
 
 func writeSocketPlaceholder(t *testing.T, sock string) string {
@@ -151,37 +141,5 @@ func TestDaemon_BindsUnderDeepHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(d.SocketPath())); !os.IsNotExist(err) {
 		t.Errorf("socket directory remains after clean daemon exit: %v", err)
-	}
-}
-
-func TestPeerSockets_ReapsADeadSocketDirectory(t *testing.T) {
-	deadHome := t.TempDir()
-	deadSock := bindPlaceholderSocket(t, deadHome)
-	deadDir := filepath.Dir(deadSock)
-
-	peers, err := PeerSockets(t.TempDir())
-	if err != nil {
-		t.Fatalf("peer sockets: %v", err)
-	}
-	if slices.Contains(peers, deadSock) {
-		t.Errorf("dead socket %q returned as a peer", deadSock)
-	}
-	if _, err := os.Stat(deadDir); !os.IsNotExist(err) {
-		t.Errorf("dead socket directory remains after sweep: %v", err)
-	}
-}
-
-func TestSocketStatusDoesNotCallAnAmbiguousDialFailureDead(t *testing.T) {
-	if socketDialMeansDead(context.DeadlineExceeded) {
-		t.Fatal("a dial timeout was classified as conclusive absence")
-	}
-	if socketDialMeansDead(os.ErrPermission) {
-		t.Fatal("a permission failure was classified as conclusive absence")
-	}
-	if !socketDialMeansDead(syscall.ECONNREFUSED) {
-		t.Fatal("a refused connection was not classified as a dead socket")
-	}
-	if !socketDialMeansDead(os.ErrNotExist) {
-		t.Fatal("a missing socket was not classified as a dead socket")
 	}
 }
