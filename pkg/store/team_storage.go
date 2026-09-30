@@ -176,9 +176,11 @@ func newReservationID() (string, error) {
 }
 
 // ReserveStorage holds req.Bytes of the team's room in one store, or refuses
-// with a [*StorageQuotaError] past a free team's share and with
-// [ErrFreeStoragePaused] for a team with neither credits nor a slot. A
-// funded team is granted what it asks for and counted all the same.
+// with a [*StorageQuotaError] past a free team's cache share and with
+// [ErrFreeStoragePaused] for a team with neither credits nor a slot while
+// every slot is taken. A free team's log writes are never refused for its
+// share; the hourly storage pass prunes its oldest finished runs back under
+// it. A funded team is granted what it asks for and counted all the same.
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -190,6 +192,31 @@ func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ Stora
 		return StorageReservation{}, err
 	}
 	return out, tx.Commit()
+}
+
+// safety: the lock order puts the free tier before team_storage rows, so a
+// commit takes its slot before it locks a row. A commit whose team finds every
+// slot taken is refused, so no team without a slot commits a byte.
+func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64, now time.Time) error {
+	team = NormalizeTeam(team)
+	if bytes <= 0 || !holdsFreeAllowance(team) {
+		return nil
+	}
+	standing, err := storageStandingTx(ctx, tx, team)
+	if err != nil || standing.Tier != TeamTierNone {
+		return err
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if err := lockFreeTierTx(ctx, tx); err != nil {
+		return err
+	}
+	slotted, err := takeFreeSlotTx(ctx, tx, team, now)
+	if err != nil || slotted {
+		return err
+	}
+	return freeStoragePaused(team)
 }
 
 // RenewStorage commits c and reserves next in one transaction, for a writer
@@ -206,6 +233,9 @@ func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageR
 		return StorageReservation{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
+		return StorageReservation{}, err
+	}
 	replayed, err := commitStorageTx(ctx, tx, c)
 	if err != nil {
 		return StorageReservation{}, err
@@ -255,12 +285,22 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 	if err != nil {
 		return StorageReservation{}, err
 	}
+	if standing.Tier == TeamTierNone {
+		open, err := freeSlotOpenTx(ctx, tx)
+		if err != nil {
+			return StorageReservation{}, err
+		}
+		if open {
+			standing.Tier = TeamTierFree
+		}
+	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
 	if err != nil {
 		return StorageReservation{}, err
 	}
-	// safety: a small output never fails its node, so it skips the slot and
-	// the share, up to a fixed overage past the share, while its bytes count.
+	// safety: a small output never fails its node, so with every slot taken
+	// or its share full it may still take a team a fixed overage past the
+	// share, and its bytes count.
 	small := false
 	if req.SmallOutput && req.Bytes <= MaxUnpaidOutputBytes && standing.Tier != TeamTierFunded {
 		share := int64(0)
@@ -273,7 +313,7 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		return StorageReservation{}, freeStoragePaused(team)
 	}
 	out := StorageReservation{ID: id, Tier: standing.Tier, Granted: max(req.Bytes, 0), ExpiresAt: now.Add(ttl)}
-	if standing.Tier == TeamTierFree && !small {
+	if standing.Tier == TeamTierFree && req.Kind != StorageLogs && !small {
 		share := req.Kind.share(standing.AllowanceBytes)
 		room := share - used - reserved
 		if req.UpTo && (req.Bytes <= 0 || req.Bytes > room) {
@@ -392,6 +432,9 @@ func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) 
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
+		return err
+	}
 	if _, err := commitStorageTx(ctx, tx, c); err != nil {
 		return err
 	}
@@ -736,11 +779,10 @@ func lockCommittedTx(ctx context.Context, tx *storeTx, kind StorageKind) (_ map[
 // DownloadCharge asks to serve a team's download.
 type DownloadCharge struct {
 	Team Team
-	// Bytes is the download's size. Zero checks that the team has room
-	// left today without charging it.
+	// Bytes is what the download delivered, or for a signed URL the
+	// object's size. Zero checks that the team is not yet at its cap.
 	Bytes int64
-	// Record charges Bytes whatever the cap says, for a stream whose size
-	// was learned only once it finished.
+	// Record charges Bytes whatever the cap says, for bytes already sent.
 	Record bool
 	Now    time.Time
 	// FreeCapBytes and FundedCapBytes are what a team may download in a
@@ -779,9 +821,9 @@ func (e *DownloadCapError) Error() string {
 func (e *DownloadCapError) Unwrap() error { return ErrDownloadCap }
 
 // ChargeDownload charges c.Bytes to the team's UTC day, or refuses with a
-// [*DownloadCapError] when they would pass its cap. The operator's team has
-// no cap. The row is locked for the charge, so readers racing for the last
-// bytes of a day cannot both see room.
+// [*DownloadCapError] when the team is already at its cap. The operator's
+// team has no cap. The row is locked for the charge, so a download started
+// after another's charge reached the cap sees it.
 func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error) {
 	team := NormalizeTeam(c.Team)
 	if team == "" || c.Bytes < 0 {
@@ -819,7 +861,9 @@ INSERT INTO team_download_day (team, day, bytes, updated_at) VALUES (?, ?, 0, ?)
 		string(team), day).Scan(&used); err != nil {
 		return DownloadCharged{}, err
 	}
-	if !c.Record && out.CapBytes > 0 && used+max(c.Bytes, 1) > out.CapBytes {
+	// safety: only a team already at its cap is refused, so the download that
+	// crosses the cap finishes and the next one waits for midnight UTC.
+	if !c.Record && out.CapBytes > 0 && used >= out.CapBytes {
 		remedy := "the cap resets at midnight UTC"
 		if out.Tier == TeamTierFree && c.FundedCapBytes > c.FreeCapBytes {
 			remedy = fmt.Sprintf("add credits to the team to raise it to %d bytes a day, or wait for midnight UTC",
@@ -899,4 +943,91 @@ func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, err
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// TeamOverShare is a free team whose logs hold more than its share.
+type TeamOverShare struct {
+	Team      Team
+	OverBytes int64
+}
+
+// TeamsOverFreeLogShare reports every team without credits whose logs hold
+// more than its share of the free allowance, and by how much. A team with
+// neither credits nor a slot, and that never held credits, has a share of
+// zero; a team whose credits lapsed keeps its logs to retention.
+func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error) {
+	rows, err := s.query(ctx, `
+SELECT team, used_bytes FROM team_storage WHERE store = ? AND used_bytes > 0 ORDER BY team`, string(StorageLogs))
+	if err != nil {
+		return nil, err
+	}
+	used := map[Team]int64{}
+	var teams []Team
+	for rows.Next() {
+		var team string
+		var n int64
+		if err := rows.Scan(&team, &n); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		used[Team(team)] = n
+		teams = append(teams, Team(team))
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	// safety: the rows are closed before each team's standing is read, because
+	// SQLite's one connection deadlocks on a query under an open cursor.
+	var out []TeamOverShare
+	for _, team := range teams {
+		standing, err := s.StorageStandingFor(ctx, team)
+		if err != nil {
+			return nil, err
+		}
+		var share int64
+		switch standing.Tier {
+		case TeamTierFree:
+			share = FreeLogShare(standing.AllowanceBytes)
+		case TeamTierNone:
+			held, err := s.everHeldCredits(ctx, team)
+			if err != nil {
+				return nil, err
+			}
+			if held {
+				continue
+			}
+		default:
+			continue
+		}
+		if over := used[team] - share; over > 0 {
+			out = append(out, TeamOverShare{Team: team, OverBytes: over})
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) everHeldCredits(ctx context.Context, team Team) (_ bool, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_grants WHERE team = ? AND kind != ? AND amount_micro > 0 LIMIT 1`,
+		string(NormalizeTeam(team)), CreditGrantReversal)
+	if err != nil {
+		return false, err
+	}
+	return held, tx.Commit()
+}
+
+// RunFinished reports whether team's run ended, so its logs may be pruned. A
+// run still going, or one no longer recorded, is not finished; retention
+// removes the logs of a run nobody records.
+func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error) {
+	var status string
+	err := s.queryRow(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`,
+		string(NormalizeTeam(team)), runID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && isTerminalRunStatus(status), err
 }

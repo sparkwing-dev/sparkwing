@@ -111,9 +111,10 @@ func TestLogsWriterCommitRequiresReservationAndNonnegativeBytes(t *testing.T) {
 }
 
 // The cache reserves, commits and releases a team's storage with its
-// operator token. A team that took the last slot is held to its cache
-// share, the next team is refused as paused until the operator grants it a
-// slot, and the operator's own team is never held.
+// operator token. Both teams start runs; the one whose write took the last
+// slot is held to its cache share, the next team's writes are refused as
+// paused until the operator grants it a slot, and the operator's own team is
+// never held.
 func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	f := freeTierFixture(t, 1)
 	allowance := int64(4096)
@@ -127,8 +128,8 @@ func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	if code := f.trigger(first); code != http.StatusAccepted {
 		t.Fatalf("first team's run = %d", code)
 	}
-	if code := f.trigger(second); code != http.StatusPaymentRequired {
-		t.Fatalf("second team's run with no slot = %d, want 402", code)
+	if code := f.trigger(second); code != http.StatusAccepted {
+		t.Fatalf("second team's run with no slot = %d, want a run is never refused for billing", code)
 	}
 	const cache = "Bearer cache-token"
 	code, res := f.reserve(cache, "first", "cache", 3072)
@@ -301,8 +302,15 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 	if got, err := f.srv.SignUpFreeTier(ctx); err != nil || got != controller.FreeTierOpen {
 		t.Fatalf("with a slot free = %s, %v; want open", got, err)
 	}
-	if code := f.trigger(freeTeamToken(t, f.store, "first")); code != http.StatusAccepted {
-		t.Fatalf("first team's run = %d", code)
+	freeTeamToken(t, f.store, "first")
+	code, res := f.reserve("Bearer cache-token", "first", "cache", 1)
+	if code != http.StatusOK {
+		t.Fatalf("first team's reservation = %d", code)
+	}
+	if code := f.call("POST", "/internal/storage/commit", "Bearer cache-token", map[string]any{
+		"team": "first", "store": "cache", "reservation": res.ID, "bytes": 1,
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("first team's first committed byte = %d", code)
 	}
 	if got, err := f.srv.SignUpFreeTier(ctx); err != nil || got != controller.FreeTierClosed {
 		t.Fatalf("with every slot taken = %s, %v; want closed", got, err)

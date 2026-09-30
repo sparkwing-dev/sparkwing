@@ -102,6 +102,14 @@ send bytes to S3, and use signed CloudFront reads when off-cluster. See
 source from origin. Warm cloud runners use the internal cache Service for
 Git mirrors and artifacts; no public cache URL is needed.
 
+Cloud serves no dependency proxy. Its cache runs with `--disable-proxy` and
+its runners with `--dependency-proxy=off`, so Cloud build pods get no
+`GOPROXY`, `npm_config_registry` or `PIP_INDEX_URL` from Sparkwing and fetch
+packages from the upstream registries. The proxy takes no credential, so the
+bytes it serves cannot be charged to a team's download cap. Self-hosted
+deployments keep the proxy; see
+[Dependency proxy defaults & egress](#dependency-proxy-defaults--egress).
+
 ## On-Demand Fetch
 
 Every clone refreshes the mirror before the cache advertises its refs,

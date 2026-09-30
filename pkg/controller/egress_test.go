@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -165,80 +164,12 @@ func claimRunForRunner(t *testing.T, f egressFixture, runID string) {
 	}
 }
 
-func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 200}, art)
-
-	first := f.get(t, "/api/v1/artifacts/k", f.adminToken)
-	if first.status != http.StatusOK || len(first.body) != 100 {
-		t.Fatalf("first download = %d with %d bytes, want 200 and 100", first.status, len(first.body))
-	}
-	if state := f.meter.State(); state.GlobalMonthBytes != 100 {
-		t.Fatalf("metered %d bytes, want 100", state.GlobalMonthBytes)
-	}
-
-	if got := f.get(t, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusOK {
-		t.Fatalf("second download = %d, want 200; the budget was not yet spent", got)
-	}
-
-	third := f.get(t, "/api/v1/artifacts/k", f.adminToken)
-	if third.status != http.StatusTooManyRequests {
-		t.Fatalf("third download = %d, want 429", third.status)
-	}
-	retry, err := strconv.Atoi(third.header.Get("Retry-After"))
-	if err != nil || retry <= 0 {
-		t.Fatalf("Retry-After = %q, want a positive number of seconds", third.header.Get("Retry-After"))
-	}
-	var refusal struct {
-		Error      string `json:"error"`
-		Code       string `json:"code"`
-		Principal  string `json:"principal"`
-		LimitBytes int64  `json:"limit_bytes"`
-		UsedBytes  int64  `json:"used_bytes"`
-	}
-	if err := json.Unmarshal(third.body, &refusal); err != nil {
-		t.Fatalf("decode refusal: %v -- raw %q", err, third.body)
-	}
-	if refusal.Code != controller.EgressBudgetCode || refusal.Principal != "root" {
-		t.Fatalf("refusal = %+v", refusal)
-	}
-	if refusal.LimitBytes != 200 || refusal.UsedBytes != 200 {
-		t.Fatalf("refusal counters = %+v, want 200 of 200", refusal)
-	}
-	if !strings.Contains(refusal.Error, "egress budget exceeded") {
-		t.Errorf("error member %q does not carry the reason", refusal.Error)
-	}
-}
-
-func TestOneBudgetDoesNotRefuseAnotherPrincipal(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"runs/r1/k": bytes.Repeat([]byte("x"), 100)}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 100}, art)
-	// safety: only the operator reads a key that names no run, so the CLI
-	// token fetches an artifact of a run its team owns.
-	if err := f.store.CreateRun(context.Background(), store.Run{ID: "r1", Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-
-	f.spend(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.adminToken)
-
-	if got := f.get(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.adminToken).status; got != http.StatusTooManyRequests {
-		t.Fatalf("the spent principal = %d, want 429", got)
-	}
-
-	// safety: the runner and CLI fetch paths must keep working while
-	// another principal is over budget.
-	other := f.get(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.reader)
-	if other.status != http.StatusOK || len(other.body) != 100 {
-		t.Fatalf("a CLI token fetching = %d with %d bytes, want 200 and 100", other.status, len(other.body))
-	}
-}
-
 func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	art := &fakeArtifactStore{objects: map[string][]byte{"runs/r1/k": []byte("payload")}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 1 << 20, MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4}, art)
+	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4}, art)
 	seedLiveLog(t, f, "r1", "n1", "hello\n")
 
 	// safety: a runner reads a node's logs on its claim scope, which is the
@@ -478,8 +409,8 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	if !top.Enabled || !top.Egress.Alarm {
 		t.Fatalf("view = %+v, want an enabled meter with the alarm up", top)
 	}
-	if len(top.Egress.Top) != 1 || top.Egress.Top[0].Principal != "root" || top.Egress.Top[0].MonthBytes != 100 {
-		t.Fatalf("top consumers = %+v, want root at 100 bytes", top.Egress.Top)
+	if len(top.Egress.Top) != 1 || top.Egress.Top[0].Principal != "default/root" || top.Egress.Top[0].MonthBytes != 100 {
+		t.Fatalf("top consumers = %+v, want default/root at 100 bytes", top.Egress.Top)
 	}
 }
 
@@ -570,26 +501,4 @@ func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 
 	close(art.release)
 	<-done
-}
-
-// safety: a download admitted just under the budget used to finish past it,
-// so parallel downloads started at the edge each carried the whole object.
-// The cut response is aborted, which a client sees as a failed read or, when
-// nothing reached it, retries into the refusal.
-func TestADownloadStopsAtThePrincipalsBudget(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 150}, art)
-
-	f.spend(t, "/api/v1/artifacts/k", f.adminToken)
-	resp, err := http.DefaultClient.Do(f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken))
-	if err == nil {
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr == nil && resp.StatusCode == http.StatusOK {
-			t.Fatalf("the second download ended cleanly with %d bytes, want it cut at the budget", len(body))
-		}
-	}
-	if got := f.meter.State().GlobalMonthBytes; got != 150 {
-		t.Fatalf("metered %d bytes, want the 150 the budget allows", got)
-	}
 }

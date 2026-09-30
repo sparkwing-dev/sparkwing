@@ -135,8 +135,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg.EgressDailyAlarmBytes = egressCfg.GlobalDailyAlarmBytes
-	cfg.EgressDailyCapBytes = egressDailyCap(cfg, egressCfg, named)
+	cfg.EgressDailyAlarmBytes = egressDailyAlarm(cfg, egressCfg, named)
 
 	srv, err := cache.New(cfg)
 	if err != nil {
@@ -150,12 +149,12 @@ func run(args []string) error {
 
 // safety: a cache that verifies grants serves more than one team, and its
 // proxy and blob downloads are what an abusive team churns, so it starts
-// with a finite daily cap unless the operator named one, zero included.
-func egressDailyCap(cfg cache.Config, egressCfg egress.Config, named egress.Named) int64 {
-	if cfg.GrantKey != "" && !named.DailyCapBytes {
-		return cache.DefaultMultiTeamEgressDailyCapBytes
+// with a daily alarm unless the operator named one, zero included.
+func egressDailyAlarm(cfg cache.Config, egressCfg egress.Config, named egress.Named) int64 {
+	if cfg.GrantKey != "" && !named.DailyAlarmBytes {
+		return cache.DefaultMultiTeamEgressDailyAlarmBytes
 	}
-	return egressCfg.GlobalDailyCapBytes
+	return egressCfg.GlobalDailyAlarmBytes
 }
 
 func envOr(name, fallback string) string {

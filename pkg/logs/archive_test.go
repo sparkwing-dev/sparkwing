@@ -21,6 +21,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
@@ -301,7 +302,7 @@ func TestArchiveMovesIdleRunsToTheirTeamsNamespaceAndRestoresThem(t *testing.T) 
 		"logs/teams/team-a/runs/run-a/build.log",
 		"logs/teams/team-a/runs/run-a/test.log",
 		"logs/index/runs/run-a.json",
-		"logs/index/days/" + day + "/run-a",
+		"logs/index/free-days/" + day + "/run-a",
 	} {
 		if !keys[k] {
 			t.Errorf("missing %s in %v", k, keys)
@@ -474,8 +475,8 @@ func TestRetentionOnTheArchiveCostsBoundedRequests(t *testing.T) {
 	if err != nil || pruned != expired {
 		t.Fatalf("prune = %d, %v", pruned, err)
 	}
-	if got := f.client.count("ListObjectsV2"); got != 2 {
-		t.Errorf("prune listed %d times, want 2 (the days, then the expired day)", got)
+	if got := f.client.count("ListObjectsV2"); got != 3 {
+		t.Errorf("prune listed %d times, want 3 (each class's days, then the expired day)", got)
 	}
 	if got := f.client.count("GetObject"); got != expired {
 		t.Errorf("prune read %d indexes, want %d", got, expired)
@@ -501,8 +502,8 @@ func TestRetentionOnTheArchiveCostsBoundedRequests(t *testing.T) {
 	if _, err := f.srv.PruneArchive(context.Background(), now); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.client.total(); got != 1 {
-		t.Errorf("an idle prune cost %d requests, want 1", got)
+	if got := f.client.total(); got != 2 {
+		t.Errorf("an idle prune cost %d requests, want one listing per class", got)
 	}
 }
 
@@ -707,7 +708,7 @@ func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
 			t.Fatalf("append = %d %s", code, body)
 		}
 	}
-	f.client.refuseKey = func(key string) bool { return strings.HasPrefix(key, "logs/index/days/") }
+	f.client.refuseKey = func(key string) bool { return strings.HasPrefix(key, "logs/index/free-days/") }
 	now := time.Now().Add(time.Hour)
 	const retries = 6
 	for i := range retries {
@@ -723,7 +724,7 @@ func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
 	}
 	day := 0
 	for k, n := range f.client.keys {
-		if strings.HasPrefix(k, "logs/index/days/") {
+		if strings.HasPrefix(k, "logs/index/free-days/") {
 			day += n
 		}
 	}
@@ -732,5 +733,71 @@ func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
 	}
 	if !f.onVolume("stuck") {
 		t.Fatal("a run whose archive never finished left the volume")
+	}
+}
+
+// A team without credits keeps its archived logs for the free window and a
+// funded team for the whole retention, each run judged by its team's tier
+// when it was archived.
+func TestAFreeTeamsArchivedLogsExpireBeforeAFundedTeams(t *testing.T) {
+	counter := storagequotatest.New(1<<40, 0)
+	counter.Tiers["team-b"] = storagequota.TierFunded
+	f := newArchiveFixtureWith(t, DefaultArchiveRetention, counter)
+	now := time.Now()
+	for run, bearer := range map[string]string{"free-run": "Bearer a", "funded-run": "Bearer b"} {
+		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", bearer, "x\n"); code != http.StatusNoContent {
+			t.Fatalf("append = %d %s", code, body)
+		}
+		f.age(t, run, now.Add(-40*24*time.Hour))
+	}
+	// safety: a restarted service has heard no tier yet, so the run's own
+	// record is all that can keep it classified.
+	f.srv.counter = nil
+	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 2 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	if pruned, err := f.srv.PruneArchive(context.Background(), now); err != nil || pruned != 1 {
+		t.Fatalf("prune = %d, %v; want the free team's run alone", pruned, err)
+	}
+	keys := f.keys(t)
+	if keys["logs/teams/team-a/runs/free-run/build.log"] {
+		t.Error("a free team's run past the free window survived")
+	}
+	if !keys["logs/teams/team-b/runs/funded-run/build.log"] {
+		t.Error("a funded team's run inside the retention was pruned")
+	}
+}
+
+// The controller's log-deletion credential, which belongs to the operator's
+// team, deletes another team's archived run and says how many archived bytes
+// went; a team bearer, which carries no logs.delete, cannot delete a run.
+func TestTheDeletionCredentialDeletesAnyTeamsArchivedRun(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", "0123456789\n"); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	f.age(t, "run-a", time.Now().Add(-time.Hour))
+	if n, err := f.srv.ArchiveOnce(context.Background(), time.Now()); err != nil || n != 1 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	if code, _ := f.do(t, http.MethodDelete, "/api/v1/logs/run-a", "Bearer b", ""); code != http.StatusForbidden {
+		t.Fatalf("a team bearer deleting = %d, want 403", code)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, f.http.URL+"/api/v1/logs/run-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer deleter")
+	resp, err := f.http.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get(storagequota.ArchivedBytesDeletedHeader) != "11" {
+		t.Fatalf("the deletion credential = %d naming %q bytes, want 204 naming 11",
+			resp.StatusCode, resp.Header.Get(storagequota.ArchivedBytesDeletedHeader))
+	}
+	if f.keys(t)["logs/teams/team-a/runs/run-a/build.log"] {
+		t.Fatal("the archived run survived its deletion")
 	}
 }

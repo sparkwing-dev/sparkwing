@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -236,7 +237,12 @@ var sparkwingCollectors = []prometheus.Collector{
 	hashingBudgetCollector{},
 	creditsCollector{},
 	nodeSecondsCollector{},
+	egress.NewCollector(publishedEgress.Load),
 }
+
+// safety: the registry is process-wide and a meter belongs to a server, so the
+// collector reads the one the latest server was given.
+var publishedEgress atomic.Pointer[egress.Meter]
 
 func init() {
 	metricsRegistry.MustRegister(sparkwingCollectors...)

@@ -27,15 +27,16 @@ type Launcher struct {
 	Poll   time.Duration
 	Logger *slog.Logger
 
-	// safety: Sync writes the count of live Jobs waiting for a machine and
-	// Run reads it, both on Run's goroutine, so it needs no lock.
-	unplaced int
+	// safety: LaunchOne adds each Job it creates, Sync rebuilds the set from
+	// the Jobs and pods it lists, and Run reads it before every claim, all on
+	// Run's goroutine, so it needs no lock.
+	pending map[string]bool
 }
 
 // Run claims and launches until ctx ends. An idle queue is polled every
 // l.Poll; a claim is followed at once by the next. Every [SyncInterval] it
-// reconciles its Jobs, and it claims nothing while [MaxUnplacedJobs] of them
-// wait for a machine. A failed claim backs off exponentially, and a revoked
+// reconciles its Jobs, and it claims nothing while [MaxPendingJobs] of them
+// are not yet running. A failed claim backs off exponentially, and a revoked
 // or expired token parks the launcher, asking once an hour, until a claim is
 // answered.
 func (l *Launcher) Run(ctx context.Context) error {
@@ -52,9 +53,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 			}
 			lastSync = time.Now()
 		}
-		if l.unplaced >= MaxUnplacedJobs {
+		if len(l.pending) >= MaxPendingJobs {
 			if !braked {
-				l.Logger.Warn("launcher: Jobs are waiting for machines; pausing claims", "waiting", l.unplaced)
+				l.Logger.Warn("launcher: Jobs are not yet running; pausing claims", "pending", len(l.pending))
 			}
 			braked = true
 			select {
@@ -126,6 +127,10 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		err = nil
 	}
 	if err == nil {
+		if l.pending == nil {
+			l.pending = map[string]bool{}
+		}
+		l.pending[job.Name] = true
 		l.Logger.Info("launcher: job created", "job", job.Name, "team", claim.Team,
 			"run_id", claim.RunID, "node_id", claim.NodeID, "generation", claim.Generation)
 	}

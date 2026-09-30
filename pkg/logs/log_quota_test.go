@@ -28,29 +28,25 @@ func (f *archiveFixture) logSize(t *testing.T, runID, nodeID string) int64 {
 
 func line(n int) string { return strings.Repeat("x", n-1) + "\n" }
 
-// The logs service holds a free team to the share the controller counts,
-// drawing appends from a block it reserved with the appending caller's own
-// credential; an append past the share writes nothing, and a settle commits
-// what was written and gives the rest of the block back.
-func TestAFreeTeamsLogsStopAtTheirShare(t *testing.T) {
+// A free team's append past its share is written, never refused: the run
+// keeps its logs, the controller counts every byte, and the hourly storage
+// pass prunes the team's oldest finished runs back under the share. Appends
+// draw from a block reserved with the appending caller's own credential.
+func TestAFreeTeamsLogsPastTheirShareAreWrittenAndCounted(t *testing.T) {
 	counter := storagequotatest.New(300, 0)
 	f := newArchiveFixtureWith(t, 0, counter)
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(200)); code != http.StatusNoContent {
 		t.Fatalf("200 of 300 = %d %s", code, body)
 	}
-	code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(101))
-	if code != http.StatusRequestEntityTooLarge || !strings.Contains(body, "add credits") {
-		t.Fatalf("101 more past the share = %d %q, want 413 naming the remedy", code, body)
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(150)); code != http.StatusNoContent {
+		t.Fatalf("150 more past the share = %d %q, want it written", code, body)
 	}
-	if got := f.logSize(t, "run-a", "build"); got != 200 {
-		t.Fatalf("the log holds %d bytes after a refused append, want 200", got)
-	}
-	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(100)); code != http.StatusNoContent {
-		t.Fatalf("the last 100 bytes = %d %s", code, body)
+	if got := f.logSize(t, "run-a", "build"); got != 350 {
+		t.Fatalf("the log holds %d bytes, want 350", got)
 	}
 	f.srv.settleLogBlocks(context.Background(), true)
-	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != 300 || reserved != 0 {
-		t.Fatalf("the controller counts %d used, %d reserved; want 300 and nothing held", used, reserved)
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != 350 || reserved != 0 {
+		t.Fatalf("the controller counts %d used, %d reserved; want 350 and nothing held", used, reserved)
 	}
 	for _, auth := range counter.Auths() {
 		if auth != "Bearer a" {
@@ -232,5 +228,26 @@ func TestRetriedRangeDoesNotSettleExtraQuota(t *testing.T) {
 	}
 	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != int64(len(body)) || reserved != 0 {
 		t.Fatalf("quota = %d used, %d reserved; want one copy", used, reserved)
+	}
+}
+
+// A final settle the controller refuses, because the team lost its chance at
+// a free slot, drops the block rather than retrying a commit that is refused
+// every time; the storage pass counts what the run wrote.
+func TestARefusedFinalCommitDropsTheLogBlock(t *testing.T) {
+	counter := storagequotatest.New(300, 0)
+	f := newArchiveFixtureWith(t, 0, counter)
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(10)); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	counter.Tiers["team-a"] = storagequota.TierNone
+	f.srv.settleLogBlocks(context.Background(), true)
+	if n := len(f.srv.logBlocks.all()); n != 0 {
+		t.Fatalf("%d log blocks left after a refused final commit, want none", n)
+	}
+	calls := len(counter.Auths())
+	f.srv.settleLogBlocks(context.Background(), true)
+	if got := len(counter.Auths()); got != calls {
+		t.Fatalf("a later settle made %d more controller calls, want none", got-calls)
 	}
 }

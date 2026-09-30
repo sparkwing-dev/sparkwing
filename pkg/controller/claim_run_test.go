@@ -532,7 +532,8 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		"a bare memo key for a known hash":                     {"m", bare, http.StatusForbidden},
 		"an entry another node wrote under its key":            {"m", memoIn(store.ClaimInputCached, "m", "h5"), http.StatusForbidden},
 		"an entry another pipeline wrote under its key":        {"m", memoIn(store.ClaimInputCached, "m", "h6"), http.StatusForbidden},
-		"an entry another repository wrote under its key":      {"m", memoIn(store.ClaimInputCoalesced, "m", "h7"), http.StatusForbidden},
+		"a leader another repository wrote under its key":      {"m", memoIn(store.ClaimInputCoalesced, "m", "h7"), http.StatusForbidden},
+		"a cache entry another repository wrote under its key": {"m", memoIn(store.ClaimInputCached, "m", "h7"), http.StatusNotFound},
 		"an undeclared pipeline reference":                     {"r", otherRef, http.StatusForbidden},
 		"a pipeline reference on a node that declares none":    {"m", lastRun, http.StatusForbidden},
 		"another node's coalesce waiter":                       {"c", memoIn(store.ClaimInputCoalesced, "c", "h3"), http.StatusNotFound},
@@ -633,5 +634,93 @@ func TestClaimRun_MemoSlotsAndHoldersStayInTheClaimsNode(t *testing.T) {
 	}
 	if st, err := tn.GetConcurrencyState(ctx, sibling); err != nil || len(st.Holders) != 1 {
 		t.Fatalf("the sibling's holder = %+v %v, want it untouched", st, err)
+	}
+}
+
+// Every concurrency route a claim reaches holds it to one rule: it acts only
+// on its own node's holders and waiters, under a key its node declares. A
+// sibling node's live holder in the same run survives every route aimed at it.
+func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
+	ctx := context.Background()
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	plan := "Bearer " + f.launchedRun(olga, "run-own", "acme", "widgets")
+	group := map[string]any{"conc_group": "deploy", "conc_capacity": 1, "conc_cost": 1, "conc_on_limit": "queue"}
+	doc := map[string]any{"nodes": []map[string]any{
+		{"id": "a", "deps": []string{}, "spec_hash": specA, "modifiers": group},
+		{"id": "b", "deps": []string{}, "spec_hash": specA, "modifiers": group},
+	}}
+	if code := f.call("POST", "/api/v1/runs/run-own/plan", plan, doc, nil); code != http.StatusOK {
+		t.Fatalf("accept plan = %d", code)
+	}
+	wk := "Bearer " + f.launchNode("run-own", "a")
+	tn, err := f.store.ForTeam(ctx, store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func() {
+		t.Helper()
+		if res, err := tn.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+			Key: "g:deploy", HolderID: "run-own/b", RunID: "run-own", NodeID: "b", Capacity: 1, Cost: 1, Policy: "queue",
+		}); err != nil || res.Kind != store.AcquireGranted {
+			t.Fatalf("seed the sibling's holder = %+v %v", res, err)
+		}
+	}
+	const base = "/api/v1/concurrency/g:deploy"
+	siblingHeld := func() bool {
+		st, err := tn.GetConcurrencyState(ctx, "g:deploy")
+		return err == nil && len(st.Holders) == 1 && st.Holders[0].HolderID == "run-own/b"
+	}
+	for _, c := range []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/cancel-waiter", map[string]any{"run_id": "run-own", "node_id": "b"}},
+		{"POST", "/acquire", map[string]any{"holder_id": "run-own/b", "run_id": "run-own", "node_id": "b", "max": 1, "cost": 1, "policy": "queue"}},
+		{"POST", "/heartbeat", map[string]any{"holder_id": "run-own/b"}},
+		{"POST", "/release", map[string]any{"holder_id": "run-own/b", "outcome": "success"}},
+		{"GET", "/holder?holder_id=run-own%2Fb", nil},
+		{"GET", "/resolve?run_id=run-own&node_id=b", nil},
+		{"GET", "/notify?run_id=run-own&node_id=b", nil},
+	} {
+		if !siblingHeld() {
+			seed()
+		}
+		if code := f.call(c.method, base+c.path, wk, c.body, nil); code != http.StatusForbidden || !siblingHeld() {
+			t.Errorf("%s %s aimed at the sibling = %d, holder kept %v; want 403 and the holder kept", c.method, c.path, code, siblingHeld())
+		}
+	}
+	joinSibling := map[string]any{"holder_id": "run-own/a", "inherited_holder_id": "run-own/b", "run_id": "run-own", "node_id": "a", "max": 1, "cost": 1, "policy": "queue"}
+	if code := f.call("POST", base+"/acquire", wk, joinSibling, nil); code != http.StatusForbidden {
+		t.Errorf("an acquire joining the sibling's live holder = %d, want 403", code)
+	}
+	if code := f.call("GET", "/api/v1/concurrency/g:other/state", wk, nil, nil); code != http.StatusForbidden {
+		t.Errorf("the state of an undeclared key = %d, want 403", code)
+	}
+	if code := f.call("GET", base+"/state", wk, nil, nil); code != http.StatusOK {
+		t.Errorf("the state of its own declared key = %d, want 200", code)
+	}
+	if code := f.call("GET", base+"/resolve?run_id=run-own&node_id=a", wk, nil, nil); code != http.StatusOK {
+		t.Errorf("resolving its own node's waiter = %d, want 200", code)
+	}
+	if st, err := tn.GetConcurrencyState(ctx, "g:deploy"); err != nil || len(st.Holders) != 1 || st.Holders[0].HolderID != "run-own/b" {
+		t.Fatalf("the sibling's holder = %+v %v, want it untouched", st, err)
+	}
+	if _, _, _, err := tn.ReleaseAndNotify(ctx, "g:deploy", "run-own/b", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := tn.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "g:deploy", HolderID: "run-own/a", RunID: "run-own", NodeID: "a", Capacity: 1, Cost: 1, Policy: "queue",
+	}); err != nil || res.Kind != store.AcquireGranted {
+		t.Fatalf("seed the node's own earlier holder = %+v %v", res, err)
+	}
+	joinOwn := map[string]any{"holder_id": "run-own/a", "inherited_holder_id": "run-own/a", "run_id": "run-own", "node_id": "a", "max": 1, "cost": 1, "policy": "queue"}
+	if code := f.call("POST", base+"/acquire", wk, joinOwn, nil); code != http.StatusForbidden {
+		t.Errorf("an acquire joining its own node's earlier holder = %d, want 403", code)
+	}
+	plain := map[string]any{"holder_id": "run-own/a", "run_id": "run-own", "node_id": "a", "max": 1, "cost": 1, "policy": "queue"}
+	if code := f.call("POST", base+"/acquire", wk, plain, nil); code != http.StatusOK {
+		t.Errorf("its own plain acquire = %d, want 200", code)
 	}
 }

@@ -488,6 +488,9 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 func TestReserveUpload_ASlotlessTeamStoresOnlySmallOutputs(t *testing.T) {
 	s := storetest.Open(t)
 	teamHandle(t, s, "team-slotless")
+	if err := s.SetFreeTeamSlots(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
 	reserve := func(size int64) error {
 		key, _ := store.NewOutputKey("run-slotless", "n", 1, 0)
 		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
@@ -496,8 +499,16 @@ func TestReserveUpload_ASlotlessTeamStoresOnlySmallOutputs(t *testing.T) {
 		})
 		return err
 	}
-	if err := reserve(store.MaxUnpaidOutputBytes); err != nil {
+	key, _ := store.NewOutputKey("run-slotless", "n", 1, 0)
+	u, err := s.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: "team-slotless", RunID: "run-slotless", Kind: store.StorageCache, Key: key, Size: store.MaxUnpaidOutputBytes,
+		SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
+	})
+	if err != nil {
 		t.Fatalf("a 1 MiB output: %v", err)
+	}
+	if err := s.CommitUpload(t.Context(), "team-slotless", u.ID, "p", time.Now()); err != nil {
+		t.Fatalf("committing a 1 MiB output with every slot taken: %v", err)
 	}
 	if err := reserve(store.MaxUnpaidOutputBytes + 1); !errors.Is(err, store.ErrFreeStoragePaused) {
 		t.Fatalf("an output past 1 MiB: err = %v, want free storage paused", err)
@@ -632,6 +643,9 @@ func TestWriteOutputFileDurably_KeepsAMatchingFileAndReplacesAnother(t *testing.
 func TestReserveUpload_SmallOutputsStopAtTheOverage(t *testing.T) {
 	s := storetest.Open(t)
 	teamHandle(t, s, "team-over")
+	if err := s.SetFreeTeamSlots(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
 	reserve := func(size int64) error {
 		key, _ := store.NewOutputKey("run-over", "n", 1, 0)
 		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{

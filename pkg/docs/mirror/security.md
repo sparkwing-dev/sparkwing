@@ -383,8 +383,7 @@ poll, which is what it served before profiles existed.
 | `--egress-max-downloads` | 20 | 5 |
 | `--max-runs-per-principal-hour` | 600 | 60 |
 | `--shed-queue-depth` | 5000 | 1000 |
-| `--egress-monthly-bytes` | 100 GiB | 5 GiB |
-| `--egress-daily-cap-bytes` | 200 GiB | 20 GiB |
+| `--egress-daily-alarm-bytes` | 200 GiB | 20 GiB |
 | Idle-poll enforcement | on | on |
 
 The claim budgets are worked from the cadence the shipped claim loop
@@ -404,9 +403,11 @@ egress caps are the concurrency one team is expected to read logs and
 artifacts at.
 The run cap bounds the pending triggers one principal can queue when no
 runner claims them, and the shed depth is the fleet's backstop behind it.
-The egress byte budgets bound the bill a free account can run up with no
-compute at all: one principal's month, and the controller's day however
-many principals share it, which caps a month at 31 times the daily figure.
+The egress alarm names the day the controller's traffic runs ahead of the
+pod it was planned for; it refuses nothing. The bill one team can run up
+with no compute at all is bounded by that team's daily download cap,
+`--team-daily-download-free-bytes` and `--team-daily-download-funded-bytes`,
+which applies with or without a profile.
 
 A profile fills a guard only where the command line and the environment
 named none, and a guard the operator named wins whatever its value,
@@ -888,7 +889,7 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
   | `--max-inflight-bytes` (`SPARKWING_LOGS_MAX_INFLIGHT_BYTES`) | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
   | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
-  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off); 720h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 30 days unless the operator names another value, zero included. |
+  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off); 2160h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 90 days unless the operator names another value, zero included. A run of a team without credits keeps its archived logs 30 days at most. |
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
   | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |

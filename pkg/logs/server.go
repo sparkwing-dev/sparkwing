@@ -777,6 +777,13 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "label run", err)
 		return
 	}
+	if tier, ok := counted.tier(); ok {
+		if err := s.markRunTier(root, runID, tier == storagequota.TierFree); err != nil {
+			refuse()
+			s.storeError(w, "mark run tier", err)
+			return
+		}
+	}
 	if name != nodePath(runID, nodeID) {
 		if err := s.ensureAttemptDir(root, runID, nodeID); err != nil {
 			refuse()
@@ -1233,9 +1240,14 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		l := s.archive.lock(runID)
 		l.rw.Lock()
 		defer l.rw.Unlock()
-		if !s.mayDeleteArchivedRun(w, r, root, runID) {
+		deleted, err := s.deleteArchivedRun(r.Context(), runID)
+		if err != nil {
+			s.logger.Error("logs archive", "op", "delete run", "run", runID, "err", err)
+			http.Error(w, "delete the run's archived logs: the object store refused; retry", http.StatusBadGateway)
 			return
 		}
+		s.archive.noteAbsent(runID, time.Now())
+		w.Header().Set(storagequota.ArchivedBytesDeletedHeader, strconv.FormatInt(deleted, 10))
 	}
 	if err := root.RemoveAll(runID); err != nil {
 		s.storeError(w, "remove run dir", err)

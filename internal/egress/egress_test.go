@@ -44,12 +44,18 @@ func flushUsages(t *testing.T, m *egress.Meter) []egress.Usage {
 	return flushed
 }
 
+func monthBytes(m *egress.Meter, principal string) int64 {
+	for _, p := range m.State().Top {
+		if p.Principal == principal {
+			return p.MonthBytes
+		}
+	}
+	return 0
+}
+
 func TestUnbudgetedMeterCountsAndRefusesNothing(t *testing.T) {
 	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 5000)
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check with no budget = %v, want nil", err)
-	}
 	state := m.State()
 	if state.GlobalMonthBytes != 5000 || state.GlobalDayBytes != 5000 {
 		t.Fatalf("global totals = month %d day %d, want 5000 and 5000", state.GlobalMonthBytes, state.GlobalDayBytes)
@@ -59,53 +65,6 @@ func TestUnbudgetedMeterCountsAndRefusesNothing(t *testing.T) {
 	}
 	if state.Alarm {
 		t.Error("an unbudgeted meter raised the daily alarm")
-	}
-}
-
-func TestMonthlyBudgetRefusesOnlyThePrincipalPastIt(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 1000}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 999)
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check one byte short of the budget = %v, want nil", err)
-	}
-	m.Record("alice", egress.ClassArtifact, 1)
-
-	var budget *egress.BudgetError
-	err := m.Check("alice")
-	if !errors.As(err, &budget) {
-		t.Fatalf("Check at the budget = %v, want a *BudgetError", err)
-	}
-	if !errors.Is(err, egress.ErrBudgetExceeded) {
-		t.Error("a *BudgetError does not match ErrBudgetExceeded")
-	}
-	if budget.UsedBytes != 1000 || budget.LimitBytes != 1000 || budget.Principal != "alice" {
-		t.Fatalf("refusal = %+v, want alice at 1000 of 1000", budget)
-	}
-	if budget.RetryAfter <= 0 {
-		t.Errorf("RetryAfter = %s, want the wait until the month rolls", budget.RetryAfter)
-	}
-	for _, want := range []string{"alice", "egress budget exceeded", egress.FlagMonthlyBytes} {
-		if !strings.Contains(budget.Error(), want) {
-			t.Errorf("refusal message %q does not name %q", budget.Error(), want)
-		}
-	}
-	if err := m.Check("bob"); err != nil {
-		t.Fatalf("Check for a principal with its own budget = %v, want nil", err)
-	}
-}
-
-func TestBudgetResetsWhenTheMonthRolls(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 100}, "2026-09-30T23:59:00Z")
-	m.Record("alice", egress.ClassLog, 100)
-	if err := m.Check("alice"); err == nil {
-		t.Fatal("Check at the budget = nil, want a refusal")
-	}
-	*clock = at(t, "2026-10-01T00:00:00Z")
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check after the month rolled = %v, want nil", err)
-	}
-	if state := m.State(); state.GlobalMonthBytes != 0 || state.Month != "2026-10" {
-		t.Fatalf("state after the roll = %+v, want an empty October", state)
 	}
 }
 
@@ -200,23 +159,16 @@ func TestSlotsAreCountedApart(t *testing.T) {
 }
 
 func TestServeCountsTheBytesTheHandlerWrites(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 32}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	rec := httptest.NewRecorder()
 	out := m.Serve(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", egress.ClassArtifact)
-	if _, err := out.Write([]byte("0123456789")); err != nil {
-		t.Fatalf("write: %v", err)
+	for _, chunk := range []string{"0123456789", "0123456789", "0123456789ab"} {
+		if _, err := out.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
 	}
-	if _, err := out.Write([]byte("0123456789")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check under the budget = %v, want nil", err)
-	}
-	if _, err := out.Write([]byte("0123456789ab")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := m.Check("alice"); err == nil {
-		t.Fatal("Check after 32 bytes = nil, want a refusal")
+	if got := monthBytes(m, "alice"); got != 32 {
+		t.Fatalf("alice's bytes = %d, want the 32 written", got)
 	}
 	if body := rec.Body.String(); body != "01234567890123456789"+"0123456789ab" {
 		t.Fatalf("body = %q, the counting writer changed it", body)
@@ -260,7 +212,7 @@ func TestServeKeepsTheStreamControlsAHandlerAsksFor(t *testing.T) {
 }
 
 func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 1000}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 400)
 	m.Record("bob", egress.ClassLog, 100)
 	dirty := flushUsages(t, m)
@@ -275,7 +227,7 @@ func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
 		t.Fatalf("Flush after one more byte = %+v, want alice at 401", moved)
 	}
 
-	restarted, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 1000}, "2026-09-13T11:00:00Z")
+	restarted, _ := meterAt(t, egress.Config{}, "2026-09-13T11:00:00Z")
 	restarted.Restore([]egress.Usage{
 		{Principal: "alice", Month: "2026-09", Bytes: 401},
 		{Principal: "carol", Month: "2026-08", Bytes: 900},
@@ -335,28 +287,20 @@ func TestFlushDoesNotAcknowledgeBytesRecordedDuringPersistence(t *testing.T) {
 }
 
 func TestRestoreNeverLowersWhatThisProcessCounted(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 1000}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 900)
 	m.Restore([]egress.Usage{{Principal: "alice", Month: "2026-09", Bytes: 100}})
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check after a lower persisted total = %v, want the in-memory 900 to stand", err)
-	}
-	m.Record("alice", egress.ClassArtifact, 100)
-	if err := m.Check("alice"); err == nil {
-		t.Fatal("Check at 1000 = nil, want a refusal")
+	if got := monthBytes(m, "alice"); got != 900 {
+		t.Fatalf("alice after a lower persisted total = %d, want the in-memory 900 to stand", got)
 	}
 }
 
-func TestAnonymousBytesShareOneBudget(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 100}, "2026-09-13T10:00:00Z")
+func TestAnonymousBytesShareOneCount(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	m.Record("", egress.ClassGit, 60)
 	m.Record("", egress.ClassGit, 40)
-	var budget *egress.BudgetError
-	if err := m.Check(""); !errors.As(err, &budget) {
-		t.Fatalf("Check for anonymous = %v, want a refusal", err)
-	}
-	if budget.Principal != egress.AnonymousPrincipal {
-		t.Fatalf("refused principal = %q, want %q", budget.Principal, egress.AnonymousPrincipal)
+	if got := monthBytes(m, egress.AnonymousPrincipal); got != 100 {
+		t.Fatalf("anonymous bytes = %d, want 100 under %q", got, egress.AnonymousPrincipal)
 	}
 }
 
@@ -408,8 +352,8 @@ func TestBudgetedReportsWhetherAnyBudgetApplies(t *testing.T) {
 		t.Error("a zero Config reports a budget")
 	}
 	for _, cfg := range []egress.Config{
-		{PerPrincipalMonthlyBytes: 1},
 		{GlobalDailyAlarmBytes: 1},
+		{MaxDownloadsPerPrincipal: 1},
 		{MaxStreamsPerPrincipal: 1},
 	} {
 		if !cfg.Budgeted() {
@@ -504,8 +448,8 @@ func TestServeForwardsHijack(t *testing.T) {
 	}
 }
 
-func TestPrincipalsPastTheCapShareTheOverflowBudget(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 10}, "2026-09-13T10:00:00Z")
+func TestPrincipalsPastTheCapShareTheOverflowCount(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	for i := range egress.MaxPrincipals {
 		m.Record(fmt.Sprintf("p%d", i), egress.ClassArtifact, 1)
 	}
@@ -515,14 +459,8 @@ func TestPrincipalsPastTheCapShareTheOverflowBudget(t *testing.T) {
 
 	m.Record("late-1", egress.ClassArtifact, 6)
 	m.Record("late-2", egress.ClassArtifact, 6)
-	var budget *egress.BudgetError
-	// safety: the fold must tighten the meter, not open it, so two
-	// untracked principals spend one shared budget rather than none.
-	if err := m.Check("late-3"); !errors.As(err, &budget) {
-		t.Fatalf("Check for an untracked principal = %v, want a refusal", err)
-	}
-	if budget.Principal != egress.OverflowPrincipal || budget.UsedBytes != 12 {
-		t.Fatalf("refusal = %+v, want %s at 12 bytes", budget, egress.OverflowPrincipal)
+	if got := monthBytes(m, egress.OverflowPrincipal); got != 12 {
+		t.Fatalf("%s = %d bytes, want both untracked principals' 12", egress.OverflowPrincipal, got)
 	}
 	if got := m.State().Principals; got != egress.MaxPrincipals+1 {
 		t.Fatalf("tracked %d principals, want the cap plus the overflow bucket", got)
@@ -533,9 +471,6 @@ func TestPrincipalsPastTheCapShareTheOverflowBudget(t *testing.T) {
 	*clock = at(t, "2026-10-01T00:00:00Z")
 	if got := m.State().Principals; got != 0 {
 		t.Fatalf("tracked %d principals after the month rolled, want every idle one dropped", got)
-	}
-	if err := m.Check("late-3"); err != nil {
-		t.Fatalf("Check after the roll = %v, want nil", err)
 	}
 }
 
@@ -705,132 +640,6 @@ func TestStateRollsEachPrincipalsDayWithTheProcesss(t *testing.T) {
 	}
 }
 
-func TestDailyCapRefusesEveryPrincipalUntilTheDayRolls(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T10:00:00Z")
-	m.Record("alice", egress.ClassArtifact, 600)
-	m.Record("bob", egress.ClassLog, 399)
-	if err := m.Check("carol"); err != nil {
-		t.Fatalf("Check one byte under the process cap = %v, want nil", err)
-	}
-	m.Record("bob", egress.ClassLog, 1)
-
-	for _, who := range []string{"alice", "bob", "carol"} {
-		var budget *egress.BudgetError
-		err := m.Check(who)
-		if !errors.As(err, &budget) || !budget.ProcessWide {
-			t.Fatalf("Check(%s) at the process cap = %v, want a process-wide *BudgetError", who, err)
-		}
-		if !errors.Is(err, egress.ErrBudgetExceeded) {
-			t.Errorf("Check(%s): the cap refusal does not match ErrBudgetExceeded", who)
-		}
-		if budget.UsedBytes != 1000 || budget.LimitBytes != 1000 || budget.Principal != who {
-			t.Fatalf("refusal = %+v, want %s refused at 1000 of 1000", budget, who)
-		}
-		if budget.RetryAfter != 14*time.Hour {
-			t.Errorf("RetryAfter = %s, want the 14h until the UTC day rolls", budget.RetryAfter)
-		}
-		for _, want := range []string{"daily cap", who, egress.FlagDailyCapBytes} {
-			if !strings.Contains(budget.Error(), want) {
-				t.Errorf("refusal message %q does not name %q", budget.Error(), want)
-			}
-		}
-	}
-
-	*clock = at(t, "2026-09-14T00:00:00Z")
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check after the day rolled = %v, want nil", err)
-	}
-	if state := m.State(); state.DailyCapBytes != 1000 || state.GlobalMonthBytes != 1000 {
-		t.Fatalf("state after the roll = %+v, want the cap reported and the month kept", state)
-	}
-}
-
-// safety: both downloads start below the cap, which is the whole of what a
-// check before the response can see, so only a writer that spends the
-// remaining budget as it goes keeps the day's total at the cap.
-func TestParallelDownloadsStopAtTheDailyCap(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T10:00:00Z")
-	get := httptest.NewRequest(http.MethodGet, "/a", nil)
-	first, second := httptest.NewRecorder(), httptest.NewRecorder()
-	if err := m.Check("alice"); err != nil {
-		t.Fatalf("Check alice = %v", err)
-	}
-	if err := m.Check("bob"); err != nil {
-		t.Fatalf("Check bob = %v", err)
-	}
-	outA := m.Serve(first, get, "alice", egress.ClassArtifact)
-	outB := m.Serve(second, get, "bob", egress.ClassArtifact)
-
-	payload := []byte(strings.Repeat("x", 800))
-	if n, err := outA.Write(payload); err != nil || n != 800 {
-		t.Fatalf("first write = %d, %v; want 800 bytes under the cap", n, err)
-	}
-	n, err := outB.Write(payload)
-	if !errors.Is(err, egress.ErrBudgetExceeded) {
-		t.Fatalf("a write past the cap = %d, %v; want ErrBudgetExceeded", n, err)
-	}
-	if n != 200 || second.Body.Len() != 200 {
-		t.Fatalf("a write past the cap sent %d bytes (body %d), want the 200 left", n, second.Body.Len())
-	}
-	if n, err := outA.Write(payload); n != 0 || !errors.Is(err, egress.ErrBudgetExceeded) {
-		t.Fatalf("a write at the cap = %d, %v; want nothing sent", n, err)
-	}
-	if got := m.State().GlobalDayBytes; got != 1000 {
-		t.Fatalf("GlobalDayBytes = %d, want the 1000 the cap allows", got)
-	}
-}
-
-func TestAWriteStopsAtThePrincipalsMonthlyBudget(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 100}, "2026-09-13T10:00:00Z")
-	rec := httptest.NewRecorder()
-	out := m.Serve(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", egress.ClassArtifact)
-	if _, err := out.Write([]byte(strings.Repeat("x", 60))); err != nil {
-		t.Fatalf("write under the budget: %v", err)
-	}
-	var budget *egress.BudgetError
-	n, err := out.Write([]byte(strings.Repeat("x", 60)))
-	if !errors.As(err, &budget) || budget.ProcessWide {
-		t.Fatalf("a write past the monthly budget = %d, %v; want the principal's *BudgetError", n, err)
-	}
-	if n != 40 || rec.Body.Len() != 100 {
-		t.Fatalf("sent %d more (body %d), want the 40 left of 100", n, rec.Body.Len())
-	}
-	// safety: another principal's writes are not cut by alice's budget.
-	other := m.Serve(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/a", nil), "bob", egress.ClassArtifact)
-	if n, err := other.Write([]byte(strings.Repeat("x", 60))); err != nil || n != 60 {
-		t.Fatalf("bob's write = %d, %v; want 60 and no refusal", n, err)
-	}
-}
-
-// safety: a chunked response the budget cut must not end with a clean
-// terminator, or the client keeps a truncated artifact as if it were whole.
-func TestHandleAbortsAResponseTheBudgetCut(t *testing.T) {
-	m := egress.New(egress.Config{GlobalDailyCapBytes: 64})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m.Handle(w, r, "alice", egress.ClassArtifact, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			for range 4 {
-				if _, err := w.Write([]byte(strings.Repeat("x", 32))); err != nil {
-					return
-				}
-				w.(http.Flusher).Flush()
-			}
-		}))
-	}))
-	defer srv.Close()
-	resp, err := http.Get(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err == nil {
-		t.Fatalf("read %d bytes and a clean end from a response the cap cut at 64", len(body))
-	}
-	if len(body) > 64 {
-		t.Fatalf("the client received %d bytes past a 64-byte cap", len(body))
-	}
-}
-
 // A restart later in the month resumes the month's total from the last saved
 // day, while that day's own total no longer counts; another month's total is
 // ignored.
@@ -860,7 +669,7 @@ func TestRestoreDayResumesTheMonthOnALaterDay(t *testing.T) {
 }
 
 func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
-	m, clock := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T10:00:00Z")
+	m, clock := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 600)
 	m.Record("bob", egress.ClassLog, 400)
 	var got []egress.DayUsage
@@ -875,18 +684,15 @@ func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
 		t.Fatalf("FlushDay = %+v, want one 2026-09-13 total of 1000 in a 2026-09 total of 1000", got)
 	}
 
-	restarted, _ := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T11:00:00Z")
+	restarted, _ := meterAt(t, egress.Config{}, "2026-09-13T11:00:00Z")
 	restarted.RestoreDay(egress.DayUsage{Day: "2026-09-12", Bytes: 5000})
-	if err := restarted.Check("carol"); err != nil {
-		t.Fatalf("yesterday's total closed today's cap: %v", err)
+	if state := restarted.State(); state.GlobalDayBytes != 0 {
+		t.Fatalf("GlobalDayBytes after restoring yesterday = %d, want 0", state.GlobalDayBytes)
 	}
 	restarted.RestoreDay(got[0])
 	restarted.RestoreDay(egress.DayUsage{Day: "2026-09-13", Bytes: 10})
 	if state := restarted.State(); state.GlobalDayBytes != 1000 {
 		t.Fatalf("GlobalDayBytes after RestoreDay = %d, want 1000 and never lowered", state.GlobalDayBytes)
-	}
-	if err := restarted.Check("carol"); !errors.Is(err, egress.ErrBudgetExceeded) {
-		t.Fatalf("Check after restoring a spent day = %v, want the cap's refusal", err)
 	}
 
 	*clock = at(t, "2026-09-14T00:00:01Z")

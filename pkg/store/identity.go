@@ -97,14 +97,15 @@ func isReservedSlug(slug string) bool {
 // Team-wide ceilings. Every runner token multiplies each per-principal budget, and every invitation
 // may become a mail the deployment sends, so a team holds a bounded number of both.
 const (
-	MaxRunnerTokensPerTeam = 10
+	MaxRunnerTokensPerTeam = 100
 	MaxInvitationsPerDay   = 100
 	MaxOpenInvitations     = 50
 )
 
-// RunnerTokenLifetime bounds a team runner token. The token reads the secrets
-// of whatever run it claims, so one a forgotten machine still holds stops
-// working on its own.
+// RunnerTokenLifetime is how long a team runner token lives unused. Each use
+// moves its expiry to this far past the use, so a machine that keeps working
+// keeps its token, and one a forgotten machine still holds stops working on
+// its own. The token reads the secrets of whatever run it claims.
 const RunnerTokenLifetime = 90 * 24 * time.Hour
 
 // MaxCreatedTeams bounds how many teams one user creates over the account's

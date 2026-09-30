@@ -50,9 +50,9 @@ unlock.
   later. A launched node's billing opens when its pod first renews the claim,
   at the start of the source fetch, not at the claim. A handed-back node
   shows `waiting for Cloud capacity` with a `capacity_wait` event. The
-  launcher claims no new node while five of its own Jobs wait for a machine,
-  counted from the Jobs it already lists, and resumes as they start or are
-  handed back. A
+  launcher claims no new node while five of the Jobs it created are not yet
+  running, counted as it creates each and from the Jobs it lists at every
+  sync, and resumes as they start or are handed back. A
   planning node whose `.sparkwing` pins a
   sparkwing release before v0.65.0 fails before its build, naming the pin. The
   opt-in's audit record names the repository. Opting a repository in is
@@ -73,7 +73,10 @@ unlock.
   token, for its own run and node in its own team, under its node's holder
   ID, and only with the key, policy, capacity and cost its accepted plan
   declares for the node, a memoized node only under its own repository,
-  pipeline and node, and it moves no sibling node's holder; a slot's lease
+  pipeline and node; every concurrency route, cancel-waiter, resolve,
+  notify and state included, lets it act only on its own node's holders and
+  waiters under a key its node declares, and it joins no other holder at
+  no cost; a slot's lease
   never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
   not. A claim token's binary cache is scoped to its run's GitHub repository ID
@@ -90,7 +93,8 @@ unlock.
   `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
   itself: the cache entry of the node's memoization, the leader its own
   coalesce waiter names, both only under the node's own memo key and from a
-  run of its repository, pipeline and node, or the newest successful run of a pipeline and node
+  run of its repository, pipeline and node (a cache entry another repository
+  wrote under a reused name reads as a miss, and the node runs), or the newest successful run of a pipeline and node
   its plan declares in the new per-node `pipeline_refs` field, which the SDK
   fills from the `RefToLastRun` fields a job struct holds; an undeclared
   reference is refused and audited, and a ref built in a step body is refused
@@ -414,18 +418,21 @@ unlock.
 
 - **cache + controller:** a per-team daily download cap. Every `GET` the
   cache serves a grant (binaries, artifacts, dependency archives and git
-  mirror fetches) is charged to the grant's team for the UTC day in the
-  controller's database, through `POST /internal/downloads/charge`; past the
+  mirror fetches), and every artifact and git proxy download the controller
+  serves a team's credential, is charged to that team for the UTC day in the
+  controller's database, the cache's through
+  `POST /internal/downloads/charge`; reading a run's logs is never charged,
+  and a download under way always finishes. Past the
   controller's `--team-daily-download-free-bytes` (5 GiB) for a free team, or
   `--team-daily-download-funded-bytes` (50 GiB) for a funded one, the team's
   downloads answer `429` with a `Retry-After` naming the wait until midnight
-  UTC. A download of known length is charged whole under a row lock before
-  its first byte, so two downloads racing for a team's last bytes cannot both
-  start; a stream is checked for room when it starts and charged what it sent.
+  UTC. Only a team already at its cap is refused; a download is charged the
+  bytes it delivers, 8 MiB at a time as it streams, so a range pays for what
+  it served, and a signed URL is charged the object's size when it is minted
+  and expires after 60 seconds.
   While the controller cannot answer, a free team's download is refused with
   `503`, and a team answered funded within five minutes proceeds. The
-  operator's team and token are exempt. `0` turns either cap off; the
-  process-wide `--egress-daily-cap-bytes` stays the backstop. See
+  operator's team and token are exempt. `0` turns either cap off. See
   [Egress budgets](docs/observability.md#egress-budgets).
 - **logs + runner:** a node's log says whether it is whole. The runner
   numbers every line it appends (`X-Sparkwing-Log-Stream`,
@@ -444,11 +451,14 @@ unlock.
   [Log completeness](docs/observability.md#log-completeness).
 
 - **controller:** a free tier bounded by counting teams. A team without
-  credits takes one of `--free-team-slots` (200) the first time it starts a
-  run, in the trigger's transaction, and keeps it until the team is deleted,
-  so free storage never passes slots times the allowance. A team with neither
-  a slot nor credits is refused its runs with `402` "free storage is paused;
-  buy credits or join the waitlist". `PUT /api/v1/storage/teams/{team}/free-slot`
+  credits takes one of `--free-team-slots` (200) with the first byte it
+  commits, in that commit's transaction, and keeps it until the team is
+  deleted; a commit that cannot take a slot is refused with `402`, so no team
+  without a slot commits a byte. A team with
+  neither a slot nor credits is refused its storage writes with `402` "free
+  storage is paused; buy credits or join the waitlist". Runs are never refused
+  for billing: its own machines run them, and a metered claim still needs
+  credits and is refused while the team is held over a disputed payment. `PUT /api/v1/storage/teams/{team}/free-slot`
   (`admin`) grants a slot past the cap, and `Server.SignUpFreeTier` reports the
   tier closed once every slot is taken. Schema v56 adds `free_slots`. See
   [Tenant limits](docs/limits.md).
@@ -457,7 +467,17 @@ unlock.
   (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares:
   the cache keeps 768 MiB, checked before an upload's body is read and cut at
   the room left when the length is unknown; the logs service keeps 192 MiB,
-  checked after the node and run caps and before the append is written; run
+  counted as it is written but never refused for it: the hourly storage pass
+  deletes a free team's least recently written finished runs' archived logs,
+  through the logs service with the controller's `logs.delete` credential,
+  until the team is back under its share. It skips a run still going or one
+  no run row records, and takes off the count only the bytes the logs service
+  reports deleting (`X-Sparkwing-Archived-Bytes-Deleted`), so a refused
+  deletion frees nothing. A team with neither credits nor a slot that never
+  held credits has a log share of zero, so its finished runs' logs are
+  pruned too; a team whose credits lapsed keeps its logs to retention. The logs service's `DELETE /api/v1/logs/{runID}`
+  deletes any team's run for a `logs.delete` credential, as its team-logs
+  deletion already did; run
   events keep 64 MiB, checked in the append's transaction. The controller
   counts every team's cache and log bytes in its database (schema v61,
   `team_storage`): a write reserves its size with
@@ -481,8 +501,7 @@ unlock.
   plus what was committed while it listed. A store whose listing fails keeps
   its counts, and `/api/v1/health` reports the failed pass.
 
-- **controller:** a team without credits starts at most 200 runs in any 24
-  hours (`429`), a team binds at most 20 repositories to GitHub runners
+- **controller:** a team binds at most 20 repositories to GitHub runners
   (`403`), and a signed-up team holds at most 100 secrets of 128 KiB each
   (`413`).
 
@@ -796,12 +815,11 @@ unlock.
   routes, and another team's grant on registration (403). A team's bins and the git mirrors count toward the store ceiling.
   The operator token is unchanged.
 
-- **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
-  the cache refuses every download a process serves once it has sent that many
-  bytes in the UTC day, answering `429` with a `Retry-After` naming the day
-  roll. The per-principal budgets bound one caller and are multiplied by every
-  account or token a caller mints; this is the backstop that bounds the month.
-  Unlimited by default.
+- **egress:** the daily egress alarm is exported as the
+  `sparkwing_egress_daily_alarm` and `sparkwing_egress_day_bytes` gauges on
+  the controller's and the logs service's `/metrics`, and as
+  `sparkwing.cache.egress_daily_alarm` and `sparkwing.cache.egress_day_bytes`
+  on the cache's. The alarm refuses nothing.
 - **web:** Sign in with Google on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
   provider, the sign-in page offers Google. `GET /auth/google/start` and
@@ -868,7 +886,7 @@ unlock.
   active team; an editor mints and revokes their own, an owner revokes any.
   Every `/team` route acts on the session's team, and another team's id
   answers 404. Nobody grants a role above their own and the last owner stays.
-  A team holds at most 10 live runner tokens (the next mint answers 409), 50
+  A team holds at most 100 live runner tokens (the next mint answers 409), 50
   open invitations and 100 invitations created a day (429), and a withdrawn
   invitation still counts toward the day. `store.Tenant` refuses to mint a
   token carrying `admin` on every path.
@@ -1013,6 +1031,12 @@ unlock.
   outputs before the upgrade, and a laptop database moves its own on first
   open. See the
   [migration guide](docs/migrations/_unreleased.md#job-outputs-are-objects).
+- **cloud:** Cloud builds fetch packages from the upstream registries. The
+  Cloud cache runs with `--disable-proxy` and its runners with
+  `--dependency-proxy=off`, because the proxy takes no credential and its
+  bytes could not be charged to a team. Self-hosted deployments keep the
+  proxy.
+
 - **controller:** The `cloud` limits profile allows a signed-up team 3600
   requests a minute, up from 2000. A team's tokens share that budget, and a
   two-slot runner spends about 300 a minute, so a pool of ten runners no longer
@@ -1159,9 +1183,9 @@ unlock.
   store the cache and logs service keep their objects in.
 
 - **cache:** a cache that verifies grants starts with a 200 GiB daily egress
-  cap unless `--egress-daily-cap-bytes` names another value. It bounds what
-  any caller churns through the registry proxy, which takes no credential and
-  belongs inside the cluster only.
+  alarm unless `--egress-daily-alarm-bytes` names another value. It reports
+  what callers churn through the registry proxy, which takes no credential and
+  belongs inside the cluster only, and refuses nothing.
   With `--controller` the day's and the month's egress totals survive a
   restart, kept in the controller's database. `--disable-proxy`
   serves no registry proxy, and the runner bundle refuses a cache Service
@@ -1171,7 +1195,10 @@ unlock.
 - **cache:** a cache that verifies grants and keeps a `--blob-store` refuses
   to start without `--controller`, which counts what each team stores there.
 
-- **logs:** with `--archive-store`, `--retention` defaults to 30 days.
+- **logs:** with `--archive-store`, `--retention` defaults to 90 days, and a
+  run whose reservation reported a team without credits keeps its archived
+  logs 30 days at most, recorded with the run and indexed under
+  `index/free-days/`.
 - **credits (Breaking):** one credit is $0.001, a value that never changes;
   prices move by rate, never by redefining the credit. The ledger still stores
   micro-credits and a dollar is still 100,000,000 of them, so every balance,
@@ -1229,10 +1256,10 @@ unlock.
 
 - **controller:** the `cloud` and `cloud-free` limits profiles now also set
   `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
-  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
-  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
-  with a profile previously left run creation and egress bytes unlimited. A
-  flag or environment variable the operator names still wins.
+  (5000 / 1000) and `--egress-daily-alarm-bytes` (200 GiB / 20 GiB), which
+  refuses nothing. A hosted controller started with a profile previously left
+  run creation unlimited. A flag or environment variable the operator names
+  still wins.
 - **controller (Breaking):** a metered token's trigger claim names how its
   nodes run. `POST /api/v1/triggers/claim` and `/api/v1/triggers/{id}/claim`
   take `node_runner` (`k8s`, `warm` or `inprocess`, the default), and a
@@ -1332,6 +1359,11 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **store:** A queued concurrency group promotes its waiters in arrival order
+  even when the host's wall clock steps backwards between two arrivals. Before,
+  a node queued just after the step jumped ahead of every waiter stamped in the
+  stepped-over window; WSL2 steps its clock back about 750ms every 30 seconds.
 
 - **runner + controller:** A runner, agent, worker or launcher whose token is
   revoked or expired no longer polls the controller twice a second forever. The
@@ -1643,18 +1675,13 @@ unlock.
   Postgres broke the deadlock after a second by aborting one side. The round
   now locks the run `FOR NO KEY UPDATE`.
 
-- **controller:** a restart no longer reopens the egress daily cap. Only the
-  per-principal month totals were persisted, so a controller restarted after
-  reaching `--egress-daily-cap-bytes` served the whole cap again that day. The
-  day's process total is now written on the maintenance sweep beside the
-  month totals and restored before the listener binds.
-- **egress:** the daily cap and the monthly budget are hard byte caps. They
-  were checked once before a response started, so parallel downloads begun
-  just under a cap each finished past it. Bytes are now charged as they are
-  written, a write past either budget sends only what is left, and the
-  controller, logs service and cache abort the cut response so the client
-  sees a failed transfer. The download and log-stream concurrency caps key on
-  the authenticated principal alone; they had keyed on the caller's
+- **controller:** a restart no longer resets the egress daily alarm. Only the
+  per-principal month totals were persisted, so a controller restarted
+  mid-day counted the day from zero. The day's process total is now written on
+  the maintenance sweep beside the month totals and restored before the
+  listener binds.
+- **egress:** the download and log-stream concurrency caps key on the
+  caller's team and token name; they had keyed on the caller's
   `X-Sparkwing-Runner` or claim-holder header, so a caller multiplied its
   slots by naming pods. A pool behind one bearer now shares its caps, so size
   `--egress-max-downloads` and `--egress-max-log-streams` for the pool.
@@ -1979,8 +2006,9 @@ unlock.
   removed editor's machine kept reading the team's pipeline secrets. Removing a
   member now revokes every token they minted in that team, and demoting one to
   `reader` revokes their runner tokens, in the same transaction as the role
-  change. A team runner token expires 90 days after it is minted, and
-  `GET /api/v1/team/runner-tokens` reports `expires_at`.
+  change. A team runner token expires once it goes 90 days unused, each use
+  moving `expires_at` forward, and `GET /api/v1/team/runner-tokens` reports
+  `expires_at`. A token's last use is written at most once an hour.
   `store.Tenant.RemoveMember` and `SetMemberRole` take the time and return the
   revoked prefixes. `docs/auth.md` now states that an editor can use the
   secrets the team's pipelines read.
@@ -2049,6 +2077,17 @@ unlock.
   January 1970.
 
 ### Removed
+
+- **controller + logs (Breaking):** `--egress-monthly-bytes` and
+  `SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES` /
+  `SPARKWING_LOGS_EGRESS_MONTHLY_BYTES` are gone, with the
+  `egress_budget_exceeded` refusal and the `monthly_bytes_per_principal` and
+  `over_budget` members of `GET /api/v1/egress`. The budget keyed on a token's
+  free-text name, so two teams whose tokens shared a name spent one budget,
+  and it refused log reads. What a team downloads is bounded by its daily
+  download cap, which never counts log reads; the logs service refuses no
+  byte. A limits profile sets the daily alarm in place of the budget. See the
+  [migration guide](docs/migrations/_unreleased.md#egress-monthly-budget-removed).
 
 - **controller + web (Breaking):** `--trusted-proxy-cidrs` and the chart's
   `controller.trustedProxyCIDRs` and `web.trustedProxyCIDRs` are gone, and

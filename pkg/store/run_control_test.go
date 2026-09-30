@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -445,44 +444,6 @@ func TestEnqueueChildRun_ReusesOnlyALiveChildOfTheSameRequest(t *testing.T) {
 		if got, err := enqueue(next, int64(i), want, arg); err != nil || got != want {
 			t.Fatalf("ordinal %d on the next attempt: %q %v, want %s", i, got, err, want)
 		}
-	}
-}
-
-// A replay of an enqueued child answers even once the team has used up its
-// free runs for the day; only a new child is admitted.
-func TestEnqueueChildRun_ReplayAnswersAtTheDailyCap(t *testing.T) {
-	f := newDispatchRun(t, "run-child-cap")
-	f.mustAccept(t, planOf("a"))
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	ctx := context.Background()
-	acme := teamHandle(t, f.s, "acme")
-	for _, table := range []string{"runs", "nodes", "claim_tokens"} {
-		col := "run_id"
-		if table == "runs" {
-			col = "id"
-		}
-		if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
-			`UPDATE `+table+` SET team = 'acme' WHERE `+col+` = ?`), f.run); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tok.Team = "acme"
-	enqueue := func(ordinal int64, id string) (string, error) {
-		return f.s.EnqueueChildRun(ctx, tok, ordinal, store.Trigger{ID: id, Pipeline: "child"}, time.Now())
-	}
-	if got, err := enqueue(0, "child-0"); err != nil || got != "child-0" {
-		t.Fatalf("first child: %q %v", got, err)
-	}
-	for i := 1; i < store.MaxFreeRunsPerDay; i++ {
-		if err := startRun(acme, fmt.Sprintf("filler-%d", i)); err != nil {
-			t.Fatalf("filler %d: %v", i, err)
-		}
-	}
-	if got, err := enqueue(0, "child-0-retry"); err != nil || got != "child-0" {
-		t.Fatalf("replay at the daily cap: %q %v, want child-0", got, err)
-	}
-	if _, err := enqueue(1, "child-1"); !errors.Is(err, store.ErrFreeRunLimit) {
-		t.Fatalf("a new child at the daily cap: err = %v, want ErrFreeRunLimit", err)
 	}
 }
 

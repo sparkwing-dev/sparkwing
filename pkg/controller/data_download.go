@@ -378,7 +378,11 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "sign download", err)
 		return
 	}
-	_, err = s.store.ChargeDownload(r.Context(), store.DownloadCharge{Team: team, Bytes: objectSize, Now: time.Now(), FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
+	// safety: log reads are never counted against a team's download cap, so
+	// a team at its cap can still read why its runs failed.
+	if req.Kind != "log" {
+		_, err = s.store.ChargeDownload(r.Context(), store.DownloadCharge{Team: team, Bytes: objectSize, Now: time.Now(), FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
+	}
 	var capErr *store.DownloadCapError
 	switch {
 	case errors.As(err, &capErr):

@@ -1,8 +1,10 @@
 // Package storagequotatest is a stand-in for the controller's storage
 // counter routes, for tests of the services that call them. It keeps the
 // counts in memory under one lock with the controller's arithmetic: a free
-// team's reservation fits used plus reserved within its share, and a
-// download fits the team's day within its cap.
+// team's cache reservation fits used plus reserved within its share, its log
+// reservations are granted whatever they hold, a team with no tier is refused
+// its reservations and commits, and a download is refused once the team's day
+// reaches its cap.
 package storagequotatest
 
 import (
@@ -150,6 +152,10 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	k := key{req.Team, req.Store}
 	path := r.URL.Path
+	if path == "/internal/storage/commit" && req.Bytes > 0 && c.tier(req.Team) == storagequota.TierNone {
+		refuse(w, http.StatusPaymentRequired, "free storage is paused; buy credits or join the waitlist")
+		return
+	}
 	if path == "/internal/storage/commit" && req.NextBytes > 0 {
 		c.commit(k, req.Team, req.Reservation, req.Bytes)
 		req.Bytes, req.UpTo, path = req.NextBytes, true, "/internal/storage/reserve"
@@ -163,6 +169,9 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusPaymentRequired, "free storage is paused; buy credits or join the waitlist")
 			return
 		case storagequota.TierFree:
+			if req.Store == storagequota.KindLogs {
+				break
+			}
 			room := c.Share - c.used[k] - c.reserved[k]
 			if req.UpTo && (granted <= 0 || granted > room) {
 				granted = room
@@ -193,7 +202,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case "/internal/downloads/charge":
 		tier := c.tier(req.Team)
-		if !req.Record && c.DownloadCap > 0 && tier != storagequota.TierFunded && c.days[req.Team]+max(req.Bytes, 1) > c.DownloadCap {
+		if !req.Record && c.DownloadCap > 0 && tier != storagequota.TierFunded && c.days[req.Team] >= c.DownloadCap {
 			w.Header().Set("Retry-After", "3600")
 			refuse(w, http.StatusTooManyRequests, "daily download cap reached: team %s downloaded %d of its %d bytes",
 				req.Team, c.days[req.Team], c.DownloadCap)

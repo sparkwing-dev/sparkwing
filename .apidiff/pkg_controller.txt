@@ -96,7 +96,6 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
 const DisputeConflictCode = "dispute_conflict"
-const EgressBudgetCode = "egress_budget_exceeded"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
@@ -108,7 +107,6 @@ type FloodPolicy struct {
 
 	DedupeWindow time.Duration
 }
-const FreeRunLimitRetryAfterSeconds = 3600
 const FreeTierClosed FreeTierState = "closed"
 type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
 func (f FreeTierFunc) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
@@ -218,9 +216,7 @@ type LimitsProfileValues struct {
 
 	ShedQueueDepth int
 
-	EgressMonthlyBytesPerPrincipal int64
-
-	EgressDailyCapBytes int64
+	EgressDailyAlarmBytes int64
 
 	EnforceIdleClaimPoll bool
 }

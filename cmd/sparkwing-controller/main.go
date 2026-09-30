@@ -211,7 +211,7 @@ func run(args []string) error {
 	limitsProfile := fs.String("limits-profile", "",
 		fmt.Sprintf("named set of abuse guards this controller runs with: %s. A profile "+
 			"supplies the per-runner and per-token request budgets, the request rate "+
-			"alarm, the egress stream and download caps, and idle-poll enforcement, "+
+			"alarm, the egress alarm, stream and download caps, and idle-poll enforcement, "+
 			"and it fills a guard only where the command line and the environment "+
 			"named none, so an explicit setting always wins, zero included. Empty, "+
 			"the default, supplies none and leaves a self-hosted controller exactly "+
@@ -259,9 +259,10 @@ func run(args []string) error {
 			"what each team's archived logs hold; the logs service keeps its own retention "+
 			"(env: SPARKWING_LOGS_ARCHIVE_STORE)")
 	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
-		"bytes one team without credits may download through the cache in a UTC day: binaries, artifacts, "+
-			"dependency archives and git fetches. Past it the cache refuses the team's downloads with 429 until "+
-			"midnight UTC. The operator's team is exempt, and 0 turns the cap off")
+		"bytes one team without credits may download in a UTC day: binaries, artifacts, dependency archives "+
+			"and git fetches, through the cache or this controller. Log reads are not counted. Past it the "+
+			"team's next download is refused with 429 until midnight UTC; one already under way finishes. The "+
+			"operator's team is exempt, and 0 turns the cap off")
 	teamDownloadFunded := fs.Int64("team-daily-download-funded-bytes", controller.DefaultTeamDailyDownloadFundedBytes,
 		"the same daily cap for a team with credits; 0 turns it off")
 	bucketMeasurePages := fs.Int("bucket-measure-pages", envMeasurePages(),
@@ -369,8 +370,7 @@ func run(args []string) error {
 		MaxDownloadsPerPrincipal:  egressCfg.MaxDownloadsPerPrincipal,
 		RunsPerPrincipalHour:      *maxRunsPerPrincipalHour,
 		ShedQueueDepth:            *shedQueueDepth,
-		EgressMonthlyBytes:        egressCfg.PerPrincipalMonthlyBytes,
-		EgressDailyCapBytes:       egressCfg.GlobalDailyCapBytes,
+		EgressDailyAlarmBytes:     egressCfg.GlobalDailyAlarmBytes,
 	}, guardsNamed{
 		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
 		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
@@ -380,13 +380,11 @@ func run(args []string) error {
 		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
 		RunsPerPrincipalHour:      fs.Changed("max-runs-per-principal-hour"),
 		ShedQueueDepth:            fs.Changed("shed-queue-depth"),
-		EgressMonthlyBytes:        egressNamed.MonthlyBytes,
-		EgressDailyCapBytes:       egressNamed.DailyCapBytes,
+		EgressDailyAlarmBytes:     egressNamed.DailyAlarmBytes,
 	})
 	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
-	egressCfg.PerPrincipalMonthlyBytes = guards.EgressMonthlyBytes
-	egressCfg.GlobalDailyCapBytes = guards.EgressDailyCapBytes
+	egressCfg.GlobalDailyAlarmBytes = guards.EgressDailyAlarmBytes
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
 			*liveLogNodeKB, *liveLogTotalMB)
@@ -663,8 +661,7 @@ type guardValues struct {
 	MaxDownloadsPerPrincipal  int
 	RunsPerPrincipalHour      int
 	ShedQueueDepth            int
-	EgressMonthlyBytes        int64
-	EgressDailyCapBytes       int64
+	EgressDailyAlarmBytes     int64
 	EnforceIdleClaimPoll      bool
 }
 
@@ -679,8 +676,7 @@ type guardsNamed struct {
 	MaxDownloadsPerPrincipal  bool
 	RunsPerPrincipalHour      bool
 	ShedQueueDepth            bool
-	EgressMonthlyBytes        bool
-	EgressDailyCapBytes       bool
+	EgressDailyAlarmBytes     bool
 }
 
 // safety: zero is a documented value on every guard here, unlimited, so what
@@ -711,11 +707,8 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	if !named.ShedQueueDepth {
 		set.ShedQueueDepth = profile.ShedQueueDepth
 	}
-	if !named.EgressMonthlyBytes {
-		set.EgressMonthlyBytes = profile.EgressMonthlyBytesPerPrincipal
-	}
-	if !named.EgressDailyCapBytes {
-		set.EgressDailyCapBytes = profile.EgressDailyCapBytes
+	if !named.EgressDailyAlarmBytes {
+		set.EgressDailyAlarmBytes = profile.EgressDailyAlarmBytes
 	}
 	set.EnforceIdleClaimPoll = profile.EnforceIdleClaimPoll
 	return set

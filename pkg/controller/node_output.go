@@ -114,7 +114,11 @@ func (o fsOutputs) commit(ctx context.Context, u store.Upload) error {
 	if err := os.Rename(pending, final); err != nil {
 		return err
 	}
-	return o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
+	err := o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
+	if errors.Is(err, store.ErrFreeStoragePaused) {
+		return errors.Join(err, os.Remove(final))
+	}
+	return err
 }
 
 func (o fsOutputs) resolve(_ *http.Request, obj store.Upload) (string, time.Time, error) {

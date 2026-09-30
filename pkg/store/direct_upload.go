@@ -182,11 +182,6 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 		return Upload{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if source {
-		if err := admitFreeTeamRunTx(ctx, tx, req.Team, req.Now); err != nil {
-			return Upload{}, err
-		}
-	}
 	var exists int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM data_objects WHERE team = ? AND key = ? AND provenance = ?`, string(req.Team), req.Key, req.Provenance).Scan(&exists)
 	if err == nil {
@@ -455,6 +450,11 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := takeStorageSlotTx(ctx, tx, team, u.Size, now); err != nil {
+		if small, serr := smallOutputWithoutSlotTx(ctx, tx, team, u); serr != nil || !small {
+			return errors.Join(err, serr)
+		}
+	}
 	if _, _, err := lockTeamStorageTx(ctx, tx, team, u.Kind, now); err != nil {
 		return err
 	}
@@ -493,6 +493,22 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 		return err
 	}
 	return tx.Commit()
+}
+
+// safety: a small output needs no slot while the team's small outputs stay
+// within the overage its reservation was granted under, so the commit keeps
+// what the reservation promised.
+func smallOutputWithoutSlotTx(ctx context.Context, tx *storeTx, team Team, u Upload) (bool, error) {
+	if !strings.HasPrefix(u.Key, "outputs/") || u.Size > MaxUnpaidOutputBytes {
+		return false, nil
+	}
+	var used int64
+	err := tx.QueryRowContext(ctx, `SELECT used_bytes FROM team_storage WHERE team = ? AND store = ?`,
+		string(team), string(u.Kind)).Scan(&used)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	return used+u.Size <= MaxSmallOutputOverage, nil
 }
 
 // PruneExpiredUploads removes upload records after the pending lifecycle

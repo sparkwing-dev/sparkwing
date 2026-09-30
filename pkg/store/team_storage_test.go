@@ -15,8 +15,8 @@ import (
 func freeTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	tenant := teamHandle(t, st, team)
-	if err := startRun(tenant, "t-"+string(team)); err != nil {
-		t.Fatalf("%s's first run: %v", team, err)
+	if err := st.GrantFreeSlot(context.Background(), team, time.Now()); err != nil {
+		t.Fatalf("%s's free slot: %v", team, err)
 	}
 	return tenant
 }
@@ -60,8 +60,8 @@ func TestReserveHoldsAFreeTeamToEachShareApart(t *testing.T) {
 	if _, err := reserve(st, "team-a", store.StorageLogs, 3<<10, now); err != nil {
 		t.Fatalf("the log share with the cache share full: %v", err)
 	}
-	if _, err := reserve(st, "team-a", store.StorageLogs, 1, now); !errors.As(err, &quota) {
-		t.Fatalf("one byte past the log share = %v, want a quota error", err)
+	if past, err := reserve(st, "team-a", store.StorageLogs, 1, now); err != nil || past.Granted != 1 {
+		t.Fatalf("one byte past the log share = %+v, %v; want it granted for the storage pass to prune", past, err)
 	}
 
 	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 10 << 10, Now: now}); err != nil {
@@ -471,16 +471,13 @@ func TestChargeDownloadHoldsATeamToItsDailyCap(t *testing.T) {
 	if got, err := charge(st, "team-a", 60, now); err != nil || got.DayBytes != 60 || got.CapBytes != 100 {
 		t.Fatalf("60 of 100 = %+v, %v", got, err)
 	}
-	_, err := charge(st, "team-a", 60, now)
+	if got, err := charge(st, "team-a", 60, now); err != nil || got.DayBytes != 120 {
+		t.Fatalf("60 more with 40 left = %+v, %v; want it charged whole, since the team was under its cap", got, err)
+	}
+	_, err := charge(st, "team-a", 0, now)
 	var capErr *store.DownloadCapError
-	if !errors.As(err, &capErr) || capErr.UsedBytes != 60 || capErr.CapBytes != 100 || capErr.RetryAfter != 2*time.Hour {
-		t.Fatalf("60 more past the cap = %v, want a cap error retrying in 2h", err)
-	}
-	if _, err := charge(st, "team-a", 40, now); err != nil {
-		t.Fatalf("the 40 bytes left: %v", err)
-	}
-	if _, err := charge(st, "team-a", 0, now); !errors.As(err, &capErr) {
-		t.Fatalf("a check with the cap spent = %v, want a cap error", err)
+	if !errors.As(err, &capErr) || capErr.UsedBytes != 120 || capErr.CapBytes != 100 || capErr.RetryAfter != 2*time.Hour {
+		t.Fatalf("a download past the cap = %v, want a cap error retrying in 2h", err)
 	}
 	if _, err := st.ChargeDownload(context.Background(), store.DownloadCharge{
 		Team: "team-a", Bytes: 500, Record: true, Now: now, FreeCapBytes: 100, FundedCapBytes: 1000,
@@ -586,37 +583,37 @@ func TestEgressTotalsKeepTheLargerValue(t *testing.T) {
 // lands even when the next block does not fit.
 func TestRenewCommitsTheBlockAndReservesTheNext(t *testing.T) {
 	st := storetest.Open(t)
-	setFreeAllowance(t, st, 16<<10)
+	setFreeAllowance(t, st, 4<<10)
 	freeTeam(t, st, "team-a")
 	ctx := context.Background()
 	now := time.Now()
-	block, err := st.ReserveStorage(ctx, store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+	block, err := st.ReserveStorage(ctx, store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
 	if err != nil || block.Granted != 2<<10 {
 		t.Fatalf("first block = %+v, %v", block, err)
 	}
 	next, err := st.RenewStorage(ctx,
-		store.StorageCommit{ID: block.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+		store.StorageCommit{ID: block.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
 	if err != nil || next.ID == "" || next.Granted != 1<<10 {
-		t.Fatalf("renew with 1 KiB of the 3 KiB log share left = %+v, %v; want a 1 KiB block", next, err)
+		t.Fatalf("renew with 1 KiB of the 3 KiB cache share left = %+v, %v; want a 1 KiB block", next, err)
 	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 2<<10 || got.ReservedBytes != 1<<10 {
+	if got := usageOf(t, st, "team-a", store.StorageCache); got.UsedBytes != 2<<10 || got.ReservedBytes != 1<<10 {
 		t.Fatalf("after renew = %+v, want 2 KiB used and the 1 KiB block held", got)
 	}
 	_, err = st.RenewStorage(ctx,
-		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 1 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
 	var quota *store.StorageQuotaError
 	if !errors.As(err, &quota) {
 		t.Fatalf("renew with the share spent = %v, want a quota error", err)
 	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 3<<10 || got.ReservedBytes != 0 {
+	if got := usageOf(t, st, "team-a", store.StorageCache); got.UsedBytes != 3<<10 || got.ReservedBytes != 0 {
 		t.Fatalf("after a refused renew = %+v, want the commit kept: 3 KiB used, nothing held", got)
 	}
 	_, err = st.RenewStorage(ctx,
-		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
-	if !errors.As(err, &quota) || usageOf(t, st, "team-a", store.StorageLogs).UsedBytes != 3<<10 {
+		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 1 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
+	if !errors.As(err, &quota) || usageOf(t, st, "team-a", store.StorageCache).UsedBytes != 3<<10 {
 		t.Fatalf("replayed refused renewal = %v; count changed", err)
 	}
 }
@@ -653,5 +650,40 @@ func TestRenewReceiptReplaysTheSameNextReservation(t *testing.T) {
 	nextReq.Bytes--
 	if _, err := st.RenewStorage(t.Context(), c, nextReq); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("replay after next block release = %v, want invalid input", err)
+	}
+}
+
+// safety: a renewal commits under the team's row lock, and a team without a
+// slot then takes one under the free-tier lock; a reservation racing it must
+// take the two in the same order or Postgres aborts one of them.
+func TestRenewalsAndReservationsTakingSlotsNeverDeadlock(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	const teams = 24
+	for i := range teams {
+		teamHandle(t, st, store.Team(fmt.Sprintf("team-%d", i)))
+	}
+	errs := make(chan error, 2*teams)
+	var wg sync.WaitGroup
+	for i := range teams {
+		team := store.Team(fmt.Sprintf("team-%d", i))
+		wg.Go(func() {
+			_, err := st.RenewStorage(ctx,
+				store.StorageCommit{ID: "r-" + string(team), Team: team, Kind: store.StorageLogs, Bytes: 1, Now: now},
+				store.StorageReserve{Team: team, Kind: store.StorageLogs, Bytes: 1, UpTo: true, Now: now})
+			errs <- err
+		})
+		wg.Go(func() {
+			_, err := reserve(st, team, store.StorageLogs, 1, now)
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("a racing write = %v, want every write admitted", err)
+		}
 	}
 }
