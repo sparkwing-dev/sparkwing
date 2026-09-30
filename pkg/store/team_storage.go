@@ -135,8 +135,9 @@ type StorageReserve struct {
 	// TTL defaults to [DefaultStorageReservationTTL].
 	TTL time.Duration
 	Now time.Time
-	// SmallOutput reserves a job output of at most [MaxUnpaidOutputBytes],
-	// which a team with neither credits nor a free slot may still store.
+	// SmallOutput reserves a job output. One of at most
+	// [MaxUnpaidOutputBytes] is always granted, whatever room the team has,
+	// and still counts toward its storage.
 	SmallOutput bool
 }
 
@@ -254,7 +255,10 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 	if err != nil {
 		return StorageReservation{}, err
 	}
-	if standing.Tier == TeamTierNone && !(req.SmallOutput && req.Bytes <= MaxUnpaidOutputBytes) {
+	// safety: a small output never fails its node, so it skips both the
+	// slot and the share while its bytes still count.
+	small := req.SmallOutput && req.Bytes <= MaxUnpaidOutputBytes
+	if standing.Tier == TeamTierNone && !small {
 		return StorageReservation{}, freeStoragePaused(team)
 	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
@@ -262,7 +266,7 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		return StorageReservation{}, err
 	}
 	out := StorageReservation{ID: id, Tier: standing.Tier, Granted: max(req.Bytes, 0), ExpiresAt: now.Add(ttl)}
-	if standing.Tier == TeamTierFree {
+	if standing.Tier == TeamTierFree && !small {
 		share := req.Kind.share(standing.AllowanceBytes)
 		room := share - used - reserved
 		if req.UpTo && (req.Bytes <= 0 || req.Bytes > room) {

@@ -19,8 +19,8 @@ import (
 const (
 	MaxOutputBytes    int64 = 64 << 20
 	MaxRunOutputBytes int64 = 1 << 30
-	// MaxUnpaidOutputBytes is the largest output a team with neither credits
-	// nor a free slot may store; a larger one needs storage room.
+	// MaxUnpaidOutputBytes is the largest output every team may store even
+	// with no storage room; a larger one needs room.
 	MaxUnpaidOutputBytes int64 = 1 << 20
 )
 

@@ -1004,8 +1004,8 @@ unlock.
   report names the committed object; inline output bytes are refused. A read
   of `GET .../nodes/{nodeID}/output` returns a one-minute URL and the SHA-256
   the bytes must match. An output is at most 64 MiB, one run's outputs at most
-  1 GiB, both counted toward the team's cache share (a team with neither
-  credits nor a free slot stores outputs of up to 1 MiB), and outputs expire 30
+  1 GiB, both counted toward the team's cache share (an output of up to
+  1 MiB is always accepted), and outputs expire 30
   days after their run finishes, except each pipeline's newest successful
   run. A claim token reads only its own node's transitive dependencies, and
   `claim/input` answers a read grant instead of the bytes.

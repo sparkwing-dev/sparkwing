@@ -102,8 +102,9 @@ database. The node reserves the output's exact size with
 URL it gets back, and commits them with `output-commit`; its finish or
 attempt report then names the committed object. Outputs count toward the
 cache share, so a free team whose cache is full has its node fail with the
-storage refusal as the reason. A team with neither credits nor a free slot
-may still store outputs of up to 1 MiB each; a larger one needs storage room.
+storage refusal as the reason, but only for an output over 1 MiB: every
+team may store outputs of up to 1 MiB each, whatever room it has, and they
+still count toward its storage.
 
 | Limit | Bound | Where |
 |---|---|---|

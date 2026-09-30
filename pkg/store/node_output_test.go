@@ -161,7 +161,7 @@ func TestReserveUpload_OutputsCountTowardTheTeamShare(t *testing.T) {
 	if err := reserve(1 << 10); err != nil {
 		t.Fatalf("an output within the share: %v", err)
 	}
-	if err := reserve(64 << 10); !errors.Is(err, store.ErrStorageQuota) {
+	if err := reserve(store.MaxUnpaidOutputBytes + 1); !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("an output past the share: err = %v, want a storage refusal", err)
 	}
 }
@@ -530,5 +530,37 @@ func TestFinishNodeCopyingOutput_NamesTheOriginsObject(t *testing.T) {
 	}
 	if got := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes; got != held {
 		t.Fatalf("storage after the hit's retention = %d, want %d", got, held)
+	}
+}
+
+func TestReserveUpload_AFullShareStillTakesSmallOutputs(t *testing.T) {
+	s := storetest.Open(t)
+	setFreeAllowance(t, s, 16<<10)
+	freeTeam(t, s, "team-full")
+	reserve := func(key string, size int64) error {
+		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
+			Team: "team-full", RunID: "run-full", Kind: store.StorageCache, Key: key, Size: size,
+			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
+		})
+		return err
+	}
+	output := func() string {
+		key, _ := store.NewOutputKey("run-full", "n", 1, 0)
+		return key
+	}
+	if err := reserve("artifacts/blobs/"+strings.Repeat("c", 64), 12<<10); err != nil {
+		t.Fatalf("filling the share: %v", err)
+	}
+	if err := reserve(output(), store.MaxUnpaidOutputBytes); err != nil {
+		t.Fatalf("a 1 MiB output past a full share: %v", err)
+	}
+	if got := usageOf(t, s, "team-full", store.StorageCache).ReservedBytes; got < store.MaxUnpaidOutputBytes {
+		t.Fatalf("reserved bytes = %d, want the small output counted", got)
+	}
+	if err := reserve(output(), store.MaxUnpaidOutputBytes+1); !errors.Is(err, store.ErrStorageQuota) {
+		t.Fatalf("an output past 1 MiB with a full share: err = %v, want the storage refusal", err)
+	}
+	if err := reserve("artifacts/blobs/"+strings.Repeat("d", 64), 1); !errors.Is(err, store.ErrStorageQuota) {
+		t.Fatalf("a one-byte artifact with a full share: err = %v, want the storage refusal", err)
 	}
 }
