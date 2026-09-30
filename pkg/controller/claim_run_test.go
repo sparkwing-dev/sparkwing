@@ -543,6 +543,20 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 			t.Errorf("%s = %d from %s, want %d", what, code, in.RunID, c.want)
 		}
 	}
+	copied := func(node string, from store.ClaimInputRequest) (int, *store.Node) {
+		t.Helper()
+		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/attempt", tokens[node],
+			map[string]any{"outcome": "cached", "output_from": from}, nil)
+		n, _ := f.store.GetNode(ctx, "run-in", node)
+		return code, n
+	}
+	if code, _ := copied("r", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusUnprocessableEntity {
+		t.Errorf("a report copying an input its node does not declare = %d, want 422", code)
+	}
+	origin, _ := f.store.GetNode(ctx, "run-origin", "m")
+	if code, n := copied("m", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusOK || n.OutputRef == nil || *n.OutputRef != *origin.OutputRef {
+		t.Errorf("a cache hit's report = %d with ref %+v, want the origin's %+v", code, n.OutputRef, origin.OutputRef)
+	}
 	if !strings.Contains(f.logs.String(), "event=input_undeclared") {
 		t.Error("a refused input was not audited")
 	}

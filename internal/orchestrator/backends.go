@@ -473,6 +473,10 @@ func (l localState) GetLatestRun(ctx context.Context, pipeline string, statuses 
 	return l.st.GetLatestRun(ctx, pipeline, statuses, maxAge)
 }
 
+func (l localState) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason string, src copiedOutput) error {
+	return l.st.FinishNodeCopyingOutput(ctx, runID, nodeID, outcome, reason, src.runID, src.nodeID)
+}
+
 func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	return l.st.GetNodeOutput(ctx, runID, nodeID)
 }

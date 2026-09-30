@@ -4810,6 +4810,12 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 // FinishNodeWithOutputRef finishes a node whose output, when there is one,
 // is already a committed object named by ref.
 func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
+	return s.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+}
+
+func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
+	reason string, exitCode *int,
+) error {
 	var code any
 	if exitCode != nil {
 		code = *exitCode
@@ -4836,6 +4842,11 @@ func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outc
 	}
 	if output != nil {
 		if err := checkOutputRefTx(ctx, tx, Team(team), runID, nodeID, consumed+1, generation, output); err != nil {
+			return err
+		}
+	}
+	if copied != nil {
+		if output, err = sourceOutputRefTx(ctx, tx, Team(team), copied.run, copied.node); err != nil {
 			return err
 		}
 	}

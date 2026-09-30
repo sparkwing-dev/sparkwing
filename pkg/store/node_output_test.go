@@ -495,3 +495,40 @@ func TestReserveUpload_ASlotlessTeamStoresOnlySmallOutputs(t *testing.T) {
 		t.Fatalf("a one-byte artifact: err = %v, want free storage paused", err)
 	}
 }
+
+func TestFinishNodeCopyingOutput_NamesTheOriginsObject(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	for _, run := range []string{"run-origin", "run-hit"} {
+		if err := s.CreateRun(ctx, store.Run{ID: run, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateNode(ctx, store.Node{RunID: run, NodeID: "n", Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.FinishNode(ctx, "run-origin", "n", "success", "", []byte(`{"built":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	held := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes
+	if err := s.FinishNodeCopyingOutput(ctx, "run-hit", "n", "cached", "", "run-origin", "n"); err != nil {
+		t.Fatal(err)
+	}
+	origin, _ := s.GetNode(ctx, "run-origin", "n")
+	hit, _ := s.GetNode(ctx, "run-hit", "n")
+	if hit.OutputRef == nil || *hit.OutputRef != *origin.OutputRef {
+		t.Fatalf("the hit's ref = %+v, want the origin's %+v", hit.OutputRef, origin.OutputRef)
+	}
+	if got := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes; got != held {
+		t.Fatalf("storage after the copy = %d, want %d: a copy stores nothing", got, held)
+	}
+	if err := s.DeleteRunOutputs(ctx, store.DefaultTeam, "run-hit"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := s.GetNodeOutput(ctx, "run-origin", "n"); err != nil || string(out) != `{"built":1}` {
+		t.Fatalf("the hit's retention took the origin's output: %s, %v", out, err)
+	}
+	if got := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes; got != held {
+		t.Fatalf("storage after the hit's retention = %d, want %d", got, held)
+	}
+}

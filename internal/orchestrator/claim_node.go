@@ -58,6 +58,15 @@ func (s *claimState) FinishNodeWithReason(ctx context.Context, runID, nodeID, ou
 	return nil
 }
 
+func (s *claimState) FinishNodeCopyingOutput(_ context.Context, _, _, outcome, reason string, src copiedOutput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finished = true
+	input := src.input
+	s.report = store.AttemptReport{Outcome: outcome, FailureReason: reason, OutputFrom: &input}
+	return nil
+}
+
 func (s *claimState) AppendEvent(context.Context, string, string, string, []byte) error { return nil }
 
 func (s *claimState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string,

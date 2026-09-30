@@ -182,7 +182,7 @@ var unportedSQL = []string{
 	"(*Store).FinishLapsedClaim",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).FinishNodeStep",
-	"(*Store).FinishNodeWithOutputRef",
+	"(*Store).finishNode",
 	"(*Store).FinishRunAtGeneration",
 	"(*Store).FinishRunsIfActive",
 	"(*Store).FinishTrigger",

@@ -108,6 +108,28 @@ func checkOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	return nil
 }
 
+func sourceOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (*OutputRef, error) {
+	var ref OutputRef
+	err := tx.QueryRowContext(ctx, `SELECT key, size, sha256 FROM node_outputs WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID).Scan(&ref.Key, &ref.Size, &ref.SHA256)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ref, nil
+}
+
+// FinishNodeCopyingOutput finishes a node whose output is the one srcRun's
+// srcNode already stored, such as a cache hit's origin: the node's ref names
+// that object instead of a second copy of its bytes.
+func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error {
+	return s.finishNode(ctx, runID, nodeID, outcome, "", nil, &copySource{run: srcRun, node: srcNode}, reason, nil)
+}
+
+type copySource struct{ run, node string }
+
 func writeNodeOutputTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, attempt int64, ref *OutputRef) error {
 	if ref == nil {
 		return clearNodeOutputTx(ctx, tx, team, runID, nodeID)
@@ -415,10 +437,7 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 	sum := sha256.Sum256(data)
 	ref := &OutputRef{Key: key, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
 	path := OutputPath(s.outputDir, key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := WriteOutputFileDurably(path, data); err != nil {
 		return nil, err
 	}
 	if err := s.RecordLocalOutput(ctx, runID, nodeID, *ref, time.Now()); err != nil {

@@ -7484,6 +7484,9 @@ paths:
                 error: {type: string}
                 failure_reason: {type: string}
                 output: {$ref: "#/components/schemas/OutputRef"}
+                output_from:
+                  type: object
+                  description: In place of `output`, the declared input a cache hit or coalesce follower took from another run, in the `claim/input` request shape; the node's ref then names that input's stored object.
                 failure: {description: The failure record an OnFailure recovery node receives.}
                 artifact_manifest: {type: string}
       responses:
