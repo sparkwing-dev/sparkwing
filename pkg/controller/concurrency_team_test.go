@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -23,7 +24,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 		if err := f.st.FinishNode(ctx, f.runA, "n1", "success", "", nil); err != nil {
 			t.Fatal(err)
 		}
-		claimSeq := f.claimRunAsRunnerB(ctx, "run-by-b")
+		claimSeq := f.claimRun(ctx, f.runnerB, "run-by-b", "")
 
 		leaderB := "leader-b"
 		seedRun(t, f.teamB, leaderB, "build-b")
@@ -78,7 +79,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 	})
 }
 
-func (f *tenancyFixture) claimRunAsRunnerB(ctx context.Context, runID string) int64 {
+func (f *tenancyFixture) claimRun(ctx context.Context, auth, runID, extraRunJSON string) int64 {
 	t := f.t
 	t.Helper()
 	if err := f.teamB.CreateTrigger(ctx, store.Trigger{
@@ -86,7 +87,7 @@ func (f *tenancyFixture) claimRunAsRunnerB(ctx context.Context, runID string) in
 	}); err != nil {
 		t.Fatal(err)
 	}
-	code, body := f.do("POST", "/api/v1/triggers/claim", f.runnerB, map[string]any{})
+	code, body := f.do("POST", "/api/v1/triggers/claim", auth, map[string]any{})
 	if code != http.StatusOK {
 		t.Fatalf("claim as team B's runner = %d: %s", code, body)
 	}
@@ -95,12 +96,12 @@ func (f *tenancyFixture) claimRunAsRunnerB(ctx context.Context, runID string) in
 		t.Fatal(err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/runs", strings.NewReader(
-		`{"id":"`+runID+`","pipeline":"build-b","status":"running"}`))
+		`{"id":"`+runID+`",`+extraRunJSON+`"pipeline":"build-b","status":"running"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", f.runnerB)
+	req.Header.Set("Authorization", auth)
 	req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -112,4 +113,48 @@ func (f *tenancyFixture) claimRunAsRunnerB(ctx context.Context, runID string) in
 		t.Fatalf("POST /runs under team B's trigger claim = %d: %s", resp.StatusCode, raw)
 	}
 	return claimed.ClaimSeq
+}
+
+// A trigger naming a parent run walks that run's ancestry for cycle
+// detection. A foreign ancestor of the caller's own run ends the walk
+// instead of naming its pipeline in a cycle error.
+func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
+	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		ctx := context.Background()
+		raw, _, err := f.teamB.CreateToken(ctx, "b-spawner", store.TokenKindRunner, []string{
+			controller.ScopeRunsWrite, controller.ScopeRunsState, controller.ScopeTriggersClaim,
+		}, 0, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		spawner := "Bearer " + raw
+		claimSeq := f.claimRun(ctx, spawner, "child-b", `"parent_run_id":"`+f.runA+`",`)
+
+		trigger := func(pipeline string) (int, string) {
+			t.Helper()
+			b, _ := json.Marshal(map[string]any{
+				"pipeline": pipeline, "parent_run_id": "child-b", "trigger": map[string]any{"source": "api"},
+			})
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/triggers", strings.NewReader(string(b)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", spawner)
+			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimSeq, 10))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return resp.StatusCode, string(out)
+		}
+		if code, body := trigger("build-b"); code != http.StatusConflict {
+			t.Errorf("re-entering the parent's own pipeline = %d, want a cycle: %s", code, body)
+		}
+		if code, body := trigger("build-a"); code != http.StatusAccepted {
+			t.Errorf("team B's ancestry walk read team A's run = %d: %s", code, body)
+		}
+	})
 }

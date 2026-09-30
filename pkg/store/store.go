@@ -7403,6 +7403,13 @@ ORDER BY parent_node_id, created_at`, runID)
 // data cycles terminate cleanly; partial chains are still useful for
 // cycle detection.
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
+	return s.defaultTenant().GetRunAncestorPipelines(ctx, runID)
+}
+
+// GetRunAncestorPipelines walks parent_run_id links inside t's team; an
+// ancestor in another team ends the walk as a missing one does. See
+// [Store.GetRunAncestorPipelines].
+func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
 	if runID == "" {
 		return nil, nil
 	}
@@ -7412,9 +7419,9 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 	for range maxDepth {
 		var parent sql.NullString
 		var pipeline string
-		err := s.queryRow(
+		err := t.s.queryRow(
 			ctx,
-			`SELECT pipeline, parent_run_id FROM runs WHERE id = ?`, cur,
+			`SELECT pipeline, parent_run_id FROM runs WHERE team = ? AND id = ?`, string(t.team), cur,
 		).Scan(&pipeline, &parent)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
