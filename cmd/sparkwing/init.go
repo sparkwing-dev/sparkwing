@@ -17,14 +17,26 @@ import (
 )
 
 func bootstrapDotSparkwingOpts(cwd, sparkwingDir string, terse bool) error {
-	moduleName := filepath.Base(cwd) + "-pipelines"
+	moduleName := scaffoldModuleName(filepath.Base(cwd))
 	existed := dirExists(sparkwingDir)
 	report, err := writeSkeleton(sparkwingDir, moduleName, false)
 	if err != nil {
 		return err
 	}
-	printInitReport(cwd, moduleName, existed, report, tidyStatus{Skipped: true}, terse)
+	printInitReport(moduleName, existed, report, terse)
 	return nil
+}
+
+var moduleUnsafeRE = regexp.MustCompile(`[^A-Za-z0-9._~-]+`)
+
+// scaffoldModuleName derives the pipelines module path from a directory
+// name, which may hold spaces or other characters a module path refuses.
+func scaffoldModuleName(dir string) string {
+	base := strings.Trim(moduleUnsafeRE.ReplaceAllString(dir, "-"), "-.")
+	if base == "" {
+		base = "sparkwing"
+	}
+	return base + "-pipelines"
 }
 
 type initFileReport struct {
@@ -215,16 +227,11 @@ func dirExists(p string) bool {
 	return err == nil && st.IsDir()
 }
 
-type tidyStatus struct {
-	Skipped bool
-	OK      bool
-	Note    string
-	Err     string
-}
-
-func tidySkeleton(sparkwingDir string) tidyStatus {
+// tidySkeleton runs `go mod tidy` in sparkwingDir and reports whether it ran;
+// without Go on PATH it does nothing.
+func tidySkeleton(sparkwingDir string) (bool, error) {
 	if !goOnPath() {
-		return tidyStatus{Skipped: true}
+		return false, nil
 	}
 	fmt.Println()
 	cmd := exec.Command("go", "mod", "tidy")
@@ -238,9 +245,10 @@ func tidySkeleton(sparkwingDir string) tidyStatus {
 	stop()
 
 	if err != nil {
-		return tidyStatus{OK: false, Note: "go mod tidy failed", Err: strings.TrimSpace(captured.String())}
+		return true, fmt.Errorf("go mod tidy in %s failed; the pipeline files are written, so fix the error and rerun it there: %w\n%s",
+			sparkwingDir, err, strings.TrimSpace(captured.String()))
 	}
-	return tidyStatus{OK: true, Note: "resolved dependencies (go mod tidy)"}
+	return true, nil
 }
 
 func startSpinner(label string) func() {
@@ -279,7 +287,7 @@ func runSpinner(w io.Writer, frames []rune, label string, done <-chan struct{}, 
 	}
 }
 
-func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileReport, tidy tidyStatus, terse bool) {
+func printInitReport(moduleName string, existedBefore bool, rep initFileReport, terse bool) {
 	if existedBefore {
 		fmt.Printf("%s .sparkwing already in place (module %s)\n", color.Cyan("==>"), moduleName)
 	} else {
@@ -295,19 +303,6 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	for _, p := range rep.Skipped {
 		fmt.Printf("  %s %s %s\n", color.Yellow("!"), p, color.Dim("(kept; pass --force to overwrite)"))
 	}
-	switch {
-	case tidy.Skipped:
-	case tidy.OK:
-		fmt.Printf("  %s resolved dependencies (go mod tidy)\n", color.Green("+"))
-	default:
-		fmt.Printf("  %s go mod tidy %s\n", color.Red("x"), color.Dim("(see error below)"))
-		if tidy.Err != "" {
-			for _, line := range strings.Split(tidy.Err, "\n") {
-				fmt.Printf("      %s\n", color.Dim(line))
-			}
-		}
-	}
-
 	if !goOnPath() {
 		fmt.Println()
 		fmt.Println("toolchain: Go is NOT on PATH")

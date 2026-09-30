@@ -436,18 +436,12 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			fmt.Printf("    %s\n", color.Dim(hint))
 		}
 	}
-	tidy := tidySkeleton(sparkwingDir)
-	switch {
-	case tidy.Skipped:
-	case tidy.OK:
-		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim(tidy.Note))
-	default:
-		fmt.Printf("  %s %s\n", color.Red("x"), tidy.Note)
-		if tidy.Err != "" {
-			for _, line := range strings.Split(tidy.Err, "\n") {
-				fmt.Printf("      %s\n", color.Dim(line))
-			}
-		}
+	tidied, err := tidySkeleton(sparkwingDir)
+	if err != nil {
+		return err
+	}
+	if tidied {
+		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim("resolved dependencies (go mod tidy)"))
 	}
 	fmt.Println()
 	fmt.Println(color.Bold("TIPS"))

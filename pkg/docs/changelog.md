@@ -1311,6 +1311,12 @@ unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing pipeline new` exits non-zero with the `go mod tidy`
+  output when tidy fails, instead of printing the failure and exiting 0. The
+  pipeline files stay written. A repository directory whose name holds spaces
+  or other characters a module path refuses (`my repo`) now scaffolds a valid
+  module path (`my-repo-pipelines`).
+
 - **cli:** A failed local run's closing tips and its `run_finish` hints no
   longer suggest `sparkwing runs retry --failed`, which refuses every local
   run. Submit a new run from the intended checkout instead.
