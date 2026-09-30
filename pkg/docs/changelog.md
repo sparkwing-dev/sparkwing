@@ -75,7 +75,8 @@ unlock.
   declares for the node, a memoized node only under its own repository,
   pipeline and node; every concurrency route, cancel-waiter, resolve,
   notify and state included, lets it act only on its own node's holders and
-  waiters under a key its node declares; a slot's lease
+  waiters under a key its node declares, and it joins no other holder at
+  no cost; a slot's lease
   never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
   not. A claim token's binary cache is scoped to its run's GitHub repository ID

@@ -204,7 +204,7 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tok, claim := claimTokenFromContext(r.Context()); claim {
-		if err := s.checkClaimAcquire(r, tenant, tok, key, &body); err != nil {
+		if err := s.checkClaimAcquire(r, tok, key, &body); err != nil {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "slot_undeclared", Message: err.Error()})
 			return
 		}
@@ -663,10 +663,10 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: a claim takes only a slot its node's plan declares, under its own
-// node's holder ID, joins no other run's holder, and holds it no longer than
+// node's holder ID, joins no holder, and holds it no longer than
 // its claim token lives, so it cannot supersede, renew or block another run's
 // holder beyond what the declared policy allows.
-func (s *Server) checkClaimAcquire(r *http.Request, tenant *store.Tenant, tok store.ClaimToken, key string, body *acquireSlotReq) error {
+func (s *Server) checkClaimAcquire(r *http.Request, tok store.ClaimToken, key string, body *acquireSlotReq) error {
 	// safety: an acquire naming a live holder's ID renews that holder, so a
 	// claim names only the ID the SDK gives its own node.
 	if body.HolderID != tok.RunID+"/"+tok.NodeID {
@@ -675,11 +675,11 @@ func (s *Server) checkClaimAcquire(r *http.Request, tenant *store.Tenant, tok st
 	if err := s.store.CheckClaimSlot(r.Context(), tok, key, body.Policy, body.Max, body.Cost); err != nil {
 		return err
 	}
+	// safety: joining a holder takes its slot at no cost, and only a runner's
+	// remote broker joins one; a claimed node never does, and its own earlier
+	// holder already carries its holder ID.
 	if body.InheritedHolderID != "" {
-		holder, err := tenant.ConcurrencyHolder(r.Context(), key, body.InheritedHolderID, time.Now())
-		if err != nil || holder.RunID != tok.RunID {
-			return errors.New("a claim joins only a holder of its own run")
-		}
+		return errors.New("a claim does not join another holder")
 	}
 	body.LeaseSecs = int(claimSlotLease(tok, time.Duration(body.LeaseSecs)*time.Second) / time.Second)
 	return nil

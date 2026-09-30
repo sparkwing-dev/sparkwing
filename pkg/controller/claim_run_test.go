@@ -661,6 +661,10 @@ func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
 			t.Errorf("%s %s aimed at the sibling = %d, holder kept %v; want 403 and the holder kept", c.method, c.path, code, siblingHeld())
 		}
 	}
+	joinSibling := map[string]any{"holder_id": "run-own/a", "inherited_holder_id": "run-own/b", "run_id": "run-own", "node_id": "a", "max": 1, "cost": 1, "policy": "queue"}
+	if code := f.call("POST", base+"/acquire", wk, joinSibling, nil); code != http.StatusForbidden {
+		t.Errorf("an acquire joining the sibling's live holder = %d, want 403", code)
+	}
 	if code := f.call("GET", "/api/v1/concurrency/g:other/state", wk, nil, nil); code != http.StatusForbidden {
 		t.Errorf("the state of an undeclared key = %d, want 403", code)
 	}
@@ -672,5 +676,21 @@ func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
 	}
 	if st, err := tn.GetConcurrencyState(ctx, "g:deploy"); err != nil || len(st.Holders) != 1 || st.Holders[0].HolderID != "run-own/b" {
 		t.Fatalf("the sibling's holder = %+v %v, want it untouched", st, err)
+	}
+	if _, _, _, err := tn.ReleaseAndNotify(ctx, "g:deploy", "run-own/b", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := tn.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "g:deploy", HolderID: "run-own/a", RunID: "run-own", NodeID: "a", Capacity: 1, Cost: 1, Policy: "queue",
+	}); err != nil || res.Kind != store.AcquireGranted {
+		t.Fatalf("seed the node's own earlier holder = %+v %v", res, err)
+	}
+	joinOwn := map[string]any{"holder_id": "run-own/a", "inherited_holder_id": "run-own/a", "run_id": "run-own", "node_id": "a", "max": 1, "cost": 1, "policy": "queue"}
+	if code := f.call("POST", base+"/acquire", wk, joinOwn, nil); code != http.StatusForbidden {
+		t.Errorf("an acquire joining its own node's earlier holder = %d, want 403", code)
+	}
+	plain := map[string]any{"holder_id": "run-own/a", "run_id": "run-own", "node_id": "a", "max": 1, "cost": 1, "policy": "queue"}
+	if code := f.call("POST", base+"/acquire", wk, plain, nil); code != http.StatusOK {
+		t.Errorf("its own plain acquire = %d, want 200", code)
 	}
 }
