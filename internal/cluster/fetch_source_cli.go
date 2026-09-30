@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: this runs as a launcher Job's init container, before any pipeline
@@ -38,12 +39,37 @@ func runFetchSourceCLI(args []string) error {
 	if _, err := ctrl.HeartbeatClaim(ctx, args[0], args[1], store.MaxLeaseDuration); err != nil {
 		return fmt.Errorf("fetch-source: renew the claim: %w", err)
 	}
-	return fetchSource(ctx, ctrl, args[0], os.Getenv("SPARKWING_SOURCE_DIR"), os.Getenv("GOMODCACHE"),
+	err := fetchSource(ctx, ctrl, args[0], os.Getenv("SPARKWING_SOURCE_DIR"), os.Getenv("GOMODCACHE"),
 		bincache.CheckoutSource, goModDownload)
+	if err != nil {
+		return reportFetchFailure(ctx, ctrl, args[0], args[1], err)
+	}
+	return nil
 }
 
 type sourceCredentials interface {
 	SourceCredential(ctx context.Context, runID string) (*store.SourceCredential, error)
+}
+
+type attemptReporter interface {
+	ReportAttempt(ctx context.Context, runID, nodeID string, report store.AttemptReport) error
+}
+
+// safety: a refusal answers the same on every attempt, so it marks the fetch
+// failure no retry can get past.
+var errSourceRefused = errors.New("the controller refused the source credential")
+
+// safety: the pipeline's container never starts once this one fails, so the
+// attempt is reported here, or its claim holds the node until its lease lapses.
+func reportFetchFailure(ctx context.Context, ctrl attemptReporter, runID, nodeID string, cause error) error {
+	report := store.AttemptReport{Outcome: string(sparkwing.Failed), Error: cause.Error(), FailureReason: store.FailureSourceFetch}
+	if errors.Is(cause, errSourceRefused) {
+		report.FailureReason = store.FailureSourceUnavailable
+	}
+	if err := ctrl.ReportAttempt(context.WithoutCancel(ctx), runID, nodeID, report); err != nil {
+		return errors.Join(cause, fmt.Errorf("fetch-source: report the attempt: %w", err))
+	}
+	return cause
 }
 
 type checkoutFunc func(ctx context.Context, repoURL, sha, branch, dest string, cred bincache.DirectCredential,
@@ -117,7 +143,10 @@ func askSourceCredential(ctx context.Context, ctrl sourceCredentials, runID stri
 		sc, err := ctrl.SourceCredential(ctx, runID)
 		var transport *url.Error
 		transient := errors.Is(err, client.ErrControllerFailed) || errors.As(err, &transport)
-		if err == nil || !transient || attempt == store.MaxSourceMints {
+		if err != nil && !transient && ctx.Err() == nil {
+			return nil, fmt.Errorf("%w: %w", errSourceRefused, err)
+		}
+		if err == nil || attempt == store.MaxSourceMints {
 			return sc, err
 		}
 		select {

@@ -91,6 +91,14 @@ const (
 	// nobody can read is not a run anybody should trust. Adopters who
 	// prefer the lossy behavior set SPARKWING_LOGS_DROP_POLICY=warn.
 	FailureLogsDropped = "logs_dropped"
+	// FailureSourceUnavailable: a launcher Job's init container was refused
+	// the run's source credential, which answers the same on every attempt,
+	// so the node is not retried.
+	FailureSourceUnavailable = "source_unavailable"
+	// FailureSourceFetch: a launcher Job's init container could not check
+	// out the run's source for a reason a later attempt may not meet. The
+	// node is retried within its budget, a planning node included.
+	FailureSourceFetch = "source_fetch"
 )
 
 // RetrySource values for runs.retry_source.

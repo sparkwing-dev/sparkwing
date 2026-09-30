@@ -144,9 +144,11 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 		return err
 	}
 	// safety: a planning claim's own failure is deterministic, so only a
-	// planning claim the reaper found lost is planned again.
+	// planning claim the reaper found lost, or whose source fetch failed, is
+	// planned again.
 	retry := report.Outcome == outcomeFailed && ordinal <= n.retryBudget && !cancelled &&
-		(n.kind != nodeKindPlan || report.leaseLost)
+		report.FailureReason != FailureSourceUnavailable &&
+		(n.kind != nodeKindPlan || report.leaseLost || report.FailureReason == FailureSourceFetch)
 	if retry {
 		readyAt := now.Add(retryBackoff(time.Duration(n.backoffMS)*time.Millisecond, int(ordinal))).UnixNano()
 		_, err = tx.ExecContext(ctx, `UPDATE nodes

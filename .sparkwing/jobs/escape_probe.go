@@ -25,10 +25,12 @@ import (
 )
 
 // EscapeProbeArgs names the cluster-specific targets the probe cannot derive.
-// A missing target fails the run, so the gate never passes by skipping one.
+// The repository's sparkwing.yaml supplies the Cloud's, so a webhook run probes
+// them too. A missing target fails the run, so the gate never passes by
+// skipping one.
 type EscapeProbeArgs struct {
-	RDS      string `flag:"rds" desc:"The RDS endpoint as host:port; required."`
-	APIHosts string `flag:"api-hosts" desc:"Comma-separated API server endpoint IPs behind the kubernetes Service VIP; required."`
+	RDS      string `flag:"rds" desc:"The RDS endpoint as host:port; required, and sparkwing.yaml sets the Cloud's."`
+	APIHosts string `flag:"api-hosts" desc:"Comma-separated API server endpoint IPs behind the kubernetes Service VIP; required, and sparkwing.yaml sets the Cloud's."`
 	Nodes    string `flag:"nodes" desc:"Comma-separated node IPs whose kubelet (10250) a pod must not reach, beyond its own node."`
 }
 

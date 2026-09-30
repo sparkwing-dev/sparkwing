@@ -6,10 +6,14 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -275,5 +279,31 @@ func TestEscapeProbe_ATooTightPolicyFailsTheGate(t *testing.T) {
 	offline.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, timeoutErr{} })}
 	if r := byName(offline.run())["egress https github.com"]; r.verdict != closed {
 		t.Fatalf("no internet at all: %+v, want HTTPS closed", r)
+	}
+}
+
+// A webhook run carries no arguments, so the repository's sparkwing.yaml must
+// name every target the probe requires.
+func TestEscapeProbe_TheRepositoryConfigNamesEveryRequiredTarget(t *testing.T) {
+	f, err := os.Open(filepath.Join("..", "sparkwing.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	cfg, err := pipelines.Parse(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := cfg.Find("escape-probe")
+	if entry == nil {
+		t.Fatal("sparkwing.yaml declares no escape-probe entry")
+	}
+	var bearers []string
+	p := fencedProber(&bearers)
+	p.args = EscapeProbeArgs{RDS: entry.Args["rds"], APIHosts: entry.Args["api-hosts"]}
+	for _, r := range p.run() {
+		if strings.Contains(r.detail, "is required") {
+			t.Errorf("%s: %s", r.name, r.detail)
+		}
 	}
 }

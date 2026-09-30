@@ -47,7 +47,8 @@ const ReleaseBackoff = 5 * time.Minute
 
 // SyncLaunchJobs answers, for each Job the launcher holds, whether to keep
 // or delete it, releasing a claim the launcher asks back when its pod never
-// started.
+// started, and ending the claim of a cancelled run's Job as a cancelled
+// attempt, so the run settles as the Job is deleted.
 func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs []LaunchJob, now time.Time) ([]LaunchJobResult, error) {
 	out := make([]LaunchJobResult, 0, len(jobs))
 	for _, j := range jobs {
@@ -61,19 +62,22 @@ func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs
 }
 
 func (s *Store) launchJobState(ctx context.Context, launcher ClaimIdentity, j LaunchJob, now time.Time) (_ LaunchJobState, err error) {
-	var team string
-	var started sql.NullInt64
+	var team, kind string
+	var started, cancelled sql.NullInt64
 	var billingFrom int64
-	err = s.queryRow(ctx, `SELECT n.team, n.execution_started_at, n.credit_billing_from FROM nodes n
+	err = s.queryRow(ctx, `SELECT n.team, n.kind, n.execution_started_at, n.credit_billing_from, r.cancel_requested_at FROM nodes n
   JOIN runs r ON r.team = n.team AND r.id = n.run_id
  WHERE n.run_id = ? AND n.node_id = ? AND n.claim_generation = ? AND n.claim_token_prefix = ?
-   AND n.`+nodeNotDone+` AND `+nodeClaimLiveSQL("n.")+` AND r.cancel_requested_at IS NULL`,
-		j.RunID, j.NodeID, j.Generation, launcher.TokenPrefix, now.UnixNano()).Scan(&team, &started, &billingFrom)
+   AND n.`+nodeNotDone+` AND `+nodeClaimLiveSQL("n."),
+		j.RunID, j.NodeID, j.Generation, launcher.TokenPrefix, now.UnixNano()).Scan(&team, &kind, &started, &billingFrom, &cancelled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LaunchJobDelete, nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if cancelled.Valid {
+		return LaunchJobDelete, s.cancelLaunchClaim(ctx, Team(team), ClaimTokenKind(kind), launcher, j, now)
 	}
 	if !j.Release || started.Valid || billingFrom != 0 {
 		return LaunchJobKeep, nil
@@ -83,6 +87,31 @@ func (s *Store) launchJobState(ctx context.Context, launcher ClaimIdentity, j La
 		return LaunchJobKeep, err
 	}
 	return LaunchJobDelete, nil
+}
+
+// safety: the launcher deletes a cancelled run's Job at once, and its pod can
+// die before it reports, so the claim ends here as a cancelled attempt instead
+// of holding the node, and the run, until its lease lapses.
+func (s *Store) cancelLaunchClaim(ctx context.Context, team Team, kind ClaimTokenKind, launcher ClaimIdentity, j LaunchJob, now time.Time) error {
+	return s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockDispatchRunTx(ctx, tx, team, j.RunID); err != nil {
+			return err
+		}
+		var held int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND claim_token_prefix = ?
+   AND `+nodeNotDone+` AND `+nodeClaimLiveSQL("")+tx.forUpdate(),
+			string(team), j.RunID, j.NodeID, j.Generation, launcher.TokenPrefix, now.UnixNano()).Scan(&held)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		tok := ClaimToken{Team: team, RunID: j.RunID, NodeID: j.NodeID, Generation: j.Generation, Kind: kind}
+		report := AttemptReport{Outcome: outcomeCancelled, Error: "the run was cancelled"}
+		return s.commitAttemptBilledTx(ctx, tx, tok, report, now, now)
+	})
 }
 
 // safety: only a claim whose pod never renewed it is released, so nothing was

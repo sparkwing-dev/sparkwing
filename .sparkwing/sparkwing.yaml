@@ -84,3 +84,13 @@ pipelines:
 
   - name: weather-report
     entrypoint: WeatherReport
+
+  # The Cloud's own targets, so a webhook run, which carries no arguments,
+  # probes them. The API server addresses are the EKS control-plane ENIs
+  # behind the kubernetes Service; recheck them after a control-plane upgrade
+  # with `kubectl get endpointslices -l kubernetes.io/service-name=kubernetes`.
+  - name: escape-probe
+    entrypoint: EscapeProbe
+    args:
+      rds: kikd-prod-sparkwing-postgres.cv04yywoevz8.us-west-2.rds.amazonaws.com:5432
+      api-hosts: 10.0.41.86,10.0.59.73

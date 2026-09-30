@@ -2195,7 +2195,7 @@ paths:
       tags: [teams]
       summary: Choose the path a repository's new runs take.
       description: >-
-        Empty keeps the trigger path, where a runner claims the run's trigger. `controller` starts each new run with a planning node that the launcher runs in a Job it builds, and a child such a run starts takes the same path. Runs already started keep their path.
+        `trigger` is every repository's default path, where a runner claims the run's trigger, and setting it moves a repository back from controller dispatch. `controller` starts each new run with a planning node that the launcher runs in a Job it builds, and a child such a run starts takes the same path. Runs already started keep their path.
       requestBody:
         required: true
         content:
@@ -2205,7 +2205,7 @@ paths:
               type: object
               required: [dispatch]
               properties:
-                dispatch: {type: string, enum: ["", controller]}
+                dispatch: {type: string, enum: [trigger, controller]}
       responses:
         "200":
           description: The repository's dispatch path.

@@ -75,11 +75,22 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 		claim.Kind != store.ClaimTokenPlan || claim.Dispatch != store.RepoDispatchController {
 		t.Fatalf("launch claim = %+v", claim)
 	}
-	if err := alpha.SetRepoDispatch(ctx, "korey", "probe", "shell", time.Now()); !errors.Is(err, store.ErrInvalidInput) {
-		t.Fatalf("unknown dispatch: err = %v", err)
+	for _, bad := range []store.RepoDispatch{"shell", ""} {
+		if err := alpha.SetRepoDispatch(ctx, "korey", "probe", bad, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+			t.Fatalf("dispatch %q: err = %v, want ErrInvalidInput", bad, err)
+		}
 	}
 	if err := alpha.SetRepoDispatch(ctx, "korey", "other", store.RepoDispatchController, time.Now()); err != nil {
 		t.Fatalf("opt a repository in: %v", err)
+	}
+
+	if err := alpha.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchTrigger, time.Now()); err != nil {
+		t.Fatalf("move the repository back to the trigger path: %v", err)
+	}
+	intake(t, alpha, "run-back", "korey", "probe")
+	back, err := st.ClaimNextTriggerFor(ctx, runner, time.Minute, nil, nil)
+	if err != nil || back.ID != "run-back" {
+		t.Fatalf("trigger claim after the rollback = %+v, %v; want run-back", back, err)
 	}
 }
 
