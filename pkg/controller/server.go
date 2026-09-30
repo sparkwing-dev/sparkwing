@@ -1035,6 +1035,11 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
 	mux.Handle("GET /api/v1/admin/usage-metrics", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUsageMetrics)))
+	// safety: the run counters name every team's pipelines, so on the shared
+	// API listener the scrape is the operator's; --metrics-addr serves it open.
+	if s.metricsAddr == "" {
+		mux.Handle("GET /metrics", requireScope(ScopeAdmin, metricsHandler()))
+	}
 	mux.Handle("GET /api/v1/egress", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEgressState)))
 
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
@@ -1253,9 +1258,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.Handle("POST /api/v1/auth/oauth/google/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange)))
 	router.Handle("POST /api/v1/auth/oauth/github/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubStart)))
 	router.Handle("POST /api/v1/auth/oauth/github/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange)))
-	if s.metricsAddr == "" {
-		router.Handle("GET /metrics", metricsHandler())
-	}
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.

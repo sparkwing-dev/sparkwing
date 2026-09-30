@@ -279,7 +279,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/internal/storage/commit` | `public` |
 | `POST` | `/internal/storage/release` | `public` |
 | `POST` | `/internal/storage/reserve` | `public` |
-| `GET` | `/metrics` | `public` |
+| `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |
 

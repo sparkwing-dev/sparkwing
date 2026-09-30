@@ -397,13 +397,15 @@ additionally export traces and structured logs via OTLP.
 
 Always active on every service; scrape it with your Prometheus.
 
-The controller serves `/metrics` unauthenticated on its API listener, so
-an ingress fronting that listener publishes pipeline names to anyone who
-asks. `sparkwing-controller --metrics-addr 127.0.0.1:9090`
+On its API listener the controller serves `/metrics` only to an `admin`
+bearer when authentication is on, because the run counters name every
+team's pipelines; with authentication off it serves it to anyone.
+`sparkwing-controller --metrics-addr 127.0.0.1:9090`
 (`$SPARKWING_METRICS_ADDR`) moves the endpoint onto its own listener,
-which you can bind to a pod-local or cluster-internal address and leave
-out of the ingress. The API listener then answers `401` for `/metrics`
-when authentication is on, and `404` when it is off. In `sparkwing-full`,
+which serves it without a bearer, so bind it to a pod-local or
+cluster-internal address and leave it out of the ingress. The API
+listener then answers `401` for `/metrics` when authentication is on,
+and `404` when it is off. In `sparkwing-full`,
 `controller.metricsPort` passes that flag and exposes the port on the
 controller container only; the controller Service does not publish it,
 so an in-cluster scraper reaches it by pod address. The controller

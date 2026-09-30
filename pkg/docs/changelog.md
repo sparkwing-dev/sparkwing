@@ -1311,6 +1311,12 @@ unlock.
 
 ### Fixed
 
+- **wingd + doctor:** A daemon no longer fails to start with `wingd: restrict
+  socket ...: chmod ...: no such file` when `sparkwing doctor` runs at the same
+  moment. The doctor's peer scan unlinked any socket that refused a dial, which
+  includes a starting daemon's socket between its bind and listen. The scan
+  now only reads; a killed daemon's socket directory stays in `/tmp` until that
+  home's next daemon starts.
 - **orchestrator:** A node whose parallel commands finish on the same clock
   reading no longer fails with `record node accounting: controller 500`; each
   of a node's resource samples now takes a timestamp after the one before it.
@@ -1681,6 +1687,12 @@ unlock.
 
 ### Security
 
+- **controller:** `GET /metrics` on the API listener of a controller with
+  authentication on requires an `admin` bearer. Its run counters name every
+  team's pipelines, and the `sparkwing-full` chart's default `metricsPort: 0`
+  served them to anyone who reached the API. A `--metrics-addr` listener still
+  serves the endpoint without a bearer. See
+  [the migration note](docs/migrations/_unreleased.md#controller-metrics-on-the-api-listener-needs-an-admin-bearer).
 - **runner:** A trigger loop using the in-process node runner no longer puts
   its runner token in the environment of the trigger's compiled pipeline
   binary. The runner serves that binary a loopback broker that admits only

@@ -3039,16 +3039,21 @@ paths:
 
   /metrics:
     get:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: admin
       tags: [health]
       summary: Prometheus scrape endpoint.
-      security: []
+      description: >-
+        With --metrics-addr the endpoint moves to its own listener, which serves it without a bearer, and this listener answers 404.
       responses:
         "200":
           description: Prometheus text exposition format.
           content:
             text/plain:
               schema: {type: string}
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/runs/{id}/gitcache/git/register:
     parameters:

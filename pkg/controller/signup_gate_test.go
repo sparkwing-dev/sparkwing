@@ -235,9 +235,15 @@ func TestAClosedFreeTierWaitlistsNewAccounts(t *testing.T) {
 	}
 }
 
-func metricValue(t *testing.T, base, series string) float64 {
+func (f *identityFixture) metricValue(series string) float64 {
+	t := f.t
 	t.Helper()
-	resp, err := http.Get(base + "/metrics")
+	req, err := http.NewRequest(http.MethodGet, f.url+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.admin)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,11 +273,11 @@ func TestSignUpVelocityWarnsThenClosesTheGate(t *testing.T) {
 		warnings   = `sparkwing_signup_velocity_warnings_total`
 		waitlisted = `sparkwing_signups_total{outcome="waitlisted",reason="hourly_signups"}`
 	)
-	closedBefore, warnBefore, waitBefore := metricValue(t, f.url, closed), metricValue(t, f.url, warnings),
-		metricValue(t, f.url, waitlisted)
+	closedBefore, warnBefore, waitBefore := f.metricValue(closed), f.metricValue(warnings),
+		f.metricValue(waitlisted)
 
 	f.signIn(person("v-0", "v0@example.com", "V"))
-	if st := f.signUpStatus(); st.VelocityWarning || metricValue(t, f.url, warnings) != warnBefore {
+	if st := f.signUpStatus(); st.VelocityWarning || f.metricValue(warnings) != warnBefore {
 		t.Fatalf("one sign-up already warned: %+v", st)
 	}
 	f.signIn(person("v-1", "v1@example.com", "V"))
@@ -279,10 +285,10 @@ func TestSignUpVelocityWarnsThenClosesTheGate(t *testing.T) {
 	if st := f.signUpStatus(); !st.VelocityWarning || st.State != "open" || st.Counts.LastHour != 3 {
 		t.Fatalf("status past the warn threshold = %+v", st)
 	}
-	if got := metricValue(t, f.url, warnings); got != warnBefore+1 {
+	if got := f.metricValue(warnings); got != warnBefore+1 {
 		t.Fatalf("velocity warnings = %v, want one per crossing (%v before)", got, warnBefore)
 	}
-	if got := metricValue(t, f.url, closed); got != closedBefore {
+	if got := f.metricValue(closed); got != closedBefore {
 		t.Fatalf("the gate closed before the hourly limit: %v", got)
 	}
 
@@ -294,7 +300,7 @@ func TestSignUpVelocityWarnsThenClosesTheGate(t *testing.T) {
 	if st.State != "waitlist" || st.Mode != "waitlist" || st.Source != store.WaitlistReasonHourly || st.SetBy != "automatic" {
 		t.Fatalf("status after the burst = %+v", st)
 	}
-	if metricValue(t, f.url, closed) != closedBefore+1 || metricValue(t, f.url, waitlisted) != waitBefore+1 {
+	if f.metricValue(closed) != closedBefore+1 || f.metricValue(waitlisted) != waitBefore+1 {
 		t.Fatal("the closure or the waitlisted sign-up was not counted")
 	}
 

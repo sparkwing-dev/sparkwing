@@ -20,7 +20,6 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /api/v1/auth/logout":          true,
 		"GET /api/v1/auth/session":          true,
 		"GET /api/v1/auth/bootstrap-needed": true,
-		"GET /metrics":                      true,
 		"POST /webhooks/github/{pipeline}":  true,
 		"/":                                 true,
 		// safety: a signed-out browser draws the sign-in page from it; it reports only teams and providers.

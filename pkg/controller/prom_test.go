@@ -17,23 +17,54 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func newAuthedTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func()) {
+func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if _, _, err := s.CreateToken("test-admin", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, time.Now().UTC()); err != nil {
+	admin, _, err = s.CreateToken("test-admin", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
 	ctrl := controller.New(s, nil).EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
-	return srv.URL, s, func() {
+	return srv.URL, admin, s, func() {
 		srv.Close()
 		_ = s.Close()
 	}
+}
+
+func getWithBearer(t *testing.T, url, token string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	return resp
+}
+
+func scrapeAs(t *testing.T, base, token string) string {
+	t.Helper()
+	resp := getWithBearer(t, base+"/metrics", token)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/metrics status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
+	return string(body)
 }
 
 func TestMetrics_EndpointReachable(t *testing.T) {
@@ -202,28 +233,36 @@ func TestMetrics_HTTPRouteNormalization(t *testing.T) {
 	}
 }
 
-func TestMetrics_EndpointUnauthWithAuthEnabled(t *testing.T) {
-	base, st, cleanup := newAuthedTestServer(t)
+// The run counters carry every team's pipeline names, so on the API listener
+// of an authenticating controller the scrape belongs to the operator.
+func TestMetrics_RequiresAdminWithAuthEnabled(t *testing.T) {
+	base, admin, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
-	_ = st
-
-	resp := mustGet(t, base+"/metrics")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("/metrics under auth expected 200, got %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
+	member, _, err := st.CreateToken("member", store.TokenKindUser,
+		[]string{controller.ScopeRunsRead}, 0, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if !strings.Contains(string(body), "sparkwing_pending_nodes") {
-		t.Errorf("/metrics under auth returned 200 but body is not the sparkwing registry:\n%s", string(body))
+		t.Fatalf("CreateToken: %v", err)
 	}
 
-	resp2 := mustGet(t, base+"/api/v1/runs")
-	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusUnauthorized {
-		t.Errorf("/api/v1/runs without auth: expected 401, got %d", resp2.StatusCode)
+	for _, c := range []struct {
+		name, token string
+		want        int
+	}{
+		{"no token", "", http.StatusUnauthorized},
+		{"a runs:read token", member, http.StatusForbidden},
+	} {
+		resp := getWithBearer(t, base+"/metrics", c.token)
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("%s: /metrics status = %d, want %d", c.name, resp.StatusCode, c.want)
+		}
+		if strings.Contains(string(body), "sparkwing_") {
+			t.Errorf("%s: /metrics leaked the registry:\n%s", c.name, body)
+		}
+	}
+	if body := scrapeAs(t, base, admin); !strings.Contains(body, "sparkwing_pending_nodes") {
+		t.Errorf("admin /metrics is not the sparkwing registry:\n%s", body)
 	}
 }
 
@@ -377,7 +416,7 @@ func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	base, st, cleanup := newAuthedTestServer(t)
+	base, admin, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 
 	raw, _, err := st.CreateToken("pool", store.TokenKindRunner,
@@ -387,7 +426,7 @@ func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
 	}
 
 	const hits = `sparkwing_auth_token_cache_total{result="hit"}`
-	before := metricSampleValue(t, scrape(t, base), hits)
+	before := metricSampleValue(t, scrapeAs(t, base, admin), hits)
 	for range 3 {
 		req, err := http.NewRequest(http.MethodGet, base+"/api/v1/auth/whoami", nil)
 		if err != nil {
@@ -404,7 +443,7 @@ func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
 		}
 	}
 
-	body := scrape(t, base)
+	body := scrapeAs(t, base, admin)
 	if got := metricSampleValue(t, body, hits); got < before+2 {
 		t.Errorf("cache hits = %v, want at least %v: only the first of three polls verifies", got, before+2)
 	}

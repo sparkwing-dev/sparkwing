@@ -105,7 +105,7 @@ func TestObjectStoreResetBreaker_ClearsNothingWhenNothingTripped(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_NeedsAdminScope(t *testing.T) {
-	base, _, cleanup := newAuthedTestServer(t)
+	base, _, _, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 
 	resp, err := http.Post(base+"/api/v1/object-store/reset-breaker", "application/json", nil)

@@ -287,6 +287,17 @@ server at port 3100 is no longer trusted implicitly: start the dashboard with
 host and port changed to `localhost:3100`, since the session belongs to the
 origin that opened it. No database migration is required.
 
+## Controller /metrics on the API listener needs an admin bearer
+
+A controller with authentication on answers `401` to an unauthenticated
+`GET /metrics` on its API listener and `403` to a token without `admin`,
+because the run counters name every team's pipelines. Give the scraper an
+admin token (`Authorization: Bearer <token>`, `bearer_token_file` in a
+Prometheus scrape config), or run the controller with `--metrics-addr`
+(`controller.metricsPort` in `sparkwing-full`), whose own listener still
+serves the endpoint without a bearer. A controller with authentication off
+is unchanged. No database migration is required.
+
 ## GitHub App picker carries no binding state
 
 `POST /api/v1/team/github-app/connect/available` drops the

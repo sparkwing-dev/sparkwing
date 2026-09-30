@@ -1687,6 +1687,12 @@ unlock.
 
 ### Security
 
+- **controller:** `GET /metrics` on the API listener of a controller with
+  authentication on requires an `admin` bearer. Its run counters name every
+  team's pipelines, and the `sparkwing-full` chart's default `metricsPort: 0`
+  served them to anyone who reached the API. A `--metrics-addr` listener still
+  serves the endpoint without a bearer. See
+  [the migration note](docs/migrations/_unreleased.md#controller-metrics-on-the-api-listener-needs-an-admin-bearer).
 - **runner:** A trigger loop using the in-process node runner no longer puts
   its runner token in the environment of the trigger's compiled pipeline
   binary. The runner serves that binary a loopback broker that admits only

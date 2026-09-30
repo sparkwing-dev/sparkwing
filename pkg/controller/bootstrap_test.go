@@ -42,7 +42,7 @@ func TestBootstrap_NeededOnEmpty(t *testing.T) {
 }
 
 func TestBootstrap_PostBootstrapRequiresAuth(t *testing.T) {
-	base, st, cleanup := newAuthedTestServer(t)
+	base, _, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 
 	if _, err := st.CreateUser("preexisting", "correctbatteryhorse", []string{controller.ScopeAdmin}, timeNowUTC()); err != nil {
