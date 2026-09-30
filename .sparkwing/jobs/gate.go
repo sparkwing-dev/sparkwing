@@ -644,7 +644,7 @@ func runBuild(ctx context.Context) error {
 
 func runTest(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
-		return forEachGoModule(ctx, "go test", boundedGoCommand(currentHost(), "test", "./..."), home)
+		return forEachGoModule(ctx, "go test", testGoCommand(currentHost()), home)
 	})
 }
 

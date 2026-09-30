@@ -70,13 +70,6 @@ func TestStoreRacePatternAnchorsEveryTopLevelName(t *testing.T) {
 	}
 }
 
-func TestStoreRaceShardCommandArgs(t *testing.T) {
-	want := []string{"-test.run", "^(TestA|ExampleB)$", "-test.count=1", "-test.timeout=80m"}
-	if got := storeRaceShardArgs([]string{"TestA", "ExampleB"}); !slices.Equal(got, want) {
-		t.Fatalf("store race shard args = %v, want %v", got, want)
-	}
-}
-
 func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", "operator-home")

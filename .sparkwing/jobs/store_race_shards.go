@@ -88,10 +88,6 @@ func storeRacePattern(names []string) string {
 	return "^(" + strings.Join(quoted, "|") + ")$"
 }
 
-func storeRaceShardArgs(names []string) []string {
-	return []string{"-test.run", storeRacePattern(names), "-test.count=1", "-test.timeout=80m"}
-}
-
 func storeRaceDigest(names []string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(names, "\n"))))
 }
@@ -158,7 +154,8 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 	results := make(chan storeRaceResult, storeRaceShardCount)
 	for i, shard := range shards {
 		go func() {
-			result, runErr := storeRaceExec(shardCtx, home, binary, storeRaceShardArgs(shard)...).
+			result, runErr := storeRaceExec(shardCtx, home, binary,
+				"-test.run", storeRacePattern(shard), "-test.count=1", "-test.timeout=80m").
 				Dir("pkg/store").Env("GOMAXPROCS", "1").Capture()
 			results <- storeRaceResult{shard: i + 1, count: len(shard), output: result, err: runErr}
 		}()
