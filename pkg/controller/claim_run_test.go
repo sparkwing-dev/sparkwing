@@ -103,11 +103,14 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	plan := "Bearer " + f.launchedRun(olga, "run-parent", "acme", "widgets")
-	doc := map[string]any{"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}}}
+	doc := map[string]any{"nodes": []map[string]any{
+		{"id": "a", "deps": []string{}, "spec_hash": specA}, {"id": "b", "deps": []string{}, "spec_hash": specA},
+	}}
 	if code := f.call("POST", "/api/v1/runs/run-parent/plan", plan, doc, nil); code != http.StatusOK {
 		t.Fatalf("accept plan = %d", code)
 	}
 	work := "Bearer " + f.launchNode("run-parent", "a")
+	sibling := "Bearer " + f.launchNode("run-parent", "b")
 	f.secretArg("run-parent")
 	var own store.Run
 	if code := f.call("GET", "/api/v1/runs/run-parent?include=secret_values", work, nil, &own); code != http.StatusOK || own.Args["token"] != "s3cret" {
@@ -151,6 +154,11 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatalf("read child = %d %+v", code, got)
 	}
 	f.launchedRun(olga, "run-stranger", "acme", "widgets")
+	for _, path := range []string{"/api/v1/runs/run-parent/children/" + childID, "/api/v1/runs/run-parent/children/" + childID + "/nodes/plan/output"} {
+		if code := f.call("GET", path, sibling, nil, nil); code != http.StatusNotFound {
+			t.Fatalf("a sibling node reading %s = %d, want 404", path, code)
+		}
+	}
 	if code := f.call("GET", "/api/v1/runs/run-parent/children/run-stranger", work, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("read a run that is not a child = %d, want 404", code)
 	}

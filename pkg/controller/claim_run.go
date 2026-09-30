@@ -120,12 +120,12 @@ func (s *Server) handleEnqueueChildRun(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// safety: a claim reads only the children its own run started, and only
+// safety: a claim reads only the children its own node started, and only
 // their redacted form and finished outputs.
 func (s *Server) claimChild(w http.ResponseWriter, r *http.Request) (string, bool) {
 	tok, _ := claimTokenFromContext(r.Context())
 	childID := r.PathValue("childID")
-	ok, err := s.store.IsChildRunOf(r.Context(), tok.Team, tok.RunID, childID)
+	ok, err := s.store.IsChildRunOf(r.Context(), tok.Team, tok.RunID, tok.NodeID, childID)
 	if err != nil {
 		s.writeInternalError(w, r, "child run", err)
 		return "", false
