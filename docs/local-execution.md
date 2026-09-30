@@ -542,9 +542,12 @@ SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
 #### What a laptop runner trusts
 
 A runner compiles the pipeline code it fetches and runs it as the user who
-started the runner. That code reads what that user can read: ssh keys,
-`~/.aws`, other tokens in the home directory, and the runner token itself,
-which it receives to report its run. Any team member who can trigger a run
+started the runner. The pipeline process reaches the controller through a
+loopback broker in the runner that admits only its own run's routes, so the
+runner token is not in its environment. That does not stop code running as the
+same OS user: it reads what that user can read, including ssh keys, `~/.aws`,
+other tokens in the home directory, and the runner token in the agent's
+`config.yaml`. Any team member who can trigger a run
 chooses which repository and commit that is. So the machine's owner, not the
 team, decides what the machine builds:
 

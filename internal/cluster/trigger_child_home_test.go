@@ -55,7 +55,7 @@ func TestTriggerChildOpensItsOwnStore(t *testing.T) {
 	if err := os.WriteFile(script, []byte(contents), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := TriggerLoopOptions{WorkRoot: relativeWorkRoot}
+	opts := TriggerLoopOptions{WorkRoot: relativeWorkRoot, ControllerURL: "http://controller.invalid"}
 	for _, runID := range []string{"run-a", "run-b"} {
 		if err := execHandleTrigger(context.Background(), script, relativeWorkRoot,
 			&store.Trigger{ID: runID}, opts, "", discardLogger()); err != nil {

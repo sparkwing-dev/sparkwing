@@ -26,9 +26,19 @@ gets a process-lifetime loopback capability limited to its exact run and node,
 with execution start, finish, and logs additionally bound to its acknowledged
 attempt ordinal. The child does not inherit arbitrary agent service credentials,
 and its capability cannot claim or renew work, manage the fleet, or call
-administrative routes. This is not an OS sandbox: the pipeline keeps every
-file, network, and process permission of the agent OS user. Use a dedicated
-account whose reach every enrolled repository may have. Sparkwing does not
+administrative routes. A claimed trigger's pipeline binary, which plans the
+run, gets the same kind of loopback capability, limited to its own run, from
+a runner using the in-process node runner. A runner using the Kubernetes or
+warm node runner still hands its token to the trigger's binary, because the
+Jobs that binary creates need it.
+
+This is not an OS sandbox: the pipeline keeps every file, network, and
+process permission of the agent OS user. It can read the agent's
+`config.yaml`, which holds the runner token, and every other credential in
+that user's home, such as ssh keys and cloud profiles. GitHub gives the same
+warning for its self-hosted runners. Run the agent as a dedicated OS user
+that holds nothing else, or in a container or VM, and admit only repositories
+whose every committer may act as that user. Sparkwing does not
 join a tailnet or configure host networking.
 [threat-model.md](threat-model.md) states what that boundary isolates, what it
 does not, and what an operator does about the rest when a teammate's branch

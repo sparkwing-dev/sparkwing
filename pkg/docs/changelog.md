@@ -1627,6 +1627,15 @@ unlock.
 
 ### Security
 
+- **runner:** A trigger loop using the in-process node runner no longer puts
+  its runner token in the environment of the trigger's compiled pipeline
+  binary. The runner serves that binary a loopback broker that admits only
+  the claimed run's routes under a per-run capability, as node execution
+  already did. The Kubernetes and warm node runners keep handing the token to
+  the binary, since the Jobs it creates need it. The self-hosted runner
+  documentation now says plainly that pipeline code runs as the runner's OS
+  user and can read that user's files, the agent's `config.yaml` included.
+
 - **runner (Breaking):** A runner or agent with an `--allow-repo` /
   `allow_repos` list refuses a run that names no repository and a
   `--working-tree` snapshot, before fetching anything. The controller
