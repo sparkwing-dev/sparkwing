@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -74,9 +75,9 @@ type Options struct {
 	AllowRemote bool
 
 	// AllowOrigins lists browser origins ("https://dash.example") whose
-	// requests the API answers in addition to loopback ones. Only useful
-	// with AllowRemote, where the request Host no longer proves the caller
-	// reached this process over the loopback interface.
+	// requests the API answers in addition to loopback ones, as Origin and
+	// as Host: the public name of a proxy on this host, or under
+	// AllowRemote a name that is not the Addr host.
 	AllowOrigins []string
 
 	// Version is rendered as a small pill in the dashboard nav. The
@@ -314,20 +315,8 @@ func buildHandler(
 	if opts.ReadOnly {
 		handler = readOnlyMiddleware(handler)
 	}
-	return web.SecurityHeadersMiddleware(webOpts, originGuard(handler, opts.originPolicy()))
-}
-
-func (o Options) originPolicy() originPolicy {
-	ports := []string{devServerPort}
-	if _, port, err := net.SplitHostPort(o.Addr); err == nil {
-		ports = append(ports, port)
-	}
-	return originPolicy{
-		allowRemote:   o.AllowRemote,
-		bindHost:      bindOriginHost(o.Addr),
-		loopbackPorts: ports,
-		allowOrigins:  o.AllowOrigins,
-	}
+	return web.SecurityHeadersMiddleware(webOpts,
+		originguard.Guard(handler, originguard.NewPolicy(opts.Addr, opts.AllowRemote, opts.AllowOrigins)))
 }
 
 func localPaths(home string) (orchestrator.Paths, error) {

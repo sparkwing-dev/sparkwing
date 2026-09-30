@@ -1147,6 +1147,16 @@ mode. The service bearer stays in the web process and rides only its
 server-side proxy, so the browser talks to one origin and `connect-src 'self'`
 holds.
 
+A dashboard without `--require-login` on a loopback address answers only
+loopback `Host` names and the hosts named in `--allow-origin`, so a page whose
+DNS name was rebound to `127.0.0.1` gets `403`. It also refuses a browser
+request whose `Origin` is another site, a cross-site subresource request, and
+a browser write whose body is not `application/json`; `sparkwing serve`
+applies the same checks. Pass `--allow-origin https://dash.example` when a
+proxy on the same host publishes the dashboard under that name. A non-loopback
+listener is reachable directly, so these checks do not apply to it; use
+`--require-login` there.
+
 A dashboard that carries `--token`, runs without `--require-login`, and binds a
 non-loopback address refuses to start, because every caller that reaches the
 listener would drive the controller with that token. Pass `--require-login`,

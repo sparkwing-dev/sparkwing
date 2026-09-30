@@ -42,6 +42,8 @@ func run(args []string) error {
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
 	allowUnauthenticatedRemote := fs.Bool("allow-unauthenticated-remote", false,
 		"serve a token-backed dashboard without --require-login on a non-loopback address, handing the controller to every caller that reaches it")
+	allowOrigins := fs.String("allow-origin", "",
+		"comma-separated browser origins a loopback dashboard without --require-login also answers, such as a same-host proxy's public name")
 	allowInsecureCookiesRemote := fs.Bool("allow-insecure-cookies-remote", false,
 		"accept SPARKWING_WEB_INSECURE_COOKIES on a non-loopback address, for a dashboard published over plain HTTP through a proxy or ingress")
 	hsts := fs.Bool("hsts", false,
@@ -103,6 +105,7 @@ func run(args []string) error {
 			HSTS:              *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
+			AllowOrigins:               splitOrigins(*allowOrigins),
 			InsecureCookies:            insecureCookies,
 			AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
 		}
@@ -138,6 +141,7 @@ func run(args []string) error {
 			HSTS:             *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
+			AllowOrigins:               splitOrigins(*allowOrigins),
 			InsecureCookies:            insecureCookies,
 			AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
 		}
@@ -157,6 +161,16 @@ func run(args []string) error {
 		InsecureCookies:            insecureCookies,
 		AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
 	})
+}
+
+func splitOrigins(raw string) []string {
+	var out []string
+	for _, origin := range strings.Split(raw, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			out = append(out, origin)
+		}
+	}
+	return out
 }
 
 func insecureCookiesRequested(v string) bool {

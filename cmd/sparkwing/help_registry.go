@@ -1806,7 +1806,8 @@ A running instance is left unchanged, including its effective options.
 Use serve restart for replacement. Build identity is reported separately
 from readiness; missing artifact evidence is unknown.
 
-The listener accepts loopback Host headers and rejects a browser Origin
+The listener accepts loopback Host headers and the host of each
+--allow-origin entry, and rejects a browser Origin
 that is neither a loopback origin on the served port or the dashboard's
 dev-server port 3100, the --addr host, nor listed in --allow-origin. A
 browser write with a body must send application/json. --allow-remote
@@ -1816,7 +1817,7 @@ list, overwrite and delete this machine's local secrets.`,
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
-		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
+		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},

@@ -1627,6 +1627,14 @@ unlock.
 
 ### Security
 
+- **web:** `sparkwing-web` without `--require-login` on a loopback address
+  refuses DNS-rebound requests and cross-site writes. It answers only loopback
+  `Host` names and the hosts of the new `--allow-origin` list, and applies the
+  Origin, `Sec-Fetch-Site` and JSON-body checks `sparkwing serve` already
+  applied. A same-host proxy that publishes such a dashboard under another
+  name needs `--allow-origin`. `sparkwing serve --allow-origin` now admits
+  those hosts as `Host` too.
+
 - **store:** Opening an existing SQLite store narrows the database and its
   `-wal`, `-shm` and `-journal` sidecars to `0600` when any of them grants
   group or other access. A file the process cannot chmod fails the open with
