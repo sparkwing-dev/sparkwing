@@ -705,3 +705,72 @@ func TestReleaseRunOutputs_KeepsAnObjectANewerRunStillNames(t *testing.T) {
 		t.Fatalf("storage after both runs expired = %d, want 0", got)
 	}
 }
+
+// Retention and a cache hit's copy serialize on the object. A copy after
+// retention tombstoned the object is refused, so no committed ref names bytes
+// about to be deleted; racing the two, either the copy wins and retention
+// keeps the object, or retention wins and the copy is refused.
+func TestReleaseRunOutputs_NeverDeletesAnObjectACopyNames(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	pair := func(i int) (origin, hit string) {
+		origin, hit = fmt.Sprintf("run-origin-%d", i), fmt.Sprintf("run-hit-%d", i)
+		for _, run := range []string{origin, hit} {
+			if err := s.CreateRun(ctx, store.Run{ID: run, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.CreateNode(ctx, store.Node{RunID: run, NodeID: "n", Status: "running"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.FinishNode(ctx, origin, "n", "success", "", []byte(`"`+origin+`"`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.FinishRunAtForTest(ctx, s, origin, "failed", time.Now().Add(-store.OutputRetention-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		return origin, hit
+	}
+	origin, hit := pair(0)
+	released, err := s.ReleaseRunOutputs(ctx, store.DefaultTeam, origin)
+	if err != nil || len(released) != 1 {
+		t.Fatalf("release = %v, %v; want the origin's object", released, err)
+	}
+	if err := s.FinishNodeCopyingOutput(ctx, hit, "n", "cached", "", origin, "n"); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("a copy of a tombstoned object = %v, want it refused", err)
+	}
+	if again, err := s.ReleaseRunOutputs(ctx, store.DefaultTeam, origin); err != nil || len(again) != 1 {
+		t.Fatalf("a retried release = %v, %v; want the tombstoned object again", again, err)
+	}
+	if err := s.ForgetRunOutputs(ctx, store.DefaultTeam, origin, released); err != nil {
+		t.Fatal(err)
+	}
+	if got := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes; got != 0 {
+		t.Fatalf("storage after retention = %d, want 0", got)
+	}
+	for i := 1; i <= 8; i++ {
+		origin, hit := pair(i)
+		var copyErr, releaseErr error
+		var objs []store.Upload
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			copyErr = s.FinishNodeCopyingOutput(ctx, hit, "n", "cached", "", origin, "n")
+		}()
+		objs, releaseErr = s.ReleaseRunOutputs(ctx, store.DefaultTeam, origin)
+		<-done
+		if releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		node, err := s.GetNode(ctx, hit, "n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case copyErr == nil && (node.OutputRef == nil || len(objs) != 0):
+			t.Fatalf("race %d: the copy won with ref %+v, yet retention released %v", i, node.OutputRef, objs)
+		case copyErr != nil && (!errors.Is(copyErr, store.ErrInvalidInput) || len(objs) != 1):
+			t.Fatalf("race %d: the copy lost with %v, yet retention released %v", i, copyErr, objs)
+		}
+	}
+}
