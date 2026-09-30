@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +14,9 @@ import (
 func processReadChars(t *testing.T) uint64 {
 	t.Helper()
 	data, err := os.ReadFile("/proc/self/io")
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Skip("this kernel keeps no per-task I/O accounting (/proc/self/io)")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
