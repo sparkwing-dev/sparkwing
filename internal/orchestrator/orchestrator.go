@@ -912,6 +912,9 @@ func dispatch(
 		dispatchCtx, backends, runID, plan, admission != nil, cancelDispatch,
 	)
 	if perr != nil {
+		if cause := context.Cause(dispatchCtx); cause != nil {
+			return cause
+		}
 		return perr
 	}
 	switch planOutcome {

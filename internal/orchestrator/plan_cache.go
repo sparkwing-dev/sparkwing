@@ -35,7 +35,7 @@ func (e *planAdmissionEvictedError) Error() string {
 	if e.supersededBy != "" {
 		return fmt.Sprintf("admission on %q lost under %s: superseded by run %s; run `sparkwing queue` to inspect the queue", e.groupName, e.policy, e.supersededBy)
 	}
-	return fmt.Sprintf("plan concurrency group %q: evicted before dispatch; run `sparkwing queue` to inspect the queue", e.groupName)
+	return fmt.Sprintf("plan concurrency group %q: admission evicted; run `sparkwing queue` to inspect the queue", e.groupName)
 }
 
 func planConcurrencyResource(*sparkwing.ConcurrencyGroup) string {
@@ -244,6 +244,11 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, res
 	for {
 		select {
 		case <-ctx.Done():
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if _, err := backends.Concurrency.CancelWaiter(cleanupCtx, key, runID, ""); err != nil {
+				slog.Warn("cancel plan waiter failed", "key", key, "run", runID, "err", err)
+			}
+			cancel()
 			return false, ctx.Err()
 		case <-ticker.C:
 		}
