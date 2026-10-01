@@ -2174,25 +2174,34 @@ func TestRepeatedInvalidRequestsSurfaceInQueueStateWindow(t *testing.T) {
 
 func TestExplicitRelease_Promotes(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home})
+	startDaemon(t, wingd.Config{Home: home, SampleInterval: time.Hour})
 
-	a := ensure(t, home, "")
-	holder := mustAcquire(t, a, semReq("a", "lock", 1, 1, wingwire.PolicyQueue))
+	holder := openRawQueuedAdmission(t, home, semReq("a", "lock", 1, 1, wingwire.PolicyQueue))
+	defer holder.Close()
+	grant, ok := readRawMessage(t, holder).(*wingwire.Grant)
+	if !ok {
+		t.Fatal("holder was not granted admission")
+	}
 
 	b := ensure(t, home, "")
 	positions, resultB := acquireAsync(b, semReq("b", "lock", 1, 1, wingwire.PolicyQueue))
 	waitForQueue(t, positions)
-	started := time.Now()
 
-	if err := holder.Release(); err != nil {
+	if err := writeRawMessage(holder, &wingwire.Release{LeaseToken: grant.LeaseToken}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	r := waitResult(t, resultB, 2*time.Second)
-	if r.err != nil {
-		t.Fatalf("b should have been promoted after release, got %v", r.err)
+	if err := writeRawMessage(holder, &wingwire.QueueState{}); err != nil {
+		t.Fatalf("query after release: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed >= 90*time.Millisecond {
-		t.Fatalf("release-to-promotion took %v, want less than 90ms", elapsed)
+	state, ok := readRawMessage(t, holder).(*wingwire.QueueState)
+	if !ok {
+		t.Fatal("release barrier did not return queue state")
+	}
+	if len(state.Holders) != 1 || state.Holders[0].RunID != "b" || len(state.Waiters) != 0 {
+		t.Fatalf("state after release: holders=%+v waiters=%+v", state.Holders, state.Waiters)
+	}
+	if r := waitResult(t, resultB, 2*time.Second); r.err != nil {
+		t.Fatalf("b should have been promoted after release, got %v", r.err)
 	}
 }
 
