@@ -1417,6 +1417,9 @@ unlock.
 
 ### Security
 
+- **web + deps:** Update Next.js to 16.3.6 for the upstream
+  [GHSA-vcvr-r3jv-pc5j image-generation fix](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j)
+
 - **Cloud source fetch:** A checkout with a symlinked `.sparkwing`, root
   `go.mod`, or `.sparkwing/go.mod` now fails before private module download or
   pipeline build. Cloud pipelines require a real `.sparkwing` directory. See
