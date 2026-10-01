@@ -189,6 +189,7 @@ func TestSpawnDispatch_NoProgressTimeoutPausesForChildAndResumesAfterward(t *tes
 	spawnProgressAfterContext = make(chan context.Context, 1)
 	var releaseChild sync.Once
 	release := func() { releaseChild.Do(func() { close(spawnProgressChildRelease) }) }
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	type runResult struct {
 		result *orchestrator.Result
@@ -196,7 +197,6 @@ func TestSpawnDispatch_NoProgressTimeoutPausesForChildAndResumesAfterward(t *tes
 	}
 	runDone := make(chan runResult, 1)
 	runFinished := make(chan struct{})
-	p := newPaths(t)
 	go func() {
 		defer close(runFinished)
 		res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "spawn-progress-timeout"})
@@ -275,7 +275,7 @@ func TestSpawnDispatch_NoProgressTimeoutPausesForChildAndResumesAfterward(t *tes
 
 func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
 	spawnSingleChildRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "spawn-single"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -307,7 +307,7 @@ func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
 }
 
 func TestSpawnDispatch_ChildFailureFailsParent(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "spawn-fail"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -333,7 +333,7 @@ func TestSpawnDispatch_ChildFailureFailsParent(t *testing.T) {
 
 func TestSpawnDispatch_ForEachFansOut(t *testing.T) {
 	spawnEachCount.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "spawn-each"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

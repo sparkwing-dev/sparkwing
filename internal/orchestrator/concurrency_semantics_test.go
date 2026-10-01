@@ -423,7 +423,7 @@ func nodeByID(t *testing.T, p orchestrator.Paths, runID, nodeID string) *store.N
 
 func TestMemo_SharedAcrossDifferentGroups(t *testing.T) {
 	resetSem()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-diff-groups"})
 	if err != nil || res.Status != "success" {
 		t.Fatalf("run: status=%q err=%v", res.Status, err)
@@ -438,7 +438,7 @@ func TestMemo_SharedAcrossDifferentGroups(t *testing.T) {
 
 func TestMemo_SameGroupDifferentContentBothRun(t *testing.T) {
 	resetSem()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-same-group"})
 	if err != nil || res.Status != "success" {
 		t.Fatalf("run: status=%q err=%v", res.Status, err)
@@ -451,7 +451,7 @@ func TestMemo_SameGroupDifferentContentBothRun(t *testing.T) {
 func TestMemo_InFlightDedupeOnContent(t *testing.T) {
 	resetSem()
 	gate := installSemStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan semRunOutcome, 1)
 	finished := make(chan struct{})
@@ -493,7 +493,7 @@ func TestScope_BoxSerializesAcrossRunsOnSameHost(t *testing.T) {
 	}
 	resetSem()
 	gate := installSemStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	var wg sync.WaitGroup
 	results := make(chan semRunOutcome, 2)
@@ -535,7 +535,7 @@ func TestScope_BoxSerializesAcrossRunsOnSameHost(t *testing.T) {
 
 func TestScope_RunIsolatesPerRun(t *testing.T) {
 	scopeRunBarrier.Store(newRunBarrier())
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	type outcome struct {
 		status string
 		runErr error
@@ -571,7 +571,7 @@ func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
 	}
 	resetSem()
 	gate := installSemStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	var wg sync.WaitGroup
 	results := make(chan semRunOutcome, 2)
@@ -619,7 +619,7 @@ func TestConcurrency_WaitDoesNotHoldWorkerSlot(t *testing.T) {
 	resetSem()
 	gate := installSemStepGate(t)
 	freeNodeLatency.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan semRunOutcome, 1)
 	finished := make(chan struct{})
@@ -666,7 +666,7 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	resetSem()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	leaderDone := make(chan struct{})
 	go func() {
 		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "qt-leader", RunID: "qt-leader"})
@@ -727,7 +727,7 @@ func init() {
 
 func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 	resetSem()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -764,7 +764,7 @@ func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 
 func TestGroupedNode_CancelWhileQueuedDoesNotLeaveHolder(t *testing.T) {
 	resetSem()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	started := time.Now()
 
 	holderCtx, cancelHolder := context.WithCancel(context.Background())

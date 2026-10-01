@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -17,7 +18,7 @@ import (
 func seedProfileRunWithNode(t *testing.T, dbPath, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	seed, err := store.Open(dbPath)
+	seed, err := teststore.Open(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -77,7 +78,7 @@ func dropRun(t *testing.T, pipeline string, open func(nodeID string) *nodeLogger
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return localDropPipe{} })
 
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

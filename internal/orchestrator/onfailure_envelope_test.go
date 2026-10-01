@@ -121,7 +121,7 @@ func init() {
 
 func TestOnFailure_RecoveryNodeMemoizes(t *testing.T) {
 	recoveryMemoizeRuns.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	first, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "mod-onfailure-memoize"})
@@ -157,7 +157,7 @@ func TestOnFailure_RecoveryNodeMemoizes(t *testing.T) {
 
 func TestOnFailure_RecoveryNodeHonorsSkipIf(t *testing.T) {
 	recoverySkipIfRuns.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "mod-onfailure-skipif"})
@@ -182,7 +182,7 @@ func TestOnFailure_RecoveryNodeHonorsSkipIf(t *testing.T) {
 func TestOnFailure_RecoveryNodeTakesAConcurrencySlot(t *testing.T) {
 	recoveryConcurrencyRuns.Store(0)
 	gate := installRecoveryHolderGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	type runResult struct {
 		res *orchestrator.Result

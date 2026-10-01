@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -231,7 +232,7 @@ func podSpawnFixture(t *testing.T, pipeline, runID, nodeID string) (*store.Store
 		t.Fatalf("ensure root: %v", err)
 	}
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -384,7 +385,7 @@ func TestRunNodeOnce_SpawnHonorsWhenRunnerLikeTheDispatcher(t *testing.T) {
 		t.Error("no node_skipped event for the gated child")
 	}
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ref, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "pod-spawn-gated"})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

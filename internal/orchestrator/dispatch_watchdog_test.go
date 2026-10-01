@@ -39,7 +39,7 @@ func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 			close(wedgeRelease)
 		}
 	})
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	start := time.Now()
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
@@ -97,7 +97,7 @@ func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 func TestDispatchWatchdog_NegativeDisables(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:            "spawn-single",

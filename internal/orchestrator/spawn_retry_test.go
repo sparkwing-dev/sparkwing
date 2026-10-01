@@ -88,7 +88,7 @@ func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 
 	first, err := orchestrator.RunLocal(ctx, p,
@@ -155,7 +155,7 @@ func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	resetGateCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 
 	first, err := orchestrator.RunLocal(ctx, p,

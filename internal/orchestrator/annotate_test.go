@@ -26,7 +26,7 @@ func init() {
 }
 
 func TestRun_AnnotatePersistsToStepRow(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-annotate"})
 	if err != nil {

@@ -69,7 +69,7 @@ func seedLocalSecret(t *testing.T, p orchestrator.Paths, name, value string) {
 }
 
 func TestSecret_ResolvesFromTheLocalStoreWithoutADaemon(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	seedLocalSecret(t, p, "TOKEN", "abc123")
 
 	observedToken = ""
@@ -88,7 +88,7 @@ func TestSecret_ResolvesFromTheLocalStoreWithoutADaemon(t *testing.T) {
 }
 
 func TestSecret_MissingNameFailsTheJob(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	seedLocalSecret(t, p, "OTHER", "1")
 
 	observedToken = "before"
@@ -169,7 +169,7 @@ func init() {
 }
 
 func TestSecret_MaskerRedactsResolvedValues(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	seedLocalSecret(t, p, "TOKEN", "supersecret")
 
 	cap := &captureLogger{}

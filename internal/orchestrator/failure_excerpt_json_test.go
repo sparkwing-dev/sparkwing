@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -70,7 +71,7 @@ func runsErrorsJSON(t *testing.T, p orchestrator.Paths, runID string) []map[stri
 }
 
 func TestJobErrorsJSON_PlainErrorHasNoExcerpt(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "excerpt-plain-fail"})
 	if err != nil {
@@ -96,7 +97,7 @@ func TestJobErrorsJSON_PlainErrorHasNoExcerpt(t *testing.T) {
 }
 
 func TestJobErrorsJSON_ShortOutputNotTruncated(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "excerpt-short-fail"})
 	if err != nil {
@@ -116,7 +117,7 @@ func TestJobErrorsJSON_ShortOutputNotTruncated(t *testing.T) {
 }
 
 func TestJobsRemoteJSON_CarriesFailureExcerpt(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -28,7 +28,7 @@ func init() {
 }
 
 func TestRun_CancelWhileWaitingOnDependencyRecordsTerminalNode(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	waitingCancelStarted = make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

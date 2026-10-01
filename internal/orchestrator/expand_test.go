@@ -149,7 +149,7 @@ func TestJobFanOutDynamic_FansOutAndJoins(t *testing.T) {
 	builtMu.Unlock()
 	faninRan.Store(false)
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "expand-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -189,7 +189,7 @@ func TestJobFanOutDynamic_EmptyExpansion(t *testing.T) {
 	discoverItems.Store(&empty)
 	emptyFaninRan.Store(false)
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "expand-empty"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -206,7 +206,7 @@ func TestJobFanOutDynamic_SourceFailsCancelsFanin(t *testing.T) {
 	failedFaninRan.Store(false)
 	failedGenRan.Store(false)
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "expand-source-fails"})
 
 	if res.Status != "failed" {
@@ -236,7 +236,7 @@ func TestJobFanOutDynamic_GeneratorPanicCancelsFanin(t *testing.T) {
 	discoverItems.Store(&items)
 	panicFaninRan.Store(false)
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "expand-gen-panics"})
 
 	if panicFaninRan.Load() {

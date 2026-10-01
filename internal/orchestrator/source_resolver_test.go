@@ -41,7 +41,7 @@ func TestRun_ProfileSecretsBackend_EnvType(t *testing.T) {
 	t.Setenv("SWTEST_TOKEN", "from-env")
 
 	capturedEnvSecret = ""
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "env-reading-pipe",
 		Profile: &profile.Profile{
@@ -62,7 +62,7 @@ func TestRun_ProfileSecretsBackend_EnvType(t *testing.T) {
 
 func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 	capturedEnvSecret = ""
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "env-reading-pipe",
 		SecretSource: staticSource{"TOKEN": "from-options-fallback"},
@@ -79,7 +79,7 @@ func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 }
 
 func TestRun_LocalOnlyReplacesOptionsSecretSourceWithTheLocalStore(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	seedLocalSecret(t, p, "TOKEN", "from-local-store")
 
 	capturedEnvSecret = ""
@@ -102,7 +102,7 @@ func TestRun_LocalOnlyReplacesOptionsSecretSourceWithTheLocalStore(t *testing.T)
 func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
 	t.Setenv("SWTEST_TOKEN", "x")
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "env-reading-pipe",
 		PipelineYAML: &pipelines.Pipeline{

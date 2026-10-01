@@ -126,7 +126,7 @@ func init() {
 func TestSkipIf_SkipsWhenPredicateTrue(t *testing.T) {
 	skipDeployWant.Store(true)
 	deployRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-flag"})
 
 	if res.Status != "success" {
@@ -155,7 +155,7 @@ func TestSkipIf_SkipsWhenPredicateTrue(t *testing.T) {
 func TestSkipIf_RunsWhenPredicateFalse(t *testing.T) {
 	skipDeployWant.Store(false)
 	deployRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-flag"})
 
 	if !deployRan.Load() {
@@ -166,7 +166,7 @@ func TestSkipIf_RunsWhenPredicateFalse(t *testing.T) {
 func TestSkipIf_MultiplePredicatesOR(t *testing.T) {
 	skipDeployWant.Store(true)
 	multiRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-multi"})
 
 	if multiRan.Load() {
@@ -177,7 +177,7 @@ func TestSkipIf_MultiplePredicatesOR(t *testing.T) {
 func TestSkipIf_MultiplePredicatesAllFalse(t *testing.T) {
 	skipDeployWant.Store(false)
 	multiRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-multi"})
 
 	if !multiRan.Load() {
@@ -190,7 +190,7 @@ func TestSkipIf_SlowPredicateDefaultsToRun(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	slowRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	start := time.Now()
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-slow"})
 	elapsed := time.Since(start)
@@ -205,7 +205,7 @@ func TestSkipIf_SlowPredicateDefaultsToRun(t *testing.T) {
 
 func TestSkipIf_PanickyPredicateDefaultsToRun(t *testing.T) {
 	panickyRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-panic"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -249,7 +249,7 @@ func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 	generousRan.Store(false)
 	generousBudget = make(chan time.Duration, 1)
 	generousCanceled = make(chan struct{}, 1)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-generous"})
 
 	budget := <-generousBudget
@@ -270,7 +270,7 @@ func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 
 func TestSkipIf_DownstreamProceedsAfterSkip(t *testing.T) {
 	downstreamRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-downstream"})
 
 	if res.Status != "success" {

@@ -39,7 +39,7 @@ func TestNoProgressTimeout_DumpIsAvailableThroughJobLogs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-diagnostic"})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

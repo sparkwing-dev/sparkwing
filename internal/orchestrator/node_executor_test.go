@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -83,7 +84,7 @@ func TestNodeExecutorMarkFailedPersistsAfterContextCancel(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestClaimedNodeAcknowledgesAtExecutionBoundary(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func TestTriggerOwnedNodeConsumesCarriedExecutionOrdinal(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +247,7 @@ func TestTriggerOwnedNodeDoesNotRunWithoutExecutionRecorder(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +294,7 @@ func TestClaimedNodeDoesNotInvokeBodyWhenNextOrdinalIsRejected(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +346,7 @@ func TestClaimedNodeCancellationFinishesAcknowledgedAttempt(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +392,7 @@ func TestNodeExecutorSubtractsCarriedAttemptsFromLocalRetryBudget(t *testing.T) 
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +439,7 @@ func TestClaimedRetryAutoReportsFailureWithoutPrivateRedispatch(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +492,7 @@ func TestNodeExecutorRunNodeCancelledLeavesRowForTeardownClassifier(t *testing.T
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -550,7 +551,7 @@ func TestNodeExecutorVerifyFailurePersistsReasonAfterContextCancel(t *testing.T)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -608,7 +609,7 @@ func TestNodeExecutorMarkFailedIfUnfinishedDoesNotOverwriteOnReadError(t *testin
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -666,7 +667,7 @@ func TestTriggerOwnedNodeRecordsLocalAttribution(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}

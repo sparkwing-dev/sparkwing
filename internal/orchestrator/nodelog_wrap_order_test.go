@@ -41,7 +41,7 @@ func init() {
 }
 
 func TestRun_AnnotationsAndSummariesPersistMasked(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	seedLocalSecret(t, p, "WRAP_TOKEN", wrapOrderSecret)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{

@@ -13,12 +13,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestWriteEventsViaBackend_PagesPastOnePage(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "events-state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "events-state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestWriteEventsViaBackend_StopsWhenAPageDoesNotAdvance(t *testing.T) {
 
 func TestJobLogsRemoteWithTokens_EventsOnlyEmitsStoreEvents(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller-events.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller-events.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestLatestComputeGuardRefusal_StopsWhenAPageDoesNotAdvance(t *testing.T) {
 
 func TestLatestComputeGuardRefusal_ReadsPastOnePage(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "guard-events.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "guard-events.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}

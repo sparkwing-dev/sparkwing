@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store.Store, time.Time, time.Time) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 }
 
 func TestRecordRunProfile_CommandCPUDoesNotJoinSampledWindows(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -62,7 +63,7 @@ func TestArtifacts_AggregatorStagesFullSetOnCacheHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestArtifacts_StagedInDistributedMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
-	ctrlStore, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	ctrlStore, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatalf("controller store: %v", err)
 	}

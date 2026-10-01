@@ -14,7 +14,7 @@ import (
 )
 
 func TestListJobs_EmptyDB(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	var buf bytes.Buffer
 	if err := orchestrator.ListJobs(context.Background(), p, orchestrator.ListOpts{Limit: 10}, &buf); err != nil {
 		t.Fatalf("ListJobs: %v", err)
@@ -25,7 +25,7 @@ func TestListJobs_EmptyDB(t *testing.T) {
 }
 
 func TestListJobs_ShowsRecentRun(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -48,7 +48,7 @@ func TestListJobs_ShowsRecentRun(t *testing.T) {
 }
 
 func TestListJobs_FilterByPipeline(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
 
@@ -70,7 +70,7 @@ func TestListJobs_FilterByPipeline(t *testing.T) {
 }
 
 func TestListJobs_FilterByStatus(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
 
@@ -92,7 +92,7 @@ func TestListJobs_FilterByStatus(t *testing.T) {
 }
 
 func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 }
 
 func TestListJobs_JSONOutput(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -151,7 +151,7 @@ func TestListJobs_JSONOutput(t *testing.T) {
 }
 
 func TestListJobs_ShowsLocalAdmissionWait(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -183,7 +183,7 @@ func TestListJobs_ShowsLocalAdmissionWait(t *testing.T) {
 }
 
 func TestListJobs_TracksInterleavedNodeAdmissionWaitsIndependently(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -229,7 +229,7 @@ func TestListJobs_TracksInterleavedNodeAdmissionWaitsIndependently(t *testing.T)
 }
 
 func TestListJobs_PreservesPlanAdmissionAsRootWait(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -260,7 +260,7 @@ func TestListJobs_PreservesPlanAdmissionAsRootWait(t *testing.T) {
 }
 
 func TestListJobs_ClearsInterleavedNodeAdmissionTerminalsIndependently(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -297,7 +297,7 @@ func TestListJobs_ClearsInterleavedNodeAdmissionTerminalsIndependently(t *testin
 }
 
 func TestListJobs_StaleAdmissionTerminalPreservesNewerRequest(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -333,7 +333,7 @@ func TestListJobs_StaleAdmissionTerminalPreservesNewerRequest(t *testing.T) {
 }
 
 func TestListJobs_ClearsLegacyAdmissionWaitOnLegacyTerminal(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -364,7 +364,7 @@ func TestListJobs_ClearsLegacyAdmissionWaitOnLegacyTerminal(t *testing.T) {
 }
 
 func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -402,7 +402,7 @@ func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 }
 
 func TestJobStatus_RendersFanOutDAG(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fanout-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -421,7 +421,7 @@ func TestJobStatus_RendersFanOutDAG(t *testing.T) {
 }
 
 func TestJobStatus_ShowsError(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -446,7 +446,7 @@ func TestJobStatus_ShowsError(t *testing.T) {
 }
 
 func TestJobStatus_JSON(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -466,7 +466,7 @@ func TestJobStatus_JSON(t *testing.T) {
 }
 
 func TestJobStatus_ShowsLogPath(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -506,7 +506,7 @@ func TestJobStatus_ShowsLogPath(t *testing.T) {
 }
 
 func TestJobStatus_OmitsLogPathWhenRunHasNone(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -549,7 +549,7 @@ func TestJobStatus_OmitsLogPathWhenRunHasNone(t *testing.T) {
 }
 
 func TestJobStatus_MarksLogPathAbsentOnThisMachine(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -597,7 +597,7 @@ func TestJobStatus_MarksLogPathAbsentOnThisMachine(t *testing.T) {
 }
 
 func TestJobStatus_ShowsLocalAdmissionWait(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -642,7 +642,7 @@ func TestJobStatus_ShowsLocalAdmissionWait(t *testing.T) {
 }
 
 func TestJobStatus_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -677,7 +677,7 @@ func TestJobStatus_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 }
 
 func TestListJobs_ReadsAdmissionTerminalEventPastFirstPage(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -717,7 +717,7 @@ func TestListJobs_ReadsAdmissionTerminalEventPastFirstPage(t *testing.T) {
 }
 
 func TestJobLogs_WholeRunAndNodeScoped(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -742,7 +742,7 @@ func TestJobLogs_WholeRunAndNodeScoped(t *testing.T) {
 }
 
 func TestJobLogs_UnknownNode(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -756,7 +756,7 @@ func TestJobLogs_UnknownNode(t *testing.T) {
 }
 
 func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -785,7 +785,7 @@ func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
 }
 
 func TestJobErrors(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -804,7 +804,7 @@ func TestJobErrors(t *testing.T) {
 }
 
 func TestJobErrors_NoFailures(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -819,7 +819,7 @@ func TestJobErrors_NoFailures(t *testing.T) {
 }
 
 func TestJobErrors_JSON(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -838,7 +838,7 @@ func TestJobErrors_JSON(t *testing.T) {
 }
 
 func TestJobStatus_ReportsTheComputeGuardThatRefusedWork(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {

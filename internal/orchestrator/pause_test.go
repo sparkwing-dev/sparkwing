@@ -19,7 +19,7 @@ type pauseTestHarness struct {
 
 func newPauseHarness(t *testing.T) *pauseTestHarness {
 	t.Helper()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}

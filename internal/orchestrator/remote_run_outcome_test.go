@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -20,7 +21,7 @@ import (
 func outcomeController(t *testing.T, status, runErr string) string {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatalf("controller store: %v", err)
 	}

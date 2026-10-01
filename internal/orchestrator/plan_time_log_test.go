@@ -31,7 +31,7 @@ func init() {
 }
 
 func TestRun_InfoFromPlanReachesTheRunLog(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-plan-time-log"})
 	if err != nil {
@@ -57,7 +57,7 @@ func TestRun_InfoFromPlanReachesTheRunLog(t *testing.T) {
 
 func TestRun_InfoFromPlanIsMasked(t *testing.T) {
 	registerSecretArgsPipeline()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: planSecretPipeline,
 		Args:     map[string]string{"token": secretArgValue, "env": visibleArgValue},

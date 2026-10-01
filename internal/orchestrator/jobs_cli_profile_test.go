@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -17,7 +18,7 @@ func TestListJobs_ReadsFromProfileBackend(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "profile-state.db")
 
-	seed, err := store.Open(dbPath)
+	seed, err := teststore.Open(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}

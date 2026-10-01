@@ -132,7 +132,7 @@ func init() {
 }
 
 func TestExclusive_SerializesConcurrentHolders(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	assertExclusiveSerialization(t, p, 1)
 }
 
@@ -140,7 +140,7 @@ func TestExclusive_AcrossRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	assertExclusiveSerialization(t, p, 2)
 }
 
@@ -241,7 +241,7 @@ func waitForExclusivePopulation(t *testing.T, ctx context.Context, st *store.Sto
 func TestNeedsOptional_WaitsForPresent(t *testing.T) {
 	optA.Store(false)
 	optB.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "needs-optional"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -255,7 +255,7 @@ func TestContinueOnError_DownstreamProceeds(t *testing.T) {
 	cOErrFailRan.Store(false)
 	cOErrNextRan.Store(false)
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "continue-on-error"})
 
 	if !cOErrFailRan.Load() {
@@ -286,7 +286,7 @@ func TestContinueOnError_DownstreamProceeds(t *testing.T) {
 func TestOptional_FailureDoesNotFailRun(t *testing.T) {
 	optFailRan.Store(false)
 	optFailNext.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "optional-failure"})
 
 	if !optFailRan.Load() {

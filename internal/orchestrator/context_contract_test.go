@@ -94,7 +94,7 @@ func runContextProbe(t *testing.T) map[string]contextSighting {
 	seen = nil
 	seenMu.Unlock()
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-context-probe"})
 	if err != nil {

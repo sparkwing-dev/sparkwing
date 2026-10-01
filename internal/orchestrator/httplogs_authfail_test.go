@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -44,7 +45,7 @@ func TestHTTPLogs_AfterHookAuthFailureStillFailsTheNode(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer logsSrv.Close()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestHTTPLogs_TerminalBatchAuthFailureStillFailsTheNode(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer logsSrv.Close()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 	defer logsSrv.Close()
 
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -41,7 +42,7 @@ func TestNodeExecutorFailsANodeWhoseOutputWasNotStored(t *testing.T) {
 			if err := paths.EnsureRoot(); err != nil {
 				t.Fatal(err)
 			}
-			st, err := store.Open(paths.StateDB())
+			st, err := teststore.Open(paths.StateDB())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +80,7 @@ func TestNodeExecutorFailsANodeWhoseOutputWasNotStored(t *testing.T) {
 }
 
 func TestLocalOutputsReady_RefusesAStoreWithNoOutputDir(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

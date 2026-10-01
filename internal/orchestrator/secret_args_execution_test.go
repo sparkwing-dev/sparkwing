@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -21,7 +22,7 @@ const (
 
 func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *client.Client) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestSecretArgs_RetryArgRehydrationUsesTheExecutionView(t *testing.T) {
 }
 
 func TestRunForExecution_FallsBackForLocalBackends(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "local.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "local.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
 		t.Fatalf("WriteNodeDispatch: %v", err)
 	}
 
-	local, err := store.Open(filepath.Join(t.TempDir(), "local.db"))
+	local, err := teststore.Open(filepath.Join(t.TempDir(), "local.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
 }
 
 func TestSecretArgs_ExecutionFetchOnAnUnauthenticatedController(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

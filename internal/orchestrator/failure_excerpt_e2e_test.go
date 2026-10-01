@@ -57,7 +57,7 @@ func init() {
 }
 
 func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	seedLocalSecret(t, p, "DEPLOY_TOKEN", excerptSecretValue)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{

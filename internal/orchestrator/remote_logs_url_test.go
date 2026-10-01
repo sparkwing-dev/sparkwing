@@ -10,14 +10,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestControllerHandlerServesNoLogAppends(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/controller.db")
+	st, err := teststore.Open(t.TempDir() + "/controller.db")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestControllerHandlerServesNoLogAppends(t *testing.T) {
 }
 
 func TestColocatedControllerAcceptsLogAppends(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/controller.db")
+	st, err := teststore.Open(t.TempDir() + "/controller.db")
 	if err != nil {
 		t.Fatal(err)
 	}

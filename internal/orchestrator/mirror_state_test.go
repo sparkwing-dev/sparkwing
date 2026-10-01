@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -18,7 +19,7 @@ import (
 
 func openMirrorStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -254,7 +255,7 @@ func registerMirrorTestPipelines() {
 
 func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 	registerMirrorTestPipelines()
-	ctrlStore, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	ctrlStore, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatalf("controller store: %v", err)
 	}

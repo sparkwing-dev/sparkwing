@@ -123,7 +123,7 @@ func nodesByID(t *testing.T, p orchestrator.Paths, runID string) map[string]*sto
 
 func TestVerify_SuccessLetsNodeSucceed(t *testing.T) {
 	verifyOKRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "verify-ok"})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -140,7 +140,7 @@ func TestVerify_FailureFailsNodeAtVerifyStage(t *testing.T) {
 	vfActionRuns.Store(0)
 	vfVerifyRuns.Store(0)
 	vfRecoveryStage.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "verify-fails"})
 
 	if res.Status != "failed" {
@@ -175,7 +175,7 @@ func TestVerify_FailureFailsNodeAtVerifyStage(t *testing.T) {
 func TestVerify_ActionFailureSkipsVerifyAndRoutesAsAction(t *testing.T) {
 	afVerifyRuns.Store(0)
 	afRecoveryStage.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "verify-action-fails"})
 
 	if res.Status != "failed" {
@@ -192,7 +192,7 @@ func TestVerify_ActionFailureSkipsVerifyAndRoutesAsAction(t *testing.T) {
 func TestVerify_RetryReRunsActionAndVerify(t *testing.T) {
 	vrActionRuns.Store(0)
 	vrVerifyRuns.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "verify-retry"})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

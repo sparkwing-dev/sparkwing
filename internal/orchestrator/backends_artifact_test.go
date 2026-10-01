@@ -10,7 +10,7 @@ import (
 )
 
 func TestLocalBackends_ThreadsArtifact(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}

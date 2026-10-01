@@ -46,7 +46,7 @@ func (s staticSource) Read(name string) (string, bool, error) {
 
 func TestOrchestratorRun_InstallsPipelineSecretsOnCtx(t *testing.T) {
 	capturedSecrets = nil
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "orch-sec-reader",
 		SecretSource: staticSource{"DEPLOY_TOKEN": "swu_real"},
@@ -73,7 +73,7 @@ func TestOrchestratorRun_InstallsPipelineSecretsOnCtx(t *testing.T) {
 }
 
 func TestOrchestratorRun_MissingRequiredSecretFailsRun(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "orch-sec-reader",
 		SecretSource: staticSource{},

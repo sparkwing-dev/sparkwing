@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -42,7 +43,7 @@ func pivotRowTotal(t *testing.T, out string) int {
 
 func TestListJobsRemoteByPipeline_CountsEveryMatchingRunNotThePage(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller-state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller-state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "subset-state.db")
 
-	seed, err := store.Open(dbPath)
+	seed, err := teststore.Open(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
 
 func TestListJobsRemote_CursorWalksEveryRunExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "remote-page-state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "remote-page-state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestListJobsRemote_CursorWalksEveryRunExactlyOnce(t *testing.T) {
 func TestListJobsByPipeline_SummarySaysWhenTotalsStopShort(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "summary-state.db")
-	seed, err := store.Open(dbPath)
+	seed, err := teststore.Open(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}

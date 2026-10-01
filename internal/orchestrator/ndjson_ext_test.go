@@ -58,7 +58,7 @@ func TestRunsListJSONIsNDJSON(t *testing.T) {
 
 func seedRunsAndList(t *testing.T, n int) string {
 	t.Helper()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {

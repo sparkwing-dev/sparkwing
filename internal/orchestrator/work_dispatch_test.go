@@ -86,7 +86,7 @@ func init() {
 }
 
 func TestWorkDispatch_MultiStepWorkSucceeds(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "workdisp-multi"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -108,7 +108,7 @@ func TestWorkDispatch_MultiStepWorkSucceeds(t *testing.T) {
 }
 
 func TestWorkDispatch_TypedResultPersistedAsNodeOutput(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "workdisp-multi"})
 	if err != nil || res.Status != "success" {
 		t.Fatalf("Run: status=%q err=%v rerr=%v", res.Status, err, res.Error)
@@ -139,7 +139,7 @@ func TestWorkDispatch_TypedResultPersistedAsNodeOutput(t *testing.T) {
 }
 
 func TestWorkDispatch_FailingStepFailsTheNode(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "workdisp-fail"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -173,7 +173,7 @@ func TestWorkDispatch_FailingStepFailsTheNode(t *testing.T) {
 
 func TestWorkDispatch_JobFnRunsViaWorkPath(t *testing.T) {
 	jobFnRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "workdisp-jobfn"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

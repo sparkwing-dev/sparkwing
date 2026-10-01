@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,7 +32,7 @@ func TestEnvelopeTruncated(t *testing.T) {
 
 func TestMintReplayRun(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestMintReplayRun(t *testing.T) {
 
 func TestMintReplayRun_NoSnapshot(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -130,7 +131,7 @@ func TestMintReplayRun_NoSnapshot(t *testing.T) {
 func TestRunReplayNode_CodeDrift(t *testing.T) {
 	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 
 func TestMintReplayRun_InheritsSecretArgClassification(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -239,7 +240,7 @@ func TestMintReplayRun_InheritsSecretArgClassification(t *testing.T) {
 
 func TestMintReplayRun_UnclassifiedSourceStaysUnclassified(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -627,7 +627,7 @@ func cacheCounterBump() func() {
 func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan *orchestrator.Result, 1)
 	finished := make(chan struct{})
@@ -668,7 +668,7 @@ func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 	}
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan *orchestrator.Result, 2)
 	finished := make(chan struct{})
@@ -715,7 +715,7 @@ func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 
 func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -763,7 +763,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 
 func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -799,7 +799,7 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 
 func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	res1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
@@ -836,7 +836,7 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 
 func TestConcurrency_DriftWarnEventEmitted(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	r1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-a"})
 	if err != nil || r1.Status != "success" {
@@ -1099,7 +1099,7 @@ func waitForProgressTimeoutResumed(t *testing.T, attemptCtx context.Context) {
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan *orchestrator.Result, 2)
 	finished := make(chan struct{})
@@ -1150,7 +1150,7 @@ func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 	}
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
@@ -1250,7 +1250,7 @@ func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 
 func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 	resetLeaderBarrier()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1357,7 +1357,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -1458,7 +1458,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 }
 
 func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1489,7 +1489,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -1616,7 +1616,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -1735,7 +1735,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -1887,7 +1887,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -2052,7 +2052,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -2191,7 +2191,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -2337,7 +2337,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx := context.Background()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
@@ -2383,7 +2383,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.
 
 func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	leaderFinished := make(chan struct{})
@@ -2446,7 +2446,7 @@ func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline 
 	t.Helper()
 	orchestrator.SetSlotObservationIntervalForTest(t, 10*time.Millisecond)
 	resetCacheCounter()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	leaderFinished := make(chan struct{})

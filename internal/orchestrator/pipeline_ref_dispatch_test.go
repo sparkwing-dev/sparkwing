@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runretry"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -48,7 +49,7 @@ func main() {
 			runGitForRetryTest(t, repo, "commit", "-am", "change pipeline")
 			revision := strings.TrimSpace(runGitForRetryTest(t, repo, "rev-parse", "HEAD"))
 			runGitForRetryTest(t, repo, "branch", "-f", "selected", "HEAD")
-			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

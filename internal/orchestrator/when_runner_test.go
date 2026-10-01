@@ -47,7 +47,7 @@ func init() {
 }
 
 func TestRun_WhenRunnerSkipsJobWhenRunnerCannotSatisfy(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "when-runner-skip"})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestRun_WhenRunnerSkipsJobWhenRunnerCannotSatisfy(t *testing.T) {
 }
 
 func TestRun_WhenRunnerLocalRunsOnLocalRunner(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "when-runner-local"})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestRun_WhenRunnerLocalRunsOnLocalRunner(t *testing.T) {
 }
 
 func TestRun_WhenRunnerCommaOrMatchesLocal(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "when-runner-comma-or"})
 	if err != nil {
@@ -158,7 +158,7 @@ func init() {
 }
 
 func TestRun_WhenRunnerUsesCurrentLocalPlatform(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "when-runner-platform"})
 	if err != nil {
 		t.Fatal(err)

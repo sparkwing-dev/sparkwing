@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestClaimedUnknownPipelineFailsVisibly(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestClaimedDefinedPipelineSetupFailureFailsRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
 			ctx := context.Background()
-			st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +213,7 @@ func TestClaimedSetupFailureConfirmsAmbiguousRunWrite(t *testing.T) {
 func TestClaimedDefinedPipelineStillCompletes(t *testing.T) {
 	registerRemotePipelines(t)
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

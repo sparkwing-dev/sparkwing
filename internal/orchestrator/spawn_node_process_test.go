@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -84,7 +85,7 @@ func nodeSpawnFixture(t *testing.T, runID string, requires []string) (*store.Sto
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

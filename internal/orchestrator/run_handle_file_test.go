@@ -11,7 +11,7 @@ import (
 )
 
 func TestRunPublishesHandleAfterPersistence(t *testing.T) {
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	handlePath := filepath.Join(t.TempDir(), "run.json")
 	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline:      "orch-ok",
@@ -38,7 +38,7 @@ func TestRunPublishesHandleAfterPersistence(t *testing.T) {
 }
 
 func TestRunRefusesWorkWhenHandleCannotBePublished(t *testing.T) {
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline:      "orch-ok",
 		RunHandlePath: filepath.Join(t.TempDir(), "missing", "run.json"),
@@ -49,7 +49,7 @@ func TestRunRefusesWorkWhenHandleCannotBePublished(t *testing.T) {
 }
 
 func TestRunRefusesAnExistingHandleDestination(t *testing.T) {
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	handlePath := filepath.Join(t.TempDir(), "run.json")
 	old := []byte(`{"schema_version":1,"run_id":"old"}`)
 	if err := os.WriteFile(handlePath, old, 0o600); err != nil {

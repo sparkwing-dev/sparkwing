@@ -40,7 +40,7 @@ func registerLockDefaultsPipe(t *testing.T) {
 func TestRun_PipelineDefaultsFillUnsetArgs(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	lockDefaultsCapturedReplicas = 0
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "lock-defaults-pipe",
 		PipelineYAML: &pipelines.Pipeline{
@@ -63,7 +63,7 @@ func TestRun_PipelineDefaultsFillUnsetArgs(t *testing.T) {
 func TestRun_ExplicitArgBeatsPipelineDefault(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	lockDefaultsCapturedReplicas = 0
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "lock-defaults-pipe",
 		Args:     map[string]string{"replicas": "3"},
@@ -86,7 +86,7 @@ func TestRun_ExplicitArgBeatsPipelineDefault(t *testing.T) {
 
 func TestRun_ArgGuardSeesPipelineYAMLDefault(t *testing.T) {
 	registerLockDefaultsPipe(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "lock-defaults-pipe",
 		PipelineYAML: &pipelines.Pipeline{
@@ -108,7 +108,7 @@ func TestRun_ArgGuardSeesPipelineYAMLDefault(t *testing.T) {
 
 func TestRun_ArgGuardSeesProjectDefaultArgs(t *testing.T) {
 	registerLockDefaultsPipe(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:    "lock-defaults-pipe",
 		DefaultArgs: map[string]string{"protected": "prod"},
@@ -127,7 +127,7 @@ func TestRun_ArgGuardSeesProjectDefaultArgs(t *testing.T) {
 
 func TestRun_ArgGuardHonoursCLIOverrideOfYAMLDefault(t *testing.T) {
 	registerLockDefaultsPipe(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "lock-defaults-pipe",
 		Args:     map[string]string{"protected": "staging"},
@@ -151,7 +151,7 @@ func TestRun_ArgGuardHonoursCLIOverrideOfYAMLDefault(t *testing.T) {
 
 func TestRun_ArgGuardOnUnsetArgDoesNotFire(t *testing.T) {
 	registerLockDefaultsPipe(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "lock-defaults-pipe",
 		PipelineYAML: &pipelines.Pipeline{
@@ -172,7 +172,7 @@ func TestRun_ArgGuardOnUnsetArgDoesNotFire(t *testing.T) {
 
 func TestRun_GuardRejectFiresBeforeDispatch(t *testing.T) {
 	registerLockDefaultsPipe(t)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "lock-defaults-pipe",
 		PipelineYAML: &pipelines.Pipeline{

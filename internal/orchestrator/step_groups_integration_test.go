@@ -34,7 +34,7 @@ func init() {
 }
 
 func TestRun_StepGroupsSurviveStoreToAPI(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ci-groups"})
 	if err != nil {

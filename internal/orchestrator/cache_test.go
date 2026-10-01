@@ -150,7 +150,7 @@ func init() {
 
 func TestCacheKey_FirstRunRunsJob(t *testing.T) {
 	cachedInvocations.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	enabledPipeline := func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		pipe := &cachedPipe{}
 		return wrapWithCacheKey(pipe)
@@ -180,7 +180,7 @@ func TestCacheKey_FirstRunRunsJob(t *testing.T) {
 
 func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 	cachedInvocations.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	sparkwing.Register[sparkwing.NoInputs]("cache-replay", func() sparkwing.Pipeline[sparkwing.NoInputs] { return wrapWithCacheKey(&cachedPipe{}) })
 
@@ -226,7 +226,7 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 
 func TestCacheKey_ExplicitBypassRunsEveryTime(t *testing.T) {
 	cachedInvocations.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	sparkwing.Register[sparkwing.NoInputs]("cache-explicit-bypass", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return wrapWithSpecificKey(&cachedPipe{}, func(ctx context.Context) (sparkwing.CacheKey, error) {
@@ -247,7 +247,7 @@ func TestCacheKey_ExplicitBypassRunsEveryTime(t *testing.T) {
 
 func TestHooks_BeforeAndAfterFire(t *testing.T) {
 	resetHooksCounters()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "hooks-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -265,7 +265,7 @@ func TestHooks_BeforeAndAfterFire(t *testing.T) {
 
 func TestHooks_BeforeRunFailureStopsJob(t *testing.T) {
 	beforeFailsRan.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "hooks-before-fails"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -280,7 +280,7 @@ func TestHooks_BeforeRunFailureStopsJob(t *testing.T) {
 
 func TestHooks_AfterRunFiresOnFailure(t *testing.T) {
 	afterOnFailureErr.Store(errorSentinel{})
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "hooks-after-on-failure"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -302,7 +302,7 @@ func TestHooks_AfterRunFiresOnFailure(t *testing.T) {
 func TestHooks_Ordering(t *testing.T) {
 	hookOrderingLog.count.Store(0)
 	hookOrderingLog.entries = [3]string{}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "hooks-ordering"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -355,7 +355,7 @@ func TestRunModes_ReachThePlanThatDecidesWhatTheRunCovers(t *testing.T) {
 	for _, want := range []bool{false, true} {
 		planSawNoCache.Store(!want)
 		planSawDryRun.Store(!want)
-		res, err := orchestrator.RunLocal(context.Background(), newPaths(t),
+		res, err := orchestrator.RunLocal(context.Background(), newPathsWithStore(t),
 			orchestrator.Options{Pipeline: "run-mode-reporting", NoCache: want, DryRun: want})
 		if err != nil {
 			t.Fatalf("RunLocal(NoCache=%v, DryRun=%v): %v", want, want, err)

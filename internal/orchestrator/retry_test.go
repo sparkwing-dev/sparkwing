@@ -86,7 +86,7 @@ func init() {
 
 func TestRun_SkipPassedOnRetry(t *testing.T) {
 	retryCnt = &retryCounter{runs: map[string]int{}}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	first, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "retry-pipe", RunID: "first"})
@@ -148,7 +148,7 @@ func TestRun_SkipPassedOnRetry(t *testing.T) {
 
 func TestRun_FullRetryReexecutesAll(t *testing.T) {
 	retryCnt = &retryCounter{runs: map[string]int{}}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	first, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "retry-pipe", RunID: "first"})

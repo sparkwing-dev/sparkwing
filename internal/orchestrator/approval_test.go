@@ -101,7 +101,7 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	dbPath := filepath.Join(p.Root, "state.db")
 	testCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -180,7 +180,7 @@ func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	dbPath := filepath.Join(p.Root, "state.db")
 	testCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -236,10 +236,10 @@ func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	orchestrator.SetApprovalPollIntervalForTest(t, time.Hour)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	p := newPaths(t)
 	res, err := orchestrator.RunLocal(ctx, p,
 		orchestrator.Options{Pipeline: "appr-timeout"})
 	if err != nil {

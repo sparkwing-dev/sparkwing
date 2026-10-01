@@ -13,7 +13,7 @@ import (
 )
 
 func TestEnvelopeLog_PersistsRunStartFinish(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -37,7 +37,7 @@ func TestEnvelopeLog_PersistsRunStartFinish(t *testing.T) {
 }
 
 func TestEnvelopeLog_RunStartCarriesLogPath(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -72,7 +72,7 @@ func TestEnvelopeLog_RunStartCarriesLogPath(t *testing.T) {
 }
 
 func TestJobLogs_EventsOnlyFiltersBodyLines(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestJobLogs_EventsOnlyFiltersBodyLines(t *testing.T) {
 }
 
 func TestJobLogs_NoEventsMatchesLegacy(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestJobLogs_NoEventsMatchesLegacy(t *testing.T) {
 }
 
 func TestJobLogs_DefaultIsMergedStream(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -157,7 +157,7 @@ func TestJobLogs_DefaultIsMergedStream(t *testing.T) {
 }
 
 func TestJobLogs_GrepWorksWithEventsOnly(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestJobLogs_GrepWorksWithEventsOnly(t *testing.T) {
 }
 
 func TestJobLogs_EventsOnlyAndNoEventsConflict(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {

@@ -49,7 +49,7 @@ func TestInputs_StepBodySeesTypedInputs(t *testing.T) {
 	inputsObserved = nil
 	inputsObservedMu.Unlock()
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "orch-inputs",
 		Args: map[string]string{

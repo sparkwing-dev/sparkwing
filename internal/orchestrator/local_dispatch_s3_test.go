@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
@@ -144,7 +145,7 @@ func TestSetupLocalExecution_S3LoopbackServesTheRunsState(t *testing.T) {
 
 func TestStartRunLoopback_SQLiteStillGetsTheRealController(t *testing.T) {
 	paths := newInternalPaths(t)
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -185,7 +186,7 @@ func quietTestLogger() *slog.Logger {
 
 func TestSetupLocalExecution_CanceledContextDoesNotMintToken(t *testing.T) {
 	paths := newInternalPaths(t)
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}

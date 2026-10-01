@@ -39,7 +39,7 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:      "ci-embedded-hello",
 		LogStore:      logStore,
@@ -95,7 +95,7 @@ func TestCIEmbedded_LogStore_OverridesLocalLogs(t *testing.T) {
 		t.Fatalf("NewLogStore: %v", err)
 	}
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "ci-embedded-hello",
 		LogStore: logStore,

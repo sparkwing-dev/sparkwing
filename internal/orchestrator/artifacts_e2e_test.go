@@ -59,7 +59,7 @@ func TestArtifacts_CapturedThenReplayedOnCacheHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}

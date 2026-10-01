@@ -10,12 +10,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +71,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 }
 
 func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 }
 
 func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
 }
 
 func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,7 @@ func TestRecordRunProfile_RollupSumsDistinctNodeIntervals(t *testing.T) {
 	if runtime.NumCPU() < 3 {
 		t.Skip("host cannot hold a three-core reading")
 	}
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func TestRecordRunProfile_RollupSumsDistinctNodeIntervals(t *testing.T) {
 }
 
 func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +307,7 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 }
 
 func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +347,7 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 }
 
 func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +427,7 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 	if runtime.NumCPU() < 2 {
 		t.Skip("capLocalPeakCores caps the asserted peak at host cores")
 	}
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +482,7 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 }
 
 func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +525,7 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 }
 
 func TestRecordRunProfile_NoSamplesWritesNothing(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

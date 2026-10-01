@@ -90,7 +90,7 @@ func assertVolume(t *testing.T, event string, attrs map[string]any) {
 }
 
 func TestRun_StartRecordsMeasureTheRunsOwnVolume(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	byEvent := runOnce(t, p, "orch-plan-time-log")
 
 	for _, event := range []string{"run_start", "node_start"} {
@@ -113,7 +113,7 @@ func TestRun_StartRecordsMeasureTheRunsOwnVolume(t *testing.T) {
 }
 
 func TestRun_CachedNodeStartCarriesTheDiskReading(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	runOnce(t, p, "orch-start-records-memoized")
 	byEvent := runOnce(t, p, "orch-start-records-memoized")
 

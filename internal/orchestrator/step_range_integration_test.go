@@ -36,7 +36,7 @@ func TestRunLocal_StartAtSkipsUpstreamSteps(t *testing.T) {
 	register("orch-step-range-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
 	stepRangeFlags = stepRangeRanFlags{}
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "orch-step-range-ok",
 		StartAt:  "compile",
@@ -60,7 +60,7 @@ func TestRunLocal_StartAtUnknownFailsRunBeforeDispatch(t *testing.T) {
 	register("orch-step-range-typo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
 	stepRangeFlags = stepRangeRanFlags{}
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "orch-step-range-typo",
 		StartAt:  "fetchh",

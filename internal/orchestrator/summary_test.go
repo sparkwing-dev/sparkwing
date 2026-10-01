@@ -46,7 +46,7 @@ func init() {
 }
 
 func TestRun_SummaryPersistsToNodeRow(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-summary-node"})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestRun_SummaryPersistsToNodeRow(t *testing.T) {
 }
 
 func TestRun_SummaryPersistsToStepRow(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-summary-step"})
 	if err != nil {

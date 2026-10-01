@@ -53,7 +53,7 @@ func runYAMLSecret(t *testing.T, opts orchestrator.Options) (orchestrator.Paths,
 	t.Helper()
 	registerYAMLSecretPipeline()
 	observedYAMLToken = ""
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	cap := &captureLogger{}
 	opts.Pipeline = yamlSecretPipelineName
 	opts.Delegate = cap

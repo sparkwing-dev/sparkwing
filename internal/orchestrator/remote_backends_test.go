@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -33,7 +33,7 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	registerRemotePipelines(t)
 
 	ctrlDB := filepath.Join(t.TempDir(), "controller.db")
-	ctrlStore, err := store.Open(ctrlDB)
+	ctrlStore, err := teststore.Open(ctrlDB)
 	if err != nil {
 		t.Fatalf("controller store: %v", err)
 	}

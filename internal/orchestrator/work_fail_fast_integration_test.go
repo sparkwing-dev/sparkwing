@@ -52,7 +52,7 @@ func init() {
 func TestRun_WorkFailFastPersistsCancelledStepsAndRunsCleanup(t *testing.T) {
 	failFastSlowStarted = make(chan struct{})
 	failFastCleanupRan = make(chan struct{})
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	started := time.Now()
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-work-fail-fast"})

@@ -44,7 +44,7 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 		}
 	})
 
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second*raceBudgetScale)
 	defer cancel()
 	var res *orchestrator.Result

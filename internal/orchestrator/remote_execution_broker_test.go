@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
@@ -332,7 +333,7 @@ func TestCollectDispatchEnvDropsRemoteExecutionAuthority(t *testing.T) {
 func TestClaimedRegisteredNodeRunsOnlyInIsolatedChild(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
-	st, err := store.Open(t.TempDir() + "/state.db")
+	st, err := teststore.Open(t.TempDir() + "/state.db")
 	if err != nil {
 		t.Fatal(err)
 	}

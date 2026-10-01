@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -190,7 +191,7 @@ func TestCoordinatedLogBackend_UnopenableSurfaceFailsTheNode(t *testing.T) {
 func TestStartRunLoopback_MirroredRunTeesChildWritesToBothStores(t *testing.T) {
 	paths := newInternalPaths(t)
 
-	canonicalStore, err := store.Open(filepath.Join(t.TempDir(), "canonical.db"))
+	canonicalStore, err := teststore.Open(filepath.Join(t.TempDir(), "canonical.db"))
 	if err != nil {
 		t.Fatalf("open canonical store: %v", err)
 	}

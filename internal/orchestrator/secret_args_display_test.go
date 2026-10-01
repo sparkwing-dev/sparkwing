@@ -52,7 +52,7 @@ func registerSecretArgsPipeline() {
 func runWithSecretArg(t *testing.T) (orchestrator.Paths, string) {
 	t.Helper()
 	registerSecretArgsPipeline()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: secretArgPipeline,
 		Args:     map[string]string{"token": secretArgValue, "env": visibleArgValue},
@@ -182,7 +182,7 @@ func TestSecretArgs_StateDumpOmitsInputHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:      secretArgPipeline,
 		Args:          map[string]string{"token": secretArgValue, "env": visibleArgValue},
@@ -228,7 +228,7 @@ func TestSecretArgs_StoredRowStillSeedsTheLogMasker(t *testing.T) {
 }
 
 func TestSecretArgs_PipelineWithoutSecretsIsUnchanged(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -250,7 +250,7 @@ func TestSecretArgs_PipelineWithoutSecretsIsUnchanged(t *testing.T) {
 
 func TestSecretArgs_UnsuppliedSecretKeepsInputHash(t *testing.T) {
 	registerSecretArgsPipeline()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: secretArgPipeline,
 		Args:     map[string]string{"env": visibleArgValue},

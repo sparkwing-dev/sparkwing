@@ -45,7 +45,7 @@ func registerSmugglerPipe() {
 
 func TestRun_UnencodableNodeOutputFailsTheNode(t *testing.T) {
 	registerSmugglerPipe()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "output-smuggler",

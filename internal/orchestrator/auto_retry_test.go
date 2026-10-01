@@ -162,7 +162,7 @@ func forceMixedFallback(t *testing.T, ctx context.Context, st *store.Store, runI
 
 func TestAutoRetry_RecoversAfterTransientFailures(t *testing.T) {
 	autoRetryCount.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "auto-retry-recovers"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -200,7 +200,7 @@ func TestAutoRetry_RecoversAfterTransientFailures(t *testing.T) {
 
 func TestAutoRetry_WarmRunnerRedispatchesAReportedFailure(t *testing.T) {
 	autoRetryCount.Store(0)
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +272,7 @@ func TestAutoRetry_WarmRunnerRedispatchesAReportedFailure(t *testing.T) {
 
 func TestAutoRetry_FallbackThenLegacyLossUsesOnlyTwoGlobalAttempts(t *testing.T) {
 	autoRetryCount.Store(0)
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +339,7 @@ func TestAutoRetry_FallbackThenLegacyLossUsesOnlyTwoGlobalAttempts(t *testing.T)
 
 func TestAutoRetry_AssistedFailureThenFallbackUsesOrdinalTwo(t *testing.T) {
 	autoRetryCount.Store(0)
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +409,7 @@ func TestAutoRetry_AssistedFailureThenFallbackUsesOrdinalTwo(t *testing.T) {
 
 func TestAutoRetry_FailsAfterExhaustingAttempts(t *testing.T) {
 	autoRetryCount.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "auto-retry-exhausts"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -437,7 +437,7 @@ func TestAutoRetry_FailsAfterExhaustingAttempts(t *testing.T) {
 
 func TestAutoRetry_SubtractsCarriedAttemptsFromDispatchBudget(t *testing.T) {
 	autoRetryCount.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatal(err)

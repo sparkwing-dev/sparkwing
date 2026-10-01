@@ -90,7 +90,7 @@ func TestRun_AgentLossRetryRerunsOnlyCausesAndDescendants(t *testing.T) {
 	agentLossCounts.Lock()
 	agentLossCounts.values = map[string]int{}
 	agentLossCounts.Unlock()
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestRun_AgentLossRetryRehydratesCompletedDynamicSibling(t *testing.T) {
 	builtMu.Lock()
 	builtImages = nil
 	builtMu.Unlock()
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	ctx := context.Background()
 	source, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{Pipeline: "expand-ok", RunID: "dynamic-source"})
 	if err != nil || source.Status != "success" {
@@ -254,7 +254,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, "dynamic-retry", "dynamic-source", "dynamic-sourc
 func TestRun_AgentLossRetryRejectsChangedDynamicChildSemantics(t *testing.T) {
 	items := []string{"lost"}
 	discoverItems.Store(&items)
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	ctx := context.Background()
 	source, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{Pipeline: "expand-ok", RunID: "dynamic-drift-source"})
 	if err != nil || source.Status != "success" {
@@ -335,7 +335,7 @@ func TestRun_AgentLossRetryFailsClosedWhenSourceCannotBeRehydrated(t *testing.T)
 	agentLossCounts.Lock()
 	agentLossCounts.values = map[string]int{}
 	agentLossCounts.Unlock()
-	paths := newPaths(t)
+	paths := newPathsWithStore(t)
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)

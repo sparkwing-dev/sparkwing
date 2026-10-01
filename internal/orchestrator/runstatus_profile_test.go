@@ -7,13 +7,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestRunStatus_ReadsThroughProfileNotLocalStore(t *testing.T) {
 	shared := filepath.Join(t.TempDir(), "shared.db")
-	st, err := store.Open(shared)
+	st, err := teststore.Open(shared)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestRunStatus_ReadsThroughProfileNotLocalStore(t *testing.T) {
 
 func TestRunStatus_FailedRunKeepsItsStatus(t *testing.T) {
 	shared := filepath.Join(t.TempDir(), "shared.db")
-	st, err := store.Open(shared)
+	st, err := teststore.Open(shared)
 	if err != nil {
 		t.Fatal(err)
 	}

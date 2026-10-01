@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -50,7 +51,7 @@ func gitRepoDir(t *testing.T, name string) string {
 }
 
 func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 }
 
 func TestRatchetedFloorRecoversAtGrantableMemoryCeiling(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestRatchetedFloorRecoversAtGrantableMemoryCeiling(t *testing.T) {
 }
 
 func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

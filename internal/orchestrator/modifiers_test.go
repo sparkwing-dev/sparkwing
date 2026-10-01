@@ -269,7 +269,7 @@ func init() {
 
 func TestRetry_EventuallySucceeds(t *testing.T) {
 	atomic.StoreInt32(&retryOKState.attempts, 0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-retry-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -285,7 +285,7 @@ func TestRetry_EventuallySucceeds(t *testing.T) {
 
 func TestRetry_ExhaustedStillFails(t *testing.T) {
 	atomic.StoreInt32(&retryExhaustedState.attempts, 0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-retry-exhausted"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -301,7 +301,7 @@ func TestRetry_ExhaustedStillFails(t *testing.T) {
 
 func TestRetry_LogCapturesAttempts(t *testing.T) {
 	atomic.StoreInt32(&retryExhaustedState.attempts, 0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-retry-exhausted"})
 
 	st, _ := store.Open(p.StateDB())
@@ -325,7 +325,7 @@ func TestRetry_LogCapturesAttempts(t *testing.T) {
 }
 
 func TestTimeout_CancelsSlowJob(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-timeout"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -354,7 +354,7 @@ func TestTimeout_CancelsSlowJob(t *testing.T) {
 }
 
 func TestNoProgressTimeout_CancelsSilentJob(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-timeout"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -383,6 +383,7 @@ func TestNoProgressTimeout_CancelsSilentJob(t *testing.T) {
 func TestNoProgressTimeout_ResetsOnObservableProgress(t *testing.T) {
 	gate := newObservableProgressGate()
 	progressingTestGate = gate
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	type runResult struct {
 		result *orchestrator.Result
@@ -390,7 +391,6 @@ func TestNoProgressTimeout_ResetsOnObservableProgress(t *testing.T) {
 	}
 	resultCh := make(chan runResult, 1)
 	finished := make(chan struct{})
-	p := newPaths(t)
 	go func() {
 		defer close(finished)
 		result, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "mod-progressing"})
@@ -453,7 +453,7 @@ func TestTimeout_RemainsAbsoluteWhileProgressContinues(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
 	}
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-absolute-timeout-with-progress"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -478,7 +478,7 @@ func TestTimeout_RemainsAbsoluteWhileProgressContinues(t *testing.T) {
 
 func TestNoProgressTimeout_RetryStartsWithAFreshWindow(t *testing.T) {
 	noProgressRetryAttempts.Store(0)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-retry"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -515,6 +515,7 @@ func assertForcedAbsoluteTimeout(t *testing.T, pipeline string, started <-chan c
 
 func assertForcedTimeout(t *testing.T, pipeline string, started <-chan context.Context, force func(context.Context) bool, wantReason string) {
 	t.Helper()
+	p := newPathsWithStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	t.Cleanup(cancel)
 	type runResult struct {
@@ -523,7 +524,6 @@ func assertForcedTimeout(t *testing.T, pipeline string, started <-chan context.C
 	}
 	resultCh := make(chan runResult, 1)
 	finished := make(chan struct{})
-	p := newPaths(t)
 	go func() {
 		defer close(finished)
 		result, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: pipeline})
@@ -578,7 +578,7 @@ func assertForcedTimeout(t *testing.T, pipeline string, started <-chan context.C
 
 func TestOnFailure_RunsWhenParentFails(t *testing.T) {
 	rollbackCalled.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-onfailure"})
 
 	if res.Status != "failed" {
@@ -605,7 +605,7 @@ func TestOnFailure_RunsWhenParentFails(t *testing.T) {
 
 func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 	skipRollbackCalled.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-onfailure-skip"})
 
 	if res.Status != "success" {
@@ -632,7 +632,7 @@ func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 
 func TestOnFailure_DetachedRecoveryRuns(t *testing.T) {
 	detachedRecoveryCalled.Store(false)
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-onfailure-detached"})
 
 	if res.Status != "failed" {

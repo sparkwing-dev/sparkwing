@@ -203,7 +203,7 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	resetSharedS3()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -259,7 +259,7 @@ func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	resetSharedS3()
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open: %v", err)

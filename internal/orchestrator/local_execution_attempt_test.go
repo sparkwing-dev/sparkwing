@@ -40,7 +40,7 @@ func expectedLocalExecutor(t *testing.T) string {
 }
 
 func TestRunLocal_RecordsALocalExecutionAttemptPerNode(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -77,7 +77,7 @@ func TestRunLocal_RecordsALocalExecutionAttemptPerNode(t *testing.T) {
 }
 
 func TestRunLocal_SequencesTheAttemptsOfARetriedNode(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "local-attempt-flaky"})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

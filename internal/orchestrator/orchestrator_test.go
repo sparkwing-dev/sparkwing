@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -188,6 +189,26 @@ func newPaths(t *testing.T) orchestrator.Paths {
 	return p
 }
 
+func newPathsWithStore(t *testing.T) orchestrator.Paths {
+	t.Helper()
+	p := newPaths(t)
+	st, err := teststore.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close seed state: %v", err)
+	}
+	return p
+}
+
+func TestNewPathsLeavesStateDatabaseAbsent(t *testing.T) {
+	p := newPaths(t)
+	if _, err := os.Stat(p.StateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state database exists: %v", err)
+	}
+}
+
 func isolateProfiles(t *testing.T) {
 	t.Helper()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
@@ -198,7 +219,7 @@ func isolateProfiles(t *testing.T) {
 }
 
 func TestRun_SingleJobSuccess(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -219,7 +240,7 @@ func TestRun_SingleJobSuccess(t *testing.T) {
 }
 
 func TestRun_FailurePropagatesResult(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
 	if err != nil {
 		t.Fatalf("Run returned err=%v; failures should surface via Result not err", err)
@@ -233,7 +254,7 @@ func TestRun_FailurePropagatesResult(t *testing.T) {
 }
 
 func TestRun_FailureAutoWrapsErrorWithNodeID(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
 
 	st, _ := store.Open(p.StateDB())
@@ -253,7 +274,7 @@ func TestRun_FailureAutoWrapsErrorWithNodeID(t *testing.T) {
 }
 
 func TestRun_FanOutFanIn(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fanout-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -282,7 +303,7 @@ func TestRun_FanOutFanIn(t *testing.T) {
 }
 
 func TestRun_MidFailureCancelsDownstream(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -316,7 +337,7 @@ func TestRun_MidFailureCancelsDownstream(t *testing.T) {
 }
 
 func TestRun_InFlightNodeCanceledByRunRecordedCancelledNotFailed(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	inflightCancelStarted = make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -351,7 +372,7 @@ func TestRun_InFlightNodeCanceledByRunRecordedCancelledNotFailed(t *testing.T) {
 }
 
 func TestRun_TypedRefsThreadOutput(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ref"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -382,7 +403,7 @@ func TestRun_TypedRefsThreadOutput(t *testing.T) {
 }
 
 func TestRun_InProcessRefsStillCrossAJSONBoundary(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "orch-ref-shared-memory"})
 	if err != nil {
@@ -412,7 +433,7 @@ func TestRun_InProcessRefsStillCrossAJSONBoundary(t *testing.T) {
 }
 
 func TestRun_PersistsPlanSnapshotAndRunRow(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fanout-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -440,7 +461,7 @@ func TestRun_PersistsPlanSnapshotAndRunRow(t *testing.T) {
 }
 
 func TestRun_RetryPlanDriftFailsBeforeCreatingNodes(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	const runID = "retry-plan-drift"
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:          "orch-fanout-ok",
@@ -490,7 +511,7 @@ func TestRun_RetryPlanDriftFailsBeforeCreatingNodes(t *testing.T) {
 }
 
 func TestRun_RetryAcceptsMatchingSourcePlanSnapshot(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	const sourceID = "retry-plan-source"
 	source, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "orch-fanout-ok",
@@ -526,7 +547,7 @@ func TestRun_RetryAcceptsMatchingSourcePlanSnapshot(t *testing.T) {
 }
 
 func TestRun_UnknownPipelineErrors(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "nope-not-registered"})
 	if err == nil {
 		t.Fatal("expected error for unknown pipeline")
@@ -537,7 +558,7 @@ func TestRun_UnknownPipelineErrors(t *testing.T) {
 }
 
 func TestRun_PathsIsolation(t *testing.T) {
-	p := newPaths(t)
+	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
