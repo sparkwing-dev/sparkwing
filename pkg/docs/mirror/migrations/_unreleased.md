@@ -345,6 +345,10 @@ upgraded controller accepts kind-less samples from older runners.
 
 ## 60-second minimum billable duration
 
+`CreditClaimFloorSeconds` is now `MinBillableSeconds`. `CreditClaimFloorMicro`
+is removed. `CreditRateTable(ctx)` returns per-second micro-unit rates;
+use `RateFor(cores)` for the CPU class whose price the caller needs.
+
 Drain metered node and trigger claims before deploying the controller that
 raises the minimum to 60 seconds. A claim reserved at 20 seconds under the
 older build is covered for 60 once its pod first renews under the new one, and
@@ -382,7 +386,7 @@ team-facing alerts.
 
 `Store.ExtendSession` has been removed. Replace a
 `LookupSession`/`ExtendSession` pair with
-`LookupSessionAndRenew(rawSession, now, idleTTL, maxLifetime)`. The new call
+`LookupSessionAndRenew(ctx, rawSession, now, idleTTL, maxLifetime)`. The new call
 checks the session and renews its expiry in one database write. The caller
 must reject an over-age session returned without renewal and revoke it.
 Controller sessions now last seven days after their last use, with a 30-day
@@ -605,6 +609,27 @@ node runner, and the controller refuses `inprocess` with `403`
   `"warm"` in the claim body when its token is metered.
 - A metered `k8s` or `warm` claim answers `402` while the team's balance cannot
   cover the cheapest class's first minute, and the trigger stays pending.
+
+## Store API calls carry ownership
+
+Select a registered team with `tenant, err := st.ForTeam(ctx, team)` and
+handle `err` before reading its runs. A local single-team store uses
+`store.DefaultTeam`. Update these calls and callback types:
+
+| Before | After |
+| --- | --- |
+| `st.ListRunRetryTree(ctx, id)` | `tenant.ListRunRetryTree(ctx, id)` |
+| `st.ListRunTrends(ctx, since, pipeline)` | `tenant.ListRunTrends(ctx, since, pipeline)` |
+| `st.PipelineForClaimedRun(ctx, id, claimant, now)` | `st.ClaimedRunFor(ctx, id, claimant, now)` |
+| `st.PipelinesForClaimant(ctx, claimant, now)` | `st.ClaimedRunsFor(ctx, claimant, now)` |
+| `st.OldestWaitingReadyNode(ctx)` | `st.OldestWaitingReadyNodeForPrincipal(ctx, principal)` |
+| `RotateSecretValues` callback `func(store.Secret) (string, error)` | `func(store.Team, store.Secret) (string, error)` |
+
+The claim queries return `store.ClaimedRun` or `[]store.ClaimedRun`; read
+`Pipeline` and retain `Team` when resolving secrets. The waiting-node query
+now selects only the creating principal's runs. For a credit refusal, use
+`InsufficientCreditsError.RunID` and `NodeID`. Secret rotation callbacks bind
+the owning team as [BoundCipher describes](#boundcipher-takes-the-owning-team).
 
 ## Session methods take a context
 

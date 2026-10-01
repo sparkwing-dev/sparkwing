@@ -676,11 +676,8 @@ unlock.
   preferred label no longer parks a node its own cloud runner could take.
 - **controller:** a runner's secret read resolves in the team of the run it
   holds, so a runner holding one team's run reads that team's pipeline and
-  shared rows rather than the default team's. `Store.ClaimedRunFor` and
-  `Store.ClaimedRunsFor` replace `PipelineForClaimedRun` and
-  `PipelinesForClaimant` and return a `store.ClaimedRun` carrying the run's
-  team beside its pipeline. A legacy envelope resealed on read is written back
-  into the team it was read from.
+  shared rows rather than the default team's. A legacy envelope resealed on
+  read is written back into the team it was read from.
 - **controller:** a manual retry (`POST /api/v1/runs/{id}/retry`, `sparkwing
   runs retry`) files its trigger and pending run in the source run's team
   through the new `Store.CreateRetryWithRun`, rather than in the default
@@ -693,14 +690,13 @@ unlock.
 - **store:** rows that hang off a run (events, approvals, debug pauses, node
   steps, metrics, dispatches, execution attempts, claim offers and agent-loss
   retry records) take the run's team in the statement that writes them. A
-  runner holding another team's trigger can now mutate that run's nodes,
+  runner holding a non-default team's trigger can now mutate that run's nodes,
   events and attempts: its fence was checked in the default team and every
   such write was refused as held by another holder.
 - **controller:** a claim refused for an empty balance records its
   `credits_blocked` event on the node it was refused for, which
   `store.InsufficientCreditsError` now names (`RunID`, `NodeID`), instead of
   on the oldest waiting node on the controller, which could be another team's.
-  `Store.OldestWaitingReadyNode` is removed.
 - **store:** an assisted executor's offer takes its run's row lock before the
   run's event-sequence lock, the order a deadline round takes them in, so an
   offer and a claim round on one run no longer deadlock on PostgreSQL.
@@ -719,6 +715,13 @@ unlock.
 ### Changed
 
 - **scaffold:** Fresh pipelines use the published v0.65.1 SDK.
+
+- **store (Breaking):** `Store.ListRunRetryTree` and `ListRunTrends` move to
+  `Tenant`. `PipelineForClaimedRun` and `PipelinesForClaimant` become
+  `ClaimedRunFor` and `ClaimedRunsFor`, returning team/pipeline pairs.
+  `OldestWaitingReadyNode` is removed, and `RotateSecretValues` callbacks
+  receive the owning team. See [Store API calls carry
+  ownership](docs/migrations/_unreleased.md#store-api-calls-carry-ownership).
 
 - **store (Breaking):** The local state database moves to schema 90, and the
   first open copies it to `$SPARKWING_HOME/backups/` and prints where before
@@ -835,7 +838,9 @@ unlock.
   their class rate, then bill by the second. A claim reserves that minute up front;
   insufficient balance returns `402`, and `GET /api/v1/team/billing` reports
   `min_billable_seconds: 60`. Drain existing claims before deploying because a claim
-  reserved at the earlier 20-second minimum can be billed for 60. See [60-second minimum
+  reserved at the earlier 20-second minimum can be billed for 60.
+  `CreditClaimFloorSeconds` becomes `MinBillableSeconds`, and
+  `CreditClaimFloorMicro` is removed. See [60-second minimum
   billable
   duration](docs/migrations/_unreleased.md#60-second-minimum-billable-duration).
 
