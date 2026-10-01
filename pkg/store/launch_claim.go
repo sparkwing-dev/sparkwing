@@ -161,7 +161,7 @@ func (s *Store) launchCandidates(ctx context.Context, req LaunchClaimRequest, af
   JOIN runs r ON r.team = n.team AND r.id = n.run_id
  WHERE n.kind IN ('`+nodeKindPlan+`', '`+nodeKindWork+`') AND n.ready_at IS NOT NULL AND n.ready_at <= ?
    AND n.claimed_by IS NULL AND n.status != '`+nodeStatusDone+`'
-   AND r.dispatch != '' AND r.cancel_requested_at IS NULL`+where+`
+   AND r.dispatch != '' AND r.cancel_requested_at IS NULL AND `+nodeRunActiveSQL("n.")+where+`
  ORDER BY n.ready_at, n.run_id, n.node_id LIMIT `+fmt.Sprint(launchScanBatch), args...)
 	if err != nil {
 		return nil, err

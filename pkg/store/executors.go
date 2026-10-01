@@ -1320,7 +1320,7 @@ UPDATE nodes
 	   executor_location = ?, reservation_id = ?, claim_generation = claim_generation + 1,
 	   required_coordinator_id = CASE WHEN required_coordinator_id = '' THEN ? ELSE required_coordinator_id END,
 	   required_executor_location = CASE WHEN required_executor_location = '' THEN ? ELSE required_executor_location END
-	 WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+nodeRunNotCancelled+`
+	 WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+`
 	   AND (required_coordinator_id = '' OR required_coordinator_id = ?)
 	   AND (required_executor_location = '' OR (required_executor_location != 'unknown' AND required_executor_location = ?))`,
 		holderID, e.Principal, claimant.TokenPrefix,

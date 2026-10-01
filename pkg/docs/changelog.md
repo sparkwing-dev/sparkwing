@@ -24,6 +24,11 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.0, so a fresh scaffold compiles against that release.
 
+### Fixed
+
+- **controller:** Finished runs cannot supply new node claims or credit reservations.
+  Queue depth excludes their unfinished node rows, including rows left by an interrupted pipeline.
+
 
 ## [v0.66.0] - 2026-10-01
 ### Added

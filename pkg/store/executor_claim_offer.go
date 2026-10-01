@@ -411,6 +411,7 @@ SELECT n.run_id, n.node_id, n.ready_at, n.needs_labels,
  FROM nodes n
 	WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL
 	   AND n.outcome = '' AND n.finished_at IS NULL AND n.` + nodeNotDone + `
+	   AND ` + nodeRunActiveSQL("n.") + `
 	   AND n.` + nodeTriggerDispatched + `
 	   AND n.execution_policy_hash != ''
 	   AND n.execution_policy_version = ? AND n.execution_body_protocol > 0
@@ -1030,7 +1031,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	   required_coordinator_id = CASE WHEN required_coordinator_id = '' THEN ? ELSE required_coordinator_id END,
 	   required_executor_location = CASE WHEN required_executor_location = '' THEN ? ELSE required_executor_location END
  WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
-	   AND claimed_by IS NULL AND `+nodeNotDone+nodeRunNotCancelled+`
+	   AND claimed_by IS NULL AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+`
 	   AND `+nodeTriggerDispatched+`
 	   AND (required_coordinator_id = '' OR required_coordinator_id = ?)
 	   AND (required_executor_location = '' OR (required_executor_location != 'unknown' AND required_executor_location = ?))`,

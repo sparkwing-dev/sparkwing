@@ -2,6 +2,11 @@ package store
 
 const nodeNotDone = `status != 'done'`
 
+func nodeRunActiveSQL(alias string) string {
+	return `EXISTS (SELECT 1 FROM runs ar WHERE ar.team = ` + alias + `team
+     AND ar.id = ` + alias + `run_id AND ar.finished_at IS NULL AND NOT (ar.` + runTerminalIn + `))`
+}
+
 // safety: a controller-dispatched run's nodes carry a kind, and only the
 // launcher's claim hands their pods the claim token they report through, so
 // every other claim path passes over them.

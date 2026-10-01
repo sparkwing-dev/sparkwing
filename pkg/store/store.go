@@ -6176,6 +6176,7 @@ func (s *Store) readClaimCandidates(
         requested_cores, requested_memory_bytes
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
+	AND `+nodeRunActiveSQL("nodes.")+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+` AND `+nodeTriggerDispatched+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
@@ -6315,6 +6316,11 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return nil, err
 	}
+	// safety: a finish after the candidate read must precede or follow this award.
+	found, err := lockTeamRunRowTx(ctx, tx, scope.team, candidate.runID)
+	if err != nil || !found {
+		return nil, err
+	}
 	expires := now.Add(lease)
 	awardArgs := []any{
 		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
@@ -6329,7 +6335,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
-		    AND `+nodeNotDone+nodeRunNotCancelled+`
+		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
 		    AND `+nodeExecutionUnsealed+teamClause,
 		awardArgs...,
@@ -8795,7 +8801,8 @@ func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 	err := s.queryRow(
 		ctx,
 		`SELECT COUNT(*) FROM nodes
-		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')`,
+		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')
+		    AND `+nodeNotDone+` AND `+nodeRunActiveSQL("nodes."),
 	).Scan(&n)
 	return n, err
 }
@@ -8841,7 +8848,7 @@ func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, err
                     COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
                    FROM nodes
-                  WHERE `+nodeNotDone,
+                  WHERE `+nodeNotDone+` AND `+nodeRunActiveSQL("nodes."),
 		nodeStatusPending, nodeStatusPending, nodeStatusPending,
 		nodeStatusRunning, NodeStatusApprovalPending,
 	).Scan(&waiting, &ready, &claimed, &running, &approval)

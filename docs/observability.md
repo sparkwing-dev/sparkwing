@@ -434,7 +434,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_runs_total` | Counter | `pipeline`, `status` | Runs that reached a terminal state |
 | `sparkwing_run_duration_seconds` | Histogram | `outcome`, `pipeline` | End-to-end wall time from create to finish |
 | `sparkwing_nodes_claimed_total` | Counter | `pipeline` | Successful node claims |
-| `sparkwing_pending_nodes` | Gauge | (none) | Claim-queue depth (ready, unclaimed nodes) |
+| `sparkwing_pending_nodes` | Gauge | (none) | Claim-queue depth (ready, unclaimed nodes of active runs) |
 | `sparkwing_active_runners` | Gauge | (none) | Distinct runners with a non-expired lease in the last 2 minutes |
 | `sparkwing_http_requests_total` | Counter | `method`, `route`, `status` | HTTP requests the controller answered |
 | `sparkwing_http_request_duration_seconds` | Histogram | `method`, `route` | HTTP handling latency |
@@ -457,7 +457,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_signups_total` | Counter | `outcome`, `reason` | New accounts: `admitted` (reason `none`, or `invitation` for a waitlisted account that joined a team by invitation) or `waitlisted` with the reason (`deployment`, `operator`, `free_tier_closed`, `free_tier_unreadable`, `hourly_signups`, `daily_signups`, `github_account_age`) |
 | `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
 | `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
-| `sparkwing_queue_depth` | Gauge | `state` | Nodes short of a terminal outcome: `waiting`, `ready`, `claimed`, `running`, `approval_pending` |
+| `sparkwing_queue_depth` | Gauge | `state` | Unfinished nodes of active runs: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. Node rows retained by a finished run do not count. |
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
