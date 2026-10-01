@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.66.0] - 2026-10-01
 ### Added
 
 - **controller + runner:** Opted-in repositories can run entirely through controller
@@ -62,7 +63,7 @@ unlock.
   response (`components.schemas.ComputeUsage`) loses `derived_runner_cap`,
   `recent_paid_micro`, and `scale_window_seconds`. See [Schema 87: card
   billing and a team-wide runner
-  count](docs/migrations/_unreleased.md#schema-87-card-billing-and-a-team-wide-runner-count).
+  count](docs/migrations/v0.66.0.md#schema-87-card-billing-and-a-team-wide-runner-count).
 
 - **controller + runner:** An operator can opt a repository into controller dispatch
   with `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` and return it to trigger
@@ -192,7 +193,7 @@ unlock.
   finishes (or 24 hours after commit when unused). Retry uploads again.
   Normal remote triggers require a pushed commit; GitHub App crons remain
   Git-backed and local working-tree runs are unchanged. Upgrade controller,
-  CLI and runners together. See [Direct source bundles](docs/migrations/_unreleased.md#direct-source-bundles).
+  CLI and runners together. See [Direct source bundles](docs/migrations/v0.66.0.md#direct-source-bundles).
 - **controller + GitHub App:** A push of the current default-branch head reads
   `.sparkwing/sparkwing.yaml` with a repository-scoped `contents: read` token
   and arms its `where: controller` schedules for the connected team. Removing
@@ -223,7 +224,7 @@ unlock.
   Older attempts derive a site from matching claim credentials and holders when
   available. GitHub Actions attempts include the repository and workflow run
   ID. Schema 68 adds `github_runner_credentials.run_id`. See
-  [Execution attribution](docs/migrations/_unreleased.md#execution-attribution).
+  [Execution attribution](docs/migrations/v0.66.0.md#execution-attribution).
 - **controller:** GitHub App subscriptions can opt into PR closed, labeled and
   ready-for-review actions, release published and prereleased actions, and branch create
   and delete events. Runs expose event, ref, action, label, merge and tag environment
@@ -263,7 +264,7 @@ unlock.
   matching after schema v66 adds the default-off pattern column. Operator GitHub
   webhooks ignore tag pushes. Tag triggers expose their full ref and tag name, and OIDC
   subjects use `refs/tags/<tag>`. See [Tag push
-  subscriptions](docs/migrations/_unreleased.md#tag-push-subscriptions).
+  subscriptions](docs/migrations/v0.66.0.md#tag-push-subscriptions).
 
 - **controller + web:** Team owners can connect a GitHub App installation made directly
   on GitHub by authorizing the App, choosing an installation they administer, and
@@ -721,14 +722,14 @@ unlock.
   `ClaimedRunFor` and `ClaimedRunsFor`, returning team/pipeline pairs.
   `OldestWaitingReadyNode` is removed, and `RotateSecretValues` callbacks
   receive the owning team. See [Store API calls carry
-  ownership](docs/migrations/_unreleased.md#store-api-calls-carry-ownership).
+  ownership](docs/migrations/v0.66.0.md#store-api-calls-carry-ownership).
 
 - **store (Breaking):** The local state database moves to schema 90, and the
   first open copies it to `$SPARKWING_HOME/backups/` and prints where before
   upgrading it. v0.65.1 and older refuse the upgraded database. A database
   v0.65.0 or v0.65.1 wrote, whose v50 and v51 were metric migrations, gains the
   team migrations those numbers hold here. See the [migration
-  guide](docs/migrations/_unreleased.md#upgrading-a-local-install).
+  guide](docs/migrations/v0.66.0.md#upgrading-a-local-install).
 - **controller + store (Breaking):** Job outputs are objects, not database
   rows. A node reserves its output with `output-upload`, puts the bytes to the
   URL it gets, commits them with `output-commit`, and its finish or attempt
@@ -748,7 +749,7 @@ unlock.
   `sparkwing-controller migrate-outputs` upgrades the store and moves stored
   outputs before the new controller starts. A laptop database moves its own on
   first open. See the
-  [migration guide](docs/migrations/_unreleased.md#job-outputs-are-objects).
+  [migration guide](docs/migrations/v0.66.0.md#job-outputs-are-objects).
 - **cloud:** Cloud builds fetch packages from the upstream registries. The
   Cloud cache runs with `--disable-proxy` and its runners with
   `--dependency-proxy=off`, because the proxy takes no credential and its
@@ -773,7 +774,7 @@ unlock.
   `context.Context`, so a cancelled request stops the session and CSRF-key
   queries it started. A failed `last_used_at` update on `LookupSession` is
   logged rather than dropped silently. See the
-  [migration guide](docs/migrations/_unreleased.md#session-methods-take-a-context).
+  [migration guide](docs/migrations/v0.66.0.md#session-methods-take-a-context).
 - **controller + store (Breaking):** `name=` in a selector matches only the
   runner whose token was minted for that agent name; a runner asserting
   `name=`, `class=`, `team=`, `local` or `location=` as a label no longer
@@ -790,7 +791,7 @@ unlock.
   dispatcher whose labels do not satisfy it. Executor exclusion
   reasons rename `hard_capability` to `selector` and add `shape` for a node
   larger than the executor's budget. See the
-  [migration guide](docs/migrations/_unreleased.md#one-agent-matcher).
+  [migration guide](docs/migrations/v0.66.0.md#one-agent-matcher).
 - **controller + runner:** A node skips the five-second agent offer window
   when nothing but its coordinator could claim it: no live eligible executor
   of the run's team, no live queue runner of that team whose labels and CPU
@@ -812,7 +813,7 @@ unlock.
   place for older binaries; once the section exists the original is ignored
   and can be deleted. This automatic copy will be removed in a later release.
   The internal `wingd run --admission-config` flag is gone. See
-  [One config.yaml for machine settings](docs/migrations/_unreleased.md#one-configyaml-for-machine-settings).
+  [One config.yaml for machine settings](docs/migrations/v0.66.0.md#one-configyaml-for-machine-settings).
 - **cli + orchestrator (Breaking):** Local secrets move from
   `secrets.env` and `config.env` into the `secrets` table of `state.db`,
   sealed with the controller's cipher under a key in
@@ -826,13 +827,13 @@ unlock.
   `SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` name, once and all or
   nothing, and leaves them in place; a failed import fails secret reads with
   its error. This automatic import will be removed in a later release. See
-  [Local secrets in state.db](docs/migrations/_unreleased.md#local-secrets-in-statedb).
+  [Local secrets in state.db](docs/migrations/v0.66.0.md#local-secrets-in-statedb).
 - **cli + web (Breaking):** `sparkwing serve --allow-remote` exposes local secrets to
   hosts holding the serve token, including listing, overwriting and deleting
   secrets; startup warns about this. Masked values are never served. Cross-port browser
   origins require `--allow-origin`, and browser writes with a body require
   `application/json`. See [Remote local dashboards expose
-  secrets](docs/migrations/_unreleased.md#remote-local-dashboards-expose-secrets).
+  secrets](docs/migrations/v0.66.0.md#remote-local-dashboards-expose-secrets).
 
 - **credits (Breaking):** Metered node and trigger claims bill at least 60 seconds at
   their class rate, then bill by the second. A claim reserves that minute up front;
@@ -842,7 +843,7 @@ unlock.
   `CreditClaimFloorSeconds` becomes `MinBillableSeconds`, and
   `CreditClaimFloorMicro` is removed. See [60-second minimum
   billable
-  duration](docs/migrations/_unreleased.md#60-second-minimum-billable-duration).
+  duration](docs/migrations/v0.66.0.md#60-second-minimum-billable-duration).
 
 - **runner:** A Kubernetes Job on a `sparkwing.dev/cpu-band` pool now runs
   alone on a machine of its billed class, N vCPU and 4N GiB, instead of on a
@@ -868,21 +869,21 @@ unlock.
   every line dropped. Accepted-range retries on one live logs service write
   one copy; a restart can still replay an ambiguously acknowledged batch.
   Upgrade the logs service before runners and pipeline
-  binaries. See [Batched log append protocol](docs/migrations/_unreleased.md#batched-log-append-protocol).
+  binaries. See [Batched log append protocol](docs/migrations/v0.66.0.md#batched-log-append-protocol).
 
 - **controller (Breaking):** The hourly storage pass deletes cache objects older than
   30 days for the default team and the operator token's cache root, as it
   already does for other teams. It also removes expired direct-object rows for
   the default team. Existing older cache objects leave on the first successful
   storage pass after upgrade. See [Default and operator cache expires after 30
-  days](docs/migrations/_unreleased.md#default-and-operator-cache-expires-after-30-days).
+  days](docs/migrations/v0.66.0.md#default-and-operator-cache-expires-after-30-days).
 
 - **controller + dashboard (Breaking):** credit and billing routes, metered
   tokens, claim charges, and storage billing require a signed `metering`
   license. Existing signed `multi-team` licenses also grant metering.
   Self-hosted controllers without either feature run claims and storage tiers
   without credit limits, and the dashboard hides Billing. See
-  [Metering needs a signed license](docs/migrations/_unreleased.md#metering-needs-a-signed-license).
+  [Metering needs a signed license](docs/migrations/v0.66.0.md#metering-needs-a-signed-license).
 - **dashboard:** the selected node's execution history now sits below the run
   summary in the Summary tab. Single attempts use one compact row, and selecting
   nodes leaves the tab bar in place.
@@ -932,7 +933,7 @@ unlock.
   step keeps its dollar value; its `credit-value-v1` requirement makes an
   older controller refuse the upgraded database. The dashboard shows charges to a hundredth of a
   credit, because a runner second costs a fraction of one. See
-  [Schema 75: a credit is $0.001](docs/migrations/_unreleased.md#schema-75-a-credit-is-0001).
+  [Schema 75: a credit is $0.001](docs/migrations/v0.66.0.md#schema-75-a-credit-is-0001).
 
 - **credits:** a metered node bills from the moment the machine that runs it
   starts work to its finish, so fetching the source and compiling the
@@ -980,7 +981,7 @@ unlock.
   free. A metered `k8s` or `warm` claim answers `402` when the team's balance
   cannot cover the cheapest class's first minute. The trigger loop sends its
   `--trigger-runner`, and stops with that reason when it is refused. See
-  [migration guide](docs/migrations/_unreleased.md#a-metered-pool-runs-trigger-nodes-through-node-claims).
+  [migration guide](docs/migrations/v0.66.0.md#a-metered-pool-runs-trigger-nodes-through-node-claims).
 - **charts (Breaking):** the cache's operator token and the cache grant key are
   Secrets of their own, `cache.tokenSecret` and `cache.grantKeySecret` in the
   runner bundle, instead of the runner's `controller.tokenSecret`. The runner's
@@ -988,7 +989,7 @@ unlock.
   pipeline mint a grant for any team and replace another team's cached
   binaries. The chart refuses to render when any two of the three name the
   same Secret key, and a cache-enabled install requires `cache.tokenSecret`.
-  See [migration guide](docs/migrations/_unreleased.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
+  See [migration guide](docs/migrations/v0.66.0.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on
@@ -1000,7 +1001,7 @@ unlock.
   launcher's credentials no longer reach team code. The runner no longer reads
   `SPARKWING_CACHE_TOKEN`, the runner-bundle chart no longer sets it on the
   runner, and `agent.yaml` refuses `cache_token`. See
-  [migration guide](docs/migrations/_unreleased.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
+  [migration guide](docs/migrations/v0.66.0.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
 
 ### Fixed
 
@@ -1149,7 +1150,7 @@ unlock.
   a claim-specific credit cursor and charge-balance index. Resolve every open
   trigger credit reservation before upgrading. An unsettled reservation parks
   its trigger until ledger review; see [Trigger credit
-  cursor](docs/migrations/_unreleased.md#schema-73-trigger-credit-cursor).
+  cursor](docs/migrations/v0.66.0.md#schema-73-trigger-credit-cursor).
 
 - **controller:** Per-principal runner, node and hourly run guards now check
   metering and usage within one team. Teams sharing a principal name no longer
@@ -1163,7 +1164,7 @@ unlock.
   Controller sessions expire after seven idle days or 30 days from sign-in,
   whichever comes first. Logout and server-side revocation still take effect
   on the next request. `Store.ExtendSession` is replaced by
-  `Store.LookupSessionAndRenew`; see [Browser session renewal](docs/migrations/_unreleased.md#browser-session-renewal).
+  `Store.LookupSessionAndRenew`; see [Browser session renewal](docs/migrations/v0.66.0.md#browser-session-renewal).
 
 - **cloud CLI + cache:** `sparkwing cloud status` omits the optional gitcache
   probe when no cache pod URL is announced, while an announced unhealthy cache
@@ -1187,7 +1188,7 @@ unlock.
   within 24 hours. A renewed block returns the same next reservation on
   retry, and hourly storage maintenance prunes older receipts. Schema 72 makes
   older controllers refuse the receipt ledger. See [Storage commit
-  receipts](docs/migrations/_unreleased.md#schema-72-storage-commit-receipts).
+  receipts](docs/migrations/v0.66.0.md#schema-72-storage-commit-receipts).
 
 - **web:** Navigation fetches a tab's route on hover, focus or touch instead of
   prefetching every visible tab on page load.
@@ -1441,7 +1442,7 @@ unlock.
   team's pipelines, and the `sparkwing-full` chart's default `metricsPort: 0`
   served them to anyone who reached the API. A `--metrics-addr` listener still
   serves the endpoint without a bearer. See
-  [the migration note](docs/migrations/_unreleased.md#controller-metrics-on-the-api-listener-needs-an-admin-bearer).
+  [the migration note](docs/migrations/v0.66.0.md#controller-metrics-on-the-api-listener-needs-an-admin-bearer).
 - **serve:** The dashboard's sign-in exchange (`POST /auth/local/session`)
   and sign-in-code mint now pass the same Host and Origin checks as the rest of
   `sparkwing serve`, and a browser exchange must send `application/json`. A page
@@ -1467,7 +1468,7 @@ unlock.
   compromised controller could run chosen code as the machine's user. The new
   `accept_working_tree: true` agent key and `sparkwing-runner runner
   --accept-working-tree` flag accept snapshots of listed repositories. See
-  [migration guide](docs/migrations/_unreleased.md#allow-listed-runners-refuse-working-tree-snapshots).
+  [migration guide](docs/migrations/v0.66.0.md#allow-listed-runners-refuse-working-tree-snapshots).
 
 - **cli + dashboard (Breaking):** `sparkwing serve` requires the token in
   `serve-token` under the Sparkwing home on every request except
@@ -1481,7 +1482,7 @@ unlock.
   `localStorage` and sends as a bearer; no credential rides a cookie or a URL
   a server sees. A loopback origin on port 3100 is no longer trusted without
   `--allow-origin http://localhost:3100`. See
-  [migration guide](docs/migrations/_unreleased.md#the-local-dashboard-requires-its-token).
+  [migration guide](docs/migrations/v0.66.0.md#the-local-dashboard-requires-its-token).
 
 - **web:** `sparkwing-web` without `--require-login` on a loopback address
   refuses DNS-rebound requests and cross-site writes. It answers only loopback
@@ -1509,12 +1510,12 @@ unlock.
   /api/v1/team/github-app/connect/available` no longer returns
   `connected_elsewhere`, and connecting an installation another team holds
   answers `409` with a generic "unavailable to this team" message. See
-  [migration guide](docs/migrations/_unreleased.md#github-app-picker-carries-no-binding-state).
+  [migration guide](docs/migrations/v0.66.0.md#github-app-picker-carries-no-binding-state).
   The dashboard's picker offers every installation the user administers.
 
 - **controller + store (Breaking):** Annotations and node metric samples are
   bounded, and node metric reads are paged. See [migration
-  guide](docs/migrations/_unreleased.md#node-metric-reads-are-paged). An
+  guide](docs/migrations/v0.66.0.md#node-metric-reads-are-paged). An
   annotation holds at most 64 KiB, and a run at most 1,000 annotations and
   4 MiB of them JSON-encoded, node and step annotations together; past a bound
   the append answers `413` for size or `429` for count and stores nothing. A
@@ -1535,7 +1536,7 @@ unlock.
 - **controller + store + dashboard (Breaking):** A Google or GitHub sign-in no
   longer joins an existing account because both report the same verified
   email. See [migration
-  guide](docs/migrations/_unreleased.md#sign-in-no-longer-joins-accounts-by-email). The
+  guide](docs/migrations/v0.66.0.md#sign-in-no-longer-joins-accounts-by-email). The
   first sign-in by a provider account whose address an existing
   account holds, from a provider that account does not sign in with, answers
   `409` with "An account with this email already exists. Sign in the way you
@@ -1626,7 +1627,7 @@ unlock.
   Team runner-token enrollment requires `repos`, and the machines page asks for
   them. `--github-app-source` and `SPARKWING_GITHUB_APP_SOURCE` are removed. See the
   [migration
-  guide](docs/migrations/_unreleased.md#a-runner-without-the-git-cache-fetches-with-the-credential-the-controller-releases).
+  guide](docs/migrations/v0.66.0.md#a-runner-without-the-git-cache-fetches-with-the-credential-the-controller-releases).
 - **runner:** a direct-source checkout reads no system or global git config
   and skips LFS smudging, so a fetched tree cannot name a filter driver or
   hook that runs; the fetch refuses http redirects, hosts that resolve to
@@ -1639,7 +1640,7 @@ unlock.
   `GITHUB_REPOSITORY` and `github_owner`/`github_repo` name different
   repositories is refused with 400, and a runner refuses such a stored
   trigger, so a run can no longer show one repository and fetch another. See
-  [migration guide](docs/migrations/_unreleased.md#a-trigger-names-one-repository).
+  [migration guide](docs/migrations/v0.66.0.md#a-trigger-names-one-repository).
 - **runner:** `sparkwing-runner runner` serves `/metrics` on
   `127.0.0.1:9090` by default instead of every interface, and the command the
   machines page prints passes `--metrics-addr=` so a laptop runner opens no
@@ -1666,7 +1667,7 @@ unlock.
   `SealBound` and `OpenBound` gain a leading `team` argument, and a new
   optional `controller.LegacyCipher` opens envelopes sealed before team
   binding so the startup reseal can bring them forward. See the
-  [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
+  [migration guide](docs/migrations/v0.66.0.md#boundcipher-takes-the-owning-team).
 - **controller:** a multi-team controller never offers the first-admin web signup
   With an active multi-team license, `GET /api/v1/auth/bootstrap-needed` answers
   `false` and the unauthenticated first-user `POST /api/v1/users` answers `403`,
@@ -1692,7 +1693,7 @@ unlock.
   webhook bindings. `team.admin` no longer suffices. A binding outside the operator's
   team posts no commit status and opens no Git cache mirror. See [Operator-only GitHub
   webhook
-  bindings](docs/migrations/_unreleased.md#operator-only-github-webhook-bindings).
+  bindings](docs/migrations/v0.66.0.md#operator-only-github-webhook-bindings).
 
 - **controller:** a runner token goes with the membership that minted it
   Removing a member left the runner tokens they minted working, and those
@@ -1781,7 +1782,7 @@ unlock.
   and it refused log reads. What a team downloads is bounded by its daily
   download cap, which never counts log reads; the logs service refuses no
   byte. A limits profile sets the daily alarm in place of the budget. See the
-  [migration guide](docs/migrations/_unreleased.md#egress-monthly-budget-removed).
+  [migration guide](docs/migrations/v0.66.0.md#egress-monthly-budget-removed).
 
 - **controller + web (Breaking):** `--trusted-proxy-cidrs` and the chart's
   `controller.trustedProxyCIDRs` and `web.trustedProxyCIDRs` are gone, and
@@ -1790,20 +1791,20 @@ unlock.
   (and, for the dashboard, `X-Forwarded-Proto`) counts; `--addr` ignores both.
   The dashboard sends each browser's address as `X-Real-IP` on every
   controller call, not only logins, and never to the logs service. See the
-  [migration guide](docs/migrations/_unreleased.md#trusted-proxy-listener-replaces-trusted-proxy-cidrs).
+  [migration guide](docs/migrations/v0.66.0.md#trusted-proxy-listener-replaces-trusted-proxy-cidrs).
 
 - **web (Breaking):** the dashboard no longer probes or displays controller,
   logs, and cache service health. It no longer serves
   `GET /api/v1/health/services` or accepts the probe-only `--cache` flag.
   The full chart no longer uses `web.cache.url`. See the
-  [migration guide](docs/migrations/_unreleased.md#dashboard-service-probes).
+  [migration guide](docs/migrations/v0.66.0.md#dashboard-service-probes).
 
 - **cli (Breaking):** the public CLI no longer provides `sparkwing cluster
   credits`, `sparkwing cluster tokens set-metered`, or `--metered` on token
   creation. Sparkwing Cloud operators use the private `sparkwing-ops` tool for
   credit and metering operations. The controller's credit and token routes
   remain available to that tool. See the [migration
-  guide](docs/migrations/_unreleased.md#cloud-operator-commands-leave-the-public-cli).
+  guide](docs/migrations/v0.66.0.md#cloud-operator-commands-leave-the-public-cli).
 
 ## [v0.65.1] - 2026-09-30
 ### Changed
