@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.65.2] - 2026-10-01
 ### Fixed
 
 - **dashboard:** Update Next.js to 16.3.6 to address the ImageResponse security advisory
