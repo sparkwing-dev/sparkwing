@@ -61,6 +61,13 @@ func TestConfigureInitTightensAndReportsAnExistingConfigDirectory(t *testing.T) 
 }
 
 func TestConfigureInitDryRunLeavesTheDirectoryAlone(t *testing.T) {
+	// safety: Go's telemetry sidecar can outlive the version probe and race TempDir cleanup.
+	telemetry := t.TempDir()
+	if err := os.WriteFile(filepath.Join(telemetry, "mode"), []byte("off\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_TELEMETRY_DIR", telemetry)
+
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	t.Setenv("SPARKWING_CONFIG", "")
