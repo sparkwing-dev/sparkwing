@@ -1311,6 +1311,9 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** Report resource-profile read failures before admission
+  instead of treating failed reads as missing measurements
+
 - **orchestrator:** A node whose parallel commands finish on the same clock
   reading no longer fails with `record node accounting: controller 500`; each
   of a node's resource samples now takes a timestamp after the one before it.

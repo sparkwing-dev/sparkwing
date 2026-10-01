@@ -44,7 +44,10 @@ func TestNodeProfileVersion(t *testing.T) {
 				if replaceLease {
 					ctx = withLocalAdmission(ctx, admission, "run", "lease", "child", true, 0, runCharge{})
 				}
-				resolved, _, _, _ := admission.resolveNodeHostCost(ctx, backends, "demo", "shard-a", plan.Job("shard-a"))
+				resolved, _, _, err := admission.resolveNodeHostCost(ctx, backends, "demo", "shard-a", plan.Job("shard-a"))
+				if err != nil {
+					t.Fatal(err)
+				}
 				want := store.CostSourceMeasured
 				if name != "matching" {
 					want = store.CostSourceMeasuring
@@ -57,7 +60,10 @@ func TestNodeProfileVersion(t *testing.T) {
 				}
 			}
 			plan.Job("shard-a").Resources(sparkwing.Cores(2), sparkwing.MemoryGB(1))
-			resolved, _, _, _ := admission.resolveNodeHostCost(dispatch.resolverCtx, backends, "demo", "shard-a", plan.Job("shard-a"))
+			resolved, _, _, err := admission.resolveNodeHostCost(dispatch.resolverCtx, backends, "demo", "shard-a", plan.Job("shard-a"))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if resolved.Source != store.CostSourcePin || resolved.Cores != 2 || resolved.MemoryBytes != 1<<30 {
 				t.Errorf("explicit pin = %+v, want pinned 2 cores and 1 GiB", resolved)
 			}

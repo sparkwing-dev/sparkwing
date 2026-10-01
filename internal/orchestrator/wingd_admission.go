@@ -205,7 +205,11 @@ func (la *LocalAdmission) admitRun(
 	var overCap string
 	hostPinned := planHasResourcePin(plan)
 	if hostPinned {
-		res, prof, drift, overCap = la.resolveHostCost(ctx, backends, pipeline, plan)
+		var err error
+		res, prof, drift, overCap, err = la.resolveHostCost(ctx, backends, pipeline, plan)
+		if err != nil {
+			return nil, admitProceed, err
+		}
 	}
 	class := effectiveAdmissionClass(plan, la.AdmissionClass)
 	la.AdmissionClass = class
@@ -300,7 +304,10 @@ func (la *LocalAdmission) admitNode(
 	node *sparkwing.JobNode,
 	priority int,
 ) (*runLease, error) {
-	res, prof, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	res, prof, overCap, err := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	if err != nil {
+		return nil, err
+	}
 	req := wingwire.AdmissionRequest{
 		RunID:              nodeHostRunID(runID, nodeID),
 		OwnerRunID:         runID,
@@ -336,13 +343,15 @@ func (la *LocalAdmission) admitNode(
 	return rl, nil
 }
 
-func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
+func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, string, error) {
 	pin := nodePin(node)
 	key := currentProfileKey(pipeline)
 	var profile *store.PipelineProfile
 	if backends.LocalCoordination && pipeline != "" {
-		if p, err := backends.State.GetPipelineProfile(ctx, key, nodeID); err == nil {
-			profile = p
+		var err error
+		profile, err = backends.State.GetPipelineProfile(ctx, key, nodeID)
+		if err != nil {
+			return capacity.Resolution{}, nil, "", fmt.Errorf("read resource profile for pipeline %q node %q: %w", pipeline, nodeID, err)
 		}
 	}
 	var planHash string
@@ -352,7 +361,7 @@ func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Back
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU(), planHash)
 	res, overCap := la.applyHostCeiling(ctx, res, key)
-	return res, profile, capacity.CheckDrift(pin, profile), overCap
+	return res, profile, overCap, nil
 }
 
 func (la *LocalAdmission) applyHostCeiling(ctx context.Context, res capacity.Resolution, profileKey string) (capacity.Resolution, string) {
@@ -955,18 +964,20 @@ func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Durati
 	return key, timeout
 }
 
-func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
+func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string, error) {
 	pin := planPin(plan)
 	key := currentProfileKey(pipeline)
 	var profile *store.PipelineProfile
 	if backends.LocalCoordination && pipeline != "" {
-		if p, err := backends.State.GetPipelineProfile(ctx, key, ""); err == nil {
-			profile = p
+		var err error
+		profile, err = backends.State.GetPipelineProfile(ctx, key, "")
+		if err != nil {
+			return capacity.Resolution{}, nil, nil, "", fmt.Errorf("read resource profile for pipeline %q: %w", pipeline, err)
 		}
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU(), capacityFingerprint(plan))
 	res, overCap := la.applyHostCeiling(ctx, res, key)
-	return res, profile, capacity.CheckDrift(pin, profile), overCap
+	return res, profile, capacity.CheckDrift(pin, profile), overCap, nil
 }
 
 func planPin(plan *sparkwing.Plan) *capacity.Pin {
@@ -1180,7 +1191,10 @@ func (la *LocalAdmission) acquireNodeHostSlot(
 	priority int,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
-	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	res, _, overCap, err := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	if err != nil {
+		return nil, err
+	}
 	return la.acquireNodeAdmission(ctx, wingwire.AdmissionRequest{
 		RunID:              nodeHostRunID(runID, nodeID),
 		OwnerRunID:         runID,
