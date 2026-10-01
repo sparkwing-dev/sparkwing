@@ -714,7 +714,7 @@ unlock.
 
 ### Changed
 
-- **scaffold:** Fresh pipelines use the published v0.65.1 SDK.
+- **scaffold:** Fresh pipelines use the published v0.65.2 SDK.
 
 - **store (Breaking):** `Store.ListRunRetryTree` and `ListRunTrends` move to
   `Tenant`. `PipelineForClaimedRun` and `PipelinesForClaimant` become
