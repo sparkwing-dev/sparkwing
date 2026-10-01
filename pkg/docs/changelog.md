@@ -20,6 +20,19 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **dashboard:** Update Next.js to 16.3.6 to address the ImageResponse security advisory
+
+- **cli:** Explain default admission charges without incorrectly identifying
+  repeat runs as first runs
+
+- **orchestrator:** Cancel executing and queued nodes when a store-backed plan
+  concurrency lease is superseded or lost
+
+- **orchestrator:** Report resource-profile read failures before admission
+  instead of treating failed reads as missing measurements
+
 ## [v0.65.1] - 2026-09-30
 ### Changed
 

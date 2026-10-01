@@ -1,56 +1,90 @@
 package wingd
 
 import (
-	"fmt"
-	"sync"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"testing"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
-func TestDeepQueueEstimateLeavesDaemonLockAvailable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: simulates admission of four thousand queued requests")
+func TestQueueStateCallbackLockPlacement(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "queuestate.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	d := newHeadroomDaemon(t, 10, 0)
-	for i := range 4002 {
-		id := fmt.Sprintf("request-%d", i)
-		cores := float64(1 + i%5)
-		if i < 2 {
-			cores = 5
+	var callback *ast.FuncLit
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "readQueueState" {
+			continue
 		}
-		request := admission.Request{ID: id, Cores: cores, MemoryBytes: uint64(1+i%3) << 30}
-		if i%4 == 0 {
-			request.Semaphores = []admission.SemaphoreClaim{{Key: "heavy", Capacity: 3, Cost: 1}}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if ok && types.ExprString(call.Fun) == "d.queueStateReads.Do" && len(call.Args) == 2 {
+				callback, _ = call.Args[1].(*ast.FuncLit)
+			}
+			return true
+		})
+	}
+	if callback == nil {
+		t.Fatal("queue state callback not found")
+	}
+	locked := false
+	seen := map[string]bool{}
+	for _, stmt := range callback.Body.List {
+		var expressions []ast.Expr
+		switch stmt := stmt.(type) {
+		case *ast.ExprStmt:
+			expressions = []ast.Expr{stmt.X}
+		case *ast.AssignStmt:
+			expressions = stmt.Rhs
+		case *ast.ReturnStmt:
+			for _, result := range stmt.Results {
+				if _, ok := result.(*ast.Ident); !ok {
+					t.Fatalf("review lock ownership for return expression %T", result)
+				}
+			}
+			if locked {
+				t.Fatal("queue state returns while holding daemon lock")
+			}
+		default:
+			t.Fatalf("review lock ownership for callback statement %T", stmt)
 		}
-		if _, _, err := d.ledger.Submit(request); err != nil {
-			t.Fatal(err)
+		for _, expr := range expressions {
+			call, ok := expr.(*ast.CallExpr)
+			if !ok {
+				t.Fatalf("review lock ownership for callback expression %T", expr)
+			}
+			name := types.ExprString(call.Fun)
+			switch name {
+			case "d.mu.Lock":
+				if locked {
+					t.Fatal("daemon lock acquired twice")
+				}
+				locked = true
+			case "d.mu.Unlock":
+				if !locked {
+					t.Fatal("daemon lock released without ownership")
+				}
+				locked = false
+			case "d.buildQueueStateLocked":
+				if !locked {
+					t.Fatal("queue snapshot requires daemon lock")
+				}
+			case "annotateETA", "annotateSemaphoreETA":
+				if locked || !seen["d.buildQueueStateLocked"] {
+					t.Fatalf("%s requires a completed snapshot and released daemon lock", name)
+				}
+			default:
+				t.Fatalf("review lock ownership for callback call %s", name)
+			}
+			seen[name] = true
 		}
-		d.byRun[id] = &conn{expectedDurationMS: int64(30_000 + (i%7)*20_000)}
 	}
-	entered := make(chan struct{})
-	var once sync.Once
-	d.cfg.Now = func() time.Time {
-		once.Do(func() { close(entered) })
-		return time.Now()
-	}
-	finished := make(chan int, 1)
-	go func() { finished <- len(queueState(t, d).Waiters) }()
-	<-entered
-	acquired := make(chan time.Duration, 1)
-	start := time.Now()
-	go func() {
-		d.mu.Lock()
-		d.mu.Unlock() //nolint:staticcheck // This empty critical section measures contention for the daemon lock.
-		acquired <- time.Since(start)
-	}()
-	if delay := <-acquired; delay > 100*time.Millisecond {
-		t.Errorf("queue calculation blocked unrelated daemon work for %s", delay)
-	} else {
-		t.Logf("daemon lock acquired in %s during queue calculation", delay)
-	}
-	if waiters := <-finished; waiters != 4000 {
-		t.Fatalf("waiters = %d, want 4000", waiters)
+	for _, name := range []string{"d.buildQueueStateLocked", "annotateETA", "annotateSemaphoreETA"} {
+		if !seen[name] {
+			t.Errorf("missing %s", name)
+		}
 	}
 }

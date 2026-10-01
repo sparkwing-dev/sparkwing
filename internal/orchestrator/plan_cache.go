@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -36,7 +35,7 @@ func (e *planAdmissionEvictedError) Error() string {
 	if e.supersededBy != "" {
 		return fmt.Sprintf("admission on %q lost under %s: superseded by run %s; run `sparkwing queue` to inspect the queue", e.groupName, e.policy, e.supersededBy)
 	}
-	return fmt.Sprintf("plan concurrency group %q: evicted before dispatch; run `sparkwing queue` to inspect the queue", e.groupName)
+	return fmt.Sprintf("plan concurrency group %q: admission evicted; run `sparkwing queue` to inspect the queue", e.groupName)
 }
 
 func planConcurrencyResource(*sparkwing.ConcurrencyGroup) string {
@@ -77,6 +76,7 @@ func acquirePlanSlot(
 	runID string,
 	plan *sparkwing.Plan,
 	daemonHandlesLocalScopes bool,
+	cancel context.CancelCauseFunc,
 ) (release func(outcome string), outcome planCacheOutcome, outcomeGroup string, err error) {
 	memberships := planConcurrencyAcquireOrder(plan, runID)
 	if daemonHandlesLocalScopes {
@@ -102,7 +102,7 @@ func acquirePlanSlot(
 	}()
 	for _, membership := range memberships {
 		var groupRelease func(string)
-		groupRelease, outcome, err = acquireOnePlanSlot(ctx, backends, runID, membership)
+		groupRelease, outcome, err = acquireOnePlanSlot(ctx, backends, runID, membership, cancel)
 		if err != nil || outcome != planCacheProceed {
 			if membership.Group != nil {
 				outcomeGroup = membership.Group.Name()
@@ -123,6 +123,7 @@ func acquireOnePlanSlot(
 	backends Backends,
 	runID string,
 	membership sparkwing.PlanConcurrency,
+	cancel context.CancelCauseFunc,
 ) (release func(outcome string), outcome planCacheOutcome, err error) {
 	group := membership.Group
 	key := scopedGroupKey(group, runID)
@@ -163,9 +164,12 @@ func acquireOnePlanSlot(
 		appendPlanEvent(ctx, backends, runID, "concurrency_drift", payload)
 	}
 
+	onEvicted := func() {
+		cancel(&planAdmissionEvictedError{groupName: group.Name(), policy: string(limit.OnLimit), runID: runID})
+	}
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, nil
+		return makePlanSlotRelease(ctx, backends, key, holderID, string(limit.OnLimit), wedgeBudget, onEvicted), planCacheProceed, nil
 
 	case store.AcquireSkipped:
 		appendPlanEvent(ctx, backends, runID, "plan_skipped_concurrent", nil)
@@ -199,7 +203,7 @@ func acquireOnePlanSlot(
 		if !promoted {
 			return nil, planCacheEvicted, nil
 		}
-		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, nil
+		return makePlanSlotRelease(ctx, backends, key, holderID, string(limit.OnLimit), wedgeBudget, onEvicted), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
 		return nil, "", fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
@@ -240,6 +244,11 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, res
 	for {
 		select {
 		case <-ctx.Done():
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if _, err := backends.Concurrency.CancelWaiter(cleanupCtx, key, runID, ""); err != nil {
+				slog.Warn("cancel plan waiter failed", "key", key, "run", runID, "err", err)
+			}
+			cancel()
 			return false, ctx.Err()
 		case <-ticker.C:
 		}
@@ -314,9 +323,8 @@ func cappedPlanEventHolders(holders []store.ConcurrencyHolder) []planConcurrency
 	return payload
 }
 
-func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedgeBudget time.Duration) func(outcome string) {
-	hbCtx, hbCancel := context.WithCancel(context.Background())
-	var superseded atomic.Bool
+func makePlanSlotRelease(ctx context.Context, backends Backends, key, holderID, onLimit string, wedgeBudget time.Duration, onEvicted func()) func(outcome string) {
+	hbCtx, hbCancel := context.WithCancel(context.WithoutCancel(ctx))
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -331,20 +339,14 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedge
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
+				ctx, cancel := context.WithTimeout(hbCtx, store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, was, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, lease)
 				cancel()
 				if err != nil {
 					sinceOK := time.Since(lastOK)
-					// safety: ErrLockHeld is the store answering fine -- the
-					// lease lapsed and another holder owns the slot -- so it
-					// feeds the lease-lost branch, never the wedge guard,
-					// keeping the "store wedged" telemetry honest.
 					if errors.Is(err, store.ErrLockHeld) {
-						wedge.success()
-						slog.Error("plan concurrency lease lost; slot held by another holder",
-							"key", key, "since_last_ok", sinceOK.Round(time.Second))
-						continue
+						onEvicted()
+						return
 					}
 					if terminal := wedge.fail(fmt.Sprintf("plan concurrency namespace %q: heartbeat", key), err); terminal != nil {
 						slog.Error("plan concurrency heartbeat stopping; store wedged",
@@ -363,7 +365,8 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedge
 				wedge.success()
 				lastOK = time.Now()
 				if was {
-					superseded.Store(true)
+					onEvicted()
+					return
 				}
 			}
 		}
@@ -374,7 +377,7 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedge
 		once.Do(func() {
 			hbCancel()
 			wg.Wait()
-			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if err := backends.Concurrency.ReleaseSlot(bg, key, holderID, outcome, "", "", 0); err != nil {
 				slog.Warn("plan concurrency release failed; relying on reaper",

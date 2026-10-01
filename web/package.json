@@ -14,7 +14,7 @@
     "test:browser:install": "playwright install chromium"
   },
   "dependencies": {
-    "next": "16.3.3",
+    "next": "16.3.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
@@ -29,7 +29,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.3",
+    "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5"
