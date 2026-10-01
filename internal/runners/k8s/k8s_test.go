@@ -464,7 +464,7 @@ func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
 		Image:                 "runner",
 		ControllerURL:         srv.URL,
 		PollInterval:          time.Millisecond,
-		MissingJobGracePeriod: 100 * time.Millisecond,
+		MissingJobGracePeriod: time.Hour,
 	}, nil)
 	finishErr := make(chan error, 1)
 	go func() {

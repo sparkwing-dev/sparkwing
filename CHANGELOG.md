@@ -1311,6 +1311,9 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** Cancel executing and queued nodes when a store-backed plan
+  concurrency lease is superseded or lost
+
 - **orchestrator:** A node whose parallel commands finish on the same clock
   reading no longer fails with `record node accounting: controller 500`; each
   of a node's resource samples now takes a timestamp after the one before it.

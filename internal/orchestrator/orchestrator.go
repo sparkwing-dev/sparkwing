@@ -909,9 +909,12 @@ func dispatch(
 	defer cancelDispatch(nil)
 
 	planRelease, planOutcome, planOutcomeGroup, perr := acquirePlanSlot(
-		dispatchCtx, backends, runID, plan, admission != nil,
+		dispatchCtx, backends, runID, plan, admission != nil, cancelDispatch,
 	)
 	if perr != nil {
+		if cause := context.Cause(dispatchCtx); cause != nil {
+			return cause
+		}
 		return perr
 	}
 	switch planOutcome {
