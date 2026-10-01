@@ -169,7 +169,7 @@ func acquireOnePlanSlot(
 	}
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget, onEvicted), planCacheProceed, nil
+		return makePlanSlotRelease(ctx, backends, key, holderID, string(limit.OnLimit), wedgeBudget, onEvicted), planCacheProceed, nil
 
 	case store.AcquireSkipped:
 		appendPlanEvent(ctx, backends, runID, "plan_skipped_concurrent", nil)
@@ -203,7 +203,7 @@ func acquireOnePlanSlot(
 		if !promoted {
 			return nil, planCacheEvicted, nil
 		}
-		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget, onEvicted), planCacheProceed, nil
+		return makePlanSlotRelease(ctx, backends, key, holderID, string(limit.OnLimit), wedgeBudget, onEvicted), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
 		return nil, "", fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
@@ -323,8 +323,8 @@ func cappedPlanEventHolders(holders []store.ConcurrencyHolder) []planConcurrency
 	return payload
 }
 
-func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedgeBudget time.Duration, onEvicted func()) func(outcome string) {
-	hbCtx, hbCancel := context.WithCancel(context.Background())
+func makePlanSlotRelease(ctx context.Context, backends Backends, key, holderID, onLimit string, wedgeBudget time.Duration, onEvicted func()) func(outcome string) {
+	hbCtx, hbCancel := context.WithCancel(context.WithoutCancel(ctx))
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -339,7 +339,7 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedge
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
+				ctx, cancel := context.WithTimeout(hbCtx, store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, was, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, lease)
 				cancel()
 				if err != nil {
@@ -377,7 +377,7 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedge
 		once.Do(func() {
 			hbCancel()
 			wg.Wait()
-			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if err := backends.Concurrency.ReleaseSlot(bg, key, holderID, outcome, "", "", 0); err != nil {
 				slog.Warn("plan concurrency release failed; relying on reaper",
