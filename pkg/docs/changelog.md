@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** Metric timestamps use stored wall-clock ordering, so concurrent commands cannot fail their node by reusing a timestamp.
+
 - **controller:** Finished runs cannot supply new node claims or credit reservations.
   Queue depth excludes their unfinished node rows, including rows left by an interrupted pipeline.
 

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -26,5 +27,29 @@ func TestStateMetricsSinkNeverRepeatsATimestamp(t *testing.T) {
 	}
 	if !backend.sample.TS.After(first) {
 		t.Fatalf("a clock that stepped back reused %s", backend.sample.TS)
+	}
+}
+
+func TestMetricStampsNeverRepeatStoredTimestampsForConcurrentCommands(t *testing.T) {
+	stamps := &metricStamps{}
+	const commands = 8
+	const samplesPerCommand = 10_000
+	samples := make(chan int64, commands*samplesPerCommand)
+	var writers sync.WaitGroup
+	for range commands {
+		writers.Go(func() {
+			for range samplesPerCommand {
+				samples <- stamps.next(time.Now()).UnixNano()
+			}
+		})
+	}
+	writers.Wait()
+	close(samples)
+	seen := make(map[int64]bool, commands*samplesPerCommand)
+	for stamp := range samples {
+		if seen[stamp] {
+			t.Fatalf("concurrent commands reused stored timestamp %d", stamp)
+		}
+		seen[stamp] = true
 	}
 }

@@ -137,6 +137,8 @@ func (m *metricStamps) next(at time.Time) time.Time {
 	if m == nil {
 		return at
 	}
+	// safety: wall time can repeat while monotonic time advances, but storage keys use wall time.
+	at = at.Round(0)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !at.After(m.last) {
