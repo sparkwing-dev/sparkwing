@@ -227,14 +227,22 @@ func TestRunnerFallsBackForLabelsItAdvertises(t *testing.T) {
 
 func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 	claimed := make(chan struct{})
-	revokeServed := make(chan struct{})
-	var touches atomic.Int64
+	heartbeatStarted := make(chan struct{})
+	heartbeatStopped := make(chan struct{})
 	st, ctrl, cleanup := newWarmPoolFixture(t, nil, func(next http.Handler, st *store.Store) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasSuffix(req.URL.Path, "/touch") {
-				touches.Add(1)
+				close(heartbeatStarted)
+				<-req.Context().Done()
+				close(heartbeatStopped)
+				return
 			}
 			if strings.HasSuffix(req.URL.Path, "/finalize-ready") {
+				select {
+				case <-heartbeatStarted:
+				case <-req.Context().Done():
+					return
+				}
 				node, err := st.ClaimNextReadyNode(req.Context(), store.ClaimIdentity{
 					Principal:   "remote-workstation",
 					TokenPrefix: "swr_remote-workstation",
@@ -246,13 +254,14 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 				}
 				close(claimed)
 				next.ServeHTTP(w, req)
-				close(revokeServed)
 				return
 			}
 			next.ServeHTTP(w, req)
 		})
 	})
 	defer cleanup()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	fallback := &fallbackRunner{}
 	r := New(ctrl, fallback, Config{
 		PollInterval:      5 * time.Millisecond,
@@ -262,7 +271,7 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 
 	done := make(chan runner.Result, 1)
 	go func() {
-		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+		done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
 	}()
 
 	select {
@@ -271,15 +280,9 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 		t.Fatal("runner never attempted the fallback handoff")
 	}
 	select {
-	case <-revokeServed:
+	case <-heartbeatStopped:
 	case <-time.After(time.Second):
-		t.Fatal("runner never completed the fallback handoff request")
-	}
-	time.Sleep(10 * time.Millisecond)
-	touchCount := touches.Load()
-	time.Sleep(10 * time.Millisecond)
-	if got := touches.Load(); got != touchCount {
-		t.Fatalf("pre-claim heartbeat continued after handoff: %d -> %d", touchCount, got)
+		t.Fatal("pre-claim heartbeat request was not cancelled after handoff")
 	}
 	if err := st.FinishNode(context.Background(), "run-1", "build", string(sparkwing.Failed), "remote failure", []byte(`{"remote":true}`)); err != nil {
 		t.Fatal(err)
