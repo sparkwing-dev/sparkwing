@@ -6316,7 +6316,16 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return nil, err
 	}
-	// safety: a finish after the candidate read must precede or follow this award.
+	// safety: reservation claims lock their node before its run; sharing that order avoids a cycle.
+	var lockedNode string
+	err = tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE run_id = ? AND node_id = ?`+teamClause+tx.forUpdate(),
+		append([]any{candidate.runID, candidate.nodeID}, teamArgs...)...).Scan(&lockedNode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	found, err := lockTeamRunRowTx(ctx, tx, scope.team, candidate.runID)
 	if err != nil || !found {
 		return nil, err
