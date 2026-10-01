@@ -270,7 +270,7 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	seedSecretArgRun(t, st, "run-1")
+	seedSecretArgRunAs(t, st, "run-1", "running")
 
 	now := time.Now().UTC()
 	runnerTok, runnerRow, err := st.CreateToken("pod", store.TokenKindRunner,
