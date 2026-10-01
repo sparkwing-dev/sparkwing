@@ -24,6 +24,15 @@ unlock.
 
 - **cli:** Explain default admission charges without incorrectly identifying
   repeat runs as first runs
+- **dashboard:** Update Next.js to 16.3.6 to address the ImageResponse security advisory
+
+- **orchestrator:** A node whose parallel commands finish on the same clock
+  reading no longer fails with `record node accounting: controller 500`; each
+  of a node's resource samples now takes a timestamp after the one before it.
+- **store:** A queued concurrency group promotes its waiters in arrival order
+  even when the host's wall clock steps backwards between two arrivals. Before,
+  a node queued just after the step jumped ahead of every waiter stamped in the
+  stepped-over window; WSL2 steps its clock back about 750ms every 30 seconds.
 
 - **orchestrator:** Cancel executing and queued nodes when a store-backed plan
   concurrency lease is superseded or lost
