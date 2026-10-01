@@ -49,6 +49,27 @@ func TestPrePushBudgetFailsPastOneMinuteNamingTheSlowestStep(t *testing.T) {
 	}
 }
 
+func TestReleaseCutBudgetAcceptsTheMeasuredTestClass(t *testing.T) {
+	span := 7*time.Minute + 19*time.Second + 746*time.Millisecond
+	_, err := budgetVerdict("release cut", releaseCutBudget, span,
+		[]stepTiming{{"test", span}}, false, -1)
+	if err != nil {
+		t.Fatalf("the measured release test class failed its budget: %v", err)
+	}
+}
+
+func TestReleaseCutBudgetFailsPastTenMinutesNamingTheSlowestStep(t *testing.T) {
+	span := 10*time.Minute + time.Millisecond
+	_, err := budgetVerdict("release cut", releaseCutBudget, span,
+		[]stepTiming{{"test", span}}, false, -1)
+	if err == nil {
+		t.Fatal("a release cut past ten minutes passed")
+	}
+	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "10m0.001s") {
+		t.Errorf("the failure names neither the slowest step nor its cost: %v", err)
+	}
+}
+
 func TestBudgetLeavesTheVerdictToTheCheckThatFailed(t *testing.T) {
 	_, err := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
 		[]stepTiming{{"gofmt", 20 * time.Second}}, true, -1)

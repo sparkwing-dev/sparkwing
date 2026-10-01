@@ -15,7 +15,7 @@ import (
 const (
 	preCommitBudget  = 3 * time.Second
 	prePushBudget    = time.Minute
-	releaseCutBudget = 5 * time.Minute
+	releaseCutBudget = 10 * time.Minute
 )
 
 const budgetStepID = "budget"

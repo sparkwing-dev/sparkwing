@@ -648,9 +648,8 @@ func runTest(ctx context.Context) error {
 	})
 }
 
-// perf: the fast test class. A test whose own runtime passes 200 ms guards
-// itself with testing.Short, so this is the same suite without the members
-// that make it minutes long.
+// perf: short mode defers expensive test bodies while retaining real-store
+// fixture setup, whose aggregate cost still takes minutes.
 func runShortTest(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
 		return forEachGoModule(ctx, "go test", boundedGoCommand(currentHost(), "test", "-short ./..."), home)

@@ -80,14 +80,14 @@ file. Other syntax and workflow checks remain active.
 - **The three check classes and their budgets:** `pre-commit` is the source
   policy at 3 seconds, `pre-push` the fast tier with a one-minute hard limit,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
-  before it tags, 5 minutes for build, full lint, the fast test class,
+  before it tags, 10 minutes for build, full lint, the short test suite,
   published-version and SDK-pin checks, and changelog-link checks in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
   and still report the span and slowest step. Every selected check still runs.
   At or below 25 files, both hook budgets are enforced. The release cut always
-  enforces its five-minute budget, regardless of change size. A tier whose
+  enforces its ten-minute budget, regardless of change size. A tier whose
   scope holds no Go file still runs and passes every step, so it warns and
   names the scope it read: a push judged against an empty
   `origin/main..HEAD` range reports success over nothing, and uncommitted
@@ -161,19 +161,26 @@ file. Other syntax and workflow checks remain active.
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
   output. Measured on this 16-core Linux
-  host with a warm cache, the release cut's three members cost 9 s (build),
-  92 s (the full linter over both modules) and 81 s (`go test -short`), so the
-  class costs about 95 s of its 5 minutes; the same suite without `-short`
-  costs 289 s, which is what the fast class removes. `sparkwing runs stats
+  host with a warm cache at source `2eefff146`, the release cut's three
+  members cost 17.001 s (build), 73.455 s (full lint), and 439.746 s
+  (`go test -short`). Every check passed; the span exceeded the former
+  five-minute budget. `pkg/store` took 361.767 s inside that run. A focused
+  `pkg/store -short` run without concurrent build or lint took 347.558 s,
+  with 1,214 top-level passes and a 240 ms median test duration; 1,130
+  exceeded 200 ms. Repeated current-schema SQLite setup remains in this
+  coverage. The ten-minute budget keeps the entire short suite and its
+  checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
   week, and `sparkwing runs timeline --run <id> --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
   by repo before reading a per-pipeline figure as this one's.
-- **The fast test class:** the release cut runs `go test -short`. A test whose
-  own runtime passes 200 ms guards itself with
-  `if testing.Short() { t.Skip("slow: ...") }` naming what costs the time, so a
-  new slow test is either cheap enough for the fast class or says why it is
-  not. The short class retains a real-store risk-admission test that requires
+- **The short test class:** the release cut runs `go test -short`. Use
+  200 ms as guidance for expensive test-body work beyond current-schema
+  fixture setup. Such work should guard itself with
+  `if testing.Short() { t.Skip("slow: ...") }` naming what costs the time.
+  Real-store fixture setup remains in the short suite; the measured package
+  and test durations above include that setup. The short class retains a
+  real-store risk-admission test that requires
   an unapproved submission to leave the queue empty. First-run compilation,
   ref selection and pinned-binary risk fixtures remain in the full class.
   `gate` runs the suite without `-short`, which is where every guarded test is
@@ -539,7 +546,7 @@ file. Other syntax and workflow checks remain active.
 - **Release:** merging is not a release; a release is a tag push. The local
   `release` pipeline checks the chosen version against origin tags, checks the
   clean tree, and verifies published module freshness, coherent SDK pins and
-  changelog links in the fixed five-minute build/lint/short-test class. It then
+  changelog links in the fixed ten-minute build/lint/short-test class. It then
   renames `[Unreleased]`, rolls the migration guide, validates the resulting
   section and guide before committing, and checks schema/wire change coverage.
   All refusals precede push-tag. Freshness checks published versions, not the
