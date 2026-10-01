@@ -24,7 +24,7 @@ func CostRationale(source CostSource, sampleCount int) string {
 	case CostSourceFloor:
 		return "measuring up from the demand floor of contended runs"
 	case CostSourceDefault:
-		return "first run, conservative default until measured"
+		return "conservative default until sufficient measurements"
 	default:
 		return ""
 	}
