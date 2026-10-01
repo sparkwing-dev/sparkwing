@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -22,7 +23,7 @@ import (
 func newSecretsTestServer(t *testing.T, c controller.Cipher) (*httptest.Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

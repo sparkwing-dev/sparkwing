@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -18,7 +19,7 @@ import (
 // bounds empty polling, which is what a runner can do without limit.
 func TestClaimBudget_AnAwardedClaimDoesNotSpendTheBudget(t *testing.T) {
 	const budget = 5
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -38,7 +39,7 @@ func doctorHome(t *testing.T) paths.Paths {
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("EnsureRoot: %v", err)
 	}
-	st, err := store.Open(p.StateDB())
+	st, err := teststore.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

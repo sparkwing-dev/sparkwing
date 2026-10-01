@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {
@@ -42,7 +42,7 @@ func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {
 
 func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

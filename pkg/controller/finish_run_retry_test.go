@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -15,7 +16,7 @@ import (
 func TestFinishRunRetriesDoNotRepeatProfileObservations(t *testing.T) {
 	for _, concurrent := range []bool{false, true} {
 		t.Run(map[bool]string{false: "sequential", true: "concurrent"}[concurrent], func(t *testing.T) {
-			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

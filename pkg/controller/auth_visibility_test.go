@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -32,7 +33,7 @@ func healthAuthField(t *testing.T, base string) string {
 
 func TestController_Health_ReportsAuthDisabledWhenTokensEmpty(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestController_Health_ReportsAuthDisabledWhenTokensEmpty(t *testing.T) {
 
 func TestController_Health_ReportsAuthEnabledWhenTokenPresent(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestController_Health_ReportsAuthEnabledWhenTokenPresent(t *testing.T) {
 
 func TestEnableAuthFromStore_WarnsWhenTokensEmpty(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestEnableAuthFromStore_WarnsWhenTokensEmpty(t *testing.T) {
 
 func TestEnableAuthFromStore_SilentAndEnabledWhenTokenPresent(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

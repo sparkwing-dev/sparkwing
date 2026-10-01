@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func emptyTokenTableServer(t *testing.T, multiTeam bool) (*controller.Server, *store.Store, string) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func TestMultiTeamAuth_ASingleTeamInstallStaysOpenWithNoTokens(t *testing.T) {
 // The controller binary installs the license before resolving auth, so
 // --require-auth and the startup log already see auth on.
 func TestMultiTeamAuth_ALicenseInstalledFirstTurnsAuthOnAtEnable(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

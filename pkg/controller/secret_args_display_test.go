@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -52,7 +53,7 @@ func seedSecretArgRunAs(t *testing.T, st *store.Store, id, status string) {
 
 func secretArgController(t *testing.T) (*store.Store, *httptest.Server) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +265,7 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +375,7 @@ func TestSecretArgs_ExecutionViewFollowsTheAuthMode(t *testing.T) {
 	})
 
 	t.Run("auth enabled refuses an anonymous caller", func(t *testing.T) {
-		st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+		st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

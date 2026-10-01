@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -14,7 +15,7 @@ import (
 // served the default team's rows. A signed-in account that lost its team is
 // the case that must not fall back the way a pre-team token does.
 func TestRequestTenantRefusesACallerWithNoRegisteredTeam(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestTeamBoundaryLeavesClaimValidateToItsOwnGate(t *testing.T) {
 // runTeam feeds the cache grant, which opens a team's cache namespace, so it
 // repeats the boundary rather than trusting the middleware in front of it.
 func TestRunTeamRefusesAnotherTeamsRun(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

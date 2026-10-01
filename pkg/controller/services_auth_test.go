@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestServices_RequiresABearer(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func TestServices_RequiresABearer(t *testing.T) {
 }
 
 func TestServices_AnnouncesADashboardOnItsOwn(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func servicesAs(t *testing.T, url, token string) (int, controller.ServicesRespon
 // knows the cache's operator routes are not the caller's to use.
 func TestServices_AnnouncesAMultiTeamController(t *testing.T) {
 	for _, multiTeam := range []bool{true, false} {
-		st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+		st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

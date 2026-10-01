@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func bounceHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	st, err := store.Open(filepath.Join(home, "state.db"))
+	st, err := teststore.Open(filepath.Join(home, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

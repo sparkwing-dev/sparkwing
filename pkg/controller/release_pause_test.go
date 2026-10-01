@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func newPauseTestServer(t *testing.T) (*Server, string, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestReleaseDebugPause_Unauthenticated(t *testing.T) {
 
 func TestReleaseDebugPause_AuthDisabledFallback(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}

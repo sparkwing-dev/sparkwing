@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -32,7 +33,7 @@ func newCloudFixture(t *testing.T) *cloudFixture {
 	t.Helper()
 	discovery.ResetCache()
 	t.Cleanup(discovery.ResetCache)
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestCloudConnectRefusesATokenlessConnectionToAnAuthedController(t *testing.
 func TestCloudConnectAcceptsAnUnauthenticatedController(t *testing.T) {
 	discovery.ResetCache()
 	t.Cleanup(discovery.ResetCache)
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

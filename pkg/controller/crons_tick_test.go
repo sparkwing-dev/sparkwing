@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -60,7 +61,7 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 }
 
 func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 }
 
 func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 }
 
 func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 // The tick evaluates every team's schedules, and a schedule team B armed
 // launches its run, its trigger and its history in team B.
 func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

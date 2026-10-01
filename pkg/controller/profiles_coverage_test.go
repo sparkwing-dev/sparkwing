@@ -5,13 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 	for _, mode := range []string{"missing", "unreadable", "cached", "zero"} {
 		t.Run(mode, func(t *testing.T) {
-			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
