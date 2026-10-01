@@ -1004,6 +1004,10 @@ unlock.
 
 ### Fixed
 
+- **templates:** The embedded v0.32.1 registry makes the PostgreSQL service
+  example probe TCP readiness before running integration tests, so a temporary
+  startup socket cannot admit the tests before the service accepts TCP connections.
+
 - **source:** A file removed during a source mirror size scan no longer fails
   the fetch. A missing mirror or other filesystem error still fails.
 
