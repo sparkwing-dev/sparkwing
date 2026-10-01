@@ -87,6 +87,7 @@ func TestAcquirePlanSlotBoundsAcquireContext(t *testing.T) {
 		"child",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -120,6 +121,7 @@ func TestAcquirePlanSlotFailsWhenAdmissionAcquireBlocks(t *testing.T) {
 		"blocked-run",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err == nil {
 		t.Fatal("acquirePlanSlot succeeded, want deadline failure")
@@ -154,6 +156,7 @@ func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 		"run-multi",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -202,6 +205,7 @@ func TestAcquirePlanSlot_DaemonModeSkipsBoxAndRunScopes(t *testing.T) {
 		"run-daemon",
 		plan,
 		true,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -235,6 +239,7 @@ func TestAcquirePlanSlotUsesCanonicalGateOrder(t *testing.T) {
 		"run-canonical",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -270,6 +275,7 @@ func TestAcquirePlanSlotReportsGateThatRejectedAdmission(t *testing.T) {
 		"run-fail",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -296,6 +302,7 @@ func TestAcquirePlanSlotSendsPlanCost(t *testing.T) {
 		"run-costed",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)

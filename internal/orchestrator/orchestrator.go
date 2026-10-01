@@ -909,7 +909,7 @@ func dispatch(
 	defer cancelDispatch(nil)
 
 	planRelease, planOutcome, planOutcomeGroup, perr := acquirePlanSlot(
-		dispatchCtx, backends, runID, plan, admission != nil,
+		dispatchCtx, backends, runID, plan, admission != nil, cancelDispatch,
 	)
 	if perr != nil {
 		return perr
