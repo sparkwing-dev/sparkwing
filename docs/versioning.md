@@ -92,23 +92,33 @@ For v0 we accept this and rely on:
 
 ## The SDK pin selects the CLI
 
-`.sparkwing/go.mod` pins the SDK a repo builds against. That pin also
-selects the CLI that runs the repo's pipelines, the way `go` honors a
-`toolchain` line under `GOTOOLCHAIN=auto`. Before compiling a pipeline,
-`sparkwing` compares its own version with the pin:
+`.sparkwing/go.mod` pins the SDK a repo builds against. A foreground
+`sparkwing run` also uses its direct stable pin to select a CLI, the way
+`go` honors a `toolchain` line under `GOTOOLCHAIN=auto`. With the default
+`SPARKWING_TOOLCHAIN=auto`, it compares the installed version with that pin:
 
 | Pin | Installed CLI | What runs |
 |---|---|---|
 | release tag newer than the CLI | release build | the pinned release, from the version store |
 | release tag at or below the CLI | release build | the installed CLI |
-| pseudo-version, or a `replace` for the SDK | anything | the installed CLI |
+| pseudo-version, prerelease, or a `replace` for the SDK | anything | the installed CLI |
 | anything | `(devel)` or a source build | the installed CLI |
 
-A newer CLI needs no switch, because the daemon protocol serves older
-pipelines. A source build on either side wins, because a checkout is
-what its author is testing. Under `--sw-ref` the decision reads the
-working tree's pin, not the ref's, because it is made before the ref's
-worktree exists.
+An older pin keeps the newer CLI. Admission protocol negotiation can
+serve an older handshake, but execution and output APIs must also remain
+compatible. A documented v0 breaking change can require an SDK update;
+for example, v0.66 output-producing pipelines require the object-output
+contract. Selection does not fetch an older CLI to match an old pin.
+
+Source builds stay selected because the checkout is what its author is
+testing. Selection reads the direct working-tree requirement, not the
+version Go's MVS resolves from the whole dependency graph. Under `--sw-ref`
+it also reads the working tree's pin before the ref's worktree exists.
+
+Detached submissions, compiled schedules and directly launched runner
+executables do not use this foreground selector. The selected cached CLI
+does not replace the installed executable on PATH, update resident runners
+or deploy a remote controller.
 
 The version store is `$SPARKWING_HOME/toolchains/<version>/sparkwing`,
 `~/.sparkwing/toolchains/<version>/sparkwing` by default. A fetch pulls
@@ -123,12 +133,16 @@ re-checks that signature offline against the same release keys
 the manifest entry, so a cache hit touches no network and anything that
 does not check out is fetched again.
 
-The pinned release hosts the admission daemon and migrates the shared
-runs store in `$SPARKWING_HOME` exactly as the pipeline binary compiled
-at that pin already does on every run; the
-[schema requirements rule](deployment-modes.md#schema-versioning)
-decides whether binaries at older pins keep opening it, which is why
-`sparkwing repos update` moves the fleet together.
+A selected CLI can start a successor daemon and migrate the shared runs
+store. Daemon succession preserves active leases so compatible pipelines
+can reconnect; it does not stop every old agent, consumer or schedule.
+The [schema requirements rule](deployment-modes.md#schema-versioning)
+decides whether older direct database clients can reopen the store. It
+does not translate incompatible HTTP output requests.
+
+For a breaking store or execution change, follow its migration guide and
+drain the affected old writers before upgrading. Moving SDK pins with
+`sparkwing repos update` is one part of that coordinated upgrade.
 
 A switch is never silent. It prints one line to stderr and nothing to
 stdout:
@@ -152,9 +166,12 @@ by hand:
 this repo pins SDK v0.40.0 but the installed sparkwing is v0.38.2 and SPARKWING_TOOLCHAIN=local forbids fetching one. Install v0.40.0 with `sparkwing update --version v0.40.0`, or unset SPARKWING_TOOLCHAIN
 ```
 
-A fetch that cannot reach the release host fails the same way, naming the
-URL it tried. Neither case falls through to the installed CLI, because
-that is the build the pin already ruled out.
+Network failures and release signature or digest failures stop selection.
+If the requested release's assets have not been published, the selector
+announces and uses the latest published release instead. When that is the
+installed version it continues without re-exec. This fallback does not
+establish that every feature of the newer SDK works on that release.
+`SPARKWING_TOOLCHAIN=local` still refuses a newer stable pin.
 
 `SPARKWING_TOOLCHAIN=auto` is the default and the only other accepted
 value. The CLI a switch starts runs with `SPARKWING_TOOLCHAIN_ACTIVE` set

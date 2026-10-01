@@ -60,6 +60,19 @@ vulnerabilities privately through the process in [SECURITY.md](./SECURITY.md).
 
 ## Wire protocol
 
+Compatibility is the default aim for pinned pipelines and their controller,
+runner and daemon. Pre-1.0 minor releases can still make justified breaking
+changes, but the need for a pin update should be weighed and called out before
+implementation. This is a preference, not a guarantee for every old release.
+
+Prefer additive wire changes. Send new optional request fields only when the
+receiving service supports them; an old strict decoder can reject an added
+field even when the new service calls it optional. When changing execution or
+output contracts, check a released SDK pipeline with dependencies and outputs
+against the candidate runtime, because an outputless job does not cover that
+boundary. Check the reverse pairing when claiming newer-SDK support on an
+older controller.
+
 The controller's HTTP API has a formal contract at
 [`api/openapi.yaml`](./api/openapi.yaml) (OpenAPI 3.0). Wire-protocol
 changes follow the same semver discipline as Go API changes:
