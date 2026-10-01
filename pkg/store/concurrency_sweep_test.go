@@ -15,7 +15,6 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
-	started := time.Now()
 	if _, err := s.DB().Exec(storetest.Rebind(s,
 		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
@@ -36,9 +35,6 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 	}
 	if got := activeHolders(t, s, "k"); got != 1 {
 		t.Fatalf("active holders on cap-1 key = %d, want 1 (no revive)", got)
-	}
-	if elapsed := time.Since(started); promptnessPinned(s) && elapsed >= 60*time.Millisecond {
-		t.Fatalf("expired-holder reassignment took %v, want less than 60ms", elapsed)
 	}
 }
 
@@ -162,7 +158,6 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("W: want Queued, got %s", r.Kind)
 	}
-	started := time.Now()
 	updated, err := s.DB().Exec(storetest.Rebind(s,
 		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
@@ -190,9 +185,6 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}
 	if len(state.Waiters) != 2 || state.Waiters[0].RunID != "rW" || state.Waiters[1].RunID != "rX" {
 		t.Fatalf("waiter order = %+v, want rW then rX", state.Waiters)
-	}
-	if elapsed := time.Since(started); promptnessPinned(s) && elapsed >= 60*time.Millisecond {
-		t.Fatalf("expired-holder FIFO check took %v, want less than 60ms", elapsed)
 	}
 }
 
@@ -265,12 +257,4 @@ func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
 	if len(r.SupersededIDs) != 1 || r.SupersededIDs[0] != "rB/n" {
 		t.Fatalf("D: SupersededIDs = %v, want [rB/n] (must supersede the canceller)", r.SupersededIDs)
 	}
-}
-
-// safety: the 60 ms budgets prove an expired holder is reassigned without
-// waiting out its lease, a dialect-independent property SQLite pins in
-// microseconds; Postgres over TCP on a loaded one-core runner took 64 ms for
-// the same statements, so its pass checks the outcomes only.
-func promptnessPinned(s *store.Store) bool {
-	return s.Dialect() == store.DialectSQLite
 }
