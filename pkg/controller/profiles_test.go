@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -14,7 +15,7 @@ import (
 
 func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 
 func TestGetPipelineProfile_RoundTripsThroughController(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

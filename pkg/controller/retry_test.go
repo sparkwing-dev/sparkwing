@@ -15,13 +15,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 
 func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +186,7 @@ func TestRetry_WorkingTreeRunIgnoresAnotherTeamsTriggerWithSameID(t *testing.T) 
 
 func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +252,7 @@ func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *test
 
 func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +315,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 
 func TestRetry_FullQueryParam(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +357,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 
 func TestRetry_ListAttempts(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +404,7 @@ func TestRetry_ListAttempts(t *testing.T) {
 
 func TestRetry_UnknownRunReturns404(t *testing.T) {
 	dir := t.TempDir()
-	st, _ := store.Open(filepath.Join(dir, "s.db"))
+	st, _ := teststore.Open(filepath.Join(dir, "s.db"))
 	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()

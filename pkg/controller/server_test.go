@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -20,7 +21,7 @@ import (
 func newTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "state.db"))
+	s, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 
 func TestController_HealthDoesNotExposeClaimedTriggers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
-	st, err := store.Open(path)
+	st, err := teststore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

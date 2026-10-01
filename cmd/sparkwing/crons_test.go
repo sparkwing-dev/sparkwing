@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -535,7 +536,7 @@ func cronsRealLauncher(t *testing.T) (cronLauncher, *store.Store) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

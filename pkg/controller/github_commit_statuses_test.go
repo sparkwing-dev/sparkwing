@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -714,7 +715,7 @@ func TestServeWithDrainsGitHubCommitStatuses(t *testing.T) {
 	}))
 	defer github.Close()
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +838,7 @@ func TestGitHubCommitStatusDispatchPanicReleasesReservation(t *testing.T) {
 	}))
 	defer github.Close()
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -903,7 +904,7 @@ func TestGitHubCommitStatusesFollowWebhookRunLifecycle(t *testing.T) {
 	}))
 	defer github.Close()
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,7 +996,7 @@ func TestGitHubCommitStatusFailureDoesNotRejectWebhook(t *testing.T) {
 	}))
 	defer github.Close()
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1232,7 +1233,7 @@ func TestGitHubCommitStatus_ATeamBindingPostsNoStatus(t *testing.T) {
 	}))
 	defer github.Close()
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

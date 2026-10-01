@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -63,7 +64,7 @@ func TestFinishRun_FollowUpsSurviveARequestCancel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestFinishRun_FollowUpsSurviveARequestCancel(t *testing.T) {
 
 func queuedCommitStatusServer(t *testing.T, apiBase string, httpClient *http.Client, logs *lockedBuffer) *Server {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

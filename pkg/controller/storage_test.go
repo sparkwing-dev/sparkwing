@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -31,7 +32,7 @@ type storageFixture struct {
 // node here and the second token deliberately holds nothing.
 func newStorageFixture(t *testing.T, quotas ...store.StorageQuota) storageFixture {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +386,7 @@ func TestHealthPublishesTheAlarmAndNoSizes(t *testing.T) {
 // both run "agent:eddie". Storage is charged to the writer's team, so one
 // team's writes never spend a quota or a month another team is held to.
 func TestStorageChargesTheTeamNotAPrincipalNameAnotherTeamShares(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

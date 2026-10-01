@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -24,7 +25,7 @@ type revocationFixture struct {
 func newRevocationFixture(t *testing.T) *revocationFixture {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestDeleteUser_InvalidatesSessionAndTokens(t *testing.T) {
 
 func TestAuthenticate_CachedEntryRechecksExpiry(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -224,7 +225,7 @@ func TestAuthenticate_CachedEntryRechecksExpiry(t *testing.T) {
 
 func TestInvalidate_LeavesOtherPrefixesCached(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}
@@ -261,7 +262,7 @@ func TestInvalidate_LeavesOtherPrefixesCached(t *testing.T) {
 
 func TestAuthenticate_InvalidateDuringLookupIsNotOverwritten(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}

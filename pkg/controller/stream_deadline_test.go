@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -31,7 +32,7 @@ func (d *deadlineRecorder) SetWriteDeadline(time.Time) error {
 }
 
 func TestGitcacheStreamDeadline_OnlyExtendsForAnAuthenticatedCaller(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,7 @@ func TestGitcacheStreamDeadline_OnlyExtendsForAnAuthenticatedCaller(t *testing.T
 }
 
 func TestGitcacheStreamDeadline_CoversTheRegisterRoute(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestWaiterNotifyStreamDeadline_SurvivesTheServerWriteTimeout(t *testing.T) 
 	if testing.Short() {
 		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
 	}
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

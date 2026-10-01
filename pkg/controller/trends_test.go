@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -25,7 +26,7 @@ func httpGet(url string) ([]byte, error) {
 
 func TestTrends_BucketsRuns(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 
 func TestTrends_AvgWaitMs(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 
 func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 
 func TestTrends_PipelineFilter(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 	}
 	for _, failure := range []string{"query", "scan", "iteration"} {
 		t.Run(failure, func(t *testing.T) {
-			st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

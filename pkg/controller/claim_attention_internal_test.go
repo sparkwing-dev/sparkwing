@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -52,7 +53,7 @@ func runAttention(t *testing.T, base, runID string) (single, listed string) {
 // missing, then the offline agent that could run it, and the mark clears once
 // an agent is online and once one claims.
 func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestClaimAttentionCountsSparkwingCloud(t *testing.T) {
 // An enrolled executor counts as online by its heartbeat, since its assisted
 // offers record no presence, and is judged on its enrolled profile.
 func TestClaimAttentionReadsAnEnrolledExecutorsHeartbeat(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +204,7 @@ func TestPresenceReportsAPlatformChange(t *testing.T) {
 // node behind the cursor is judged again even while newer nodes keep every
 // page after the cursor full.
 func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

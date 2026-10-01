@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -20,7 +21,7 @@ func TestFinishRunExcludesIncompleteAndRetriedNodes(t *testing.T) {
 		{"successful retry", `UPDATE nodes SET attempts_consumed = 2 WHERE node_id = 'build'`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

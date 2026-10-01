@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -30,7 +31,7 @@ func TestPersistSubmissionRefusesDeclaredRiskBeforeQueuing(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +255,7 @@ func TestCronLaunch_RefusesADeclaredRisk(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure %s: %v", paths.Root, err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open %s: %v", paths.StateDB(), err)
 	}
@@ -310,7 +311,7 @@ func TestCronLaunch_WeighsThePinnedBinary(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure %s: %v", paths.Root, err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open %s: %v", paths.StateDB(), err)
 	}

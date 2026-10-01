@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -20,7 +21,7 @@ func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := teststore.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}

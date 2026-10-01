@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -16,7 +17,7 @@ import (
 // A runner's name is its team's to know, so the queue view shows a caller the
 // runners its own team advertised and no other team's.
 func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 }
 
 func TestComputeLimitsNameEveryTeamsPrincipalsOnlyToTheOperator(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -38,7 +39,7 @@ func postChunked(t *testing.T, url, token, body string) *http.Response {
 }
 
 func TestClaimTrigger_ChunkedBodyKeepsThePipelineFilter(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestClaimTrigger_ChunkedBodyKeepsThePipelineFilter(t *testing.T) {
 }
 
 func TestClaimTrigger_EmptyChunkedBodyStillClaims(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestClaimTrigger_EmptyChunkedBodyStillClaims(t *testing.T) {
 }
 
 func TestRotateToken_ChunkedBodyKeepsTheGrace(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestRotateToken_ChunkedBodyKeepsTheGrace(t *testing.T) {
 }
 
 func TestClaimSpecificTrigger_ChunkedBodyKeepsTheLease(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +169,7 @@ func TestClaimSpecificTrigger_ChunkedBodyKeepsTheLease(t *testing.T) {
 }
 
 func TestReconcileOrphans_ChunkedBodyKeepsTheThreshold(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

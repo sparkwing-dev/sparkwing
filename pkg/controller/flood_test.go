@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -19,7 +20,7 @@ import (
 func newFloodServer(t *testing.T, p controller.FloodPolicy) (string, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -162,7 +163,7 @@ func TestFloodPolicy_UnsetWindowDedupesNothing(t *testing.T) {
 
 func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
 
 func TestFloodPolicy_GitHubRedeliveryDoesNotSpendTheCap(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -269,7 +270,7 @@ func TestFloodPolicy_GitHubRedeliveryDoesNotSpendTheCap(t *testing.T) {
 
 func TestFloodPolicy_CapsGitHubDeliveriesPerRepository(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

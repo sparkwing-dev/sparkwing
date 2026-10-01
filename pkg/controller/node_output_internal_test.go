@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -197,7 +198,7 @@ func TestFinishRoute_RefusesInlineOutputBytes(t *testing.T) {
 }
 
 func TestPruneExpiredOutputs_DeletesBytesAndRowsPastRetention(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +239,7 @@ func TestPruneExpiredOutputs_DeletesBytesAndRowsPastRetention(t *testing.T) {
 // A filesystem commit refused a slot leaves the file it moved into place,
 // and a retry once the team has room finds that file and commits it.
 func TestFsOutputCommitRefusedASlotCommitsOnRetry(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -39,7 +40,7 @@ func (f *fakeArtifactStore) List(context.Context, string) ([]string, error) {
 func newServerWithArtifacts(t *testing.T, art storage.ArtifactStore) string {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "state.db"))
+	s, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
 		t.Parallel()
 		art := &fakeArtifactStore{}
 		dir := t.TempDir()
-		st, err := store.Open(filepath.Join(dir, "state.db"))
+		st, err := teststore.Open(filepath.Join(dir, "state.db"))
 		if err != nil {
 			t.Fatalf("open store: %v", err)
 		}
@@ -148,7 +149,7 @@ func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "state.db"))
+	s, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "state.db"))
+	s, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +216,7 @@ func TestReconcileHook_NoHookIsPassThrough(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "state.db"))
+	s, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

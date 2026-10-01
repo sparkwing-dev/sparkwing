@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -17,7 +18,7 @@ func cacheGrantServer(t *testing.T, cacheToken, grantKey string) *Server {
 	t.Helper()
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 	t.Setenv(authwire.CacheGrantKeyEnv, grantKey)
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -20,7 +21,7 @@ func teapotHandler() http.Handler {
 func newStoreForAuth(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "test.db"))
+	s, err := teststore.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}

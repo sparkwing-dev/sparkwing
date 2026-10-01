@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -32,7 +33,7 @@ type coordinationFixture struct {
 // which is the whole standing an orchestrator process has while it drives a run.
 func newCoordinationFixture(t *testing.T) coordinationFixture {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -15,13 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestAgentsLogsInternalStoreFailure(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestAgentsLogsInternalStoreFailure(t *testing.T) {
 
 func TestAgents_DerivedFromClaims(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 }
 
 func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +271,7 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 }
 
 func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +314,7 @@ func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
 }
 
 func TestAgents_RegisteredIdleAndOfflineExecutorsExposeNoPrincipal(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +375,7 @@ func TestAgents_RegisteredIdleAndOfflineExecutorsExposeNoPrincipal(t *testing.T)
 }
 
 func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +569,7 @@ FROM executors WHERE name = 'desk'`).Scan(&protocolMin, &protocolMax, &superviso
 }
 
 func TestAgents_EnrollmentLimitReturnsStableError(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +639,7 @@ func agentRequest(t *testing.T, method, target, token string, body any) (int, st
 
 func TestAgents_EmptyWhenNoClaims(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := teststore.Open(filepath.Join(dir, "s.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
