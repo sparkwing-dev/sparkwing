@@ -23,6 +23,7 @@ unlock.
 ### Fixed
 
 - **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
+- **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
 
 ### Changed
 

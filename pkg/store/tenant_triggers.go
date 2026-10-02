@@ -89,6 +89,11 @@ func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig
 	if !found {
 		return notFound("run", sourceRunID)
 	}
+	trig.GithubRepoID = 0
+	if err := tx.QueryRowContext(ctx, `SELECT github_repo_id FROM triggers WHERE team = ? AND id = ?`,
+		string(team), sourceRunID).Scan(&trig.GithubRepoID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	if err := createTriggerTx(ctx, tx, team, trig); err != nil {
 		return err
 	}

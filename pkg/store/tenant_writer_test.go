@@ -164,6 +164,20 @@ func TestUnscopedWritersStayInTheDefaultTeam(t *testing.T) {
 // hands a team, so it has to copy the lost run's team or the retry lands
 // where the team that lost the agent cannot see or claim it.
 func TestAgentLossRetryStaysInTheLostRunsTeam(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		team     store.Team
+		id, want int64
+	}{
+		{"github-app", "acme", 1023983482, 1023983482},
+		{"non-app", "acme", 0, 0},
+		{"another-team", "other", 1023983482, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testAgentLossRetryTeam(t, tc.team, tc.id, tc.want) })
+	}
+}
+
+func testAgentLossRetryTeam(t *testing.T, triggerTeam store.Team, sourceRepoID, wantRepoID int64) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	tn := tenantFor(t, st, "acme")
@@ -177,6 +191,9 @@ func TestAgentLossRetryStaysInTheLostRunsTeam(t *testing.T) {
 		RepoURL: "https://example.com/acme/repo.git", GitSHA: strings.Repeat("a", 40),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := tenantFor(t, st, triggerTeam).CreateTrigger(ctx, store.Trigger{ID: "run-lost", Pipeline: "p", GithubRepoID: sourceRepoID, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
 	}
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-lost", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
@@ -209,6 +226,13 @@ func TestAgentLossRetryStaysInTheLostRunsTeam(t *testing.T) {
 	}
 	if got := storedTeam(t, st, `SELECT team FROM agent_loss_retries WHERE run_id = ?`, retryID); got != "acme" {
 		t.Errorf("stored agent-loss retry record carries team %q, want acme", got)
+	}
+	repoID, err := st.TriggerRepoID(ctx, "acme", retryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repoID != wantRepoID {
+		t.Errorf("retry repository ID = %d, want %d", repoID, wantRepoID)
 	}
 }
 
