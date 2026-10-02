@@ -31,6 +31,14 @@ unlock.
 - **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
 - **orchestrator:** Global plan concurrency applies while runs wait for host capacity
   Superseded runs cancel and withdraw their queued admission requests.
+## [v0.66.3] - 2026-10-02
+### Changed
+
+- Creating a local SQLite database now requires hard-link support so concurrent opens cannot observe an unfinished creation handle. Existing databases remain usable on filesystems without hard links.
+
+### Fixed
+
+- Preserve SQLite locks when tightening database file permissions, preventing another process from deleting live WAL files after a store is reopened.
 
 ## [v0.66.2] - 2026-10-02
 ### Changed
