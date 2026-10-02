@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- Creating a local SQLite database now requires hard-link support so concurrent opens cannot observe an unfinished creation handle. Existing databases remain usable on filesystems without hard links.
+
 ### Fixed
 
 - Preserve SQLite locks when tightening database file permissions, preventing another process from deleting live WAL files after a store is reopened.
