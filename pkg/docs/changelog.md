@@ -24,19 +24,11 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.3, so a fresh scaffold compiles against that release.
 
-
-## [v0.66.3] - 2026-10-02
-### Changed
-
-- **scaffold:** `const FallbackSDKVersion` pins v0.66.2, so a fresh scaffold compiles against that release.
-
-
 ### Fixed
 
 - **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
 - **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
-- **orchestrator:** Global plan concurrency applies while runs wait for host capacity
-  Superseded runs cancel and withdraw their queued admission requests.
+
 ## [v0.66.3] - 2026-10-02
 ### Changed
 
@@ -54,6 +46,11 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.1, so a fresh scaffold compiles against that release.
 
 - **store (PERF):** SQLite test fixtures clone an initialized schema to avoid replaying migrations for every store
+
+### Fixed
+
+- **orchestrator:** Global plan concurrency applies while runs wait for host capacity
+  Superseded runs cancel and withdraw their queued admission requests.
 
 ## [v0.66.1] - 2026-10-02
 ### Changed
