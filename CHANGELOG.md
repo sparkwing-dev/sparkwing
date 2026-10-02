@@ -28,6 +28,10 @@ unlock.
 
 - **store (PERF):** SQLite test fixtures clone an initialized schema to avoid replaying migrations for every store
 
+### Fixed
+
+- **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
+
 ## [v0.66.1] - 2026-10-02
 ### Changed
 

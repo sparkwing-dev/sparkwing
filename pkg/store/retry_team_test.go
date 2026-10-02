@@ -55,3 +55,56 @@ func TestCreateRetryWithRunRefusesAMissingSource(t *testing.T) {
 		t.Fatalf("CreateRetryWithRun of a missing source = %v, want not found", err)
 	}
 }
+
+func TestManualRetryPreservesOnlyItsTeamsGithubRepositoryID(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		triggerTeam store.Team
+		repoID      int64
+		want        int64
+	}{
+		{"github-app", "acme", 1023983482, 1023983482},
+		{"non-app", "acme", 0, 0},
+		{"another-team", "other", 1023983482, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			st := storetest.New(t).Open(t)
+			acme := tenantFor(t, st, "acme")
+			now := time.Now()
+			source := store.Run{
+				ID: "source", Pipeline: "pre-push", Status: "failed", StartedAt: now,
+				RepoURL: "https://github.com/acme/private", GithubOwner: "acme", GithubRepo: "private", GitSHA: "recorded-sha",
+			}
+			if err := acme.CreateRun(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+			if err := tenantFor(t, st, tc.triggerTeam).CreateTrigger(ctx, store.Trigger{
+				ID: source.ID, Pipeline: source.Pipeline, TriggerSource: "github:push", GithubOwner: source.GithubOwner,
+				GithubRepo: source.GithubRepo, GithubRepoID: tc.repoID, GitSHA: source.GitSHA, CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenantFor(t, st, "unrelated").GetRun(ctx, source.ID); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("unrelated tenant read source: %v", err)
+			}
+			if _, err := runretry.Create(ctx, st, source.ID, "retry", false, now); err != nil {
+				t.Fatal(err)
+			}
+			trig, err := st.GetTrigger(ctx, "retry")
+			if err != nil {
+				t.Fatal(err)
+			}
+			repoID, err := st.TriggerRepoID(ctx, "acme", "retry")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if repoID != tc.want {
+				t.Errorf("retry repository ID = %d, want %d", repoID, tc.want)
+			}
+			if trig.Team != "acme" || trig.GithubOwner != source.GithubOwner || trig.GithubRepo != source.GithubRepo || trig.GitSHA != source.GitSHA || trig.RetryOf != source.ID {
+				t.Fatalf("retry lost source metadata: %+v", trig)
+			}
+		})
+	}
+}
