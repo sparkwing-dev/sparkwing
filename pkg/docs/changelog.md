@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **store (PERF):** SQLite test fixtures clone an initialized schema to avoid replaying migrations for every store
+
 ## [v0.66.1] - 2026-10-02
 ### Changed
 
