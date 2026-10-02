@@ -572,6 +572,9 @@ stale fence gets `409 Conflict`. Another runner token is refused, and
 principal, and the holder id all match. `admin` bypasses the check, which is
 what lets a dispatcher mark a node ready, start it, and finish it.
 
+Once a run finishes or cancellation is recorded on its run or node, the
+heartbeat answers `409`. The runner stops its node and its child processes.
+
 The lease is an authorization window, so the claimant does not choose how long
 it lasts. `lease_secs` above the server cap of 10 minutes is clamped, on the
 claim and on every heartbeat; a runner renews well inside that.

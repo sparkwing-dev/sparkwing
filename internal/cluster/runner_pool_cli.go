@@ -731,6 +731,15 @@ func executePooledNode(
 		failPooledNodeSetup(ctx, ctrl, n, holderID, err, source, logger)
 		return
 	}
+	if ctx.Err() == nil && errors.Is(res.Err, context.Canceled) {
+		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(heartbeatCtx), poolSetupFinishTimeout)
+		finishErr := ctrl.FinishNodeWithReason(finishCtx, n.RunID, n.NodeID, string(sparkwing.Cancelled),
+			"runner stopped the cancelled node's processes", nil, store.FailureUnknown, nil)
+		finishCancel()
+		if finishErr != nil {
+			logger.Warn(source+" could not finish the cancelled node", "run_id", n.RunID, "node_id", n.NodeID, "err", finishErr)
+		}
+	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
 }
