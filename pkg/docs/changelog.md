@@ -28,6 +28,11 @@ unlock.
 
 - **store (PERF):** SQLite test fixtures clone an initialized schema to avoid replaying migrations for every store
 
+### Fixed
+
+- **orchestrator:** Global plan concurrency applies while runs wait for host capacity
+  Superseded runs cancel and withdraw their queued admission requests.
+
 ## [v0.66.1] - 2026-10-02
 ### Changed
 

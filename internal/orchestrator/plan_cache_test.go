@@ -87,6 +87,7 @@ func TestAcquirePlanSlotBoundsAcquireContext(t *testing.T) {
 		"child",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -120,6 +121,7 @@ func TestAcquirePlanSlotFailsWhenAdmissionAcquireBlocks(t *testing.T) {
 		"blocked-run",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err == nil {
 		t.Fatal("acquirePlanSlot succeeded, want deadline failure")
@@ -139,12 +141,12 @@ func TestAcquirePlanSlotFailsWhenAdmissionAcquireBlocks(t *testing.T) {
 
 func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	land := sparkwing.NewConcurrencyGroup("land", sparkwing.ConcurrencyLimit{Capacity: 1})
+	publish := sparkwing.NewConcurrencyGroup("publish", sparkwing.ConcurrencyLimit{Capacity: 1})
 	memory := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{
 		Capacity: 32,
 		Scope:    sparkwing.ScopeBox,
 	})
-	plan.Concurrency(land)
+	plan.Concurrency(publish)
 	plan.Concurrency(memory, 8)
 	fake := &planAcquireFake{}
 
@@ -154,10 +156,12 @@ func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 		"run-multi",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
 	}
+	t.Cleanup(func() { release("success") })
 	if outcome != planCacheProceed {
 		t.Fatalf("outcome = %q, want proceed", outcome)
 	}
@@ -165,17 +169,17 @@ func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 		t.Fatalf("AcquireSlot calls = %d, want 2", len(fake.requests))
 	}
 	expectedMemoryKey := scopedGroupKey(memory, "run-multi")
-	if fake.requests[0].Key != expectedMemoryKey || fake.requests[0].Cost != 8 {
-		t.Fatalf("first request = %+v, want memory cost 8", fake.requests[0])
+	if fake.requests[1].Key != expectedMemoryKey || fake.requests[1].Cost != 8 {
+		t.Fatalf("second request = %+v, want memory cost 8", fake.requests[1])
 	}
-	if fake.requests[1].Key != "g:land" || fake.requests[1].Cost != 1 {
-		t.Fatalf("second request = %+v, want land cost 1", fake.requests[1])
+	if fake.requests[0].Key != "g:publish" || fake.requests[0].Cost != 1 {
+		t.Fatalf("first request = %+v, want publish cost 1", fake.requests[0])
 	}
 	release("success")
 	if len(fake.releases) != 2 {
 		t.Fatalf("ReleaseSlot calls = %d, want 2", len(fake.releases))
 	}
-	if fake.releases[0] != "g:land\x00run-multi/-" || fake.releases[1] != expectedMemoryKey+"\x00run-multi/-" {
+	if fake.releases[1] != "g:publish\x00run-multi/-" || fake.releases[0] != expectedMemoryKey+"\x00run-multi/-" {
 		t.Fatalf("releases = %+v, want reverse acquisition order", fake.releases)
 	}
 }
@@ -202,6 +206,7 @@ func TestAcquirePlanSlot_DaemonModeSkipsBoxAndRunScopes(t *testing.T) {
 		"run-daemon",
 		plan,
 		true,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -220,13 +225,13 @@ func TestAcquirePlanSlot_DaemonModeSkipsBoxAndRunScopes(t *testing.T) {
 
 func TestAcquirePlanSlotUsesCanonicalGateOrder(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	land := sparkwing.NewConcurrencyGroup("land", sparkwing.ConcurrencyLimit{Capacity: 1})
+	publish := sparkwing.NewConcurrencyGroup("publish", sparkwing.ConcurrencyLimit{Capacity: 1})
 	memory := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{
 		Capacity: 32,
 		Scope:    sparkwing.ScopeBox,
 	})
 	plan.Concurrency(memory, 8)
-	plan.Concurrency(land)
+	plan.Concurrency(publish)
 	fake := &planAcquireFake{}
 
 	release, outcome, _, err := acquirePlanSlot(
@@ -235,6 +240,7 @@ func TestAcquirePlanSlotUsesCanonicalGateOrder(t *testing.T) {
 		"run-canonical",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -244,8 +250,8 @@ func TestAcquirePlanSlotUsesCanonicalGateOrder(t *testing.T) {
 		t.Fatalf("outcome = %q, want proceed", outcome)
 	}
 	expectedMemoryKey := scopedGroupKey(memory, "run-canonical")
-	if got := []string{fake.requests[0].Key, fake.requests[1].Key}; got[0] != expectedMemoryKey || got[1] != "g:land" {
-		t.Fatalf("acquire order = %+v, want [%s g:land]", got, expectedMemoryKey)
+	if got := []string{fake.requests[0].Key, fake.requests[1].Key}; got[0] != "g:publish" || got[1] != expectedMemoryKey {
+		t.Fatalf("acquire order = %+v, want [g:publish %s]", got, expectedMemoryKey)
 	}
 }
 
@@ -270,6 +276,7 @@ func TestAcquirePlanSlotReportsGateThatRejectedAdmission(t *testing.T) {
 		"run-fail",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
@@ -296,6 +303,7 @@ func TestAcquirePlanSlotSendsPlanCost(t *testing.T) {
 		"run-costed",
 		plan,
 		false,
+		func(error) {},
 	)
 	if err != nil {
 		t.Fatalf("acquirePlanSlot: %v", err)
