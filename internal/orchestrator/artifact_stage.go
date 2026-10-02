@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,6 +72,10 @@ func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest stri
 	if err != nil {
 		return artifactManifest{}, err
 	}
+	sum := sha256.Sum256(b)
+	if hex.EncodeToString(sum[:]) != digest {
+		return artifactManifest{}, fmt.Errorf("artifact manifest digest mismatch")
+	}
 	var m artifactManifest
 	if err := json.Unmarshal(b, &m); err != nil {
 		return artifactManifest{}, fmt.Errorf("decode manifest: %w", err)
@@ -102,7 +108,8 @@ func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, 
 		return 0, err
 	}
 	limit := min(maxStagedArtifactBytes, remaining)
-	n, err := io.Copy(f, io.LimitReader(rc, limit+1))
+	hash := sha256.New()
+	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(rc, limit+1))
 	if err != nil {
 		_ = f.Close()
 		return n, err
@@ -116,6 +123,12 @@ func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, 
 	}
 	if err := f.Close(); err != nil {
 		return n, err
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != entry.Digest {
+		if err := root.Remove(rel); err != nil {
+			return n, fmt.Errorf("artifact blob digest mismatch; remove invalid file: %w", err)
+		}
+		return n, fmt.Errorf("artifact blob digest mismatch")
 	}
 	return n, root.Chmod(rel, mode)
 }

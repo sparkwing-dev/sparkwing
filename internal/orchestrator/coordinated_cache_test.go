@@ -74,8 +74,17 @@ func TestCoordinatedArtifactStore_NeverReadsDevEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("coordinatedArtifactStore: %v", err)
 	}
-	if art != nil {
+	if art == nil {
+		t.Fatal("no local artifact cache")
+	}
+	if err := art.Put(t.Context(), "probe", strings.NewReader("local")); err != nil {
+		t.Fatal(err)
+	}
+	if dirHasContent(t, dashboardDir) {
 		t.Fatal("the child opened the cache store named in dev.env")
+	}
+	if !dirHasContent(t, filepath.Join(home, "cache")) {
+		t.Fatal("local cache received nothing")
 	}
 }
 

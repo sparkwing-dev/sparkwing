@@ -25,6 +25,10 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.3, so a fresh scaffold compiles against that release.
 
 ### Fixed
+- Local and local-only runs publish and stage declared artifacts through the
+  filesystem cache, including memoized producers. Missing or corrupt cached
+  bytes fail before the consumer body runs. Memo entries without required
+  artifact manifests rebuild their producers.
 
 - **controller:** Filesystem node outputs use signed URLs that reach the configured external controller or its request address, so claimed jobs can upload and read typed results.
 - **remote execution:** Claimed job processes can reserve and commit their own typed outputs through the supervisor. Private controller connections keep signed S3 reads, so dependent jobs can read producer results without CloudFront.

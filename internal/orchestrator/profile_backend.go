@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -93,6 +96,17 @@ func applyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profi
 	if err := applyProfileBackends(ctx, opts, p, keepState); err != nil {
 		return err
 	}
+	localCache := opts.LocalOnly
+	if !localCache && opts.ArtifactStore == nil {
+		localCache = isLocalState(p.Surfaces().State)
+	}
+	if opts.ArtifactStore == nil && localCache {
+		art, err := localArtifactStore(paths)
+		if err != nil {
+			return fmt.Errorf("local artifact cache: %w", err)
+		}
+		opts.ArtifactStore = art
+	}
 	if opts.LocalOnly || hadState || opts.State == nil {
 		return nil
 	}
@@ -167,4 +181,8 @@ func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {
 	return func(string) (string, string, error) {
 		return p.ControllerURL(), p.ControllerToken(), nil
 	}
+}
+
+func localArtifactStore(paths Paths) (storage.ArtifactStore, error) {
+	return fsstore.NewArtifactStore(filepath.Join(paths.Root, "cache"))
 }
