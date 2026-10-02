@@ -283,6 +283,12 @@ func (b *remoteExecutionBroker) allowController(r *http.Request) bool {
 		if path == runPath || path == triggerPath || path == nodePath || path == nodePath+"/output" || path == nodePath+"/bounce" || path == runPath+"/steps" {
 			return true
 		}
+		if encoded, ok := strings.CutPrefix(path, runPath+"/nodes/"); ok {
+			node, err := url.PathUnescape(encoded)
+			if err == nil && node != "" && node != "." && node != ".." && !strings.ContainsAny(node, "/\\") {
+				return true
+			}
+		}
 		if strings.HasPrefix(path, runPath+"/nodes/") && strings.HasSuffix(path, "/output") {
 			return true
 		}

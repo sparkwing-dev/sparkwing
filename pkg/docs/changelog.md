@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
+
 ### Changed
 
 - **store:** `pkg/store/teststore` provides shared isolated SQLite test fixtures.

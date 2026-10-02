@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -368,5 +369,82 @@ func TestClaimedRegisteredNodeRunsOnlyInIsolatedChild(t *testing.T) {
 	}
 	if !called || result.Outcome != sparkwing.Success {
 		t.Fatalf("claimed registered node bypassed isolated child: called=%v result=%+v", called, result)
+	}
+}
+
+func TestRemoteExecutionBrokerConsumerReadsProducerMetadata(t *testing.T) {
+	st, err := teststore.Open(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "artifact-demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"produce", "consume"} {
+		if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: id, Status: "passed"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := "sha256:" + strings.Repeat("a", 64)
+	if err := st.SetNodeArtifactManifest(ctx, "run-1", "produce", manifest); err != nil {
+		t.Fatal(err)
+	}
+	upstream := httptest.NewServer(controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer upstream.Close()
+	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "consume", store.NodeClaimFence{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	state := client.NewWithToken(broker.URL(), http.DefaultClient, broker.capability)
+	for _, id := range []string{"consume", "produce"} {
+		node, err := state.GetNode(ctx, "run-1", id)
+		if err != nil {
+			t.Fatalf("GetNode(%q): %v", id, err)
+		}
+		if node.NodeID != id {
+			t.Fatalf("node = %q, want %q", node.NodeID, id)
+		}
+		if id == "produce" && node.ArtifactManifest != manifest {
+			t.Fatalf("manifest = %q, want %q", node.ArtifactManifest, manifest)
+		}
+	}
+}
+
+func TestRemoteExecutionBrokerProducerMetadataScope(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	defer upstream.Close()
+	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "consume", store.NodeClaimFence{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/runs/run-2/nodes/produce"},
+		{http.MethodGet, "/api/v1/runs/run-10/nodes/produce"},
+		{http.MethodPost, "/api/v1/runs/run-1/nodes/produce"},
+		{http.MethodPost, "/api/v1/runs/run-1/nodes/produce/artifact-manifest"},
+		{http.MethodGet, "/api/v1/runs/run-1/nodes/produce/metrics"},
+		{http.MethodGet, "/api/v1/runs/run-1/nodes/%2e%2e"},
+		{http.MethodGet, "/api/v1/runs/run-1/nodes/produce%2fmetrics"},
+		{http.MethodGet, "/api/v1/runs/run-1/nodes/"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(context.Background(), tc.method, broker.URL()+tc.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+broker.capability)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+		})
 	}
 }

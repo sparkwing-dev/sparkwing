@@ -30,8 +30,9 @@ process on the machine could read it. `internal/orchestrator` builds both the
 broker and the child (`remote_execution_broker.go`, `run_node_remote.go`).
 
 **That capability reaches one node's routes.** The broker proxies the awarded
-run's and node's paths -- start, finish, steps, events, heartbeat, artifacts --
-and concurrency acquire, observation, renewal, waiter resolution, waiter
+run's and node's paths -- start, finish, steps, events, heartbeat, artifacts. It
+reads node metadata and outputs within that run for dependencies, and proxies
+concurrency acquire, observation, renewal, waiter resolution, waiter
 cancellation, and release
 for that node's holder. The controller resolves concurrency keys in the
 runner token's team, so the same key in another team remains separate. The
