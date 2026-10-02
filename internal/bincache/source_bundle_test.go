@@ -19,7 +19,11 @@ func TestDirectSourceBundleImportsExactSnapshotWithoutOrigin(t *testing.T) {
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_AUTHOR_NAME=Sparkwing", "GIT_AUTHOR_EMAIL=workspace@sparkwing.dev",
+			"GIT_COMMITTER_NAME=Sparkwing", "GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
+		)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
@@ -34,7 +38,7 @@ func TestDirectSourceBundleImportsExactSnapshotWithoutOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	git("add", ".sparkwing/source.txt")
-	git("-c", "user.name=Sparkwing", "-c", "user.email=workspace@sparkwing.dev", "commit", "--quiet", "-m", "sparkwing working-tree snapshot")
+	git("commit", "--quiet", "-m", "sparkwing working-tree snapshot")
 	sha := git("rev-parse", "HEAD")
 	git("update-ref", SeedRef(sha), sha)
 	bundle := filepath.Join(t.TempDir(), "source.bundle")
