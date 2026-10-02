@@ -168,8 +168,9 @@ this repo pins SDK v0.40.0 but the installed sparkwing is v0.38.2 and SPARKWING_
 
 Network failures and release signature or digest failures stop selection.
 If the requested release's assets have not been published, the selector
-announces and uses the latest published release instead. When that is the
-installed version it continues without re-exec. This fallback does not
+announces and uses the latest published release if it precedes the pin.
+If none does, selection fails. If the selected release is already installed,
+it continues without re-exec. This fallback does not
 establish that every feature of the newer SDK works on that release.
 `SPARKWING_TOOLCHAIN=local` still refuses a newer stable pin.
 
