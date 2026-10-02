@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.66.1, so a fresh scaffold compiles against that release.
+
 - **store (PERF):** SQLite test fixtures clone an initialized schema to avoid replaying migrations for every store
 
 ## [v0.66.1] - 2026-10-02
