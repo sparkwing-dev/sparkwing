@@ -27,6 +27,7 @@ unlock.
 - **orchestrator:** Global plan concurrency applies while runs wait for host capacity
   Superseded runs cancel and withdraw their queued admission requests.
 
+## [v0.66.2] - 2026-10-02
 ### Changed
 
 - **store:** `pkg/store/teststore` provides shared isolated SQLite test fixtures.
