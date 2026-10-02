@@ -511,6 +511,16 @@ func (la *LocalAdmission) acquireBlocking(
 	lease, err := cl.Acquire(acquireCtx, req, reporter.onQueued)
 	stopHeartbeat()
 	if err != nil {
+		// safety: closing the queued connection lets the daemon finalize an unfinished
+		// run as orphaned, so persist intentional supersession before disconnecting.
+		var evicted *planAdmissionEvictedError
+		if !req.SubLease && backends.State != nil && errors.As(context.Cause(ctx), &evicted) {
+			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if finishErr := backends.State.FinishRun(finishCtx, runID, "cancelled", evicted.Error()); finishErr != nil {
+				noteLostStateWrite(finishCtx, "finish superseded admission", runID, finishErr)
+			}
+			cancel()
+		}
 		cl.Close()
 		if cause := context.Cause(acquireCtx); cause != nil && ctx.Err() == nil {
 			appendAdmissionEvent(ctx, backends, runID, participant, "admission_queue_timeout", admissionRequestPayload(req.RunID))

@@ -24,6 +24,8 @@ unlock.
 
 - **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
 - **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
+- **orchestrator:** Global plan concurrency applies while runs wait for host capacity
+  Superseded runs cancel and withdraw their queued admission requests.
 
 ### Changed
 

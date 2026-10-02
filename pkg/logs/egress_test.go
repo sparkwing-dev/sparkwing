@@ -164,6 +164,7 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 
 func TestLogsHealthReportsTheEgressAlarm(t *testing.T) {
 	s, h := newEgressLogsServer(t, egress.Config{GlobalDailyAlarmBytes: 10})
+	s.diskSpace = func(string) (uint64, uint64, bool) { return 8 << 30, 16 << 30, true }
 
 	var health struct {
 		Status   string         `json:"status"`
