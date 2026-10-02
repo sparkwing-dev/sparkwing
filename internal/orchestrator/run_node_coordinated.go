@@ -144,7 +144,16 @@ func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secr
 
 	var art storage.ArtifactStore
 	var logs LogBackend
-	if !localOnly {
+	if localOnly {
+		paths, pathErr := DefaultPaths()
+		if pathErr != nil {
+			return nil, nil, nil, pathErr
+		}
+		art, err = localArtifactStore(paths)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	} else {
 		art, err = coordinatedArtifactStore(ctx, prof)
 		if err != nil {
 			return nil, nil, nil, err
@@ -211,7 +220,14 @@ func coordinatedArtifactStore(ctx context.Context, prof *profile.Profile) (stora
 	}
 	url := strings.TrimSpace(os.Getenv(ArtifactStoreEnvVar))
 	if url == "" {
-		return nil, nil
+		if !isLocalState(prof.Surfaces().State) {
+			return nil, nil
+		}
+		paths, err := DefaultPaths()
+		if err != nil {
+			return nil, err
+		}
+		return localArtifactStore(paths)
 	}
 	art, err := storeurl.OpenArtifactStore(ctx, url)
 	if err != nil {

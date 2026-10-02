@@ -358,6 +358,17 @@ func storeOutcome(res runner.Result) string {
 }
 
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
+	if len(req.Node.OutputGlobs()) > 0 {
+		source, err := r.backends.State.GetNode(ctx, originRun, originNode)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && (source == nil || source.ArtifactManifest == "")) {
+			result, _ := r.runNodeWithCache(withNoCache(ctx), req)
+			return result
+		}
+		if err != nil {
+			r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: read artifacts: %w", err))
+			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+		}
+	}
 	output, err := r.fetchCachedOutput(ctx, parameters, originRun, originNode)
 	if cacheOutputMiss(ctx, err) {
 		result, _ := r.runNodeWithCache(withNoCache(ctx), req)

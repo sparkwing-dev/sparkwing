@@ -1,8 +1,11 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -156,7 +159,7 @@ func TestStageConsumedArtifacts_RejectsEscapingPath(t *testing.T) {
 func publishMaliciousManifest(t *testing.T, art storage.ArtifactStore, producerID, badPath string) stubNodeReader {
 	t.Helper()
 	ctx := context.Background()
-	const blobDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+	blobDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("pwned")))
 	if err := putBytes(ctx, art, artifactBlobKey(blobDigest), []byte("pwned")); err != nil {
 		t.Fatalf("put blob: %v", err)
 	}
@@ -166,7 +169,7 @@ func publishMaliciousManifest(t *testing.T, art storage.ArtifactStore, producerI
 	if err != nil {
 		t.Fatalf("marshal manifest: %v", err)
 	}
-	const manifestDigest = "1111111111111111111111111111111111111111111111111111111111111111"
+	manifestDigest := fmt.Sprintf("%x", sha256.Sum256(mb))
 	if err := putBytes(ctx, art, artifactManifestKey(manifestDigest), mb); err != nil {
 		t.Fatalf("put manifest: %v", err)
 	}
@@ -214,7 +217,7 @@ func TestStageConsumedArtifacts_RejectsEscapingManifestPath(t *testing.T) {
 func publishManifestEntry(t *testing.T, art storage.ArtifactStore, producerID, path string, mode uint32, body []byte) stubNodeReader {
 	t.Helper()
 	ctx := context.Background()
-	const blobDigest = "2222222222222222222222222222222222222222222222222222222222222222"
+	blobDigest := fmt.Sprintf("%x", sha256.Sum256(body))
 	if err := putBytes(ctx, art, artifactBlobKey(blobDigest), body); err != nil {
 		t.Fatalf("put blob: %v", err)
 	}
@@ -224,7 +227,7 @@ func publishManifestEntry(t *testing.T, art storage.ArtifactStore, producerID, p
 	if err != nil {
 		t.Fatalf("marshal manifest: %v", err)
 	}
-	const manifestDigest = "3333333333333333333333333333333333333333333333333333333333333333"
+	manifestDigest := fmt.Sprintf("%x", sha256.Sum256(mb))
 	if err := putBytes(ctx, art, artifactManifestKey(manifestDigest), mb); err != nil {
 		t.Fatalf("put manifest: %v", err)
 	}
@@ -363,5 +366,38 @@ func TestStageConsumedArtifacts_LastEdgeWinsOnOverlap(t *testing.T) {
 	}
 	if got := readStagedFile(t, consumerWS, "shared.txt"); got != "from-second" {
 		t.Errorf("overlap: got %q, want from-second (last edge wins)", got)
+	}
+}
+
+func TestStageConsumedArtifactsRejectsBadCacheBytes(t *testing.T) {
+	for _, kind := range []string{"missing-blob", "corrupt-blob", "corrupt-manifest"} {
+		t.Run(kind, func(t *testing.T) {
+			art := newTestArtifactStore(t)
+			reader := publishProducer(t, art, "build", map[string][]byte{"output.txt": []byte("original")})
+			manifestDigest := reader.nodes["build"].ArtifactManifest
+			manifest, err := fetchManifest(t.Context(), art, manifestDigest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := artifactBlobKey(manifest.Entries[0].Digest)
+			switch kind {
+			case "missing-blob":
+				err = art.Delete(t.Context(), key)
+			case "corrupt-blob":
+				err = art.Put(t.Context(), key, bytes.NewBufferString("changed!"))
+			case "corrupt-manifest":
+				err = art.Put(t.Context(), artifactManifestKey(manifestDigest), bytes.NewBufferString(`{"entries":[]}`))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			ws := t.TempDir()
+			if _, err := stageConsumedArtifacts(t.Context(), art, reader, "run", ws, []sparkwing.ConsumeEdge{{Producer: "build"}}); err == nil {
+				t.Fatal("bad cache bytes staged successfully")
+			}
+			if _, err := os.Stat(filepath.Join(ws, "output.txt")); !os.IsNotExist(err) {
+				t.Fatalf("invalid output remains in consumer workspace: %v", err)
+			}
+		})
 	}
 }

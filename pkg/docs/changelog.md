@@ -25,6 +25,10 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.3, so a fresh scaffold compiles against that release.
 
 ### Fixed
+- Local and local-only runs publish and stage declared artifacts through the
+  filesystem cache, including memoized producers. Missing or corrupt cached
+  bytes fail before the consumer body runs. Memo entries without required
+  artifact manifests rebuild their producers.
 
 - **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
 - **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.

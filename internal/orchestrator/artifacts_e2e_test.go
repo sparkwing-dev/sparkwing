@@ -133,3 +133,50 @@ func readBlob(t *testing.T, art storage.ArtifactStore, digest string) string {
 	b, _ := io.ReadAll(rc)
 	return string(b)
 }
+
+func TestArtifacts_MissingCachedManifestRebuildsProducer(t *testing.T) {
+	ws := t.TempDir()
+	setWorkDir(t, ws)
+	art, err := fsstore.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newPathsWithStore(t)
+	if err := p.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	backends := orchestrator.LocalBackends(p, st, art)
+	first, err := orchestrator.Run(t.Context(), backends, orchestrator.Options{Pipeline: "artifact-producer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeArtifactManifest(t.Context(), first.RunID, "produce", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(ws, "dist", "out.txt")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := orchestrator.Run(t.Context(), backends, orchestrator.Options{Pipeline: "artifact-producer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := findNode(t, st, second.RunID, "produce")
+	if node.Outcome != string(sparkwing.Success) || node.ArtifactManifest == "" {
+		t.Fatalf("producer outcome=%q manifest=%q, want rebuilt artifacts", node.Outcome, node.ArtifactManifest)
+	}
+	if got := readBlob(t, art, readManifestFromStore(t, art, node.ArtifactManifest).Entries[0].Digest); got != "artifact-bytes" {
+		t.Fatalf("artifact = %q", got)
+	}
+	third, err := orchestrator.Run(t.Context(), backends, orchestrator.Options{Pipeline: "artifact-producer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node := findNode(t, st, third.RunID, "produce"); node.Outcome != string(sparkwing.Cached) || node.ArtifactManifest == "" {
+		t.Fatalf("repaired cache not reusable: outcome=%q manifest=%q", node.Outcome, node.ArtifactManifest)
+	}
+}
