@@ -1078,6 +1078,12 @@ plan.Concurrency(sw.NewConcurrencyGroup("whole-run-prod", sw.ConcurrencyLimit{
 }))
 ```
 
+Global plan groups are acquired before local host admission. A run waiting for
+host capacity therefore participates in `CancelOthers`: a newer group member
+supersedes it, and its next concurrency heartbeat cancels the run and withdraws
+its host request. Global `Skip` and `Fail` decisions also precede host admission.
+Plans acquire global groups before local groups, sorting each set by scoped key.
+
 The `JobGroup` mirror is `group.Concurrency(handle, cost...)`.
 
 ### Run priority

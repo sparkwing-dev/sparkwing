@@ -490,55 +490,39 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	var leaseToken string
 	var leaseChildToken string
 	var leaseHostAdmitted bool
-	skipDispatch := false
-	if opts.Admission != nil {
+	planRelease, planOutcome, planGroup, admitErr := acquirePlanSlot(runCtx, backends, runID, plan, opts.Admission != nil, cancelRun)
+	planReleaseOutcome := "failed"
+	if planRelease != nil {
+		defer func() { planRelease(planReleaseOutcome) }()
+	}
+	skipDispatch, admitErr := planAdmissionResult(planOutcome, planGroup, admitErr)
+	if opts.Admission != nil && admitErr == nil && !skipDispatch {
 		if opts.Admission.Delegate == nil {
 			opts.Admission.Delegate = opts.Delegate
 		}
 		var outcome admitOutcome
-		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
 		degradeState := opts.standalone.state(backends.APISocket != "")
 		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr, degradeState) {
 			opts.Admission = nil
-			lease, outcome, admitErr = nil, admitProceed, nil
-		}
-		if admitErr != nil {
-			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
-				admitErr = cause
-			}
-			if opts.standalone != nil {
-				opts.standalone.refused = true
-			}
-			status := statusForRunError(admitErr)
-			if err := backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error()); err != nil {
-				noteLostStateWrite(context.WithoutCancel(ctx), "finish run", runID, err)
-			}
-			if opts.Delegate != nil {
-				attrs := map[string]any{
-					"run_id": runID,
-					"status": status,
-					"error":  admitErr.Error(),
+			lease, outcome = nil, admitProceed
+			var localMemberships []sparkwing.PlanConcurrency
+			for _, membership := range planConcurrencyAcquireOrder(plan, runID) {
+				if membership.Group != nil && groupUsesLocalDaemon(membership.Group) {
+					localMemberships = append(localMemberships, membership)
 				}
-				if runID != "" {
-					attrs["hints"] = map[string]string{
-						"status": "sparkwing runs status --run " + runID,
-						"logs":   "sparkwing runs logs --run " + runID,
-					}
-				}
-				opts.Delegate.Emit(sparkwing.LogRecord{
-					TS:    time.Now(),
-					Level: "error",
-					Event: "run_finish",
-					Attrs: attrs,
-				})
 			}
-			return &Result{RunID: runID, Status: status, Error: admitErr}, nil
+			var localRelease func(string)
+			localRelease, planOutcome, planGroup, admitErr = acquirePlanMemberships(runCtx, backends, runID, localMemberships, cancelRun)
+			if localRelease != nil {
+				defer func() { localRelease(planReleaseOutcome) }()
+			}
+			skipDispatch, admitErr = planAdmissionResult(planOutcome, planGroup, admitErr)
 		}
+
 		// safety: release only after FinishRun below, so the daemon's
 		// orphan finalizer can never observe a still-running row.
 		defer lease.release()
-		opts.standalone.announce()
 		if outcome == admitSkipped {
 			skipDispatch = true
 		} else if lease != nil {
@@ -550,6 +534,41 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			runCtx = withAdmittedCharge(runCtx, lease.charge)
 		}
 	}
+
+	if admitErr != nil {
+		if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
+			admitErr = cause
+		}
+		if opts.standalone != nil {
+			opts.standalone.refused = true
+		}
+		status := statusForRunError(admitErr)
+		if err := backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error()); err != nil {
+			noteLostStateWrite(context.WithoutCancel(ctx), "finish run", runID, err)
+		}
+		if opts.Delegate != nil {
+			attrs := map[string]any{
+				"run_id": runID,
+				"status": status,
+				"error":  admitErr.Error(),
+			}
+			if runID != "" {
+				attrs["hints"] = map[string]string{
+					"status": "sparkwing runs status --run " + runID,
+					"logs":   "sparkwing runs logs --run " + runID,
+				}
+			}
+			opts.Delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "error",
+				Event: "run_finish",
+				Attrs: attrs,
+			})
+		}
+		return &Result{RunID: runID, Status: status, Error: admitErr}, nil
+	}
+
+	opts.standalone.announce()
 
 	var fleetAuthority *localFleetAuthority
 	if fleetRuntime != nil {
@@ -581,6 +600,17 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		fleetAuthority.StopClaims()
 	}
 
+	if runErr == nil && context.Cause(runCtx) != nil {
+		runErr = context.Cause(runCtx)
+	}
+	if runErr == nil {
+		planReleaseOutcome = "success"
+	} else {
+		var superseded *nodeSupersededError
+		if errors.As(runErr, &superseded) {
+			planReleaseOutcome = "superseded"
+		}
+	}
 	finalStatus := statusForRunError(runErr)
 	errMsg := ""
 	if runErr != nil {
@@ -904,23 +934,6 @@ func dispatch(
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
 	defer cancelDispatch(nil)
 
-	planRelease, planOutcome, planOutcomeGroup, perr := acquirePlanSlot(
-		dispatchCtx, backends, runID, plan, admission != nil,
-	)
-	if perr != nil {
-		return perr
-	}
-	switch planOutcome {
-	case planCacheSkipped:
-		return nil
-	case planCacheFailed:
-		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", planOutcomeGroup)
-	case planCacheEvicted:
-		return &planAdmissionEvictedError{groupName: planOutcomeGroup}
-	}
-	planReleaseOutcome := "success"
-	defer func() { planRelease(planReleaseOutcome) }()
-
 	state := newDispatchState(
 		dispatchCtx, backends, r, runID, pipeline, plan, delegate, debug, retryOf,
 		masker, maxParallel, admission, leaseToken, leaseChildToken, leaseHostAdmitted,
@@ -937,14 +950,12 @@ func dispatch(
 			continue
 		}
 		if err := backends.State.CreateNode(ctx, pendingStoreNode(runID, n, state.pipelineRequires)); err != nil {
-			planReleaseOutcome = "failed"
 			return fmt.Errorf("create recovery node %s: %w", n.ID(), err)
 		}
 	}
 
 	if retryOf != "" && !full {
 		if err := state.rehydrateFromRetry(dispatchCtx, retryOf); err != nil {
-			planReleaseOutcome = "failed"
 			return fmt.Errorf("rehydrate retry from %s: %w", retryOf, err)
 		}
 	}
@@ -992,14 +1003,12 @@ func dispatch(
 		for _, nodeID := range stuck {
 			state.markRunCancelled(nodeID)
 		}
-		planReleaseOutcome = "failed"
 		return fmt.Errorf("dispatch_wait_timeout: %d node(s) did not terminate within %s: %v",
 			len(stuck), dispatchWaitTimeout, stuck)
 	}
 	if cause := context.Cause(dispatchCtx); cause != nil &&
 		!errors.Is(cause, context.Canceled) &&
 		!errors.Is(cause, context.DeadlineExceeded) {
-		planReleaseOutcome = "failed"
 		return cause
 	}
 
@@ -1027,11 +1036,9 @@ func dispatch(
 	emitRunSummary(delegate, plan, state, runStart, len(failed) == 0 && len(cancelled) == 0 && len(superseded) == 0)
 
 	if len(failed) > 0 || len(cancelled) > 0 {
-		planReleaseOutcome = "failed"
 		return nodeFailureError(failed, cancelled)
 	}
 	if len(superseded) > 0 {
-		planReleaseOutcome = "superseded"
 		return &nodeSupersededError{nodes: superseded}
 	}
 	return nil
