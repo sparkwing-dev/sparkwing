@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.66.2] - 2026-10-02
 ### Changed
 
 - **store:** `pkg/store/teststore` provides shared isolated SQLite test fixtures.
