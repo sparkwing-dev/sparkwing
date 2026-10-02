@@ -8,10 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -49,31 +48,42 @@ func registerQueuedPlanTests() {
 
 type queuedDepartureObserver struct {
 	wingd.RunStore
-	departed chan struct{}
+	state    *store.Store
+	departed chan string
 }
 
 func (o *queuedDepartureObserver) FinalizeRun(runID string) {
+	reason := ""
+	if runID == "older-checks" {
+		run, err := o.state.GetRun(context.Background(), runID)
+		if err != nil {
+			reason = err.Error()
+		} else {
+			reason = run.Error
+		}
+	}
 	o.RunStore.FinalizeRun(runID)
 	if runID == "older-checks" {
-		close(o.departed)
+		o.departed <- reason
 	}
 }
 
 func TestQueuedGlobalPlanSupersededBeforeHostAdmission(t *testing.T) {
 	registerQueuedPlanTests()
 	home := wingdTestHome(t)
+	backends, st, _ := openWingdBackends(t, home)
 	runs, err := NewHeldRunStore(home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
-	observer := &queuedDepartureObserver{RunStore: runs, departed: make(chan struct{})}
+	observer := &queuedDepartureObserver{RunStore: runs, state: st, departed: make(chan string, 1)}
 	startWingdCfg(t, wingd.Config{
 		Home: home, Version: "test", Runs: observer,
 		Sampler:          stubSampler{wingd.HostStat{TotalCores: 1, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadMeasured: true, MemoryMeasured: true}},
 		HeadroomFraction: -1, GraceWindow: -1,
 	})
-	backends, st, _ := openWingdBackends(t, home)
+
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -111,7 +121,10 @@ func TestQueuedGlobalPlanSupersededBeforeHostAdmission(t *testing.T) {
 		t.Fatal("superseded run did not cancel while host capacity remained occupied")
 	}
 	select {
-	case <-observer.departed:
+	case reason := <-observer.departed:
+		if !strings.Contains(reason, "latest-checks") {
+			t.Fatalf("persisted cancellation before disconnect = %q, want group identity", reason)
+		}
 	case <-ctx.Done():
 		t.Fatal("superseded run did not withdraw from host admission")
 	}
