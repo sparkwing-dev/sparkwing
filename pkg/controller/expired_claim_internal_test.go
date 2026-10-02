@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func requeuedClaimServer(t *testing.T, runID, runStatus string) (*Server, *store.Store) {

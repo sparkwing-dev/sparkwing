@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func newSecretsTestServer(t *testing.T, c controller.Cipher) (*httptest.Server, *store.Store) {

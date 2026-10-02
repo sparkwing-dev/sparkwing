@@ -15,9 +15,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func emptyTokenTableServer(t *testing.T, multiTeam bool) (*controller.Server, *store.Store, string) {

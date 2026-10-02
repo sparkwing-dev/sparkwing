@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store.Store, time.Time, time.Time) {

@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestWriteEventsViaBackend_PagesPastOnePage(t *testing.T) {

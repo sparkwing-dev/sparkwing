@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )

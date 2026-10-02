@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {

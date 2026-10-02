@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const cronsClientRepoURL = "https://github.com/acme/widgets.git"

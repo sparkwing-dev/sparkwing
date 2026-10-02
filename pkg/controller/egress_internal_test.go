@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func egressServer(t *testing.T, cfg egress.Config) (*Server, *store.Store) {

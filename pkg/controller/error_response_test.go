@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestWriteErrorMasksInternalDetails(t *testing.T) {

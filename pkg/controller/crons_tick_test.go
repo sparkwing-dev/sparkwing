@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // safety: records what each tick asked for, so a test can tell one dispatch
