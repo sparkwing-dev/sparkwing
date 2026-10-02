@@ -198,17 +198,30 @@ func Open(path string) (*Store, error) {
 	return st, nil
 }
 
-func preparePrivateSQLite(path string) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+// safety: the creation descriptor closes before the database name becomes
+// visible, so another SQLite connection cannot acquire locks it would release.
+func preparePrivateSQLite(path string) (err error) {
+	f, err := os.CreateTemp(filepath.Dir(path), ".sqlite-create-*")
 	if err != nil {
-		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+		return fmt.Errorf("prepare sqlite database %s: %w", path, err)
 	}
+	temporary := f.Name()
+	defer func() {
+		if removeErr := os.Remove(temporary); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove sqlite creation file: %w", removeErr))
+		}
+	}()
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("secure sqlite database %s: %w", path, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+		return fmt.Errorf("close sqlite creation file %s: %w", path, err)
+	}
+	if err := os.Link(temporary, path); errors.Is(err, os.ErrExist) {
+		return tightenExistingSQLite(path)
+	} else if err != nil {
+		return fmt.Errorf("create sqlite database %s: %w", path, err)
 	}
 	return nil
 }
@@ -226,26 +239,20 @@ func tightenExistingSQLite(path string) error {
 	return nil
 }
 
-// safety: the mode is read and changed through one open descriptor, so a
-// file swapped in at the path between the check and the change is never
-// the one narrowed or skipped.
+// safety: closing a raw descriptor releases this process's SQLite locks,
+// including locks held by other connections to the same database.
 func tightenSQLiteFile(name string) error {
-	f, err := os.OpenFile(name, os.O_RDONLY|sqliteTightenFlags, 0)
+	info, err := os.Stat(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("open sqlite file %s: %w", name, err)
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("inspect sqlite file %s: %w", name, err)
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 == 0 {
 		return nil
 	}
-	if err := f.Chmod(info.Mode().Perm() & 0o700); err != nil {
+	if err := os.Chmod(name, info.Mode().Perm()&0o700); err != nil {
 		return fmt.Errorf("secure sqlite file %s: %w", name, err)
 	}
 	return nil
@@ -315,7 +322,10 @@ func OpenReadOnly(path string) (*Store, error) {
 
 // OpenReadOnlySnapshot copies a stable database-and-WAL pair from an existing
 // SQLite state database and opens the copy read-only. SQLite only opens the
-// private copy, so the source directory is never changed. Closing the Store
+// private copy, so the source directory is never changed. Raw file copying
+// releases any SQLite locks this process holds on the source; callers with
+// live source connections must run the snapshot in a separate process.
+// Closing the Store
 // removes the temporary copy.
 func OpenReadOnlySnapshot(path string) (*Store, error) {
 	tempDir, err := os.MkdirTemp("", "sparkwing-store-snapshot-")
