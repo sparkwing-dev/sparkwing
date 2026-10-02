@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.66.3] - 2026-10-02
 ### Changed
 
 - Creating a local SQLite database now requires hard-link support so concurrent opens cannot observe an unfinished creation handle. Existing databases remain usable on filesystems without hard links.
