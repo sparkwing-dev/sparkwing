@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve SQLite locks when tightening database file permissions, preventing another process from deleting live WAL files after a store is reopened.
+
 ## [v0.66.2] - 2026-10-02
 ### Changed
 
