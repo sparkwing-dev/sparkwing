@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -43,6 +45,19 @@ func runPipelineChildForTest(runID, nodeID string) int {
 	base := os.Getenv("SPARKWING_LOGS_URL")
 	ctx := store.WithExecutionAttemptOrdinal(context.Background(), 1)
 	client := logs.NewClientWithToken(base, nil, capability)
+	var descendant *exec.Cmd
+	if string(mode) == "cancel" {
+		descendant = exec.Command("sh", "-c", "exec sleep 300")
+		if err := descendant.Start(); err != nil {
+			return 2
+		}
+		pids := strconv.Itoa(os.Getpid()) + " " + strconv.Itoa(descendant.Process.Pid)
+		if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "pipeline-child-pids"), []byte(pids), 0o600); err != nil {
+			_ = descendant.Process.Kill()
+			_ = descendant.Wait()
+			return 2
+		}
+	}
 	for i := 1; i <= 5; i++ {
 		line := []byte(fmt.Sprintf("{\"msg\":\"step %d\"}\n", i))
 		appendCtx := ctx
@@ -55,6 +70,8 @@ func runPipelineChildForTest(runID, nodeID string) int {
 		}
 	}
 	switch string(mode) {
+	case "cancel":
+		_ = descendant.Wait()
 	case "killed":
 		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
 		select {}

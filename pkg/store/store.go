@@ -6440,7 +6440,7 @@ func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID
 		    AND COALESCE(claim_token_prefix, '') = ?
 		    AND COALESCE(claim_membership_id, '') = ?
 		    AND COALESCE(reservation_id, '') = ?
-		    AND claim_generation = ?`+tx.forUpdate(),
+		    AND claim_generation = ? AND cancel_requested_at IS NULL AND `+nodeRunActiveSQL("")+nodeRunNotCancelled+tx.forUpdate(),
 			runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
 			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration).Scan(&executorName, &currentLease)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -6486,7 +6486,7 @@ func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID
 		    AND COALESCE(claim_token_prefix, '') = ?
 		    AND COALESCE(claim_membership_id, '') = ?
 		    AND COALESCE(reservation_id, '') = ?
-		    AND claim_generation = ? AND `+nodeClaimLiveSQL(""),
+		    AND claim_generation = ? AND cancel_requested_at IS NULL AND `+nodeRunActiveSQL("")+nodeRunNotCancelled+` AND `+nodeClaimLiveSQL(""),
 			expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
 			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, renewAt.UnixNano())
 		if err != nil {

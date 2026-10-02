@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** Stop renewing remote node claims after their run is cancelled, so agents terminate the node's child processes
+- **runner:** Record cancelled nodes after their child processes stop, and drain agent child processes on SIGTERM
 - **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
 - **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
 
