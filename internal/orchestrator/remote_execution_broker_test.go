@@ -180,6 +180,158 @@ func TestRemoteExecutionBrokerBindsExactAttemptAndDeniesSupervisorRoutes(t *test
 	}
 }
 
+func TestRemoteExecutionBrokerUploadsOwnNodeOutput(t *testing.T) {
+	data := []byte(`{"value":"from-producer"}`)
+	sum := sha256.Sum256(data)
+	uploaded := make(chan []byte, 1)
+	blobs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get(store.ClaimHolderHeader) != "" {
+			t.Error("supervisor credentials reached the external output store")
+		}
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(data)
+			return
+		}
+		if r.Method != http.MethodPut {
+			t.Errorf("blob request method = %s", r.Method)
+		}
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		uploaded <- data
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(blobs.Close)
+	committed := make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer parent-token" || r.Header.Get(store.ClaimHolderHeader) != "holder" {
+			t.Error("output request lacks supervisor claim authority")
+		}
+		switch r.URL.Path {
+		case "/api/v1/runs/run-1/nodes/producer/output":
+			if _, forwarded := r.Header["X-Forwarded-For"]; forwarded || r.Header.Get("X-Forwarded-Host") != "" {
+				http.Error(w, "CloudFront signing unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.OutputReadGrant{URL: blobs.URL, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:]), SourceRunID: "run-1"})
+		case "/api/v1/runs/run-1/nodes/node-a/output-upload":
+			_ = json.NewEncoder(w).Encode(store.OutputUploadGrant{UploadID: "upload-1", Key: "outputs/node-a", URL: blobs.URL})
+		case "/api/v1/runs/run-1/nodes/node-a/output-commit":
+			committed <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected output route %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "node-a", store.NodeClaimFence{HolderID: "holder"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(broker.Close)
+	c := client.NewWithToken(broker.URL(), nil, broker.capability)
+	ref, err := c.UploadNodeOutput(context.Background(), "run-1", "node-a", data)
+	if err != nil {
+		t.Fatalf("upload own output: %v", err)
+	}
+	got := <-uploaded
+	if string(got) != string(data) || ref.Key != "outputs/node-a" {
+		t.Fatalf("output = %q, ref = %+v", got, ref)
+	}
+	select {
+	case <-committed:
+	default:
+		t.Fatal("output upload was not committed")
+	}
+	output, err := c.GetNodeOutput(context.Background(), "run-1", "producer")
+	if err != nil || string(output) != string(data) {
+		t.Fatalf("read producer output = %q, %v", output, err)
+	}
+	for _, target := range []struct{ run, node string }{{"run-2", "node-a"}, {"run-1", "node-b"}} {
+		if _, err := c.UploadNodeOutput(context.Background(), target.run, target.node, data); err == nil {
+			t.Fatalf("uploaded another claim's output: %+v", target)
+		}
+	}
+}
+
+func TestRemoteExecutionBrokerFilesystemOutputs(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(fmt.Sprint("external=", external), func(t *testing.T) {
+			st, err := teststore.Open(t.TempDir() + "/state.db")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			st.SetOutputDir(t.TempDir())
+			ctx := context.Background()
+			if err := st.CreateRun(ctx, store.Run{ID: "run-fs", Pipeline: "fs", Status: "running", StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.CreateNode(ctx, store.Node{RunID: "run-fs", NodeID: "produce", Status: "running"}); err != nil {
+				t.Fatal(err)
+			}
+			token, _, err := st.CreateToken("operator", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			srv := controller.New(st, nil).EnableAuthFromStore()
+			blobRequests := make(chan string, 4)
+			handler := func(name string) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasPrefix(r.URL.Path, "/api/v1/outputs/") {
+						if r.Header.Get("Authorization") != "" || r.Header.Get(store.ClaimHolderHeader) != "" {
+							t.Error("claim authority reached a signed filesystem URL")
+						}
+						blobRequests <- name + " " + r.Method
+					}
+					srv.Handler().ServeHTTP(w, r)
+				})
+			}
+			upstream := httptest.NewServer(handler("controller"))
+			t.Cleanup(upstream.Close)
+			if external {
+				alias := httptest.NewServer(handler("external"))
+				t.Cleanup(alias.Close)
+				srv.WithExternalURL(alias.URL)
+			}
+			producer, err := startRemoteExecutionBroker(upstream.URL, "", token, "run-fs", "produce", store.NodeClaimFence{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(producer.Close)
+			data := []byte(`{"value":"filesystem-producer"}`)
+			writer := client.NewWithToken(producer.URL(), nil, producer.capability)
+			if err := writer.FinishNode(ctx, "run-fs", "produce", "success", "", data); err != nil {
+				t.Fatalf("producer output: %v", err)
+			}
+			consumer, err := startRemoteExecutionBroker(upstream.URL, "", token, "run-fs", "consume", store.NodeClaimFence{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(consumer.Close)
+			reader := client.NewWithToken(consumer.URL(), nil, consumer.capability)
+			output, err := reader.GetNodeOutput(ctx, "run-fs", "produce")
+			if err != nil || string(output) != string(data) {
+				t.Fatalf("consumer output = %q, %v", output, err)
+			}
+			wantHost := "controller"
+			if external {
+				wantHost = "external"
+			}
+			for _, method := range []string{http.MethodPut, http.MethodGet} {
+				if got := <-blobRequests; got != wantHost+" "+method {
+					t.Fatalf("signed byte request = %q, want %s %s", got, wantHost, method)
+				}
+			}
+			if _, err := reader.UploadNodeOutput(ctx, "run-fs", "produce", data); err == nil {
+				t.Fatal("consumer wrote the producer's output")
+			}
+		})
+	}
+}
+
 func TestRemoteExecutionBrokerMemoizedSlot(t *testing.T) {
 	var forwarded []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

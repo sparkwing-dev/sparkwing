@@ -305,6 +305,7 @@ func (b *remoteExecutionBroker) allowController(r *http.Request) bool {
 	}
 	for _, suffix := range []string{
 		"/start", "/finish", "/deps", "/dispatch", "/metrics", "/execution-start", "/execution-finish",
+		"/output-upload", "/output-commit",
 		"/activity", "/touch", "/annotations", "/summary", "/artifact-manifest", "/steps/start",
 		"/steps/finish", "/steps/skip", "/steps/annotations", "/steps/summary", "/bounce/consume", "/status",
 	} {
@@ -369,6 +370,10 @@ func (b *remoteExecutionBroker) allowConcurrency(r *http.Request) bool {
 }
 
 func (b *remoteExecutionBroker) bindRequest(r *http.Request) error {
+	// safety: nil prevents the loopback hop from appearing as public ingress.
+	r.Header["X-Forwarded-For"] = nil
+	r.Header.Del("X-Forwarded-Host")
+	r.Header.Del("X-Forwarded-Proto")
 	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
 	for _, header := range []string{
 		store.ClaimHolderHeader, store.ClaimMembershipHeader, store.ClaimReservationHeader,

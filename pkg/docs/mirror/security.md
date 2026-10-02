@@ -31,6 +31,7 @@ compiles and executes. Enrolling a workstation or gateway authorizes that
 code to execute as the agent service's OS user. Assisted execution keeps the
 enrollment bearer and claim identity in the supervisor; the job-body child
 gets a process-lifetime loopback capability limited to its exact run and node,
+including reserving and committing its own typed output upload,
 with execution start, finish, and logs additionally bound to its acknowledged
 attempt ordinal. The child does not inherit arbitrary agent service credentials,
 and its capability cannot claim or renew work, manage the fleet, or call

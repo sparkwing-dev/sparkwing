@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -62,7 +64,7 @@ func runRunnersAdd(args []string) error {
 	contribution := fs.String("contribution", "50%,50%", "CPU and memory this machine contributes")
 	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
 	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
-	logsURL := fs.String("logs", "", "logs service URL (default: the profile's logs surface)")
+	logsURL := fs.String("logs", "", "logs service URL (default: the profile's logs surface, then the controller's announcement)")
 	configPath := fs.String("config", "", "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)")
 	force := fs.Bool("force", false, "replace an existing agent section")
 	noService := fs.Bool("no-service", false, "write the config without installing or starting the service")
@@ -103,6 +105,13 @@ func runRunnersAdd(args []string) error {
 		AllowRepos:     *allowRepos,
 		Contribution:   *contribution,
 		LocalAdmission: true,
+	}
+	if cfg.Logs == "" {
+		services, err := discovery.ServicesFor(context.Background(), prof.ControllerURL(), prof.ControllerToken())
+		if err != nil {
+			return fmt.Errorf("runners add: discover logs service: %w", err)
+		}
+		cfg.Logs = services.Logs
 	}
 	if err := validateAgentFileConfig(cfg); err != nil {
 		return err

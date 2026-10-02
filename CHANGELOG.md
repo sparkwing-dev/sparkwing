@@ -26,6 +26,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Filesystem node outputs use signed URLs that reach the configured external controller or its request address, so claimed jobs can upload and read typed results.
+- **remote execution:** Claimed job processes can reserve and commit their own typed outputs through the supervisor. Private controller connections keep signed S3 reads, so dependent jobs can read producer results without CloudFront.
+- **runner enrollment:** `cluster runners add` discovers the controller's announced logs service when the profile supplies none, so connected workstations retain their job logs.
 - **orchestrator:** Remote artifact consumers can read producer metadata in their own run, so declared artifacts stage before the consumer executes.
 - **controller:** Retries preserve the verified GitHub repository identity so GitHub App pipelines can rerun.
 

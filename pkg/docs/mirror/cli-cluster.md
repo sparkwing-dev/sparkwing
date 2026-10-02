@@ -523,7 +523,7 @@ reaches only config.yaml.
 | `--labels CSV` | Comma-separated self-asserted placement labels |
 | `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
 | `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
-| `--logs URL` | Logs service URL (default: the profile's logs surface) |
+| `--logs URL` | Logs service URL (default: the profile's logs surface, then the controller's announcement) |
 | `--config PATH` | config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml) |
 | `--force` | Replace an existing agent section |
 | `--no-service` | Write the config without installing or starting the service |

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -94,6 +95,44 @@ func (f *runnersFixture) runnerTokens(t *testing.T) []store.Token {
 		t.Fatalf("ListTokens: %v", err)
 	}
 	return tokens
+}
+
+func TestRunnersAddDiscoversTheAnnouncedLogsService(t *testing.T) {
+	f := newRunnersFixture(t)
+	prof, err := resolveProfile("prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const logsURL = "https://logs.example.test"
+	srv := httptest.NewServer(controller.New(f.store, nil).EnableAuthFromStore().WithLogsURL(logsURL).Handler())
+	t.Cleanup(srv.Close)
+	writeProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: { url: %s, token: %s }\n", srv.URL, prof.ControllerToken()))
+	if err := runRunners([]string{"add", "--profile", "prod", "--name", "desktop", "--config", f.config, "--no-service"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := agentconfig.Load(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Logs != logsURL {
+		t.Fatalf("runner logs URL = %q, want announced %q", cfg.Logs, logsURL)
+	}
+}
+
+func TestRunnersAddDiscoveryFailureMintsNoToken(t *testing.T) {
+	f := newRunnersFixture(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	writeProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: { url: %s }\n", srv.URL))
+	err := runRunners([]string{"add", "--profile", "prod", "--name", "desktop", "--config", f.config, "--no-service"})
+	if err == nil || !strings.Contains(err.Error(), "discover logs service") {
+		t.Fatalf("runners add = %v, want discovery failure", err)
+	}
+	if got := len(f.runnerTokens(t)); got != 0 {
+		t.Fatalf("minted %d tokens after discovery failed", got)
+	}
 }
 
 func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {

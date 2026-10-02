@@ -54,11 +54,8 @@ type GitHubWebhookDisconnectResponse struct {
 }
 
 // WithExternalURL declares the base URL this controller answers on from
-// outside the cluster, which is what GitHub must post deliveries to. The
-// bindings route announces it so `sparkwing cluster webhooks connect`
-// points a repository's webhook at the right address. Empty leaves each
-// binding request answering with the URL it arrived at, which is correct
-// whenever the operator reaches the controller where GitHub does.
+// outside the cluster. Webhook delivery and signed filesystem output URLs
+// use that address. Empty uses the address each request arrived at.
 func (s *Server) WithExternalURL(rawURL string) *Server {
 	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	return s
@@ -69,11 +66,15 @@ func githubWebhookDeliveryPath(pipeline string) string {
 }
 
 func (s *Server) githubWebhookDeliveryURL(r *http.Request, pipeline string) string {
+	return s.externalBaseURL(r) + githubWebhookDeliveryPath(pipeline)
+}
+
+func (s *Server) externalBaseURL(r *http.Request) string {
 	base := s.externalURL
 	if base == "" {
 		base = requestBaseURL(r)
 	}
-	return base + githubWebhookDeliveryPath(pipeline)
+	return base
 }
 
 // safety: a controller behind TLS termination sees a plain listener, so the

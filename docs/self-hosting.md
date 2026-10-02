@@ -110,6 +110,15 @@ The controller reads the Secret as `SPARKWING_PG_URL`. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 
+Filesystem node outputs use signed URLs on the controller. Behind a proxy, set
+the controller's `--external-url` to the address runners can reach. Without that
+setting, the URLs use the controller request's address. Uploads and downloads
+use the signed URL's authority and carry no runner token.
+
+Remote `--working-tree` submissions need an S3 cache bucket configured through
+`--cache-blob-store` to hold their uploaded source bundles. A filesystem-only
+controller runs submitted commits from the repository's pushed history.
+
 ### Backups and upgrades
 
 [Backup, restore, and upgrade](backup-restore.md) covers both database
@@ -147,8 +156,10 @@ It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
 `runs.state`, `secrets.read` and `logs.write`, writes
 the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
 keeping the file's other sections, installs the user service, and
-prints the token prefix with the command that revokes it. The config and the
-machine are checked before the mint, so a host with no `sparkwing-runner` or no
+prints the token prefix with the command that revokes it. Logs use the profile's
+logs URL, or the logs service the controller announces when the profile supplies
+none. `--logs` chooses an explicit URL. The config and the machine are checked
+before the mint, so a host with no `sparkwing-runner` or no
 user service session fails before a credential exists; a failure after the mint
 prints the live token and its revoke command. `--max-concurrent`,
 `--contribution` and `--labels` set the same fields the interactive installer

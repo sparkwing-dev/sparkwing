@@ -103,9 +103,9 @@ func run(args []string) error {
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", os.Getenv("SPARKWING_EXTERNAL_URL"),
 		"base URL this controller answers on from outside the cluster, which is "+
-			"where GitHub posts webhook deliveries. `sparkwing cluster webhooks "+
-			"connect` points a repository's webhook at it. Empty answers each "+
-			"connect request with the URL that request arrived at.")
+			"where GitHub posts webhook deliveries and runners read signed filesystem outputs. "+
+			"`sparkwing cluster webhooks connect` points a repository's webhook at it. "+
+			"Empty uses the URL each request arrived at.")
 	oidcKeyFile := fs.String("oidc-key-file", "",
 		"path to an RSA private key PEM (at least 2048 bits) that signs the OIDC ID "+
 			"tokens runs exchange for cloud credentials (alternative to "+oidcKeyEnv+", "+

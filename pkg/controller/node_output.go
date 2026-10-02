@@ -123,10 +123,10 @@ func (o fsOutputs) commit(ctx context.Context, u store.Upload) error {
 	return o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
 }
 
-func (o fsOutputs) resolve(_ *http.Request, obj store.Upload) (string, time.Time, error) {
+func (o fsOutputs) resolve(r *http.Request, obj store.Upload) (string, time.Time, error) {
 	expires := time.Now().Add(outputReadTTL).UTC()
 	q := o.s.outputSigner.sign("get", string(obj.Team), obj.Key, expires.Unix())
-	return "/api/v1/outputs/objects/" + obj.Key + "?" + q.Encode(), expires, nil
+	return o.s.externalBaseURL(r) + "/api/v1/outputs/objects/" + obj.Key + "?" + q.Encode(), expires, nil
 }
 
 // safety: S3 expires pending/ by lifecycle; here an upload never committed is
@@ -379,6 +379,9 @@ func (s *Server) handleOutputUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeInternalError(w, r, "grant output upload", err)
 		return
+	}
+	if strings.HasPrefix(putURL, "/") {
+		putURL = s.externalBaseURL(r) + putURL
 	}
 	writeJSON(w, http.StatusOK, store.OutputUploadGrant{
 		UploadID: u.ID, Key: u.Key, URL: putURL, Headers: headers,
