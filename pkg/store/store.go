@@ -322,7 +322,10 @@ func OpenReadOnly(path string) (*Store, error) {
 
 // OpenReadOnlySnapshot copies a stable database-and-WAL pair from an existing
 // SQLite state database and opens the copy read-only. SQLite only opens the
-// private copy, so the source directory is never changed. Closing the Store
+// private copy, so the source directory is never changed. Raw file copying
+// releases any SQLite locks this process holds on the source; callers with
+// live source connections must run the snapshot in a separate process.
+// Closing the Store
 // removes the temporary copy.
 func OpenReadOnlySnapshot(path string) (*Store, error) {
 	tempDir, err := os.MkdirTemp("", "sparkwing-store-snapshot-")
