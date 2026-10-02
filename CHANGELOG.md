@@ -31,6 +31,12 @@ unlock.
 - **controller:** Finished runs cannot supply new node claims or credit reservations.
   Queue depth excludes their unfinished node rows, including rows left by an interrupted pipeline.
 
+### Security
+
+- **deps:** OpenTelemetry updates fix log-export backpressure CPU exhaustion
+  (GO-2026-6615) and exporter configuration logs that expose endpoint URLs
+  (GO-2026-6505).
+
 
 ## [v0.66.0] - 2026-10-01
 ### Added
