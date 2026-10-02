@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -88,7 +89,19 @@ func PostgresURL(t *testing.T) string {
 // Open opens a store for the test in the suite's dialect.
 func Open(t *testing.T) *store.Store {
 	t.Helper()
-	return New(t).Open(t)
+	if suiteRunsOnPostgres() {
+		return New(t).Open(t)
+	}
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close sqlite store: %v", err)
+		}
+	})
+	return st
 }
 
 // OpenPostgres opens a schema-scoped Postgres store whatever the suite's
