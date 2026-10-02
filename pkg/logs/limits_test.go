@@ -385,46 +385,53 @@ func TestLogs_InFlightBudgetRefusesExcessAppends(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.WithLimits(logs.Limits{MaxInFlightBytes: 8192})
-	srv := httptest.NewServer(s.Handler())
-	defer srv.Close()
-
+	handler := s.Handler()
 	pr, pw := io.Pipe()
+	slow := httptest.NewRecorder()
 	slowDone := make(chan struct{})
 	go func() {
 		defer close(slowDone)
-		req, rerr := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/logs/run-1/step-a", pr)
-		if rerr != nil {
-			return
-		}
-		resp, derr := http.DefaultClient.Do(req)
-		if derr == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-		}
+		handler.ServeHTTP(slow, httptest.NewRequest(http.MethodPost, "/api/v1/logs/run-1/step-a", pr))
 	}()
-	if _, err := pw.Write([]byte("holding the budget\n")); err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() {
+		_ = pw.Close()
+		_ = pr.Close()
+		<-slowDone
+	})
+	written := make(chan error, 1)
+	go func() {
+		_, err := pw.Write([]byte("holding the budget\n"))
+		written <- err
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	select {
+	case err := <-written:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-slowDone:
+		t.Fatalf("stalled append returned before reading its body: status=%d", slow.Code)
+	case <-ctx.Done():
+		t.Fatal("stalled append did not begin reading its body")
 	}
 
-	status := 0
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-		resp, perr := http.Post(srv.URL+"/api/v1/logs/run-1/step-b", "text/plain", strings.NewReader("line\n"))
-		if perr != nil {
-			t.Fatalf("second append: %v", perr)
-		}
-		status = resp.StatusCode
-		_ = resp.Body.Close()
-		if status == http.StatusServiceUnavailable {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if status != http.StatusServiceUnavailable {
-		t.Errorf("status=%d, want 503 while a stalled body holds the whole in-flight budget", status)
+	probe := httptest.NewRecorder()
+	handler.ServeHTTP(probe, httptest.NewRequest(http.MethodPost, "/api/v1/logs/run-1/step-b", strings.NewReader("line\n")))
+	if probe.Code != http.StatusServiceUnavailable {
+		t.Errorf("status=%d, want 503 while a stalled body holds the whole in-flight budget", probe.Code)
 	}
 
 	_ = pw.Close()
 	<-slowDone
+	if slow.Code != http.StatusNoContent {
+		t.Fatalf("stalled append completed with status=%d, want 204", slow.Code)
+	}
+	probe = httptest.NewRecorder()
+	handler.ServeHTTP(probe, httptest.NewRequest(http.MethodPost, "/api/v1/logs/run-1/step-b", strings.NewReader("line\n")))
+	if probe.Code != http.StatusNoContent {
+		t.Errorf("status=%d, want 204 after the in-flight budget is released", probe.Code)
+	}
 }
 
 func TestLogs_SweepSparesRunsWrittenNearTheCutoff(t *testing.T) {
