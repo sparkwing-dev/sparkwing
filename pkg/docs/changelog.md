@@ -25,6 +25,8 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.3, so a fresh scaffold compiles against that release.
 
 ### Fixed
+- Same-origin signed node outputs use the controller transport, including local
+  Unix sockets, without sending API bearer or claim headers.
 - Local and local-only runs publish and stage declared artifacts through the
   filesystem cache, including memoized producers. Missing or corrupt cached
   bytes fail before the consumer body runs. Memo entries without required

@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -78,8 +79,8 @@ func TestCoordinatedChildSurfaces_LocalOnlyNeverOpensProfileBackends(t *testing.
 	if err != nil {
 		t.Fatalf("coordinatedChildSurfaces: %v", err)
 	}
-	if art != nil || logs != nil {
-		t.Fatalf("local-only child opened remote surfaces: cache=%T logs=%T", art, logs)
+	if _, ok := art.(*fsstore.ArtifactStore); !ok || logs != nil {
+		t.Fatalf("local-only child surfaces: cache=%T logs=%T; want local cache and no remote logs", art, logs)
 	}
 	value, _, err := source.Read("TOKEN")
 	if err != nil || value != "local-token" {

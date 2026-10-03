@@ -127,7 +127,9 @@ func (c *Client) blobURL(u string) string {
 // safety: a signed URL carries its own authority, so the bearer never
 // travels with it, and a URL off this controller never sees its transport.
 func (c *Client) blobClient(u string) *http.Client {
-	if !strings.HasPrefix(u, "/") {
+	base, baseErr := url.Parse(c.baseURL)
+	target, targetErr := url.Parse(c.blobURL(u))
+	if baseErr != nil || targetErr != nil || !strings.EqualFold(base.Scheme, target.Scheme) || !strings.EqualFold(base.Host, target.Host) {
 		return &http.Client{Timeout: outputTransferTimeout, Transport: otelutil.WrapTransport(nil)}
 	}
 	transport := c.http.Transport
