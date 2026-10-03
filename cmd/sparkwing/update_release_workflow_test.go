@@ -64,7 +64,7 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		"FROM --platform=$BUILDPLATFORM " + buildImage + " AS build",
 		"FROM " + runtimeImage + " AS runtime",
 		"ARG SPARKWING_IMAGE_REFRESH=local",
-		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends bash ca-certificates coreutils curl git git-lfs gzip jq lsof make openssh-client procps tar unzip xz-utils && rm -rf /var/lib/apt/lists/*",
+		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends bash ca-certificates coreutils curl git git-lfs gzip jq lsof make netcat-openbsd openssh-client procps tar unzip xz-utils && rm -rf /var/lib/apt/lists/*",
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
 		"COPY bin/check-runner-image.sh /usr/local/bin/check-runner-image.sh",
 		"RUN /bin/sh /usr/local/bin/check-runner-image.sh",
