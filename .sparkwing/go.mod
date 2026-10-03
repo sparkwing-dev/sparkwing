@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/fergusstrange/embedded-postgres v1.34.0
-	github.com/sparkwing-dev/sparks-core/templates v0.33.1
-	github.com/sparkwing-dev/sparkwing v0.66.3
+	github.com/sparkwing-dev/sparks-core/templates v0.33.2
+	github.com/sparkwing-dev/sparkwing v0.66.4
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.40.0
 )
