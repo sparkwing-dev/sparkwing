@@ -14,10 +14,15 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
@@ -177,6 +182,18 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 
 	args = append(args, cfg.Context)
 
+	metadataPath := ""
+	if multiPlatform && push && len(remoteRefs) > 0 {
+		if dir, err := os.MkdirTemp("", "sparkwing-push-"); err == nil {
+			defer func() {
+				if err := os.RemoveAll(dir); err != nil {
+					log.Printf("remove Docker push metadata: %v", err)
+				}
+			}()
+			metadataPath = filepath.Join(dir, "metadata.json")
+			args = append(args[:len(args)-1], "--metadata-file", metadataPath, cfg.Context)
+		}
+	}
 	if _, err := runDocker(ctx, nil, args...); err != nil {
 		return BuildResult{}, fmt.Errorf("docker build: %w", err)
 	}
@@ -191,6 +208,16 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 	}
 
 	if multiPlatform {
+		if data, err := os.ReadFile(metadataPath); err == nil {
+			var metadata struct {
+				Digest string `json:"containerimage.digest"`
+			}
+			if json.Unmarshal(data, &metadata) == nil && manifestDigestPattern.MatchString(metadata.Digest) {
+				for _, ref := range remoteRefs {
+					result.Digests[ref] = metadata.Digest
+				}
+			}
+		}
 		result.Registries = append(result.Registries, cfg.Registries...)
 		if len(remoteRefs) > 0 {
 			result.Image = remoteRefs[0]
@@ -213,10 +240,14 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 				regSucceeded = false
 				continue
 			}
-			if _, err := runDocker(ctx, nil, "push", remote); err != nil {
+			output, err := runDocker(ctx, nil, "push", remote)
+			if err != nil {
 				errs = append(errs, fmt.Errorf("docker push %s: %w", remote, err))
 				regSucceeded = false
 				continue
+			}
+			if digest := pushedManifestDigest(output, t); digest != "" {
+				result.Digests[remote] = digest
 			}
 			pushed = append(pushed, remote)
 		}
@@ -237,6 +268,20 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 		return result, err
 	}
 	return result, nil
+}
+
+var manifestDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+func pushedManifestDigest(output, tag string) string {
+	pattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(tag) + `: digest: (sha256:[a-f0-9]{64}) size: [0-9]+\s*$`)
+	digest := ""
+	for _, match := range pattern.FindAllStringSubmatch(output, -1) {
+		if digest != "" && digest != match[1] {
+			return ""
+		}
+		digest = match[1]
+	}
+	return digest
 }
 
 // Push tags and pushes the given local `image` reference to each
