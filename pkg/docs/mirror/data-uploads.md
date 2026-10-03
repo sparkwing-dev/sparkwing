@@ -73,6 +73,9 @@ binaries unless the team owner sets
 false. `GET /api/v1/team/build-trust` reports the team's choice. Runners
 verify the committed digest while reading.
 
+Launcher claim tokens follow this cloud provenance policy for both binaries and
+artifacts. Their source bundle remains readable through its exact run binding.
+
 A controller-dispatched node's claim token writes cache under its run's
 GitHub repository ID and git ref, which the controller reads from the run and
 never from the request, as GitHub Actions scopes caches: `GITHUB_REF` for a

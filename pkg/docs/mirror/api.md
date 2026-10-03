@@ -40,6 +40,10 @@ before it returns `{ "url": "...", "sha256": "...", "size": 123,
 "expires": "..." }`. It charges the recorded object size when it signs the
 URL.
 
+Artifact downloads accept only committed keys under `artifacts/`. Other keys
+return `400`. Node outputs use their run's output routes, which check the claim's
+node dependencies.
+
 Log downloads require a token with `logs.read` or `admin`. A run cache grant
 cannot sign log downloads, even for its own run. Revoking a claimant's token
 stops its cache grant from signing new URLs.

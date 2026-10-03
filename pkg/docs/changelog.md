@@ -24,6 +24,11 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.4, so a fresh scaffold compiles against that release.
 
+### Security
+
+- **controller:** Keep artifact downloads inside their committed artifact namespace so they cannot sign node outputs or source bundles through the artifact route
+- **controller:** Apply the team's cloud build trust policy to downloads signed for launcher claim tokens
+
 
 ## [v0.66.4] - 2026-10-03
 ### Changed

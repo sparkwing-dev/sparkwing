@@ -249,7 +249,8 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := downloadKind(req.Kind)
 	bucket := s.downloadStores[kind]
-	if bucket == nil || strings.HasPrefix(req.Key, "teams/") {
+	if bucket == nil || strings.HasPrefix(req.Key, "teams/") ||
+		(req.Kind == "artifact" && !strings.HasPrefix(req.Key, "artifacts/")) {
 		writeError(w, http.StatusBadRequest, errors.New("invalid download kind or key"))
 		return
 	}
@@ -261,6 +262,7 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			s.writeInternalError(w, r, "read download provenance", err)
 			return
 		}
+		cloudReader = cloudReader || grant.Claim.Kind == authwire.CacheClaimToken
 	}
 	var objectSize int64
 	var digest string
