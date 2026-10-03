@@ -30,12 +30,11 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
 	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
 		"the queued row says",
-	"globalRunnerRefusal":                    "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal":               "the global hourly cap counts runs from every team",
-	"(*Store).NodeClaimFenceNodeForRun":      "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).HeartbeatNodeClaimWithCredits": "the run ID is global, and the renewal matches the exact claimant, holder, membership, reservation and generation",
-	"(*Store).PruneExpiredUploads":           "the hourly storage pass releases expired pending uploads for every team",
-	"(*Store).PruneStorageCommitReceipts":    "the hourly storage pass drops receipt rows past the retry window for every team",
+	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
+	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
+	"(*Store).PruneExpiredUploads":        "the hourly storage pass releases expired pending uploads for every team",
+	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
 	"(*Store).PruneExpiredCacheObjects": "the controller's leased hourly storage pass deletes expired cache rows " +
 		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +

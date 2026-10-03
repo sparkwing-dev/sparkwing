@@ -949,9 +949,10 @@ binaries. Portable Go file modes do not describe Windows DACLs, so doctor
 reports that audit as unverified on Windows rather than claiming the ACL is
 private.
 
-Creating a local SQLite database requires a filesystem that supports hard links.
-Sparkwing closes the private creation file before publishing its database name,
-so concurrent opens preserve SQLite locks.
+SQLite creates local databases with private permissions on POSIX systems and
+coordinates concurrent opens through its own file locking. Creation works without
+hard-link support. The filesystem must support SQLite locking and shared memory
+for WAL mode. Keep the local database on one host rather than a network share.
 
 ### The laptop boundary
 

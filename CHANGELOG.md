@@ -25,6 +25,9 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.3, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **store:** Restore local SQLite database creation on filesystems without hard links while preserving private POSIX permissions and concurrent connection locks.
+
 - Local and local-only runs publish and stage declared artifacts through the
   filesystem cache, including memoized producers. Missing or corrupt cached
   bytes fail before the consumer body runs. Memo entries without required
