@@ -25,6 +25,12 @@ verdict after completion returns `400`. `POST /api/v1/runs` cannot attach a
 finish time to a pending or running row, or reopen a pending row that already
 has one.
 
+## Payment references
+
+A paid payment reference belongs to one team across prepaid grants and card
+settlements. Repeating a card settlement for that team changes nothing. Reporting
+it for another team returns `409` and leaves both teams’ balances and grants unchanged.
+
 ## Data downloads
 
 `POST /api/v1/data/download` signs a short-lived download for an object. Send

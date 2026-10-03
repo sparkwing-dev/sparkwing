@@ -233,6 +233,22 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 	if len(refunds) != 1 || refunds[0].Body["payment_intent"] != "pi_second" {
 		t.Fatalf("refunds = %+v; want the second payment refunded once", refunds)
 	}
+	if err := f.store.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.store.ForTeam(t.Context(), "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.RecordCreditGrant(t.Context(), store.CreditGrantRequest{
+		Kind: store.CreditGrantPaid, AmountMicro: 15_000 * store.MicroCreditsPerCent, Reference: "pi_other_team",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second["payment_intent"] = "pi_other_team"
+	if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, second, nil); code != http.StatusConflict {
+		t.Fatalf("another team's payment reference = %d, want 409", code)
+	}
 	var units struct {
 		Capabilities []string `json:"capabilities"`
 	}

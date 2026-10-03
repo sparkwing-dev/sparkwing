@@ -194,6 +194,8 @@ func (s *Server) handleCardPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.applyCardResult(r.Context(), req)
 	switch {
+	case errors.Is(err, store.ErrCreditGrantConflict):
+		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)
 	case errors.Is(err, store.ErrInvalidInput):

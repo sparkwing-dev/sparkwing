@@ -942,7 +942,11 @@ func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.T
 // safety: a payment already granted, queued for refund or refused over a
 // warning has been settled; its redelivery changes nothing.
 func cardPaymentSeenTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string) (bool, error) {
-	if _, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantPaid, paymentIntent); err != nil || found {
+	grant, found, err := creditGrantByReferenceTx(ctx, tx, "", CreditGrantPaid, paymentIntent)
+	if err == nil && found && grant.Team != team {
+		return false, ErrCreditGrantConflict
+	}
+	if err != nil || found {
 		return found, err
 	}
 	return rowPresentTx(ctx, tx, `SELECT 1 FROM card_attempts WHERE team = ? AND payment_intent = ? AND status = ?`,

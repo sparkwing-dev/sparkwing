@@ -26,6 +26,8 @@ unlock.
 
 ### Security
 
+- **controller:** Refuse card payments whose payment reference already funded another team
+
 - **controller:** Keep artifact downloads inside their committed artifact namespace so they cannot sign node outputs or source bundles through the artifact route
 - **controller:** Apply the team's cloud build trust policy to downloads signed for launcher claim tokens
 
