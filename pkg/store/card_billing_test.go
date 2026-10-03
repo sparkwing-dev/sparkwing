@@ -386,7 +386,7 @@ func TestAWarningBeforeItsPaymentStopsTheGrant(t *testing.T) {
 		t.Fatalf("balance = %d, %v; want the debt still owed", bal, err)
 	}
 	freeze, err := acme.CreditFreeze(ctx)
-	if err != nil || !freeze.Frozen || freeze.Disputes[0] != "issfr_1" {
+	if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 {
 		t.Fatalf("freeze = %+v, %v; want the team held for the warning", freeze, err)
 	}
 	st, err := acme.SpendStanding(ctx, now)

@@ -1012,18 +1012,22 @@ func settleWarnedTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, 
 // safety: callers hold the ledger lock, so the check and the insert cannot
 // interleave with another hold of the same warning.
 func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paymentIntent string, now time.Time) error {
-	if held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_freezes WHERE team = ? AND dispute_id = ?`,
-		string(team), warning); err != nil || held {
+	// safety: a length prefix prevents colons in team or provider IDs from colliding.
+	freezeID := fmt.Sprintf("early_fraud_warning:%d:%s:%s", len(team), team, warning)
+	// safety: legacy IDs, including released holds, must stay idempotent on replay.
+	if held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_freezes
+	    WHERE team = ? AND cause = ? AND dispute_id IN (?, ?)`,
+		string(team), FreezeCauseWarning, freezeID, warning); err != nil || held {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
 	    VALUES (?, ?, ?, ?, ?, ?)`,
-		warning, string(team), paymentIntent, "early fraud warning "+warning, FreezeCauseWarning, now.UnixNano()); err != nil {
+		freezeID, string(team), paymentIntent, "early fraud warning "+warning, FreezeCauseWarning, now.UnixNano()); err != nil {
 		return err
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: warning,
-		Attrs: map[string]any{"payment_id": paymentIntent, "cause": FreezeCauseWarning},
+		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: freezeID,
+		Attrs: map[string]any{"payment_id": paymentIntent, "cause": FreezeCauseWarning, "warning_id": warning},
 	})
 }
 

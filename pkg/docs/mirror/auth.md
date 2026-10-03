@@ -252,9 +252,12 @@ charge withdraws the card's credit, so new work waits, and is retried after
 `POST /api/v1/team/billing/pay`, and a new card retries it at once. A team
 with debt or a charge open cannot be deleted.
 
-An early fraud warning holds the team under the warning's id, blocks the
+An early fraud warning gives each affected team its own hold, blocks the
 card's fingerprint for every team, and refunds the payment; the refund then
-reverses the credits as above.
+reverses the credits as above. Use the returned hold id to release
+that hold. Existing warning holds keep their ids, and replaying
+a warning does not undo an operator's release. Business events retain the
+provider's warning id alongside the hold id.
 
 A chargeback holds the team. Holds are one per dispute, and a team is held
 while any of its holds stands: its metered claims are refused with `402` and
