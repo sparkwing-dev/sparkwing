@@ -117,3 +117,40 @@ func TestResolvePipelineSecrets_NoProviderReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil/nil, got %v/%v", out, err)
 	}
 }
+
+type coercionSecretPipe struct {
+	plainPipe
+	fields any
+}
+
+func (p coercionSecretPipe) Secrets() any { return p.fields }
+
+func TestResolvePipelineSecrets_CoercionErrorsOmitValues(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields any
+	}{
+		{"required", &struct {
+			Count int8 `sw:"COUNT,required"`
+		}{}},
+		{"optional", &struct {
+			Count int8 `sw:"COUNT,optional"`
+		}{}},
+	} {
+		for _, input := range []struct{ name, value string }{{"overflow", "12345"}, {"malformed", "private-invalid-number"}} {
+			t.Run(tc.name+"/"+input.name, func(t *testing.T) {
+				reg := ensureRegistered(t, "coercion-"+tc.name+"-"+input.name, func() sparkwing.Pipeline[sparkwing.NoInputs] {
+					return coercionSecretPipe{fields: tc.fields}
+				})
+				ctx := sparkwing.WithSecretResolver(t.Context(), &fakeResolver{values: map[string]string{"COUNT": input.value}})
+				out, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, nil)
+				if err == nil || out != nil {
+					t.Fatalf("malformed secret resolved: %v, %v", out, err)
+				}
+				if strings.Contains(err.Error(), input.value) || !strings.Contains(err.Error(), "Count") || !strings.Contains(err.Error(), "int8") {
+					t.Fatalf("unsafe or incomplete coercion error: %v", err)
+				}
+			})
+		}
+	}
+}

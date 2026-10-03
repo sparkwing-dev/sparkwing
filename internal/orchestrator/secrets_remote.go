@@ -48,8 +48,12 @@ func remoteSecretSource(profName, runID string) (secrets.Source, error) {
 		return nil, fmt.Errorf("profile %q has no controller URL", prof.Name)
 	}
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+	return controllerSecretSource(context.Background(), c, runID), nil
+}
+
+func controllerSecretSource(ctx context.Context, c *client.Client, runID string) secrets.Source {
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
-		sec, gerr := c.GetSecretForRun(context.Background(), name, runID)
+		sec, gerr := c.GetSecretForRun(ctx, name, runID)
 		if gerr != nil {
 			if errors.Is(gerr, store.ErrNotFound) {
 				return "", false, secrets.ErrSecretMissing
@@ -57,5 +61,5 @@ func remoteSecretSource(profName, runID string) (secrets.Source, error) {
 			return "", false, gerr
 		}
 		return sec.Value, sec.Masked, nil
-	}), nil
+	})
 }

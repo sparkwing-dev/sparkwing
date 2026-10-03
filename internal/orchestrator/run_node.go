@@ -182,16 +182,7 @@ func RunNodeOnce(
 
 	source := localSecrets
 	if source == nil {
-		source = secrets.SourceFunc(func(name string) (string, bool, error) {
-			sec, gerr := stateClient.GetSecretForRun(ctx, name, runID)
-			if gerr != nil {
-				if errors.Is(gerr, store.ErrNotFound) {
-					return "", false, secrets.ErrSecretMissing
-				}
-				return "", false, gerr
-			}
-			return sec.Value, sec.Masked, nil
-		})
+		source = controllerSecretSource(ctx, stateClient, runID)
 	}
 	ctx = sparkwing.WithSecretResolver(ctx,
 		secrets.NewCached(source, masker).AsResolver())

@@ -72,6 +72,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	}
 	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
 	runOpts := Options{
+		SecretSource:      controllerSecretSource(runCtx, stateClient, trigger.ID),
 		Pipeline:          trigger.Pipeline,
 		RunID:             trigger.ID,
 		Args:              args,

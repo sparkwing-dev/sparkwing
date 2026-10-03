@@ -82,7 +82,7 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ 
 		}
 		if s, ok := specByName[name]; ok {
 			if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), v, s.Field.Name); err != nil {
-				return nil, fmt.Errorf("pipeline %q secrets: %w", reg.Name, err)
+				return nil, fmt.Errorf("pipeline %q secrets: field %s expects %s", reg.Name, s.Field.Name, s.Field.Type)
 			}
 		}
 	}
@@ -96,7 +96,7 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ 
 		}
 		if s, ok := specByName[name]; ok {
 			if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), v, s.Field.Name); err != nil {
-				return nil, fmt.Errorf("pipeline %q secrets: %w", reg.Name, err)
+				return nil, fmt.Errorf("pipeline %q secrets: field %s expects %s", reg.Name, s.Field.Name, s.Field.Type)
 			}
 		}
 	}

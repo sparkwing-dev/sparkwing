@@ -24,7 +24,14 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.4, so a fresh scaffold compiles against that release.
 
+### Fixed
+
+- **orchestrator:** Resolve typed pipeline secrets through the claimed run's controller scope before remote execution
+  Rebuild pipeline binaries with the updated SDK to receive this fix.
+
 ### Security
+
+- **orchestrator:** Keep typed-secret values out of conversion errors stored in run history
 
 - **controller:** Refuse card payments whose payment reference already funded another team
 
