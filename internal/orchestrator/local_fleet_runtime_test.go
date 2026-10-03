@@ -78,8 +78,6 @@ func TestForegroundFleetAuthorityRequiresBodyAttestationThenFallsBackToCoordinat
 
 	fleetHelperBodyCalls.Store(0)
 	fleetCoordinatorBodyCalls.Store(0)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 
 	root := t.TempDir()
 	paths := PathsAt(filepath.Join(root, "sparkwing"))
@@ -121,6 +119,10 @@ func TestForegroundFleetAuthorityRequiresBodyAttestationThenFallsBackToCoordinat
 		t.Fatal(err)
 	}
 	fixture := newFleetSourceFixture(t)
+
+	// perf: fixture migrations and Git setup must not consume the two fallback windows.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
 
 	type runResult struct {
 		result *Result
