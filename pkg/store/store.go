@@ -198,8 +198,8 @@ func Open(path string) (*Store, error) {
 	return st, nil
 }
 
-// safety: the creation descriptor closes before the database name becomes
-// visible, so another SQLite connection cannot acquire locks it would release.
+// safety: SQLite copies the seed's private mode on Unix and coordinates
+// its own descriptor closes with locks held by other database connections.
 func preparePrivateSQLite(path string) (err error) {
 	f, err := os.CreateTemp(filepath.Dir(path), ".sqlite-create-*")
 	if err != nil {
@@ -218,12 +218,18 @@ func preparePrivateSQLite(path string) (err error) {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close sqlite creation file %s: %w", path, err)
 	}
-	if err := os.Link(temporary, path); errors.Is(err, os.ErrExist) {
-		return tightenExistingSQLite(path)
-	} else if err != nil {
+	db, err := sql.Open("sqlite", sqliteURI(path)+"?modeof="+strings.ReplaceAll(url.QueryEscape(temporary), "+", "%20"))
+	if err != nil {
 		return fmt.Errorf("create sqlite database %s: %w", path, err)
 	}
-	return nil
+	connection, err := db.Conn(context.Background())
+	if err != nil {
+		return errors.Join(fmt.Errorf("create sqlite database %s: %w", path, err), db.Close())
+	}
+	if err := errors.Join(connection.Close(), db.Close()); err != nil {
+		return fmt.Errorf("create sqlite database %s: %w", path, err)
+	}
+	return tightenExistingSQLite(path)
 }
 
 // safety: SQLite creates the -wal and -shm sidecars with the database's own

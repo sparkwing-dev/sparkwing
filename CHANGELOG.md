@@ -27,6 +27,9 @@ unlock.
 ### Fixed
 - Same-origin signed node outputs use the controller transport, including local
   Unix sockets, without sending API bearer or claim headers.
+
+- **store:** Restore local SQLite database creation on filesystems without hard links while preserving private POSIX permissions and concurrent connection locks.
+
 - Local and local-only runs publish and stage declared artifacts through the
   filesystem cache, including memoized producers. Missing or corrupt cached
   bytes fail before the consumer body runs. Memo entries without required

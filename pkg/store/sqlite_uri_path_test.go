@@ -49,7 +49,7 @@ func TestOpenWritesTheStatDatabaseWhenPathHasURIMetacharacters(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	for _, dirName := range []string{"a#b", "q?x", "pct%41x"} {
+	for _, dirName := range []string{"a#b", "q?x", "pct%41x", "space name", "plus+name"} {
 		t.Run(dirName, func(t *testing.T) {
 			root := t.TempDir()
 			dir := filepath.Join(root, dirName)
