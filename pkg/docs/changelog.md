@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **Scaffolding:** Align source-build fallback and Kubernetes fixture SDK pins with v0.66.5
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
