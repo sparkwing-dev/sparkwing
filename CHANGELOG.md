@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
+
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.66.4, so a fresh scaffold compiles against that release.
