@@ -2100,7 +2100,10 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
 			return
 		}
-		_, _ = gitCmd("-C", bareRepo, "remote", "set-url", "origin", repoURL)
+		if out, err := gitCmd("-C", bareRepo, "config", "remote.origin.url", repoURL); err != nil { //nolint:contextcheck // safety: finish mirror metadata under its lock if the caller disconnects; gitCmd bounds the operation.
+			http.Error(w, fmt.Sprintf("configure mirror origin failed: %s\n%s", err, out), http.StatusInternalServerError)
+			return
+		}
 		enableSHAFetch(bareRepo)
 	} else {
 		enableSHAFetch(bareRepo)
@@ -2336,11 +2339,11 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	repoNamesMu.Unlock()
 
 	bareRepo := filepath.Join(repoDir, hash+".git")
+	lock := repoLock(hash)
+	lock.Lock()
+	defer lock.Unlock()
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		lock := repoLock(hash)
-		lock.Lock()
-		defer lock.Unlock()
 
 		// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
@@ -2357,6 +2360,11 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		bgFetch.markFetched(stateKey(hash))
 	} else {
 		enableSHAFetch(bareRepo)
+	}
+
+	if out, err := gitCmd("-C", bareRepo, "config", "remote.origin.url", repoURL); err != nil { //nolint:contextcheck // safety: finish mirror metadata under its lock if the caller disconnects; gitCmd bounds the operation.
+		http.Error(w, fmt.Sprintf("configure mirror origin failed: %s\n%s", err, out), http.StatusInternalServerError)
+		return
 	}
 
 	// #nosec G706 -- the repository name is pattern-validated and the URL is redacted

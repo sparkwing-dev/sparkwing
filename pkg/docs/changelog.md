@@ -28,6 +28,8 @@ unlock.
 
 ### Fixed
 
+- **gitcache:** Configure the origin of seeded mirrors and restore it during registration so later published commits can be fetched
+
 - **orchestrator:** Resolve typed pipeline secrets through the claimed run's controller scope before remote execution
   Rebuild pipeline binaries with the updated SDK to receive this fix.
 

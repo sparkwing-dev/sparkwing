@@ -69,7 +69,14 @@ curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
   "http://sparkwing-cache:8090/git/register?name=gitops&repo=git@github.com:user/repo.git"
 ```
 
+Registration restores the mirror's `origin` URL from the validated repository
+URL, including mirrors created by an earlier seed without an origin. A failed
+origin configuration returns an error instead of reporting a usable mirror.
+
 ### Seeding (no SSH required)
+
+A new seeded mirror records the repository URL as its origin so later refreshes
+can fetch published commits when upstream access is available.
 
 If the cache doesn't have SSH access, seed from a machine that does:
 

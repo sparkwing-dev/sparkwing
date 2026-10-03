@@ -542,6 +542,9 @@ func TestSyncSeed_ImportsOnlyRequestedWorkspaceRef(t *testing.T) {
 	seed(true)
 
 	bareRepo := filepath.Join(repoDir, repoHash("https://git.example.com/acme/widgets.git")+".git")
+	if got := strings.TrimSpace(runGit(t, bareRepo, "config", "--get", "remote.origin.url")); got != "https://git.example.com/acme/widgets.git" {
+		t.Fatalf("seed origin = %q", got)
+	}
 	runGit(t, bareRepo, "cat-file", "-e", wanted+"^{commit}")
 	workspaceRefs := strings.Fields(runGit(t, bareRepo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
 	if len(workspaceRefs) != 1 || !strings.HasSuffix(workspaceRefs[0], "/"+wanted) {
@@ -555,6 +558,14 @@ func TestSyncSeed_ImportsOnlyRequestedWorkspaceRef(t *testing.T) {
 	}
 	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", private+"^{commit}").CombinedOutput(); err == nil {
 		t.Fatalf("private commit was imported unexpectedly: %s", out)
+	}
+	runGit(t, bareRepo, "config", "url.file://"+src+".insteadOf", "https://git.example.com/acme/widgets.git")
+	if out, err := mirrorFetch(time.Second*10, bareRepo); err != nil {
+		t.Fatalf("refresh seeded mirror: %v: %s", err, out)
+	}
+	branch := strings.TrimSpace(runGit(t, src, "symbolic-ref", "HEAD"))
+	if got := strings.TrimSpace(runGit(t, bareRepo, "rev-parse", branch)); got != private {
+		t.Fatalf("refreshed branch = %s, want upstream %s", got, private)
 	}
 }
 
@@ -1274,6 +1285,41 @@ func TestGitRegisterValidatesTheName(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("register name %q = %d, want 400", name, resp.StatusCode)
 		}
+	}
+}
+
+func TestGitRegisterRepairsSeededMirrorOrigin(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing-origin=%v", existing), func(t *testing.T) {
+			srv := newTestServer(t, "s3cret")
+			isolateRepoNames(t)
+			repoURL := "https://example.invalid/acme/widgets.git"
+			bareRepo := filepath.Join(repoDir, repoHash(repoURL)+".git")
+			runGit(t, bareRepo, "init", "--bare")
+			if existing {
+				runGit(t, bareRepo, "remote", "add", "origin", repoURL)
+			}
+			if code := registerName(t, srv, sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL, "s3cret"); code != http.StatusOK {
+				t.Fatalf("registration = %d, want 200", code)
+			}
+			if got := strings.TrimSpace(runGit(t, bareRepo, "config", "--get", "remote.origin.url")); got != repoURL {
+				t.Fatalf("registered origin = %q, want %q", got, repoURL)
+			}
+		})
+	}
+}
+
+func TestGitRegisterReportsOriginConfigFailure(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+	isolateRepoNames(t)
+	repoURL := "https://example.invalid/acme/widgets.git"
+	bareRepo := filepath.Join(repoDir, repoHash(repoURL)+".git")
+	runGit(t, bareRepo, "init", "--bare")
+	if err := os.WriteFile(filepath.Join(bareRepo, "config.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := registerName(t, srv, sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL, "s3cret"); code != http.StatusInternalServerError {
+		t.Fatalf("registration with locked config = %d, want 500", code)
 	}
 }
 
