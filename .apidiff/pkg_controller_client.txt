@@ -483,6 +483,3 @@ type WaiterResolution struct {
 	QueueLength         int
 	Holders             []WaiterHolder
 }
-
-# methods on un-declared receiver types (likely a bug)
-func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error)
