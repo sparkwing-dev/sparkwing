@@ -60,20 +60,35 @@ var (
 	proxyMaxAge   = 7 * 24 * time.Hour
 	proxyClient   = &http.Client{Timeout: 60 * time.Second}
 
-	proxyKeyLocks   = map[string]*sync.RWMutex{}
+	proxyKeyLocks   = map[string]*proxyLockEntry{}
 	proxyKeyLocksMu sync.Mutex
 
 	proxyPublicBase         string
 	proxyTrustForwardedHost bool
 )
 
-func proxyKeyLock(key string) *sync.RWMutex {
+type proxyLockEntry struct {
+	mutex sync.RWMutex
+	users int
+}
+
+func proxyKeyLock(key string) (*sync.RWMutex, func()) {
 	proxyKeyLocksMu.Lock()
-	defer proxyKeyLocksMu.Unlock()
-	if _, ok := proxyKeyLocks[key]; !ok {
-		proxyKeyLocks[key] = &sync.RWMutex{}
+	entry := proxyKeyLocks[key]
+	if entry == nil {
+		entry = &proxyLockEntry{}
+		proxyKeyLocks[key] = entry
 	}
-	return proxyKeyLocks[key]
+	entry.users++
+	proxyKeyLocksMu.Unlock()
+	return &entry.mutex, func() {
+		proxyKeyLocksMu.Lock()
+		defer proxyKeyLocksMu.Unlock()
+		entry.users--
+		if entry.users == 0 {
+			delete(proxyKeyLocks, key)
+		}
+	}
 }
 
 func initProxy() {
@@ -116,7 +131,8 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := proxyCacheKey(registryName, remotePath, r.Header.Get("Accept"))
-	lock := proxyKeyLock(key)
+	lock, release := proxyKeyLock(key)
+	defer release()
 
 	lock.RLock()
 	if served := proxyServeFromCache(w, r, registryName, key); served {

@@ -88,8 +88,9 @@ func enforceProxyCap() (int, int64) {
 		if total-freed <= proxyMaxBytes {
 			break
 		}
-		lock := proxyKeyLock(e.key)
+		lock, release := proxyKeyLock(e.key)
 		if !lock.TryLock() {
+			release()
 			continue
 		}
 		for _, ext := range []string{".meta", ".body"} {
@@ -99,6 +100,7 @@ func enforceProxyCap() (int, int64) {
 			}
 		}
 		lock.Unlock()
+		release()
 		evicted++
 		freed += e.bytes
 	}
