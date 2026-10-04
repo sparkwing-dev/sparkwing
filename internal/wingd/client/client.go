@@ -403,6 +403,9 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 				opts.observeDialFailure()
 			}
 			lastDial = derr
+			if err := ctx.Err(); err != nil {
+				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
+			}
 			if socketDeadline.IsZero() || !time.Now().Before(socketDeadline) {
 				releaseStart()
 				releaseStart = func() {}
@@ -452,6 +455,9 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 				}
 				predecessorDeadline = time.Time{}
 				electionWait.reset()
+				if err := ctx.Err(); err != nil {
+					return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
+				}
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
 					return spawnFailed(opts.Home, cl.sock, serr, lastDial)
 				}
