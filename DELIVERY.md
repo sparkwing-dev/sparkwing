@@ -110,12 +110,16 @@ file. Other syntax and workflow checks remain active.
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
   build. The race command can run two package binaries while each keeps
-  `GOMAXPROCS=1`. The full Go suite uses a 25-minute per-package timeout;
+  `GOMAXPROCS=1`. On a four-core single-tenant host, the ordinary and
+  PostgreSQL commands use the same one-thread, two-package bounds, so the
+  overlapping commands allow four Go runtime threads rather than six.
+  This corrects execution accounting; fitting the whole gate deadline and
+  improving cold-start latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
   in `pkg/controller` or `pkg/store` while the active tests had run for 0s.
   The 25-minute value matches the existing `store-postgres` command. Lint waits
   for both Go suites. The conditional PostgreSQL
-  suite waits for the full Go suite, then uses its released one-core slot while
+  suite waits for the full Go suite, then uses its released two-package capacity while
   the race suite continues. Machines with one to three or more than four
   logical CPUs retain their existing dependency schedule and Go parallelism.
   `pkg/store` is not among the gate's race targets. It measures 2148 s under

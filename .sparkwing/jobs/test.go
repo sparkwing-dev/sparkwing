@@ -38,6 +38,9 @@ func (p *Test) run(ctx context.Context) error {
 const productGoTestTimeout = "25m"
 
 func testGoCommand(h hostShape) string {
+	if h.cpus == overlappedGoSuiteCPUs && h.singleTenant {
+		return goCommandWithLimits(1, 2, "test", "-timeout "+productGoTestTimeout+" ./...")
+	}
 	return boundedGoCommand(h, "test", "-timeout "+productGoTestTimeout+" ./...")
 }
 

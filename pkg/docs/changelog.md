@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.
 - **Integration checks:** Build the MinIO fixture from pinned upstream source instead of pulling an unavailable image.
 - **Dependency proxy:** Retire inactive per-key locks after requests and eviction complete.
 

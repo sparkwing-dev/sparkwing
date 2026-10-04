@@ -255,6 +255,9 @@ func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 }
 
 func storePostgresGoCommand(h hostShape) string {
+	if h.cpus == overlappedGoSuiteCPUs && h.singleTenant {
+		return goCommandWithLimits(1, 2, "test", "-timeout 25m -count=1 ./pkg/store/...")
+	}
 	return boundedGoCommand(h, "test", "-timeout 25m -count=1 ./pkg/store/...")
 }
 
