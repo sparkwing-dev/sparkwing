@@ -408,7 +408,11 @@ func (h *Harness) finishActor(a *actor, force bool) error {
 	select {
 	case <-a.scanned:
 	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", errActorDrain, ctx.Err())
+		select {
+		case <-a.scanned:
+		default:
+			return fmt.Errorf("%w: %w", errActorDrain, ctx.Err())
+		}
 	}
 	_ = a.stdout.Close()
 	h.mu.Lock()
