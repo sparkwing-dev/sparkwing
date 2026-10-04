@@ -366,15 +366,6 @@ func waitForListenerOrExit(addr string, exited <-chan struct{}, timeout time.Dur
 	return fmt.Errorf("failed to accept connections within %s", timeout)
 }
 
-func bannerLine() string {
-	const n = 60
-	buf := make([]byte, n)
-	for i := range buf {
-		buf[i] = '-'
-	}
-	return string(buf)
-}
-
 func applyDashboardProfile(ctx context.Context, opts *localws.Options, profileName string) error {
 	if profileName == "" {
 		return nil

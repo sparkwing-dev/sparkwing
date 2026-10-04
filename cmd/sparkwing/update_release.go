@@ -52,15 +52,6 @@ func manifestSignedByTrustSet(publicKeys []ed25519.PublicKey, manifest, manifest
 	return releaseasset.ManifestSignedBy(publicKeys, manifest, manifestSig)
 }
 
-func verifyReleaseAssetWithTrustSet(publicKeys []ed25519.PublicKey, manifest, manifestSig []byte, assetName string, asset, assetSig []byte) (verifiedReleaseAsset, error) {
-	target, err := releaseasset.ParseName(assetName)
-	if err != nil {
-		return verifiedReleaseAsset{}, err
-	}
-	verified, err := releaseasset.Verify(publicKeys, manifest, manifestSig, target, asset, assetSig)
-	return fromSharedVerified(verified), err
-}
-
 func manifestDigest(manifest []byte, assetName string) (string, error) {
 	return releaseasset.ManifestDigest(manifest, assetName)
 }

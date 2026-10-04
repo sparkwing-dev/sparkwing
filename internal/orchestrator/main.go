@@ -231,8 +231,8 @@ func Main() {
 	}
 
 	runCtx := context.Background()
-	stopParentGuard := func() {}
 	if opts.Fleet {
+		var stopParentGuard func()
 		runCtx, stopParentGuard, err = fleet.JoinParentGuard(runCtx,
 			os.Getenv("SPARKWING_FLEET_PARENT_GUARD"), os.Getenv("SPARKWING_FLEET_PARENT_TOKEN"))
 		if err != nil {

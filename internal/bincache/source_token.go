@@ -289,8 +289,6 @@ func plainToken(tok string) bool {
 	return true
 }
 
-const credentialFD = 3
-
 // safety: The pipe answers only git get requests; store and erase persist nothing, and ambient helpers are cleared.
 const credentialHelper = `!f() { test "$1" = get || return 0; IFS= read -r u <&3 && IFS= read -r p <&3 && printf '%s\n%s\n' "$u" "$p"; }; f`
 

@@ -66,6 +66,7 @@ func (g *goTypes) load(dir string) (map[string]goStruct, error) {
 		return nil, fmt.Errorf("package dir %s: %w", dir, err)
 	}
 	fset := token.NewFileSet()
+	//lint:ignore SA1019 Schema generation enumerates source declarations across all build tags without loading target-specific packages.
 	pkgs, err := parser.ParseDir(fset, abs, func(fi os.FileInfo) bool {
 		return !strings.HasSuffix(fi.Name(), "_test.go")
 	}, 0)

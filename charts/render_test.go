@@ -2004,21 +2004,6 @@ func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
 	}
 }
 
-func envSecretRef(t *testing.T, rendered, envName string) renderedSecretKeyRef {
-	t.Helper()
-	for _, env := range runnerContainer(t, rendered).Env {
-		if env.Name != envName {
-			continue
-		}
-		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
-			t.Fatalf("%s is not a secretKeyRef: %+v", envName, env)
-		}
-		return *env.ValueFrom.SecretKeyRef
-	}
-	t.Fatalf("%s env missing:\n%s", envName, rendered)
-	return renderedSecretKeyRef{}
-}
-
 // The runner runs team code, so it holds no cache operator token; it asks the
 // controller for a per-run grant instead.
 func TestRunnerCarriesNoCacheToken(t *testing.T) {

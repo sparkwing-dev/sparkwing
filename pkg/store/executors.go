@@ -1395,22 +1395,6 @@ SELECT claim_principal, claim_token_prefix, claim_executor, claim_reservation, c
 	return nil
 }
 
-func executorResourcesFit(e Executor, usedCores float64, usedMemory int64, charge ExecutorResource) bool {
-	if e.Budget.Cores > 0 && usedCores+charge.Cores > e.Budget.Cores {
-		return false
-	}
-	if e.Budget.MemoryBytes > 0 && usedMemory+charge.MemoryBytes > e.Budget.MemoryBytes {
-		return false
-	}
-	if e.HeadroomReported && e.Headroom.Cores >= 0 && charge.Cores > e.Headroom.Cores {
-		return false
-	}
-	if e.HeadroomReported && e.Headroom.MemoryBytes >= 0 && charge.MemoryBytes > e.Headroom.MemoryBytes {
-		return false
-	}
-	return true
-}
-
 func (s *Store) executorNodeCharge(ctx context.Context, tx *storeTx, n *Node) (ExecutorResource, error) {
 	return nodeChargeTx(ctx, tx, n.RunID, n.NodeID)
 }

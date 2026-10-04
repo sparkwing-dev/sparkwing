@@ -151,12 +151,6 @@ func (s *triggerSpy) requests() []string {
 	return append([]string(nil), s.reqs...)
 }
 
-func (s *triggerSpy) seedStats() (int, []string, []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.seedBodyBytes, append([]string(nil), s.seedRepoValues...), append([]string(nil), s.seedSHAValues...)
-}
-
 func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

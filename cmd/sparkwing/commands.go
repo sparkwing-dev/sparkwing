@@ -480,10 +480,6 @@ func splitCommandsMarkdown(cmds []CommandJSON) (map[string]string, error) {
 	return files, nil
 }
 
-func writeSplitMarkdown(dir string, commands []CommandJSON) error {
-	return writeSplitMarkdownOutput(dir, commands, "plain")
-}
-
 func writeSplitMarkdownOutput(dir string, cmds []CommandJSON, output string) error {
 	files, err := splitCommandsMarkdown(cmds)
 	if err != nil {

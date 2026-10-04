@@ -678,14 +678,6 @@ func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlig
 	}
 }
 
-func claimGenerationOf(ctx context.Context, st *store.Store, id string) int64 {
-	seq, err := st.TriggerClaimGeneration(ctx, id)
-	if err != nil {
-		return 0
-	}
-	return seq
-}
-
 type inFlightSet struct {
 	mu  sync.Mutex
 	ids map[string]struct{}

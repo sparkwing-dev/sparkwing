@@ -467,14 +467,6 @@ func (s *Server) planAppend(root *os.Root, runID, nodeID string, rt *runTotal, b
 	return appendPlan{write: body}
 }
 
-func nodeSize(root *os.Root, name string) int64 {
-	info, err := root.Stat(name)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
-}
-
 func runTotalBytes(root *os.Root, runID string) int64 {
 	total, _ := logTreeUsage(root, runID)
 	return total
