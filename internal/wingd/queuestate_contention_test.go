@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestDeepQueueEstimateLeavesDaemonLockAvailable(t *testing.T) {
@@ -30,26 +30,28 @@ func TestDeepQueueEstimateLeavesDaemonLockAvailable(t *testing.T) {
 		d.byRun[id] = &conn{expectedDurationMS: int64(30_000 + (i%7)*20_000)}
 	}
 	entered := make(chan struct{})
+	release := make(chan struct{})
 	var once sync.Once
-	d.cfg.Now = func() time.Time {
-		once.Do(func() { close(entered) })
-		return time.Now()
-	}
+	releaseEstimate := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(releaseEstimate)
 	finished := make(chan int, 1)
-	go func() { finished <- len(queueState(t, d).Waiters) }()
-	<-entered
-	acquired := make(chan time.Duration, 1)
-	start := time.Now()
 	go func() {
-		d.mu.Lock()
-		d.mu.Unlock() //nolint:staticcheck // This empty critical section measures contention for the daemon lock.
-		acquired <- time.Since(start)
+		qs := d.readQueueStateWithEstimator(func(qs *wingwire.QueueState, snap admission.Snapshot) {
+			close(entered)
+			<-release
+			annotateETA(qs, snap)
+			annotateSemaphoreETA(qs, snap)
+		})
+		finished <- len(qs.Waiters)
 	}()
-	if delay := <-acquired; delay > 100*time.Millisecond {
-		t.Errorf("queue calculation blocked unrelated daemon work for %s", delay)
-	} else {
-		t.Logf("daemon lock acquired in %s during queue calculation", delay)
+	<-entered
+	if !d.mu.TryLock() {
+		releaseEstimate()
+		<-finished
+		t.Fatal("queue estimator retained the daemon mutex")
 	}
+	d.mu.Unlock()
+	releaseEstimate()
 	if waiters := <-finished; waiters != 4000 {
 		t.Fatalf("waiters = %d, want 4000", waiters)
 	}
