@@ -1142,54 +1142,54 @@ func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
 }
 
 func (f logFilter) apply(data []byte) []byte {
-	text := string(data)
-	trailingNL := strings.HasSuffix(text, "\n")
-	text = strings.TrimSuffix(text, "\n")
-	type line struct {
-		text       string
-		terminated bool
-	}
-	var lines []line
-	if len(data) > 0 {
-		parts := strings.Split(text, "\n")
-		lines = make([]line, len(parts))
-		for i, part := range parts {
-			lines[i] = line{text: part, terminated: i < len(parts)-1 || trailingNL}
-		}
-	}
-
-	if f.grep != "" {
-		kept := lines[:0:0]
-		for _, l := range lines {
-			if strings.Contains(l.text, f.grep) {
-				kept = append(kept, l)
-			}
-		}
-		lines = kept
-	}
+	a, b := 1, 0
 	if f.lines != "" {
-		a, b, _ := parseLinesRange(f.lines)
-		lines = sliceRange(lines, a, b)
+		a, b, _ = parseLinesRange(f.lines)
 	}
-	if f.tail > 0 && len(lines) > f.tail {
-		lines = lines[len(lines)-f.tail:]
-	} else if f.head > 0 && len(lines) > f.head {
-		lines = lines[:f.head]
+	needle := []byte(f.grep)
+	walk := func(visit func([]byte)) {
+		matched := 0
+		for rest := data; len(rest) > 0; {
+			end := bytes.IndexByte(rest, '\n')
+			line, text := rest, rest
+			if end >= 0 {
+				line, text, rest = rest[:end+1], rest[:end], rest[end+1:]
+			} else {
+				rest = nil
+			}
+			if !bytes.Contains(text, needle) {
+				continue
+			}
+			matched++
+			if matched < a {
+				continue
+			}
+			if b > 0 && matched > b {
+				break
+			}
+			visit(line)
+		}
 	}
-	if len(lines) == 0 {
+	total := 0
+	walk(func([]byte) { total++ })
+	if total == 0 {
 		return nil
 	}
-	var out strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			out.WriteByte('\n')
+	first, last := 1, total
+	if f.tail > 0 && total > f.tail {
+		first = total - f.tail + 1
+	} else if f.head > 0 && total > f.head {
+		last = f.head
+	}
+	var out []byte
+	selected := 0
+	walk(func(line []byte) {
+		selected++
+		if selected >= first && selected <= last {
+			out = append(out, line...)
 		}
-		out.WriteString(line.text)
-	}
-	if lines[len(lines)-1].terminated {
-		out.WriteByte('\n')
-	}
-	return []byte(out.String())
+	})
+	return out
 }
 
 func parseLinesRange(spec string) (int, int, error) {
@@ -1209,19 +1209,6 @@ func parseLinesRange(spec string) (int, int, error) {
 		}
 	}
 	return a, b, nil
-}
-
-func sliceRange[T any](lines []T, a, b int) []T {
-	if a < 1 {
-		a = 1
-	}
-	if a > len(lines) {
-		return nil
-	}
-	if b == 0 || b > len(lines) {
-		b = len(lines)
-	}
-	return lines[a-1 : b]
 }
 
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {

@@ -470,6 +470,8 @@ bytes as a synthetic Git commit, requires the bundle seed to finish before it
 admits the trigger, and prints the base SHA, snapshot SHA, file count, and
 bundle size. The source checkout's HEAD, refs, index, and object database stay
 unchanged. The bundle limit is 500 MiB.
+Direct clones and source bundles require `.sparkwing` to be a directory inside
+the materialized checkout. A symlink at `.sparkwing` is refused before compilation.
 The remote checkout is clean and detached at the synthetic SHA; file contents
 match the laptop, but staged-versus-unstaged state is intentionally flattened.
 Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories

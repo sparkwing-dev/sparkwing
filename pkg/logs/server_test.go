@@ -76,6 +76,13 @@ func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
 		{name: "tail-final", data: "first\nsecond", filter: logs.ReadFilter{Tail: 1}, want: "second"},
 		{name: "empty-selection", data: "first\nsecond", filter: logs.ReadFilter{Grep: "absent"}, want: ""},
 		{name: "single-empty-line", data: "\n", filter: logs.ReadFilter{Head: 1}, want: "\n"},
+		{name: "tail-trims-before-head", data: "first\nsecond\nthird", filter: logs.ReadFilter{Head: 1, Tail: 2}, want: "second\nthird"},
+		{name: "head-trims-when-tail-does-not", data: "first\nsecond\nthird", filter: logs.ReadFilter{Head: 1, Tail: 3}, want: "first\n"},
+		{name: "range-after-grep", data: "hit one\nmiss\nhit two\nhit three", filter: logs.ReadFilter{Grep: "hit", Lines: "2:3", Tail: 1}, want: "hit three"},
+		{name: "open-range-after-grep", data: "hit one\nmiss\nhit two\nhit three\n", filter: logs.ReadFilter{Grep: "hit", Lines: "2:", Head: 1}, want: "hit two\n"},
+		{name: "newline-is-not-line-content", data: "first\nsecond\n", filter: logs.ReadFilter{Grep: "\n"}, want: ""},
+		{name: "blank-lines", data: "\n\n\n", filter: logs.ReadFilter{Lines: "2:2"}, want: "\n"},
+		{name: "range-past-end", data: "first\nsecond", filter: logs.ReadFilter{Lines: "3:"}, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := c.Append(ctx, "run-filter", tc.name, []byte(tc.data)); err != nil {
@@ -89,6 +96,38 @@ func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
 				t.Errorf("filtered bytes = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLogs_HeadOfManyEmptyLinesBoundsAllocation(t *testing.T) {
+	const size = 1 << 20
+	root := t.TempDir()
+	s, err := logs.New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "runs", "run-head")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "node.log"), bytes.Repeat([]byte{'\n'}, size), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := s.Handler()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/logs/run-head/node?head=1", nil)
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	handler.ServeHTTP(w, req)
+	runtime.ReadMemStats(&after)
+	if w.Code != http.StatusOK || w.Body.String() != "\n" {
+		t.Fatalf("head response = %d %q", w.Code, w.Body.String())
+	}
+	allocated := after.TotalAlloc - before.TotalAlloc
+	t.Logf("head allocated %d bytes for %d bytes of empty lines", allocated, size)
+	if allocated > 10*size {
+		t.Fatalf("head allocated %d bytes for %d bytes of empty lines", allocated, size)
 	}
 }
 

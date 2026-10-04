@@ -96,9 +96,5 @@ func FetchSourceBundleDirect(ctx context.Context, controllerURL, grant, runID, k
 			return "", err
 		}
 	}
-	candidate := filepath.Join(checkout, ".sparkwing")
-	if info, err := os.Stat(candidate); err != nil || !info.IsDir() {
-		return "", errors.New("source bundle has no .sparkwing directory")
-	}
-	return candidate, nil
+	return directSparkwingDir(checkout)
 }
