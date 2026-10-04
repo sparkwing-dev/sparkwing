@@ -52,8 +52,8 @@ func TestUnderTempDir_CoversSharedTmpAsWellAsTMPDIR(t *testing.T) {
 			t.Errorf("underTempDir(%q) = false, want true", p)
 		}
 	}
-	home, _ := os.UserHomeDir()
-	if home != "" && underTempDir(filepath.Join(home, "code", "app")) {
-		t.Errorf("a checkout under the home directory is not scratch")
+	permanent := filepath.Join(string(filepath.Separator), "sparkwing-permanent-checkout", "code", "app")
+	if underTempDir(permanent) {
+		t.Errorf("underTempDir(%q) = true, want false", permanent)
 	}
 }
