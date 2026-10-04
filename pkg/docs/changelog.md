@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Integration checks:** Build the MinIO fixture from pinned upstream source instead of pulling an unavailable image.
 - **Dependency proxy:** Retire inactive per-key locks after requests and eviction complete.
 
 - **Scaffolding:** Align source-build fallback and Kubernetes fixture SDK pins with v0.66.5

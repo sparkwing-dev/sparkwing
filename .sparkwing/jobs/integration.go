@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,7 +20,7 @@ func (Integration) ShortHelp() string {
 }
 
 func (Integration) Help() string {
-	return "Spins up Postgres + MinIO in Docker, waits for readiness via a Verify gate, " +
+	return "Builds a local MinIO fixture image from a pinned upstream source commit, then spins up Postgres + MinIO in Docker, waits for readiness via a Verify gate, " +
 		"runs the env-gated integration tests (SPARKWING_TEST_PG_URL + SPARKWING_S3_* ) with " +
 		"SPARKWING_REQUIRE_PG=1, re-runs the Postgres-gated tests verbosely and fails on any " +
 		"reported skip, " +
@@ -28,13 +29,15 @@ func (Integration) Help() string {
 }
 
 const (
-	itPGName    = "sw-it-pg"
-	itMinioName = "sw-it-minio"
-	itPGPort    = "5433"
-	itMinioPort = "9100"
-	itBucket    = "sw-it"
-	itPGURL     = "postgres://postgres:postgres@localhost:" + itPGPort + "/postgres?sslmode=disable"
-	itS3Endpt   = "http://localhost:" + itMinioPort
+	itMinioCommit = "07c3a429bfed433e49018cb0f78a52145d4bedeb"
+	itMinioImage  = "sparkwing-integration-minio:" + itMinioCommit
+	itPGName      = "sw-it-pg"
+	itMinioName   = "sw-it-minio"
+	itPGPort      = "5433"
+	itMinioPort   = "9100"
+	itBucket      = "sw-it"
+	itPGURL       = "postgres://postgres:postgres@localhost:" + itPGPort + "/postgres?sslmode=disable"
+	itS3Endpt     = "http://localhost:" + itMinioPort
 )
 
 func (Integration) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -53,6 +56,9 @@ func (Integration) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoI
 }
 
 func startFixtures(ctx context.Context) error {
+	if err := buildMinioFixture(ctx); err != nil {
+		return err
+	}
 	_ = run(ctx, "", "docker", "rm", "-f", itPGName, itMinioName)
 	sparkwing.Info(ctx, "starting postgres (%s) on :%s", itPGName, itPGPort)
 	if err := run(ctx, "", "docker", "run", "-d", "--name", itPGName,
@@ -63,10 +69,38 @@ func startFixtures(ctx context.Context) error {
 	sparkwing.Info(ctx, "starting minio (%s) on :%s", itMinioName, itMinioPort)
 	if err := run(ctx, "", "docker", "run", "-d", "--name", itMinioName,
 		"-e", "MINIO_ROOT_USER=minioadmin", "-e", "MINIO_ROOT_PASSWORD=minioadmin",
-		"-p", itMinioPort+":9000", "minio/minio", "server", "/data"); err != nil {
+		"-p", itMinioPort+":9000", itMinioImage, "server", "/data"); err != nil {
 		return fmt.Errorf("start minio: %w", err)
 	}
 	return nil
+}
+
+func buildMinioFixture(ctx context.Context) error {
+	dir, err := os.MkdirTemp("", "sw-it-minio-build-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			sparkwing.Warn(ctx, "remove MinIO build scratch: %v", err)
+		}
+	}()
+	moduleCache, err := exec.CommandContext(ctx, "go", "env", "GOMODCACHE").Output()
+	if err != nil {
+		return fmt.Errorf("locate Go module cache: %w", err)
+	}
+	if err := run(ctx, "", "env", "GOENV=off", "GOBIN=", "GOPATH="+dir, "GOMODCACHE="+strings.TrimSpace(string(moduleCache)), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+runtime.GOARCH, "go", "install", "github.com/minio/minio@"+itMinioCommit); err != nil {
+		return fmt.Errorf("build pinned MinIO: %w", err)
+	}
+	binary := "bin/minio"
+	if runtime.GOOS != "linux" {
+		binary = "bin/linux_" + runtime.GOARCH + "/minio"
+	}
+	dockerfile := "FROM scratch\nCOPY " + binary + " /minio\nENTRYPOINT [\"/minio\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {
+		return err
+	}
+	return run(ctx, "", "docker", "build", "--platform", "linux/"+runtime.GOARCH, "--label", "org.opencontainers.image.source=https://github.com/minio/minio", "--label", "org.opencontainers.image.revision="+itMinioCommit, "-t", itMinioImage, dir)
 }
 
 func fixturesReady(ctx context.Context) error {
