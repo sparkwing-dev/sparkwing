@@ -555,6 +555,10 @@ A route can narrow a field below its route scope. The node dispatch reads
 (`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
 `runs.read`, but fill `env_json` only for an `admin` principal. Every reader
 still gets `redacted_keys`, the names the snapshot dropped as credentials.
+For registered multiline secrets, each complete nonblank line is also masked
+using literal matching. Identical short or common text elsewhere can therefore
+be hidden. CRLF line endings are normalized for line matching; other whitespace
+is retained. Arbitrarily truncated prefixes are not guaranteed to match.
 
 ## Claim ownership
 

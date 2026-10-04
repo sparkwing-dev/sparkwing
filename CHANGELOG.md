@@ -25,6 +25,10 @@ unlock.
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
+### Security
+
+- **Secrets:** Mask complete nonblank lines of registered multiline secrets in subprocess output, direct logs, and structured string attributes
+
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
 
