@@ -55,20 +55,20 @@ func (p *Principal) HasScope(s string) bool {
 // Scope names used throughout the controller. Centralized as
 // constants so a rename is a compile-error not a silent drift.
 const (
-	ScopeRunsRead = "runs.read"
+	ScopeRunsRead = store.ScopeRunsRead
 	// ScopeRunsWrite gates starting new work: POST /api/v1/triggers and
 	// the Git cache refresh. It does not reach an existing run.
-	ScopeRunsWrite = "runs.write"
+	ScopeRunsWrite = store.ScopeRunsWrite
 	// ScopeRunsControl gates acting on a run somebody else started, or on
 	// a schedule: retry, cancel, bounce, release a debug pause, and the
 	// cron writes including firing one now. These are operator actions, so
 	// they are held apart from the scopes a runner carries: a runner
 	// reports state on work it holds and never reaches for another run.
-	ScopeRunsControl  = "runs.control"
+	ScopeRunsControl  = store.ScopeRunsControl
 	ScopeNodesClaim   = "nodes.claim"
-	ScopeLogsRead     = "logs.read"
+	ScopeLogsRead     = store.ScopeLogsRead
 	ScopeLogsWrite    = "logs.write"
-	ScopeTriggersRead = "triggers.read"
+	ScopeTriggersRead = store.ScopeTriggersRead
 	// ScopeTriggersClaim gates the trigger worker lifecycle: claim,
 	// heartbeat, and done. It carries no authority over run or node
 	// state.
@@ -85,12 +85,12 @@ const (
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
 	// Any principal with this scope can resolve any approval. Reads
 	// are covered by runs.read.
-	ScopeApprovalsWrite = "approvals.write"
+	ScopeApprovalsWrite = store.ScopeApprovalsWrite
 	// ScopeTeamAdmin gates administering the principal's own team: its
 	// members, invitations, roles, name, and every runner token it holds.
 	// A team owner holds it. It reaches no other team and no deployment
 	// setting, which is what ScopeAdmin is for.
-	ScopeTeamAdmin = "team.admin"
+	ScopeTeamAdmin = store.ScopeTeamAdmin
 	// ScopeAdmin is the deployment operator's scope. No team membership
 	// grants it.
 	ScopeAdmin = "admin"
@@ -130,24 +130,10 @@ var allScopes = []string{
 	ScopeClaimsLaunch,
 }
 
-// safety: the table is the whole grant a membership carries, and ScopeAdmin
-// is on no row, so no role reaches a deployment setting.
-var roleScopes = map[store.Role][]string{
-	store.RoleReader: {ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead},
-	store.RoleEditor: {
-		ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead,
-		ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite,
-	},
-	store.RoleOwner: {
-		ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead,
-		ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite, ScopeTeamAdmin,
-	},
-}
-
 // ScopesForRole returns the scopes a membership at role carries, or none for
 // an unknown role.
 func ScopesForRole(role store.Role) []string {
-	return slices.Clone(roleScopes[role])
+	return store.ScopesForRole(role)
 }
 
 func validateScopes(scopes []string) error {

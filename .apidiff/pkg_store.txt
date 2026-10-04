@@ -170,6 +170,7 @@ const BusinessEventTeamFrozen = "team.frozen"
 const BusinessEventTeamUnfrozen = "team.unfrozen"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
+func CLITokenScopes(role Role) []string
 type CPUClass struct {
 	Cores       int64
 	MemoryBytes int64
@@ -1869,6 +1870,14 @@ type SchemaRequirement struct {
 	Name    string
 	AddedBy string
 }
+const ScopeApprovalsWrite = "approvals.write"
+const ScopeLogsRead = "logs.read"
+const ScopeRunsControl = "runs.control"
+const ScopeRunsRead = "runs.read"
+const ScopeRunsWrite = "runs.write"
+const ScopeTeamAdmin = "team.admin"
+const ScopeTriggersRead = "triggers.read"
+func ScopesForRole(role Role) []string
 type Secret struct {
 	Name      string
 	Value     string
