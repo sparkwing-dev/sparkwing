@@ -475,6 +475,10 @@ file. Other syntax and workflow checks remain active.
   and rejects skipped tests. Its no-skip selection also includes
   `TestCLITokenMintUsesCommittedMembershipAuthority` in `pkg/controller`,
   retaining the PostgreSQL bearer-token regression for demotion and removal.
+  It also retains both SQL literal regressions, which verify that run filters
+  and secret mutations treat SQL metacharacters as data and preserve team
+  isolation. `sparkwing run integration` runs them through its full `./...`
+  suite against the local PostgreSQL fixture.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
