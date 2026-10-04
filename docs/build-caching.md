@@ -256,6 +256,12 @@ once. Immutable entries carry no upstream URLs and are unaffected.
 
 **Cache policy:**
 
+Cache misses stage upstream bodies on disk and stream metadata rewrites, so
+memory use does not grow with the download size. Staging needs space in the
+cache directory or the operating system's temporary directory. A failed cache
+publication still serves the staged download. A staging or upstream read
+failure returns HTTP 502 and leaves no partial cache entry.
+
 - Immutable content (.tgz, .whl, .gem, .zip, .jar, .apk): cached until the
   max-age cleanup threshold (default 168h / 7 days)
 - Metadata (JSON, HTML): 10-minute TTL, stale-on-error fallback
