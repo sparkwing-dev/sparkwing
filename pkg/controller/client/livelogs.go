@@ -92,6 +92,10 @@ func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, si
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	c.setRunnerIdentity(req)
+	if c.token != "" {
+		req = req.Clone(ctx)
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	client := *c.http
 	client.Timeout = 0
 	resp, err := client.Do(req)
