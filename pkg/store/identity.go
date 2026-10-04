@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1620,7 +1621,8 @@ const (
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
 
 // CreateCLIToken mints a user token for accountID in t's team, carrying
-// scopes and filed under principal, refusing once the member holds
+// the requested scopes allowed by their current role and filed under principal,
+// refusing once the member holds
 // [MaxCLITokensPerMember] live ones. It returns the raw token once. The
 // token is revoked with the member's other tokens when they leave the team
 // or are demoted to reader.
@@ -1656,9 +1658,13 @@ func (t *Tenant) createCLITokenOnce(
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return "", nil, err
 	}
-	if _, err := t.roleTx(ctx, tx, accountID); err != nil {
+	role, err := t.roleTx(ctx, tx, accountID)
+	if err != nil {
 		return "", nil, err
 	}
+	// safety: the membership lock also serializes demotion and removal, so stale requests cannot restore authority.
+	allowed := CLITokenScopes(role)
+	scopes = slices.DeleteFunc(slices.Clone(scopes), func(scope string) bool { return !slices.Contains(allowed, scope) })
 	at := now.UTC().Unix()
 	var live int
 	if err := tx.QueryRowContext(ctx, `

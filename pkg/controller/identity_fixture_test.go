@@ -41,6 +41,7 @@ type identityFixture struct {
 }
 
 type fixtureOpts struct {
+	store     *store.Store
 	license   string
 	key       ed25519.PublicKey
 	configure func(*controller.Server)
@@ -67,11 +68,15 @@ func newIdentityFixture(t *testing.T) *identityFixture {
 
 func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
+	st := o.store
+	if st == nil {
+		var err error
+		st, err = teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
 	}
-	t.Cleanup(func() { _ = st.Close() })
 	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)

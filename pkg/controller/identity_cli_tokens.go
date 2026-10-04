@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -28,7 +27,7 @@ type cliTokenJSON struct {
 }
 
 func cliTokenScopes(role store.Role) []string {
-	return slices.DeleteFunc(ScopesForRole(role), func(s string) bool { return s == ScopeTeamAdmin })
+	return store.CLITokenScopes(role)
 }
 
 func (s *Server) handleCreateCLIToken(w http.ResponseWriter, r *http.Request) {

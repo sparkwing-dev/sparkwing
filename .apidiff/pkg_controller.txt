@@ -326,21 +326,21 @@ type RunRequest struct {
 	RetryOf     string
 }
 const ScopeAdmin = "admin"
-const ScopeApprovalsWrite = "approvals.write"
+const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
 const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsDelete = "logs.delete"
-const ScopeLogsRead = "logs.read"
+const ScopeLogsRead = store.ScopeLogsRead
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"
-const ScopeRunsControl = "runs.control"
-const ScopeRunsRead = "runs.read"
+const ScopeRunsControl = store.ScopeRunsControl
+const ScopeRunsRead = store.ScopeRunsRead
 const ScopeRunsState = "runs.state"
-const ScopeRunsWrite = "runs.write"
+const ScopeRunsWrite = store.ScopeRunsWrite
 const ScopeSecretsRead = "secrets.read"
-const ScopeTeamAdmin = "team.admin"
+const ScopeTeamAdmin = store.ScopeTeamAdmin
 const ScopeTriggersClaim = "triggers.claim"
-const ScopeTriggersRead = "triggers.read"
+const ScopeTriggersRead = store.ScopeTriggersRead
 func ScopesForRole(role store.Role) []string
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
 func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error

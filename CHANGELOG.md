@@ -29,6 +29,7 @@ unlock.
 ### Security
 
 - **Billing:** Give each team a separate fraud-warning hold so another team cannot prevent its hold from being recorded
+- **CLI tokens:** Constrain new tokens to the member role held when minting commits, so a concurrent demotion cannot restore write access
 
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.

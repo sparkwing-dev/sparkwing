@@ -1,11 +1,15 @@
 package controller_test
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type mintedCLI struct {
@@ -191,5 +195,66 @@ func TestCLITokensArePersonal(t *testing.T) {
 	}
 	if cliAuthenticates(f, mine) {
 		t.Error("a revoked CLI token still authenticates")
+	}
+}
+
+func TestCLITokenMintUsesCommittedMembershipAuthority(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			rawLicense, key := multiTeamLicense(t)
+			opts := fixtureOpts{license: rawLicense, key: key}
+			if dialect == "postgres" {
+				opts.store = openPostgresBindingStore(t)
+			}
+			f := newIdentityFixtureWith(t, opts)
+			owner, editor, reader := teamOf(f)
+			for _, who := range []signedIn{owner, editor, reader} {
+				token := mintCLI(f, who)
+				if slices.Contains(token.Scopes, controller.ScopeTeamAdmin) {
+					t.Fatal("CLI token carries team administration")
+				}
+				if got := slices.Contains(token.Scopes, controller.ScopeRunsWrite); got != (who.id != reader.id) {
+					t.Fatalf("ordinary member authority mismatch: write=%v", got)
+				}
+			}
+			stale := controller.ScopesForRole(store.RoleEditor)
+			original := slices.Clone(stale)
+			if code := f.call("PATCH", "/api/v1/team/members/"+editor.id, owner.auth, map[string]string{"role": "reader"}, nil); code != http.StatusNoContent {
+				t.Fatalf("demote=%d", code)
+			}
+			tenant, err := f.store.ForTeam(context.Background(), store.Team(editor.team))
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, tok, err := tenant.CreateCLIToken(context.Background(), "pending-editor", stale, editor.id, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(stale, original) {
+				t.Fatal("mint mutated caller scopes")
+			}
+			if !slices.Equal(tok.Scopes, controller.ScopesForRole(store.RoleReader)) {
+				t.Errorf("post-demotion token scopes=%v", tok.Scopes)
+			}
+			if code, _ := cliTrigger(f, raw); code != http.StatusForbidden {
+				t.Errorf("post-demotion bearer write=%d, want403", code)
+			}
+			if code := f.call("GET", "/api/v1/runs", "Bearer "+raw, nil, nil); code != http.StatusOK {
+				t.Errorf("reader bearer read=%d", code)
+			}
+			subset, subtok, err := tenant.CreateCLIToken(context.Background(), "reader-subset", []string{controller.ScopeLogsRead}, editor.id, time.Now())
+			if err != nil || subset == "" || !slices.Equal(subtok.Scopes, []string{controller.ScopeLogsRead}) {
+				t.Fatalf("requested subset widened: %v error=%v", subtok, err)
+			}
+			if code := f.call("DELETE", "/api/v1/team/members/"+editor.id, owner.auth, nil, nil); code != http.StatusNoContent {
+				t.Fatalf("remove=%d", code)
+			}
+			if raw, tok, err := tenant.CreateCLIToken(context.Background(), "pending-removed", stale, editor.id, time.Now()); err == nil || raw != "" || tok != nil {
+				t.Fatal("removed member minted a token")
+			}
+			if code := f.call("GET", "/api/v1/runs", "Bearer "+raw, nil, nil); code != http.StatusUnauthorized {
+				t.Errorf("removed member bearer=%d", code)
+			}
+		})
 	}
 }
