@@ -3,6 +3,7 @@
 package wingd_test
 
 import (
+	"io"
 	"os/exec"
 	"syscall"
 	"testing"
@@ -25,15 +26,23 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 		StallWindow:      60 * time.Millisecond,
 	})
 
-	holderProcess := exec.Command("sh", "-c", "while :; do :; done & child=$!; wait $child")
+	holderProcess := exec.Command("sh", "-c", "{ printf r; while :; do :; done; } & child=$!; wait $child")
 	holderProcess.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ready, err := holderProcess.StdoutPipe()
+	if err != nil {
+		t.Fatalf("create child readiness pipe: %v", err)
+	}
 	if err := holderProcess.Start(); err != nil {
 		t.Fatalf("start holder process: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = syscall.Kill(-holderProcess.Process.Pid, syscall.SIGKILL)
-		_, _ = holderProcess.Process.Wait()
+		_ = holderProcess.Wait()
 	})
+
+	if _, err := io.ReadFull(ready, make([]byte, 1)); err != nil {
+		t.Fatalf("wait for active child: %v", err)
+	}
 
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, semHostReq("active-child", "worker", holderProcess.Process.Pid, "deploy"))
