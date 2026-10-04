@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -146,11 +147,12 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 
 func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	s := storetest.Open(t)
+	const lease = 10 * time.Second
 	// safety: the holder is expired by hand below, so a lease long enough to
 	// outlive a slow Postgres round trip keeps W queued on a loaded box.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
-		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue, Lease: 10 * time.Second,
+		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue, Lease: lease,
 	})
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rW/n", RunID: "rW", NodeID: "n",
@@ -158,7 +160,6 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("W: want Queued, got %s", r.Kind)
 	}
-	started := time.Now()
 	updated, err := s.DB().Exec(storetest.Rebind(s,
 		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
@@ -171,10 +172,18 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	} else if rows != 1 {
 		t.Fatalf("expired holder rows = %d, want 1", rows)
 	}
-	if r := acquireT(t, s, store.AcquireSlotRequest{
+	createLiveRunT(t, s, "rX")
+	// safety: this test budget detects lease-scale stalls while allowing database overhead.
+	ctx, cancel := context.WithTimeout(ctxT(t), lease/2)
+	defer cancel()
+	r, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rX/n", RunID: "rX", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
-	}); r.Kind != store.AcquireQueued {
+	})
+	if err != nil {
+		t.Fatalf("X: acquire: %v", err)
+	}
+	if r.Kind != store.AcquireQueued {
 		t.Fatalf("X: want Queued (FIFO; must not barge W), got %s", r.Kind)
 	}
 	if got := activeHolders(t, s, "k"); got != 0 {
@@ -186,9 +195,6 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}
 	if len(state.Waiters) != 2 || state.Waiters[0].RunID != "rW" || state.Waiters[1].RunID != "rX" {
 		t.Fatalf("waiter order = %+v, want rW then rX", state.Waiters)
-	}
-	if elapsed := time.Since(started); promptnessPinned(s) && elapsed >= 60*time.Millisecond {
-		t.Fatalf("expired-holder FIFO check took %v, want less than 60ms", elapsed)
 	}
 }
 
@@ -261,12 +267,4 @@ func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
 	if len(r.SupersededIDs) != 1 || r.SupersededIDs[0] != "rB/n" {
 		t.Fatalf("D: SupersededIDs = %v, want [rB/n] (must supersede the canceller)", r.SupersededIDs)
 	}
-}
-
-// safety: the 60 ms budgets prove an expired holder is reassigned without
-// waiting out its lease, a dialect-independent property SQLite pins in
-// microseconds; Postgres over TCP on a loaded one-core runner took 64 ms for
-// the same statements, so its pass checks the outcomes only.
-func promptnessPinned(s *store.Store) bool {
-	return s.Dialect() == store.DialectSQLite
 }
