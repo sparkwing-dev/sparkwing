@@ -483,6 +483,7 @@ controller:
     - name: SPARKWING_REQUIRE_AUTH
       value: "true"
 web:
+  requireLogin: true
   tokenSecret:
     name: sparkwing-token
 sparkwing-runner-bundle:
@@ -490,6 +491,8 @@ sparkwing-runner-bundle:
     tokenSecret:
       name: sparkwing-token
   cache:
+    tokenSecret:
+      name: sparkwing-cache-token
     allowUnauthenticated: false
   logs:
     allowUnauthenticated: false
@@ -580,8 +583,14 @@ token_response="$(curl --fail --silent --show-error --max-time 10 \
 admin_token="$(jq -er '.token' <<<"$token_response")"
 [[ "$admin_token" == sw* ]] || die "controller returned an invalid bootstrap token"
 
+web_password="$(openssl rand -base64 32)"
+api_post_json "/api/v1/users" "$(jq -nc --arg password "$web_password" \
+  '{name:"k8s-e2e-web",password:$password,scopes:["admin"]}')" >/dev/null
+
 create_owned_secret sparkwing-token \
   --from-literal="token=$admin_token"
+create_owned_secret sparkwing-cache-token \
+  --from-literal="token=$(openssl rand -base64 32)"
 helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
   --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" --timeout 5m --wait
 kube --namespace "$namespace" wait deployment \
@@ -597,6 +606,9 @@ unauthenticated_status="$(curl --silent --show-error --max-time 5 \
   "http://127.0.0.1:${controller_port}/api/v1/runs")"
 [[ "$unauthenticated_status" == "401" ]] || die "protected controller read returned $unauthenticated_status without a token"
 api_get "/api/v1/runs?limit=1" >/dev/null
+web_session="$(api_post_json "/api/v1/auth/login" "$(jq -nc --arg password "$web_password" \
+  '{username:"k8s-e2e-web",password:$password}')" | jq -er '.session_id')"
+unset web_password
 
 for repository_source in \
   "https://github.com/sparkwing-k8s/" \
@@ -732,18 +744,21 @@ jq -e --arg name "$initial_runner_pod" \
 
 start_forward "$web_service" 80 web
 web_port=$forward_port
+unauthenticated_web_status="$(curl --silent --show-error --max-time 5 \
+  -o /dev/null -w '%{http_code}' "http://127.0.0.1:${web_port}/api/v1/runs")"
+[[ "$unauthenticated_web_status" == "401" ]] || die "protected web read returned $unauthenticated_web_status without a session"
 web_root="$artifact_dir/web-root.html"
 web_static_asset="$artifact_dir/web-static-asset"
-curl --fail --silent --show-error --location --max-time 10 \
+curl --fail --silent --show-error --location --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}/" >"$web_root"
 web_static_path="$(grep -Eo '/_next/static/[^"<> ]+' "$web_root" | sed -n '1p')"
 [[ "$web_static_path" == /_next/static/* ]] || die "web root did not reference a built static asset"
-curl --fail --silent --show-error --location --max-time 10 \
+curl --fail --silent --show-error --location --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}${web_static_path}" >"$web_static_asset"
 [[ -s "$web_static_asset" ]] || die "referenced web static asset was empty"
-curl --fail --silent --show-error --max-time 10 \
+curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}/api/v1/runs/$success_run" | jq -e '.status == "success"' >/dev/null
-curl --fail --silent --show-error --max-time 10 \
+curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}/api/v1/runs/$success_run/logs/prove-controller-runner-logs" | \
   grep -q "sparkwing-k8s-e2e-success run_id=$success_run"
 
@@ -808,7 +823,7 @@ jq -e --arg source_started "$success_started" '
 ' <<<"$retry_nodes" >/dev/null
 retry_output="$(api_get "/api/v1/runs/$retry_run/nodes/prove-controller-runner-logs/output" | jq -er '.')"
 [[ "$retry_output" == "$retry_run" ]] || die "retry node output $retry_output does not match retry run $retry_run"
-curl --fail --silent --show-error --max-time 10 \
+curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}/api/v1/runs/$retry_run/logs/prove-controller-runner-logs" | \
   grep -q "sparkwing-k8s-e2e-success run_id=$retry_run"
 
@@ -838,7 +853,7 @@ controller_port=$forward_port
 start_forward "$web_service" 80 web-reinstall
 web_port=$forward_port
 api_get "/api/v1/runs/$success_run" | jq -e '.status == "success"' >/dev/null
-curl --fail --silent --show-error --max-time 10 \
+curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}/api/v1/runs/$success_run/logs/prove-controller-runner-logs" | \
   grep -q "sparkwing-k8s-e2e-success run_id=$success_run"
 
