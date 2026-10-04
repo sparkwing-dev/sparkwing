@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	backgroundNice    = 10
 	prioDarwinProcess = 4
 	prioDarwinBG      = 0x1000
 )

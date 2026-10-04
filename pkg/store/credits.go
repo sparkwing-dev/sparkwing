@@ -299,11 +299,6 @@ func applyCreditUnitMigration(context.Context, *storeTx) error { return nil }
 
 func applyCreditValueMigration(context.Context, *storeTx) error { return nil }
 
-func wholeCreditSetting(raw string) (int64, bool) {
-	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	return v, err == nil
-}
-
 func duplicateTeamGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
 	rows, err := q.QueryContext(ctx, `SELECT team, kind, reference FROM credit_grants
 	  WHERE reference != '' GROUP BY team, kind, reference HAVING COUNT(*) > 1`)

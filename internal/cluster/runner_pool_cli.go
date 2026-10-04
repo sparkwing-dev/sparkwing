@@ -365,13 +365,6 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	}
 }
 
-func executorKind(source string) string {
-	if source == "agent" {
-		return "agent"
-	}
-	return "runner"
-}
-
 // safety: loopback-only so a runner on a laptop does not serve /metrics on every
 // interface; the chart passes its own port.
 const defaultRunnerMetricsAddr = "127.0.0.1:9090"

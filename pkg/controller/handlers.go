@@ -358,10 +358,6 @@ func nodeForResponse(node *store.Node) *store.Node {
 	return api.PublicNode(node)
 }
 
-func nodesForResponse(nodes []*store.Node) []*store.Node {
-	return api.PublicNodes(nodes)
-}
-
 func nodeForClaimResponse(node *store.Node) *store.Node {
 	out := nodeForResponse(node)
 	if out == nil {

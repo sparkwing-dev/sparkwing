@@ -970,30 +970,6 @@ func TestGitHubAppSourceTokenReadsOnlyTheRunsRepository(t *testing.T) {
 	}
 }
 
-func (f *appFixture) claimTrigger(owner signedIn, runID string) string {
-	f.t.Helper()
-	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth,
-		map[string]any{"name": "t-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
-		f.t.Fatalf("mint runner = %d", code)
-	}
-	auth := "Bearer " + m.Token
-	if code := f.call("POST", "/api/v1/triggers/"+runID+"/claim", auth, nil, nil); code != http.StatusOK {
-		f.t.Fatalf("claim trigger %s = %d", runID, code)
-	}
-	tn, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	now := time.Now()
-	if err := tn.CreateRun(context.Background(), store.Run{
-		ID: runID, Pipeline: "build", Status: "running", CreatedAt: now, StartedAt: now,
-	}); err != nil {
-		f.t.Fatalf("create run %s: %v", runID, err)
-	}
-	return auth
-}
-
 func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")

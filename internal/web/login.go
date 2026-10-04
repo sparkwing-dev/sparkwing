@@ -390,10 +390,7 @@ func validFormCSRF(r *http.Request, secure bool) bool {
 		return false
 	}
 	formToken := r.PostForm.Get("csrf_token")
-	if !constantTimeEqual(formToken, cookie.Value) {
-		return false
-	}
-	return true
+	return constantTimeEqual(formToken, cookie.Value)
 }
 
 func sameOriginRequest(r *http.Request) bool {

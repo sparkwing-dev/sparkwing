@@ -156,17 +156,6 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	return &storeTx{tx: tx, dialect: s.dialect}, nil
 }
 
-// safety: a figure compared against itself across samples must come off one
-// clock, so the database's is what a second controller and a stepped system
-// clock are both measured against. Both branches truncate, because a rounded
-// one would put the clock a half second ahead of the other dialect's.
-func (s *Store) nowSeconds() string {
-	if s.dialect == DialectPostgres {
-		return "FLOOR(EXTRACT(EPOCH FROM now()))::BIGINT"
-	}
-	return "unixepoch()"
-}
-
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

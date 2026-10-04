@@ -7,8 +7,6 @@ import (
 
 const cgroupCPUPeriodUS = 100000
 
-const backgroundNice = 10
-
 type cgroupLimiter struct {
 	//lint:ignore U1000 used by the Linux implementation
 	path string

@@ -29,12 +29,6 @@ func (m *measuredStore) Usage(context.Context) (storage.StoreUsage, error) {
 	return m.usage, m.err
 }
 
-type unmeasuredStore struct{ measuredStore }
-
-func (u *unmeasuredStore) Usage(context.Context) (storage.StoreUsage, error) {
-	panic("the unmeasurable store was asked for a total")
-}
-
 func TestBucketUsageMeasuresTheStoreTheCeilingWasPointedAt(t *testing.T) {
 	store := &measuredStore{usage: storage.StoreUsage{Bytes: 4096, Objects: 12, ObservedAt: time.Now()}}
 	s := New(nil, nil).WithBucketUsage(store)

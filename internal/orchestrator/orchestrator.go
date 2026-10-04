@@ -621,7 +621,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		// safety: a terminal state the store never took is a run nobody can read back.
 		runErr = fmt.Errorf("persist run state: %w", ferr)
 		finalStatus = statusForRunError(runErr)
-		errMsg = runErr.Error()
 	}
 
 	contentionNote := ""

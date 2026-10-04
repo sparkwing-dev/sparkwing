@@ -348,6 +348,8 @@ type oauthExchangeResp struct {
 
 // safety: the refusal names none of the existing account's providers, because
 // whoever holds the address now may not be that account's owner.
+//
+//lint:ignore ST1005 This error is displayed as complete sign-in guidance to the user.
 var errAccountExistsSignIn = errors.New("An account with this email already exists. " + //nolint:staticcheck // shown to the person signing in
 	"Sign in the way you did before, then link this provider from account settings.")
 

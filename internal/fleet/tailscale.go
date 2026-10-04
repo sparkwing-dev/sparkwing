@@ -53,7 +53,7 @@ func probeLocalTailscaleIPs(
 		}
 	}
 	if len(failures) == 0 {
-		return nil, errors.New("Tailscale returned no local IPs")
+		return nil, errors.New("no local IPs returned by Tailscale")
 	}
 	return nil, errors.Join(failures...)
 }

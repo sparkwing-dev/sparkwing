@@ -40,7 +40,9 @@ type hostSamplerOnly struct {
 type platformSampler struct {
 	cpu cpuTracker
 
-	darwinPrev   map[int]darwinCPUProcess
+	//lint:ignore U1000 Used by the Darwin sampler in sampler_darwin.go.
+	darwinPrev map[int]darwinCPUProcess
+	//lint:ignore U1000 Used by the Darwin sampler in sampler_darwin.go.
 	darwinPrevAt time.Time
 }
 

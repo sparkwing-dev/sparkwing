@@ -91,18 +91,6 @@ func (d *e2eDaemon) stopAndWait(t *testing.T) {
 	}
 }
 
-func (d *e2eDaemon) waitExit(t *testing.T) error {
-	t.Helper()
-	d.stop()
-	select {
-	case err := <-d.done:
-		return err
-	case <-time.After(3 * time.Second):
-		t.Fatal("daemon did not stop")
-		return nil
-	}
-}
-
 func e2eNoSpawn(string, string) error { return wingdclient.ErrNoDaemon }
 
 func holdLease(t *testing.T, home, runID string, cores float64, origin wingwire.Origin) {
