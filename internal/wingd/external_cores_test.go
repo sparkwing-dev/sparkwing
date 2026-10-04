@@ -291,14 +291,14 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(owned.release) }) }
-	t.Cleanup(release)
+	t.Cleanup(func() { release(); <-done })
 
 	select {
 	case roots := <-owned.started:
 		if len(roots) != 1 || roots[0] != 4242 {
 			t.Fatalf("sampled roots = %v, want [4242]", roots)
 		}
-	case <-time.After(time.Second):
+	case <-t.Context().Done():
 		t.Fatal("owned CPU sampling did not start")
 	}
 	d.mu.Lock()
@@ -308,7 +308,7 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 	release()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-t.Context().Done():
 		t.Fatal("headroom refresh did not finish")
 	}
 

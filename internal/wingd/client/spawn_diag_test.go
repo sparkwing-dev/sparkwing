@@ -34,7 +34,7 @@ func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 	logPath, _ := wingd.LogPath(home)
 
 	spawn := func(h, v string) error {
-		d, derr := wingd.New(wingd.Config{Home: h, Version: v})
+		d, derr := wingd.New(wingd.Config{Home: h, Version: v, Sampler: bindDiagnosticSampler{}})
 		if derr != nil {
 			return derr
 		}
@@ -69,4 +69,15 @@ func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 	if elapsed := time.Since(started); elapsed >= time.Second {
 		t.Fatalf("bind diagnostic returned in %s, want < 1s", elapsed)
 	}
+}
+
+type bindDiagnosticSampler struct{}
+
+func (bindDiagnosticSampler) Sample() (wingd.HostStat, error) {
+	return wingd.HostStat{TotalCores: 1, TotalMemoryBytes: 1 << 30, FreeMemoryBytes: 1 << 30, CPUMeasured: true, MemoryMeasured: true}, nil
+}
+
+func (s bindDiagnosticSampler) SampleWithOwned([]wingd.OwnedRoot, float64) (wingd.HostStat, map[int]float64, bool, error) {
+	stat, err := s.Sample()
+	return stat, nil, true, err
 }
