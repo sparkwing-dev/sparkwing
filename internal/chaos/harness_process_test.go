@@ -681,3 +681,40 @@ func requireProcessGroups(t *testing.T) {
 		t.Skip(err)
 	}
 }
+
+func TestFinishActorAcceptsCompletedDrainAtDeadline(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := newProcessHarness(t)
+	defer journal.Close()
+	group, err := procgroup.Start(helperCommand("exit", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = group.Terminate(context.Background(), 0) })
+	<-group.LeaderExited()
+	if err := group.Finish(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if !group.Reaped() {
+		t.Fatal("fixture group was not reaped")
+	}
+	t.Logf("owned group %d reaped before actor cases", group.ID())
+	h.cfg.Settle = time.Nanosecond
+	ctx, cancel := context.WithTimeout(context.Background(), h.processWait())
+	defer cancel()
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("fixture deadline is not already closed")
+	}
+	for i := range 32 {
+		a := &actor{runID: fmt.Sprintf("completed-%d", i), group: group, stdout: io.NopCloser(strings.NewReader("")), scanned: make(chan struct{})}
+		close(a.scanned)
+		if err := h.finishActor(a, true); err != nil {
+			t.Errorf("case %d completed scanner on reaped group: %v", i, err)
+		}
+		if !a.exited {
+			t.Errorf("case %d completed actor was not marked exited", i)
+		}
+	}
+}
