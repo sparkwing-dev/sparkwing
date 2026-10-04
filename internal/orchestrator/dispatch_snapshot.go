@@ -43,12 +43,12 @@ func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, 
 	redactions := 0
 	if m := secrets.MaskerFromContext(ctx); m != nil {
 		before := strings.Count(string(scalar), "***")
-		masked := m.Mask(string(scalar))
-		after := strings.Count(masked, "***")
+		masked := m.MaskJSON(scalar)
+		after := strings.Count(string(masked), "***")
 		if after > before {
 			redactions = after - before
 		}
-		scalar = []byte(masked)
+		scalar = masked
 	}
 	envelope, err := json.Marshal(dispatchEnvelope{
 		Version:      dispatchEnvelopeVersion,

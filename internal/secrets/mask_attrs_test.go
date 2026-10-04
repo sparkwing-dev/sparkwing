@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -296,4 +297,37 @@ func TestMaskAttrsJSONPreservesNumbers(t *testing.T) {
 	if !strings.Contains(string(body), `"id":9007199254740993`) || strings.Contains(string(body), "s3cr3t") {
 		t.Fatalf("JSON changed numeric value or leaked: %s", body)
 	}
+}
+
+func TestMaskJSONConcurrentRegistrationKeepsRegisteredSecretHidden(t *testing.T) {
+	const secret = "registered\"private\nvalue"
+	m := NewMasker()
+	m.Register(secret)
+	payload, err := json.Marshal(map[string]any{"token": secret, "count": 12345})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := 0; i < 50; i++ {
+			m.Register(fmt.Sprintf("other-private-%d", i))
+		}
+	})
+	wg.Go(func() {
+		for i := 0; i < 50; i++ {
+			var decoded struct {
+				Token string
+				Count int
+			}
+			if err := json.Unmarshal(m.MaskJSON(payload), &decoded); err != nil {
+				t.Error(err)
+				return
+			}
+			if decoded.Token != "***" || decoded.Count != 12345 {
+				t.Error("registered secret or numeric data changed under concurrent registration")
+				return
+			}
+		}
+	})
+	wg.Wait()
 }

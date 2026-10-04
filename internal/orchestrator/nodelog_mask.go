@@ -11,14 +11,7 @@ type maskingNodeLog struct {
 }
 
 func maskEventPayload(masker *secrets.Masker, payload []byte) []byte {
-	if masker == nil || len(payload) == 0 {
-		return payload
-	}
-	masked := masker.Mask(string(payload))
-	if masked == string(payload) {
-		return payload
-	}
-	return []byte(masked)
+	return masker.MaskJSON(payload)
 }
 
 func wrapNodeLogWithMasker(inner NodeLog, masker *secrets.Masker) NodeLog {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -155,6 +157,7 @@ func (b *captureBackend) ListNodeDispatches(ctx context.Context, _, _ string) ([
 }
 
 type stubJob struct {
+	Count  int64  `json:"count,omitempty"`
 	Region string `json:"region"`
 	Token  string `json:"token,omitempty"`
 }
@@ -492,5 +495,53 @@ func TestCollectDispatchEnv_ExemptsWellKnownNonCredentialNames(t *testing.T) {
 		if got.values[k] != want {
 			t.Fatalf("%s = %q, want %q (redacted: %v)", k, got.values[k], want, got.redactedKeys)
 		}
+	}
+}
+
+func TestDispatchSnapshotEscapedSecretIsMaskedBeforePersistence(t *testing.T) {
+	for _, secret := range []string{"snapshot<token>&value", "snapshot\"token\nvalue"} {
+		t.Run(secret, func(t *testing.T) {
+			be := &captureBackend{gitSHA: strings.Repeat("a", 40)}
+			r := NewNodeExecutor(Backends{State: be})
+			m := secrets.NewMasker()
+			m.Register(secret)
+			ctx := secrets.WithMasker(context.Background(), m)
+			node := buildNode(t, "deploy", &stubJob{Region: "us-east-1", Token: secret, Count: 9007199254740993})
+			if err := r.writeDispatchSnapshot(ctx, "parent", node); err != nil {
+				t.Fatal(err)
+			}
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "dispatch.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			if err := st.CreateRun(ctx, store.Run{ID: "parent", Pipeline: "parent", Status: "running"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.CreateNode(ctx, store.Node{RunID: "parent", NodeID: "deploy", Status: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.WriteNodeDispatch(ctx, be.captured[0]); err != nil {
+				t.Fatal(err)
+			}
+			got, err := st.GetNodeDispatch(ctx, "parent", "deploy", -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var envelope dispatchEnvelope
+			if err := json.Unmarshal(got.InputEnvelope, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			var scalar stubJob
+			if err := json.Unmarshal(envelope.ScalarFields, &scalar); err != nil {
+				t.Fatal(err)
+			}
+			if scalar.Token != "***" {
+				t.Error("persisted dispatch contains recoverable secret")
+			}
+			if scalar.Region != "us-east-1" || scalar.Count != 9007199254740993 || got.CodeVersion != be.gitSHA || envelope.Version != dispatchEnvelopeVersion || got.SecretRedactions < 1 {
+				t.Errorf("snapshot contract changed: count=%d version=%d redactions=%d", scalar.Count, envelope.Version, got.SecretRedactions)
+			}
+		})
 	}
 }
