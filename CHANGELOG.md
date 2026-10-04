@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Dependency proxy:** Retire inactive per-key locks after requests and eviction complete.
 
 - **Scaffolding:** Align source-build fallback and Kubernetes fixture SDK pins with v0.66.5
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
