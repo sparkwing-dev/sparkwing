@@ -32,6 +32,10 @@ unlock.
 - **CLI tokens:** Constrain new tokens to the member role held when minting commits, so a concurrent demotion cannot restore write access
 - **Secrets:** Mask JSON-escaped secret values in child-run events and dispatch snapshots while preserving numeric fields
 
+### Docs
+
+- **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
+
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
 
