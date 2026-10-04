@@ -2,10 +2,12 @@ package nodemetrics
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,7 +25,7 @@ func processSnapshot(root int) (map[int]processSample, bool) {
 			continue
 		}
 		raw, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 			continue
 		}
 		p, zombie, ok := parseProcessStat(string(raw), pid, frequency)
