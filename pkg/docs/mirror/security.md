@@ -12,11 +12,22 @@ defines supported versions and the information to include.
 Read this before deciding who holds a token and which repositories share a
 deployment.
 
-**One controller is one trust domain.** Every token authenticates against
-the same store, and every run, secret, and concurrency key lives in it.
-Scopes narrow what a token may do; they do not partition the deployment by
-repository, team, or environment. Two projects that must not read each
-other's runs need two controllers, not two tokens in one.
+**The default controller has one team. A license enables multiple teams.** In the default mode, projects share the `default` team's authority.
+A controller with a valid multi-team license requires authentication and
+scopes tenant API requests and store operations to the authenticated team.
+Run lists use that team, and a run belonging to another team is answered as
+not found. See [Teams and sign-in](auth.md#teams-and-sign-in).
+
+Within a team, scopes and member roles decide which operations a caller may
+perform. Repository and environment names do not create separate tenant
+boundaries inside that team.
+
+**Operators and service credentials have separate authority.** `admin` is
+deployment authority. Service scopes such as `credits.grant`, `claims.launch`,
+and `logs.delete` cross teams for their documented operations. Team membership
+does not grant them. Operators who control the database, encryption keys or
+cluster remain trusted with tenant data. See [Authentication](auth.md) for
+individual scope and claim contracts.
 
 **A self-hosted runner runs pipeline code as its own OS user; give it a
 dedicated one.** Pipeline code on a runner or agent can read every file that
@@ -48,11 +59,25 @@ the pipeline's own code already has, since it can reference any team
 pipeline's latest run. A runner using the Kubernetes or
 warm node runner still hands its token to the trigger's binary, because the
 Jobs that binary creates need it; controller dispatch (`sparkwing-runner
-launch`), which gives each Job its own claim token as its only credential,
-replaces that path.
+launch`) instead gives each Job a claim token for its assigned work.
 
-This is not an OS sandbox: the pipeline keeps every file, network, and
-process permission of the agent OS user. It can read the agent's
+**Hosted execution also depends on the cluster configuration.** The launcher
+keeps its service credential outside the Job. Its Job builder disables
+service-account token automounting, uses a non-root user and a runtime-default
+seccomp profile, and gives the Job scratch storage. These settings depend on
+appropriate Kubernetes RBAC, enforced network policies, protected controller
+and storage credentials, and controlled volume mounts. A multi-team license
+does not configure those protections or isolate pipeline code from a shared
+host's OS permissions.
+
+**Cache and source sharing have their own provenance requirements.** A source
+URL and a cache grant alone do not establish that every Git object in a shared
+mirror is public. Assess imported and seeded objects separately from
+controller API permissions. This guide makes no tenant-isolation guarantee
+for those shared mirrors.
+
+Assisted execution on a self-hosted machine keeps the agent OS user's file,
+network, and process permissions. It can read the agent's
 `config.yaml`, which holds the runner token, and every other credential in
 that user's home, such as ssh keys and cloud profiles. GitHub gives the same
 warning for its self-hosted runners. Run the agent as a dedicated OS user
@@ -84,17 +109,18 @@ compatibility boundary on its own.
 **A warm pool shares one OS account across repositories.** Assisted job bodies
 run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
-credential to disk can leave it where the next repository reads it. Run
-`sparkwing cluster worker --runner k8s` to give each node its own Job pod where
-repositories do not trust each other; see [warm-pool.md](warm-pool.md).
+credential to disk can leave it where the next repository reads it.
+`sparkwing cluster worker --runner k8s` gives nodes separate Job pods, while
+its planning process still has the runner-token authority described above.
+See [warm-pool.md](warm-pool.md) for that execution mode.
 
-**`runs.read` is deployment-wide.** `GET /api/v1/runs` filters on the query
-the caller supplies, never on the caller. One `runs.read` token lists every
-run of every pipeline and repository the controller holds, along with the
-plan, the arguments, the event stream, the trends aggregate, and the queue
-view. Argument values the pipeline declared `secret:"true"` are masked;
-nothing else is. Give `runs.read` to a principal you would show the whole
-deployment's history.
+**`runs.read` applies within the caller's team.** `GET /api/v1/runs`
+combines the caller's filters with the authenticated team. A team reader can
+read that team's pipeline and repository history, including permitted plans,
+events, trends and queue views. Secret argument values are masked, and some
+fields have narrower permissions, such as dispatch environment snapshots.
+Give this scope to someone who may read the team's history. An operator's
+`admin` authority is separate from this team-scoped read permission.
 
 **The laptop dashboard admits the account that started it.** `sparkwing
 serve start` mounts the controller API and the dashboard on one listener

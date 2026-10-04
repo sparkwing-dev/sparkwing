@@ -33,6 +33,10 @@ unlock.
 - **Secrets:** Mask JSON-escaped secret values in child-run events and dispatch snapshots while preserving numeric fields
 - **Secrets:** Mask complete nonblank lines of registered multiline secrets in subprocess output, direct logs, and structured string attributes
 
+### Docs
+
+- **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
+
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
 
