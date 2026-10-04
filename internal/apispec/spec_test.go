@@ -38,7 +38,7 @@ func realSpec(t *testing.T) (spec string, routes []apiroutes.Route, scopes []str
 	if err != nil {
 		t.Fatalf("read api/openapi.yaml: %v", err)
 	}
-	names, err := apiroutes.Scopes(filepath.Join(root, "pkg", "controller", "auth.go"))
+	names, err := apiroutes.Scopes(filepath.Join(root, "pkg", "controller", "auth.go"), filepath.Join(root, "pkg", "store", "identity_scopes.go"))
 	if err != nil {
 		t.Fatalf("read scopes: %v", err)
 	}

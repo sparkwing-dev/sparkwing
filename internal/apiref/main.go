@@ -19,7 +19,7 @@ func main() {
 	authsrc := filepath.Join(root, "pkg", "controller", "auth.go")
 	logs := filepath.Join(root, "pkg", "logs", "server.go")
 
-	scopes, err := apiroutes.Scopes(authsrc, logs)
+	scopes, err := apiroutes.Scopes(authsrc, logs, filepath.Join(root, "pkg", "store", "identity_scopes.go"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apiref:", err)
 		os.Exit(2)

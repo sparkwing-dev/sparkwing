@@ -29,7 +29,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "apispec:", err)
 		os.Exit(1)
 	}
-	scopes, err := apiroutes.Scopes(filepath.Join(root, "pkg", "controller", "auth.go"))
+	scopes, err := apiroutes.Scopes(filepath.Join(root, "pkg", "controller", "auth.go"), filepath.Join(root, "pkg", "store", "identity_scopes.go"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apispec:", err)
 		os.Exit(1)
