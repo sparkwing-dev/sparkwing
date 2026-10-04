@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
 - **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
 - **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.

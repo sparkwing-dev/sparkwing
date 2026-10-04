@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,29 @@ func TestClientRetriesWhenAnotherStarterReleasesItsClaim(t *testing.T) {
 	release, claimed, err = wingd.ClaimDaemonStart(home)
 	if err != nil || !claimed {
 		t.Fatalf("cancelled client retained startup claim: claimed=%v, err=%v", claimed, err)
+	}
+	release()
+}
+
+func TestCanceledDialFailureDoesNotStartTheDaemon(t *testing.T) {
+	home := shortHome(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var spawns atomic.Int32
+	_, err := EnsureDaemon(ctx, Options{
+		Home: home, Version: "v1.0.0", DialTimeout: time.Millisecond,
+		observeDialFailure: cancel,
+		Spawn:              func(string, string) error { spawns.Add(1); return nil },
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v, want cancellation", err)
+	}
+	if got := spawns.Load(); got != 0 {
+		t.Errorf("canceled caller started %d daemons", got)
+	}
+	release, claimed, err := wingd.ClaimDaemonStart(home)
+	if err != nil || !claimed {
+		t.Fatalf("canceled caller retained startup claim: claimed=%v error=%v", claimed, err)
 	}
 	release()
 }
