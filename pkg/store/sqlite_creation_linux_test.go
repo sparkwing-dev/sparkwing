@@ -23,6 +23,8 @@ func TestOpenSQLiteWithoutHardLinks(t *testing.T) {
 		}
 		return
 	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	// safety: SQLite opens files on multiple Go threads, so capability denial
 	// must cover every thread.
 	filter := []unix.SockFilter{
