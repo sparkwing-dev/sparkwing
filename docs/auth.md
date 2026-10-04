@@ -562,6 +562,11 @@ Registered secret string values are masked in child-run events and dispatch
 scalar snapshots before storage, including values escaped by JSON. Numeric
 fields retain their types and precision.
 
+For registered multiline secrets, each complete nonblank line is also masked
+using literal matching. Identical short or common text elsewhere can therefore
+be hidden. CRLF line endings are normalized for line matching; other whitespace
+is retained. Arbitrarily truncated prefixes are not guaranteed to match.
+
 ## Claim ownership
 
 Scope decides which routes a token may call; the claim decides which node it

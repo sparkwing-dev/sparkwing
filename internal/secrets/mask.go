@@ -68,12 +68,20 @@ func (m *Masker) Register(value string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, v := range m.values {
-		if v == value {
-			return
+	values := []string{value}
+	if strings.Contains(value, "\n") {
+		for _, line := range strings.Split(value, "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if strings.TrimSpace(line) != "" {
+				values = append(values, line)
+			}
 		}
 	}
-	m.values = append(m.values, value)
+	for _, v := range values {
+		if !slices.Contains(m.values, v) {
+			m.values = append(m.values, v)
+		}
+	}
 	// safety: Mask replaces in slice order, so a shorter secret that prefixes a
 	// longer one must not run first or it leaves the longer tail in the clear.
 	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
@@ -292,6 +300,7 @@ func (e maskedError) MarshalJSON() ([]byte, error) { return json.Marshal(e.msg) 
 
 func (e maskedError) Unwrap() error { return e.err }
 
+// Values returns a copy of masking patterns, including whole values and nonblank multiline components.
 func (m *Masker) Values() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 )
@@ -164,5 +165,36 @@ func TestNewCipherWithPrevious_RejectsAShortPreviousKey(t *testing.T) {
 	}
 	if _, err := NewCipherWithPrevious(key, []byte("too short")); err == nil {
 		t.Fatal("NewCipherWithPrevious accepted a previous key of the wrong length")
+	}
+}
+
+func TestMaskerMultilineComponentsKeepLiteralMatchingPolicy(t *testing.T) {
+	m := NewMasker()
+	value := "xy\n \r\nlonger-private-xy\n"
+	m.Register(value)
+	before := m.Values()
+	m.Register(value)
+	if !slices.Equal(before, m.Values()) || len(before) != 3 {
+		t.Fatalf("registration not deduplicated: %q", m.Values())
+	}
+	if !slices.Contains(before, value) {
+		t.Fatal("whole value not retained")
+	}
+	if got := m.Mask("longer-private-xy xy ordinary"); got != "*** *** ordinary" {
+		t.Fatalf("longest/literal matching=%q", got)
+	}
+	if got := m.Mask("ordinary xy text"); got != "ordinary *** text" {
+		t.Fatalf("short component rule=%q", got)
+	}
+	if got := m.Mask(" \r"); got != " \r" {
+		t.Fatal("blank component became a mask pattern")
+	}
+	spaces := NewMasker()
+	spaces.Register(" left \r\nright\r\n")
+	if spaces.Mask("left") != "left" || spaces.Mask(" left ") != "***" || spaces.Mask("right") != "***" {
+		t.Fatal("line whitespace was changed beyond CRLF normalization")
+	}
+	if m.Mask("longer-private-") != "longer-private-" {
+		t.Fatal("partial-prefix matching was introduced")
 	}
 }
