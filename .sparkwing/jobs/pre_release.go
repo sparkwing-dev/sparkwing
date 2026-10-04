@@ -97,8 +97,8 @@ func (PreRelease) Help() string {
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
 		"On an attached branch, the gate updates a stale Sparkwing dependency pin, regenerates interface " +
 		"snapshots, and commits those changes before the push. On a detached checkout, it leaves the pin " +
-		"artifacts unchanged and reports stale versions. This is the release-boundary tier: the release " +
-		"pipeline runs it, hosted CI runs it on every pull request and push to main, and nothing fires " +
+		"artifacts unchanged and reports stale versions. Run this release-boundary tier explicitly with " +
+		"`sparkwing run pre-release`. Hosted CI runs it on every pull request and push to main, and nothing fires " +
 		"it from a git hook. The broad " +
 		"per-landing check is `gate`, and the source-policy check a commit passes is `pre-commit`."
 }
