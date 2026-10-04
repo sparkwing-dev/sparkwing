@@ -18,14 +18,14 @@ func TestBashCompletionWithoutMapfile(t *testing.T) {
 		{"no rows", "sparkwing empty ''", "2", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script := "set -u\nenable -n mapfile\n" + renderBash() + `
+			script := "set -u\nif type -t mapfile >/dev/null; then enable -n mapfile; fi\n" + renderBash() + `
 sparkwing() {
  case "$1" in
  _complete-verbs) if [[ "${2-}" != leaf && "${2-}" != empty ]]; then printf '%s\n' run; fi ;;
  _complete-flags) if [[ "${2-}" != empty ]]; then printf '%s\n' --profile; fi ;;
  esac
 }
-` + "COMP_WORDS=(" + tc.words + ")\nCOMP_CWORD=" + tc.index + "\n_sparkwing_complete\nprintf '%s\n' \"${COMPREPLY[@]}\"\n"
+` + "COMP_WORDS=(" + tc.words + ")\nCOMP_CWORD=" + tc.index + "\n_sparkwing_complete\nprintf '%s\n' ${COMPREPLY[@]+\"${COMPREPLY[@]}\"}\n"
 			out, err := exec.Command(bash, "--noprofile", "--norc", "-c", script).CombinedOutput()
 			if err != nil || strings.TrimSpace(string(out)) != tc.want {
 				t.Fatalf("completion=%q err=%v want=%q", out, err, tc.want)
