@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
+- **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.
 - **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
 - **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
 - **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.

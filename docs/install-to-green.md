@@ -52,6 +52,10 @@ resolves rather than failing on an unresolved module graph.
 `--binary PATH` stages an existing binary under the version it reports, and the
 scaffold resolves that released SDK from the proxy.
 
+Local staging tries the installer's standard OpenSSL candidates, including
+Homebrew OpenSSL 3 on macOS, to generate its Ed25519 key. `SPARKWING_OPENSSL`
+selects one binary for staging and verification; an incapable explicit choice fails.
+
 Both local modes serve the staged release to the installer over `file://` and
 replace the installer's trust root with an ed25519 key the harness mints, so
 the install phase measures verification against that key rather than the

@@ -613,3 +613,19 @@ func TestInstallToGreenTidiesSoACandidateDependencyResolves(t *testing.T) {
 		t.Fatalf("a candidate dependency still does not compile after the tidy build mode runs: %v\n%s", err, out)
 	}
 }
+
+func TestInstallToGreenRejectsAnExplicitIncapableOpenSSL(t *testing.T) {
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "openssl")
+	marker := filepath.Join(dir, "selected")
+	if err := os.WriteFile(bad, []byte("#!/bin/sh\nprintf selected > '"+marker+"'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := runInstallToGreen(t, installToGreenOptions{stubRun: "green", env: []string{"SPARKWING_OPENSSL=" + bad}})
+	if result.err == nil || !strings.Contains(result.stderr, "cannot generate ed25519 keys") {
+		t.Fatalf("incapable nominated tool accepted: error=%v stderr=%s", result.err, result.stderr)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("nominated tool was not used: %v", err)
+	}
+}

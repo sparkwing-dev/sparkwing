@@ -216,7 +216,6 @@ install_source=""
 if [[ "$mode" == release ]]; then
   install_source="$ROOT/install/install.sh"
 else
-  command -v openssl >/dev/null 2>&1 || fail "openssl is required to stage a local release"
   # The installer refuses an asset whose own report disagrees with the tag it
   # was served under, so a supplied binary is staged under the tag it claims.
   if [[ "$mode" == binary ]]; then
@@ -247,12 +246,22 @@ else
     chmod 0755 "$STAGE/$asset"
   fi
 
-  # The caller nominates an openssl for the installer, and staging needs the
-  # same one: a system openssl that cannot mint an ed25519 key stops the run
-  # here, before the nominated binary is ever consulted.
-  ssl="${SPARKWING_OPENSSL:-openssl}"
-  "$ssl" genpkey -algorithm ed25519 -out "$WORK/signing.pem" 2>/dev/null ||
-    fail "this openssl cannot generate ed25519 keys, so no release can be staged"
+  # macOS's system LibreSSL cannot generate the release's Ed25519 key.
+  if [[ -n "${SPARKWING_OPENSSL:-}" ]]; then
+    set -- "$SPARKWING_OPENSSL"
+  else
+    set -- openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl \
+      /opt/homebrew/bin/openssl /usr/local/bin/openssl
+  fi
+  ssl=""
+  for candidate in "$@"; do
+    if "$candidate" genpkey -algorithm ed25519 -out "$WORK/signing.pem" 2>/dev/null; then
+      ssl="$candidate"
+      break
+    fi
+  done
+  [[ -n "$ssl" ]] || fail "this openssl cannot generate ed25519 keys, so no release can be staged"
+  export SPARKWING_OPENSSL="$ssl"
   signing_key="$("$ssl" pkey -in "$WORK/signing.pem" -pubout -outform DER | tail -c 32 | "$ssl" base64 -A)"
   (cd "$STAGE" && "$ssl" dgst -sha256 -r "$asset" >SHA256SUMS)
   "$ssl" pkeyutl -sign -inkey "$WORK/signing.pem" -rawin -in "$STAGE/SHA256SUMS" -out "$STAGE/SHA256SUMS.sig"
