@@ -142,6 +142,12 @@ The fourth surface, `secrets`, names where `sparkwing.Secret` values
 resolve from (this machine's local secret store or controller-stored); see
 [security.md](security.md).
 
+With a controller secrets surface, foreground runs and coordinated nodes identify
+the current run so the controller selects that pipeline's scoped values. The
+controller still enforces the caller's permissions and, for ordinary readers,
+a live claim on the run. Standalone resolver calls without a run binding retain
+unscoped lookup behavior.
+
 ## Per-pipeline backend selection
 
 A pipeline pins its backends by pointing at a profile that declares

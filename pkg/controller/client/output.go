@@ -133,8 +133,5 @@ func (c *Client) blobClient(u string) *http.Client {
 		return &http.Client{Timeout: outputTransferTimeout, Transport: otelutil.WrapTransport(nil)}
 	}
 	transport := c.http.Transport
-	if bt, ok := transport.(*bearerTransport); ok {
-		transport = bt.base
-	}
 	return &http.Client{Timeout: outputTransferTimeout, Transport: transport}
 }

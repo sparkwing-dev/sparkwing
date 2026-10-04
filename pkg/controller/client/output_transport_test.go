@@ -60,8 +60,14 @@ func TestSignedOutputUploadUsesControllerSocketOnlyForSameOrigin(t *testing.T) {
 					}
 					receive(w, r)
 				case r.URL.Path == "/api/v1/runs/run/nodes/node/output-upload":
+					if r.Header.Get("Authorization") != "Bearer api-token" {
+						t.Error("grant request missing bearer")
+					}
 					_ = json.NewEncoder(w).Encode(store.OutputUploadGrant{URL: blobURL, UploadID: "upload", Key: "output-key"})
 				case r.URL.Path == "/api/v1/runs/run/nodes/node/output-commit":
+					if r.Header.Get("Authorization") != "Bearer api-token" {
+						t.Error("commit request missing bearer")
+					}
 					w.WriteHeader(http.StatusNoContent)
 				default:
 					t.Errorf("unexpected path %s", r.URL.Path)

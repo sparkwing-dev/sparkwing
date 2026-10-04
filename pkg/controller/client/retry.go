@@ -27,6 +27,10 @@ const MaxUnavailableWait = 5 * time.Second
 // server says the condition will not clear; only a server that invites the
 // caller back gets another attempt.
 func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.token != "" {
+		req = req.Clone(req.Context())
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	for attempt := 0; ; attempt++ {
 		resp, err := c.http.Do(req)
 		if err != nil {

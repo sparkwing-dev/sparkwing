@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
 - **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.
 - **Integration checks:** Build the MinIO fixture from pinned upstream source instead of pulling an unavailable image.
 - **Dependency proxy:** Retire inactive per-key locks after requests and eviction complete.
@@ -30,6 +31,7 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **Controller client:** Keep bearer credentials out of cross-host redirects while preserving normal redirect handling and signed artifact transfers.
 
 - **Billing:** Give each team a separate fraud-warning hold so another team cannot prevent its hold from being recorded
 - **CLI tokens:** Constrain new tokens to the member role held when minting commits, so a concurrent demotion cannot restore write access

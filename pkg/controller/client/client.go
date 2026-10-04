@@ -50,30 +50,13 @@ func New(baseURL string, httpClient *http.Client) *Client {
 	return &Client{baseURL: baseURL, http: httpClient}
 }
 
-// NewWithToken is New plus a shared-secret bearer token. Every
-// outgoing request carries `Authorization: Bearer <token>`. Empty
-// token is equivalent to New.
+// NewWithToken is New plus bearer authority on controller API requests.
+// Standard HTTP redirect handling controls where that authority is forwarded.
+// Empty token is equivalent to New.
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client {
-	ownsClient := httpClient == nil
-	if ownsClient {
-		httpClient = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: otelutil.WrapTransport(nil),
-		}
-	}
-	if token != "" {
-		base := httpClient.Transport
-		if base == nil {
-			base = http.DefaultTransport
-		}
-		httpClient = &http.Client{
-			Timeout:       httpClient.Timeout,
-			CheckRedirect: httpClient.CheckRedirect,
-			Jar:           httpClient.Jar,
-			Transport:     &bearerTransport{base: base, token: token},
-		}
-	}
-	return &Client{baseURL: baseURL, token: token, http: httpClient}
+	c := New(baseURL, httpClient)
+	c.token = token
+	return c
 }
 
 // BaseURL returns the controller URL the client was constructed
@@ -85,17 +68,6 @@ func (c *Client) BaseURL() string { return c.baseURL }
 // "" when constructed without auth. Used by RemoteBackends to thread
 // the same auth to sibling HTTP backends.
 func (c *Client) Token() string { return c.token }
-
-type bearerTransport struct {
-	base  http.RoundTripper
-	token string
-}
-
-func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
-	req.Header.Set("Authorization", "Bearer "+t.token)
-	return t.base.RoundTrip(req)
-}
 
 // Close releases resources held by the client. The HTTP transport
 // runs idle connections under its own GC; Close is a no-op kept on

@@ -434,7 +434,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		r = NewNodeExecutor(backends)
 	}
 	ctx = secrets.WithMasker(ctx, masker)
-	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
+	secretOpts := opts
+	secretOpts.RunID = runID
+	if resolver, rerr := selectSecretResolver(ctx, secretOpts); rerr != nil {
 		if err := backends.State.FinishRun(ctx, runID, "failed", rerr.Error()); err != nil {
 			noteLostStateWrite(ctx, "finish run", runID, err)
 		}

@@ -986,3 +986,10 @@ scanner failure on `main` is what holds a release back, before the tag exists.
 - **Rotate the GitHub credentials and cache SSH key** periodically.
 - **Limit the status token.** Give the controller's `GITHUB_TOKEN` commit-status
   write access only to repositories whose pull requests Sparkwing reports.
+
+## Controller client redirects
+
+Controller API clients attach their bearer to the initial request. Go's default HTTP
+redirect handling strips that header on redirects to unrelated hosts. A caller
+can supply a different CheckRedirect policy. Signed artifact URLs carry their
+own grant and receive no controller bearer, including on the controller origin.

@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"net/http"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -12,6 +15,10 @@ func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, er
 	spec := effectiveSecretsSpec(opts)
 	if spec == nil {
 		return nil, nil
+	}
+	if spec.Type == backends.TypeController && spec.URL != "" && opts.RunID != "" {
+		c := client.NewWithToken(strings.TrimRight(spec.URL, "/"), http.DefaultClient, spec.ResolvedToken())
+		return controllerSecretSource(ctx, c, opts.RunID), nil
 	}
 	resolver, err := sparkwing.NewSecretResolverFromSpec(ctx, *spec)
 	if err != nil {

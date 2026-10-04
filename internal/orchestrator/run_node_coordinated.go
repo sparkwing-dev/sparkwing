@@ -165,7 +165,7 @@ func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secr
 		}
 	}
 
-	source, err := selectSecretResolver(ctx, Options{Profile: prof, LocalOnly: localOnly})
+	source, err := selectSecretResolver(ctx, Options{Profile: prof, LocalOnly: localOnly, RunID: runID})
 	if err != nil {
 		return nil, art, logs, fmt.Errorf("run-node --coordinated: secrets backend: %w", err)
 	}
