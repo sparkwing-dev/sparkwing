@@ -228,9 +228,16 @@ else
     # module version the proxy cannot serve and the scaffold never finishes.
     # Prereleases and local candidate tags are excluded, because one of those
     # ranking above the published release pins a module nothing has published.
-    STAGE_TAG="$(git -C "$ROOT" tag -l 'v0.*' | grep -E '^v0\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
-    [[ -n "$STAGE_TAG" ]] ||
-      fail "this checkout has no vX.Y.Z release tag to stamp a candidate build with; fetch tags or pass --binary"
+    STAGE_TAG="$(git -C "$ROOT" tag -l 'v0.*' | awk '/^v0\.[0-9]+\.[0-9]+$/' | sort -V | tail -1)"
+    # Source checkouts can omit tags; the pipeline module keeps a released SDK pin.
+    if [[ -z "$STAGE_TAG" && -r "$ROOT/.sparkwing/go.mod" ]]; then
+      STAGE_TAG="$(awk '
+        $1 == "github.com/sparkwing-dev/sparkwing" { print $2; exit }
+        $1 == "require" && $2 == "github.com/sparkwing-dev/sparkwing" { print $3; exit }
+      ' "$ROOT/.sparkwing/go.mod")" || fail "could not read the pipeline module SDK pin"
+    fi
+    [[ "$STAGE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] ||
+      fail "this checkout has no stable release tag or SDK pin to stamp a candidate build with; fetch tags or pass --binary"
   fi
   STAGE="$WORK/releases/$STAGE_TAG"
   mkdir -p "$STAGE"

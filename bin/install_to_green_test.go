@@ -532,6 +532,77 @@ func TestInstallToGreenBuildUsesPublicScaffoldAndCandidateSDK(t *testing.T) {
 	}
 }
 
+func TestInstallToGreenBuildSelectsAStableSDKVersion(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join(installToGreenRoot(t), "bin", "install-to-green.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, pin, tag, want string
+	}{
+		{"tagless", "v0.66.5", "", "v0.66.5"},
+		{"stable tag wins", "v0.66.5", "v0.66.4", "v0.66.4"},
+		{"prerelease excluded", "v0.66.5", "v0.99.0-rc.1", "v0.66.5"},
+		{"invalid pin", "v0.66.5-rc.1", "", ""},
+		{"missing pin", "", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, content := range map[string]string{
+				"bin/install-to-green.sh": string(script),
+				".sparkwing/go.mod":       "module pipeline\n\nrequire github.com/sparkwing-dev/sparkwing " + tt.pin + "\n",
+			} {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, args := range [][]string{
+				{"init", "-q"},
+				{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "fixture"},
+			} {
+				cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+				cmd.Env = environWithoutGitBindings()
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git fixture: %v\n%s", err, out)
+				}
+			}
+			if tt.tag != "" {
+				cmd := exec.Command("git", "-C", root, "tag", tt.tag)
+				cmd.Env = environWithoutGitBindings()
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git tag: %v\n%s", err, out)
+				}
+			}
+			cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--keep")
+			cmd.Env = append(environWithoutGitBindings(), "GOWORK=off")
+			out, err := cmd.CombinedOutput()
+			kept := regexp.MustCompile(`install-to-green: kept ([^\n]+)`).FindStringSubmatch(string(out))
+			if kept == nil {
+				t.Fatalf("harness returned no scratch path: %s", out)
+			}
+			t.Cleanup(func() {
+				if err := os.RemoveAll(kept[1]); err != nil {
+					t.Errorf("remove harness scratch: %v", err)
+				}
+			})
+			if err == nil {
+				t.Fatal("fixture without cmd/sparkwing unexpectedly built")
+			}
+			if tt.want == "" {
+				if !strings.Contains(string(out), "no stable release tag or SDK pin") {
+					t.Fatalf("missing version diagnostic: %s", out)
+				}
+			} else if _, err := os.Stat(filepath.Join(kept[1], "releases", tt.want)); err != nil || !strings.Contains(string(out), "could not build ./cmd/sparkwing") {
+				t.Fatalf("candidate did not stage %s before building: %s", tt.want, out)
+			}
+		})
+	}
+}
+
 func TestInstallToGreenRemovesItsScratchTree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")

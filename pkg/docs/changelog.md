@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
 - **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.

@@ -38,8 +38,11 @@ the scaffold compiled against.
 
 `--build` builds `cmd/sparkwing` from the checkout, stamps it with the newest
 published `vX.Y.Z` tag (prerelease and local candidate tags are excluded, so a
-tag nothing has published cannot be selected), and points the scaffolded module
-at the worktree with a `replace` directive. A build row is a branch source
+tag nothing has published cannot be selected), falling back to the stable SDK
+version required by `.sparkwing/go.mod` when the checkout has no stable tags,
+and points the scaffolded module at the worktree with a `replace` directive.
+The selected version must be published for the public scaffold to resolve.
+A build row is a branch source
 build wearing the tag it reports, not that release.
 
 Its scaffold phase measures resolving the candidate's module graph, not the
