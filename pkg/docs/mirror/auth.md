@@ -555,6 +555,9 @@ A route can narrow a field below its route scope. The node dispatch reads
 (`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
 `runs.read`, but fill `env_json` only for an `admin` principal. Every reader
 still gets `redacted_keys`, the names the snapshot dropped as credentials.
+Registered secret string values are masked in child-run events and dispatch
+scalar snapshots before storage, including values escaped by JSON. Numeric
+fields retain their types and precision.
 
 ## Claim ownership
 

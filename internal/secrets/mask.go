@@ -115,6 +115,37 @@ func (m *Masker) MaskAttrs(attrs map[string]any) map[string]any {
 	return out
 }
 
+// MaskJSON masks decoded string values so JSON escaping cannot hide a secret.
+// Unchanged payloads retain their bytes; invalid JSON uses literal text masking.
+func (m *Masker) MaskJSON(payload []byte) []byte {
+	if m == nil || len(payload) == 0 {
+		return payload
+	}
+	m.mu.RLock()
+	none := len(m.values) == 0
+	m.mu.RUnlock()
+	if none {
+		return payload
+	}
+	masked, changed := m.maskJSON(json.RawMessage(payload), 0)
+	if changed {
+		encoded, err := json.Marshal(masked)
+		if err != nil {
+			// safety: an unexpected encoding error must not restore the original secret-bearing payload.
+			return []byte(`"***"`)
+		}
+		return encoded
+	}
+	if json.Valid(payload) {
+		return payload
+	}
+	text := m.Mask(string(payload))
+	if text == string(payload) {
+		return payload
+	}
+	return []byte(text)
+}
+
 func (m *Masker) maskAttrs(attrs map[string]any, depth int) (map[string]any, bool) {
 	if len(attrs) == 0 {
 		return attrs, false
@@ -145,6 +176,8 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 		return maskedValue, true
 	}
 	switch t := v.(type) {
+	case json.Number:
+		return t, false
 	case string:
 		masked := m.Mask(t)
 		return masked, masked != t
