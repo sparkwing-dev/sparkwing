@@ -1068,7 +1068,8 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 type logFilter struct {
 	tail        int
 	head        int
-	lines       string
+	lineStart   int
+	lineEnd     int
 	grep        string
 	lineNumbers bool
 	maxMatches  int
@@ -1076,9 +1077,10 @@ type logFilter struct {
 
 func parseLogFilter(r *http.Request) (logFilter, error) {
 	q := r.URL.Query()
-	f := logFilter{lines: q.Get("lines"), grep: q.Get("grep")}
+	lines := q.Get("lines")
+	f := logFilter{grep: q.Get("grep")}
 	if raw := q.Get("line_numbers"); raw != "" {
-		if raw != "1" || f.grep == "" || f.lines != "" || q.Get("head") != "" || q.Get("tail") != "" {
+		if raw != "1" || f.grep == "" || lines != "" || q.Get("head") != "" || q.Get("tail") != "" {
 			return f, errors.New("line_numbers requires grep without other line filters")
 		}
 		f.lineNumbers = true
@@ -1104,8 +1106,9 @@ func parseLogFilter(r *http.Request) (logFilter, error) {
 		}
 		f.head = n
 	}
-	if f.lines != "" {
-		if _, _, err := parseLinesRange(f.lines); err != nil {
+	if lines != "" {
+		var err error
+		if f.lineStart, f.lineEnd, err = parseLinesRange(lines); err != nil {
 			return f, err
 		}
 	}
@@ -1113,7 +1116,7 @@ func parseLogFilter(r *http.Request) (logFilter, error) {
 }
 
 func (f logFilter) passThrough() bool {
-	return f.tail == 0 && f.head == 0 && f.lines == "" && f.grep == ""
+	return f.tail == 0 && f.head == 0 && f.lineStart == 0 && f.grep == ""
 }
 
 func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
@@ -1142,10 +1145,7 @@ func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
 }
 
 func (f logFilter) apply(data []byte) []byte {
-	a, b := 1, 0
-	if f.lines != "" {
-		a, b, _ = parseLinesRange(f.lines)
-	}
+	a, b := max(1, f.lineStart), f.lineEnd
 	needle := []byte(f.grep)
 	walk := func(visit func([]byte)) {
 		matched := 0
