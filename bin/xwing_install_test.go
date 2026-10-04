@@ -67,6 +67,10 @@ chmod +x "$out"
 	if err := os.WriteFile(filepath.Join(stub, "go"), []byte(compiler), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// safety: the fake web builder must be selected even when the host has no pnpm.
+	if err := os.WriteFile(filepath.Join(stub, "pnpm"), []byte("#!/bin/sh\nexit 97\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CANDIDATE_TRACE", trace)
 	t.Setenv("XWING_TOOL_SOURCE", source)
