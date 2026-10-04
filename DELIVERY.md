@@ -468,7 +468,9 @@ file. Other syntax and workflow checks remain active.
   PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`
   uses that server without downloading embedded binaries. The separate
   Postgres conformance job verifies the backup drill with a matching client
-  and rejects skipped tests.
+  and rejects skipped tests. Its no-skip selection also includes
+  `TestCLITokenMintUsesCommittedMembershipAuthority` in `pkg/controller`,
+  retaining the PostgreSQL bearer-token regression for demotion and removal.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
