@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -100,7 +101,7 @@ func consumerTestStore(t *testing.T, home string) *store.Store {
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(p.StateDB())
+	st, err := teststore.Open(p.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
