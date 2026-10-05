@@ -56,8 +56,8 @@ func blobError(w http.ResponseWriter, op string, err error) {
 }
 
 func serveBinBlob(w http.ResponseWriter, r *http.Request) {
-	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
-	if !validBinHash.MatchString(hash) {
+	hash, valid := binStorageKey(strings.TrimPrefix(r.URL.Path, "/bin/"))
+	if !valid {
 		http.Error(w, "invalid hash", http.StatusBadRequest)
 		return
 	}

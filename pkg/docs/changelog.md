@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
 - **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
