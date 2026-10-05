@@ -561,14 +561,12 @@ func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *tes
 		"/webhooks/github/${pipeline}",
 		"/api/v1/tokens",
 		"/api/v1/agents",
-		`"/api/v1/runs/$run_id/nodes/$node_id/mark-ready"`,
-		`"needs_labels":["cluster"]`,
 		"/logs/prove-controller-runner-logs",
 		"/cancel",
 		"/retry?full=1",
 		"rollout restart \"deployment/$runner_deployment\"",
-		`prove_runner_claim "$initial_runner_pod" "initial runner"`,
-		`prove_runner_claim "$runner_pod_after" "post-restart runner"`,
+		`prove_runner_execution "$success_run" "$initial_runner_pod" initial`,
+		`prove_runner_execution "$post_runner_restart_run" "$runner_pod_after" post-restart`,
 		".status.readyReplicas == 1",
 		"rollout restart \"deployment/$controller_deployment\"",
 		"sort_by(.metadata.creationTimestamp)",
@@ -660,101 +658,80 @@ func TestKubernetesE2EWaitRunStatusRejectsOtherHTTPFailures(t *testing.T) {
 	}
 }
 
-func TestKubernetesE2EProvesTheExpectedRunnerPodClaimedTheProbe(t *testing.T) {
-	result, calls := runProveRunnerClaim(t,
-		`{"nodes":[{"claimed_by":null}]}`,
-		`{"nodes":[{"claimed_by":"runner:runner-new:123"}]}`,
-	)
+const kubernetesRunnerExecutionNodes = `{"nodes":[{"id":"prove-controller-runner-logs","status":"done","execution_attempts":[{"outcome":"success","executor_kind":"kubernetes","execution_site":"cluster","execution_site_name":"runner-new"}]}]}`
+
+func TestKubernetesE2EProvesSuccessfulExecutionByTheExpectedReadyRunnerPod(t *testing.T) {
+	result := runProveRunnerExecution(t, kubernetesRunnerExecutionNodes)
 	if result.err != nil {
-		t.Fatalf("runner claim proof: %v\n%s", result.err, result.output)
+		t.Fatalf("runner execution proof: %v\n%s", result.err, result.output)
 	}
-	for _, want := range []string{
-		"post-json /api/v1/runs ",
-		"post-json /api/v1/runs/k8s-runner-probe-0123456789ab-1/nodes ",
-		"post /api/v1/runs/k8s-runner-probe-0123456789ab-1/nodes/runner-claim/mark-ready",
+}
+
+func TestKubernetesE2ERejectsUnprovenRunnerExecution(t *testing.T) {
+	for _, tc := range []struct{ name, nodes string }{
+		{"wrong pod", strings.Replace(kubernetesRunnerExecutionNodes, `"runner-new"`, `"runner-old"`, 1)},
+		{"failed attempt", strings.Replace(kubernetesRunnerExecutionNodes, `"success"`, `"failed"`, 1)},
+		{"missing attempts", `{"nodes":[{"id":"prove-controller-runner-logs","status":"done"}]}`},
+		{"wrong node", strings.Replace(kubernetesRunnerExecutionNodes, `"prove-controller-runner-logs"`, `"other-node"`, 1)},
+		{"wrong executor", strings.Replace(kubernetesRunnerExecutionNodes, `"kubernetes"`, `"local"`, 1)},
+		{"wrong site", strings.Replace(kubernetesRunnerExecutionNodes, `"cluster"`, `"local"`, 1)},
+		{"unfinished node", strings.Replace(kubernetesRunnerExecutionNodes, `"done"`, `"running"`, 1)},
 	} {
-		if !strings.Contains(calls, want) {
-			t.Errorf("runner probe calls missing %q:\n%s", want, calls)
-		}
-	}
-	if !strings.Contains(result.output, "runner:runner-new:123") {
-		t.Fatalf("runner claim proof output = %q", result.output)
-	}
-}
-
-func TestKubernetesE2ERejectsAProbeClaimedByAnotherRunnerPod(t *testing.T) {
-	result, _ := runProveRunnerClaim(t,
-		`{"nodes":[{"claimed_by":"runner:runner-old:123"}]}`,
-	)
-	if result.err == nil {
-		t.Fatal("runner claim proof accepted another runner pod")
-	}
-	if !strings.Contains(result.output, "does not identify Ready runner pod runner-new") {
-		t.Fatalf("runner claim proof output = %q", result.output)
+		t.Run(tc.name, func(t *testing.T) {
+			result := runProveRunnerExecution(t, tc.nodes)
+			if result.err == nil {
+				t.Fatal("runner execution proof accepted unproven execution")
+			}
+			if !strings.Contains(result.output, "test run run-1 has no successful execution by Ready runner pod runner-new") {
+				t.Fatalf("runner execution proof output = %q", result.output)
+			}
+		})
 	}
 }
 
-func runProveRunnerClaim(t *testing.T, responses ...string) (scriptResult, string) {
+func runProveRunnerExecution(t *testing.T, nodes string) scriptResult {
 	t.Helper()
 	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
-	proveFunction := "prove_runner_claim() {\n" + between(t, script,
-		"prove_runner_claim() {\n",
+	proveFunction := "prove_runner_execution() {\n" + between(t, script,
+		"prove_runner_execution() {\n",
 		"\n}\n\nwait_run_status() {",
 	) + "\n}\n"
-	responseDir := t.TempDir()
-	for i, response := range responses {
-		if err := os.WriteFile(filepath.Join(responseDir, strconv.Itoa(i)), []byte(response), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	countFile := filepath.Join(t.TempDir(), "count")
-	if err := os.WriteFile(countFile, []byte("0"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	artifactDir := t.TempDir()
 	callsFile := filepath.Join(t.TempDir(), "calls")
 	harness := `set -Eeuo pipefail
-api_post_json() {
-  printf 'post-json %s %s\n' "$1" "$2" >>"$CALLS_FILE"
-}
-api_post() {
-  printf 'post %s\n' "$1" >>"$CALLS_FILE"
-}
 api_get() {
-  local index response_path
-  index="$(<"$COUNT_FILE")"
-  response_path="$RESPONSES_DIR/$index"
-  printf '%s' "$((index + 1))" >"$COUNT_FILE"
-  if [[ ! -f "$response_path" ]]; then
-    printf '{"nodes":[{"claimed_by":null}]}'
-    return
-  fi
-  cat "$response_path"
-}
-sleep() {
-  :
+  printf 'get %s\n' "$1" >>"$CALLS_FILE"
+  printf '%s' "$NODES_JSON"
 }
 die() {
   printf 'k8s-e2e: %s\n' "$*" >&2
   exit 1
 }
-run_owner=0123456789abcdef0123456789abcdef
-runner_probe_sequence=0
 ` + proveFunction + `
-prove_runner_claim runner-new test
-printf '%s\n%s\n' "$runner_probe_run_id" "$runner_probe_claim"
+prove_runner_execution run-1 runner-new test
 `
 	cmd := exec.Command("/bin/bash", "-c", harness)
 	cmd.Env = append(os.Environ(),
 		"CALLS_FILE="+callsFile,
-		"COUNT_FILE="+countFile,
-		"RESPONSES_DIR="+responseDir,
+		"NODES_JSON="+nodes,
+		"artifact_dir="+artifactDir,
 	)
 	out, runErr := cmd.CombinedOutput()
 	calls, err := os.ReadFile(callsFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return scriptResult{output: string(out), err: runErr}, string(calls)
+	if string(calls) != "get /api/v1/runs/run-1/nodes\n" {
+		t.Fatalf("runner execution proof calls = %q", calls)
+	}
+	evidence, err := os.ReadFile(filepath.Join(artifactDir, "runner-test-nodes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(evidence) != nodes+"\n" {
+		t.Fatalf("runner execution evidence = %q, want %q", evidence, nodes+"\n")
+	}
+	return scriptResult{output: string(out), err: runErr}
 }
 
 func runWaitRunStatus(t *testing.T, responses ...string) (scriptResult, int) {
