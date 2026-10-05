@@ -179,13 +179,6 @@ api_get_with_status() {
     "http://127.0.0.1:${controller_port}${path}"
 }
 
-api_post() {
-  local path=$1
-  curl --fail --silent --show-error --max-time 10 \
-    -X POST -H "Authorization: Bearer $admin_token" \
-    "http://127.0.0.1:${controller_port}${path}"
-}
-
 api_post_json() {
   local path=$1
   local body=$2
@@ -553,7 +546,7 @@ start_forward() {
   local label=$3
   local log="$artifact_dir/port-forward-$label.log"
   local pid port
-  kube --namespace "$namespace" port-forward "service/$service" ":$remote_port" >"$log" 2>&1 &
+  command kubectl --context "$kube_context" --namespace "$namespace" port-forward "service/$service" ":$remote_port" >"$log" 2>&1 &
   pid=$!
   forward_pids+=("$pid")
   for _ in {1..100}; do
@@ -654,33 +647,15 @@ send_webhook() {
   webhook_run_id="$(jq -er '.run_id' <<<"$response")"
 }
 
-runner_probe_sequence=0
-prove_runner_claim() {
-  local runner_pod=$1
-  local phase=$2
-  local run_id node_id now nodes claim
-  runner_probe_sequence=$((runner_probe_sequence + 1))
-  run_id="k8s-runner-probe-${run_owner:0:12}-${runner_probe_sequence}"
-  node_id="runner-claim"
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  api_post_json "/api/v1/runs" "$(jq -nc \
-    --arg id "$run_id" --arg started "$now" \
-    '{id:$id,pipeline:"k8s-runner-probe",status:"running",trigger_source:"k8s-e2e",started_at:$started}')" >/dev/null
-  api_post_json "/api/v1/runs/$run_id/nodes" \
-    '{"id":"runner-claim","status":"pending","deps":[],"needs_labels":["cluster"]}' >/dev/null
-  api_post "/api/v1/runs/$run_id/nodes/$node_id/mark-ready" >/dev/null
-  for _ in {1..120}; do
-    nodes="$(api_get "/api/v1/runs/$run_id/nodes")"
-    claim="$(jq -r '.nodes[0].claimed_by // empty' <<<"$nodes")"
-    if [[ "$claim" == "runner:${runner_pod}:"* ]]; then
-      runner_probe_run_id=$run_id
-      runner_probe_claim=$claim
-      return 0
-    fi
-    [[ -z "$claim" ]] || die "$phase claim $claim does not identify Ready runner pod $runner_pod"
-    sleep 0.5
-  done
-  die "$phase node $run_id/$node_id was not claimed by Ready runner pod $runner_pod"
+prove_runner_execution() {
+  local run_id=$1 runner_pod=$2 phase=$3 nodes
+  nodes="$(api_get "/api/v1/runs/$run_id/nodes")"
+  printf '%s\n' "$nodes" >"$artifact_dir/runner-$phase-nodes.json"
+  jq -e --arg pod "$runner_pod" '
+    .nodes | length == 1 and .[0].id == "prove-controller-runner-logs" and .[0].status == "done" and
+    (.[0].execution_attempts | any(.outcome == "success" and .executor_kind == "kubernetes" and
+      .execution_site == "cluster" and .execution_site_name == $pod))
+  ' <<<"$nodes" >/dev/null || die "$phase run $run_id has no successful execution by Ready runner pod $runner_pod"
 }
 
 wait_run_status() {
@@ -739,9 +714,7 @@ wait_run_status "$success_run" success 300
 success_nodes="$(api_get "/api/v1/runs/$success_run/nodes")"
 jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$success_nodes" >/dev/null
 success_started="$(jq -er '.nodes[0].started_at' <<<"$success_nodes")"
-prove_runner_claim "$initial_runner_pod" "initial runner"
-initial_runner_probe_run=$runner_probe_run_id
-initial_runner_claim=$runner_probe_claim
+prove_runner_execution "$success_run" "$initial_runner_pod" initial
 agents="$(api_get "/api/v1/agents")"
 jq -e --arg name "$initial_runner_pod" \
   '.agents | any(.type == "agent" and .name == $name)' <<<"$agents" >/dev/null
@@ -790,9 +763,7 @@ post_runner_restart_run=$webhook_run_id
 wait_run_status "$post_runner_restart_run" success 300
 post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run/nodes")"
 jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$post_runner_nodes" >/dev/null
-prove_runner_claim "$runner_pod_after" "post-restart runner"
-post_runner_probe_run=$runner_probe_run_id
-post_runner_claim=$runner_probe_claim
+prove_runner_execution "$post_runner_restart_run" "$runner_pod_after" post-restart
 
 echo "k8s-e2e: proving controller restart and retained run state"
 IFS=$'\t' read -r controller_pod_before controller_uid_before < <(ready_pod_identity controller)
@@ -869,12 +840,10 @@ release=$release_name
 image_prefix=$image_prefix
 image_tag=$image_tag
 success_run=$success_run
-initial_runner_probe_run=$initial_runner_probe_run
-initial_runner_claim=$initial_runner_claim
+initial_runner_execution_pod=$initial_runner_pod
 cancelled_run=$cancelled_run
 post_runner_restart_run=$post_runner_restart_run
-post_runner_probe_run=$post_runner_probe_run
-post_runner_claim=$post_runner_claim
+post_runner_execution_pod=$runner_pod_after
 retry_run=$retry_run
 controller_pvc=$controller_pvc
 fixture_sha=$fixture_sha
