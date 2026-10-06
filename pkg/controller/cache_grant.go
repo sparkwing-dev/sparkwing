@@ -176,13 +176,13 @@ func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID str
 	if trigger.Team != team {
 		return nil, errors.New("the run's trigger belongs to another team")
 	}
-	repo, own, refs, err := s.triggerCacheScope(ctx, trigger)
+	_, own, refs, err := s.triggerCacheScope(ctx, trigger)
 	if err != nil {
 		return nil, err
 	}
-	if repo == "" && trigger.Repo != "" {
-		repo = "name:" + trigger.Repo
-	}
+	// safety: the OIDC subject's spelling, so a webhook's run and a manual run of one
+	// repository share a scope however each trigger was created.
+	repo := canonicalRepository(trigger.GithubOwner, trigger.GithubRepo, trigger.RepoURL)
 	// safety: only a signed webhook vouches for a ref, as the OIDC subject's trigger
 	// does, so any other run writes beside that ref's entries and never over them.
 	write := own

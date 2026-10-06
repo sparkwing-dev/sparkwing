@@ -30,7 +30,7 @@ func TestCacheGrantCarriesTheRunsRepositoryAndRefs(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := s.store.DB().ExecContext(t.Context(),
-			`UPDATE triggers SET git_branch = 'ignored', repo = 'acme/app', trigger_source = ?, trigger_env = ? WHERE id = 'run-1'`,
+			`UPDATE triggers SET git_branch = 'ignored', repo = 'app', repo_url = 'https://GitHub.com/acme/app.git', trigger_source = ?, trigger_env = ? WHERE id = 'run-1'`,
 			source, raw); err != nil {
 			t.Fatal(err)
 		}
@@ -47,8 +47,8 @@ func TestCacheGrantCarriesTheRunsRepositoryAndRefs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if grant.Scope == nil || grant.Scope.Repo != "name:acme/app" {
-			t.Fatalf("grant scope = %+v, want repository name:acme/app", grant.Scope)
+		if grant.Scope == nil || grant.Scope.Repo != "github.com/acme/app" {
+			t.Fatalf("grant scope = %+v, want repository github.com/acme/app", grant.Scope)
 		}
 		if rec, _ := callDownload(t, s, body.Grant, "bins/abc", false); rec.Code != http.StatusOK {
 			t.Fatalf("download = %d: %s", rec.Code, rec.Body.String())
