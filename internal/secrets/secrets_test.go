@@ -17,8 +17,8 @@ func TestMasker_RegisterAndMask(t *testing.T) {
 	if got != "token=*** other=*** visible" {
 		t.Fatalf("Mask = %q", got)
 	}
-	if vs := m.Values(); len(vs) != 2 {
-		t.Fatalf("Values len = %d, want 2", len(vs))
+	if vs := m.Values(); !slices.Contains(vs, "supersecret") || !slices.Contains(vs, "another") || slices.Contains(vs, "") {
+		t.Fatalf("Values = %q", vs)
 	}
 }
 
@@ -174,7 +174,7 @@ func TestMaskerMultilineComponentsKeepLiteralMatchingPolicy(t *testing.T) {
 	m.Register(value)
 	before := m.Values()
 	m.Register(value)
-	if !slices.Equal(before, m.Values()) || len(before) != 3 {
+	if !slices.Equal(before, m.Values()) || !slices.Contains(before, "xy") || !slices.Contains(before, "longer-private-xy") || slices.Contains(before, " ") {
 		t.Fatalf("registration not deduplicated: %q", m.Values())
 	}
 	if !slices.Contains(before, value) {

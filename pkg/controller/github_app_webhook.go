@@ -170,11 +170,9 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 }
 
-// safety: a removal whose listing cannot be read withdraws the whole
-// installation's schedules, except when the listing is unreadable only for
-// its size; then the repositories GitHub names as removed are withdrawn and
-// the rest of the installation stays. A named repository the cut listing
-// still shows was added back after the removal, so it keeps its schedules.
+// safety: an unreadable listing withdraws the whole installation's schedules, but a listing cut only
+// for its size withdraws just the repositories GitHub names as removed and keeps the rest; a named
+// repository the cut listing still shows was added back after the removal, so it keeps its schedules.
 func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
 	installation int64, body []byte, listed []githubapp.Repository, listErr error,
 ) bool {

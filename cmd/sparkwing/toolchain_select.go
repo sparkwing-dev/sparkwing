@@ -240,7 +240,7 @@ func installToolchainRelease(w io.Writer, p paths.Paths, dir, binPath, version s
 	if err != nil {
 		return fmt.Errorf("stage %s: %w", binPath, err)
 	}
-	if err := assertToolchainVersion(stage, version); err != nil {
+	if err := assertReleaseVersion(stage, version); err != nil {
 		_ = os.Remove(stage)
 		return err
 	}
@@ -323,7 +323,10 @@ func ensureToolchainExecutable(binPath string) error {
 	return nil
 }
 
-func assertToolchainVersion(binPath, version string) error {
+// safety: a signature covers bytes, not a tag, so an older signed release
+// served under a newer tag passes verification; only the binary's own report
+// catches that substitution.
+func assertReleaseVersion(binPath, version string) error {
 	args := []string{"version", "-o", "json", "--offline"}
 	// #nosec G702 -- the release binary this process just verified against its signed manifest, asked only for its version
 	out, err := exec.Command(binPath, args...).Output()
@@ -337,8 +340,8 @@ func assertToolchainVersion(binPath, version string) error {
 	}
 	if report.CLI.Installed != version {
 		return fmt.Errorf(
-			"the release published as %s reports itself as %s; refusing to cache it as %s",
-			version, report.CLI.Installed, version)
+			"the release published as %s reports itself as %s; refusing it",
+			version, report.CLI.Installed)
 	}
 	return nil
 }

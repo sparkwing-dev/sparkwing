@@ -9,7 +9,7 @@ import (
 )
 
 // TestVersionJSONKeepsTheFieldTheToolchainSwitchReads freezes the surface
-// assertToolchainVersion depends on: the switch asks a freshly fetched release
+// assertReleaseVersion depends on: the switch asks a freshly fetched release
 // for its identity with `version -o json --offline` and reads cli.installed, so
 // a release that drops either the flags or the field breaks every repo whose pin
 // names it, in a place no other test looks.

@@ -186,6 +186,7 @@ func TestRunnerTokenRefusesADuplicateAgentName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedMinter(t, s, store.DefaultTeam, "owner", store.RoleOwner)
 	now := time.Now().UTC()
 	_, first, err := tenant.CreateRunnerToken(ctx, "agent:moonborn", []string{"nodes.claim"}, "owner", now)
 	if err != nil {

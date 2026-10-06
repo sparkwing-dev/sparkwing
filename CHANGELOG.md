@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
+- **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.
 - **GitHub App webhooks:** Start `branch_delete` subscriptions on GitHub's real `delete` payload, which has no `master_branch`, at the default branch from `repository.default_branch`; a `delete` body carrying `master_branch` is a `create` body and starts nothing.
 - **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
@@ -40,7 +42,17 @@ unlock.
 
 ### Security
 - **GitHub App webhooks:** Refuse a signed delivery body re-sent under another `X-GitHub-Event`, which could unbind an installation or start `branch_delete` pipelines, and require this App's id on `installation` events. Schema 91 adds one defaulted column to `github_app_deliveries`; older binaries keep working against the migrated database.
+- **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
+- **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
+- **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
+- **Node attempt history:** Derive a node's lineage root only from the server's retry record and keep execution-attempt reads inside the run's team, so a node created with another team's run as `retry_root_run_id` no longer shows that team's attempt history.
+- **Team invitations:** Withdraw open invitations when their inviter is removed or deletes their account, and withdraw those above a demoted inviter's new role.
+- **Runner tokens:** Recheck the minter's role inside the mint, so a removal or demotion that commits during a mint request leaves no live runner token.
+- **Token mints:** Make CLI and runner token mints wait on an in-flight account deletion on PostgreSQL, so a mint racing the deletion cannot leave a live token.
+- **Compute limits:** Record a claim's compute-limit refusal only on a run of the claimant's team; `Store.OldestWaitingReadyNodeForPrincipal` moves to `Tenant`.
+- **Live logs:** Read only bytes appended since the previous poll when streaming a node log, instead of rereading every attributed file each 200 ms.
+- **Log reads:** Serve node logs and their head, tail, range and grep filters from the files incrementally instead of buffering every attempt file in memory; a read that fails after the response starts now aborts the connection.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
 - **Controller client:** Keep bearer credentials out of cross-host redirects while preserving normal redirect handling and signed artifact transfers.
 
@@ -48,8 +60,17 @@ unlock.
 - **CLI tokens:** Constrain new tokens to the member role held when minting commits, so a concurrent demotion cannot restore write access
 - **Secrets:** Mask JSON-escaped secret values in child-run events and dispatch snapshots while preserving numeric fields
 - **Secrets:** Mask complete nonblank lines of registered multiline secrets in subprocess output, direct logs, and structured string attributes
+- **Secrets:** Mask base64, URL-escaped and JSON-escaped forms of registered secret values in run logs, including a value inside a longer base64 blob
+- **controller:** Send `Cache-Control: no-store` on every authenticated API response and on the public routes that mint sessions, runner credentials or download URLs
+- **controller:** Name a signed-in account on request spans by its account id instead of its email address
+- **Run outputs:** Expire the stored outputs of a deleted run so retention removes their object-store bytes
+- **web:** End the browser's previous controller session when a password or first-admin sign-in replaces it
+- **Dashboard:** Encode run and node ids in API paths and refuse dot segments, so a crafted `?run=` link cannot turn a run action into a request to another route
+- **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+- **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
+- **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
 

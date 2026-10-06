@@ -3,9 +3,11 @@ package secrets
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -77,14 +79,87 @@ func (m *Masker) Register(value string) {
 			}
 		}
 	}
-	for _, v := range values {
-		if !slices.Contains(m.values, v) {
-			m.values = append(m.values, v)
+	for _, literal := range values {
+		for _, v := range append([]string{literal}, encodedForms(literal)...) {
+			if !slices.Contains(m.values, v) {
+				m.values = append(m.values, v)
+			}
 		}
 	}
 	// safety: Mask replaces in slice order, so a shorter secret that prefixes a
 	// longer one must not run first or it leaves the longer tail in the clear.
 	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
+}
+
+// safety: shorter encodings of short secrets would mask ordinary log text.
+const minEncodedFormLen = 4
+
+func encodedForms(value string) []string {
+	jsonHTML, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var jsonPlain bytes.Buffer
+	enc := json.NewEncoder(&jsonPlain)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(value); err != nil {
+		return nil
+	}
+	query := url.QueryEscape(value)
+	candidates := []string{
+		trimJSONString(string(jsonHTML)),
+		trimJSONString(jsonPlain.String()),
+		query,
+		strings.ReplaceAll(query, "+", "%20"),
+		url.PathEscape(value),
+		uriComponentEscape(value),
+		base64.StdEncoding.EncodeToString([]byte(value)),
+		base64.RawURLEncoding.EncodeToString([]byte(value)),
+	}
+	for lead := range 3 {
+		std := embeddedBase64(value, lead)
+		candidates = append(candidates, std, strings.NewReplacer("+", "-", "/", "_").Replace(std))
+	}
+	var out []string
+	for _, c := range candidates {
+		if len(c) >= minEncodedFormLen && c != value && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// safety: JavaScript's encodeURIComponent leaves !'()* unescaped, which no Go
+// escaper matches.
+func uriComponentEscape(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-_.~!'()*", c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+func trimJSONString(encoded string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(strings.TrimSuffix(encoded, "\n"), `"`), `"`)
+}
+
+func embeddedBase64(value string, lead int) string {
+	buf := make([]byte, lead, lead+len(value))
+	buf = append(buf, value...)
+	encoded := base64.RawStdEncoding.EncodeToString(buf)
+	// safety: inside a longer blob the edge characters also carry bits of the
+	// neighboring bytes, so only the characters built from value alone match.
+	start := (8*lead + 5) / 6
+	end := 8 * len(buf) / 6
+	if start >= end {
+		return ""
+	}
+	return encoded[start:end]
 }
 
 func (m *Masker) Mask(s string) string {
@@ -300,7 +375,8 @@ func (e maskedError) MarshalJSON() ([]byte, error) { return json.Marshal(e.msg) 
 
 func (e maskedError) Unwrap() error { return e.err }
 
-// Values returns a copy of masking patterns, including whole values and nonblank multiline components.
+// Values returns a copy of masking patterns: whole values, nonblank multiline
+// components, and their encoded forms.
 func (m *Masker) Values() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

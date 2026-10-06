@@ -15,13 +15,14 @@ var (
 	updateSyncDir      = syncDir
 )
 
-func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
+func installVerifiedAsset(asset verifiedReleaseAsset, version, currentBin string) error {
 	dir := filepath.Dir(currentBin)
 	current, err := os.Stat(currentBin)
 	if err != nil {
 		return fmt.Errorf("inspect installed binary: %w", err)
 	}
-	stage, err := writeInstallTemp(dir, ".sparkwing-update-*", asset.bytes, current.Mode().Perm())
+	// safety: Windows runs only a file whose name carries an executable extension.
+	stage, err := writeInstallTemp(dir, ".sparkwing-update-*"+filepath.Ext(currentBin), asset.bytes, current.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("stage verified binary: %w", err)
 	}
@@ -38,6 +39,9 @@ func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 	}
 	if stagedDigest != asset.digest {
 		return fmt.Errorf("staged binary digest mismatch: got %s want %s", stagedDigest, asset.digest)
+	}
+	if err := assertReleaseVersion(stage, version); err != nil {
+		return err
 	}
 
 	oldBody, err := os.ReadFile(currentBin)

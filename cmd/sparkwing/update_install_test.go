@@ -17,7 +17,7 @@ func TestInstallVerifiedAssetRejectsMutationAfterVerification(t *testing.T) {
 	if err := os.WriteFile(target, old, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	asset := testVerifiedAsset([]byte("signed binary"))
+	asset := testVerifiedAsset(t)
 
 	originalMutate := updateMutateStaged
 	originalReplace := updateReplace
@@ -35,7 +35,7 @@ func TestInstallVerifiedAssetRejectsMutationAfterVerification(t *testing.T) {
 	updateReplace = os.Rename
 	updateRestore = os.Rename
 
-	if err := installVerifiedAsset(asset, target); err == nil {
+	if err := installVerifiedAsset(asset, testInstallVersion, target); err == nil {
 		t.Fatal("installVerifiedAsset() succeeded after staged bytes changed")
 	}
 	got, err := os.ReadFile(target)
@@ -54,7 +54,7 @@ func TestInstallVerifiedAssetRestoresAfterInstalledDigestMismatch(t *testing.T) 
 	if err := os.WriteFile(target, old, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	asset := testVerifiedAsset([]byte("signed binary"))
+	asset := testVerifiedAsset(t)
 
 	originalMutate := updateMutateStaged
 	originalReplace := updateReplace
@@ -78,7 +78,7 @@ func TestInstallVerifiedAssetRestoresAfterInstalledDigestMismatch(t *testing.T) 
 	}
 	updateRestore = updateReplace
 
-	if err := installVerifiedAsset(asset, target); err == nil {
+	if err := installVerifiedAsset(asset, testInstallVersion, target); err == nil {
 		t.Fatal("installVerifiedAsset() succeeded after installed bytes changed")
 	}
 	got, err := os.ReadFile(target)
@@ -100,7 +100,7 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	if err := os.WriteFile(target, old, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	asset := testVerifiedAsset([]byte("signed binary"))
+	asset := testVerifiedAsset(t)
 
 	originalMutate := updateMutateStaged
 	originalReplace := updateReplace
@@ -124,7 +124,7 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 		return nil
 	}
 
-	if err := installVerifiedAsset(asset, target); err == nil {
+	if err := installVerifiedAsset(asset, testInstallVersion, target); err == nil {
 		t.Fatal("installVerifiedAsset() succeeded after directory sync failed")
 	}
 	got, err := os.ReadFile(target)
@@ -146,7 +146,11 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	}
 }
 
-func testVerifiedAsset(body []byte) verifiedReleaseAsset {
+const testInstallVersion = "v9.9.9"
+
+func testVerifiedAsset(t *testing.T) verifiedReleaseAsset {
+	skipWithoutShellFixtures(t)
+	body := releaseFixture(testInstallVersion)
 	digest := sha256.Sum256(body)
 	return verifiedReleaseAsset{name: "sparkwing-test", bytes: body, digest: hex.EncodeToString(digest[:])}
 }
@@ -159,7 +163,7 @@ func TestInstallVerifiedAssetPreservesExistingPermissions(t *testing.T) {
 	if err := os.WriteFile(target, []byte("old binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := installVerifiedAsset(testVerifiedAsset([]byte("new binary")), target); err != nil {
+	if err := installVerifiedAsset(testVerifiedAsset(t), testInstallVersion, target); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(target)
