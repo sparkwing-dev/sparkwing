@@ -2535,7 +2535,7 @@ func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SetTrustLocalBuilds(ctx context.Context, team Team, trust bool) error
-func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, err error)
+func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warning string, err error)
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error

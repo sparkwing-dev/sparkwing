@@ -24,7 +24,13 @@ unlock.
 - **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
   It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
 
+### Changed
+- **store (Breaking):** `Store.SettleCardPayment` returns the matched early fraud warning id
+  It now returns `(created bool, warning string, err error)`. See [migration guide](docs/migrations/_unreleased.md#settlecardpayment-returns-the-matched-warning).
+
 ### Fixed
+- **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt
+  The ledger kept that money without granting anything or alerting. It now repays exactly the open charge, grants nothing beyond it, keeps the team held, and logs `alert=card_payment_warned`; a warned payment that still grants nothing logs the same alert.
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.

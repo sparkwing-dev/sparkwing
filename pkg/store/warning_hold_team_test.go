@@ -32,7 +32,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				payments[w.Team] = store.CardPayment{Team: w.Team, ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}
 			}
 			if order == "payment-first" {
-				if paid, err := s.SettleCardPayment(ctx, payments["first"], now); err != nil || !paid {
+				if paid, _, err := s.SettleCardPayment(ctx, payments["first"], now); err != nil || !paid {
 					t.Fatalf("first payment=%v error=%v", paid, err)
 				}
 			}
@@ -44,7 +44,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				if order == "payment-first" && team == "first" {
 					return nil
 				}
-				paid, err := s.SettleCardPayment(ctx, payments[team], now)
+				paid, _, err := s.SettleCardPayment(ctx, payments[team], now)
 				if err != nil {
 					return fmt.Errorf("team %s: %w", team, err)
 				}
@@ -180,7 +180,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 			}
 			for repeat := 0; repeat < 2; repeat++ {
 				for _, w := range work {
-					if paid, err := s.SettleCardPayment(ctx, store.CardPayment{Team: w.Team, ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}, now); err != nil || paid {
+					if paid, _, err := s.SettleCardPayment(ctx, store.CardPayment{Team: w.Team, ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}, now); err != nil || paid {
 						t.Fatalf("team=%s paid=%v error=%v", w.Team, paid, err)
 					}
 				}

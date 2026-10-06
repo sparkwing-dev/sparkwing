@@ -207,15 +207,28 @@ func (s *Server) handleCardPayment(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// safety: operator alerting keys on this value, so renaming it silences the
+// alert for a fraud-warned card's payment.
+const cardPaymentWarnedAlert = "card_payment_warned"
+
 func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error {
 	now := time.Now()
 	switch req.Status {
 	case cardChargeSucceeded:
-		created, err := s.store.SettleCardPayment(ctx, store.CardPayment{
+		created, warning, err := s.store.SettleCardPayment(ctx, store.CardPayment{
 			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
-		if created {
+		switch {
+		case warning != "" && created:
+			s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held for review",
+				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
+				"payment_intent", req.PaymentIntent, "warning_id", warning, "cents", req.AmountCents)
+		case warning != "":
+			s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing; confirm it was refunded",
+				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
+				"payment_intent", req.PaymentIntent, "warning_id", warning, "cents", req.AmountCents)
+		case created:
 			s.logger.Info("card charge paid", "team", req.Team, "charge", req.ChargeID,
 				"payment_intent", req.PaymentIntent, "cents", req.AmountCents)
 		}

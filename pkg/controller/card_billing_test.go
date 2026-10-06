@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -177,6 +178,56 @@ func TestCardBilling_ADeclineIsPaidByHand(t *testing.T) {
 	}
 	if b := f.billing(owner); b.OpenCharge != nil || b.BalanceMicro != 0 || b.Limits.CreditLimitCents == 0 {
 		t.Fatalf("after paying = %+v", b)
+	}
+}
+
+// A pay-now payment by a card that drew a fraud warning on another payment
+// repays the debt, and the operator is alerted once.
+func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
+	fc, url := newFakeCheckout(t)
+	raw, pub := multiTeamLicense(t)
+	logs := &lockedBuffer{}
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		license: raw, key: pub, checkoutURL: url, checkoutToken: checkoutToken,
+		logger: slog.New(slog.NewJSONHandler(logs, nil)),
+	})
+	owner, _, _ := teamOf(f)
+	f.trust(owner.team, 0)
+	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1", "last4": "4242",
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("save card = %d", code)
+	}
+	fc.mu.Lock()
+	fc.chargeStatus, fc.declineCode = "failed", "insufficient_funds"
+	fc.mu.Unlock()
+	f.owe(owner.team, 15_000)
+	f.srv.CardBillingPass(context.Background())
+	if code := f.call("POST", "/api/v1/credits/warnings", "Bearer "+f.admin, map[string]any{
+		"payment_intent": "pi_elsewhere", "warning_id": "issfr_1", "fingerprint": "fp_flagged", "actionable": true,
+	}, nil); code >= 300 {
+		t.Fatalf("warning = %d", code)
+	}
+	if code := f.call("POST", "/api/v1/team/billing/pay", owner.auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("pay now = %d", code)
+	}
+	pays := fc.internalCalls("/internal/charge-checkout")
+	paid := map[string]any{
+		"team": owner.team, "charge_id": pays[0].Body["charge_id"], "attempt_id": pays[0].Body["attempt_id"],
+		"payment_intent": "pi_recovered", "amount_cents": 15_000, "status": "succeeded", "fingerprint": "fp_flagged",
+	}
+	for range 2 {
+		if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, paid, nil); code != http.StatusNoContent {
+			t.Fatalf("the webhook's payment = %d", code)
+		}
+	}
+	if b := f.billing(owner); b.OpenCharge != nil || b.BalanceMicro != 0 {
+		t.Fatalf("after paying = %+v, want the debt repaid", b)
+	}
+	alerts := logs.records(t, "billing alert: a card with a fraud warning repaid a debt; the team is held for review")
+	if len(alerts) != 1 || alerts[0]["alert"] != "card_payment_warned" || alerts[0]["warning_id"] != "issfr_1" ||
+		alerts[0]["payment_intent"] != "pi_recovered" {
+		t.Fatalf("alerts = %v, want one card_payment_warned", alerts)
 	}
 }
 

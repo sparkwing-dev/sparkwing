@@ -4427,7 +4427,11 @@ paths:
         amount and lifts the hold a decline placed. Any other payment, a
         second one or the wrong amount, is granted and queued for a refund. A
         payment that drew an actionable early fraud warning, or was made by a
-        card that did, grants nothing and holds the team. A repeat of a
+        card that did, grants nothing and holds the team, except that a
+        pay-now payment of exactly the open charge by a card warned only on
+        another payment repays that debt, since any card may repay usage
+        already consumed; it also holds the team, and the controller logs
+        `alert=card_payment_warned` for either outcome. A repeat of a
         settled payment changes nothing. A payment reference already credited
         to another team is refused, including one recorded as a prepaid grant.
         `failed` records a declined attempt: the charge stays open and is
@@ -4468,7 +4472,8 @@ paths:
         yet, and a repeat of `warning_id` writes nothing new. An `actionable`
         warning holds the team the payment funded, when the ledger knows it,
         and the warned payment, or a later payment by the same card, is never
-        granted: its refund returns the money. A warning that is not
+        granted: its refund returns the money. A pay-now payment by that card
+        still repays the open debt it was opened for. A warning that is not
         actionable is stored and stops nothing.
       requestBody:
         required: true
