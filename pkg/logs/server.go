@@ -1346,8 +1346,18 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
-	offsets := map[string]int64{}
-	pending := map[string]string{}
+	files := map[string]*streamFile{}
+	chunk := make([]byte, 32<<10)
+	var event []byte
+	emit := func(line []byte) error {
+		event = appendSSEData(event[:0], line)
+		_, err := out.Write(event)
+		// perf: one long line must not stay resident for the stream's lifetime.
+		if cap(event) > len(chunk) {
+			event = nil
+		}
+		return err
+	}
 	for {
 		select {
 		case <-r.Context().Done():
@@ -1366,27 +1376,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			wrote := false
 			for _, name := range names {
-				data, readErr := readLogFile(root, filepath.Join(runID, name))
-				if readErr != nil {
-					continue
+				file := files[name]
+				if file == nil {
+					file = &streamFile{}
+					files[name] = file
 				}
-				if int64(len(data)) < offsets[name] {
-					offsets[name] = 0
-					pending[name] = ""
+				sent, err := file.poll(root, filepath.Join(runID, name), chunk, emit)
+				if err != nil {
+					return
 				}
-				if int64(len(data)) == offsets[name] {
-					continue
-				}
-				buf := data[offsets[name]:]
-				offsets[name] = int64(len(data))
-				parts := splitKeepPartial(pending[name] + string(buf))
-				pending[name] = parts.trailing
-				for _, line := range parts.complete {
-					if _, err := fmt.Fprintf(out, "data: %s\n\n", sseEscape(line)); err != nil {
-						return
-					}
-					wrote = true
-				}
+				wrote = wrote || sent
 			}
 			if wrote {
 				if err := out.Flush(); err != nil {
@@ -1397,25 +1396,65 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type splitResult struct {
-	complete []string
-	trailing string
+// perf: each attributed file keeps its offset so a poll reads only appended bytes.
+type streamFile struct {
+	offset  int64
+	partial []byte
 }
 
-func splitKeepPartial(s string) splitResult {
-	out := splitResult{}
-	lines := strings.Split(s, "\n")
-	for i := 0; i < len(lines)-1; i++ {
-		out.complete = append(out.complete, lines[i])
+// safety: a read failure leaves the file for the next poll; only a write failure ends the stream.
+func (s *streamFile) poll(root *os.Root, path string, chunk []byte, emit func([]byte) error) (bool, error) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return false, nil
 	}
-	out.trailing = lines[len(lines)-1]
-	return out
+	size := info.Size()
+	if size < s.offset {
+		s.offset, s.partial = 0, nil
+	}
+	if size == s.offset {
+		return false, nil
+	}
+	f, err := root.Open(path)
+	if err != nil {
+		return false, nil
+	}
+	defer func() { _ = f.Close() }()
+	// safety: the Stat size bounds this poll; bytes appended meanwhile belong to the next one.
+	section := io.NewSectionReader(f, s.offset, size-s.offset)
+	sent := false
+	for {
+		n, readErr := section.Read(chunk)
+		s.offset += int64(n)
+		data := chunk[:n]
+		for end := bytes.IndexByte(data, '\n'); end >= 0; end = bytes.IndexByte(data, '\n') {
+			line := data[:end]
+			if len(s.partial) > 0 {
+				line = append(s.partial, line...)
+				s.partial = nil
+			}
+			if err := emit(line); err != nil {
+				return sent, err
+			}
+			sent = true
+			data = data[end+1:]
+		}
+		s.partial = append(s.partial, data...)
+		if readErr != nil {
+			return sent, nil
+		}
+	}
 }
 
-func sseEscape(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
+// safety: a carriage return would end the SSE event early; a split line holds no newline.
+func appendSSEData(dst, line []byte) []byte {
+	dst = append(dst, "data: "...)
+	for _, b := range line {
+		if b != '\r' {
+			dst = append(dst, b)
+		}
+	}
+	return append(dst, '\n', '\n')
 }
 
 // safety: os.Root confines every open, readdir and remove to the runs

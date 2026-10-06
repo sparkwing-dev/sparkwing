@@ -38,6 +38,7 @@ unlock.
 
 ### Security
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
+- **Live logs:** Read only bytes appended since the previous poll when streaming a node log, instead of rereading every attributed file each 200 ms.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
 - **Controller client:** Keep bearer credentials out of cross-host redirects while preserving normal redirect handling and signed artifact transfers.
 
