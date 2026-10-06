@@ -80,7 +80,7 @@ A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/t
 | `pull_request_labeled` with nonempty `pull_request_labels: ["ship", ...]` | PR labeled with one of the listed labels, compared without case |
 | `pull_request_ready_for_review` | Draft PR marked ready |
 | `release_published`, `release_prereleased` | Release action at its tag's commit |
-| `branch_create`, `branch_delete` | Branch creation or deletion; deletion runs at the current default branch commit |
+| `branch_create`, `branch_delete` | Branch creation or deletion; deletion runs at the current commit of the delivery's `repository.default_branch` |
 
 `branches` filters branch pushes and branch creation and deletion by the branch name; it does not apply to tag pushes, which `tags` alone selects, or to releases. `base_branches` filters every pull request event by the pull request's base branch. Both are arrays of up to 10 glob patterns, each at most 128 bytes, matched with Go `path.Match` against the branch name. An empty list matches every branch, including for subscriptions written before these fields existed. For example, `{"repository":"acme/widgets","pipeline":"deploy","push":true,"branches":["main","release/*"]}` runs deploy on `main` or a one-level `release/` branch. Set `branches` on every deploy pipeline subscribed to push or branch creation so feature branches cannot deploy. The controller applies these filters before creating a run; pipeline YAML in the pushed commit cannot change them.
 
