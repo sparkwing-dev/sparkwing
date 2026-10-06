@@ -44,6 +44,8 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **GitHub App webhooks:** Refuse a run-starting delivery whose signed event time is older than the 90-day delivery digest retention with 409 and a warn log line, so a captured delivery cannot start its commit again once its run is deleted and its digest forgotten.
+- **GitHub webhooks:** Keep each started delivery's signed-body digest for 90 days apart from its run, so a captured push or pull request delivered again after its run is deleted answers 409 instead of starting the commit again.
 - **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
 - **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
 - **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.

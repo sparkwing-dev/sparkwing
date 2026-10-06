@@ -1490,3 +1490,31 @@ func TestGitHubAppBranchDeleteRunsOnGitHubsPayload(t *testing.T) {
 		t.Fatalf("branch_delete trigger = branch %q sha %q env %v", tr.GitBranch, tr.GitSHA, tr.TriggerEnv)
 	}
 }
+
+// An event older than the delivery digest's retention is refused outright:
+// its digest may be gone, and GitHub never redelivers anything that old.
+func TestGitHubAppEventOlderThanTheReplayWindowIsRefused(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "deploy", nil)
+	if _, err := f.store.DB().Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
+		time.Now().Add(-2*store.GitHubAppDeliveryRetention).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	stale := pushedAt(pushPayload(7, 701, "acme/widgets", headSHA), time.Now().Add(-store.GitHubAppDeliveryRetention-time.Hour))
+	code, out := f.deliver("push", stale, "")
+	if code != http.StatusConflict {
+		t.Fatalf("push older than the replay window = %d %v, want 409", code, out)
+	}
+	if !strings.Contains(f.logs.String(), "older than the replay window") {
+		t.Fatalf("refusal left no log line:\n%s", f.logs.String())
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("a stale push started %d runs", n)
+	}
+	recent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("4", 40)), time.Now().Add(-store.GitHubAppDeliveryRetention+time.Hour))
+	if _, out := f.deliver("push", recent, ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a push inside the window = %v, want dispatched", out)
+	}
+}

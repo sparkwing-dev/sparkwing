@@ -536,8 +536,10 @@ func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, 
 	return s.consumeFlowNonce(ctx, "github_app_connect_states", nonce, expires, now)
 }
 
-// GitHubAppDeliveryRetention is how long a delivery's digest is remembered;
-// a delivery replayed later than this is accepted again.
+// GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
+// The App webhook refuses an event older than this, so a forgotten digest
+// does not readmit a replayed App delivery; a legacy webhook delivery
+// replayed after it is accepted again.
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 
 // GitHubAppDeliverySeen reports whether a delivery with digest was processed

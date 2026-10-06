@@ -296,6 +296,12 @@ principal that owns that run and two tenants submitting the same body get
 a run each. A GitHub redelivery is deduped regardless: the store holds
 one trigger per delivery id and one per body digest, so a retried
 delivery answers `409` naming the original run whatever this window says.
+The body digest is also kept for 90 days apart from the run, so a
+signed push or pull request delivered again after its run was deleted
+answers `409` with no run id instead of starting the commit again. Past
+those 90 days a legacy webhook delivery is accepted again; GitHub App
+deliveries carry an event time and are refused once it is that old (see
+[GitHub App](github-app.md)).
 
 Deduplication runs before the shed and the cap, so a redelivery is
 answered with its original run rather than a refusal, and retrying one
