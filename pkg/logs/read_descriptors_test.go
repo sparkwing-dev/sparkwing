@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -53,5 +55,68 @@ func TestLogs_ReadOfManyAttemptsHoldsOneDescriptor(t *testing.T) {
 		if w.Code != http.StatusOK || w.Body.String() != tc.want {
 			t.Errorf("query %q = %d %.80q, want 200 %.80q", tc.query, w.Code, w.Body.String(), tc.want)
 		}
+	}
+}
+
+type blockingResponse struct {
+	header  http.Header
+	written chan struct{}
+	resume  chan struct{}
+}
+
+func (b *blockingResponse) Header() http.Header { return b.header }
+func (b *blockingResponse) WriteHeader(int)     {}
+func (b *blockingResponse) Write(p []byte) (int, error) {
+	if b.written != nil {
+		close(b.written)
+		b.written = nil
+		<-b.resume
+	}
+	return len(p), nil
+}
+
+func TestLogs_ReadAbortsWhenALaterAttemptIsReplaced(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		query   string
+		replace func(t *testing.T, path string)
+	}{
+		{name: "replaced", replace: func(t *testing.T, path string) {
+			tmp := path + ".new"
+			if err := os.WriteFile(tmp, []byte("other incarnation\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "removed", query: "grep=attempt", replace: func(t *testing.T, path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			s, err := logs.New(root, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeLogFixture(t, root, "run/.attempts/node.log/a1.log", strings.Repeat("first attempt\n", 1<<12))
+			writeLogFixture(t, root, "run/.attempts/node.log/a2.log", "second attempt\n")
+			w := &blockingResponse{header: http.Header{}, written: make(chan struct{}), resume: make(chan struct{})}
+			written := w.written
+			aborted := make(chan any, 1)
+			go func() {
+				defer func() { aborted <- recover() }()
+				s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/logs/run/node?"+tc.query, nil))
+			}()
+			<-written
+			tc.replace(t, filepath.Join(root, "runs", "run", ".attempts", "node.log", "a2.log"))
+			close(w.resume)
+			if got := <-aborted; got != http.ErrAbortHandler { //nolint:errorlint // net/http compares the sentinel itself
+				t.Fatalf("handler finished with %v, want an aborted response", got)
+			}
+		})
 	}
 }

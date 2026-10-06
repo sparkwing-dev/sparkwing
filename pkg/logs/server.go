@@ -1593,7 +1593,9 @@ func nodeTriggerAttemptPath(runID, nodeID string, generation int64, ordinal int)
 type logicalLog struct {
 	root  *os.Root
 	paths []string
-	sizes []int64
+	// safety: identities from the snapshot stop a file deleted and recreated
+	// mid-response from being served as the bytes that were measured.
+	infos []os.FileInfo
 	// safety: one file at a time, so descriptors do not grow with attempt history.
 	file *os.File
 }
@@ -1605,7 +1607,7 @@ func snapshotLogicalLog(root *os.Root, paths []string) (*logicalLog, error) {
 		if err != nil {
 			return nil, err
 		}
-		l.sizes = append(l.sizes, info.Size())
+		l.infos = append(l.infos, info)
 	}
 	return l, nil
 }
@@ -1640,7 +1642,14 @@ func (r *logicalReader) Read(p []byte) (int, error) {
 				return 0, err
 			}
 			r.log.file = f
-			r.section = io.NewSectionReader(f, 0, r.log.sizes[r.next])
+			info, err := f.Stat()
+			if err != nil {
+				return 0, err
+			}
+			if !os.SameFile(info, r.log.infos[r.next]) {
+				return 0, fmt.Errorf("%s replaced during read", r.log.paths[r.next])
+			}
+			r.section = io.NewSectionReader(f, 0, r.log.infos[r.next].Size())
 			r.next++
 		}
 		n, err := r.section.Read(p)
