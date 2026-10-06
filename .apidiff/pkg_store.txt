@@ -2169,6 +2169,7 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
 func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, repo string, refs []string) (Upload, error)
+func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,

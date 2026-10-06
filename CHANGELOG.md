@@ -37,6 +37,7 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **GitHub App webhooks:** Refuse a signed delivery body re-sent under another `X-GitHub-Event`, which could unbind an installation or start `branch_delete` pipelines, and require this App's id on `installation` events. Schema 91 adds one defaulted column to `github_app_deliveries`; older binaries keep working against the migrated database.
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
 - **Controller client:** Keep bearer credentials out of cross-host redirects while preserving normal redirect handling and signed artifact transfers.

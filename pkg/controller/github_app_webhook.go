@@ -31,7 +31,8 @@ type githubAppRepoRef struct {
 type githubAppDelivery struct {
 	Action       string `json:"action"`
 	Installation struct {
-		ID int64 `json:"id"`
+		ID    int64 `json:"id"`
+		AppID int64 `json:"app_id"`
 	} `json:"installation"`
 	Repository githubAppRepoRef `json:"repository"`
 }
@@ -88,6 +89,18 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	var env githubAppDelivery
 	if err := json.Unmarshal(body, &env); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode delivery: %w", err))
+		return
+	}
+	// safety: GitHub signs the body and not the event header, so a body is
+	// read only as the event it first arrived as.
+	sameEvent, err := s.store.BindGitHubAppDeliveryEvent(r.Context(), githubAppDeliveryDigest(body), event, delivery, time.Now())
+	if err != nil {
+		s.writeInternalError(w, r, "github app delivery event", err)
+		return
+	}
+	if !sameEvent {
+		s.logger.Warn("github app delivery re-sent as another event", "event", event, "delivery", delivery)
+		writeError(w, http.StatusConflict, errors.New("this delivery body arrived before as another event"))
 		return
 	}
 	switch event {
@@ -161,6 +174,12 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 // needs the connect flow, because GitHub's notice that the App was installed
 // says nothing about which team should hold it.
 func (s *Server) handleGitHubAppInstallationEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery, delivery string) {
+	// safety: only installation events carry the full installation object, so
+	// a body without this App's id is another event's or another App's.
+	if env.Installation.AppID != s.githubApp.client.AppID() {
+		githubAppIgnored(w, "the installation event names another App")
+		return
+	}
 	id := env.Installation.ID
 	op := s.store.AsOperator()
 	var err error
