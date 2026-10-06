@@ -1044,7 +1044,7 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	}
 	var logical *logicalLog
 	if err == nil {
-		logical, err = openLogicalLog(root, paths)
+		logical, err = snapshotLogicalLog(root, paths)
 	}
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1589,24 +1589,20 @@ func nodeTriggerAttemptPath(runID, nodeID string, generation int64, ordinal int)
 }
 
 // safety: a partial line at the end of one attempt continues into the next, and
-// lengths fixed at open keep every pass on the same bytes while the node appends.
+// lengths fixed at the snapshot keep every pass on the same bytes while the node appends.
 type logicalLog struct {
-	files []*os.File
+	root  *os.Root
+	paths []string
 	sizes []int64
+	// safety: one file at a time, so descriptors do not grow with attempt history.
+	file *os.File
 }
 
-func openLogicalLog(root *os.Root, paths []string) (*logicalLog, error) {
-	l := &logicalLog{}
+func snapshotLogicalLog(root *os.Root, paths []string) (*logicalLog, error) {
+	l := &logicalLog{root: root, paths: paths}
 	for _, path := range paths {
-		f, err := root.Open(path)
+		info, err := root.Stat(path)
 		if err != nil {
-			l.close()
-			return nil, err
-		}
-		l.files = append(l.files, f)
-		info, err := f.Stat()
-		if err != nil {
-			l.close()
 			return nil, err
 		}
 		l.sizes = append(l.sizes, info.Size())
@@ -1615,16 +1611,47 @@ func openLogicalLog(root *os.Root, paths []string) (*logicalLog, error) {
 }
 
 func (l *logicalLog) reader() io.Reader {
-	readers := make([]io.Reader, len(l.files))
-	for i, f := range l.files {
-		readers[i] = io.NewSectionReader(f, 0, l.sizes[i])
-	}
-	return io.MultiReader(readers...)
+	l.close()
+	return &logicalReader{log: l}
 }
 
+// safety: closing a file opened only for reading cannot lose log bytes.
 func (l *logicalLog) close() {
-	for _, f := range l.files {
-		_ = f.Close()
+	if l.file != nil {
+		_ = l.file.Close()
+		l.file = nil
+	}
+}
+
+type logicalReader struct {
+	log     *logicalLog
+	next    int
+	section io.Reader
+}
+
+func (r *logicalReader) Read(p []byte) (int, error) {
+	for {
+		if r.section == nil {
+			if r.next == len(r.log.paths) {
+				return 0, io.EOF
+			}
+			f, err := r.log.root.Open(r.log.paths[r.next])
+			if err != nil {
+				return 0, err
+			}
+			r.log.file = f
+			r.section = io.NewSectionReader(f, 0, r.log.sizes[r.next])
+			r.next++
+		}
+		n, err := r.section.Read(p)
+		if !errors.Is(err, io.EOF) {
+			return n, err
+		}
+		r.section = nil
+		r.log.close()
+		if n > 0 {
+			return n, nil
+		}
 	}
 }
 
