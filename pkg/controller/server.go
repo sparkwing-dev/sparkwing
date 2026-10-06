@@ -1341,7 +1341,7 @@ func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handl
 		}
 		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
-		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
+		stampPrincipal(ctx, p)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}))
 }
