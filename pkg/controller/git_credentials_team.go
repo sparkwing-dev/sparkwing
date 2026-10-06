@@ -94,7 +94,6 @@ func (s *Server) boundCipher(w http.ResponseWriter) (BoundCipher, bool) {
 }
 
 func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	_, t, ok := s.teamMember(w, r, store.RoleReader)
 	if !ok {
 		return
@@ -113,7 +112,6 @@ func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request
 
 // safety: A stored SSH key is released only after its owner confirms the fetched host-key fingerprint.
 func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	p, t, ok := s.teamMember(w, r, store.RoleOwner)
 	if !ok {
 		return
@@ -202,7 +200,6 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleConfirmGitCredential(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	p, t, ok := s.teamMember(w, r, store.RoleOwner)
 	if !ok {
 		return
@@ -231,7 +228,6 @@ func (s *Server) handleConfirmGitCredential(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleDeleteGitCredential(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	p, t, ok := s.teamMember(w, r, store.RoleOwner)
 	if !ok {
 		return
