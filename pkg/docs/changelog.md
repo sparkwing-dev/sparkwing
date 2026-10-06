@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+- **controller (Breaking):** The OIDC subject names the repository: `team:<team>:repository_id:<id>:pipeline:...`, with GitHub's numeric repository id, empty for runs no GitHub App delivery started
+  Two repositories of one team that subscribe the same pipeline name no longer mint the same `sub`, so a push to a weaker repository no longer satisfies a trust policy written for another. Every trust policy that matches `sub` must be updated, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main` becomes `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. See [migration guide](docs/migrations/_unreleased.md#oidc-subject-names-the-repository).
+
 ### Fixed
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.

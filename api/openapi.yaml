@@ -6644,7 +6644,7 @@ paths:
       tags: [runs]
       summary: Sign an OIDC ID token for a run the caller holds a claim on.
       description: >-
-        Returns an RS256 ID token whose sub is team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>, for exchange with a cloud provider. Every claim but aud comes from the run's rows. A caller holding no live claim on the run gets 404, as does a controller with no signing key. A pipeline or branch holding ':', '*', '?' or whitespace answers 422. Each claim may mint 30 tokens per run, refilled over five minutes. A controller-dispatched node's work claim token is answered 422: such nodes get no OIDC token until Sparkwing Cloud OIDC is enabled for them. See docs/oidc.md.
+        Returns an RS256 ID token whose sub is team:<team>:repository_id:<repository_id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>, for exchange with a cloud provider. Every claim but aud comes from the run's rows. A caller holding no live claim on the run gets 404, as does a controller with no signing key. A pipeline or branch holding ':', '*', '?' or whitespace answers 422. Each claim may mint 30 tokens per run, refilled over five minutes. A controller-dispatched node's work claim token is answered 422: such nodes get no OIDC token until Sparkwing Cloud OIDC is enabled for them. See docs/oidc.md.
       requestBody:
         required: true
         content:

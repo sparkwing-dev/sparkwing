@@ -8580,13 +8580,13 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
+       repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
        idempotency_key, claim_seq, webhook_delivery, team,
        COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.GithubRepoID, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
 		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team, &t.Error)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
