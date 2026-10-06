@@ -45,8 +45,15 @@ unlock.
 - **CLI tokens:** Constrain new tokens to the member role held when minting commits, so a concurrent demotion cannot restore write access
 - **Secrets:** Mask JSON-escaped secret values in child-run events and dispatch snapshots while preserving numeric fields
 - **Secrets:** Mask complete nonblank lines of registered multiline secrets in subprocess output, direct logs, and structured string attributes
+- **Secrets:** Mask base64, URL-escaped and JSON-escaped forms of registered secret values in run logs, including a value inside a longer base64 blob
+- **controller:** Send `Cache-Control: no-store` on every authenticated API response and on the public routes that mint sessions, runner credentials or download URLs
+- **controller:** Name a signed-in account on request spans by its account id instead of its email address
+- **Run outputs:** Expire the stored outputs of a deleted run so retention removes their object-store bytes
+- **web:** End the browser's previous controller session when a password or first-admin sign-in replaces it
 
 ### Docs
+- **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
+- **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
 
