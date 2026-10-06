@@ -355,17 +355,19 @@ type ExpiredOutputRun struct {
 	RunID string
 }
 
-// ExpiredOutputRuns lists runs that finished more than [OutputRetention]
-// before now and hold outputs. The newest successful run of each pipeline is
-// kept, so a cross-pipeline ref to it still resolves.
+// ExpiredOutputRuns lists runs that hold outputs and either finished more
+// than [OutputRetention] before now or were deleted. The newest successful
+// run of each pipeline is kept, so a cross-pipeline ref to it still resolves.
 func (s *Store) ExpiredOutputRuns(ctx context.Context, now time.Time, limit int) (out []ExpiredOutputRun, err error) {
+	// safety: output rows carry no foreign key, so a deleted run's outputs
+	// expire here or nothing reclaims their bytes.
 	rows, err := s.query(ctx, `SELECT o.team, o.run_id FROM output_runs o
-  JOIN runs r ON r.id = o.run_id
- WHERE r.finished_at IS NOT NULL AND r.finished_at <= ?
+  LEFT JOIN runs r ON r.id = o.run_id
+ WHERE r.id IS NULL OR (r.finished_at IS NOT NULL AND r.finished_at <= ?
    AND NOT (r.status = 'success' AND r.finished_at = (
        SELECT MAX(r2.finished_at) FROM runs r2
-        WHERE r2.team = r.team AND r2.pipeline = r.pipeline AND r2.status = 'success'))
- ORDER BY r.finished_at LIMIT ?`, now.Add(-OutputRetention).UnixNano(), limit)
+        WHERE r2.team = r.team AND r2.pipeline = r.pipeline AND r2.status = 'success')))
+ ORDER BY COALESCE(r.finished_at, 0) LIMIT ?`, now.Add(-OutputRetention).UnixNano(), limit)
 	if err != nil {
 		return nil, err
 	}
