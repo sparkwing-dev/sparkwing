@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.
 - **GitHub App webhooks:** Start `branch_delete` subscriptions on GitHub's real `delete` payload, which has no `master_branch`, at the default branch from `repository.default_branch`; a `delete` body carrying `master_branch` is a `create` body and starts nothing.
 - **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
 - **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
