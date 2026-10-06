@@ -177,15 +177,21 @@ func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID str
 	if trigger.Team != team {
 		return nil, errors.New("the run's trigger belongs to another team")
 	}
-	_, own, refs, err := s.triggerCacheScope(ctx, trigger)
+	root, vouched, err := s.vouchedRoot(ctx, trigger)
 	if err != nil {
 		return nil, err
 	}
-	repo := cacheRepository(trigger)
-	vouched, err := s.refVouched(ctx, trigger)
+	// safety: a vouched retry or child runs its root's ref and commit, so it takes the
+	// root's scope whole, the pull request's ref and base included, which a retry row lacks.
+	source := trigger
+	if vouched {
+		source = root
+	}
+	_, own, refs, err := s.triggerCacheScope(ctx, source)
 	if err != nil {
 		return nil, err
 	}
+	repo := cacheRepository(source)
 	// safety: a run whose ref and commit only its submitter vouches for writes beside
 	// that ref's entries and never over them.
 	write := own
@@ -203,7 +209,7 @@ const maxCacheLineage = 64
 // safety: classified as the OIDC subject's trigger is. A retry or child holds its root's
 // ref only when the root's event or follow-the-tip schedule vouches for it and the run
 // names that ref and commit with no uploaded source, so the code it runs is the root's.
-func (s *Server) refVouched(ctx context.Context, trigger *store.Trigger) (bool, error) {
+func (s *Server) vouchedRoot(ctx context.Context, trigger *store.Trigger) (*store.Trigger, bool, error) {
 	root := trigger
 	for range maxCacheLineage {
 		parent := root.RetryOf
@@ -215,44 +221,47 @@ func (s *Server) refVouched(ctx context.Context, trigger *store.Trigger) (bool, 
 		}
 		next, err := s.store.GetTrigger(ctx, parent)
 		if errors.Is(err, store.ErrNotFound) {
-			return false, nil
+			return nil, false, nil
 		}
 		if err != nil {
-			return false, err
+			return nil, false, err
 		}
 		if next.Team != trigger.Team {
-			return false, nil
+			return nil, false, nil
 		}
 		root = next
 	}
 	switch kind := oidcTriggerKind(root); {
 	case root.RetryOf != "" || root.ParentRunID != "", kind == oidcTriggerManual:
-		return false, nil
+		return nil, false, nil
 	case kind == oidcTriggerCron && root.GitSHA != "":
-		return false, nil
+		return nil, false, nil
 	}
 	if root == trigger {
-		return true, nil
+		return root, true, nil
 	}
 	// safety: a submitter names the retry_of or parent it likes, so the lineage
 	// vouches only for the repository the root ran.
 	if repo := cacheRepository(trigger); repo == "" || repo != cacheRepository(root) {
-		return false, nil
+		return nil, false, nil
 	}
 	rootID, err := s.store.TriggerRepoID(ctx, root.Team, root.ID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	ownID, err := s.store.TriggerRepoID(ctx, trigger.Team, trigger.ID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if rootID > 0 && ownID > 0 && rootID != ownID {
-		return false, nil
+		return nil, false, nil
 	}
-	return triggerOwnRef(trigger) == triggerOwnRef(root) && trigger.GitSHA == root.GitSHA &&
+	ref := trigger.TriggerEnv["GITHUB_REF"]
+	held := trigger.GitBranch == root.GitBranch && trigger.GitSHA == root.GitSHA &&
+		(ref == "" || ref == root.TriggerEnv["GITHUB_REF"]) &&
 		!strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") &&
-		trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] == "", nil
+		trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] == ""
+	return root, held, nil
 }
 
 // safety: the one repository the trigger names, however it names it, with the port kept,

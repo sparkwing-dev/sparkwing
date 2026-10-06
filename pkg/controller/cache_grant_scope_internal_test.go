@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/runretry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -203,5 +204,48 @@ func TestCacheGrantLineageVouchesOnlyForTheRootsRepository(t *testing.T) {
 	}
 	if scope.Refs[0] != "manual:refs/heads/main" {
 		t.Fatalf("another repository's push vouched for %s writes under %q", scope.Repo, scope.Refs[0])
+	}
+}
+
+// A retry row keeps the branch and commit but not the pull request's ref or
+// base, so its grant takes the vouched source run's scope whole and reads
+// what that run wrote.
+func TestCacheGrantRetryOfAPullRequestKeepsItsScope(t *testing.T) {
+	s, _, _ := downloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sha = "1111111111111111111111111111111111111111"
+	pr := store.Trigger{
+		ID: "pr-source", Pipeline: "demo", CreatedAt: time.Now(), RepoURL: "https://github.com/acme/app.git",
+		GitBranch: "feature", GitSHA: sha, TriggerSource: oidcWebhookSource,
+		TriggerEnv: map[string]string{
+			sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "7",
+			"GITHUB_REF": "refs/pull/7/head", sparkwing.EnvPRBaseRef: "main", EnvDefaultBranch: "main",
+		},
+	}
+	if err := team.CreateTrigger(t.Context(), pr); err != nil {
+		t.Fatal(err)
+	}
+	if err := team.CreateRun(t.Context(), store.Run{
+		ID: pr.ID, Pipeline: "demo", Status: "failed", GitBranch: pr.GitBranch, GitSHA: sha,
+		RepoURL: pr.RepoURL, TriggerSource: oidcWebhookSource, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runretry.Create(t.Context(), s.store, pr.ID, "pr-retry", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	source, err := s.cacheGrantScope(t.Context(), "team-a", pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := s.cacheGrantScope(t.Context(), "team-a", "pr-retry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Repo != source.Repo || !slices.Equal(retry.Refs, source.Refs) {
+		t.Fatalf("retry scope = %+v, want the pull request's %+v", retry, source)
 	}
 }
