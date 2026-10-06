@@ -45,6 +45,8 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **web:** A dashboard run with `--allow-unauthenticated-remote` on a non-loopback address refuses cross-site writes
+  A `POST`, `PUT`, `PATCH` or `DELETE` whose `Origin` host differs from `Host`, or whose `Sec-Fetch-Site` is `cross-site` or `same-site`, answers `403` naming the reason, so a page on another site can no longer cancel, retry or launch runs with the dashboard's service token through a visitor's browser or an operator's port-forward. Same-origin dashboard use and clients that send neither header, such as `curl`, are unchanged. A proxy in front of such a dashboard must pass the browser's `Host` through.
 - **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
 - **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
 - **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.
