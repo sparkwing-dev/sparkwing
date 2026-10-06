@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+- **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
+
 ### Fixed
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
@@ -30,6 +33,16 @@ unlock.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
 - **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.
+- **Windows queue:** Report an absent daemon after its socket directory is removed instead of a misleading network failure
+- **Windows run handles:** Publish run-handle files without attempting unsupported directory synchronization
+- **Source checks:** Parse touched tests for scoped wait checks while retaining repository-wide boundary audits
+- **Windows cancellation:** Report commands terminated by their cancellation handler as cancelled while preserving ordinary failure exit codes
+- **Windows checkout:** Keep formatted Go source, API snapshots, shell scripts, and module files in LF format under Git's Windows line-ending conversion
+- **Windows dependency cache:** Resolve npm's configured cache through Node and use the native Windows cache fallback when npm is absent
+- **Windows installation:** Preserve `.exe` names and native paths in Git Bash source and signed-release installs, including repeated installs into an existing directory
+- **Windows local runner:** Own pipeline nodes and descendants with separate kill-on-close Job Objects, including simultaneous launches
+- **API checks:** Recognize the SDK module in CRLF go.mod files when checking a Windows checkout
+- **Windows pipelines:** Use native file locking, disk-space checks, and executable names so the repository's pipeline module runs from Git Bash
 - **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
 - **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
 - **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.

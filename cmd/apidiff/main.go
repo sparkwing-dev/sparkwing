@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/mod/modfile"
 )
 
 func main() {
@@ -92,11 +94,15 @@ func repoRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return repoRootFrom(cwd)
+}
+
+func repoRootFrom(cwd string) (string, error) {
 	dir := cwd
 	for {
 		modPath := filepath.Join(dir, "go.mod")
 		if body, err := os.ReadFile(modPath); err == nil {
-			if bytes.Contains(body, []byte("module github.com/sparkwing-dev/sparkwing\n")) {
+			if modfile.ModulePath(body) == "github.com/sparkwing-dev/sparkwing" {
 				return dir, nil
 			}
 		}

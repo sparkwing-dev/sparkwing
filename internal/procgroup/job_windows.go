@@ -126,10 +126,15 @@ func (j *Job) ActiveProcesses() (uint32, error) {
 
 // Terminate ends every member of the job now.
 func (j *Job) Terminate() error {
+	return j.TerminateWithCode(1)
+}
+
+// TerminateWithCode lets the owner attribute a member's exit to its own termination request.
+func (j *Job) TerminateWithCode(code uint32) error {
 	if j == nil {
 		return nil
 	}
-	return windows.TerminateJobObject(j.handle, 1)
+	return windows.TerminateJobObject(j.handle, code)
 }
 
 // Close releases the handle; kill-on-close ends any member still running.

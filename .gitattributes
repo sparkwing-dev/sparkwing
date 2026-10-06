@@ -4,3 +4,12 @@
 # gets wrong.
 CHANGELOG.md merge=union
 pkg/docs/changelog.md merge=union
+
+# Tools compare generated files and formatted source byte for byte.
+*.sh text eol=lf
+.shellcheckrc text eol=lf
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+.apidiff/*.txt text eol=lf
+api/openapi.yaml text eol=lf

@@ -12,6 +12,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+func TestTemplateVerifyCLIPathUsesPlatformExecutableName(t *testing.T) {
+	dir := filepath.Join("scratch with spaces", "cli")
+	for _, tc := range []struct {
+		goos string
+		name string
+	}{
+		{goos: "windows", name: "sparkwing.exe"},
+		{goos: "linux", name: "sparkwing"},
+		{goos: "darwin", name: "sparkwing"},
+	} {
+		if got, want := templateVerifyCLIPath(dir, tc.goos), filepath.Join(dir, tc.name); got != want {
+			t.Errorf("%s executable = %q, want %q", tc.goos, got, want)
+		}
+	}
+}
+
 func TestSeedFixture_WritesExpectedFiles(t *testing.T) {
 	cases := map[string][]string{
 		templates.FixtureNone:         nil,

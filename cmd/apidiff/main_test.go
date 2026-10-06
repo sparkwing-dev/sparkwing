@@ -1,9 +1,34 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
+
+func TestRepoRootFindsModuleWithLFOrCRLF(t *testing.T) {
+	for _, lineEnding := range []string{"\n", "\r\n"} {
+		t.Run(map[string]string{"\n": "LF", "\r\n": "CRLF"}[lineEnding], func(t *testing.T) {
+			root := t.TempDir()
+			mod := "module github.com/sparkwing-dev/sparkwing" + lineEnding + lineEnding + "go 1.26.0" + lineEnding
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(mod), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			child := filepath.Join(root, "nested")
+			if err := os.Mkdir(child, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(child, "go.mod"), []byte("module sparkwing-pipelines"+lineEnding), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := repoRootFrom(child)
+			if err != nil || got != root {
+				t.Fatalf("repoRootFrom(%q) = %q, %v; want %q", child, got, err, root)
+			}
+		})
+	}
+}
 
 func TestDiscoverPackagePathsIncludesEveryPublicPackage(t *testing.T) {
 	root, err := repoRoot()
