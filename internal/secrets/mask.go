@@ -112,6 +112,7 @@ func encodedForms(value string) []string {
 		query,
 		strings.ReplaceAll(query, "+", "%20"),
 		url.PathEscape(value),
+		uriComponentEscape(value),
 		base64.StdEncoding.EncodeToString([]byte(value)),
 		base64.RawURLEncoding.EncodeToString([]byte(value)),
 	}
@@ -125,6 +126,21 @@ func encodedForms(value string) []string {
 		}
 	}
 	return out
+}
+
+// safety: JavaScript's encodeURIComponent leaves !'()* unescaped, which no Go
+// escaper matches.
+func uriComponentEscape(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-_.~!'()*", c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 func trimJSONString(encoded string) string {
