@@ -70,6 +70,19 @@ and storage credentials, and controlled volume mounts. A multi-team license
 does not configure those protections or isolate pipeline code from a shared
 host's OS permissions.
 
+**A warm runner's pool token belongs to an operator-only team.** A warm
+runner claims triggers with its pool token, and only for that token's team,
+then runs that team's pipeline code in its own pod or in Jobs it creates. That
+code can read whatever the runner holds: the pool token itself, a GitHub token
+the runner carries for private modules, the service account it creates Jobs
+with, and the cloud role attached to that account, which the cloud's identity
+webhook still injects into Jobs that disable the Kubernetes token. Creating a
+Job in the runner's namespace can mount any Secret there. Every member of the
+pool token's team therefore has operator authority over that namespace and
+role, so put nobody but operators in it. Customer pipelines belong on runners
+whose token's team they own, launched through controller dispatch, which gives
+each Job a claim token for its own work and no Kubernetes API token.
+
 **Cache and source sharing have their own provenance requirements.** A source
 URL and a cache grant alone do not establish that every Git object in a shared
 mirror is public. Assess imported and seeded objects separately from

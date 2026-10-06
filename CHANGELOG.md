@@ -73,6 +73,7 @@ unlock.
 - **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+- **security:** State that a warm runner's pool token must belong to an operator-only team, because that team's pipeline code reaches the pool token, the runner's GitHub token, its Job-creating service account and its cloud role.
 - **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
