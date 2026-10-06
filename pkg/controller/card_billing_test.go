@@ -225,9 +225,9 @@ func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
 	if b := f.billing(owner); b.OpenCharge != nil || b.BalanceMicro != 0 {
 		t.Fatalf("after paying = %+v, want the debt repaid", b)
 	}
-	alerts := logs.records(t, "billing alert: a card with a fraud warning repaid a debt; the team is held for review")
+	alerts := logs.records(t, "billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return")
 	if len(alerts) != 1 || alerts[0]["alert"] != "card_payment_warned" || alerts[0]["warning_id"] != "issfr_1" ||
-		alerts[0]["payment_intent"] != "pi_recovered" {
+		alerts[0]["payment_intent"] != "pi_recovered" || alerts[0]["unapplied_micro"] != float64(0) {
 		t.Fatalf("alerts = %v, want one card_payment_warned", alerts)
 	}
 }

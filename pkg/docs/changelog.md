@@ -28,12 +28,12 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before the card on file, so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
-- **store (Breaking):** `Store.SettleCardPayment` returns the matched early fraud warning id
-  It now returns `(created bool, warning string, err error)`. See [migration guide](docs/migrations/_unreleased.md#settlecardpayment-returns-the-matched-warning).
+- **store (Breaking):** `Store.SettleCardPayment` returns the matched early fraud warning
+  It now returns `(created bool, warned *WarnedCardPayment, err error)`. See [migration guide](docs/migrations/_unreleased.md#settlecardpayment-returns-the-matched-warning).
 
 ### Fixed
 - **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt
-  The ledger kept that money without granting anything or alerting. It now repays exactly the open charge, grants nothing beyond it, keeps the team held, and logs `alert=card_payment_warned`; a warned payment that still grants nothing logs the same alert.
+  The ledger kept that money without granting anything or alerting. It now repays what the team owes at settlement, which a refunded reservation may have lowered since the charge opened, keeps the rest unapplied rather than as prepaid credit, keeps the team held, and logs `alert=card_payment_warned` with the repaid and unapplied amounts; a warned payment that still grants nothing logs the same alert.
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.

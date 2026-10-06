@@ -4433,8 +4433,9 @@ paths:
         payment that drew an actionable early fraud warning, or was made by a
         card that did, grants nothing and holds the team, except that a
         pay-now payment of exactly the open charge by a card warned only on
-        another payment repays that debt, since any card may repay usage
-        already consumed; it also holds the team, and the controller logs
+        another payment repays what the team owes at settlement, since any
+        card may repay usage already consumed, and keeps the rest unapplied
+        rather than as credit; it also holds the team, and the controller logs
         `alert=card_payment_warned` for either outcome. A repeat of a
         settled payment changes nothing. A payment reference already credited
         to another team is refused, including one recorded as a prepaid grant.

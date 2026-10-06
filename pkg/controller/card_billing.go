@@ -230,19 +230,21 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 	now := time.Now()
 	switch req.Status {
 	case cardChargeSucceeded:
-		created, warning, err := s.store.SettleCardPayment(ctx, store.CardPayment{
+		created, warned, err := s.store.SettleCardPayment(ctx, store.CardPayment{
 			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
 		switch {
-		case warning != "" && created:
-			s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held for review",
+		case warned != nil && warned.RepaidMicro > 0:
+			s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return",
 				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
-				"payment_intent", req.PaymentIntent, "warning_id", warning, "cents", req.AmountCents)
-		case warning != "":
+				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
+				"repaid_micro", warned.RepaidMicro, "unapplied_micro", warned.UnappliedMicro)
+		case warned != nil:
 			s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing; confirm it was refunded",
 				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
-				"payment_intent", req.PaymentIntent, "warning_id", warning, "cents", req.AmountCents)
+				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
+				"unapplied_micro", warned.UnappliedMicro)
 		case created:
 			s.logger.Info("card charge paid", "team", req.Team, "charge", req.ChargeID,
 				"payment_intent", req.PaymentIntent, "cents", req.AmountCents)
