@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1032,11 +1033,18 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, selectErr.Error(), http.StatusBadRequest)
 		return
 	}
-	var data []byte
-	if selected {
-		data, err = readLogFile(root, selectedPath)
-	} else {
-		data, err = readNodeLogData(root, runID, nodeID)
+	paths := []string{selectedPath}
+	if !selected {
+		var names []string
+		names, err = nodeLogNames(root, runID, nodeID)
+		paths = paths[:0]
+		for _, name := range names {
+			paths = append(paths, filepath.Join(runID, name))
+		}
+	}
+	var logical *logicalLog
+	if err == nil {
+		logical, err = openLogicalLog(root, paths)
 	}
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1047,22 +1055,30 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "open node log", err)
 		return
 	}
+	defer logical.close()
+	out := bufio.NewWriter(w)
 	if filter.lineNumbers {
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		if err := filter.writeNumbered(w, data); err != nil {
-			s.logger.Warn("write numbered log matches", "err", err)
+		err = filter.writeNumbered(out, logical.reader())
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if filter.passThrough() {
+			// #nosec G705 -- the response is text/plain, never HTML
+			_, err = io.Copy(out, logical.reader())
+		} else {
+			err = filter.write(out, logical.reader)
 		}
-		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if filter.passThrough() {
-		// #nosec G705 -- the response is text/plain, never HTML
-		_, _ = w.Write(data)
-		return
+	if err == nil {
+		err = out.Flush()
 	}
-	// #nosec G705 -- the response is text/plain, never HTML
-	_, _ = w.Write(filter.apply(data))
+	if err != nil {
+		// safety: the status is already sent, so aborting the connection is
+		// the only way a client can tell a failed read from a complete log.
+		s.logger.Warn("read node log", "run", runID, "node", nodeID, "err", err)
+		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http recovers this sentinel and drops the connection
+	}
 }
 
 type logFilter struct {
@@ -1119,77 +1135,101 @@ func (f logFilter) passThrough() bool {
 	return f.tail == 0 && f.head == 0 && f.lineStart == 0 && f.grep == ""
 }
 
-func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
+func (f logFilter) writeNumbered(w io.Writer, r io.Reader) error {
 	encoder := json.NewEncoder(w)
-	count := 0
 	needle := []byte(f.grep)
-	for lineNo := 1; len(data) > 0; lineNo++ {
-		line := data
-		if end := bytes.IndexByte(data, '\n'); end >= 0 {
-			line, data = data[:end], data[end+1:]
-		} else {
-			data = nil
+	lineNo, count := 0, 0
+	var writeErr error
+	err := eachLine(r, func(line []byte) bool {
+		lineNo++
+		text := bytes.TrimSuffix(line, []byte{'\n'})
+		if !bytes.Contains(text, needle) {
+			return true
 		}
-		if !bytes.Contains(line, needle) {
-			continue
-		}
-		if err := encoder.Encode(GrepLine{LineNo: lineNo, Line: string(line)}); err != nil {
-			return err
+		if writeErr = encoder.Encode(GrepLine{LineNo: lineNo, Line: string(text)}); writeErr != nil {
+			return false
 		}
 		count++
-		if f.maxMatches > 0 && count >= f.maxMatches {
-			break
-		}
-	}
-	return nil
+		return f.maxMatches == 0 || count < f.maxMatches
+	})
+	return errors.Join(err, writeErr)
 }
 
-func (f logFilter) apply(data []byte) []byte {
-	a, b := max(1, f.lineStart), f.lineEnd
-	needle := []byte(f.grep)
-	walk := func(visit func([]byte)) {
-		matched := 0
-		for rest := data; len(rest) > 0; {
-			end := bytes.IndexByte(rest, '\n')
-			line, text := rest, rest
-			if end >= 0 {
-				line, text, rest = rest[:end+1], rest[:end], rest[end+1:]
-			} else {
-				rest = nil
-			}
-			if !bytes.Contains(text, needle) {
-				continue
-			}
-			matched++
-			if matched < a {
-				continue
-			}
-			if b > 0 && matched > b {
-				break
-			}
-			visit(line)
+// perf: tail needs the selection's length first, so it reads the log twice rather than hold lines.
+func (f logFilter) write(w io.Writer, open func() io.Reader) error {
+	first, last := 1, 0
+	if f.tail > 0 {
+		total := 0
+		if err := f.walk(open(), func([]byte) bool { total++; return true }); err != nil {
+			return err
 		}
-	}
-	total := 0
-	walk(func([]byte) { total++ })
-	if total == 0 {
-		return nil
-	}
-	first, last := 1, total
-	if f.tail > 0 && total > f.tail {
-		first = total - f.tail + 1
-	} else if f.head > 0 && total > f.head {
+		if total > f.tail {
+			first = total - f.tail + 1
+		} else {
+			last = f.head
+		}
+	} else {
 		last = f.head
 	}
-	var out []byte
 	selected := 0
-	walk(func(line []byte) {
+	var writeErr error
+	err := f.walk(open(), func(line []byte) bool {
 		selected++
-		if selected >= first && selected <= last {
-			out = append(out, line...)
+		if last > 0 && selected > last {
+			return false
 		}
+		if selected >= first {
+			_, writeErr = w.Write(line)
+		}
+		return writeErr == nil
 	})
-	return out
+	return errors.Join(err, writeErr)
+}
+
+// safety: grep selects before the lines range, so range numbers count matches.
+func (f logFilter) walk(r io.Reader, visit func([]byte) bool) error {
+	a, b := max(1, f.lineStart), f.lineEnd
+	needle := []byte(f.grep)
+	matched := 0
+	return eachLine(r, func(line []byte) bool {
+		if !bytes.Contains(bytes.TrimSuffix(line, []byte{'\n'}), needle) {
+			return true
+		}
+		matched++
+		if matched < a {
+			return true
+		}
+		if b > 0 && matched > b {
+			return false
+		}
+		return visit(line)
+	})
+}
+
+// perf: only a line longer than the read buffer is copied.
+func eachLine(r io.Reader, visit func([]byte) bool) error {
+	br := bufio.NewReaderSize(r, 32<<10)
+	var long []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			long = append(long, chunk...)
+			continue
+		}
+		line := chunk
+		if long != nil {
+			line, long = append(long, chunk...), nil
+		}
+		if len(line) > 0 && !visit(line) {
+			return nil
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func parseLinesRange(spec string) (int, int, error) {
@@ -1548,20 +1588,44 @@ func nodeTriggerAttemptPath(runID, nodeID string, generation int64, ordinal int)
 	return filepath.Join(runID, ".attempts", nodeFile(nodeID), fmt.Sprintf("a%020d_t%020d.log", ordinal, generation))
 }
 
-func readNodeLogData(root *os.Root, runID, nodeID string) ([]byte, error) {
-	names, err := nodeLogNames(root, runID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	var out bytes.Buffer
-	for _, name := range names {
-		data, err := readLogFile(root, filepath.Join(runID, name))
+// safety: a partial line at the end of one attempt continues into the next, and
+// lengths fixed at open keep every pass on the same bytes while the node appends.
+type logicalLog struct {
+	files []*os.File
+	sizes []int64
+}
+
+func openLogicalLog(root *os.Root, paths []string) (*logicalLog, error) {
+	l := &logicalLog{}
+	for _, path := range paths {
+		f, err := root.Open(path)
 		if err != nil {
+			l.close()
 			return nil, err
 		}
-		_, _ = out.Write(data)
+		l.files = append(l.files, f)
+		info, err := f.Stat()
+		if err != nil {
+			l.close()
+			return nil, err
+		}
+		l.sizes = append(l.sizes, info.Size())
 	}
-	return out.Bytes(), nil
+	return l, nil
+}
+
+func (l *logicalLog) reader() io.Reader {
+	readers := make([]io.Reader, len(l.files))
+	for i, f := range l.files {
+		readers[i] = io.NewSectionReader(f, 0, l.sizes[i])
+	}
+	return io.MultiReader(readers...)
+}
+
+func (l *logicalLog) close() {
+	for _, f := range l.files {
+		_ = f.Close()
+	}
 }
 
 func readLogFile(root *os.Root, path string) ([]byte, error) {
