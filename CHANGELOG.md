@@ -37,6 +37,7 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
 - **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
