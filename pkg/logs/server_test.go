@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -415,5 +416,136 @@ func TestLogs_StoreErrorsHideRoot(t *testing.T) {
 	resp.Body.Close()
 	if _, err := os.Stat(secret); err != nil {
 		t.Fatalf("delete through symlink removed the target: %v", err)
+	}
+}
+
+func writeLogFixture(t *testing.T, root, rel, data string) {
+	t.Helper()
+	path := filepath.Join(root, "runs", rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLogs_ReadJoinsAttemptFilesAsOneStream(t *testing.T) {
+	root := t.TempDir()
+	s, err := logs.New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	c := logs.NewClient(srv.URL, nil)
+	ctx := context.Background()
+	long := strings.Repeat("y", 100<<10)
+	writeLogFixture(t, root, "run/node.log", "a1\npart")
+	writeLogFixture(t, root, "run/.attempts/node.log/a1.log", "ial\nb1\n")
+	writeLogFixture(t, root, "run/.attempts/node.log/a2.log", "")
+	writeLogFixture(t, root, "run/.attempts/node.log/a3.log", long+"\nc1")
+	writeLogFixture(t, root, "run/empty.log", "")
+	for _, tc := range []struct {
+		name   string
+		node   string
+		filter logs.ReadFilter
+		want   string
+	}{
+		{name: "all", node: "node", want: "a1\npartial\nb1\n" + long + "\nc1"},
+		{name: "head", node: "node", filter: logs.ReadFilter{Head: 2}, want: "a1\npartial\n"},
+		{name: "tail", node: "node", filter: logs.ReadFilter{Tail: 2}, want: long + "\nc1"},
+		{name: "range", node: "node", filter: logs.ReadFilter{Lines: "2:3"}, want: "partial\nb1\n"},
+		{name: "grep-joined-line", node: "node", filter: logs.ReadFilter{Grep: "rtia"}, want: "partial\n"},
+		{name: "grep-long-line", node: "node", filter: logs.ReadFilter{Grep: "yyy", Tail: 1}, want: long + "\n"},
+		{name: "grep-range-tail", node: "node", filter: logs.ReadFilter{Grep: "1", Lines: "1:2", Tail: 1}, want: "b1\n"},
+		{name: "grep-range-head", node: "node", filter: logs.ReadFilter{Grep: "1", Lines: "2:", Head: 5}, want: "b1\nc1"},
+		{name: "empty", node: "empty", want: ""},
+		{name: "empty-tail", node: "empty", filter: logs.ReadFilter{Tail: 3}, want: ""},
+		{name: "missing", node: "missing", filter: logs.ReadFilter{Head: 1}, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := c.ReadFiltered(ctx, "run", tc.node, tc.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("bytes = %.60q (len %d), want %.60q (len %d)", got, len(got), tc.want, len(tc.want))
+			}
+		})
+	}
+	matches, err := c.Grep(ctx, "run", "node", "1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 3 || matches[0] != (logs.GrepLine{LineNo: 1, Line: "a1"}) ||
+		matches[1] != (logs.GrepLine{LineNo: 3, Line: "b1"}) || matches[2] != (logs.GrepLine{LineNo: 5, Line: "c1"}) {
+		t.Fatalf("numbered matches = %+v", matches)
+	}
+}
+
+func TestLogs_ReadFailureAfterHeadersFailsTheResponse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	root := t.TempDir()
+	s, err := logs.New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	c := logs.NewClient(srv.URL, nil)
+	writeLogFixture(t, root, "run/node.log", strings.Repeat("flushed line\n", 1<<13))
+	writeLogFixture(t, root, "run/dir/keep", "x")
+	attempts := filepath.Join(root, "runs", "run", ".attempts", "node.log")
+	if err := os.MkdirAll(attempts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "dir"), filepath.Join(attempts, "a1.log")); err != nil {
+		t.Fatal(err)
+	}
+	for _, filter := range []logs.ReadFilter{{}, {Head: 1 << 14}, {Tail: 1}} {
+		got, err := c.ReadFiltered(context.Background(), "run", "node", filter)
+		if err == nil {
+			t.Fatalf("filter %+v returned %d bytes as a complete log", filter, len(got))
+		}
+	}
+	if _, err := c.Grep(context.Background(), "run", "node", "absent", 0); err == nil {
+		t.Fatal("numbered grep returned a complete result over an unreadable attempt")
+	}
+}
+
+type discardResponse struct{ header http.Header }
+
+func (d *discardResponse) Header() http.Header         { return d.header }
+func (d *discardResponse) Write(p []byte) (int, error) { return len(p), nil }
+func (d *discardResponse) WriteHeader(int)             {}
+
+func TestLogs_FilteredReadsDoNotBufferTheLog(t *testing.T) {
+	const size = 1 << 20
+	root := t.TempDir()
+	s, err := logs.New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data strings.Builder
+	for i := 0; data.Len() < size; i++ {
+		fmt.Fprintf(&data, "line %06d %s\n", i, strings.Repeat("z", 51))
+	}
+	writeLogFixture(t, root, "run/node.log", data.String())
+	handler := s.Handler()
+	for _, query := range []string{"", "head=1", "tail=1", "lines=100:200", "grep=line+010000", "grep=line+010000&line_numbers=1", "grep=z&tail=5&head=2"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/logs/run/node?"+query, nil)
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		handler.ServeHTTP(&discardResponse{header: http.Header{}}, req)
+		runtime.ReadMemStats(&after)
+		allocated := after.TotalAlloc - before.TotalAlloc
+		t.Logf("query %q allocated %d bytes for a %d byte log", query, allocated, data.Len())
+		if allocated > size/4 {
+			t.Errorf("query %q allocated %d bytes for a %d byte log", query, allocated, data.Len())
+		}
 	}
 }
