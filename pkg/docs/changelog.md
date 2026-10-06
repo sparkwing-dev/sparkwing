@@ -51,6 +51,7 @@ unlock.
 - **Run outputs:** Expire the stored outputs of a deleted run so retention removes their object-store bytes
 - **web:** End the browser's previous controller session when a password or first-admin sign-in replaces it
 - **Dashboard:** Encode run and node ids in API paths and refuse dot segments, so a crafted `?run=` link cannot turn a run action into a request to another route
+- **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
 - **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
