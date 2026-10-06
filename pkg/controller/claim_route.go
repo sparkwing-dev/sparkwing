@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -188,7 +187,7 @@ func (s *Server) serveClaim(w http.ResponseWriter, r *http.Request, raw string, 
 	}
 	observeRequestPrincipal(p.Kind)
 	ctx := context.WithValue(contextWithPrincipal(r.Context(), p), claimTokenCtxKey{}, tok)
-	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
+	stampPrincipal(ctx, p)
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 

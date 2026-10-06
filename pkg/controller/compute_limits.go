@@ -188,7 +188,11 @@ func (s *Server) writeClaimComputeLimitRefusal(w http.ResponseWriter, r *http.Re
 	if !errors.As(err, &refused) {
 		return false
 	}
-	runID, nodeID, lookupErr := s.store.OldestWaitingReadyNodeForPrincipal(r.Context(), refused.Principal)
+	var runID, nodeID string
+	t, lookupErr := s.tenantFor(r)
+	if lookupErr == nil {
+		runID, nodeID, lookupErr = t.OldestWaitingReadyNodeForPrincipal(r.Context(), refused.Principal)
+	}
 	if lookupErr != nil {
 		s.logger.Warn("finding the run to record a compute-limit refusal against failed",
 			"principal", refused.Principal, "err", lookupErr)

@@ -665,18 +665,19 @@ func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.
 
 // OldestWaitingReadyNodeForPrincipal names the ready node a claim by this
 // principal would have been given, so a refusal is recorded against a run that
-// principal owns rather than one it cannot see. It returns empty strings when
-// that principal has nothing waiting.
-func (s *Store) OldestWaitingReadyNodeForPrincipal(
+// principal owns rather than one it cannot see. A runner's principal name is
+// unique only within its team, so the search stays in t's team. It returns
+// empty strings when that principal has nothing waiting.
+func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error) {
 	if principal == "" {
 		return "", "", nil
 	}
-	err = s.queryRow(ctx, `SELECT run_id, node_id FROM nodes
-	  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
-	    AND run_id IN (SELECT id FROM runs WHERE created_principal = ?)
-	  ORDER BY ready_at ASC LIMIT 1`, principal).Scan(&runID, &nodeID)
+	err = t.s.queryRow(ctx, `SELECT run_id, node_id FROM nodes
+	  WHERE team = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
+	    AND run_id IN (SELECT id FROM runs WHERE team = ? AND created_principal = ?)
+	  ORDER BY ready_at ASC LIMIT 1`, string(t.team), string(t.team), principal).Scan(&runID, &nodeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", nil
 	}

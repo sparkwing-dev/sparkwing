@@ -777,12 +777,13 @@ email GitHub has verified, never the profile's public email. When the client id
 and secret belong to a GitHub App, that App is also how a team connects its
 repositories; see [GitHub App](github-app.md).
 
-A Google identity joins an existing user only when Google and that user both
-hold the email verified, and never when that user already has a different
-identity from the same provider or unlinked this one; a GitHub identity joins a
-Google user the same way. A second account from one provider on one address is
-a recycled address or another person, so it gets its own user and the first
-user's claim on the address is withdrawn. A user's email follows what the
+A sign-in never joins an existing user by email address. A first sign-in whose
+verified address an existing user holds, from a provider that user has no
+sign-in with, answers `409` and the person links the provider from account
+settings instead (see [Linked sign-ins](#linked-sign-ins)). A second account
+from one provider on one address, or one the user unlinked, is a recycled
+address or another person, so it gets its own user and the first user's claim
+on the address is withdrawn. A user's email follows what the
 provider asserts at each sign-in, except through a sign-in the user linked
 (see [Linked sign-ins](#linked-sign-ins)). A user with no team, other than one on the
 [sign-up waitlist](#sign-up-gate), gets a personal space: a team

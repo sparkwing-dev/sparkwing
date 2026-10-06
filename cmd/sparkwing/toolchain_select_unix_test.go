@@ -18,14 +18,6 @@ import (
 
 const toolchainExecHelperEnv = "SPARKWING_TOOLCHAIN_EXEC_HELPER"
 
-func releaseFixture(version string) []byte {
-	return []byte("#!/bin/sh\n" +
-		`if [ "$1" = "version" ]; then printf '{"cli":{"installed":"` + version + `"}}\n'; exit 0; fi` + "\n" +
-		"echo \"fixture argv: $@\"\n" +
-		"echo \"fixture active: $SPARKWING_TOOLCHAIN_ACTIVE\"\n" +
-		"exit 7\n")
-}
-
 func seedToolchainStore(t *testing.T, version string, asset []byte) (home, binPath string, priv ed25519.PrivateKey) {
 	t.Helper()
 	home = filepath.Join(t.TempDir(), "fresh-home")
@@ -319,7 +311,7 @@ func TestEnsureToolchainBinaryDropsAPreFixDigestSidecar(t *testing.T) {
 	}
 }
 
-func TestAssertToolchainVersionReportsWhatTheChildPrinted(t *testing.T) {
+func TestAssertReleaseVersionReportsWhatTheChildPrinted(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "fresh-home")
 	t.Setenv("SPARKWING_HOME", home)
 	priv := withTestUpdateKey(t)

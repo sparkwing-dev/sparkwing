@@ -219,6 +219,41 @@ func TestExpiredOutputRuns_KeepsTheNewestSuccessPerPipeline(t *testing.T) {
 	}
 }
 
+func TestExpiredOutputRuns_ListsADeletedRunWithinRetention(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	if err := s.CreateRun(ctx, store.Run{ID: "run-deleted", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "run-deleted", NodeID: "n", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := commitOutput(ctx, t, s, store.DefaultTeam, "run-deleted", "n", []byte(`"deleted"`))
+	if err := store.FinishRunAtForTest(ctx, s, "run-deleted", "failed", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteRun(ctx, "run-deleted"); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := s.ExpiredOutputRuns(ctx, time.Now(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expired) != 1 || expired[0].RunID != "run-deleted" || expired[0].Team != store.DefaultTeam {
+		t.Fatalf("expired = %+v, want the deleted run", expired)
+	}
+	keys, err := expireRun(t, s, "run-deleted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0] != ref.Key {
+		t.Fatalf("released objects = %v, want %s", keys, ref.Key)
+	}
+	if expired, err := s.ExpiredOutputRuns(ctx, time.Now(), 100); err != nil || len(expired) != 0 {
+		t.Fatalf("after release: expired = %+v, %v", expired, err)
+	}
+}
+
 func TestNodeIsAncestor_FollowsDepsTransitively(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()

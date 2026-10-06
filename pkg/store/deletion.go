@@ -668,6 +668,12 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		res.DeletedTeams = append(res.DeletedTeams, team)
 		res.RevokedPrefixes = append(res.RevokedPrefixes, revoked...)
 	}
+	// safety: a mint reads its minter's role under the membership row's lock,
+	// so dropping the memberships before sweeping the account's tokens makes
+	// a mint in flight either finish before the sweep reads or find no role.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE account_id = ?`, accountID); err != nil {
+		return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
+	}
 	at := now.UTC().Unix()
 	rows, err := tx.QueryContext(ctx, `
 		SELECT prefix FROM tokens WHERE created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`, accountID, at)
@@ -695,11 +701,11 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	}{
 		{`UPDATE tokens SET revoked_at = ? WHERE created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`, []any{at, accountID, at}},
 		{`UPDATE tokens SET principal = ?, created_by = '' WHERE created_by = ?`, []any{label, accountID}},
-		{`DELETE FROM memberships WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM sessions WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM invitations WHERE email = ?`, []any{acct.Email}},
+		{`UPDATE invitations SET withdrawn_at = ? WHERE invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, []any{at, accountID}},
 		{`UPDATE invitations SET invited_by = '' WHERE invited_by = ?`, []any{accountID}},
 		{`UPDATE invitations SET accepted_by = '' WHERE accepted_by = ?`, []any{accountID}},
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},

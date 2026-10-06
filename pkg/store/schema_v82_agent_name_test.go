@@ -28,6 +28,7 @@ func TestAgentNameMintRaceLeavesOneLiveTokenSQLiteAndPostgres(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			seedMinter(t, s, store.DefaultTeam, "owner", store.RoleOwner)
 			now := time.Now().UTC()
 			const minters = 8
 			start := make(chan struct{})

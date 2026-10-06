@@ -234,7 +234,7 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	if err != nil {
 		return installedRelease{}, err
 	}
-	if err := installVerifiedAsset(verified, currentBin); err != nil {
+	if err := installVerifiedAsset(verified, version, currentBin); err != nil {
 		return installedRelease{}, err
 	}
 	return installedRelease{path: currentBin, version: version, digest: verified.digest}, nil

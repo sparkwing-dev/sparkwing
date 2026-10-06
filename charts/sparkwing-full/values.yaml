@@ -360,6 +360,9 @@ ingress:
   # The render check on this list is presence-only: one entry is enough,
   # and an entry without `secretName` leaves the ingress controller's
   # default certificate to terminate TLS, which is the operator's call.
+  # Any entry also passes `--hsts` to the dashboard, which then sends
+  # Strict-Transport-Security, builds https OAuth redirect URIs and
+  # requires an https Origin on unsafe requests.
   tls: []
   # - hosts:
   #     - sparkwing.example.com

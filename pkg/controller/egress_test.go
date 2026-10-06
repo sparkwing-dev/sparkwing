@@ -331,6 +331,9 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	if open.StatusCode != http.StatusOK {
 		t.Fatalf("first stream = %d, want 200", open.StatusCode)
 	}
+	if got := open.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("live log stream Cache-Control = %q, want no-store", got)
+	}
 	// safety: the handler holds the slot only once it has written, so the
 	// first byte of the stream is what proves the reservation is in place.
 	buf := make([]byte, 1)

@@ -41,7 +41,15 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
+- **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
+- **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
+- **Node attempt history:** Derive a node's lineage root only from the server's retry record and keep execution-attempt reads inside the run's team, so a node created with another team's run as `retry_root_run_id` no longer shows that team's attempt history.
+- **Team invitations:** Withdraw open invitations when their inviter is removed or deletes their account, and withdraw those above a demoted inviter's new role.
+- **Runner tokens:** Recheck the minter's role inside the mint, so a removal or demotion that commits during a mint request leaves no live runner token.
+- **Token mints:** Make CLI and runner token mints wait on an in-flight account deletion on PostgreSQL, so a mint racing the deletion cannot leave a live token.
+- **Compute limits:** Record a claim's compute-limit refusal only on a run of the claimant's team; `Store.OldestWaitingReadyNodeForPrincipal` moves to `Tenant`.
 - **Live logs:** Read only bytes appended since the previous poll when streaming a node log, instead of rereading every attributed file each 200 ms.
 - **Log reads:** Serve node logs and their head, tail, range and grep filters from the files incrementally instead of buffering every attempt file in memory; a read that fails after the response starts now aborts the connection.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
@@ -51,8 +59,17 @@ unlock.
 - **CLI tokens:** Constrain new tokens to the member role held when minting commits, so a concurrent demotion cannot restore write access
 - **Secrets:** Mask JSON-escaped secret values in child-run events and dispatch snapshots while preserving numeric fields
 - **Secrets:** Mask complete nonblank lines of registered multiline secrets in subprocess output, direct logs, and structured string attributes
+- **Secrets:** Mask base64, URL-escaped and JSON-escaped forms of registered secret values in run logs, including a value inside a longer base64 blob
+- **controller:** Send `Cache-Control: no-store` on every authenticated API response and on the public routes that mint sessions, runner credentials or download URLs
+- **controller:** Name a signed-in account on request spans by its account id instead of its email address
+- **Run outputs:** Expire the stored outputs of a deleted run so retention removes their object-store bytes
+- **web:** End the browser's previous controller session when a password or first-admin sign-in replaces it
+- **Dashboard:** Encode run and node ids in API paths and refuse dot segments, so a crafted `?run=` link cannot turn a run action into a request to another route
+- **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+- **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
+- **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
 

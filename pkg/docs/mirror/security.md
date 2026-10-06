@@ -129,6 +129,8 @@ file, so another account on the machine that reaches the loopback port is
 refused. The CLI sends the token as a bearer; a browser signs in once
 through the link `sparkwing serve status` prints, whose single-use code the
 page trades for a session it keeps in `localStorage` and sends as a bearer.
+A session has no expiry and survives restarts; deleting `serve-token` and
+restarting the dashboard ends every browser session.
 No credential rides a cookie, which every port on `127.0.0.1` would receive. The process refuses a
 non-loopback `--addr` unless the operator passes `--allow-remote`, and a
 browser request carrying a foreign `Origin` is refused unless the operator
@@ -824,7 +826,10 @@ public key compiled into the binary and verifies the detached
 `SHA256SUMS.sig` with pure-Go `crypto/ed25519` -- no external tool and no
 network beyond fetching the asset, its detached signature, `SHA256SUMS`,
 and `SHA256SUMS.sig`. It
-then checks the download against the signed digest, installs atomically,
+then checks the download against the signed digest. A signature covers
+bytes, not a tag, so it also runs the staged binary's
+`version -o json --offline` and refuses one that reports a version other
+than the requested release. It then installs atomically,
 and re-hashes the installed file, requiring it to equal the verified
 digest. macOS binaries are ad-hoc-codesigned by the release *before* the
 manifest is hashed, so the verified bytes install unchanged -- nothing is
