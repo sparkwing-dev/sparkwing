@@ -102,6 +102,9 @@ func buildSubmitCLI(t *testing.T) string {
 		}
 		submitCLIDir = dir
 		bin := filepath.Join(dir, "sparkwing")
+		if runtime.GOOS == "windows" {
+			bin += ".exe"
+		}
 		overlay, err := seededBundleOverlay(dir)
 		if err != nil {
 			submitCLIErr = err

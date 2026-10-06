@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -87,7 +89,11 @@ func RepoIdentityFromURL(remote string) string {
 		return ""
 	}
 	if parsed.Scheme == "file" {
-		return RepoIdentityFromPath(parsed.Host + parsed.Path)
+		local := parsed.Host + parsed.Path
+		if runtime.GOOS == "windows" && parsed.Host == "" && strings.HasPrefix(local, "/") && filepath.IsAbs(local[1:]) {
+			local = local[1:]
+		}
+		return RepoIdentityFromPath(local)
 	}
 	if parsed.Host == "" {
 		return ""

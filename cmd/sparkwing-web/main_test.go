@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
-	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -70,7 +72,13 @@ func TestOpenFromConfigReturnsProfileSessionController(t *testing.T) {
 		"    state:\n" +
 		"      type: sqlite\n" +
 		"      path: " + statePath + "\n"
-	if err := os.WriteFile(profilesPath, []byte(contents), 0o600); err != nil {
+	if err := fssecure.SecurePrivateDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := fssecure.WriteFile(profilesPath, []byte(contents)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fssecure.SecurePrivateConfig(profilesPath); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", profilesPath)
@@ -95,7 +103,7 @@ func TestOpenFromConfigReturnsProfileSessionController(t *testing.T) {
 func TestRunFailsClosedWithoutUsableSessionController(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
-	stateSpec := "sqlite://" + filepath.Join(root, "state.db")
+	stateSpec := (&url.URL{Scheme: "sqlite", Path: "/" + strings.TrimPrefix(filepath.ToSlash(filepath.Join(root, "state.db")), "/")}).String()
 	tests := []struct {
 		name    string
 		args    []string

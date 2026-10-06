@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -154,7 +155,7 @@ func legacyConfigDir(t *testing.T, secretsEnv string) {
 	if err := os.MkdirAll(filepath.Join(xdg, "sparkwing"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(xdg, "sparkwing", "secrets.env"), []byte(secretsEnv), 0o600); err != nil {
+	if err := fssecure.WriteFile(filepath.Join(xdg, "sparkwing", "secrets.env"), []byte(secretsEnv)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -225,7 +226,7 @@ func TestDaemonAPI_AWrongKeyImportsNothing(t *testing.T) {
 
 	sock, _ := startAPIDaemonWith(t, home, nil, func(api *wingdAPI) {
 		wrong := filepath.Join(t.TempDir(), "secrets.key")
-		if err := os.WriteFile(wrong, bytes.Repeat([]byte{8}, secrets.KeySize), 0o600); err != nil {
+		if err := fssecure.WriteFile(wrong, bytes.Repeat([]byte{8}, secrets.KeySize)); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv(localsecrets.KeyFileEnv, wrong)

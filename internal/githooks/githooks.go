@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -101,7 +102,7 @@ func configPath(git Git, dir, scope string) string {
 	if err != nil {
 		return ""
 	}
-	v := strings.TrimSpace(out)
+	v := nativeGitPath(strings.TrimSpace(out))
 	if v == "" {
 		return ""
 	}
@@ -165,4 +166,15 @@ func canon(p string) string {
 		return r
 	}
 	return c
+}
+
+func nativeGitPath(path string) string {
+	if runtime.GOOS != "windows" || path == "" {
+		return path
+	}
+	// bug: Git Bash reports Windows drive paths as /c/... to native Go callers.
+	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == '/' && ((path[1] >= 'a' && path[1] <= 'z') || (path[1] >= 'A' && path[1] <= 'Z')) {
+		path = strings.ToUpper(string(path[1])) + ":" + path[2:]
+	}
+	return filepath.Clean(path)
 }

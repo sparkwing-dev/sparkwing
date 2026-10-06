@@ -226,7 +226,7 @@ func artifactStoreURL(p *profile.Profile, spec backends.Spec) (string, error) {
 			}
 			path = abs
 		}
-		return "fs://" + path, nil
+		return "fs://" + filepath.ToSlash(path), nil
 	case backends.TypeS3:
 		location := "s3://" + spec.Bucket
 		if prefix := strings.Trim(spec.Prefix, "/"); prefix != "" {

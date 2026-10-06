@@ -8,9 +8,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -157,13 +159,19 @@ func credentialFetchEnv(localEnv []string) []string {
 const directSSHKeyOptions = " -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none" +
 	" -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no"
 
+var sshCredentialProgram = "ssh"
+
 // safety: Cloud keys stay on tmpfs; the directory lock keeps a live fetch out of the cleanup sweep.
 func writeSSHCredential(cred DirectCredential, tmpfsOnly bool) (dir, command string, cleanup func() error, err error) {
 	root, err := sshKeyRoot(tmpfsOnly)
 	if err != nil {
 		return "", "", nil, err
 	}
-	dir, err = os.MkdirTemp(root, keyDirPrefix)
+	if runtime.GOOS == "windows" {
+		dir, err = fssecure.MkdirPrivateTemp(root, keyDirPrefix)
+	} else {
+		dir, err = os.MkdirTemp(root, keyDirPrefix)
+	}
 	if err != nil {
 		return "", "", nil, fmt.Errorf("ssh credential directory: %w", err)
 	}
@@ -177,6 +185,10 @@ func writeSSHCredential(cred DirectCredential, tmpfsOnly bool) (dir, command str
 		return "", "", nil, errors.Join(fmt.Errorf("ssh credential lock: %w", err), os.RemoveAll(dir))
 	}
 	cleanup = func() error {
+		if runtime.GOOS == "windows" {
+			closeErr := lock.Close()
+			return errors.Join(closeErr, os.RemoveAll(dir))
+		}
 		return errors.Join(os.RemoveAll(dir), lock.Close())
 	}
 	defer func() {
@@ -193,7 +205,7 @@ func writeSSHCredential(cred DirectCredential, tmpfsOnly bool) (dir, command str
 			return "", "", nil, fmt.Errorf("ssh credential: %w", err)
 		}
 	}
-	command = "ssh -i " + shellQuote(keyPath) + directSSHKeyOptions +
+	command = sshCredentialProgram + " -i " + shellQuote(keyPath) + directSSHKeyOptions +
 		" -o UserKnownHostsFile=" + shellQuote(hostsPath) + directSSHOptions
 	return dir, command, cleanup, nil
 }
@@ -202,6 +214,11 @@ func writePrivateFile(path, body string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
+	}
+	if runtime.GOOS == "windows" {
+		if err := fssecure.SecurePrivateConfig(path); err != nil {
+			return errors.Join(err, f.Close())
+		}
 	}
 	_, werr := f.WriteString(body)
 	return errors.Join(werr, f.Close())

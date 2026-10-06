@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ func writePublishProfiles(t *testing.T, cachePath string) {
 		"    state:\n      type: sqlite\n      path: " + filepath.Join(t.TempDir(), "state.db") + "\n" +
 		"    cache:\n      type: filesystem\n      path: " + cachePath + "\n" +
 		"    logs:\n      type: stdout\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := writePrivateConfigFixture(path, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)
@@ -36,7 +35,7 @@ func TestResolveArtifactStoreReadsTheNamedProfile(t *testing.T) {
 	if store == nil {
 		t.Fatal("resolveArtifactStore returned no store")
 	}
-	if location != "fs://"+cache {
+	if location != "fs://"+filepath.ToSlash(filepath.Clean(cache)) {
 		t.Fatalf("location = %q, want the fs:// URL for %q", location, cache)
 	}
 	if _, err := storeurl.OpenArtifactStore(context.Background(), location); err != nil {
@@ -53,7 +52,7 @@ func TestResolveArtifactStoreReportsAnS3ProfileAsAnS3URL(t *testing.T) {
 		"    cache:\n      type: filesystem\n      path: " + t.TempDir() + "\n" +
 		"      binaries:\n        type: s3\n        bucket: team-binaries\n        prefix: /pipelines/\n" +
 		"    logs:\n      type: stdout\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := writePrivateConfigFixture(path, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)
@@ -83,7 +82,7 @@ func TestArtifactStoreURLReportsARelativeCachePathAsOneTheFlagAccepts(t *testing
 		t.Fatalf("artifactStoreURL: %v", err)
 	}
 
-	if !strings.HasPrefix(location, "fs:///") {
+	if !filepath.IsAbs(strings.TrimPrefix(location, "fs://")) {
 		t.Fatalf("location = %q, want an absolute fs:// URL", location)
 	}
 	if _, err := storeurl.OpenArtifactStore(context.Background(), location); err != nil {
@@ -94,7 +93,7 @@ func TestArtifactStoreURLReportsARelativeCachePathAsOneTheFlagAccepts(t *testing
 func TestResolveArtifactStorePrefersTheExplicitURL(t *testing.T) {
 	writePublishProfiles(t, t.TempDir())
 
-	url := "fs://" + t.TempDir()
+	url := "fs://" + filepath.ToSlash(filepath.Clean(t.TempDir()))
 	_, location, err := resolveArtifactStore(context.Background(), "team", url)
 	if err != nil {
 		t.Fatalf("resolveArtifactStore: %v", err)

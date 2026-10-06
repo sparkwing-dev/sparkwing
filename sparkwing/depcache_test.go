@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -71,6 +72,22 @@ func TestDeriveDepCacheKeySanitizesName(t *testing.T) {
 
 func populateDepCacheFixture(t *testing.T, dir string) {
 	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if goruntime.GOOS == "windows" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tool.exe"), data, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	sub := filepath.Join(dir, "example.com", "mod@v1.0.0")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
@@ -99,8 +116,13 @@ func assertDepCacheFixture(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm()&0o100 == 0 {
+	if goruntime.GOOS != "windows" && fi.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("tool.sh lost its exec bit: %v", fi.Mode())
+	}
+	if goruntime.GOOS == "windows" {
+		if out, err := exec.Command(filepath.Join(dir, "tool.exe"), "-test.run=^$").CombinedOutput(); err != nil {
+			t.Fatalf("restored executable: %v: %s", err, out)
+		}
 	}
 	target, err := os.Readlink(filepath.Join(dir, "tool-link"))
 	if err != nil {

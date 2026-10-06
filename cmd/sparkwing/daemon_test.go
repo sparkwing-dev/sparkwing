@@ -33,7 +33,7 @@ func TestShutdownWindowsNest(t *testing.T) {
 }
 
 func TestInspectDaemonReportsExactSourceRevision(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-status-")
+	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-status-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestInspectDaemonReportsExactSourceRevision(t *testing.T) {
 }
 
 func TestInspectDaemonLeavesAbsentHomeStopped(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-stopped-")
+	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-stopped-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestDaemonRecoverStateRequiresConsentAndPreservesUnreadableBytes(t *testing
 }
 
 func TestInspectDaemonNamesADaemonBehindTheStoreSchema(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-schema-")
+	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-schema-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestInspectDaemonNamesADaemonBehindTheStoreSchema(t *testing.T) {
 }
 
 func TestInspectDaemonAcceptsADaemonBehindByAdditiveMigrationsOnly(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-additive-")
+	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-additive-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestInspectDaemonAcceptsADaemonBehindByAdditiveMigrationsOnly(t *testing.T)
 }
 
 func TestInspectDaemonReportsAnUnreadableStoreAsUnhealthy(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-badstore-")
+	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-badstore-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestInspectDaemonReportsAnUnreadableStoreAsUnhealthy(t *testing.T) {
 }
 
 func TestInspectDaemonLeavesAnAbsentStoreWithoutAnError(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-nostore-")
+	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-nostore-")
 	if err != nil {
 		t.Fatal(err)
 	}

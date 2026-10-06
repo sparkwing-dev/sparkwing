@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1578,6 +1579,10 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, root, jobID string) 
 		return
 	}
 
+	if strings.HasPrefix(artifactPath, "/") || runtime.GOOS == "windows" && (filepath.VolumeName(artifactPath) != "" || strings.HasPrefix(artifactPath, `\`)) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
 	artifactPath = filepath.Clean(artifactPath)
 	if strings.Contains(artifactPath, "..") || filepath.IsAbs(artifactPath) {
 		http.Error(w, "invalid path", http.StatusBadRequest)

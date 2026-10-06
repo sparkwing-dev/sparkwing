@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -157,7 +159,7 @@ func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	body := "profiles:\n" +
 		"  prod: { controller: { url: " + controllerURL + ", token: swu_test } }\n" +
 		"  laptop: { state: { type: sqlite } }\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)
@@ -168,7 +170,7 @@ func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "profiles:\n" +
 		"  prod: { controller: { url: " + controllerURL + " }, logs: { type: controller } }\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)

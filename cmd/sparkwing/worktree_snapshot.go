@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,31 +70,50 @@ func (s *worktreeSnapshot) materialize(ctx context.Context) (string, string, err
 		return "", "", fmt.Errorf("mark exact source ownership: %w", err)
 	}
 	// #nosec G702 -- fixed git arguments target a generated temporary checkout without a shell.
-	if out, err := exec.CommandContext(ctx, "git", "init", "--quiet", checkout).CombinedOutput(); err != nil {
+	if out, err := snapshotGitCommand(ctx, "init", "--quiet", checkout).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("initialize exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	ref := bincache.SeedRef(s.SHA)
 	// #nosec G702 -- the bundle is locally generated and the ref derives from its Git commit ID.
-	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "fetch", "--quiet", s.BundlePath, ref).CombinedOutput(); err != nil {
+	if out, err := snapshotGitCommand(ctx, "-C", checkout, "fetch", "--quiet", s.BundlePath, ref).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("import exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	// safety: tracked attributes must not alter this snapshot's raw bytes.
+	if err := writeSnapshotCheckoutAttributes(checkout); err != nil {
+		return "", "", err
+	}
 	// #nosec G702 -- SHA is the commit ID returned by git commit-tree for this snapshot.
-	if _, err := exec.CommandContext(ctx, "git", "-C", checkout, "checkout", "--detach", "--quiet", s.SHA).CombinedOutput(); err != nil {
+	if _, err := snapshotGitCommand(ctx, "-c", "core.autocrlf=false", "-C", checkout, "checkout", "--detach", "--quiet", s.SHA).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("materialize exact source checkout: %w", snapshotGitError(err))
 	}
 	repoURL := ""
 	// #nosec G702 -- the selected local repository is a -C operand; origin is a fixed remote name.
-	if out, err := exec.CommandContext(ctx, "git", "-C", s.RepoRoot, "remote", "get-url", "origin").Output(); err == nil {
+	if out, err := snapshotGitCommand(ctx, "-C", s.RepoRoot, "remote", "get-url", "origin").Output(); err == nil {
 		repoURL, _ = sourceurl.ValidateCloneURL(strings.TrimSpace(string(out)))
 	}
 	if repoURL == "" {
 		repoURL = "https://source.sparkwing.invalid/workspace-" + s.SHA[:16] + ".git"
 	}
 	// #nosec G702 -- the URL is validated by ValidateCloneURL or generated from the commit ID.
-	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "remote", "add", "origin", repoURL).CombinedOutput(); err != nil {
+	if out, err := snapshotGitCommand(ctx, "-C", checkout, "remote", "add", "origin", repoURL).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("bind exact source identity: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return checkout, repoURL, nil
+}
+
+func writeSnapshotCheckoutAttributes(checkout string) error {
+	root, err := os.OpenRoot(filepath.Join(checkout, ".git"))
+	if err != nil {
+		return fmt.Errorf("open exact source Git directory: %w", err)
+	}
+	err = root.MkdirAll("info", 0o700)
+	if err == nil {
+		err = root.WriteFile("info/attributes", []byte("* -text -eol -ident\n"), 0o600)
+	}
+	if err := errors.Join(err, root.Close()); err != nil {
+		return fmt.Errorf("disable exact source conversion: %w", err)
+	}
+	return nil
 }
 
 func captureWorktreeSnapshot(ctx context.Context, start string, allowedSecretFiles []string) (*worktreeSnapshot, error) {
@@ -157,7 +177,7 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	}
 
 	gitDir := filepath.Join(tempDir, "repo.git")
-	if out, ierr := exec.CommandContext(ctx, "git", "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
+	if out, ierr := snapshotGitCommand(ctx, "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
 		return fail(fmt.Errorf("initialize snapshot object store: %w: %s", ierr, strings.TrimSpace(string(out))))
 	}
 	commonDir, err := gitOutput(ctx, repoRoot, nil, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -387,7 +407,7 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 	if updates.Len() == 0 {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "update-index", "-z", "--index-info")
+	cmd := snapshotGitCommand(ctx, "-C", repoRoot, "update-index", "-z", "--index-info")
 	cmd.Env = appendGitEnv(env)
 	cmd.Stdin = &updates
 	if _, err := cmd.CombinedOutput(); err != nil {
@@ -405,7 +425,7 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string
 		"GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
 		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
 	}
-	cmd := exec.CommandContext(ctx, "git", "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
+	cmd := snapshotGitCommand(ctx, "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
 	cmd.Env = appendGitEnv(append(env, identity...))
 	cmd.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
 	out, err := cmd.CombinedOutput()
@@ -630,7 +650,7 @@ func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string
 	for _, pattern := range envredact.CredentialBlockPatterns() {
 		args = append(args, "-e", pattern)
 	}
-	cmd := exec.CommandContext(ctx, "git", append(args, tree)...)
+	cmd := snapshotGitCommand(ctx, append(args, tree)...)
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -653,7 +673,7 @@ func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string
 func snapshotBlobPrefix(ctx context.Context, gitDir, sha string, limit int64) ([]byte, error) {
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(readCtx, "git", "--git-dir", gitDir, "cat-file", "blob", sha)
+	cmd := snapshotGitCommand(readCtx, "--git-dir", gitDir, "cat-file", "blob", sha)
 	stdout, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
 		return nil, pipeErr
@@ -689,7 +709,7 @@ func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {
 	if out == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "check-attr", "-z", "--stdin", "filter", "working-tree-encoding")
+	cmd := snapshotGitCommand(ctx, "-C", repoRoot, "check-attr", "-z", "--stdin", "filter", "working-tree-encoding")
 	cmd.Stdin = strings.NewReader(out)
 	checked, err := cmd.Output()
 	if err != nil {
@@ -735,7 +755,7 @@ func snapshotGitError(err error) error {
 func gitOutput(ctx context.Context, repoRoot string, env []string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", repoRoot}, args...)
 	// #nosec G702 -- Callers fix Git subcommands; repository paths are -C operands and filenames follow --.
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd := snapshotGitCommand(ctx, fullArgs...)
 	cmd.Env = appendGitEnv(env)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -746,7 +766,7 @@ func gitOutput(ctx context.Context, repoRoot string, env []string, args ...strin
 
 func gitDirOutput(ctx context.Context, gitDir string, args ...string) (string, error) {
 	fullArgs := append([]string{"--git-dir", gitDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd := snapshotGitCommand(ctx, fullArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -784,4 +804,11 @@ func snapshotBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+func snapshotGitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		args = append([]string{"-c", "core.longpaths=true"}, args...)
+	}
+	return exec.CommandContext(ctx, "git", args...)
 }

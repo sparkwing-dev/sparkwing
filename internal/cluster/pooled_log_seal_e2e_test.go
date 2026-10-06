@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -106,7 +107,7 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 				t.Skip("SIGKILL signal status has no Windows equivalent")
 			}
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			testhome.Set(t, home)
 			t.Setenv("SPARKWING_HOME", filepath.Join(home, "sparkwing"))
 			t.Setenv("SPARKWING_CACHE_URL", "")
 			if err := os.WriteFile(filepath.Join(home, pipelineChildModeFile), []byte(tc.mode), 0o600); err != nil {

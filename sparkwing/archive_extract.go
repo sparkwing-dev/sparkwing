@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -106,7 +107,7 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 				return err
 			}
 			_ = root.Remove(rel)
-			if err := root.Symlink(hdr.Linkname, rel); err != nil {
+			if err := root.Symlink(filepath.FromSlash(hdr.Linkname), rel); err != nil {
 				return err
 			}
 
@@ -137,6 +138,9 @@ func mkdirParent(root *os.Root, rel string) error {
 }
 
 func secureArchiveRel(name string) (string, error) {
+	if path.IsAbs(name) || filepath.VolumeName(name) != "" || strings.HasPrefix(name, string(filepath.Separator)) {
+		return "", fmt.Errorf("archive entry %q escapes the target directory", name)
+	}
 	clean := filepath.Clean(filepath.FromSlash(name))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("archive entry %q escapes the target directory", name)
@@ -148,7 +152,7 @@ func secureArchiveRel(name string) (string, error) {
 // so measure the target from the entry's real parent, not its lexical one.
 func symlinkStaysInside(root *os.Root, rel, linkname string) error {
 	link := filepath.FromSlash(linkname)
-	if link == "" || filepath.IsAbs(link) {
+	if link == "" || path.IsAbs(linkname) || filepath.VolumeName(link) != "" || strings.HasPrefix(link, string(filepath.Separator)) {
 		return fmt.Errorf("archive symlink %q -> %q is not a relative link", rel, linkname)
 	}
 	if err := refuseSymlinkedAncestors(root, rel); err != nil {

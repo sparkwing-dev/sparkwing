@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestHandleHealth(t *testing.T) {
@@ -153,15 +155,19 @@ func TestArtifactUpload_LogEscapesTheCallerPath(t *testing.T) {
 	log.SetOutput(&logged)
 	defer log.SetOutput(oldWriter)
 
-	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=a%0Afake.txt", strings.NewReader("x"))
+	name, escaped := "a\nfake.txt", `a\nfake.txt`
+	if runtime.GOOS == "windows" {
+		name, escaped = "a\u2028fake.txt", `a\u2028fake.txt`
+	}
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path="+url.QueryEscape(name), strings.NewReader("x"))
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if !strings.Contains(logged.String(), `a\nfake.txt`) {
-		t.Errorf("log line did not escape the newline: %q", logged.String())
+	if !strings.Contains(logged.String(), escaped) {
+		t.Errorf("log line did not escape the separator: %q", logged.String())
 	}
 }
 
@@ -250,12 +256,17 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=/etc/passwd", strings.NewReader("evil"))
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 400 {
-		t.Errorf("expected 400 for absolute path, got %d", w.Code)
+	paths := []string{"/etc/passwd"}
+	if runtime.GOOS == "windows" {
+		paths = append(paths, `C:\outside`, `C:outside`, `\outside`, `\\server\share\outside`)
+	}
+	for _, path := range paths {
+		req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path="+url.QueryEscape(path), strings.NewReader("evil"))
+		w := httptest.NewRecorder()
+		handleArtifacts(w, req)
+		if w.Code != 400 {
+			t.Errorf("expected 400 for rooted path %q, got %d", path, w.Code)
+		}
 	}
 }
 
@@ -1598,7 +1609,7 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 	if err := os.WriteFile(home, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	err := setupSSH()

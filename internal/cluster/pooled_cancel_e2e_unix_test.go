@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -36,7 +37,7 @@ func TestAgent_SIGTERMStopsPipelineDescendants(t *testing.T) {
 func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Setenv("SPARKWING_HOME", filepath.Join(home, "sparkwing"))
 	t.Setenv("SPARKWING_CACHE_URL", "")
 	if err := os.WriteFile(filepath.Join(home, pipelineChildModeFile), []byte("cancel"), 0o600); err != nil {

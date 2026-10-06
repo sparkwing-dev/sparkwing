@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -57,9 +59,7 @@ func newConnectFixture(t *testing.T) *connectFixture {
 		"profiles:\n  prod:\n    controller: { url: %s, token: %s }\n", srv.URL, admin))
 
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("write the fake gh: %v", err)
-	}
+	testshell.Install(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexit 1\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	gh := &fakeGitHub{t: t, nextHookID: 5000, pingStatus: 200}

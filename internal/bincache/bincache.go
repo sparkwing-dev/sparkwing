@@ -410,7 +410,7 @@ func fetchGitRef(ctx context.Context, gcURL, cloneURL, token, ref, dest string) 
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dest
 		cmd.Env = gitHTTPEnv(gcURL, token)
-		return cmd.CombinedOutput()
+		return gitCommandCombinedOutput(cmd)
 	}
 	steps := [][]string{
 		{"init", "--quiet"},
@@ -507,7 +507,7 @@ func shallowCloneBranch(ctx context.Context, gcURL, cloneURL, token, branch, des
 		cloneURL, dest,
 	)
 	cmd.Env = gitHTTPEnv(gcURL, token)
-	out, err := cmd.CombinedOutput()
+	out, err := gitCommandCombinedOutput(cmd)
 	if err != nil {
 		return fmt.Errorf("git clone %s (branch %s): %w: %s",
 			cloneURL, branch, err, strings.TrimSpace(string(out)))
@@ -553,7 +553,7 @@ func registerRepoWithCache(ctx context.Context, gcURL, token, name, repoURL stri
 var errRegisterForbidden = errors.New("the cache refused this credential a registration")
 
 func gitHTTPEnv(gcURL, token string) []string {
-	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=0", "GIT_ASKPASS=")
 	count, countIndex := 0, -1
 	for i, value := range env {
 		if strings.HasPrefix(value, "GIT_CONFIG_COUNT=") {
@@ -686,7 +686,7 @@ func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) 
 	}()
 
 	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "bundle", "create", path, ref)
-	out, err := cmd.CombinedOutput()
+	out, err := gitCommandCombinedOutput(cmd)
 	if err != nil {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("git bundle create: %w: %s", err, strings.TrimSpace(string(out)))

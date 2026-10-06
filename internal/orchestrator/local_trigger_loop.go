@@ -298,7 +298,7 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 	}
 	outcome, startErr := runAssistedChildProcess(ctx, cmd, nil)
 	if err := errors.Join(startErr, outcome.waitErr, outcome.cancelCause); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
 			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {
 				return fmt.Errorf(
 					"child executable lease %q is unavailable (local pipeline-cache provenance). "+

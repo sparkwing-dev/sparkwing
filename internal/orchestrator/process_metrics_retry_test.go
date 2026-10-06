@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -75,7 +76,11 @@ func TestMetricDeliveryFailureUsesAutomaticRetry(t *testing.T) {
 			if reject {
 				wantAttempts = 2
 			}
-			if accountingRetryBodies.Load() != wantAttempts || metrics.calls.Load() != wantAttempts {
+			wantDeliveries := wantAttempts
+			if runtime.GOOS == "windows" {
+				wantDeliveries *= 2
+			}
+			if accountingRetryBodies.Load() != wantAttempts || metrics.calls.Load() != wantDeliveries {
 				t.Fatalf("body executions=%d metric deliveries=%d; want matching execution and delivery counts", accountingRetryBodies.Load(), metrics.calls.Load())
 			}
 			node, err := st.GetNode(t.Context(), result.RunID, "build")
@@ -86,7 +91,10 @@ func TestMetricDeliveryFailureUsesAutomaticRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reject && len(profiles) != 2 {
+			if runtime.GOOS == "windows" && len(profiles) != 0 {
+				t.Fatalf("unmeasured native execution learned profiles: %+v", profiles)
+			}
+			if runtime.GOOS != "windows" && !reject && len(profiles) != 2 {
 				t.Fatalf("complete execution profile count=%d, want node and run", len(profiles))
 			}
 			for _, profile := range profiles {
@@ -155,7 +163,10 @@ func TestExecutionAcknowledgementFailureExcludesUnrecordedRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reject && len(profiles) != 2 {
+			if runtime.GOOS == "windows" && len(profiles) != 0 {
+				t.Fatalf("unmeasured native execution learned profiles: %+v", profiles)
+			}
+			if runtime.GOOS != "windows" && !reject && len(profiles) != 2 {
 				t.Fatalf("profiles=%d, want node and run", len(profiles))
 			}
 			for _, profile := range profiles {

@@ -176,7 +176,7 @@ func HoldRefWorktree(p Paths, runID string) (*os.File, bool, error) {
 	if err := fssecure.EnsureDir(p.RefWorktreesDir()); err != nil {
 		return nil, false, fmt.Errorf("secure ref worktree directory: %w", err)
 	}
-	file, err := os.OpenFile(refWorktreeLeasePath(p, runID), os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := openRefWorktreeLease(refWorktreeLeasePath(p, runID))
 	if err != nil {
 		return nil, false, err
 	}

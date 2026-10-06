@@ -58,7 +58,7 @@ func SecurePrivateDir(path string) error {
 }
 
 func OpenFile(path string, flag int) (*os.File, error) {
-	f, err := os.OpenFile(path, flag, FileMode)
+	f, err := openPrivateFile(path, flag)
 	if err != nil {
 		return nil, err
 	}

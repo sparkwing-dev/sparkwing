@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1219,6 +1220,13 @@ func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
 	}
 }
 
+func nativeTimerFixtureBinary() string {
+	if runtime.GOOS == "windows" {
+		return filepath.VolumeName(os.TempDir()) + "/usr/local/bin/sparkwing"
+	}
+	return "/usr/local/bin/sparkwing"
+}
+
 func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
 	t.Helper()
 	root := t.TempDir()
@@ -1226,7 +1234,7 @@ func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
 		GOOS:       "linux",
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     "/usr/local/bin/sparkwing",
+		Binary:     nativeTimerFixtureBinary(),
 		PathEnv:    "/usr/bin:/bin",
 		Env:        map[string]string{"SPARKWING_HOME": home},
 		LogPath:    filepath.Join(home, "crons.log"),

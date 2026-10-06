@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -17,7 +18,7 @@ func registerRepos(t *testing.T, paths ...string) {
 		cfg += "    - path: " + p + "\n"
 	}
 	f := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(f, []byte(cfg), 0o600); err != nil {
+	if err := fssecure.WriteFile(f, []byte(cfg)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", f)

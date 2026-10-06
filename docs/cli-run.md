@@ -87,9 +87,11 @@ PIPELINE resolves against the checkout you are standing in (or
 --sw-cd PATH) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
-GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
-every credential-shaped name -- widened by naming variables in
-SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, widened
+by naming variables in SPARKWING_SUBMIT_ENV_ALLOW. Windows also
+preserves its user profile, system, shell, temporary, and application
+data paths, plus absolute Sparkwing key-file paths. Credential values
+and credential-shaped names are filtered. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.
 

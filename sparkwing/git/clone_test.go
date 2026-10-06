@@ -334,7 +334,9 @@ func tokenedGitcache(t *testing.T, token, bare string) (*httptest.Server, func()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("Authorization")
 		mu.Lock()
-		authorization = got
+		if got != "" {
+			authorization = got
+		}
 		mu.Unlock()
 		if got != "Bearer "+token {
 			http.Error(w, "unauthorized -- set Authorization: Bearer <token> header", http.StatusUnauthorized)

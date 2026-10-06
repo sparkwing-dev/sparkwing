@@ -8,7 +8,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const lockBytes = 1 << 30
+// safety: the last byte overlaps legacy locks while leaving metadata readable.
+const (
+	lockOffset = (1 << 30) - 1
+	lockBytes  = 1
+)
 
 func flockExclusive(f *os.File) error {
 	return lockFile(f, 0)
@@ -19,12 +23,12 @@ func flockExclusiveNonblock(f *os.File) error {
 }
 
 func flockUnlock(f *os.File) error {
-	var ol windows.Overlapped
+	ol := windows.Overlapped{Offset: lockOffset}
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, lockBytes, 0, &ol)
 }
 
 func lockFile(f *os.File, flags uint32) error {
-	var ol windows.Overlapped
+	ol := windows.Overlapped{Offset: lockOffset}
 	return windows.LockFileEx(
 		windows.Handle(f.Fd()),
 		windows.LOCKFILE_EXCLUSIVE_LOCK|flags,

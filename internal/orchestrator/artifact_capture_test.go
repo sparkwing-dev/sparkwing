@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -74,8 +75,12 @@ func TestCaptureArtifacts_StoresFilesAndManifest(t *testing.T) {
 	if m.Entries[0].Path != "dist/a.txt" || m.Entries[1].Path != "dist/sub/b.txt" {
 		t.Fatalf("entries not sorted by path: %+v", m.Entries)
 	}
-	if m.Entries[1].Mode != 0o755 {
-		t.Fatalf("mode bits not preserved: got %o want 0755", m.Entries[1].Mode)
+	wantMode := uint32(0o755)
+	if runtime.GOOS == "windows" {
+		wantMode = 0o666
+	}
+	if m.Entries[1].Mode != wantMode {
+		t.Fatalf("mode bits not preserved: got %o want %o", m.Entries[1].Mode, wantMode)
 	}
 	rc, err := store.Get(context.Background(), artifactBlobKey(m.Entries[0].Digest))
 	if err != nil {
@@ -291,6 +296,10 @@ func TestCaptureArtifacts_UploadsTheBytesItHashed(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := os.Rename(swap, filepath.Join(ws, "a.txt")); err != nil {
+				// safety: Windows pins the open source against replacement; its original bytes must still match the digest.
+				if runtime.GOOS == "windows" && errors.Is(err, os.ErrPermission) {
+					return
+				}
 				t.Fatal(err)
 			}
 		},

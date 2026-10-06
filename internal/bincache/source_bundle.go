@@ -66,7 +66,7 @@ func FetchSourceBundleDirect(ctx context.Context, controllerURL, grant, runID, k
 	git := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := gitCommandCombinedOutput(cmd); err != nil {
 			return fmt.Errorf("git source import: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 		return nil

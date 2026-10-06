@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func TestShellStdinPlumbing(t *testing.T) {
@@ -15,11 +17,9 @@ func TestShellStdinPlumbing(t *testing.T) {
 	stdinFile := filepath.Join(dir, "stdin")
 
 	binDir := t.TempDir()
-	script := fmt.Sprintf("#!/bin/sh\n/bin/cat > %q\nexit 0\n", stdinFile)
+	script := fmt.Sprintf("#!/bin/sh\n/bin/cat > %q\nexit 0\n", filepath.ToSlash(stdinFile))
 	fake := filepath.Join(binDir, "mycmd")
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	fake = testshell.Install(t, fake, script)
 
 	cmd := exec.Command(fake, "arg1")
 	cmd.Stdin = strings.NewReader("hello-stdin")

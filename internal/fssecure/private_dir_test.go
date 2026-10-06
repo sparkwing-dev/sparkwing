@@ -52,7 +52,7 @@ func TestMkdirPrivateTempCreatesOnePrivateDirectoryUnderParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Remove(directory) }()
-	if filepath.Dir(directory) != parent || !strings.HasPrefix(filepath.Base(directory), "probe-") {
+	if filepath.Dir(directory) != filepath.Clean(parent) || !strings.HasPrefix(filepath.Base(directory), "probe-") {
 		t.Fatalf("private temporary directory = %q", directory)
 	}
 	info, err := os.Lstat(directory)

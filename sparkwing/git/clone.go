@@ -102,7 +102,7 @@ func originEnv(ctx context.Context, repoDir string) []string {
 
 func promptlessEnv() []string {
 	// safety: git must never stop on a credential prompt; an unattended runner would hang on it.
-	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=0", "GIT_ASKPASS=")
 }
 
 func gitcacheToken(named bool) string {

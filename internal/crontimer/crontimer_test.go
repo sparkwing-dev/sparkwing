@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +39,13 @@ func (f *fakeExec) fail(prefix, out string) {
 	f.rules = append(f.rules, rule{prefix, out, errors.New("exit status 1")})
 }
 
+func fixtureAbsolutePath(path string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.VolumeName(os.TempDir()) + path
+	}
+	return path
+}
+
 func linuxHost(t *testing.T, e *fakeExec) Host {
 	t.Helper()
 	root := t.TempDir()
@@ -45,7 +53,7 @@ func linuxHost(t *testing.T, e *fakeExec) Host {
 		GOOS:       "linux",
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     "/usr/local/bin/sparkwing",
+		Binary:     fixtureAbsolutePath("/usr/local/bin/sparkwing"),
 		PathEnv:    "/usr/local/bin:/usr/bin:/bin",
 		LogPath:    filepath.Join(root, ".sparkwing", "crons.log"),
 		UID:        1000,
@@ -62,7 +70,7 @@ func darwinHost(t *testing.T, e *fakeExec) Host {
 		GOOS:       "darwin",
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     "/opt/homebrew/bin/sparkwing",
+		Binary:     fixtureAbsolutePath("/opt/homebrew/bin/sparkwing"),
 		PathEnv:    "/opt/homebrew/bin:/usr/bin:/bin",
 		LogPath:    filepath.Join(root, ".sparkwing", "crons.log"),
 		UID:        501,
@@ -102,14 +110,18 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 	}
 
 	service := read(t, servicePath)
+	homeAssignment := "SPARKWING_HOME=" + filepath.Join(h.Home, ".sparkwing")
+	if runtime.GOOS == "windows" {
+		homeAssignment = strconv.Quote(homeAssignment)
+	}
 	for _, want := range []string{
 		"# " + Marker,
 		"Type=oneshot",
 		"KillMode=process",
 		"TimeoutStartSec=5m",
-		"ExecStart=/usr/local/bin/sparkwing crons tick",
+		"ExecStart=" + fixtureAbsolutePath("/usr/local/bin/sparkwing") + " crons tick",
 		"Environment=PATH=/usr/local/bin:/usr/bin:/bin",
-		"Environment=SPARKWING_HOME=" + filepath.Join(h.Home, ".sparkwing"),
+		"Environment=" + homeAssignment,
 		"StandardOutput=append:" + h.LogPath,
 		"StandardError=append:" + h.LogPath,
 	} {
@@ -144,7 +156,7 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat %s: %v", p, err)
 		}
-		if got := info.Mode().Perm(); got != 0o644 {
+		if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o644 {
 			t.Errorf("%s mode = %#o, want 0644", p, got)
 		}
 	}
@@ -164,18 +176,18 @@ func TestStatusLinuxAfterInstall(t *testing.T) {
 	}{
 		{
 			name:        "enabled and current",
-			binary:      "/usr/local/bin/sparkwing",
+			binary:      fixtureAbsolutePath("/usr/local/bin/sparkwing"),
 			wantEnabled: true,
 		},
 		{
 			name:      "enabled but a different binary is asked about",
-			binary:    "/home/me/go/bin/sparkwing",
+			binary:    fixtureAbsolutePath("/home/me/go/bin/sparkwing"),
 			wantStale: true, wantEnabled: true,
 		},
 		{
 			name:       "no user session",
 			rules:      []func(*fakeExec){func(e *fakeExec) { e.fail("systemctl --user is-", "Failed to connect to bus") }},
-			binary:     "/usr/local/bin/sparkwing",
+			binary:     fixtureAbsolutePath("/usr/local/bin/sparkwing"),
 			wantDetail: "Failed to connect to bus",
 		},
 	}
@@ -201,7 +213,7 @@ func TestStatusLinuxAfterInstall(t *testing.T) {
 			if !state.Installed {
 				t.Fatalf("State.Installed = false, want true: %+v", state)
 			}
-			if state.Binary != "/usr/local/bin/sparkwing" {
+			if state.Binary != fixtureAbsolutePath("/usr/local/bin/sparkwing") {
 				t.Errorf("State.Binary = %q, want the installed binary", state.Binary)
 			}
 			if state.Enabled != tc.wantEnabled {
@@ -269,7 +281,7 @@ func TestInstallDarwinWritesThePlistAndBootstrapsIt(t *testing.T) {
 	}
 	for _, want := range []string{
 		"<key>Label</key>\n  <string>dev.sparkwing.crons</string>",
-		"<string>/opt/homebrew/bin/sparkwing</string>",
+		"<string>" + fixtureAbsolutePath("/opt/homebrew/bin/sparkwing") + "</string>",
 		"<string>crons</string>",
 		"<string>tick</string>",
 		"<key>StartInterval</key>\n  <integer>60</integer>",
@@ -308,7 +320,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 	t.Run("darwin escapes xml", func(t *testing.T) {
 		exec := &fakeExec{}
 		h := darwinHost(t, exec)
-		h.Binary = "/opt/tools & toys/sparkwing"
+		h.Binary = fixtureAbsolutePath("/opt/tools & toys/sparkwing")
 		h.LogPath = filepath.Join(h.Home, "logs & more", "crons.log")
 		if _, err := Install(h); err != nil {
 			t.Fatalf("Install: %v", err)
@@ -317,7 +329,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		if strings.Contains(body, "& toys") {
 			t.Errorf("plist carries a raw ampersand:\n%s", body)
 		}
-		if !strings.Contains(body, "/opt/tools &amp; toys/sparkwing") {
+		if !strings.Contains(body, fixtureAbsolutePath("/opt/tools &amp; toys/sparkwing")) {
 			t.Errorf("plist did not escape the binary path:\n%s", body)
 		}
 		var parsed struct{}
@@ -340,7 +352,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 	t.Run("linux quotes spaces and doubles percent", func(t *testing.T) {
 		exec := &fakeExec{}
 		h := linuxHost(t, exec)
-		h.Binary = "/opt/my tools/sparkwing"
+		h.Binary = fixtureAbsolutePath("/opt/my tools/sparkwing")
 		h.PathEnv = "/opt/my tools:/usr/bin"
 		h.SparkwingHome = "/srv/100% sparkwing"
 		if _, err := Install(h); err != nil {
@@ -348,7 +360,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		}
 		service := read(t, filepath.Join(UnitDir(h), h.serviceName()))
 		for _, want := range []string{
-			`ExecStart="/opt/my tools/sparkwing" crons tick`,
+			`ExecStart="` + fixtureAbsolutePath("/opt/my tools/sparkwing") + `" crons tick`,
 			`Environment="PATH=/opt/my tools:/usr/bin"`,
 			`Environment="SPARKWING_HOME=/srv/100%% sparkwing"`,
 		} {
@@ -603,7 +615,7 @@ func TestEnableFailureIsReportedAndTheFilesStay(t *testing.T) {
 func TestUnsupportedGOOS(t *testing.T) {
 	for _, goos := range []string{"windows", "plan9", ""} {
 		t.Run("goos="+goos, func(t *testing.T) {
-			h := Host{GOOS: goos, Home: t.TempDir(), Binary: "/usr/local/bin/sparkwing", Exec: (&fakeExec{}).run}
+			h := Host{GOOS: goos, Home: t.TempDir(), Binary: fixtureAbsolutePath("/usr/local/bin/sparkwing"), Exec: (&fakeExec{}).run}
 			for name, fn := range map[string]func(Host) (State, error){"Install": Install, "Uninstall": Uninstall, "Status": Status} {
 				if _, err := fn(h); !errors.Is(err, ErrUnsupported) {
 					t.Errorf("%s error = %v, want ErrUnsupported", name, err)

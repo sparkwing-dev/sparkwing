@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -62,8 +63,9 @@ func TestWingd_UnownedCommandRunDoesNotLearnResourceProfile(t *testing.T) {
 			t.Fatalf("unowned execution contains interval evidence: %+v", sample)
 		}
 	}
-	if !command || !unknown {
-		t.Fatalf("command=%v unknown=%v, want both command usage and unknown attribution", command, unknown)
+	wantCommand := runtime.GOOS != "windows"
+	if command != wantCommand || !unknown {
+		t.Fatalf("command=%v unknown=%v, want command=%v and unknown attribution", command, unknown, wantCommand)
 	}
 	for _, node := range []string{"", "command"} {
 		prof, err := st.GetPipelineProfile(t.Context(), currentProfileKey("wingd-e2e-command-only"), node)

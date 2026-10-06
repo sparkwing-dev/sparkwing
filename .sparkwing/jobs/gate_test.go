@@ -1027,8 +1027,8 @@ func TestScopedStepsRefuseToLetAFilenameRunACommand(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
 
-	witness := filepath.Join(t.TempDir(), "executed")
-	name := "internal/hostile$(touch " + witness + ").go"
+	witness := filepath.Join(root, "executed")
+	name := "internal/hostile$(touch executed).go"
 	writeGoFile(t, filepath.Join(root, name), "package internal\n\nfunc  Hostile( ) int { return 1 }\n")
 	gitAddAll(t, root)
 

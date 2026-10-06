@@ -182,8 +182,13 @@ func requeueClaimedTrigger(t *testing.T, s *store.Store, id, pipeline string) {
 	}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if _, err := s.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+	if _, err := s.ClaimNextTrigger(ctx, time.Minute); err != nil {
 		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`),
+		time.Now().Add(-time.Minute).UnixNano(), id); err != nil {
+		t.Fatalf("expire trigger claim: %v", err)
 	}
 	ids, err := store.Maintenance.ReapExpiredTriggers(s, ctx)
 	if err != nil {

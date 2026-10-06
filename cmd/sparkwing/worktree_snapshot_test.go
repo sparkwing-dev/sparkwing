@@ -313,6 +313,82 @@ func TestMaterializeFleetSnapshotNeverCarriesCredentialedOrigin(t *testing.T) {
 	}
 }
 
+func TestMaterializeSnapshotPreservesRawBytesAgainstTrackedAttributes(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	writeSnapshotFile(t, repo, ".gitattributes", "*.txt text eol=crlf\n*.id ident\n", 0o644)
+	writeSnapshotFile(t, repo, "nested/.gitattributes", "*.txt text eol=lf\n", 0o644)
+	writeSnapshotFile(t, repo, "lf.txt", "base\n", 0o644)
+	writeSnapshotFile(t, repo, "identity.id", "$Id$\n", 0o644)
+	writeSnapshotFile(t, repo, "nested/crlf.txt", "base\n", 0o644)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-m", "line ending policy")
+	writeSnapshotFile(t, repo, "lf.txt", "captured LF\n", 0o644)
+	writeSnapshotFile(t, repo, "nested/crlf.txt", "captured CRLF\r\n", 0o644)
+	callerAttributes := "# caller policy stays untouched\n"
+	writeSnapshotFile(t, repo, ".git/info/attributes", callerAttributes, 0o600)
+	snapshot, err := captureWorktreeSnapshot(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = snapshot.close() }()
+	checkout, _, err := snapshot.materialize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSnapshotFile(t, checkout, "lf.txt", "captured LF\n")
+	assertSnapshotFile(t, checkout, "identity.id", "$Id$\n")
+	assertSnapshotFile(t, checkout, "nested/crlf.txt", "captured CRLF\r\n")
+	assertSnapshotFile(t, checkout, ".gitattributes", "*.txt text eol=crlf\n*.id ident\n")
+	assertSnapshotFile(t, checkout, "nested/.gitattributes", "*.txt text eol=lf\n")
+	assertSnapshotFile(t, repo, ".git/info/attributes", callerAttributes)
+}
+
+func TestMaterializeSnapshotRejectsEscapingTemplateAttributes(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	writeSnapshotFile(t, repo, "value", "exact\n", 0o644)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-m", "source")
+	snapshot, err := captureWorktreeSnapshot(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = snapshot.close() }()
+	outside := filepath.Join(t.TempDir(), "operator-file")
+	if err := os.WriteFile(outside, []byte("untouched operator data\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	template := t.TempDir()
+	if err := os.Mkdir(filepath.Join(template, "info"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(template, "info", "attributes")); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		// bug: Git for Windows refuses template symlinks before checkout preparation; copy the actual link natively.
+		checkout := filepath.Join(t.TempDir(), "checkout")
+		runSnapshotGit(t, filepath.Dir(checkout), "init", "--quiet", checkout)
+		target, readErr := os.Readlink(filepath.Join(template, "info", "attributes"))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err := os.Symlink(target, filepath.Join(checkout, ".git", "info", "attributes")); err != nil {
+			t.Fatal(err)
+		}
+		err = writeSnapshotCheckoutAttributes(checkout)
+	} else {
+		t.Setenv("GIT_TEMPLATE_DIR", template)
+		_, _, err = snapshot.materialize(context.Background())
+	}
+	if err == nil || !strings.Contains(err.Error(), "disable exact source conversion") {
+		t.Fatalf("materialization did not reject the escaping template attribute write: %v", err)
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil || string(data) != "untouched operator data\n" {
+		t.Fatalf("template attribute target changed: %q, %v", data, err)
+	}
+}
+
 func TestCaptureWorktreeSnapshotRejectsCompressibleUncompressedOversize(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "large.txt", strings.Repeat("0", 2048), 0o644)
@@ -360,6 +436,7 @@ func initSnapshotRepo(t *testing.T) string {
 	runSnapshotGit(t, repo, "config", "user.name", "Snapshot Test")
 	runSnapshotGit(t, repo, "config", "user.email", "snapshot@example.test")
 	runSnapshotGit(t, repo, "config", "commit.gpgsign", "false")
+	runSnapshotGit(t, repo, "config", "core.autocrlf", "false")
 	return repo
 }
 
@@ -394,6 +471,10 @@ func importSnapshotBundle(t *testing.T, snapshot *worktreeSnapshot) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "checkout")
 	runSnapshotGit(t, filepath.Dir(dir), "init", "--quiet", dir)
+	runSnapshotGit(t, dir, "config", "core.autocrlf", "false")
+	if runtime.GOOS == "windows" {
+		runSnapshotGit(t, dir, "config", "core.longpaths", "true")
+	}
 	ref := bincache.SeedRef(snapshot.SHA)
 	runSnapshotGit(t, dir, "fetch", "--quiet", snapshot.BundlePath, ref+":"+ref)
 	runSnapshotGit(t, dir, "checkout", "--quiet", snapshot.SHA)

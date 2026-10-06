@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -26,6 +27,13 @@ func (f *fakeExec) run(name string, args ...string) (string, error) {
 	return "", nil
 }
 
+func fixtureServiceBinary(root string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(root, "bin", "sparkwing-runner.exe")
+	}
+	return "/usr/local/bin/sparkwing-runner"
+}
+
 func linuxHost(t *testing.T, exec *fakeExec) Host {
 	t.Helper()
 	root := t.TempDir()
@@ -33,7 +41,7 @@ func linuxHost(t *testing.T, exec *fakeExec) Host {
 		GOOS:       "linux",
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     "/usr/local/bin/sparkwing-runner",
+		Binary:     fixtureServiceBinary(root),
 		ConfigPath: filepath.Join(root, ".config", "sparkwing", "config.yaml"),
 		Exec:       exec.run,
 	}
@@ -46,7 +54,7 @@ func darwinHost(t *testing.T, exec *fakeExec) Host {
 		GOOS:       "darwin",
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     "/usr/local/bin/sparkwing-runner",
+		Binary:     fixtureServiceBinary(root),
 		ConfigPath: filepath.Join(root, ".config", "sparkwing", "config.yaml"),
 		LogPath:    filepath.Join(root, ".sparkwing", "runner.log"),
 		UID:        501,
@@ -74,7 +82,7 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	unit := string(body)
 	for _, want := range []string{
 		Marker,
-		"ExecStart=/usr/local/bin/sparkwing-runner agent --config " + h.ConfigPath,
+		"ExecStart=" + systemdWord(h.Binary) + " agent --config " + systemdWord(h.ConfigPath),
 		"Restart=on-failure",
 		"WantedBy=default.target",
 	} {
@@ -86,7 +94,7 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != fileMode {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != fileMode {
 		t.Errorf("unit mode = %04o, want %04o", info.Mode().Perm(), fileMode)
 	}
 	want := []string{

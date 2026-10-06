@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,7 +70,11 @@ type restartableAPI struct {
 
 func newRestartableAPI(t *testing.T, h http.Handler) *restartableAPI {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "swrestart")
+	socketRoot := "/tmp"
+	if runtime.GOOS == "windows" {
+		socketRoot = os.TempDir()
+	}
+	dir, err := os.MkdirTemp(socketRoot, "swrestart")
 	if err != nil {
 		t.Fatalf("temp dir: %v", err)
 	}

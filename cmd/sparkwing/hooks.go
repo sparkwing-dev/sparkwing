@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -456,7 +457,7 @@ func chainableGlobalHooks(git githooks.Git, hooksDir string) map[string]bool {
 			continue
 		}
 		info, err := os.Stat(filepath.Join(dir, e.Name()))
-		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		if err != nil || info.IsDir() || (runtime.GOOS != "windows" && info.Mode()&0o111 == 0) {
 			continue
 		}
 		names[e.Name()] = true
@@ -547,12 +548,14 @@ func captureGlobalHookState(git githooks.Git, hooksDir string, hooks map[string]
 				return globalHookState{}, err
 			}
 		}
-		info, err := os.Stat(path)
+		file, err := os.Open(path)
 		if err != nil {
 			return globalHookState{}, err
 		}
-		body, err := os.ReadFile(path)
-		if err != nil {
+		info, statErr := file.Stat()
+		body, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if err := errors.Join(statErr, readErr, closeErr); err != nil {
 			return globalHookState{}, err
 		}
 		state.files[name] = globalHookFileState{

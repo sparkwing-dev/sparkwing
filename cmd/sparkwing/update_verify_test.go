@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func withTestUpdateKey(t *testing.T) ed25519.PrivateKey {
@@ -33,13 +35,6 @@ func releaseFixture(version string) []byte {
 		"echo \"fixture argv: $@\"\n" +
 		"echo \"fixture active: $SPARKWING_TOOLCHAIN_ACTIVE\"\n" +
 		"exit 7\n")
-}
-
-func skipWithoutShellFixtures(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("release fixtures are POSIX shell scripts")
-	}
 }
 
 func expectedAssetName() string {
@@ -130,9 +125,8 @@ func mustSHA256(b []byte) string {
 }
 
 func TestDownloadAndInstall_ValidSignedAsset(t *testing.T) {
-	skipWithoutShellFixtures(t)
 	priv := withTestUpdateKey(t)
-	newBytes := releaseFixture("v9.9.9")
+	newBytes := releaseFixtureForPlatform(t, "v9.9.9")
 	newReleaseServer(t, "v9.9.9", newBytes, priv, releaseServerOpts{})
 	currentBin := writeCurrentBin(t, []byte("OLD-BINARY-BYTES"))
 
@@ -221,9 +215,8 @@ func TestDownloadAndInstall_DigestMismatch_NoReplacement(t *testing.T) {
 }
 
 func TestDownloadAndInstall_RefusesASignedReleaseOfAnotherVersion(t *testing.T) {
-	skipWithoutShellFixtures(t)
 	priv := withTestUpdateKey(t)
-	newReleaseServer(t, "v9.9.9", releaseFixture("v0.1.0"), priv, releaseServerOpts{})
+	newReleaseServer(t, "v9.9.9", releaseFixtureForPlatform(t, "v0.1.0"), priv, releaseServerOpts{})
 	old := []byte("OLD-BINARY-BYTES")
 	currentBin := writeCurrentBin(t, old)
 
@@ -247,9 +240,8 @@ func TestDownloadAndInstall_RefusesASignedReleaseOfAnotherVersion(t *testing.T) 
 }
 
 func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
-	skipWithoutShellFixtures(t)
 	priv := withTestUpdateKey(t)
-	newBytes := releaseFixture("v9.9.9")
+	newBytes := releaseFixtureForPlatform(t, "v9.9.9")
 	newReleaseServer(t, "v9.9.9", newBytes, priv, releaseServerOpts{})
 	old := []byte("KNOWN-GOOD-PRIOR-BINARY")
 	currentBin := writeCurrentBin(t, old)
@@ -282,10 +274,8 @@ func TestRunUpdateBinary_Failure_SpawnsNoGo(t *testing.T) {
 
 	shimDir := t.TempDir()
 	spyLog := filepath.Join(shimDir, "go-invocations.log")
-	shim := "#!/bin/sh\necho \"$@\" >> " + spyLog + "\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(shimDir, "go"), []byte(shim), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	shim := "#!/bin/sh\necho \"$@\" >> " + shellSingleQuote(filepath.ToSlash(spyLog)) + "\nexit 0\n"
+	testshell.Install(t, filepath.Join(shimDir, "go"), shim)
 	t.Setenv("PATH", shimDir)
 
 	err := runUpdateBinary("v9.9.9", false, false)

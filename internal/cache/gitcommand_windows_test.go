@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/windows"
 )
+
+var gitReadySequence atomic.Uint64
 
 func TestGitCommandWindowsHelper(t *testing.T) {
 	role := os.Getenv("SPARKWING_CACHE_GIT_ROLE")
@@ -66,7 +69,7 @@ func TestGitCommandWindowsCancellationEndsDescendant(t *testing.T) {
 	ctx, cancel := context.WithCancel(bound)
 	defer cancel()
 	marker := filepath.Join(t.TempDir(), "child.pid")
-	name := `Local\sparkwing-cache-ready-` + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatUint(gitJobSequence.Add(1), 10)
+	name := `Local\sparkwing-cache-ready-` + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatUint(gitReadySequence.Add(1), 10)
 	wide, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		t.Fatal(err)

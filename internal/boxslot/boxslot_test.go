@@ -1,9 +1,12 @@
 package boxslot
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -94,7 +97,21 @@ func TestPurgeIfIdleInRootStaysWithRenamedDirectory(t *testing.T) {
 
 	renamed := filepath.Join(parent, "box-slots-original")
 	if err := os.Rename(dir, renamed); err != nil {
-		t.Fatal(err)
+		if runtime.GOOS != "windows" || !errors.Is(err, syscall.Errno(32)) {
+			t.Fatal(err)
+		}
+		// bug: Windows pins an open root against rename, so bind the renamed directory before replacing its display path.
+		if err := root.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(dir, renamed); err != nil {
+			t.Fatal(err)
+		}
+		root, err = os.OpenRoot(renamed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer root.Close()
 	}
 	outside := t.TempDir()
 	victim := filepath.Join(outside, "holder-pid88888-1800000000000000000-1.lock")
@@ -210,17 +227,21 @@ func TestPurgeIfIdleInRootReturnsPromptlyWhenCoordinationIsBusy(t *testing.T) {
 	}()
 
 	var result purgeResult
+	bound, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
 	select {
 	case result = <-resultCh:
-	case <-time.After(time.Second):
+	case <-bound.Done():
 		if unlockErr := flockUnlock(coord); unlockErr != nil {
 			t.Fatalf("unlock coordination after blocked purge: %v", unlockErr)
 		}
 		coordLocked = false
+		released, stop := context.WithTimeout(t.Context(), time.Second)
+		defer stop()
 		select {
 		case <-resultCh:
 			t.Fatal("busy coordination blocked purge")
-		case <-time.After(time.Second):
+		case <-released.Done():
 			t.Fatal("purge remained blocked after releasing coordination lock")
 		}
 	}

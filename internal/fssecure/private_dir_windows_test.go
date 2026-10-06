@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -72,16 +73,29 @@ func assertProtectedCurrentUserDACL(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dacl, present, err := descriptor.DACL()
+	dacl, defaulted, err := descriptor.DACL()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !present || dacl == nil || dacl.AceCount != 1 {
-		t.Fatalf("private DACL present=%v acl=%+v", present, dacl)
+	if defaulted || dacl == nil || dacl.AceCount == 0 {
+		t.Fatalf("private DACL defaulted=%v acl=%+v", defaulted, dacl)
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
+	}
+	for index := uint16(0); index < dacl.AceCount; index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, uint32(index), &ace); err != nil {
+			t.Fatal(err)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags&windows.INHERITED_ACE != 0 || !sid.Equals(user.User.Sid) {
+			t.Fatalf("private directory has an unexpected access entry: %+v sid=%s", ace, sid.String())
+		}
+		if ace.Mask != windows.STANDARD_RIGHTS_REQUIRED|windows.SYNCHRONIZE|0x1ff && ace.Mask != windows.GENERIC_ALL {
+			t.Fatalf("private directory access mask = %#x", ace.Mask)
+		}
 	}
 	sddl := descriptor.String()
 	if !strings.Contains(sddl, "D:P") || !strings.Contains(sddl, user.User.Sid.String()) {

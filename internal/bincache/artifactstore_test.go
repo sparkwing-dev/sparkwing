@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -26,7 +28,18 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 
 	srcDir := t.TempDir()
 	src := filepath.Join(srcDir, "fake-binary")
-	if err := os.WriteFile(src, []byte("#!/bin/sh\necho hello\n"), 0o755); err != nil {
+	payload := []byte("#!/bin/sh\necho hello\n")
+	if runtime.GOOS == "windows" {
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err = os.ReadFile(executable)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(src, payload, 0o755); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
 
@@ -42,6 +55,9 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
+	if runtime.GOOS == "windows" {
+		dest += ".exe"
+	}
 	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -49,12 +65,26 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if string(got) != "#!/bin/sh\necho hello\n" {
-		t.Errorf("payload mismatch: %q", got)
+	if string(got) != string(payload) {
+		t.Error("payload mismatch")
 	}
 	st, _ := os.Stat(dest)
-	if st.Mode()&0o100 == 0 {
+	if runtime.GOOS == "windows" {
+		cmd := exec.CommandContext(t.Context(), dest, "-test.run=^TestArtifactStoreExecutableHelper$")
+		cmd.Env = append(os.Environ(), "SPARKWING_TEST_ARTIFACT_EXECUTABLE=1")
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) != "hello" {
+			t.Fatal("downloaded native artifact did not execute")
+		}
+	} else if st.Mode()&0o100 == 0 {
 		t.Errorf("dest not executable: %v", st.Mode())
+	}
+}
+
+func TestArtifactStoreExecutableHelper(t *testing.T) {
+	if os.Getenv("SPARKWING_TEST_ARTIFACT_EXECUTABLE") == "1" {
+		_, _ = os.Stdout.WriteString("hello\n")
+		os.Exit(0)
 	}
 }
 

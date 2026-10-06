@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +51,7 @@ func cronsTestHome(t *testing.T) (home string, launcher *recordingLauncher) {
 			GOOS:       "linux",
 			Home:       unitRoot,
 			ConfigHome: filepath.Join(unitRoot, ".config"),
-			Binary:     "/usr/local/bin/sparkwing",
+			Binary:     cronsTestTimerBinary(),
 			PathEnv:    "/usr/bin:/bin",
 			LogPath:    filepath.Join(paths.Root, cronsLogFile),
 			UID:        1000,
@@ -556,6 +558,9 @@ func cronsBuildableRepo(t *testing.T) string {
 	repo := cronsTestRepo(t, cronsMinutelyRepo)
 	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), "module submitfixture\n\ngo 1.22\n")
 	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "main.go"), strings.ReplaceAll(submitFixtureSource, "fixture", "every-minute"))
+	if out, err := exec.Command("git", "-C", repo, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("initialize buildable cron checkout: %v: %s", err, out)
+	}
 	return repo
 }
 
@@ -662,4 +667,11 @@ func TestCronsLockAndUnlockDoNotAdvertiseProfile(t *testing.T) {
 	if !strings.Contains(cmdCrons.Description, "every verb but tick, lock and unlock") {
 		t.Errorf("the crons group still claims every verb but tick takes --profile:\n%s", cmdCrons.Description)
 	}
+}
+
+func cronsTestTimerBinary() string {
+	if runtime.GOOS == "windows" {
+		return filepath.VolumeName(os.TempDir()) + "/usr/local/bin/sparkwing"
+	}
+	return "/usr/local/bin/sparkwing"
 }

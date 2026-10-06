@@ -10,6 +10,8 @@ import (
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestNpmCacheCommandUsesWindowsNodeCLI(t *testing.T) {
@@ -89,7 +91,7 @@ func TestDefaultNpmCacheUsesWindowsLocalAppData(t *testing.T) {
 func TestDefaultNpmCacheWithoutLocalAppData(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Setenv("USERPROFILE", home)
 	for _, tc := range []struct{ goos, relative string }{{"windows", filepath.Join("AppData", "Local", "npm-cache")}, {"linux", ".npm"}, {"darwin", ".npm"}} {
 		got, err := defaultNpmCacheDir(tc.goos)

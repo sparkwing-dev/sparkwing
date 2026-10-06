@@ -17,3 +17,7 @@ go.sum text eol=lf
 .apidiff/*.txt text eol=lf
 api/openapi.yaml text eol=lf
 .gitleaksignore text eol=lf
+pkg/wingwire/testdata/shapes.json text eol=lf
+Dockerfile.* text eol=lf
+AGENTS.md text eol=lf
+CLAUDE.md text eol=lf

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -210,6 +211,8 @@ func TestReleasedCredentialFetchReadsNoAmbientCredential(t *testing.T) {
 func sshRecorder(t *testing.T, root string, echoKey bool) (record string) {
 	t.Helper()
 	bin, record := t.TempDir(), t.TempDir()
+	root = filepath.ToSlash(root)
+	shellRecord := filepath.ToSlash(record)
 	serve := `for last; do :; done
 exec sh -c "$(printf '%s' "$last" | sed "s#'/#'` + root + `/#")"`
 	if echoKey {
@@ -217,7 +220,7 @@ exec sh -c "$(printf '%s' "$last" | sed "s#'/#'` + root + `/#")"`
 exit 1`
 	}
 	script := `#!/bin/sh
-rec='` + record + `'
+rec='` + shellRecord + `'
 printf '%s\n' "$@" > "$rec/args"
 env > "$rec/env"
 key=""; hosts=""; prev=""
@@ -231,9 +234,19 @@ stat -c %a "$key" > "$rec/keymode" 2>/dev/null || stat -f %Lp "$key" > "$rec/key
 cat "$key" > "$rec/keybody"
 cat "$hosts" > "$rec/hosts"
 ` + serve + "\n"
-	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	if !installNativeSSHShim(t, bin, script) {
+		if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
+	previous := sshCredentialProgram
+	program := filepath.Join(bin, "ssh")
+	if runtime.GOOS == "windows" {
+		program += ".exe"
+	}
+	sshCredentialProgram = shellQuote(filepath.ToSlash(program))
+	t.Cleanup(func() { sshCredentialProgram = previous })
+	t.Setenv("SPARKWING_TEST_SSH_RECORD", record)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return record
 }
@@ -270,7 +283,11 @@ func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
 		t.Fatal("the checkout holds no tree")
 	}
 	keyPath := readRecord(t, record, "keypath")
-	if got := readRecord(t, record, "keymode"); got != "600" {
+	if runtime.GOOS == "windows" {
+		if got := readRecord(t, record, "private"); got != "verified" {
+			t.Fatal("SSH credential ACL was not verified")
+		}
+	} else if got := readRecord(t, record, "keymode"); got != "600" {
 		t.Errorf("key file mode = %s, want 600", got)
 	}
 	if got := readRecord(t, record, "keybody"); got != key {
@@ -280,9 +297,13 @@ func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
 		t.Errorf("known_hosts = %q, want only the pinned entry", got)
 	}
 	args := readRecord(t, record, "args") + "\n"
+	globalHosts := "GlobalKnownHostsFile=/dev/null"
+	if runtime.GOOS == "windows" {
+		globalHosts = "GlobalKnownHostsFile=nul"
+	}
 	for _, want := range []string{
 		"IdentitiesOnly=yes", "StrictHostKeyChecking=yes", "IdentityAgent=none",
-		"GlobalKnownHostsFile=/dev/null", "BatchMode=yes", "ForwardAgent=no",
+		globalHosts, "BatchMode=yes", "ForwardAgent=no",
 	} {
 		if !strings.Contains(args, want+"\n") {
 			t.Errorf("ssh argv lacks %s:\n%s", want, args)

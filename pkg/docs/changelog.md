@@ -26,10 +26,17 @@ unlock.
 ### Fixed
 - **Windows shell commands:** Preserve long Git Bash programs, standard input, and exit status when running native pipeline commands
 - **Windows dashboard builds:** Keep build locks across nested installer commands, preserve paths and exported settings across Git Bash and MSYS2, and verify build receipts through native pnpm launchers
-- **Windows configuration:** Create local secrets keys with private access lists before writing key bytes, and report Windows permissions correctly in `configure init`
+- **Windows configuration:** Create private configuration and secrets files with protected access lists before writing bytes, retain file identity during permission checks, and report Windows permissions correctly in `configure init`
 - **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
-- **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers
+- **Windows daemon:** Capture diagnostic dump identities before replacement and stop signaling reaped children
+- **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers, and disable interactive credential prompts for unattended requests
 - **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization, preserve native runtime settings, and reclaim abandoned temporary snapshots
+- **Windows output storage:** Flush output files through writable handles, replace them durably, and publish restored log archives after closing staging directory handles
+- **Windows Git hooks:** Resolve Git Bash drive paths and detect runnable hooks without relying on Unix executable permission bits
+- **Windows caches:** Reject rooted archive paths, restore contained relative symlinks, and retire completed cache entries after their open writers release them
+- **Windows worktrees:** Keep lease locks readable and remove completed leases through retained handles that allow native deletion
+- **Windows filesystem profiles:** Resolve drive paths and file URLs consistently for local state and repository identity
+- **Maintenance leases:** Keep sweep claim generations distinct when the clock repeats or moves backwards, so an old owner cannot clear a newer claim
 - **Windows installer checks:** Stage native executable assets and file URLs, and preserve Windows tool paths in install-to-green and Xwing candidate installation
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.

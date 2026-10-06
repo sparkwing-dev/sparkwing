@@ -139,8 +139,10 @@ func gitForkCounter(t *testing.T) func() int {
 	dir := t.TempDir()
 	tally := filepath.Join(dir, "forks")
 	shim := fmt.Sprintf("#!/bin/sh\nprintf 'x' >> %q\nexec %q \"$@\"\n", tally, real)
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(shim), 0o755); err != nil {
-		t.Fatal(err)
+	if !installNativeGitForkCounter(t, dir, tally, real) {
+		if err := os.WriteFile(filepath.Join(dir, "git"), []byte(shim), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 

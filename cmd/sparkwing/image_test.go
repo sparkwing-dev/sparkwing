@@ -29,7 +29,7 @@ func TestResolveGitopsRepoUsesSparkwingEnvironmentConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if filepath.Clean(got) != filepath.Clean(want) {
 		t.Fatalf("resolved repository = %q, want %q", got, want)
 	}
 }
@@ -42,7 +42,7 @@ func TestResolveGitopsRepoFlagOverridesEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != explicit {
+	if filepath.Clean(got) != filepath.Clean(explicit) {
 		t.Fatalf("resolved repository = %q, want explicit %q", got, explicit)
 	}
 }

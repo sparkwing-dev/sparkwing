@@ -40,13 +40,13 @@ func newChainFixture(t *testing.T) *chainFixture {
 		}
 	}
 	writeExec(t, filepath.Join(f.binDir, "sparkwing"),
-		"#!/bin/sh\necho \"$@\" >> "+f.ranFile+"\nexit 0\n")
+		"#!/bin/sh\necho \"$@\" >> "+shellSingleQuote(filepath.ToSlash(f.ranFile))+"\nexit 0\n")
 	for _, name := range []string{"prepare-commit-msg", "pre-commit"} {
 		writeExec(t, filepath.Join(f.globalDir, name),
-			"#!/bin/sh\n: > "+f.sentinelOf(name)+"\nexit 0\n")
+			"#!/bin/sh\n: > "+shellSingleQuote(filepath.ToSlash(f.sentinelOf(name)))+"\nexit 0\n")
 	}
 	writeRepoFile(t, filepath.Join(root, "gitconfig"),
-		"[core]\n\thooksPath = "+f.globalDir+"\n")
+		"[core]\n\thooksPath = \""+strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(f.globalDir)+"\"\n")
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), `pipelines:
   - name: gate
     entrypoint: Gate
@@ -149,7 +149,7 @@ func TestHooksInstall_KeepsTheGlobalHookFiringWhenItCannotForwardIt(t *testing.T
 		t.Fatal(err)
 	}
 	writeExec(t, filepath.Join(hooksDir, "prepare-commit-msg"),
-		"#!/bin/sh\n: > "+f.sentinelOf("repo-prepare")+"\nexit 0\n")
+		"#!/bin/sh\n: > "+shellSingleQuote(filepath.ToSlash(f.sentinelOf("repo-prepare")))+"\nexit 0\n")
 
 	out := captureStderr(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err == nil {
@@ -235,7 +235,7 @@ func TestHooksCommands_RejectARepoWithNoSparkwingDirectory(t *testing.T) {
 func TestHooksInstall_FailingGateAbortsTheCommit(t *testing.T) {
 	f := newChainFixture(t)
 	writeExec(t, filepath.Join(f.binDir, "sparkwing"),
-		"#!/bin/sh\necho \"$@\" >> "+f.ranFile+"\nexit 1\n")
+		"#!/bin/sh\necho \"$@\" >> "+shellSingleQuote(filepath.ToSlash(f.ranFile))+"\nexit 1\n")
 
 	captureStdout(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
@@ -266,7 +266,7 @@ func TestHooksInstall_FailingPrePushAbortsThePush(t *testing.T) {
 	f.git(t, "init", "--bare", remote)
 	f.git(t, "remote", "add", "origin", remote)
 	writeExec(t, filepath.Join(f.binDir, "sparkwing"),
-		"#!/bin/sh\necho \"$@\" >> "+f.ranFile+"\nexit 1\n")
+		"#!/bin/sh\necho \"$@\" >> "+shellSingleQuote(filepath.ToSlash(f.ranFile))+"\nexit 1\n")
 
 	captureStdout(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
