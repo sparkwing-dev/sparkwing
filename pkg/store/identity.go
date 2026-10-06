@@ -1214,6 +1214,9 @@ func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, r
 		string(role), string(t.team), subjectID); err != nil {
 		return nil, err
 	}
+	if err := t.withdrawInvitationsIssuedByTx(ctx, tx, subjectID, role, now); err != nil {
+		return nil, err
+	}
 	var revoked []string
 	if role == RoleReader {
 		if revoked, err = t.revokeTokensMintedByTx(ctx, tx, subjectID, now); err != nil {
@@ -1261,6 +1264,9 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, no
 	if err := t.moveSessionsOffTeamTx(ctx, tx, subjectID, now); err != nil {
 		return nil, err
 	}
+	if err := t.withdrawInvitationsIssuedByTx(ctx, tx, subjectID, "", now); err != nil {
+		return nil, err
+	}
 	revoked, err := t.revokeTokensMintedByTx(ctx, tx, subjectID, now)
 	if err != nil {
 		return nil, err
@@ -1283,6 +1289,27 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 	_, err := tx.ExecContext(ctx,
 		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ?`,
 		active, accountID, string(t.team))
+	return err
+}
+
+// safety: accepting an invitation grants the role it names without asking
+// about its inviter again, so an invitation for more than the inviter now
+// holds goes with that authority; an empty keep withdraws every one.
+func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx, accountID string, keep Role, now time.Time) error {
+	var above []any
+	for _, r := range []Role{RoleReader, RoleEditor, RoleOwner} {
+		if r.rank() > keep.rank() {
+			above = append(above, string(r))
+		}
+	}
+	if accountID == "" || len(above) == 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE invitations SET withdrawn_at = ?
+		WHERE team = ? AND invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL
+		  AND role IN (`+placeholders(len(above))+`)`,
+		append([]any{now.UTC().Unix(), string(t.team), accountID}, above...)...)
 	return err
 }
 

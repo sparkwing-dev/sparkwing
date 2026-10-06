@@ -700,6 +700,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM invitations WHERE email = ?`, []any{acct.Email}},
+		{`UPDATE invitations SET withdrawn_at = ? WHERE invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, []any{at, accountID}},
 		{`UPDATE invitations SET invited_by = '' WHERE invited_by = ?`, []any{accountID}},
 		{`UPDATE invitations SET accepted_by = '' WHERE accepted_by = ?`, []any{accountID}},
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
