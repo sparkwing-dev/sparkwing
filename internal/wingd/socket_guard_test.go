@@ -162,7 +162,11 @@ func TestSocketBaseDir_IgnoresTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := socketPathIn(base, home); sock != want {
+	identity, err := socketHomeIdentity(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := socketPathIn(base, identity); sock != want {
 		t.Fatalf("SocketPath = %q, want the derived path %q", sock, want)
 	}
 }

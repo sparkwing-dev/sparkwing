@@ -28,7 +28,7 @@ unlock.
 - **Windows dashboard builds:** Keep build locks across nested installer commands, preserve paths and exported settings across Git Bash and MSYS2, and verify build receipts through native pnpm launchers
 - **Windows configuration:** Create private configuration and secrets files with protected access lists before writing bytes, retain file identity during permission checks, and report Windows permissions correctly in `configure init`
 - **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
-- **Windows daemon:** Capture diagnostic dump identities before replacement and stop signaling reaped children
+- **Windows daemon:** Keep runs on the same daemon when home paths differ in slashes or drive-letter casing, capture diagnostic dump identities before replacement, and stop signaling reaped children
 - **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers, and disable interactive credential prompts for unattended requests
 - **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization, preserve native runtime settings, and reclaim abandoned temporary snapshots
 - **Windows output storage:** Flush output files through writable handles, replace them durably, and publish restored log archives after closing staging directory handles
