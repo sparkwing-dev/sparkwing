@@ -45,6 +45,9 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **controller:** The request audit log names readers, targets and refused subjects
+  Reads of secrets, tokens and operator routes, and every `401` and `403`, are now `audit` records with `client_ip`, `principal_id` and `team` instead of `http` records. Identity changes add `member_id`, `invitation_id`, `token_prefix`, `secret_name` and `role`, and a refused token-shaped bearer adds `attempted_prefix`. Log parsers keyed on the `http` message for those reads should match `audit` too. See [Request audit log](docs/security.md#request-audit-log).
+- **sdk:** A step's session ledger record masks the run's secret values in its command line, so the `stray_session_reaped` event a sweep copies from it no longer stores a secret passed as an argument
 - **web:** A dashboard run with `--allow-unauthenticated-remote` on a non-loopback address refuses cross-site writes
   A `POST`, `PUT`, `PATCH` or `DELETE` whose `Origin` host differs from `Host`, or whose `Sec-Fetch-Site` is `cross-site` or `same-site`, answers `403` naming the reason, so a page on another site can no longer cancel, retry or launch runs with the dashboard's service token through a visitor's browser or an operator's port-forward. Same-origin dashboard use and clients that send neither header, such as `curl`, are unchanged. A proxy in front of such a dashboard must pass the browser's `Host` through.
 - **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.

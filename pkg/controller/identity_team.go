@@ -79,6 +79,7 @@ func (s *Server) handleSetMemberRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "role", req.Role)
 	revoked, err := t.SetMemberRole(r.Context(), p.AccountID, r.PathValue("user_id"), store.Role(req.Role), time.Now())
 	if err != nil {
 		writeIdentityError(w, s, r, "set member role", err)
@@ -161,11 +162,13 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "role", req.Role)
 	inv, err := t.CreateInvitation(r.Context(), p.AccountID, req.Email, store.Role(req.Role), time.Now())
 	if err != nil {
 		writeIdentityError(w, s, r, "invite", err)
 		return
 	}
+	noteAuditTarget(r.Context(), "invitation_id", inv.ID)
 	accept := s.acceptURL(inv.ID)
 	sent := s.mailInvitation(r.Context(), p, t, inv, accept)
 	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})

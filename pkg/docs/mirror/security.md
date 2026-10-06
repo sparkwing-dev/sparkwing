@@ -149,6 +149,25 @@ endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
 scope is the superset.
 
+### Request audit log
+
+The controller writes one slog record per request. A read is an `http` record
+carrying the request id, method, route pattern, status and duration. A write
+is an `audit` record that adds `ts`, `client_ip`, `client_class`,
+`principal_kind`, `principal_id` (an account id or a token prefix, never an
+email or a token) and `team`. These also get an `audit` record:
+
+- reads of secrets, tokens and operator routes (`/api/v1/secrets`,
+  `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
+  `/api/v1/operator/...`);
+- every `401` and `403`, whatever the method. A refused bearer shaped like a
+  Sparkwing token adds `attempted_prefix`, the prefix that names the token
+  without granting it.
+
+Identity changes name their target: `member_id`, `invitation_id`,
+`token_prefix`, `secret_name` and the requested `role`. No record carries the
+raw path, query, body, headers or a credential.
+
 ## Login and hashing budgets
 
 `POST /api/v1/auth/login` is the controller's only unauthenticated route

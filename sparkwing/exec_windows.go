@@ -96,7 +96,7 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job s
 	release, err := sessionledger.Open(p.SessionLedgerDir()).Record(sessionledger.Record{
 		Run: run, Node: node, OwnerPID: os.Getpid(), OwnerBirth: ownerBirth,
 		Handle:  sessionledger.Handle{Kind: "job", LeaderPID: cmd.Process.Pid, JobName: job.job.Name},
-		Command: display,
+		Command: sessionledger.MaskCommand(ctx, display),
 	})
 	if err != nil {
 		slog.Default().Debug("step session not recorded", "err", err)

@@ -46,6 +46,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	principal := "anonymous"
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		principal = p.Name

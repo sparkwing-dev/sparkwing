@@ -12,13 +12,20 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type maskerCtxKey struct{}
 
+// WithMasker attaches m to ctx for the run's logs, and for the step command
+// lines the session ledger records, which cannot import this package.
 func WithMasker(ctx context.Context, m *Masker) context.Context {
-	return context.WithValue(ctx, maskerCtxKey{}, m)
+	var mask func(string) string
+	if m != nil {
+		mask = m.Mask
+	}
+	return sessionledger.WithCommandMask(context.WithValue(ctx, maskerCtxKey{}, m), mask)
 }
 
 func MaskerFromContext(ctx context.Context) *Masker {
