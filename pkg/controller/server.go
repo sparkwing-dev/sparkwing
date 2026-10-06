@@ -1263,21 +1263,21 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
-	router.HandleFunc("POST /api/v1/data/download", s.handleDataDownload)
+	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
 	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
-	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
+	router.Handle("POST /api/v1/auth/login", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleLogin))))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
-	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
+	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /api/v1/auth/oauth/google/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleStart)))
-	router.Handle("POST /api/v1/auth/oauth/google/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange)))
+	router.Handle("POST /api/v1/auth/oauth/google/exchange", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange))))
 	router.Handle("POST /api/v1/auth/oauth/github/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubStart)))
-	router.Handle("POST /api/v1/auth/oauth/github/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange)))
+	router.Handle("POST /api/v1/auth/oauth/github/exchange", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange))))
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
-	router.Handle("POST /api/v1/runners/github/exchange", http.HandlerFunc(s.handleGitHubRunnerExchange))
+	router.Handle("POST /api/v1/runners/github/exchange", noStore(http.HandlerFunc(s.handleGitHubRunnerExchange)))
 	router.HandleFunc("GET /.well-known/openid-configuration", s.handleOIDCDiscovery)
 	router.HandleFunc("GET /.well-known/jwks.json", s.handleOIDCKeys)
 
@@ -1315,7 +1315,7 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return noStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if raw, route := claimRouteFor(mux, r); route != nil {
 			s.serveClaim(w, r, raw, route, next)
 			return
@@ -1341,9 +1341,9 @@ func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handl
 		}
 		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
-		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
+		stampPrincipal(ctx, p)
 		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	}))
 }
 
 // UnsupportedRouteError is the `error` member of the 404 body a controller

@@ -7,6 +7,8 @@ type RuntimeWindow = {
 };
 let getNodeStreamUrl!: typeof import("./api").getNodeStreamUrl;
 let cancelRun!: typeof import("./api").cancelRun;
+let deleteRun!: typeof import("./api").deleteRun;
+let getNodeLogs!: typeof import("./api").getNodeLogs;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
 let triggerRun!: typeof import("./api").triggerRun;
 let pipelinesByName!: typeof import("./api").pipelinesByName;
@@ -20,6 +22,8 @@ before(async () => {
     ({
       getNodeStreamUrl,
       cancelRun,
+      deleteRun,
+      getNodeLogs,
       getConnectionStatus,
       triggerRun,
       pipelinesByName,
@@ -38,6 +42,41 @@ describe("getNodeStreamUrl", () => {
       "/api/v1/runs/run-one/logs/verify/stream?format=ndjson",
     );
     assert.doesNotMatch(url, /format=ansi/);
+  });
+});
+
+describe("run path segments", () => {
+  async function requestedPaths(call: () => Promise<unknown>): Promise<string[]> {
+    const runtime = globalThis as unknown as { fetch: typeof fetch };
+    const previousFetch = runtime.fetch;
+    const paths: string[] = [];
+    runtime.fetch = async (input) => {
+      paths.push(new URL(String(input), "https://dashboard.example").pathname);
+      return new Response(null, { status: 204 });
+    };
+    try {
+      await call();
+    } finally {
+      runtime.fetch = previousFetch;
+    }
+    return paths;
+  }
+
+  it("keeps a traversal-shaped run id inside the run's own path", async () => {
+    for (const id of ["../team/members/x", "%2e%2e/team/members/x", "a/../../crons/c/run?"]) {
+      const [path] = await requestedPaths(() => deleteRun(id));
+      assert.match(path, /^\/api\/v1\/runs\/[^/]+$/, `deleteRun(${id}) requested ${path}`);
+    }
+    const [logs] = await requestedPaths(() => getNodeLogs("run-one", "../../team"));
+    assert.match(logs, /^\/api\/v1\/runs\/run-one\/logs\/[^/]+$/);
+  });
+
+  it("refuses a dot-segment run id", async () => {
+    for (const id of ["..", ".", ""]) {
+      const paths = await requestedPaths(() => deleteRun(id).catch(() => undefined));
+      assert.deepEqual(paths, [], `deleteRun(${JSON.stringify(id)}) sent a request`);
+      await assert.rejects(deleteRun(id));
+    }
   });
 });
 

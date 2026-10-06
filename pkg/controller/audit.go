@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 // RequestIDHeader carries a request's correlation id. A caller's value is
@@ -83,6 +85,10 @@ func auditPrincipalID(p *Principal) string {
 	default:
 		return clip(p.Name)
 	}
+}
+
+func stampPrincipal(ctx context.Context, p *Principal) {
+	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: auditPrincipalID(p)})
 }
 
 var sparkwingAgent = regexp.MustCompile(`^(sparkwing-[a-z]{1,24})(?:/(v?[0-9][0-9A-Za-z.+-]{0,31}))?(?:[ ;(]|$)`)

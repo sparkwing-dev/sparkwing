@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -97,7 +98,7 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 		s.handleGitHubAppInstallationEvent(w, r, env, delivery)
 	case "installation_repositories":
 		s.githubApp.forgetCovering()
-		s.handleGitHubAppInstallationRepositoriesEvent(w, r, env)
+		s.handleGitHubAppInstallationRepositoriesEvent(w, r, env, body)
 	case "push", "pull_request", "release", "create", "delete":
 		s.handleGitHubAppRunEvent(w, r, event, delivery, env, body)
 	case "repository":
@@ -109,7 +110,7 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery) {
+func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery, body []byte) {
 	ctx := r.Context()
 	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -128,8 +129,7 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 	current, err := s.githubApp.client.InstallationRepositories(ctx, env.Installation.ID)
 	if err != nil {
 		if env.Action == "removed" {
-			if _, werr := tenant.WithdrawGitHubCronInstallation(ctx, env.Installation.ID, time.Now()); werr != nil {
-				s.writeInternalError(w, r, "withdraw unreadable installation schedules", werr)
+			if !s.withdrawUnlistedGitHubRemoval(w, r, tenant, env.Installation.ID, body, current, err) {
 				return
 			}
 		}
@@ -155,6 +155,42 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 		}
 	}
 	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
+}
+
+// safety: an unreadable listing withdraws the whole installation's schedules, but a listing cut only
+// for its size withdraws just the repositories GitHub names as removed and keeps the rest; a named
+// repository the cut listing still shows was added back after the removal, so it keeps its schedules.
+func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
+	installation int64, body []byte, listed []githubapp.Repository, listErr error,
+) bool {
+	if !errors.Is(listErr, githubapp.ErrTooManyRepositories) {
+		if _, err := tenant.WithdrawGitHubCronInstallation(r.Context(), installation, time.Now()); err != nil {
+			s.writeInternalError(w, r, "withdraw unreadable installation schedules", err)
+			return false
+		}
+		return true
+	}
+	var p struct {
+		Removed []githubAppRepoRef `json:"repositories_removed"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode installation_repositories payload: %w", err))
+		return false
+	}
+	covered := make(map[int64]bool, len(listed))
+	for _, repo := range listed {
+		covered[repo.ID] = true
+	}
+	for _, repo := range p.Removed {
+		if covered[repo.ID] {
+			continue
+		}
+		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), installation, repo.ID, time.Now()); err != nil {
+			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
+			return false
+		}
+	}
+	return true
 }
 
 // safety: an installation event only removes or pauses a binding; creating one
@@ -331,9 +367,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	}
 	if event == "create" || event == "delete" {
 		var p struct {
-			Ref          string `json:"ref"`
-			RefType      string `json:"ref_type"`
-			MasterBranch string `json:"master_branch"`
+			Ref          string          `json:"ref"`
+			RefType      string          `json:"ref_type"`
+			MasterBranch json.RawMessage `json:"master_branch"`
 			Repository   struct {
 				PushedAt  json.RawMessage `json:"pushed_at"`
 				UpdatedAt json.RawMessage `json:"updated_at"`
@@ -348,7 +384,12 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		if p.RefType != "branch" || p.Ref == "" || strings.Contains(p.Ref, "..") || strings.HasPrefix(p.Ref, "/") {
 			return githubAppIntake{}, "not a branch event", nil
 		}
-		if event == "delete" && p.MasterBranch == "" {
+		// safety: GitHub's delete payload has no master_branch and its create
+		// payload always does, so a delete carrying one is a create body.
+		if event == "delete" && p.MasterBranch != nil {
+			return githubAppIntake{}, "a branch deletion carries no master_branch", nil
+		}
+		if event == "delete" && env.Repository.DefaultBranch == "" {
 			return githubAppIntake{}, "branch deletion names no default branch", nil
 		}
 		base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = "refs/heads/"+p.Ref, "branch"
@@ -358,7 +399,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		}
 		branch := p.Ref
 		if event == "delete" {
-			branch = p.MasterBranch
+			branch = env.Repository.DefaultBranch
 		}
 		return githubAppIntake{user: p.Sender.Login, branch: branch, env: base, at: at}, "", nil
 	}
@@ -683,7 +724,8 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 		return
 	}
 	repositories, err := s.githubApp.client.InstallationRepositories(r.Context(), env.Installation.ID)
-	if err != nil {
+	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
+	if err != nil && !truncated {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
@@ -693,6 +735,10 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 			matched = true
 			break
 		}
+	}
+	if !matched && truncated {
+		writeError(w, http.StatusBadGateway, err)
+		return
 	}
 	if !matched {
 		githubAppIgnored(w, "the installation no longer covers repository id")

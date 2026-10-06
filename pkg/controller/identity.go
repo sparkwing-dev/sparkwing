@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -141,7 +140,7 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, raw string
 	}
 	observeRequestPrincipal(p.Kind)
 	ctx := contextWithPrincipal(r.Context(), p)
-	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
+	stampPrincipal(ctx, p)
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 

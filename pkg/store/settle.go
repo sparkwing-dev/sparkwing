@@ -87,6 +87,20 @@ type settleNode struct {
 	continueOnError, optional              bool
 	waiting, unclaimed                     bool
 	approval                               []byte
+	up                                     []string
+	index, pass, cursor                    int
+}
+
+func (n *settleNode) upstream() []string {
+	if n.onFailureOf == "" {
+		return n.deps
+	}
+	return append(slices.Clone(n.deps), n.onFailureOf)
+}
+
+type settleDecision struct {
+	node            *settleNode
+	verdict, reason string
 }
 
 // safety: the caller holds the run row (lockDispatchRunTx) and calls this in the
@@ -130,31 +144,14 @@ func settleTx(ctx context.Context, tx *storeTx, team Team, runID string, now tim
 		}
 		return finalizeSettledRunTx(ctx, tx, team, runID, nodes, true)
 	}
-	byID := make(map[string]*settleNode, len(nodes))
-	for _, n := range nodes {
-		byID[n.id] = n
-	}
 	var ready []*settleNode
-	for changed := true; changed; {
-		changed = false
-		for _, n := range nodes {
-			if !n.waiting {
-				continue
-			}
-			verdict, reason := releaseVerdict(n, byID)
-			switch verdict {
-			case "":
-				continue
-			case nodeStatusPending:
-				ready = append(ready, n)
-			default:
-				if err := finishUnrunNodeTx(ctx, tx, team, runID, n.id, verdict, reason, now); err != nil {
-					return err
-				}
-				n.status, n.outcome = nodeStatusDone, verdict
-				changed = true
-			}
-			n.waiting = false
+	for _, d := range decideWaiting(nodes) {
+		if d.verdict == nodeStatusPending {
+			ready = append(ready, d.node)
+			continue
+		}
+		if err := finishUnrunNodeTx(ctx, tx, team, runID, d.node.id, d.verdict, d.reason, now); err != nil {
+			return err
 		}
 	}
 	for _, n := range ready {
@@ -190,26 +187,86 @@ func loadSettleNodesTx(ctx context.Context, tx *storeTx, team Team, runID string
 			&n.continueOnError, &n.optional, &unreleased, &n.unclaimed, &n.approval); err != nil {
 			return nil, err
 		}
-		if len(deps) > 0 {
+		n.waiting = n.status == nodeStatusPending && unreleased && n.unclaimed
+		// perf: only a waiting node is decided by its deps, and decoding every
+		// node's deps on each report made settlement cost grow with plan edges.
+		if n.waiting && len(deps) > 0 {
 			if err := json.Unmarshal(deps, &n.deps); err != nil {
 				return nil, fmt.Errorf("node %s/%s deps: %w", runID, n.id, err)
 			}
 		}
-		n.waiting = n.status == nodeStatusPending && unreleased && n.unclaimed
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// perf: each waiting node waits on one unfinished upstream at a time and is
+// decided once, instead of rescanning all of them until nothing changes. pass is
+// the rescan pass that would have decided it, so sorting by pass and plan order
+// keeps the rescan's write order.
+func decideWaiting(nodes []*settleNode) []settleDecision {
+	byID := make(map[string]*settleNode, len(nodes))
+	for i, n := range nodes {
+		n.index = i
+		byID[n.id] = n
+	}
+	waitingOn := make(map[string][]*settleNode)
+	var queue []*settleNode
+	park := func(n *settleNode) {
+		for ; n.cursor < len(n.up); n.cursor++ {
+			id := n.up[n.cursor]
+			if dep, ok := byID[id]; !ok || dep.status != nodeStatusDone {
+				waitingOn[id] = append(waitingOn[id], n)
+				return
+			}
+		}
+		queue = append(queue, n)
+	}
+	for _, n := range nodes {
+		if n.waiting {
+			n.up = n.upstream()
+			park(n)
+		}
+	}
+	var out []settleDecision
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		n.waiting, n.pass = false, 1
+		for _, id := range n.up {
+			dep := byID[id]
+			pass := dep.pass
+			if dep.index > n.index {
+				pass++
+			}
+			n.pass = max(n.pass, pass)
+		}
+		verdict, reason := releaseVerdict(n, byID)
+		out = append(out, settleDecision{node: n, verdict: verdict, reason: reason})
+		if verdict == nodeStatusPending {
+			continue
+		}
+		n.status, n.outcome = nodeStatusDone, verdict
+		parked := waitingOn[n.id]
+		delete(waitingOn, n.id)
+		for _, d := range parked {
+			park(d)
+		}
+	}
+	slices.SortFunc(out, func(a, b settleDecision) int {
+		if a.node.pass != b.node.pass {
+			return a.node.pass - b.node.pass
+		}
+		return a.node.index - b.node.index
+	})
+	return out
 }
 
 // safety: returns "" while any upstream is still running, so a node is decided
 // once, from terminal upstreams only. A retrying upstream is pending, not
 // terminal, which is what keeps its dependents waiting between attempts.
 func releaseVerdict(n *settleNode, byID map[string]*settleNode) (string, string) {
-	upstream := n.deps
-	if n.onFailureOf != "" {
-		upstream = append(slices.Clone(n.deps), n.onFailureOf)
-	}
-	for _, id := range upstream {
+	for _, id := range n.upstream() {
 		if dep, ok := byID[id]; !ok || dep.status != nodeStatusDone {
 			return "", ""
 		}

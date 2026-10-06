@@ -33,7 +33,6 @@ type secretJSON struct {
 }
 
 func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	var req secretSetReq
 	if err := decodeJSONLimit(r, &req, maxSecretJSONBody); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -100,7 +99,6 @@ func validateSecretName(tn *store.Tenant, name, pipeline string) error {
 }
 
 func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	sec, tn, ok := s.readSecretForCaller(w, r, r.PathValue("name"))
 	if !ok {
 		return
@@ -145,9 +143,14 @@ func maskedValueReadable(p *Principal) bool {
 	return !p.HasScope(ScopeTeamAdmin)
 }
 
-func noStoreSecrets(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
+// safety: responses carry credentials or tenant data that browser disk caches
+// and intermediaries must not keep.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) openStoredSecret(team store.Team, sec *store.Secret) (string, error) {
@@ -257,7 +260,6 @@ func (s *Server) claimedRunForReader(r *http.Request, runID string) (claimed sto
 }
 
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	tn, ok := s.requestTenant(w, r)
 	if !ok {
 		return
@@ -295,7 +297,6 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	name := r.PathValue("name")
 	tn, ok := s.requestTenant(w, r)
 	if !ok {
@@ -315,7 +316,6 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 // safety: a row held as plaintext and one sealed under the previous key both
 // come out under the current key, so dropping the previous key loses nothing.
 func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	if s.secretsCipher == nil {
 		writeError(w, http.StatusBadRequest,
 			errors.New("secrets cipher: no key configured, so there is nothing to rotate to"))

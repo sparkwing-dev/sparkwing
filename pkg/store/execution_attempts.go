@@ -159,8 +159,8 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id, membership_id,
        executor_kind, executor_name, executor_id, executor_location, holder_id, reservation_id, started_at
   FROM node_execution_attempts
- WHERE lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
-		root, nodeID, start.AttemptOrdinal).Scan(&prior.RunID, &prior.ClaimGeneration, &prior.CoordinatorID,
+ WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		runID, root, nodeID, start.AttemptOrdinal).Scan(&prior.RunID, &prior.ClaimGeneration, &prior.CoordinatorID,
 		&prior.MembershipID, &prior.ExecutorKind, &prior.ExecutorName, &prior.ExecutorID, &prior.ExecutorLocation,
 		&prior.HolderID, &prior.ReservationID, &priorStarted)
 	if err == nil {
@@ -353,8 +353,8 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id,
        executor_kind, executor_name, executor_id, executor_location, holder_id
   FROM node_execution_attempts
- WHERE lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
-		root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
+ WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		runID, root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
 		&priorKind, &priorName, &priorExecutor, &priorLocation, &priorHolder)
 	if err == nil {
 		if priorRun == runID && priorGeneration == fence.ClaimGeneration &&
@@ -586,8 +586,8 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id,
        executor_kind, executor_name, executor_id, executor_location, holder_id
   FROM node_execution_attempts
- WHERE lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
-		root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
+ WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		runID, root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
 		&priorKind, &priorName, &priorExecutor, &priorLocation, &priorHolder)
 	if err == nil {
 		if priorRun == runID && priorGeneration == generation && priorCoordinator == coordinatorID &&
@@ -602,8 +602,8 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	}
 	var recorded int
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(attempt_ordinal), 0)
-  FROM node_execution_attempts WHERE lineage_root_run_id = ? AND node_id = ?`,
-		root, nodeID).Scan(&recorded); err != nil {
+  FROM node_execution_attempts WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ?`,
+		runID, root, nodeID).Scan(&recorded); err != nil {
 		return err
 	}
 	// safety: the caller numbers its own attempts against the node's retry
@@ -713,9 +713,13 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 	return tx.Commit()
 }
 
+// safety: the attempts key names a lineage root run but not whose run it is,
+// and a node row can carry a root naming another team's run, so every
+// lineage read keeps to the team of the run being asked about.
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error) {
 	var root string
-	err := s.queryRow(ctx, `SELECT retry_root_run_id FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID).Scan(&root)
+	err := s.queryRow(ctx, `SELECT retry_root_run_id FROM nodes
+ WHERE team = `+runTeamSQL+` AND run_id = ? AND node_id = ?`, runID, runID, nodeID).Scan(&root)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("node", runID+"/"+nodeID)
 	}
@@ -729,8 +733,8 @@ func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID str
        coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
        holder_id, reservation_id, started_at, finished_at, outcome, failure_reason, retry_run_id
   FROM node_execution_attempts
- WHERE lineage_root_run_id = ? AND node_id = ?
- ORDER BY attempt_ordinal`, root, nodeID)
+ WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ?
+ ORDER BY attempt_ordinal`, runID, root, nodeID)
 	if err != nil {
 		return nil, err
 	}

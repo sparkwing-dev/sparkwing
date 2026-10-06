@@ -97,6 +97,8 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 			resp.UserID, resp.Team = "u1", "ada"
 		}
 		_ = json.NewEncoder(w).Encode(resp)
+	case "/api/v1/auth/login":
+		_ = json.NewEncoder(w).Encode(loginResp{SessionID: "password-session", CSRFToken: "csrf-password-session"})
 	case "/api/v1/auth/logout":
 		c.logouts = append(c.logouts, decode()["session_id"])
 		w.WriteHeader(http.StatusNoContent)

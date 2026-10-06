@@ -27,6 +27,21 @@ func withTestUpdateKey(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
+func releaseFixture(version string) []byte {
+	return []byte("#!/bin/sh\n" +
+		`if [ "$1" = "version" ]; then printf '{"cli":{"installed":"` + version + `"}}\n'; exit 0; fi` + "\n" +
+		"echo \"fixture argv: $@\"\n" +
+		"echo \"fixture active: $SPARKWING_TOOLCHAIN_ACTIVE\"\n" +
+		"exit 7\n")
+}
+
+func skipWithoutShellFixtures(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("release fixtures are POSIX shell scripts")
+	}
+}
+
 func expectedAssetName() string {
 	ext := ""
 	if runtime.GOOS == "windows" {
@@ -115,8 +130,9 @@ func mustSHA256(b []byte) string {
 }
 
 func TestDownloadAndInstall_ValidSignedAsset(t *testing.T) {
+	skipWithoutShellFixtures(t)
 	priv := withTestUpdateKey(t)
-	newBytes := []byte("SPARKWING-NEW-RELEASE-BYTES-v9.9.9\x00\x01\x02")
+	newBytes := releaseFixture("v9.9.9")
 	newReleaseServer(t, "v9.9.9", newBytes, priv, releaseServerOpts{})
 	currentBin := writeCurrentBin(t, []byte("OLD-BINARY-BYTES"))
 
@@ -204,9 +220,36 @@ func TestDownloadAndInstall_DigestMismatch_NoReplacement(t *testing.T) {
 	assertBytes(t, currentBin, old)
 }
 
-func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
+func TestDownloadAndInstall_RefusesASignedReleaseOfAnotherVersion(t *testing.T) {
+	skipWithoutShellFixtures(t)
 	priv := withTestUpdateKey(t)
-	newBytes := []byte("GOOD-VERIFIED-RELEASE-BYTES")
+	newReleaseServer(t, "v9.9.9", releaseFixture("v0.1.0"), priv, releaseServerOpts{})
+	old := []byte("OLD-BINARY-BYTES")
+	currentBin := writeCurrentBin(t, old)
+
+	_, err := downloadAndInstall("v9.9.9", currentBin)
+	if err == nil {
+		t.Fatal("a signed release that reports another version was installed")
+	}
+	for _, want := range []string{"v9.9.9", "v0.1.0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err.Error(), want)
+		}
+	}
+	assertBytes(t, currentBin, old)
+	entries, err := os.ReadDir(filepath.Dir(currentBin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("install directory holds %d entries after the refusal, want only the original binary", len(entries))
+	}
+}
+
+func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
+	skipWithoutShellFixtures(t)
+	priv := withTestUpdateKey(t)
+	newBytes := releaseFixture("v9.9.9")
 	newReleaseServer(t, "v9.9.9", newBytes, priv, releaseServerOpts{})
 	old := []byte("KNOWN-GOOD-PRIOR-BINARY")
 	currentBin := writeCurrentBin(t, old)

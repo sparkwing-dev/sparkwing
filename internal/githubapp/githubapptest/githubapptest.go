@@ -630,11 +630,19 @@ func (g *GitHub) handleInstallationRepos(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	inst := g.insts[tok.installation]
+	perPage, err := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if err != nil || perPage <= 0 || perPage > 100 {
+		perPage = 30
+	}
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
 	repos := []map[string]any{}
-	for _, repo := range inst.Repos {
+	for _, repo := range inst.Repos[min((page-1)*perPage, len(inst.Repos)):min(page*perPage, len(inst.Repos))] {
 		repos = append(repos, map[string]any{"id": repo.ID, "full_name": repo.FullName, "private": repo.Private})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(repos), "repositories": repos})
+	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(inst.Repos), "repositories": repos})
 }
 
 func (g *GitHub) handleStatus(w http.ResponseWriter, r *http.Request) {

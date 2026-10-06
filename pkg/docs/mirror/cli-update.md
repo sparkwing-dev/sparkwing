@@ -13,8 +13,9 @@ this project's .sparkwing/go.mod pin. Targets are mutually exclusive.
 Both resolve the latest published GitHub release unless --version names a
 specific release tag.
 
-CLI updates verify Ed25519 signatures and the release digest before atomic
-replacement. Verification failure is terminal. --force permits a downgrade;
+CLI updates verify Ed25519 signatures, the release digest and the version the
+staged binary reports before atomic replacement. Verification failure is
+terminal. --force permits a downgrade;
 --override-hold crosses an operator CLI hold. Both flags are CLI-only.
 
 SDK updates run native go get for the resolved release, then go mod tidy.

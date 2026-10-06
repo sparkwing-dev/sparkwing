@@ -10,6 +10,15 @@ function getApiUrl(): string {
 
 const API_URL = getApiUrl();
 
+// A browser resolves "." and ".." segments before sending, even encoded, so an
+// id taken from the URL could otherwise retarget a request to another route.
+function pathSegment(id: string): string {
+  if (id === "" || id === "." || id === "..") {
+    throw new Error(`invalid path segment ${JSON.stringify(id)}`);
+  }
+  return encodeURIComponent(id);
+}
+
 function sessionMode(): boolean {
   if (typeof window === "undefined") return false;
   const runtime = window as unknown as Record<string, unknown>;
@@ -352,7 +361,7 @@ export async function getControllerQueueState(): Promise<ControllerQueueState | 
 }
 
 export async function getRunAttempts(runID: string): Promise<Run[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/attempts`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/attempts`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
@@ -361,7 +370,7 @@ export async function getRunAttempts(runID: string): Promise<Run[]> {
 }
 
 export async function getRun(runID: string): Promise<RunDetail | null> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}?include=nodes`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}?include=nodes`, {
     cache: "no-store",
   });
   if (!res.ok) return null;
@@ -386,7 +395,7 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
 
 export async function getRunLogs(runID: string): Promise<string> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/logs?format=ndjson`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs?format=ndjson`,
     {
       cache: "no-store",
       headers: { Accept: "application/x-ndjson" },
@@ -401,7 +410,7 @@ export async function getNodeLogs(
   nodeID: string,
 ): Promise<string> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}?format=ndjson`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}?format=ndjson`,
     { cache: "no-store", headers: { Accept: "application/x-ndjson" } },
   );
   if (!res.ok) return "";
@@ -413,7 +422,7 @@ export async function getNodeLogCompleteness(
   nodeID: string,
 ): Promise<LogCompleteness | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/completeness`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}/completeness`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -439,7 +448,7 @@ export async function searchRunLogs(
 ): Promise<RunLogSearchResponse> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/logs/search?${params}`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/search?${params}`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return { query, results: [], total: 0 };
@@ -447,7 +456,7 @@ export async function searchRunLogs(
 }
 
 export function getNodeStreamUrl(runID: string, nodeID: string): string {
-  return `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/stream?format=ndjson`;
+  return `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}/stream?format=ndjson`;
 }
 
 export interface RunsGrepMatch {
@@ -509,7 +518,7 @@ export async function searchRunsGrep(
 }
 
 export function getRunEventsStreamUrl(runID: string): string {
-  return `${API_URL}/api/v1/runs/${runID}/events/stream`;
+  return `${API_URL}/api/v1/runs/${pathSegment(runID)}/events/stream`;
 }
 
 export async function listRunEvents(
@@ -519,7 +528,7 @@ export async function listRunEvents(
   const params = new URLSearchParams();
   if (opts?.after) params.set("after", String(opts.after));
   if (opts?.limit) params.set("limit", String(opts.limit));
-  const url = `${API_URL}/api/v1/runs/${runID}/events${
+  const url = `${API_URL}/api/v1/runs/${pathSegment(runID)}/events${
     params.toString() ? `?${params}` : ""
   }`;
   const res = await authFetch(url, { cache: "no-store" }).catch(() => null);
@@ -560,7 +569,7 @@ export async function triggerRun(
 }
 
 export async function cancelRun(runID: string): Promise<void> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/cancel`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/cancel`, {
     method: "POST",
   });
   if (!res.ok && res.status !== 204) {
@@ -569,7 +578,7 @@ export async function cancelRun(runID: string): Promise<void> {
 }
 
 export async function deleteRun(runID: string): Promise<void> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}`, {
     method: "DELETE",
   });
   if (res.status === 403) {
@@ -756,7 +765,7 @@ export async function getNodeMetrics(
     const qs = new URLSearchParams({ limit: String(METRIC_PAGE) });
     if (cursor) qs.set("cursor", cursor);
     const res = await authFetch(
-      `${API_URL}/api/v1/runs/${runID}/nodes/${nodeID}/metrics?${qs}`,
+      `${API_URL}/api/v1/runs/${pathSegment(runID)}/nodes/${pathSegment(nodeID)}/metrics?${qs}`,
       { cache: "no-store" },
     ).catch(() => null);
     if (!res || !res.ok) return { points };
@@ -774,7 +783,7 @@ export async function retryRun(
   opts?: { full?: boolean },
 ): Promise<Run | null> {
   const qs = opts?.full ? "?full=1" : "";
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/retry${qs}`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry${qs}`, {
     method: "POST",
   }).catch(() => null);
   if (!res || !res.ok) return null;
@@ -934,7 +943,7 @@ export interface PauseState {
 }
 
 export async function getPaused(runID: string): Promise<PauseState[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/paused`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/paused`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
@@ -959,7 +968,7 @@ export async function getApproval(
   nodeID: string,
 ): Promise<Approval | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/approvals/${encodeURIComponent(nodeID)}`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/approvals/${pathSegment(nodeID)}`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -982,7 +991,7 @@ export async function resolveApproval(
   comment: string,
 ): Promise<Approval> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/approvals/${encodeURIComponent(nodeID)}`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/approvals/${pathSegment(nodeID)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1001,7 +1010,7 @@ export async function releaseNode(
   nodeID: string,
 ): Promise<void> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/nodes/${encodeURIComponent(nodeID)}/release`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/nodes/${pathSegment(nodeID)}/release`,
     { method: "POST" },
   );
   if (!res.ok && res.status !== 204) {
