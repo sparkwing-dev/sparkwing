@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -119,7 +120,8 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 		}
 	}
 	listed, err := s.githubApp.client.InstallationRepositories(ctx, inst.InstallationID)
-	if err != nil {
+	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
+	if err != nil && !truncated {
 		return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to list the installation's repositories")
 	}
 	ids := map[string]int64{}
@@ -128,6 +130,9 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 			if strings.EqualFold(l.FullName, raw) {
 				ids[strings.ToLower(raw)] = l.ID
 			}
+		}
+		if ids[strings.ToLower(raw)] == 0 && truncated {
+			return nil, http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so " + raw + " cannot be confirmed")
 		}
 		if ids[strings.ToLower(raw)] == 0 {
 			return nil, http.StatusBadRequest, errors.New("the installation covering " + repo.Slug() + " does not list " + raw)

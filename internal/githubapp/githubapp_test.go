@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
@@ -148,5 +149,29 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	calls := gh.CheckRunCalls()
 	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != id || calls[1].Conclusion != "success" {
 		t.Fatalf("check run writes = %+v", calls)
+	}
+}
+
+func TestInstallationRepositories_NamesACutList(t *testing.T) {
+	for _, tc := range []struct {
+		count     int
+		truncated bool
+	}{{1000, false}, {1001, true}} {
+		gh, client := fixture(t)
+		repos := make([]githubapptest.Repo, tc.count)
+		for i := range repos {
+			repos[i] = githubapptest.Repo{ID: int64(10000 + i), FullName: fmt.Sprintf("acme/r%d", i)}
+		}
+		gh.SetRepos(7, repos...)
+		got, err := client.InstallationRepositories(context.Background(), 7)
+		if tc.truncated {
+			if !errors.Is(err, githubapp.ErrTooManyRepositories) || len(got) != 1000 {
+				t.Fatalf("%d repositories = %d listed, %v; want 1000 with ErrTooManyRepositories", tc.count, len(got), err)
+			}
+			continue
+		}
+		if err != nil || len(got) != tc.count || got[tc.count-1].ID != int64(10000+tc.count-1) {
+			t.Fatalf("%d repositories = %d listed, %v", tc.count, len(got), err)
+		}
 	}
 }
