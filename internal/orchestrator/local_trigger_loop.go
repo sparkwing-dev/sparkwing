@@ -250,6 +250,11 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		args = append(args, "--profile", profileName)
 	}
 	args = append(args, trig.ID)
+	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env)
+	if err != nil {
+		return fmt.Errorf("prepare local dispatch admission: %w", err)
+	}
+	defer closeAdmission()
 	return execLocalChild(ctx, binPath, repoDir, args, env)
 }
 
