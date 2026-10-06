@@ -130,9 +130,9 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// safety: a masked value leaves the controller only for the operator's admin
-// bearer or a runner's claim-bound read; a session holds no run and would only
-// display it, and a team owner manages the row without reading it back.
+// safety: a masked value leaves the controller only for the operator's admin bearer or a runner's claim-bound read;
+// a session holds no run and would only display it. An editor can still read one through a runner token it mints and a
+// run it claims, which is accepted: that editor already chooses the code a run executes, and that code reads the value.
 func maskedValueReadable(p *Principal) bool {
 	if p.session != "" {
 		return false

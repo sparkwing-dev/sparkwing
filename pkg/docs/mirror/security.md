@@ -122,6 +122,21 @@ fields have narrower permissions, such as dispatch environment snapshots.
 Give this scope to someone who may read the team's history. An operator's
 `admin` authority is separate from this team-scoped read permission.
 
+**Accepted trust facts.** Each of these follows from the model above and is
+not a defect. A team editor can read masked secret values: it can mint a
+runner token, start a run, claim it and read the run's secrets, because it
+already chooses the code that run executes. The operator's launcher token
+receives claim tokens for every team's ready nodes, so whoever holds it reaches
+every team's run secrets, source tokens and cache grants; keep it
+operator-only. Which secrets a run may read through a claim token is declared
+by that run's own plan, so the boundary is the secret's pipeline or shared
+scope, not the declaration. The masker covers step output that goes through
+the exec helper and the node log; anything else a pipeline process prints to
+its own stdout reaches the operator's container logs unmasked. `docker run -e
+K=V`, which the SDK's docker and services helpers use, puts the value on the
+docker CLI's command line, which every account on a
+shared self-hosted host can read in the process table.
+
 **The laptop dashboard admits the account that started it.** `sparkwing
 serve start` mounts the controller API and the dashboard on one listener
 and requires the token in `serve-token` under the Sparkwing home, a `0600`

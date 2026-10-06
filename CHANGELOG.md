@@ -77,6 +77,7 @@ unlock.
 - **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+- **security:** Record the accepted trust facts: editors can read masked secrets through a runner token they mint, the launcher token reaches every team's claim tokens, a run's plan declares its own secrets, pipeline stdout outside the exec helper is unmasked in container logs, and `docker -e K=V` is visible in a shared host's process table
 - **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
