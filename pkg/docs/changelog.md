@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+- **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
+
 ### Fixed
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.

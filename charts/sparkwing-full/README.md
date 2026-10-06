@@ -30,10 +30,13 @@ instead -- this chart pulls it in as a dependency.
 
 `helm template` stops on the sub-chart's `validate.yaml` unless the cache's
 operator token Secret is named, and the values live under the sub-chart's
-key. The minimal read-only render is:
+key. It also stops while the controller has neither a bootstrap admin token
+nor `controller.allowOpenBootstrap=true` (see [Auth](#auth)). The minimal
+read-only render is:
 
 ```bash
 helm template sparkwing ./charts/sparkwing-full \
+  --set controller.allowOpenBootstrap=true \
   --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
   --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
   --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key
@@ -96,6 +99,13 @@ kubectl -n sparkwing create secret generic sparkwing-webhook \
 kubectl -n sparkwing create secret generic sparkwing-github-status \
     --from-literal=token=<your-github-token>
 
+# The first admin token. The controller stores it as an admin credential
+# before it binds, so it never serves a request unauthenticated. Keep the
+# value: it is the admin bearer for `sparkwing cluster tokens create`.
+printf 'swu_%s' "$(openssl rand -hex 24)" > /tmp/sparkwing-bootstrap-admin
+kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
+    --from-file=token=/tmp/sparkwing-bootstrap-admin
+
 # At-rest encryption key for the controller's secrets store.
 # Skip and the controller logs a WARNING + stores plaintext.
 openssl rand -base64 32 > /tmp/sparkwing-key
@@ -104,7 +114,8 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 
 # Bearer token for sparkwing-web (controller proxy) and the runner
 # bundle (claim loop). The controller only accepts tokens IT minted,
-# so create this Secret AFTER the first `helm install` -- see Auth below.
+# so mint it with the bootstrap admin token after the first
+# `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
 # Tokens carry scopes: a runner token needs `nodes.claim`,
@@ -152,11 +163,12 @@ helm dep up ./charts/sparkwing-full
 
 # Install the complete stack with an explicitly compatible image set. This
 # source-test configuration has no auth, webhook verification, or encryption-at-rest,
-# so the cache and the logs service must opt out of their token requirement
-# explicitly.
+# so the controller, the cache and the logs service must opt out of their
+# token requirement explicitly.
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
+    --set controller.allowOpenBootstrap=true \
     --set sparkwing-runner-bundle.cache.allowUnauthenticated=true \
     --set sparkwing-runner-bundle.logs.allowUnauthenticated=true
 ```
@@ -207,6 +219,7 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.githubStatusToken.name=sparkwing-github-status \
     --set controller.dashboardURL=https://sparkwing.example.com \
     --set controller.secretsKey.name=sparkwing-secrets-key \
+    --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
     --set web.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
@@ -257,7 +270,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key, mounted as a file and named with `--secrets-key-file`. | `""` |
 | `controller.secretsPreviousKey.name` | Secret holding the key values were sealed under before `secretsKey`; read-only fallback for the window before `sparkwing secrets rotate` runs. | `""` |
 | `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
-| `controller.requireAuth` | Refuse to start when no live token exists. On an upgrade of a cluster that already holds a token it needs nothing else; on a fresh install without `bootstrapAdminToken` the controller crash-loops, because the window that would mint the first token is exactly what the flag closes. The render does not refuse that pairing, because it cannot see what the state DB holds. | `false` |
+| `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
+| `controller.allowOpenBootstrap` | Render without `bootstrapAdminToken` and drop `--require-auth`, so an empty tokens table serves every route unauthenticated until a token exists and the controller restarts. A controller that already holds a token stays authenticated. Bool only. | `false` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 
@@ -344,9 +358,18 @@ API clients authenticate with **bearer tokens the controller mints**;
 each token carries scopes. Per decision 0001, SSO and advanced RBAC
 are explicitly *not* paid gates -- they may land in OSS later. For now:
 
-1. Until the tokens table has a row, the controller serves **every
-   endpoint unauthenticated** and logs a warning at boot. Mint the
-   first token through that open window, then restart to turn auth on:
+1. Give the controller its first admin token with
+   `controller.bootstrapAdminToken.name` (see Pre-install above). It stores
+   that token before the listener binds and starts with `--require-auth`
+   (`controller.requireAuth`, on by default), so it never serves a request
+   unauthenticated. Without that Secret the render refuses, because a
+   controller whose tokens table is empty serves **every endpoint
+   unauthenticated**, token minting and first-admin creation included, to
+   anything that reaches its Service.
+
+   `controller.allowOpenBootstrap=true` opts into that open window instead.
+   The chart then drops `--require-auth`; mint the first token through the
+   window, then restart to turn auth on:
 
    ```bash
    kubectl -n sparkwing port-forward deploy/sparkwing-controller 9001:80 &
@@ -356,7 +379,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    ```
 
    Auth only takes effect on that restart -- the tokens table is read
-   once at startup.
+   once at startup. `allowOpenBootstrap` must be a bool; a quoted string
+   fails the render.
 
 2. Mint one token per consumer, stash each in a Secret (see Pre-install
    above), and reference them from `web.tokenSecret.name` /
@@ -506,6 +530,14 @@ helm dep up ./charts/sparkwing-full
 helm upgrade sparkwing ./charts/sparkwing-full \
     --namespace sparkwing -f my-values.yaml
 ```
+
+Chart 0.2.0 defaults `controller.requireAuth` to `true`, and an upgrade
+from an earlier chart without `controller.bootstrapAdminToken.name` fails
+to render. Set `controller.bootstrapAdminToken.name`, which the controller
+ignores once a live token exists and which keeps `--require-auth` on, or
+`controller.allowOpenBootstrap=true`, which keeps a controller that already
+holds a token authenticated but reopens the window if its tokens table is
+ever emptied.
 
 The controller uses `strategy: Recreate` (RWO PVC -- can't
 multi-attach), so expect a brief downtime per upgrade. Web is

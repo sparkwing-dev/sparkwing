@@ -916,9 +916,12 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   example `printf 'swu_%s' "$(openssl rand -hex 24)"` -- because a
   bearer lookup selects on that prefix. The chart mounts it from
   `controller.bootstrapAdminToken.name` as a file, renders the flag, and
-  renders `--require-auth` from `controller.requireAuth`. Without it,
-  minting the first token needs the controller open, so enable auth by
-  creating an admin token through that window and restarting.
+  renders `--require-auth` from `controller.requireAuth`, which defaults
+  to `true`. Without a bootstrap token the render refuses unless
+  `controller.allowOpenBootstrap=true`, which drops `--require-auth` so
+  the first token can be minted through the open window and auth enabled
+  by a restart. Anything that reaches the Service during that window can
+  mint an admin token, so keep it closed to everything but the operator.
 - **Know what the bootstrap flag treats as an empty table.** It writes
   when no token *authenticates*: every row is revoked, expired, or the
   table is empty. That is what recovers a cluster whose only credential

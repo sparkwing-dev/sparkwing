@@ -25,21 +25,23 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.13" {
-		t.Fatalf("full chart version = %q, want 0.1.13", chart.Version)
+	if chart.Version != "0.2.0" {
+		t.Fatalf("full chart version = %q, want 0.2.0", chart.Version)
 	}
 }
 
 func tokenSecretDefaults(chart string) []string {
 	prefix := ""
+	var controller []string
 	if strings.Contains(chart, "sparkwing-full") {
 		prefix = "sparkwing-runner-bundle."
+		controller = []string{"controller.allowOpenBootstrap=true"}
 	}
-	return []string{
-		prefix + "controller.tokenSecret.name=sparkwing-token",
-		prefix + "cache.tokenSecret.name=sparkwing-cache-token",
-		prefix + "cache.grantKeySecret.name=sparkwing-cache-grant-key",
-	}
+	return append(controller,
+		prefix+"controller.tokenSecret.name=sparkwing-token",
+		prefix+"cache.tokenSecret.name=sparkwing-cache-token",
+		prefix+"cache.grantKeySecret.name=sparkwing-cache-grant-key",
+	)
 }
 
 func helmArgs(chart, release string, sets []string, extra ...string) []string {
@@ -2791,19 +2793,66 @@ func TestFullChartCarriesControllerCredentialsAsFiles(t *testing.T) {
 	}
 }
 
-func TestFullChartRendersRequireAuth(t *testing.T) {
+func TestFullChartRequiresAuthWithABootstrapTokenByDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
-		"templates/controller-deployment.yaml", "sparkwing"))
-	if slices.Contains(container.Args, "--require-auth") {
-		t.Fatalf("args = %+v, want no --require-auth by default", container.Args)
-	}
-	container = runnerContainer(t, helmRender(t, "./sparkwing-full",
-		"templates/controller-deployment.yaml", "sparkwing", "controller.requireAuth=true"))
+		"templates/controller-deployment.yaml", "sparkwing",
+		"controller.allowOpenBootstrap=false",
+		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
 	if !slices.Contains(container.Args, "--require-auth") {
-		t.Fatalf("args = %+v, want --require-auth", container.Args)
+		t.Fatalf("args = %+v, want --require-auth by default", container.Args)
+	}
+	if !slices.Contains(container.Args, "--bootstrap-admin-token-file=/etc/sparkwing/bootstrap-admin-token/token") {
+		t.Fatalf("args = %+v, want the bootstrap token file", container.Args)
+	}
+}
+
+func TestFullChartRefusesADefaultRenderWithoutABootstrapToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.allowOpenBootstrap=false")
+	for _, want := range []string{"controller.bootstrapAdminToken.name", "controller.allowOpenBootstrap=true"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render error does not name %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
+	for _, sets := range [][]string{
+		{"controller.allowOpenBootstrap=true"},
+		{"controller.allowOpenBootstrap=false", "controller.requireAuth=false"},
+	} {
+		container := runnerContainer(t, helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...))
+		for _, arg := range container.Args {
+			if arg == "--require-auth" || strings.HasPrefix(arg, "--bootstrap-admin-token-file") {
+				t.Fatalf("%v: args = %+v, want neither --require-auth nor a bootstrap token", sets, container.Args)
+			}
+		}
+	}
+	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing",
+		"controller.allowOpenBootstrap=true",
+		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
+	if !slices.Contains(container.Args, "--require-auth") {
+		t.Fatalf("args = %+v, want --require-auth once a bootstrap token closes the window", container.Args)
+	}
+}
+
+func TestFullChartRefusesAQuotedAllowOpenBootstrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	out := helmRenderErrorSetString(t, "./sparkwing-full", "sparkwing", "controller.allowOpenBootstrap=false")
+	if !strings.Contains(out, "controller.allowOpenBootstrap must be a bool") {
+		t.Fatalf("render error does not refuse the quoted value:\n%s", out)
 	}
 }
 
@@ -2815,19 +2864,6 @@ func TestFullChartRefusesAPreviousSecretsKeyWithoutACurrentOne(t *testing.T) {
 		"controller.secretsPreviousKey.name=sparkwing-secrets-key-old")
 	if !strings.Contains(out, "controller.secretsKey.name") {
 		t.Fatalf("render error does not name the missing current key:\n%s", out)
-	}
-}
-
-func TestFullChartRendersRequireAuthWithoutABootstrapToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
-		"templates/controller-deployment.yaml", "sparkwing", "controller.requireAuth=true"))
-	for _, arg := range container.Args {
-		if strings.HasPrefix(arg, "--bootstrap-admin-token-file") {
-			t.Fatalf("args = %+v, want no bootstrap token flag", container.Args)
-		}
 	}
 }
 
