@@ -10,9 +10,11 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 
@@ -25,7 +27,28 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	return exec.CommandContext(ctx, name, args...)
 }
 
-func configureProcessGroup(context.Context, *exec.Cmd, <-chan struct{}) {}
+func configureProcessGroup(_ context.Context, cmd *exec.Cmd, _ <-chan struct{}) {
+	if len(cmd.Args) != 3 || cmd.Args[1] != "-c" {
+		return
+	}
+	name := filepath.Base(cmd.Path)
+	if !strings.EqualFold(name, "bash") && !strings.EqualFold(name, "bash.exe") {
+		return
+	}
+	// bug: Git Bash truncates long -c arguments from Windows; an environment value preserves the program and stdin.
+	const variable = "SPARKWING_BASH_PROGRAM"
+	const limit = 32767 - len(variable) - 2
+	program := cmd.Args[2]
+	if len(utf16.Encode([]rune(program))) > limit {
+		cmd.Err = fmt.Errorf("Windows Bash program exceeds environment limit of %d UTF-16 code units", limit)
+		return
+	}
+	cmd.Args[2] = `eval 'unset ` + variable + `;' "$` + variable + `"`
+	if cmd.Env == nil {
+		cmd.Env = os.Environ()
+	}
+	cmd.Env = append(cmd.Env, variable+"="+program)
+}
 
 func commandResourceUsage(*exec.Cmd) (time.Duration, int64, bool) { return 0, 0, false }
 

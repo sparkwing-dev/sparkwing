@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -85,8 +86,15 @@ func TestKeyring_FirstSealCreatesAPrivateKeyFile(t *testing.T) {
 	if info.Size() != secrets.KeySize {
 		t.Errorf("key file holds %d bytes, want %d", info.Size(), secrets.KeySize)
 	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		t.Errorf("key file mode = %o, want owner-only", perm)
+	if err := fssecure.VerifyPrivateConfig(path, info); err != nil {
+		t.Errorf("key file is not private: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "secrets.key" {
+		t.Fatalf("temporary key artifacts remain: %v", entries)
 	}
 	sec, _ := st.GetSecretRow("TOKEN", "")
 	if !secrets.IsBound(sec.Value) {

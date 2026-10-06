@@ -23,7 +23,7 @@ func TestRepoRootFindsModuleWithLFOrCRLF(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, err := repoRootFrom(child)
-			if err != nil || got != root {
+			if err != nil || got != filepath.Clean(root) {
 				t.Fatalf("repoRootFrom(%q) = %q, %v; want %q", child, got, err, root)
 			}
 		})

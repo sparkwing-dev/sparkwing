@@ -24,6 +24,13 @@ unlock.
 - **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
 ### Fixed
+- **Windows shell commands:** Preserve long Git Bash programs, standard input, and exit status when running native pipeline commands
+- **Windows dashboard builds:** Keep build locks across nested installer commands, preserve paths and exported settings across Git Bash and MSYS2, and verify build receipts through native pnpm launchers
+- **Windows configuration:** Create local secrets keys with private access lists before writing key bytes, and report Windows permissions correctly in `configure init`
+- **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
+- **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers
+- **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization and reclaim abandoned temporary snapshots
+- **Windows installer checks:** Stage native executable assets and file URLs, and preserve Windows tool paths in install-to-green and Xwing candidate installation
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.

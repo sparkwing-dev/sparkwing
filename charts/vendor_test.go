@@ -164,7 +164,7 @@ func TestVendoredRunnerBundleMatchesItsSource(t *testing.T) {
 		t.Fatalf("vendored files = %v, source files = %v; %s", got, want, refresh)
 	}
 	for _, name := range sortedKeys(source) {
-		if vendored[name] != source[name] {
+		if strings.ReplaceAll(vendored[name], "\r\n", "\n") != strings.ReplaceAll(source[name], "\r\n", "\n") {
 			t.Errorf("vendored %s differs from %s/%s; %s", name, bundleSourceDir, name, refresh)
 		}
 	}

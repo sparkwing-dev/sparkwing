@@ -43,7 +43,7 @@ export GOPRIVATE='github.com/sparkwing-dev/*'
 
 # shellcheck source=bin/web-build-lock.sh
 source "$ROOT/bin/web-build-lock.sh"
-sparkwing_lock_web_build "$ROOT"
+sparkwing_lock_web_build "$ROOT" "$@"
 
 if [ "${SKIP_WEB_BUILD:-0}" = "1" ]; then
   echo "SKIP_WEB_BUILD=1 set; using existing internal/web/next-out/ as-is"
@@ -61,9 +61,9 @@ elif ! command -v pnpm >/dev/null 2>&1; then
   fi
 else
   if (( reuse_web )); then
-    bash "$ROOT/bin/build-web.sh" --reuse
+    "$BASH" "$ROOT/bin/build-web.sh" --reuse
   else
-    bash "$ROOT/bin/build-web.sh"
+    "$BASH" "$ROOT/bin/build-web.sh"
   fi
 fi
 

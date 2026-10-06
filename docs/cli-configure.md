@@ -55,10 +55,11 @@ after install, then run 'sparkwing pipeline new --name <name>'
 inside each project to scaffold .sparkwing/ + your first pipeline
 in one step (no separate init needed).
 
-Re-running on an already-set-up laptop re-applies 0700 to
-~/.config/sparkwing/ and reports each config file's mode, naming any
-that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command reports existing state.
+Re-running on an already-set-up laptop prepares ~/.config/sparkwing/
+and reports files that other users can read. Unix reports
+permission modes and applies 0700 to the directory; Windows checks
+access lists and names Windows Security permissions for review.
+--dry-run skips directory creation and permission changes.
 
 Run inside a sparkwing project, it also reports whether this
 checkout's declared git hooks fire, and names the command that

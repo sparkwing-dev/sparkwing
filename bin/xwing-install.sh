@@ -3,6 +3,15 @@ set -euo pipefail
 
 : "${XWING_TOOL_SOURCE:?Xwing must provide the selected checkout}"
 : "${XWING_TOOL_DEST:?Xwing must provide the staging executable path}"
+exe_suffix=""
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    XWING_TOOL_SOURCE="$(cygpath -u -- "$XWING_TOOL_SOURCE")"
+    XWING_TOOL_DEST="$(cygpath -u -- "$XWING_TOOL_DEST")"
+    export XWING_TOOL_SOURCE XWING_TOOL_DEST
+    exe_suffix=".exe"
+    ;;
+esac
 case "$XWING_TOOL_SOURCE" in /*) ;; *) echo "candidate source must be absolute" >&2; exit 1 ;; esac
 case "$XWING_TOOL_DEST" in /*) ;; *) echo "candidate destination must be absolute" >&2; exit 1 ;; esac
 if [[ ! "$XWING_TOOL_SOURCE/bin/xwing-install.sh" -ef "$0" ]]; then
@@ -22,4 +31,4 @@ stage="$(mktemp -d "$(dirname "$XWING_TOOL_DEST")/.sparkwing-build.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 GOWORK=off SKIP_WEB_BUILD=0 SPARKWING_INSTALL_BIN="$stage" \
   SPARKWING_INSTALL_NAME=sparkwing-candidate bash "$XWING_TOOL_SOURCE/bin/install.sh" --reuse-web
-mv "$stage/sparkwing-candidate" "$XWING_TOOL_DEST"
+mv "$stage/sparkwing-candidate$exe_suffix" "$XWING_TOOL_DEST"

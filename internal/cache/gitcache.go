@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -863,11 +862,7 @@ func acquireGitForkHTTP(w http.ResponseWriter, r *http.Request, what string) (re
 func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	cmd := exec.CommandContext(ctx, "git", args...)
-	// safety: process group kill prevents SSH child orphans on timeout.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	configureGitCommand(cmd)
 	return cmd
 }
 
@@ -884,7 +879,7 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	out, err := gitCommand(ctx, args...).CombinedOutput()
+	out, err := gitCommandOutput(gitCommand(ctx, args...), true)
 	if ctx.Err() == context.DeadlineExceeded {
 		return string(out), fmt.Errorf("git timed out after %s: git %s", timeout, strings.Join(args, " "))
 	}
@@ -906,7 +901,7 @@ func gitOutput(args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
 	defer cancel()
 
-	out, err := gitCommand(ctx, args...).Output()
+	out, err := gitCommandOutput(gitCommand(ctx, args...), false)
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("git timed out after %s: git %s", gitDefaultTimeout, strings.Join(args, " "))
 	}
@@ -2031,7 +2026,7 @@ func firstCachedObject(bareRepo string, ids []string) (string, error) {
 
 	cmd := gitCommand(ctx, "-C", bareRepo, "cat-file", "--batch-check")
 	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
-	out, err := cmd.Output()
+	out, err := gitCommandOutput(cmd, false)
 	if err != nil {
 		return "", err
 	}

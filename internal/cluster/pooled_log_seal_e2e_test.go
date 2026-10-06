@@ -11,9 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -73,7 +73,11 @@ func runPipelineChildForTest(runID, nodeID string) int {
 	case "cancel":
 		_ = descendant.Wait()
 	case "killed":
-		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+		self, err := os.FindProcess(os.Getpid())
+		if err != nil {
+			return 2
+		}
+		_ = self.Kill()
 		select {}
 	case "sealing":
 		if err := client.Seal(ctx, runID, nodeID, logs.Seal{Stream: "child", FinalSeq: 5, Lines: 5}); err != nil {
@@ -98,6 +102,9 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 		{"killed", logs.StateCutOff},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
+			if tc.mode == "killed" && runtime.GOOS == "windows" {
+				t.Skip("SIGKILL signal status has no Windows equivalent")
+			}
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			t.Setenv("SPARKWING_HOME", filepath.Join(home, "sparkwing"))
