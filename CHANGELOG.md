@@ -41,7 +41,7 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
-- **GitHub App webhooks:** Refuse a signed delivery body re-sent under another `X-GitHub-Event`, which could unbind an installation or start `branch_delete` pipelines, and require this App's id on `installation` events. Schema 91 adds one defaulted column to `github_app_deliveries`; older binaries keep working against the migrated database.
+- **GitHub App webhooks:** Refuse a signed delivery body re-sent under another `X-GitHub-Event`, which could unbind an installation or start `branch_delete` pipelines, and require this App's id on `installation` events. Schema 91 adds one defaulted column and a `received_at` index to `github_app_deliveries`; older binaries keep working against the migrated database.
 - **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
 - **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
 - **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.

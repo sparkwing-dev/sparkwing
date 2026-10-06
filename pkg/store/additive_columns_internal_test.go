@@ -180,8 +180,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// and writing the migrated database.
 	90: nil,
 	// safety: v91 adds a defaulted github_app_deliveries column an older
-	// binary never names, and its rows use keys an older binary never looks
-	// up, so an older binary keeps writing the migrated database.
+	// binary never names and an index, and its rows use keys an older binary
+	// never looks up, so an older binary keeps writing the migrated database.
 	91: {githubAppDeliveryEventCols},
 }
 

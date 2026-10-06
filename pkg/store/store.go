@@ -2266,7 +2266,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 90:
 		return applyNodeOutputMigration(ctx, tx)
 	case 91:
-		return ensureColumnsSQLite(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols)
+		if err := ensureColumnsSQLite(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, githubAppDeliveriesReceivedIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2732,7 +2736,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 90:
 		return applyNodeOutputMigration(ctx, tx)
 	case 91:
-		return addColumnsTx(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols)
+		if err := addColumnsTx(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, githubAppDeliveriesReceivedIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

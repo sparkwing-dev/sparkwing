@@ -110,6 +110,11 @@ var (
 	githubAppDeliveryEventCols   = map[string]string{"event": "TEXT NOT NULL DEFAULT ''"}
 )
 
+// perf: every verified delivery expires old digests and bindings by age, so
+// the delete reads only the expired range.
+const githubAppDeliveriesReceivedIndex = `CREATE INDEX IF NOT EXISTS idx_github_app_deliveries_received
+    ON github_app_deliveries(received_at)`
+
 const (
 	maxGitHubTagPatterns      = 10
 	maxGitHubTagPatternLength = 128
