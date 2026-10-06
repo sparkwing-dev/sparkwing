@@ -418,11 +418,37 @@ func mirrorWritten(out string, err error) (string, error) {
 }
 
 var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
-	return mirrorWritten(gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"))
+	return mirrorWritten(gitCmdEnv(timeout, mirrorEnv(bareRepo), "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"))
 }
 
 var cloneMirror = func(repoURL, bareRepo string) (string, error) {
-	return mirrorWritten(gitCmd("clone", "--bare", "--", repoURL, bareRepo))
+	return mirrorWritten(gitCmdEnv(gitDefaultTimeout, mirrorEnv(bareRepo), "clone", "--bare", "--", repoURL, bareRepo))
+}
+
+func mirrorPath(hash string, public bool) string {
+	if public {
+		return filepath.Join(repoDir, "public", hash+".git")
+	}
+	return filepath.Join(repoDir, hash+".git")
+}
+
+// safety: other teams read a public mirror, so it holds only what origin hands anyone: its git sees
+// no system or user config (credential helpers, extraHeader, insteadOf), no .netrc under HOME, no
+// askpass, prompt or SSH command, and no transport but https. Nothing else writes under public/.
+func mirrorEnv(bareRepo string) []string {
+	if filepath.Dir(bareRepo) != filepath.Join(repoDir, "public") {
+		return nil
+	}
+	env := []string{
+		"HOME=" + os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
+		"GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https",
+	}
+	for _, k := range []string{"PATH", "TMPDIR", "GIT_SSL_CAINFO", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"} {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
 }
 
 var recloneMirror = func(repoURL, bareRepo string) (string, error) {
@@ -872,6 +898,11 @@ func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
+	return gitCmdEnv(timeout, nil, args...)
+}
+
+// safety: a nil env inherits the process's environment, credentials included.
+func gitCmdEnv(timeout time.Duration, env []string, args ...string) (string, error) {
 	// safety: queueing for the whole command timeout stalls the repo lock this caller usually holds.
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), min(gitForkWait, timeout))
 	release, err := acquireGitFork(waitCtx, strings.Join(args, " "))
@@ -884,7 +915,9 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	out, err := gitCommand(ctx, args...).CombinedOutput()
+	cmd := gitCommand(ctx, args...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return string(out), fmt.Errorf("git timed out after %s: git %s", timeout, strings.Join(args, " "))
 	}
@@ -2493,12 +2526,14 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 
 	name := parts[0]
 	rest := parts[1]
-	if !callerFrom(r).mayReadMirror(name) {
+	caller := callerFrom(r)
+	if !caller.mayReadMirror(name) {
 		http.Error(w, fmt.Sprintf("repo %q not registered", name), http.StatusNotFound)
 		return
 	}
 
-	bareRepo, err := resolveGitRepo(name)
+	public := !caller.operator()
+	bareRepo, err := resolveGitRepo(name, public) //nolint:contextcheck // safety: a clone that outlives its caller still leaves a usable mirror; gitCmd bounds it.
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -2516,7 +2551,7 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 		// receive-pack is refused anyway, and refreshing for it would let a
 		// rejected push spend an origin fetch.
 		if service == "git-upload-pack" {
-			hash := strings.TrimSuffix(filepath.Base(bareRepo), ".git")
+			hash := mirrorKey(strings.TrimSuffix(filepath.Base(bareRepo), ".git"), public)
 			lock := repoLock(hash)
 			lock.Lock()
 			refreshMirrorBestEffort(r.Context(), hash, bareRepo)
@@ -2535,7 +2570,15 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func resolveGitRepo(name string) (string, error) {
+// safety: a public mirror's lock and fetch state stay apart from the operator's mirror of the same URL.
+func mirrorKey(hash string, public bool) string {
+	if public {
+		return "public/" + hash
+	}
+	return hash
+}
+
+func resolveGitRepo(name string, public bool) (string, error) {
 	repoNamesMu.RLock()
 	repoURL, ok := repoNames[name]
 	repoNamesMu.RUnlock()
@@ -2544,8 +2587,8 @@ func resolveGitRepo(name string) (string, error) {
 		return "", fmt.Errorf("repo %q not registered -- POST /git/register?name=%s&repo=<url>", name, name)
 	}
 
-	hash := repoHash(repoURL)
-	bareRepo := filepath.Join(repoDir, hash+".git")
+	bareRepo := mirrorPath(repoHash(repoURL), public)
+	hash := mirrorKey(repoHash(repoURL), public)
 
 	if _, err := os.Stat(bareRepo); err == nil {
 		return bareRepo, nil
