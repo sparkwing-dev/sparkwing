@@ -10,7 +10,7 @@ import (
 )
 
 func TestV91GitHubDeliveryEventUpgradesSQLite(t *testing.T) {
-	target := storetest.New(t)
+	target := storetest.NewSQLite(t)
 	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
