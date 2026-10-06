@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // RequestIDHeader carries a request's correlation id. A caller's value is
@@ -42,20 +43,44 @@ var auditPathIDs = map[string]string{
 	"team":   "target_team",
 }
 
-// safety: an identity route names its target, an opaque id, a token prefix or
-// a secret name, so an investigation can follow one member, invitation,
-// token or secret; other routes' wildcards stay out under auditPathIDs.
-var auditTargetIDs = map[string]map[string]string{
-	"/api/v1/team/members/{user_id}":                      {"user_id": "member_id"},
-	"/api/v1/team/invitations/{id}":                       {"id": "invitation_id"},
-	"/api/v1/invitations/{id}/accept":                     {"id": "invitation_id"},
-	"/api/v1/tokens/{prefix}":                             {"prefix": "token_prefix"},
-	"/api/v1/tokens/{prefix}/rotate":                      {"prefix": "token_prefix"},
-	"/api/v1/tokens/{prefix}/metered":                     {"prefix": "token_prefix"},
-	"/api/v1/team/runner-tokens/{prefix}":                 {"prefix": "token_prefix"},
-	"/api/v1/team/runner-tokens/{prefix}/git-credentials": {"prefix": "token_prefix"},
-	"/api/v1/team/cli-tokens/{prefix}":                    {"prefix": "token_prefix"},
-	"/api/v1/secrets/{name}":                              {"name": "secret_name"},
+type auditTarget struct {
+	key  string
+	keep func(string) string
+}
+
+var (
+	memberTarget     = auditTarget{"member_id", opaqueID}
+	invitationTarget = auditTarget{"invitation_id", opaqueID}
+	tokenTarget      = auditTarget{"token_prefix", tokenPrefixTarget}
+)
+
+// safety: an identity route names its target so an investigation can follow one member, invitation or token. The path
+// is the caller's text, which can be a whole bearer pasted in place of a prefix, so each value passes its shape check
+// first: a token keeps only the prefix the store keys on, and an id must look like one the store mints.
+var auditTargetIDs = map[string]map[string]auditTarget{
+	"/api/v1/team/members/{user_id}":                      {"user_id": memberTarget},
+	"/api/v1/team/invitations/{id}":                       {"id": invitationTarget},
+	"/api/v1/invitations/{id}/accept":                     {"id": invitationTarget},
+	"/api/v1/tokens/{prefix}":                             {"prefix": tokenTarget},
+	"/api/v1/tokens/{prefix}/rotate":                      {"prefix": tokenTarget},
+	"/api/v1/tokens/{prefix}/metered":                     {"prefix": tokenTarget},
+	"/api/v1/team/runner-tokens/{prefix}":                 {"prefix": tokenTarget},
+	"/api/v1/team/runner-tokens/{prefix}/git-credentials": {"prefix": tokenTarget},
+	"/api/v1/team/cli-tokens/{prefix}":                    {"prefix": tokenTarget},
+}
+
+func opaqueID(v string) string {
+	if v == "" || len(v) > 64 || strings.Trim(v, "0123456789abcdef") != "" {
+		return ""
+	}
+	return v
+}
+
+func tokenPrefixTarget(v string) string {
+	if store.TokenKindFromPrefix(v) == "" {
+		return ""
+	}
+	return tokenPrefixOf(v)
 }
 
 // safety: a read of these routes can hand out a secret, a credential or every
@@ -85,7 +110,7 @@ func noteAuditPrincipal(ctx context.Context, p *Principal) {
 	}
 }
 
-// safety: callers pass identifiers only, an opaque id, a role, a token prefix or a secret name, never a value or email.
+// safety: callers pass identifiers read back from a stored row or checked against a closed set, never request text.
 func noteAuditTarget(ctx context.Context, key, value string) {
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && value != "" {
 		rec.targets = append(rec.targets, key, clip(value))
@@ -218,8 +243,9 @@ func auditPathAttrs(route, path string) []any {
 		}
 		name = strings.TrimSuffix(name, "}")
 		key := auditPathIDs[name]
+		keep := clip
 		if target, ok := auditTargetIDs[route][name]; ok {
-			key = target
+			key, keep = target.key, target.keep
 		}
 		if name == "id" && i == 3 && (pattern[2] == "runs" || pattern[2] == "triggers") {
 			key = "run_id"
@@ -236,7 +262,9 @@ func auditPathAttrs(route, path string) []any {
 			continue
 		}
 		if v, err := url.PathUnescape(segments[i]); err == nil {
-			out = append(out, key, clip(v))
+			if kept := keep(v); kept != "" {
+				out = append(out, key, kept)
+			}
 		}
 	}
 	return out

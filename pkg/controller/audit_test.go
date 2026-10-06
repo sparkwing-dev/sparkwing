@@ -54,8 +54,9 @@ func auditFixture(t *testing.T) (*identityFixture, *lockedBuffer) {
 	return f, logs
 }
 
-// A write is logged with who made it, for which team, the route it reached
-// and the secret it names; its query and its bearer token are not in the log.
+// A write is logged with who made it, for which team, and the route it
+// reached; the name of a secret it did not find, its query and its bearer
+// token are not in the log.
 func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 	f, logs := auditFixture(t)
 	owner := f.user("o", "olga@example.com")
@@ -104,9 +105,6 @@ func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 	if deleted == nil || minted == nil {
 		t.Fatalf("audit records missing: %s", logs.String())
 	}
-	if deleted["secret_name"] != secretName {
-		t.Errorf("secret delete audit secret_name = %v, want %s", deleted["secret_name"], secretName)
-	}
 	for key, want := range map[string]any{
 		"request_id": "req-audit-1", "method": "DELETE", "principal_kind": store.TokenKindUser,
 		"team": owner.team, "principal_id": owner.id, "client_class": "other",
@@ -124,7 +122,7 @@ func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 		t.Errorf("token-authenticated audit principal = %v, want the token's prefix", minted["principal_id"])
 	}
 	all := logs.String()
-	for _, leak := range []string{"leak-me-query", f.admin, strings.TrimPrefix(owner.auth, "Session "), "olga@example.com", "swk_leakedtoken123", "uuuu"} {
+	for _, leak := range []string{secretName, "leak-me-query", f.admin, strings.TrimPrefix(owner.auth, "Session "), "olga@example.com", "swk_leakedtoken123", "uuuu"} {
 		if strings.Contains(all, leak) {
 			t.Errorf("log carries %q:\n%s", leak, all)
 		}
@@ -269,5 +267,31 @@ func TestAuditNamesReadersTargetsAndDeniedSubjects(t *testing.T) {
 		if strings.Contains(all, leak) {
 			t.Errorf("log carries %q", leak)
 		}
+	}
+}
+
+// A bearer pasted where a token prefix or a role belongs reaches the audit
+// record only as its prefix, and a role outside the role set not at all,
+// even when the request is refused.
+func TestAuditKeepsABearerInATargetOutOfTheLog(t *testing.T) {
+	f, logs := auditFixture(t)
+	owner := f.user("o", "olga@example.com")
+	member := f.user("m", "mia@example.com")
+	f.join(owner, member, "mia@example.com", "reader")
+	if code := f.call("GET", "/api/v1/tokens/"+f.admin, "Bearer "+f.admin, nil, nil); code != http.StatusNotFound {
+		t.Fatalf("token lookup by a full bearer = %d, want 404", code)
+	}
+	if code := f.call("PATCH", "/api/v1/team/members/"+member.id, owner.auth, map[string]string{"role": f.admin}, nil); code != http.StatusBadRequest {
+		t.Fatalf("role set to a bearer = %d, want 400", code)
+	}
+	lookup := auditFor(t, logs, "GET", "/api/v1/tokens/{prefix}")
+	if want := f.admin[:store.PrefixLen]; lookup["token_prefix"] != want {
+		t.Errorf("token_prefix = %v, want the bearer's prefix %s", lookup["token_prefix"], want)
+	}
+	if role := auditFor(t, logs, "PATCH", "/api/v1/team/members/{user_id}")["role"]; role != nil {
+		t.Errorf("an invalid role reached the record: %v", role)
+	}
+	if strings.Contains(logs.String(), f.admin) {
+		t.Errorf("the audit log carries the full bearer:\n%s", logs.String())
 	}
 }

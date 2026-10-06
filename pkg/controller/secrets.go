@@ -46,7 +46,6 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	principal := "anonymous"
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		principal = p.Name
@@ -86,6 +85,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	s.logger.Info("secret written", "name", req.Name, "principal", principal,
 		"pipeline", req.Pipeline, "encrypted", s.secretsCipher != nil, "masked", masked, "shared", req.Shared)
 	w.WriteHeader(http.StatusNoContent)
@@ -104,6 +104,7 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", sec.Name)
 	if p, authed := PrincipalFromContext(r.Context()); authed && sec.Masked && !maskedValueReadable(p) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "write_only",
@@ -311,6 +312,7 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", name)
 	w.WriteHeader(http.StatusNoContent)
 }
 

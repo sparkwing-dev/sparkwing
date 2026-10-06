@@ -180,8 +180,12 @@ email or a token) and `team`. These also get an `audit` record:
   without granting it.
 
 Identity changes name their target: `member_id`, `invitation_id`,
-`token_prefix`, `secret_name` and the requested `role`. No record carries the
-raw path, query, body, headers or a credential.
+`token_prefix`, `secret_name` and `role`. A target taken from the request is
+recorded only in the shape the store uses: a token as its prefix, even when a
+whole bearer was sent, an id only when it looks like one the store mints, and a
+role only when it is a valid role. A secret name is recorded once the secret
+was found or written. No record carries the raw path, query, body, headers or a
+credential.
 
 ## Login and hashing budgets
 
