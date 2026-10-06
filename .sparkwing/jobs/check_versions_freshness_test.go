@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -738,7 +739,11 @@ func seedProxyPinnedRepo(t *testing.T, retract bool) string {
 	gitRun(t, repo, "commit", "-m", "seed")
 	gitRun(t, repo, "tag", fixturePinnedVersion)
 
-	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(filepath.Join(base, "proxy")))
+	proxyPath := filepath.ToSlash(filepath.Join(base, "proxy"))
+	if filepath.VolumeName(proxyPath) != "" {
+		proxyPath = "/" + proxyPath
+	}
+	t.Setenv("GOPROXY", (&url.URL{Scheme: "file", Path: proxyPath}).String())
 	// safety: the fixture serves invented metadata under the real module path, so
 	// a shared module cache would keep a stub that fails every later checksum.
 	t.Setenv("GOMODCACHE", filepath.Join(base, "modcache"))

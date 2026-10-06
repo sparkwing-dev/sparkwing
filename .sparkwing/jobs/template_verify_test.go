@@ -10,6 +10,7 @@ import (
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestTemplateVerifyCLIPathUsesPlatformExecutableName(t *testing.T) {
@@ -207,10 +208,9 @@ func TestNodeFixture_PassesNpm(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"ci"}, {"test"}, {"run", "lint"}} {
-		cmd := exec.Command("npm", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("npm %v: %v\n%s", args, err, out)
+		result, err := sparkwing.Bash(t.Context(), "npm "+strings.Join(args, " ")).Dir(dir).Capture()
+		if err != nil {
+			t.Fatalf("npm %v: %v\n%s\n%s", args, err, result.Stdout, result.Stderr)
 		}
 	}
 }

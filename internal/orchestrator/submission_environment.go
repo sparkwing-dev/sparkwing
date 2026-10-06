@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -157,8 +158,8 @@ func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, e
 		if !ok || !submissionEnvironmentAllowed(key, names, prefixes) {
 			continue
 		}
-		// safety: the snapshot outlives the shell, so a credential-shaped name or value never reaches it.
-		if envredact.CredentialName(key) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
+		// safety: snapshots outlive the shell, so credential values and names are filtered before publication.
+		if submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
 			if names[key] {
 				dropped = append(dropped, key)
 			}
@@ -200,7 +201,7 @@ func submissionEnvironmentAllowList(env []string) (map[string]bool, []string, er
 }
 
 func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []string) bool {
-	if envAllowed(key) || names[key] {
+	if nativeSubmissionEnvironmentAllowed(key) || envAllowed(key) || names[key] {
 		return true
 	}
 	for _, prefix := range prefixes {
@@ -209,6 +210,25 @@ func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []
 		}
 	}
 	return false
+}
+
+func nativeSubmissionEnvironmentAllowed(key string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	switch strings.ToUpper(key) {
+	case "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "COMSPEC", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "SPARKWING_CONFIG", "SPARKWING_SECRETS_KEY_FILE":
+		return true
+	}
+	return false
+}
+
+func submissionEnvironmentCredentialName(key, value string) bool {
+	// safety: an absolute key-file path selects the private file without carrying its key bytes.
+	if runtime.GOOS == "windows" && strings.EqualFold(key, "SPARKWING_SECRETS_KEY_FILE") && filepath.IsAbs(value) {
+		return false
+	}
+	return envredact.CredentialName(key)
 }
 
 func consumeSubmissionEnvironment(home string, trig *store.Trigger, logger *slog.Logger) ([]string, error) {

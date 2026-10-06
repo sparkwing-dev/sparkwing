@@ -29,7 +29,7 @@ unlock.
 - **Windows configuration:** Create local secrets keys with private access lists before writing key bytes, and report Windows permissions correctly in `configure init`
 - **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
 - **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers
-- **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization and reclaim abandoned temporary snapshots
+- **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization, preserve native runtime settings, and reclaim abandoned temporary snapshots
 - **Windows installer checks:** Stage native executable assets and file URLs, and preserve Windows tool paths in install-to-green and Xwing candidate installation
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
@@ -44,7 +44,7 @@ unlock.
 - **Windows run handles:** Publish run-handle files without attempting unsupported directory synchronization
 - **Source checks:** Parse touched tests for scoped wait checks while retaining repository-wide boundary audits
 - **Windows cancellation:** Report commands terminated by their cancellation handler as cancelled while preserving ordinary failure exit codes
-- **Windows checkout:** Keep formatted Go source, API snapshots, shell scripts, and module files in LF format under Git's Windows line-ending conversion
+- **Windows checkout:** Keep formatted Go source, API snapshots, shell scripts, workflows, security configuration, and module files in LF format under Git's Windows line-ending conversion
 - **Windows dependency cache:** Resolve npm's configured cache through Node and use the native Windows cache fallback when npm is absent
 - **Windows installation:** Preserve `.exe` names and native paths in Git Bash source and signed-release installs, including repeated installs into an existing directory
 - **Windows local runner:** Own pipeline nodes and descendants with separate kill-on-close Job Objects, including simultaneous launches
