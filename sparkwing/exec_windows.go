@@ -6,11 +6,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
@@ -28,7 +32,21 @@ func commandResourceUsage(*exec.Cmd) (time.Duration, int64, bool) { return 0, 0,
 // stepJob is the kill-on-close Job Object one step command runs inside. It
 // is what a timeout terminates and what a sweep can open by name once this
 // process is gone.
-type stepJob struct{ job *procgroup.Job }
+type stepJob struct {
+	job       *procgroup.Job
+	cancelled *atomic.Bool
+	cmd       *exec.Cmd
+}
+
+// safety: a distinct status distinguishes our termination from a natural exit during cancellation.
+const stepCancellationExitCode uint32 = 0x53574341
+
+func (j stepJob) wasCancelled() bool {
+	if j.cancelled == nil || !j.cancelled.Load() {
+		return false
+	}
+	return j.job == nil || (j.cmd.ProcessState != nil && uint32(j.cmd.ProcessState.ExitCode()) == stepCancellationExitCode)
+}
 
 func stepJobName() string {
 	var suffix [8]byte
@@ -50,17 +68,77 @@ func stepJobName() string {
 // that cannot be created is not fatal: the command still runs, unowned, and
 // the debug log says so.
 func startStepCommand(cmd *exec.Cmd, display string) (stepJob, error) {
+	cancelled := &atomic.Bool{}
+	trackCancellation := func(cancel func() error) {
+		cmd.Cancel = func() error {
+			err := cancel()
+			if err == nil {
+				cancelled.Store(true)
+			}
+			return err
+		}
+	}
 	job, err := procgroup.NewJob(stepJobName())
 	if err != nil {
 		slog.Default().Debug("step job unavailable; running unowned", "command", display, "err", err)
-		return stepJob{}, cmd.Start()
+		trackCancellation(cmd.Cancel)
+		return stepJob{cancelled: cancelled, cmd: cmd}, cmd.Start()
 	}
-	cmd.Cancel = job.Terminate
-	if err := job.Start(cmd); err != nil {
+	started := make(chan struct{})
+	trackCancellation(func() error {
+		// safety: cancellation cannot target an empty job while its leader is still being assigned.
+		<-started
+		process, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid))
+		if err != nil {
+			_ = job.Terminate()
+			if err == windows.ERROR_INVALID_PARAMETER {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		defer windows.CloseHandle(process)
+		state, err := windows.WaitForSingleObject(process, 0)
+		if err != nil {
+			_ = job.Terminate()
+			return err
+		}
+		if state == windows.WAIT_OBJECT_0 {
+			_ = job.Terminate()
+			return os.ErrProcessDone
+		}
+		return finishWindowsStepCancellation(process, job)
+	})
+	startErr := job.Start(cmd)
+	close(started)
+	if startErr != nil {
 		_ = job.Close()
-		return stepJob{}, err
+		if cmd.Process != nil {
+			_ = cmd.Wait()
+		}
+		return stepJob{}, startErr
 	}
-	return stepJob{job: job}, nil
+	return stepJob{job: job, cancelled: cancelled, cmd: cmd}, nil
+}
+
+func finishWindowsStepCancellation(process windows.Handle, job *procgroup.Job) error {
+	if err := job.TerminateWithCode(stepCancellationExitCode); err != nil {
+		return err
+	}
+	state, err := windows.WaitForSingleObject(process, 5000)
+	if err != nil {
+		return err
+	}
+	if state != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("Windows step termination did not complete: wait status %d", state)
+	}
+	var code uint32
+	if err := windows.GetExitCodeProcess(process, &code); err != nil {
+		return err
+	}
+	if code != stepCancellationExitCode {
+		return os.ErrProcessDone
+	}
+	return nil
 }
 
 func (j stepJob) close() {

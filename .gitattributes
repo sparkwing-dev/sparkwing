@@ -4,3 +4,7 @@
 # gets wrong.
 CHANGELOG.md merge=union
 pkg/docs/changelog.md merge=union
+
+# Git Bash and ShellCheck consume these files without CRLF conversion.
+*.sh text eol=lf
+.shellcheckrc text eol=lf

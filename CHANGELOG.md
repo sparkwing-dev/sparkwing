@@ -20,7 +20,19 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+- **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
+
 ### Fixed
+- **Windows queue:** Report an absent daemon after its socket directory is removed instead of a misleading network failure
+- **Windows run handles:** Publish run-handle files without attempting unsupported directory synchronization
+- **Source checks:** Parse touched tests for scoped wait checks while retaining repository-wide boundary audits
+- **Windows cancellation:** Report commands terminated by their cancellation handler as cancelled while preserving ordinary failure exit codes
+- **Windows checkout:** Keep shell scripts and ShellCheck configuration in LF format under Git's Windows line-ending conversion
+- **Windows dependency cache:** Resolve npm's configured cache through Node and use the native Windows cache fallback when npm is absent
+- **Windows installation:** Preserve `.exe` names and native paths in Git Bash source and signed-release installs, including repeated installs into an existing directory
+- **Windows local runner:** Own pipeline nodes and descendants with separate kill-on-close Job Objects, including simultaneous launches
+- **Windows pipelines:** Use native file locking, disk-space checks, and executable names so the repository's pipeline module runs from Git Bash
 - **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
 - **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
 - **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.

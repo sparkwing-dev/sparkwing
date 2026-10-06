@@ -78,8 +78,9 @@ func GoModules() DirCache {
 // NpmCache caches npm's content-addressed cache directory, keyed on
 // package-lock.json.
 //
-// It deliberately caches npm's store (`npm config get cache`,
-// default ~/.npm) rather than node_modules: `npm ci` deletes
+// It caches npm's store (`npm config get cache`,
+// default ~/.npm on Unix and %LOCALAPPDATA%/npm-cache on Windows) rather
+// than node_modules: `npm ci` deletes
 // node_modules before installing, so a restored install tree is
 // discarded bytes, while a restored store makes the reinstall fast.
 // The store is also safe under a stale key -- npm tops up only what
@@ -88,7 +89,7 @@ func GoModules() DirCache {
 // yours.
 //
 // The directory comes from npm_config_cache, then
-// `npm config get cache`, then $HOME/.npm, resolved where the node
+// `npm config get cache`, then the platform default, resolved where the node
 // runs.
 func NpmCache() DirCache {
 	return DirCache{
@@ -323,14 +324,48 @@ func resolveNpmCacheDir() (string, error) {
 	if v := os.Getenv("npm_config_cache"); v != "" {
 		return v, nil
 	}
-	if out, err := exec.Command("npm", "config", "get", "cache").Output(); err == nil {
-		if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
-			return v, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if command, err := npmCacheCommand(ctx, goruntime.GOOS, exec.LookPath); err == nil {
+		command.Dir = depCacheWorkdir()
+		if out, err := command.Output(); err == nil {
+			if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
+				return v, nil
+			}
+		}
+	}
+	return defaultNpmCacheDir(goruntime.GOOS)
+}
+
+func npmCacheCommand(ctx context.Context, goos string, lookPath func(string) (string, error)) (*exec.Cmd, error) {
+	npm, err := lookPath("npm")
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"config", "get", "cache"}
+	if goos != "windows" || strings.EqualFold(filepath.Ext(npm), ".exe") {
+		return exec.CommandContext(ctx, npm, args...), nil
+	}
+	node, err := lookPath("node")
+	if err != nil {
+		return nil, err
+	}
+	cli := filepath.Join(filepath.Dir(npm), "node_modules", "npm", "bin", "npm-cli.js")
+	return exec.CommandContext(ctx, node, append([]string{cli}, args...)...), nil
+}
+
+func defaultNpmCacheDir(goos string) (string, error) {
+	if goos == "windows" {
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "npm-cache"), nil
 		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve npm cache dir: %w", err)
+	}
+	if goos == "windows" {
+		return filepath.Join(home, "AppData", "Local", "npm-cache"), nil
 	}
 	return filepath.Join(home, ".npm"), nil
 }

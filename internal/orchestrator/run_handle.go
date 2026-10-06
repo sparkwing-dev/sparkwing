@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -70,11 +69,5 @@ func PublishRunHandle(path string, handle RunHandle) error {
 	if err := os.Remove(tmpName); err != nil {
 		return err
 	}
-	if d, err := os.Open(dir); err == nil {
-		defer func() { _ = d.Close() }()
-		if err := d.Sync(); err != nil {
-			return fmt.Errorf("sync run-handle directory: %w", err)
-		}
-	}
-	return nil
+	return syncRunHandleDirectory(dir)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -51,12 +52,13 @@ func TestSh_FailureProducesExecError(t *testing.T) {
 
 func TestCmd_DirRunsInDir(t *testing.T) {
 	dir := t.TempDir()
-	res, err := sparkwing.Bash(context.Background(), "pwd").Dir(dir).Run()
+	want := writeDirectoryMarker(t, dir)
+	res, err := sparkwing.Bash(t.Context(), "cat sparkwing-directory-marker").Dir(dir).Run()
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatalf("read marker: %v", err)
 	}
-	if !strings.Contains(strings.TrimSpace(res.Stdout), dir) {
-		t.Fatalf("pwd = %q, should contain %q", res.Stdout, dir)
+	if got := strings.TrimSpace(res.Stdout); got != want {
+		t.Fatalf("directory marker = %q, want %q", got, want)
 	}
 }
 
@@ -156,12 +158,13 @@ func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
 
 func TestBash_DirRunsInDir(t *testing.T) {
 	dir := t.TempDir()
-	res, err := sparkwing.Bash(context.Background(), "pwd").Dir(dir).Run()
+	want := writeDirectoryMarker(t, dir)
+	res, err := sparkwing.Bash(t.Context(), "cat sparkwing-directory-marker").Dir(dir).Run()
 	if err != nil {
-		t.Fatalf("Bash: %v", err)
+		t.Fatalf("read marker: %v", err)
 	}
-	if !strings.Contains(strings.TrimSpace(res.Stdout), dir) {
-		t.Fatalf("pwd = %q, should contain %q", res.Stdout, dir)
+	if got := strings.TrimSpace(res.Stdout); got != want {
+		t.Fatalf("directory marker = %q, want %q", got, want)
 	}
 }
 
@@ -265,7 +268,11 @@ func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 	var err error
 	done := make(chan struct{})
 	go func() {
-		_, err = sparkwing.Bash(ctx, fmt.Sprintf("printf ready > %q; sleep 30", marker)).Run()
+		if runtime.GOOS == "windows" {
+			_, err = sparkwing.Exec(ctx, os.Args[0], "-test.run=^TestExec_WindowsCancellationHelper$").Env("SPARKWING_EXEC_READY", marker).Run()
+		} else {
+			_, err = sparkwing.Bash(ctx, fmt.Sprintf("printf ready > %q; sleep 30", marker)).Run()
+		}
 		close(done)
 	}()
 	t.Cleanup(func() {
@@ -286,6 +293,8 @@ func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 		}
 		select {
 		case <-ticker.C:
+		case <-done:
+			t.Fatalf("command exited before readiness: %v", err)
 		case <-ctx.Done():
 			t.Fatal("command did not publish its readiness marker")
 		}
@@ -313,7 +322,7 @@ func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 	if !strings.Contains(msg, "command terminated by cancellation") {
 		t.Fatalf("want cancellation wording: %q", msg)
 	}
-	if !strings.Contains(msg, "signal: killed") {
+	if runtime.GOOS != "windows" && !strings.Contains(msg, "signal: killed") {
 		t.Fatalf("want the underlying signal in the message: %q", msg)
 	}
 }
@@ -322,39 +331,44 @@ func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+		t.Fatal(err)
 	}
-	prev := sparkwing.WorkDir()
+	want := writeDirectoryMarker(t, sub)
+	previous := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
-
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	res, err := sparkwing.Bash(ctx, "pwd").Dir("sub").Run()
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	res, err := sparkwing.Bash(t.Context(), "cat sparkwing-directory-marker").Dir("sub").Run()
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatalf("read relative directory marker: %v", err)
 	}
-	got := strings.TrimSpace(res.Stdout)
-	if !strings.HasSuffix(got, filepath.Join(root, "sub")) && !strings.HasSuffix(got, "/sub") {
-		t.Fatalf("pwd = %q, expected suffix %q", got, filepath.Join(root, "sub"))
+	if got := strings.TrimSpace(res.Stdout); got != want {
+		t.Fatalf("relative directory marker = %q, want %q", got, want)
 	}
 }
 
 func TestCmd_AbsoluteDirPassesThrough(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()
-	prev := sparkwing.WorkDir()
+	want := writeDirectoryMarker(t, other)
+	previous := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
-
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	res, err := sparkwing.Bash(ctx, "pwd").Dir(other).Run()
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	res, err := sparkwing.Bash(t.Context(), "cat sparkwing-directory-marker").Dir(other).Run()
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatalf("read absolute directory marker: %v", err)
 	}
-	got := strings.TrimSpace(res.Stdout)
-	if !strings.HasSuffix(got, other) {
-		t.Fatalf("pwd = %q, want suffix %q (absolute dir must not be rewritten under WorkDir)", got, other)
+	if got := strings.TrimSpace(res.Stdout); got != want {
+		t.Fatalf("absolute directory marker = %q, want %q", got, want)
 	}
+}
+
+func writeDirectoryMarker(t *testing.T, dir string) string {
+	t.Helper()
+	want := t.Name()
+	if err := os.WriteFile(filepath.Join(dir, "sparkwing-directory-marker"), []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return want
 }
 
 func TestCmd_StringTrimsStdout(t *testing.T) {
