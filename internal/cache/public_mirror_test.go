@@ -1,7 +1,10 @@
 package cache
 
 import (
+	"context"
 	"encoding/pem"
+	"io"
+	"net"
 	"net/http"
 	"net/http/cgi"
 	"net/http/httptest"
@@ -12,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -202,5 +206,110 @@ func TestTeamGrantsReadOnlyWhatOriginServesAnonymously(t *testing.T) {
 	send(t, srv, http.MethodPost, "/git/refresh?name="+publicName, token, "")
 	if fetchFromCache(t, srv, publicName, grant, laterSHA) {
 		t.Error("another team's grant fetched a commit pushed after its origin turned private")
+	}
+}
+
+func proxyAllTo(t *testing.T, addr string) {
+	t.Helper()
+	// hack: registration refuses loopback hosts, so git reaches the local origin as git.example.com through a proxy.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream, err := net.Dial("tcp", addr)
+		if r.Method != http.MethodConnect || err != nil {
+			http.Error(w, "CONNECT to the origin only", http.StatusBadGateway)
+			return
+		}
+		client, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			_ = upstream.Close()
+			return
+		}
+		_, _ = io.WriteString(client, "HTTP/1.1 200 Connection established\r\n\r\n")
+		go func() { _, _ = io.Copy(upstream, client); _ = upstream.Close() }()
+		_, _ = io.Copy(client, upstream)
+		_ = client.Close()
+	}))
+	t.Cleanup(proxy.Close)
+	for _, k := range []string{"HTTPS_PROXY", "https_proxy"} {
+		t.Setenv(k, proxy.URL)
+	}
+	for _, k := range []string{"NO_PROXY", "no_proxy"} {
+		t.Setenv(k, "")
+	}
+}
+
+// A failed anonymous clone puts the public mirror on the clone cooldown, and
+// the operator re-registering the repository lets the next team read retry it.
+func TestRegistrationClearsThePublicCloneCooldown(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+	root := t.TempDir()
+	repos := filepath.Join(root, "origin")
+	origin := newGitOrigin(t, repos)
+	proxyAllTo(t, origin.Listener.Addr().String())
+	sha := commitTo(t, filepath.Join(root, "src"), filepath.Join(repos, "public.git"), "readme.txt", "public")
+	repoURL := "https://git.example.com/public.git"
+	name := sourceurl.ClaimedRepoNameFromURL(repoURL)
+	register := "/git/register?name=" + name + "&repo=" + url.QueryEscape(repoURL)
+	t.Cleanup(func() {
+		repoNamesMu.Lock()
+		delete(repoNames, name)
+		repoNamesMu.Unlock()
+	})
+
+	origin.setPrivate("public.git", true)
+	if code, body := send(t, srv, http.MethodPost, register, token, ""); code != http.StatusOK {
+		t.Fatalf("register = %d: %s", code, body)
+	}
+	grant := grantFor(t, token, "team-a")
+	if fetchFromCache(t, srv, name, grant, sha) {
+		t.Fatal("a team read cloned an origin that refused anonymous access")
+	}
+	origin.setPrivate("public.git", false)
+	if fetchFromCache(t, srv, name, grant, sha) {
+		t.Fatal("a team read retried the clone inside its cooldown")
+	}
+	if code, body := send(t, srv, http.MethodPost, register, token, ""); code != http.StatusOK {
+		t.Fatalf("re-register = %d: %s", code, body)
+	}
+	if !fetchFromCache(t, srv, name, grant, sha) {
+		t.Error("re-registering did not let a team read clone the public mirror again")
+	}
+}
+
+// The keep-warm pass refreshes a public mirror a team read, from origin and
+// without the credential the cache's own mirrors fetch with.
+func TestKeepWarmRefreshesPublicMirrorsAnonymously(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+	root := t.TempDir()
+	repos := filepath.Join(root, "origin")
+	origin := newGitOrigin(t, repos)
+	helper := filepath.Join(root, "gitconfig")
+	if err := os.WriteFile(helper, []byte("[credential]\n\thelper = \"!f() { echo username=cache; echo password=secret; }; f\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", helper)
+	src, bare := filepath.Join(root, "src"), filepath.Join(repos, "public.git")
+	first := commitTo(t, src, bare, "readme.txt", "public")
+	repoURL := origin.URL + "/public.git"
+	name := sourceurl.ClaimedRepoNameFromURL(repoURL)
+	registerForTest(t, name, repoURL)
+	if !fetchFromCache(t, srv, name, grantFor(t, token, "team-a"), first) {
+		t.Fatal("a team read could not clone the public mirror")
+	}
+	mirrored := func(commit string) bool {
+		return exec.Command("git", "-C", mirrorPath(repoHash(repoURL), true), "cat-file", "-e", commit+"^{commit}").Run() == nil
+	}
+
+	pushed := commitTo(t, src, bare, "second.txt", "public")
+	keepWarmPass(context.Background(), time.Minute)
+	if !mirrored(pushed) {
+		t.Error("the keep-warm pass did not refresh the public mirror a team read")
+	}
+	origin.setPrivate("public.git", true)
+	hidden := commitTo(t, src, bare, "third.txt", "private now")
+	keepWarmPass(context.Background(), time.Minute)
+	if mirrored(hidden) {
+		t.Error("the keep-warm pass fetched into the public mirror with the cache's credential")
 	}
 }

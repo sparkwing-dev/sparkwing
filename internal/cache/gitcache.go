@@ -360,6 +360,14 @@ func (fs *fetchState) allowClone(name string) bool {
 	return true
 }
 
+func (fs *fetchState) clearCloneCooldown(name string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if rs := fs.repos[name]; rs != nil {
+		rs.lastClone = time.Time{}
+	}
+}
+
 // markError records why a clone or fetch failed, so /health and the next
 // refusal can name it instead of pointing at the log.
 func (fs *fetchState) markError(name, msg string) {
@@ -550,29 +558,35 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 // window. A hosted cache holds every customer's repository, and walking all of
 // them on a timer fetches code nobody is building.
 func keepWarmPass(ctx context.Context, interval time.Duration) (fetched, failed int) {
-	entries, err := os.ReadDir(repoDir)
-	if err != nil {
-		return 0, 0
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasSuffix(e.Name(), ".git") {
+	var hashes []string
+	for _, sub := range []string{"", "public"} {
+		entries, err := os.ReadDir(filepath.Join(repoDir, sub))
+		if err != nil {
 			continue
 		}
-		if !bgFetch.requestedSince(e.Name(), keepWarmWindow) {
+		for _, e := range entries {
+			if e.IsDir() && strings.HasSuffix(e.Name(), ".git") {
+				hashes = append(hashes, filepath.Join(sub, strings.TrimSuffix(e.Name(), ".git")))
+			}
+		}
+	}
+
+	for _, hash := range hashes {
+		name := stateKey(hash)
+		if !bgFetch.requestedSince(name, keepWarmWindow) {
 			continue
 		}
 
 		bgFetch.mu.RLock()
-		rs := bgFetch.repos[e.Name()]
+		rs := bgFetch.repos[name]
 		bgFetch.mu.RUnlock()
 		if rs != nil && time.Now().Before(rs.nextRetry) {
 			continue
 		}
 
-		bare := filepath.Join(repoDir, e.Name())
-		// safety: request handlers key this lock on the bare hash, and a second key is no lock at all.
-		mu := repoLock(strings.TrimSuffix(e.Name(), ".git"))
+		bare := filepath.Join(repoDir, hash+".git")
+		// safety: request handlers key this lock on mirrorKey, and a second key is no lock at all.
+		mu := repoLock(hash)
 		// safety: a handler holding this lock is already refreshing the mirror, and blocking
 		// here would stall every other repo behind it.
 		if !mu.TryLock() {
@@ -588,7 +602,7 @@ func keepWarmPass(ctx context.Context, interval time.Duration) (fetched, failed 
 		if err != nil {
 			failed++
 			errMsg := strings.TrimSpace(fmt.Sprintf("%v %s", err, out))
-			rs = bgFetch.entry(e.Name())
+			rs = bgFetch.entry(name)
 			if rs.backoff <= 0 {
 				rs.backoff = interval
 			} else {
@@ -599,11 +613,11 @@ func keepWarmPass(ctx context.Context, interval time.Duration) (fetched, failed 
 			rs.nextRetry = time.Now().Add(rs.backoff)
 			backoff := rs.backoff
 			bgFetch.mu.Unlock()
-			log.Printf("background keep-warm: %s failed (retry in %s): %s", e.Name(), backoff, errMsg)
+			log.Printf("background keep-warm: %s failed (retry in %s): %s", name, backoff, errMsg)
 		} else {
 			bgFetch.mu.Unlock()
-			bgFetch.markFetched(e.Name())
-			log.Printf("background keep-warm: %s ok", e.Name())
+			bgFetch.markFetched(name)
+			log.Printf("background keep-warm: %s ok", name)
 		}
 	}
 	return fetched, failed
@@ -2383,6 +2397,9 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	repoNames[name] = repoURL
 	saveRepoNames()
 	repoNamesMu.Unlock()
+	// safety: registering is the documented way out of a clone cooldown, and the public mirror keeps its
+	// own; clearing it only lets the next team read retry its anonymous clone from origin.
+	bgFetch.clearCloneCooldown(stateKey(mirrorKey(hash, true)))
 
 	bareRepo := filepath.Join(repoDir, hash+".git")
 	lock := repoLock(hash)
