@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -169,6 +170,7 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 
+		endPriorSession(r, controllerURL, cookiesSecure(opts), sess.SessionID)
 		setSessionCookies(w, sess, cookiesSecure(opts))
 		http.Redirect(w, r, next, http.StatusSeeOther)
 	}
@@ -205,8 +207,21 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 			renderLoginPage(w, r, data, http.StatusOK, cookiesSecure(opts))
 			return
 		}
+		endPriorSession(r, controllerURL, cookiesSecure(opts), sess.SessionID)
 		setSessionCookies(w, sess, cookiesSecure(opts))
 		http.Redirect(w, r, next, http.StatusSeeOther)
+	}
+}
+
+// safety: the browser's earlier session would otherwise stay live on the
+// controller after its cookie is overwritten, with nothing left to end it.
+func endPriorSession(r *http.Request, controllerURL string, secure bool, newSessionID string) {
+	prior, err := r.Cookie(cookieName(sessionCookieName, secure))
+	if err != nil || prior.Value == "" || prior.Value == newSessionID {
+		return
+	}
+	if err := controllerLogout(r.Context(), controllerURL, prior.Value); err != nil {
+		slog.Warn("sign-in could not end the browser's earlier session", "err", err)
 	}
 }
 

@@ -234,7 +234,6 @@ func secretRunBinding(r *http.Request) (string, string) {
 // is recorded on its node, and the value is masked in the node's logs by the
 // pipeline that asked for it.
 func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
-	noStoreSecrets(w)
 	tok, _ := claimTokenFromContext(r.Context())
 	tn, err := s.tenantForTeam(r.Context(), tok.Team)
 	if err != nil {

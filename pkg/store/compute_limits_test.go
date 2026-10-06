@@ -596,19 +596,53 @@ func TestOldestWaitingReadyNodeForPrincipalStaysInsideThePrincipal(t *testing.T)
 		}
 	}
 
-	runID, nodeID, err := s.OldestWaitingReadyNodeForPrincipal(ctx, mine.Principal)
+	tn, err := s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, nodeID, err := tn.OldestWaitingReadyNodeForPrincipal(ctx, mine.Principal)
 	if err != nil {
 		t.Fatalf("oldest waiting: %v", err)
 	}
 	if runID != "run-mine" || nodeID != "build" {
 		t.Fatalf("oldest waiting = %s/%s, want run-mine/build", runID, nodeID)
 	}
-	runID, _, err = s.OldestWaitingReadyNodeForPrincipal(ctx, "agent:nobody")
+	runID, _, err = tn.OldestWaitingReadyNodeForPrincipal(ctx, "agent:nobody")
 	if err != nil {
 		t.Fatalf("oldest waiting for a stranger: %v", err)
 	}
 	if runID != "" {
 		t.Fatalf("a principal with nothing waiting resolved %q", runID)
+	}
+}
+
+// A runner's principal name is unique only within its team, so another team's
+// runner of the same name waiting longer is not where a refusal is recorded.
+func TestOldestWaitingReadyNodeForPrincipalStaysInsideTheTeam(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := store.WithCreatingPrincipal(context.Background(), "agent:ci")
+	acme := tenantFor(t, s, "acme")
+	other := tenantFor(t, s, "other")
+	for _, run := range []struct {
+		tn *store.Tenant
+		id string
+	}{{other, "run-other"}, {acme, "run-acme"}} {
+		if err := run.tn.CreateRun(ctx, store.Run{ID: run.id, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateNode(ctx, store.Node{RunID: run.id, NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.MarkNodeReady(ctx, run.id, "build"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runID, _, err := acme.OldestWaitingReadyNodeForPrincipal(ctx, "agent:ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runID != "run-acme" {
+		t.Fatalf("acme's agent:ci resolved %q, want its own run-acme over the other team's older one", runID)
 	}
 }
 

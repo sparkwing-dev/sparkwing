@@ -181,6 +181,9 @@ func TestController_WaiterNotifyPromotesOrphanedQueue(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("notify status=%d want 200", resp.StatusCode)
 	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("notify stream Cache-Control = %q, want no-store", got)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read notify: %v", err)

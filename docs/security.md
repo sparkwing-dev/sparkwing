@@ -129,6 +129,8 @@ file, so another account on the machine that reaches the loopback port is
 refused. The CLI sends the token as a bearer; a browser signs in once
 through the link `sparkwing serve status` prints, whose single-use code the
 page trades for a session it keeps in `localStorage` and sends as a bearer.
+A session has no expiry and survives restarts; deleting `serve-token` and
+restarting the dashboard ends every browser session.
 No credential rides a cookie, which every port on `127.0.0.1` would receive. The process refuses a
 non-loopback `--addr` unless the operator passes `--allow-remote`, and a
 browser request carrying a foreign `Origin` is refused unless the operator

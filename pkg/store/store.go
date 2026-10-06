@@ -4792,6 +4792,10 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		bodyRequirementsJSON = persisted.BodyRequirementsJSON
 		bodyRequirementsHash = persisted.BodyRequirementsHash
 	}
+	// safety: the lineage root keys the attempt history this node is shown
+	// and numbers its attempts against, so only the server's own retry record
+	// names it; a root carried on the node would let its creator adopt any
+	// run's history.
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
@@ -4807,7 +4811,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
 		COALESCE(?, (SELECT retry_avoid_until FROM runs WHERE id = ?)),
 		?,
-		COALESCE((SELECT root_run_id FROM agent_loss_retries WHERE run_id = ?), NULLIF(?, ''), ?),
+		COALESCE((SELECT root_run_id FROM agent_loss_retries WHERE team = ? AND run_id = ?), ?),
 		?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
@@ -4819,7 +4823,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		n.AvoidExecutorID, n.RunID,
 		nullableUnixNano(n.AvoidUntil), n.RunID,
 		n.AttemptsConsumed,
-		n.RunID, n.RetryRootRunID, n.RunID,
+		string(team), n.RunID, n.RunID,
 		n.RequiredCoordinatorID,
 		n.RequiredExecutorLocation,
 		policyJSON, policyHash, policyVersion, bodyProtocol,

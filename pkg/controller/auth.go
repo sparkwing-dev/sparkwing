@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -534,7 +533,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		}
 		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
-		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
+		stampPrincipal(ctx, p)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
