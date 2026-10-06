@@ -142,7 +142,7 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 	current, err := s.githubApp.client.InstallationRepositories(ctx, env.Installation.ID)
 	if err != nil {
 		if env.Action == "removed" {
-			if !s.withdrawUnlistedGitHubRemoval(w, r, tenant, env.Installation.ID, body, err) {
+			if !s.withdrawUnlistedGitHubRemoval(w, r, tenant, env.Installation.ID, body, current, err) {
 				return
 			}
 		}
@@ -173,9 +173,10 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 // safety: a removal whose listing cannot be read withdraws the whole
 // installation's schedules, except when the listing is unreadable only for
 // its size; then the repositories GitHub names as removed are withdrawn and
-// the rest of the installation stays.
+// the rest of the installation stays. A named repository the cut listing
+// still shows was added back after the removal, so it keeps its schedules.
 func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
-	installation int64, body []byte, listErr error,
+	installation int64, body []byte, listed []githubapp.Repository, listErr error,
 ) bool {
 	if !errors.Is(listErr, githubapp.ErrTooManyRepositories) {
 		if _, err := tenant.WithdrawGitHubCronInstallation(r.Context(), installation, time.Now()); err != nil {
@@ -191,7 +192,14 @@ func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode installation_repositories payload: %w", err))
 		return false
 	}
+	covered := make(map[int64]bool, len(listed))
+	for _, repo := range listed {
+		covered[repo.ID] = true
+	}
 	for _, repo := range p.Removed {
+		if covered[repo.ID] {
+			continue
+		}
 		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), installation, repo.ID, time.Now()); err != nil {
 			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
 			return false
