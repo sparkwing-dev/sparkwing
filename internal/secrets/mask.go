@@ -117,7 +117,8 @@ func encodedForms(value string) []string {
 		base64.RawURLEncoding.EncodeToString([]byte(value)),
 	}
 	for lead := range 3 {
-		candidates = append(candidates, embeddedBase64(value, lead))
+		std := embeddedBase64(value, lead)
+		candidates = append(candidates, std, strings.NewReplacer("+", "-", "/", "_").Replace(std))
 	}
 	var out []string
 	for _, c := range candidates {

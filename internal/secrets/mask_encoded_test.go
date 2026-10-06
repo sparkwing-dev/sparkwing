@@ -33,7 +33,7 @@ func TestMaskerHidesEncodedSecrets(t *testing.T) {
 		}
 		for lead := range 3 {
 			raw := []byte(strings.Repeat("a", lead) + "user:" + secret + ":end")
-			for name, enc := range map[string]*base64.Encoding{"std": base64.StdEncoding} {
+			for name, enc := range map[string]*base64.Encoding{"std": base64.StdEncoding, "raw url": base64.RawURLEncoding} {
 				blob := enc.EncodeToString(raw)
 				if got := m.Mask(blob); !strings.Contains(got, "***") {
 					t.Errorf("%q embedded %s base64 lead %d: not masked: %q", secret, name, lead, got)
@@ -54,6 +54,15 @@ func TestMaskerEncodedFormsSkipShortAndIdenticalForms(t *testing.T) {
 		if len(v) < 4 && v != "ab" {
 			t.Fatalf("short encoded form registered: %q in %q", v, m.Values())
 		}
+	}
+}
+
+func TestMaskerHidesASecretInsideAURLSafeBase64Blob(t *testing.T) {
+	m := NewMasker()
+	m.Register("pass~word?")
+	blob := base64.RawURLEncoding.EncodeToString([]byte("user:pass~word?:end"))
+	if got := m.Mask(blob); !strings.Contains(got, "***") {
+		t.Fatalf("Mask(%q) = %q", blob, got)
 	}
 }
 
