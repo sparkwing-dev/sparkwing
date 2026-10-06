@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
+- **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
 - **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
