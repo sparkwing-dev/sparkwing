@@ -395,8 +395,11 @@ repository, and a grant opens the team's whole tree.
   `scopes/<hash>/`, a hash of its run's repository and own ref, and reads its
   own ref, its pull request's base, the default branch, and then the unscoped
   entries written before grants carried a repository and ref. The controller
-  reads those from the run's trigger, and a run no signed webhook started
-  writes under a ref of its own. A grant minted by an older controller carries
+  reads those from the run's trigger. A run whose ref and commit its submitter
+  chose (CLI, API and dashboard starts, and their retries and children) writes
+  under a ref of its own; signed webhook runs, schedules that follow a branch
+  tip, and their retries and children with the same ref and commit write under
+  the real ref. A grant minted by an older controller carries
   none and keeps reading and writing the unscoped entries until it expires. A team's bins count toward the store
   ceiling.
 - `/git/<name>/...` with a grant for the operator's own team (`default`, a

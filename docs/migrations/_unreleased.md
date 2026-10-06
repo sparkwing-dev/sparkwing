@@ -13,9 +13,17 @@ could replace the dependency archive or binary a later `main` run restored.
 by the controller from the run's trigger. The run writes only under its own
 ref and reads, in order, its own ref, its pull request's base branch, the
 repository's default branch, and finally the entries written before this
-release. A run that no signed GitHub webhook started (the CLI, the dashboard,
-the API, a schedule or a retry) writes under a ref of its own, so it reads
-what its branch's pushes wrote but never replaces it.
+release.
+
+A run whose ref and commit its submitter chose writes under a ref of its own,
+so it reads what its branch's pushes wrote but never replaces it. That covers
+runs started from the CLI, the API and the dashboard, and retries or child
+runs that descend from one of them. Runs whose ref the server holds write
+under the real ref and warm the caches pushes read: runs a signed GitHub
+webhook started, scheduled runs that follow a branch tip, and retries or child
+runs of either that keep its ref and commit and upload no source. A schedule
+pinned to a commit counts as submitter-chosen, because any editor can pin one
+to a commit that is not on the branch.
 
 **What you see:** the first run on a new branch restores its base branch's
 cache as before. A branch's writes stay on that branch, so a sibling branch or

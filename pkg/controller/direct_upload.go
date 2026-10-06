@@ -121,10 +121,7 @@ func (s *Server) triggerCacheScope(ctx context.Context, trigger *store.Trigger) 
 		repo = "github:" + strconv.FormatInt(repoID, 10)
 	}
 	env := trigger.TriggerEnv
-	own := env["GITHUB_REF"]
-	if own == "" && trigger.GitBranch != "" {
-		own = "refs/heads/" + trigger.GitBranch
-	}
+	own := triggerOwnRef(trigger)
 	refs := []string{}
 	for _, ref := range []string{own, branchRef(env[sparkwing.EnvPRBaseRef]), branchRef(env[EnvDefaultBranch])} {
 		if ref != "" && !slices.Contains(refs, ref) {
@@ -132,6 +129,13 @@ func (s *Server) triggerCacheScope(ctx context.Context, trigger *store.Trigger) 
 		}
 	}
 	return repo, own, refs, nil
+}
+
+func triggerOwnRef(trigger *store.Trigger) string {
+	if ref := trigger.TriggerEnv["GITHUB_REF"]; ref != "" {
+		return ref
+	}
+	return branchRef(trigger.GitBranch)
 }
 
 func branchRef(branch string) string {

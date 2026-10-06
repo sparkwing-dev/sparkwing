@@ -722,9 +722,12 @@ entries only under the run's own ref. It reads that ref, the pull request's
 base branch, the default branch, and then entries written before grants
 carried a scope, in that order. A branch's run therefore cannot replace or
 delete an entry its base branch's runs restore, and another repository's run
-does not read it. Only a signed GitHub webhook vouches for a ref: a run started
-any other way, including by a member with `runs.write` naming `main`, writes
-under a ref of its own and never over what `main`'s pushes restore. Entries a
+does not read it. A run's ref counts only when the server holds it: a signed
+GitHub webhook, a schedule that follows the branch tip, or a retry or child of
+one of those that keeps its ref and commit and uploads no source. A run whose
+ref and commit its submitter chose, including a member with `runs.write`
+naming `main` from the CLI, API or dashboard, writes under a ref of its own and
+never over what `main`'s pushes restore. Entries a
 run writes under its own ref are still restored by that ref's later runs, so
 whoever can push a branch can poison that branch's cache.
 

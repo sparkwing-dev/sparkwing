@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // CacheGrantResponse is the body of POST /api/v1/runs/{id}/cache-grant.
@@ -164,7 +164,7 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 
 // safety: the cache scopes every key by the repository and refs a grant
 // carries, so they come from the run's trigger and never from the caller. A
-// run with no trigger gets the empty scope, which no branch's run reads.
+// run with no trigger writes under a scope no branch's run reads.
 func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID string) (*authwire.CacheScope, error) {
 	trigger, err := s.store.GetTrigger(ctx, runID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -183,14 +183,59 @@ func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID str
 	// safety: the OIDC subject's spelling, so a webhook's run and a manual run of one
 	// repository share a scope however each trigger was created.
 	repo := canonicalRepository(trigger.GithubOwner, trigger.GithubRepo, trigger.RepoURL)
-	// safety: only a signed webhook vouches for a ref, as the OIDC subject's trigger
-	// does, so any other run writes beside that ref's entries and never over them.
+	vouched, err := s.refVouched(ctx, trigger)
+	if err != nil {
+		return nil, err
+	}
+	// safety: a run whose ref and commit only its submitter vouches for writes beside
+	// that ref's entries and never over them.
 	write := own
-	if trigger.TriggerSource != oidcWebhookSource || trigger.TriggerEnv[sparkwing.EnvGitHubEventName] == "" {
+	if !vouched {
 		write = "manual:" + own
 	}
 	if len(refs) == 0 || refs[0] != write {
 		refs = append([]string{write}, refs...)
 	}
 	return &authwire.CacheScope{Repo: repo, Refs: refs}, nil
+}
+
+const maxCacheLineage = 64
+
+// safety: classified as the OIDC subject's trigger is. A retry or child holds its root's
+// ref only when the root's event or follow-the-tip schedule vouches for it and the run
+// names that ref and commit with no uploaded source, so the code it runs is the root's.
+func (s *Server) refVouched(ctx context.Context, trigger *store.Trigger) (bool, error) {
+	root := trigger
+	for range maxCacheLineage {
+		parent := root.RetryOf
+		if parent == "" {
+			parent = root.ParentRunID
+		}
+		if parent == "" {
+			break
+		}
+		next, err := s.store.GetTrigger(ctx, parent)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if next.Team != trigger.Team {
+			return false, nil
+		}
+		root = next
+	}
+	switch kind := oidcTriggerKind(root); {
+	case root.RetryOf != "" || root.ParentRunID != "", kind == oidcTriggerManual:
+		return false, nil
+	case kind == oidcTriggerCron && root.GitSHA != "":
+		return false, nil
+	}
+	if root == trigger {
+		return true, nil
+	}
+	return triggerOwnRef(trigger) == triggerOwnRef(root) && trigger.GitSHA == root.GitSHA &&
+		!strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") &&
+		trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] == "", nil
 }

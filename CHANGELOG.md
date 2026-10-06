@@ -26,8 +26,10 @@ unlock.
   service writes `/cache`, `/bin` and `/artifacts` entries only under the run's own ref. It reads the run's own
   ref, then its pull request's base, then the default branch, then entries written before this release. A
   branch's run therefore no longer replaces or deletes what its base branch's runs restore, and a run of
-  another repository in the team no longer reads it. A run no signed webhook started writes beside its ref's
-  entries rather than over them. Nothing to configure; caches written on one branch are no longer visible to
+  another repository in the team no longer reads it. A run whose ref and commit its submitter chose (the CLI,
+  the API, the dashboard, and retries or children of such a run) writes beside its ref's entries rather than
+  over them; signed webhook runs, schedules that follow a branch tip, and retries or children of those that keep
+  the same ref and commit write under the real ref. Nothing to configure; caches written on one branch are no longer visible to
   other branches except through that order. See
   [Cache entries follow the repository and ref](docs/migrations/_unreleased.md#cache-entries-follow-the-repository-and-ref).
 
