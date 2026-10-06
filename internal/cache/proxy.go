@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -306,7 +307,13 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	src := http.MaxBytesReader(nil, resp.Body, maxBufferedBodyBytes)
 	if proxyShouldRewrite(reg, immutable) && proxyPublicBase != "" {
 		old, replacement := proxyRewriteRule(reg, proxyPublicBase)
-		err = proxyStreamReplace(staged, src, old, replacement)
+		// perf: the rewrite emits one write per matched URL, so a bounded buffer keeps
+		// URL-dense metadata from costing a syscall per match without growing with the body.
+		buffered := bufio.NewWriterSize(staged, 64<<10)
+		err = proxyStreamReplace(buffered, src, old, replacement)
+		if flushErr := buffered.Flush(); err == nil {
+			err = flushErr
+		}
 	} else {
 		_, err = io.Copy(staged, src)
 	}
