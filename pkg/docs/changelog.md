@@ -37,6 +37,7 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
 - **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
 - **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
