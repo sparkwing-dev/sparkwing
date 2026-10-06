@@ -84,6 +84,9 @@ spec:
             {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (kindIs "bool" .Values.ingress.allowInsecure) .Values.ingress.allowInsecure }}
             - "--allow-insecure-cookies-remote"
             {{- end }}
+            {{- if and .Values.ingress.enabled .Values.ingress.tls }}
+            - "--hsts"
+            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /tmp/sparkwing

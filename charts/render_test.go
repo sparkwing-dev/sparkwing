@@ -2493,6 +2493,24 @@ func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
 	}
 }
 
+func TestDashboardBehindATLSIngressAssertsHSTS(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
+	render := func(sets ...string) []string {
+		return runnerContainer(t, helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", "sparkwing", sets...)).Args
+	}
+	if args := render("ingress.enabled=true", "web.requireLogin=true", "ingress.tls[0].hosts[0]=sparkwing.example.com"); !slices.Contains(args, "--hsts") {
+		t.Errorf("web args %v behind a TLS Ingress lack --hsts", args)
+	}
+	if args := render("ingress.enabled=true", "ingress.allowInsecure=true"); slices.Contains(args, "--hsts") {
+		t.Errorf("web args %v carry --hsts on a plain HTTP Ingress", args)
+	}
+	if args := render("ingress.tls[0].hosts[0]=sparkwing.example.com"); slices.Contains(args, "--hsts") {
+		t.Errorf("web args %v carry --hsts with no Ingress", args)
+	}
+}
+
 func TestPublishedDashboardAcceptsTLSWithoutASecretName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
