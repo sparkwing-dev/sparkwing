@@ -101,10 +101,11 @@ kubectl -n sparkwing create secret generic sparkwing-github-status \
 
 # The first admin token. The controller stores it as an admin credential
 # before it binds, so it never serves a request unauthenticated. Keep the
-# value: it is the admin bearer for `sparkwing cluster tokens create`.
-printf 'swu_%s' "$(openssl rand -hex 24)" > /tmp/sparkwing-bootstrap-admin
+# value: it is the admin bearer for `sparkwing cluster tokens create`. The
+# umask makes the file 0600, so no other local account can read it.
+(umask 077 && printf 'swu_%s' "$(openssl rand -hex 24)" > "$HOME/sparkwing-bootstrap-admin")
 kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
-    --from-file=token=/tmp/sparkwing-bootstrap-admin
+    --from-file=token="$HOME/sparkwing-bootstrap-admin"
 
 # At-rest encryption key for the controller's secrets store.
 # Skip and the controller logs a WARNING + stores plaintext.

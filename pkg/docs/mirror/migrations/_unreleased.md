@@ -19,10 +19,11 @@ nothing; every other install sets one value on upgrade.
   `--require-auth` keeps refusing to start if the tokens table is ever emptied:
 
   ```bash
-  printf 'swu_%s' "$(openssl rand -hex 24)" > bootstrap-admin
+  # The umask makes the file 0600: it holds an admin bearer.
+  (umask 077 && printf 'swu_%s' "$(openssl rand -hex 24)" > "$HOME/sparkwing-bootstrap-admin")
   kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
-      --from-file=token=bootstrap-admin
-  helm upgrade sparkwing ./charts/sparkwing-full -f my-values.yaml \
+      --from-file=token="$HOME/sparkwing-bootstrap-admin"
+  helm upgrade sparkwing ./charts/sparkwing-full --namespace sparkwing -f my-values.yaml \
       --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin
   ```
 
