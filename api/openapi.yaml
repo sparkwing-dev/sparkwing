@@ -4352,7 +4352,7 @@ paths:
                   micro_per_credit: {type: integer, format: int64}
                   credits_per_dollar: {type: integer, format: int64}
                   micro_per_cent: {type: integer, format: int64}
-                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings, and `paid-grant-lookup-v1` the payment lookup."}
+                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings, `paid-grant-lookup-v1` the payment lookup, and `card-setup-order-v1` the saved card's `completed_at`."}
         "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/credits/payments/{reference}:
@@ -4392,7 +4392,9 @@ paths:
         controller opened for `team`. It replaces any card on file, records a
         `card.added` business event, and makes a charge that failed on the old
         card due again at once. While the team is trusted, its usage is billed
-        to this card.
+        to this card. With `completed_at`, a setup that completed before the
+        card on file is refused with 409 `stale_card_setup` and changes
+        nothing; a repeat of the same completion time is saved again.
       requestBody:
         required: true
         content:
@@ -4408,11 +4410,13 @@ paths:
                 fingerprint: {type: string, description: "The card's fingerprint, which the spend limits and fraud warnings follow across teams."}
                 brand: {type: string}
                 last4: {type: string}
+                completed_at: {type: integer, format: int64, description: "Unix seconds the owner completed the setup, from Stripe's signed event; orders saves. Sent only to a controller naming `card-setup-order-v1`, since an older one refuses the field."}
       responses:
         "204": {description: Card saved.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: The team is not registered.}
+        "409": {description: "The setup completed before the card on file (`stale_card_setup`)."}
 
   /api/v1/credits/card-payments:
     post:

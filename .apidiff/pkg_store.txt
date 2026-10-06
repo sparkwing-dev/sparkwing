@@ -183,7 +183,8 @@ type Card struct {
 	Fingerprint   string
 	Brand         string
 	Last4         string
-	AddedAt       time.Time
+
+	AddedAt time.Time
 }
 const CardAttemptFailed = "failed"
 const CardAttemptLive = "live"
@@ -854,6 +855,7 @@ var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no s
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
 var ErrSourceCredentialSpent = errors.New("store: this claim's source credentials were all issued or its attempt has started")
+var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")

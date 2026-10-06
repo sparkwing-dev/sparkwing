@@ -29,6 +29,11 @@ const CardBillingCapability = "card-billing-v1"
 // which reports the team a payment was granted to without writing anything.
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 
+// CardSetupOrderCapability names the saved card's completed_at field, which
+// refuses a setup completed before the card on file. A controller without it
+// refuses the field as unknown.
+const CardSetupOrderCapability = "card-setup-order-v1"
+
 // UnknownPaymentCode is the code on the payment lookup's 404 when no paid
 // grant carries the reference. Any other 404 means the route is not served.
 const UnknownPaymentCode = "unknown_payment"
@@ -39,7 +44,7 @@ func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
 		MicroPerCredit:   store.MicroCreditsPerCredit,
 		CreditsPerDollar: store.CreditsPerDollar,
 		MicroPerCent:     store.MicroCreditsPerCent,
-		Capabilities:     []string{CardBillingCapability, PaidGrantLookupCapability},
+		Capabilities:     []string{CardBillingCapability, PaidGrantLookupCapability, CardSetupOrderCapability},
 	})
 }
 

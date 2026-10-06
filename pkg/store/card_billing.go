@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -284,7 +285,10 @@ type Card struct {
 	Fingerprint   string
 	Brand         string
 	Last4         string
-	AddedAt       time.Time
+	// AddedAt is when the card was added. Given to SaveCard, it is when the
+	// owner completed the setup, and a setup completed before the card on
+	// file is refused with ErrStaleCardSetup.
+	AddedAt time.Time
 }
 
 // CardCharge is one obligation billed to a team's card.
@@ -485,8 +489,13 @@ func headroomTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (int
 	return room, nil
 }
 
+// ErrStaleCardSetup is SaveCard's refusal of a setup completed before the
+// card already on file, such as a delayed delivery of an older setup.
+var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
+
 // SaveCard records the card an owner added through Stripe. A charge that
-// failed on the old card is tried again at once.
+// failed on the old card is tried again at once. A non-zero c.AddedAt orders
+// saves by setup completion; without it the card is stamped now.
 func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) (err error) {
 	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
 		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
@@ -502,10 +511,22 @@ func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Ti
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ? WHERE name = ?`,
-		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, now.UnixNano(), string(t.team)); err != nil {
+	addedAt, newerThan := now.UnixNano(), int64(math.MaxInt64)
+	if !c.AddedAt.IsZero() {
+		addedAt, newerThan = c.AddedAt.UnixNano(), c.AddedAt.UnixNano()
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
+	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ? WHERE name = ? AND card_added_at <= ?`,
+		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(t.team), newerThan)
+	if err != nil {
 		return err
+	}
+	saved, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if saved == 0 {
+		return ErrStaleCardSetup
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET next_attempt_at = ? WHERE team = ? AND state = ?`,
 		now.UnixNano(), string(t.team), CardChargeOpen); err != nil {

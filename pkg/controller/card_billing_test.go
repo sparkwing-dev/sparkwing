@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -231,6 +232,42 @@ func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
 	}
 }
 
+// A saved card names when its setup completed, and a setup that completed
+// before the card on file is refused with stale_card_setup and changes nothing.
+func TestCardBilling_AnOlderSetupDoesNotReplaceANewerCard(t *testing.T) {
+	f, _ := billingFixture(t)
+	owner, _, _ := teamOf(f)
+	f.trust(owner.team, 0)
+	save := func(pm, last4 string, completed int64) (int, string) {
+		var refused struct {
+			Code string `json:"code"`
+		}
+		code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+			"team": owner.team, "customer": "cus_1", "payment_method": pm, "fingerprint": "fp_" + pm,
+			"last4": last4, "completed_at": completed,
+		}, &refused)
+		return code, refused.Code
+	}
+	at := time.Now().Add(time.Hour).Unix()
+	for _, c := range []struct {
+		pm, last4 string
+		completed int64
+		code      int
+		refusal   string
+	}{
+		{"pm_old", "0000", at, http.StatusNoContent, ""},
+		{"pm_new", "1111", at + 60, http.StatusNoContent, ""},
+		{"pm_old", "0000", at, http.StatusConflict, controller.StaleCardSetupCode},
+	} {
+		if code, refusal := save(c.pm, c.last4, c.completed); code != c.code || refusal != c.refusal {
+			t.Fatalf("save %s at %d = %d %q, want %d %q", c.pm, c.completed, code, refusal, c.code, c.refusal)
+		}
+	}
+	if b := f.billing(owner); b.Card == nil || b.Card.Last4 != "1111" {
+		t.Fatalf("card = %+v, want the newer card kept", b.Card)
+	}
+}
+
 // An owner lowers the budget; a budget above the largest limit is refused.
 func TestCardBilling_OwnerSetsABudget(t *testing.T) {
 	f, _ := billingFixture(t)
@@ -305,7 +342,7 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 		Capabilities []string `json:"capabilities"`
 	}
 	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+f.admin, nil, &units); code != http.StatusOK ||
-		strings.Join(units.Capabilities, ",") != "card-billing-v1,paid-grant-lookup-v1" {
+		strings.Join(units.Capabilities, ",") != "card-billing-v1,paid-grant-lookup-v1,card-setup-order-v1" {
 		t.Fatalf("units = %d %+v", code, units)
 	}
 }

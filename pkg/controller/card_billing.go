@@ -143,7 +143,14 @@ type savedCardReq struct {
 	Fingerprint   string `json:"fingerprint"`
 	Brand         string `json:"brand"`
 	Last4         string `json:"last4"`
+	// safety: Stripe's signed event time for the setup's completion orders
+	// saves, so a delayed older setup cannot replace a newer card.
+	CompletedAt int64 `json:"completed_at,omitempty"`
 }
+
+// StaleCardSetupCode is the code on the 409 refusing a card setup completed
+// before the card already on file.
+const StaleCardSetupCode = "stale_card_setup"
 
 // safety: only the checkout service holds credits.grant, and it names the
 // team the Stripe session was opened for by the controller.
@@ -157,13 +164,21 @@ func (s *Server) handleSavedCard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	err := t.SaveCard(r.Context(), store.Card{
+	card := store.Card{
 		Customer: req.Customer, PaymentMethod: req.PaymentMethod, Fingerprint: req.Fingerprint,
 		Brand: req.Brand, Last4: req.Last4,
-	}, principalName(r), time.Now())
+	}
+	if req.CompletedAt > 0 {
+		card.AddedAt = time.Unix(req.CompletedAt, 0)
+	}
+	err := t.SaveCard(r.Context(), card, principalName(r), time.Now())
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
+	case errors.Is(err, store.ErrStaleCardSetup):
+		s.logger.Warn("an older card setup arrived after a newer one; keeping the newer card", "team", req.Team,
+			"completed_at", req.CompletedAt, "last4", req.Last4)
+		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: StaleCardSetupCode})
 	case err != nil:
 		s.writeInternalError(w, r, "save card", err)
 	default:

@@ -487,6 +487,47 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 	})
 }
 
+// Saves ordered by setup completion keep the newest card: an older setup's
+// save delivered after a newer one is refused, so the next charge uses the
+// newer card, while a repeat of the newest setup is accepted.
+func TestASetupCompletedBeforeTheCardOnFileIsRefused(t *testing.T) {
+	s := storetest.Open(t)
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	ctx := context.Background()
+	oldCard := store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_old", Fingerprint: "fp_old", Brand: "visa", Last4: "0000",
+		AddedAt: now.Add(time.Minute),
+	}
+	newCard := store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_new", Fingerprint: "fp_new", Brand: "visa", Last4: "1111",
+		AddedAt: now.Add(2 * time.Minute),
+	}
+	for _, c := range []store.Card{oldCard, newCard, newCard} {
+		if err := acme.SaveCard(ctx, c, "billing", now.Add(3*time.Minute)); err != nil {
+			t.Fatalf("save %s: %v", c.PaymentMethod, err)
+		}
+	}
+	if err := acme.SaveCard(ctx, oldCard, "billing", now.Add(4*time.Minute)); !errors.Is(err, store.ErrStaleCardSetup) {
+		t.Fatalf("delayed older setup = %v, want ErrStaleCardSetup", err)
+	}
+	standing, err := acme.SpendStanding(ctx, now.Add(4*time.Minute))
+	if err != nil || standing.Card.PaymentMethod != "pm_new" {
+		t.Fatalf("card = %+v, %v; want pm_new kept", standing.Card, err)
+	}
+	spend(t, s, "acme", "ch_1", 15_000)
+	if work := dueCharge(t, s, now.Add(5*time.Minute)); work.PaymentMethod != "pm_new" {
+		t.Fatalf("next charge uses %s, want pm_new", work.PaymentMethod)
+	}
+	if err := acme.SaveCard(ctx, store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_unordered", Fingerprint: "fp_u",
+		Last4: "2222",
+	}, "billing", now); err != nil {
+		t.Fatalf("a save with no completion time = %v, want it accepted as before", err)
+	}
+}
+
 // A prepaid purchase whose payment drew a warning is refused at the ledger.
 func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 	s := storetest.Open(t)
