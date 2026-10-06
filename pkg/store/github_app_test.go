@@ -315,11 +315,9 @@ func TestGitHubAppDeliveryKeepsItsFirstEvent(t *testing.T) {
 	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
 		t.Fatalf("a bound delivery reads as processed: %v, %v", seen, err)
 	}
-	if err := st.RecordGitHubAppDelivery(ctx, "digest-2", "d-2", now.Add(store.GitHubAppDeliveryRetention+time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if same, err := st.BindGitHubAppDeliveryEvent(ctx, "digest-1", "installation", "d-1", now); err != nil || !same {
-		t.Fatalf("a binding past its retention was kept: %v, %v", same, err)
+	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
+	if same, err := st.BindGitHubAppDeliveryEvent(ctx, "digest-1", "installation", "d-1", later); err != nil || !same {
+		t.Fatalf("a binding past its retention was kept without any run starting: %v, %v", same, err)
 	}
 }
 

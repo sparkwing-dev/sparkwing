@@ -546,6 +546,9 @@ const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 // reports whether event is that one. The binding is kept apart from the
 // processed record, so binding a delivery does not make it seen.
 func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error) {
+	if err := s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
+		return false, err
+	}
 	key := "event:" + digest
 	if _, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
 		ON CONFLICT (digest) DO NOTHING`, key, delivery, now.Unix(), event); err != nil {
@@ -567,15 +570,20 @@ func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool,
 }
 
 // RecordGitHubAppDelivery remembers that a delivery with digest was
-// processed, and forgets digests and event bindings older than
-// [GitHubAppDeliveryRetention].
+// processed. It and [Store.BindGitHubAppDeliveryEvent] forget digests and
+// event bindings older than [GitHubAppDeliveryRetention].
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
-	if _, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		now.Add(-GitHubAppDeliveryRetention).Unix()); err != nil {
+	if err := s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
 		return err
 	}
 	_, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
 		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
+	return err
+}
+
+func (s *Store) forgetExpiredGitHubAppDeliveries(ctx context.Context, now time.Time) error {
+	_, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
+		now.Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
 
