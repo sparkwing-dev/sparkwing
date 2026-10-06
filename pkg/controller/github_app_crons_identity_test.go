@@ -350,3 +350,26 @@ func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T)
 		t.Fatalf("a named removal past the listing cap left its schedule armed: %+v", rows)
 	}
 }
+
+// A removal delivered after its repository was added back must not withdraw
+// it: the cut listing still shows the repository as covered.
+func TestGitHubAppLateRemovalKeepsARepositoryTheCutListingShows(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
+	repos := []githubapptest.Repo{githubRepo(701, "acme/widgets")}
+	for i := range 1000 {
+		repos = append(repos, githubRepo(int64(10000+i), fmt.Sprintf("acme/r%d", i)))
+	}
+	f.app.SetRepos(7, repos...)
+	f.deliver("installation_repositories", map[string]any{
+		"action": "removed", "installation": map[string]any{"id": 7},
+		"repositories_removed": []any{map[string]any{"id": 701, "full_name": "acme/widgets"}},
+	}, "")
+	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || !rows[0].Declared {
+		t.Fatalf("a late removal withdrew a repository the listing still shows: %+v", rows)
+	}
+}
