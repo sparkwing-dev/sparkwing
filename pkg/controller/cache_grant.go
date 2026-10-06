@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -180,9 +181,7 @@ func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID str
 	if err != nil {
 		return nil, err
 	}
-	// safety: the OIDC subject's spelling, so a webhook's run and a manual run of one
-	// repository share a scope however each trigger was created.
-	repo := canonicalRepository(trigger.GithubOwner, trigger.GithubRepo, trigger.RepoURL)
+	repo := cacheRepository(trigger)
 	vouched, err := s.refVouched(ctx, trigger)
 	if err != nil {
 		return nil, err
@@ -238,4 +237,15 @@ func (s *Server) refVouched(ctx context.Context, trigger *store.Trigger) (bool, 
 	return triggerOwnRef(trigger) == triggerOwnRef(root) && trigger.GitSHA == root.GitSHA &&
 		!strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") &&
 		trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] == "", nil
+}
+
+// safety: the one repository the trigger names, however it names it, with the port kept,
+// because a port names another server; the OIDC subject drops it, so this cannot reuse that.
+func cacheRepository(trigger *store.Trigger) string {
+	repo, err := sourceurl.TriggerRepository(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
+		trigger.GithubOwner, trigger.GithubRepo)
+	if err != nil {
+		return ""
+	}
+	return repo
 }

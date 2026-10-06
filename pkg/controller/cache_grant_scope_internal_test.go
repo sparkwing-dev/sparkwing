@@ -149,3 +149,26 @@ func TestCacheGrantWritesUnderTheRealRefOnlyWhenTheServerHoldsIt(t *testing.T) {
 		t.Errorf("manual run's grant with no fence = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// Two servers on one host are two repositories, so their caches stay apart.
+func TestCacheGrantKeepsTheRepositoryPort(t *testing.T) {
+	s, _, _ := downloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var repos []string
+	for id, url := range map[string]string{"port-a": "https://git.example.com:8443/acme/app.git", "port-b": "https://git.example.com:9443/acme/app.git"} {
+		if err := team.CreateTrigger(t.Context(), store.Trigger{ID: id, Pipeline: "demo", CreatedAt: time.Now(), RepoURL: url, GitBranch: "main"}); err != nil {
+			t.Fatal(err)
+		}
+		scope, err := s.cacheGrantScope(t.Context(), "team-a", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		repos = append(repos, scope.Repo)
+	}
+	if repos[0] == repos[1] || repos[0] == "" {
+		t.Fatalf("repositories on two ports share the cache scope %q", repos[0])
+	}
+}
