@@ -4352,8 +4352,35 @@ paths:
                   micro_per_credit: {type: integer, format: int64}
                   credits_per_dollar: {type: integer, format: int64}
                   micro_per_cent: {type: integer, format: int64}
-                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings."}
+                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings, and `paid-grant-lookup-v1` the payment lookup."}
         "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/credits/payments/{reference}:
+    parameters:
+      - in: path
+        name: reference
+        required: true
+        schema: {type: string}
+        description: The payment id a paid grant carries as its reference.
+    get:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Read the team a payment was granted to.
+      description: >-
+        The checkout service asks this before it refunds a payment from a refused card, so a payment the ledger already settled keeps its grant when the grant's reply or the service's own receipt was lost. It writes nothing. Controllers that serve it name `paid-grant-lookup-v1` in the units' `capabilities`. A 404 carrying `unknown_payment` means no paid grant carries the reference; any other 404 means the controller does not serve this route, and the checkout service then refunds nothing and asks Stripe to retry.
+      responses:
+        "200":
+          description: The team holding the paid grant.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.paidGrantJSON
+                type: object
+                required: [team]
+                properties:
+                  team: {type: string}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: "No paid grant carries the reference (`unknown_payment`)."}
 
   /api/v1/credits/cards:
     post:

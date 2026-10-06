@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+- **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
+  It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
+
 ### Fixed
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.

@@ -45,6 +45,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
+| `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
 | `POST` | `/api/v1/credits/reversals` | `credits.grant` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
 | `PUT` | `/api/v1/credits/settings` | `admin` |

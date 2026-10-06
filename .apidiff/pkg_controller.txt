@@ -280,6 +280,7 @@ type ObjectStoreBreakerResponse struct {
 	Thawed bool
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
+const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 const PaymentWarnedCode = "payment_warned"
 type PoolConfig struct {
@@ -467,6 +468,7 @@ type TrendPoint struct {
 	AvgWaitMs int64
 }
 const UnknownCheckoutCode = "unknown_checkout"
+const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)

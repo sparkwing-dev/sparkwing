@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,7 +254,7 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 		Capabilities []string `json:"capabilities"`
 	}
 	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+f.admin, nil, &units); code != http.StatusOK ||
-		len(units.Capabilities) != 1 || units.Capabilities[0] != "card-billing-v1" {
+		strings.Join(units.Capabilities, ",") != "card-billing-v1,paid-grant-lookup-v1" {
 		t.Fatalf("units = %d %+v", code, units)
 	}
 }
