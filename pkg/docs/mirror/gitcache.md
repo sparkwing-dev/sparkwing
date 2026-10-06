@@ -517,6 +517,13 @@ the digest under its own key.
 | HEAD | `/cache/<key>` | Check if cache entry exists (auth required) |
 | PUT | `/cache/<key>` | Upload dependency archive to cache (auth required) |
 
+The binary route also accepts `artifacts/blobs/<digest>` and
+`artifacts/manifests/<digest>` keys from the HTTP artifact-store adapter.
+The digest is exactly 64 lowercase hexadecimal characters. Each key stays in
+the caller's team namespace and is stored as `artifacts-blobs-<digest>` or
+`artifacts-manifests-<digest>` on both filesystem and S3 backends. Compiled
+binary names and storage paths keep their existing format.
+
 ### Package Registry Proxy
 
 | Method | Endpoint | Description |

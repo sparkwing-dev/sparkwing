@@ -671,7 +671,9 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), id)
-	if err != nil {
+	// safety: a list cut at GitHub's listing bound only displays; nothing is
+	// refused or withdrawn for a repository missing from it.
+	if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
 		s.logger.Warn("github app repositories", "installation_id", id, "err", err.Error())
 		writeError(w, http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
 		return
@@ -805,7 +807,8 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), inst.InstallationID)
-	if err != nil {
+	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
+	if err != nil && !truncated {
 		writeError(w, http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
 		return
 	}
@@ -814,6 +817,10 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		if strings.EqualFold(repos[i].FullName, slug) {
 			match = &repos[i]
 		}
+	}
+	if match == nil && truncated {
+		writeError(w, http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so "+slug+" cannot be confirmed"))
+		return
 	}
 	if match == nil {
 		writeError(w, http.StatusNotFound, errors.New("no installation this team holds covers "+slug))

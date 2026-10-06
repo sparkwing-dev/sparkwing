@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,5 +109,68 @@ func TestRunTeamRefusesAnotherTeamsRun(t *testing.T) {
 	}
 	if team, err := ask(&Principal{Name: "ana", AccountID: "acct-ana"}); err == nil {
 		t.Errorf("an account with no team was handed team %q", team)
+	}
+}
+
+// The boundary reads the run id itself rather than taking it from the
+// handler, so for every run and trigger route and every spelling of a path,
+// the id it checks must be the id the mux hands the handler.
+func TestTeamBoundaryRunIDIsTheIDTheHandlerReads(t *testing.T) {
+	type seen struct{ pattern, id string }
+	var got *seen
+	mux := http.NewServeMux()
+	var patterns []string
+	for pattern := range muxRoutes(t, "server.go") {
+		_, path, _ := strings.Cut(pattern, " ")
+		if !strings.HasPrefix(path, "/api/v1/runs/{id}") && !strings.HasPrefix(path, "/api/v1/triggers/{id}") {
+			continue
+		}
+		patterns = append(patterns, pattern)
+		mux.HandleFunc(pattern, func(_ http.ResponseWriter, r *http.Request) {
+			got = &seen{r.Pattern, r.PathValue("id")}
+		})
+	}
+	if len(patterns) < 60 {
+		t.Fatalf("found %d run routes in server.go; the enumeration is broken", len(patterns))
+	}
+	ids := []string{"run-1", "run%2D1", "run%252D1", "run%2F1", "%2E%2E", "%EF%BD%81", "r%C3%A9n", "re%CC%81n"}
+	spell := []func(string) string{
+		func(p string) string { return p },
+		func(p string) string { return strings.Replace(p, "/runs/", "/%72uns/", 1) },
+		func(p string) string { return strings.Replace(p, "/triggers/", "/%74riggers/", 1) },
+		func(p string) string { return strings.Replace(p, "/api/", "/%61pi/", 1) },
+		func(p string) string { return strings.Replace(p, "/v1/", "/v%31/", 1) },
+		func(p string) string { return p + "/" },
+		func(p string) string { return strings.Replace(p, "/api/v1/", "/api/v1/./", 1) },
+		func(p string) string { return strings.Replace(p, "/api/v1/", "/api/v1//", 1) },
+	}
+	served := 0
+	for _, pattern := range patterns {
+		method, path, _ := strings.Cut(pattern, " ")
+		for _, id := range ids {
+			base := strings.NewReplacer("{id}", id, "{nodeID}", "n1", "{childID}", "c1", "{path...}", "info/refs").Replace(path)
+			for _, sp := range spell {
+				target := sp(base)
+				req := httptest.NewRequest(method, target, nil)
+				_, matched := mux.Handler(req)
+				boundaryID, scoped := teamBoundaryRunID(matched, req)
+				got = nil
+				mux.ServeHTTP(httptest.NewRecorder(), req)
+				if got == nil {
+					continue
+				}
+				served++
+				if _, exempt := teamBoundaryExempt[got.pattern]; exempt {
+					continue
+				}
+				if !scoped || boundaryID != got.id {
+					t.Errorf("%s %s: boundary checks %q (scoped=%v), handler %s reads %q",
+						method, target, boundaryID, scoped, got.pattern, got.id)
+				}
+			}
+		}
+	}
+	if served < len(patterns)*len(ids) {
+		t.Errorf("only %d requests reached a handler; the probe is not exercising the routes", served)
 	}
 }

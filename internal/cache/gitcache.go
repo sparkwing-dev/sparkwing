@@ -1094,7 +1094,20 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "commit %s is on branch %s", commit, branch)
 }
 
-var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}(\.sha256)?$`)
+var (
+	validBinHash        = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}(\.sha256)?$`)
+	validArtifactBinKey = regexp.MustCompile(`^artifacts/(blobs|manifests)/[0-9a-f]{64}$`)
+)
+
+func binStorageKey(key string) (string, bool) {
+	if validBinHash.MatchString(key) {
+		return key, true
+	}
+	if validArtifactBinKey.MatchString(key) {
+		return strings.ReplaceAll(key, "/", "-"), true
+	}
+	return "", false
+}
 
 type binMeta struct {
 	SHA256    string `json:"sha256"`
@@ -1253,8 +1266,8 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveBin(w http.ResponseWriter, r *http.Request, d blobDirs) {
-	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
-	if !validBinHash.MatchString(hash) {
+	hash, valid := binStorageKey(strings.TrimPrefix(r.URL.Path, "/bin/"))
+	if !valid {
 		http.Error(w, "invalid hash", http.StatusBadRequest)
 		return
 	}

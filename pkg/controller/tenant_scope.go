@@ -113,25 +113,25 @@ var teamBoundaryExempt = map[string]string{
 		"log-write claim is live; the claim it validates is bound to the claimant's own team",
 }
 
+// safety: the mux unescapes every segment before matching, so /api/v1/%72uns/x
+// reaches a /api/v1/runs/{id} handler. Reading the id by position, unescaped
+// as the mux does, keeps the run checked here the run the handler is handed,
+// and a path too short to name one is still checked rather than passed on.
 func teamBoundaryRunID(pattern string, r *http.Request) (string, bool) {
 	if _, exempt := teamBoundaryExempt[pattern]; exempt {
 		return "", false
 	}
 	_, path, _ := strings.Cut(pattern, " ")
-	var prefix string
-	switch {
-	case strings.HasPrefix(path, "/api/v1/runs/{id}"):
-		prefix = "/api/v1/runs/"
-	case strings.HasPrefix(path, "/api/v1/triggers/{id}"):
-		prefix = "/api/v1/triggers/"
-	default:
+	if !strings.HasPrefix(path, "/api/v1/runs/{id}") && !strings.HasPrefix(path, "/api/v1/triggers/{id}") {
 		return "", false
 	}
-	rest := strings.TrimPrefix(r.URL.EscapedPath(), prefix)
-	seg, _, _ := strings.Cut(rest, "/")
-	id, err := url.PathUnescape(seg)
-	if err != nil || id == "" {
-		return "", false
+	segs := strings.Split(r.URL.EscapedPath(), "/")
+	if len(segs) < 5 {
+		return "", true
+	}
+	id, err := url.PathUnescape(segs[4])
+	if err != nil {
+		return segs[4], true
 	}
 	return id, true
 }

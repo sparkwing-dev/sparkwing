@@ -20,6 +20,7 @@ func TestValidateCloneURLAcceptsHTTPSAndGitSSH(t *testing.T) {
 		"https://134744072/acme/widgets.git",
 		"https://100.128.0.1/acme/widgets.git",
 		"https://1.2.3.4.example.com/acme/widgets.git",
+		"https://[2002:808:808::1]/acme/widgets.git",
 	}
 	for _, tc := range cases {
 		t.Run(tc, func(t *testing.T) {
@@ -312,6 +313,13 @@ func TestValidateCloneURLRejectsSpecialPurposeAddresses(t *testing.T) {
 		"https://[ff0e::1]/repo.git",
 		"https://[64:ff9b::7f00:1]/repo.git",
 		"https://[64:ff9b::a9fe:a9fe]/repo.git",
+		"https://[::169.254.169.254]/repo.git",
+		"https://[::a00:1]/repo.git",
+		"https://[::ffff:0:a9fe:a9fe]/repo.git",
+		"https://[::ffff:0:7f00:1]/repo.git",
+		"https://[2002:a9fe:a9fe::1]/repo.git",
+		"https://[2002:a00:1::1]/repo.git",
+		"https://[2002:7f00:1::]/repo.git",
 		"https://192.0.0.170/repo.git",
 		"https://198.18.0.1/repo.git",
 		"https://198.19.255.254/repo.git",
@@ -366,12 +374,16 @@ func fakeLookup(addrs map[string][]string, fail error) Lookup {
 
 func TestCheckResolvedHostRefusesANameThatResolvesInward(t *testing.T) {
 	lookup := fakeLookup(map[string][]string{
-		"git.example.com":    {"140.82.112.3"},
-		"inward.example.com": {"10.0.0.5"},
-		"mixed.example.com":  {"140.82.112.3", "127.0.0.1"},
-		"meta.example.com":   {"169.254.169.254"},
-		"nat64.example.com":  {"64:ff9b::a00:5"},
-		"v6.example.com":     {"2606:50c0:8000::153"},
+		"git.example.com":     {"140.82.112.3"},
+		"inward.example.com":  {"10.0.0.5"},
+		"mixed.example.com":   {"140.82.112.3", "127.0.0.1"},
+		"meta.example.com":    {"169.254.169.254"},
+		"nat64.example.com":   {"64:ff9b::a00:5"},
+		"compat.example.com":  {"::a9fe:a9fe"},
+		"siit.example.com":    {"::ffff:0:a00:5"},
+		"6to4.example.com":    {"2002:a00:5::1"},
+		"6to4pub.example.com": {"2002:8c52:7003::1"},
+		"v6.example.com":      {"2606:50c0:8000::153"},
 	}, nil)
 	for remote, wantErr := range map[string]bool{
 		"https://git.example.com/o/r.git":        false,
@@ -382,6 +394,10 @@ func TestCheckResolvedHostRefusesANameThatResolvesInward(t *testing.T) {
 		"ssh://git@mixed.example.com/o/r.git":    true,
 		"https://meta.example.com/o/r.git":       true,
 		"https://nat64.example.com/o/r.git":      true,
+		"https://compat.example.com/o/r.git":     true,
+		"https://siit.example.com/o/r.git":       true,
+		"https://6to4.example.com/o/r.git":       true,
+		"https://6to4pub.example.com/o/r.git":    false,
 		"https://unknown.example.com/o/r.git":    false,
 		"https://127.0.0.1/o/r.git":              true,
 		"https://[::ffff:10.0.0.1]:8443/o/r.git": true,

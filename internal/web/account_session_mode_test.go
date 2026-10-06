@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -91,5 +92,29 @@ func TestOAuthSignInEndsTheBrowsersEarlierSession(t *testing.T) {
 	defer ctrl.mu.Unlock()
 	if len(ctrl.logouts) != 1 || ctrl.logouts[0] != "earlier-session" {
 		t.Fatalf("logouts = %v, want the earlier session ended", ctrl.logouts)
+	}
+}
+
+func TestPasswordSignInEndsTheBrowsersEarlierSession(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/login", "/login/bootstrap"} {
+		ctrl := newIdentityController(t, true)
+		form := url.Values{"username": {"admin"}, "password": {"correct-horse"}, "csrf_token": {"tok"}}
+		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example"+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "https://dashboard.example")
+		req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "tok"})
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "earlier-session"})
+		rec := httptest.NewRecorder()
+		teamDashboard(t, ctrl.URL).ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("POST %s = %d: %s", path, rec.Code, rec.Body)
+		}
+		ctrl.mu.Lock()
+		logouts := append([]string{}, ctrl.logouts...)
+		ctrl.mu.Unlock()
+		if len(logouts) != 1 || logouts[0] != "earlier-session" {
+			t.Errorf("POST %s: logouts = %v, want the earlier session ended", path, logouts)
+		}
 	}
 }

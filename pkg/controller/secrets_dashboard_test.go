@@ -236,3 +236,22 @@ func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
+	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	for _, req := range []struct{ method, path string }{
+		{"POST", "/api/v1/team/cli-tokens"},
+		{"GET", "/api/v1/runs/" + f.runA},
+		{"GET", "/api/v1/runs/" + f.runA + "/nodes"},
+	} {
+		code, _, h := secretsRequest(t, f, req.method, req.path, f.ownerA, nil)
+		if code >= 300 || h.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s %s = %d with Cache-Control %q", req.method, req.path, code, h.Get("Cache-Control"))
+		}
+	}
+	for _, path := range []string{"/.well-known/jwks.json", "/api/v1/health"} {
+		if _, _, h := secretsRequest(t, f, "GET", path, "", nil); h.Get("Cache-Control") == "no-store" {
+			t.Errorf("public GET %s carries Cache-Control: no-store", path)
+		}
+	}
+}

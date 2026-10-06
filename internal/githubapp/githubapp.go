@@ -59,6 +59,10 @@ var (
 	// permission the request needs, as when its owner has not yet accepted
 	// one the App added.
 	ErrPermissionMissing = errors.New("githubapp: the installation has not granted the permission")
+	// ErrTooManyRepositories means an installation covers more repositories
+	// than [Client.InstallationRepositories] lists, so the list it returns
+	// confirms the repositories it names and says nothing of the others.
+	ErrTooManyRepositories = errors.New("githubapp: the installation covers more repositories than can be listed")
 )
 
 // APIError is an answer from GitHub that is none of the errors above.
@@ -433,8 +437,9 @@ func (c *Client) mintToken(ctx context.Context, installation int64, request map[
 
 const maxRepositoryPages = 10
 
-// InstallationRepositories lists the repositories installation covers, up to
-// 1000, with a token that can read nothing but metadata.
+// InstallationRepositories lists the repositories installation covers with a
+// token that can read nothing but metadata. For an installation covering more
+// than 1000 it returns the first 1000 with [ErrTooManyRepositories].
 func (c *Client) InstallationRepositories(ctx context.Context, installation int64) ([]Repository, error) {
 	jwt, err := c.appJWT(time.Now())
 	if err != nil {
@@ -474,10 +479,10 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation int6
 		}
 		out = append(out, resp.Repositories...)
 		if len(resp.Repositories) < 100 || len(out) >= resp.TotalCount {
-			break
+			return out, nil
 		}
 	}
-	return out, nil
+	return out, fmt.Errorf("%w: installation %d", ErrTooManyRepositories, installation)
 }
 
 // ResolveCommit reads the commit selected by a branch or tag with a token

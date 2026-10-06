@@ -195,6 +195,9 @@ func routableIP(ip net.IP) bool {
 		return false
 	}
 	addr = addr.Unmap()
+	if v4, ok := embeddedIPv4(addr); ok {
+		return routableIP(v4.AsSlice())
+	}
 	for _, block := range specialPurposeBlocks {
 		if block.Contains(addr) {
 			return false
@@ -212,6 +215,28 @@ var specialPurposeBlocks = []netip.Prefix{
 	netip.MustParsePrefix("198.18.0.0/15"),
 	netip.MustParsePrefix("255.255.255.255/32"),
 	netip.MustParsePrefix("64:ff9b::/96"),
+}
+
+// safety: a host that routes IPv4-compatible, SIIT-translated or 6to4
+// addresses delivers them to the IPv4 address they carry, so each is only as
+// routable as that address.
+var (
+	ipv4Compatible = netip.MustParsePrefix("::/96")
+	ipv4Translated = netip.MustParsePrefix("::ffff:0:0:0/96")
+	sixToFour      = netip.MustParsePrefix("2002::/16")
+)
+
+func embeddedIPv4(addr netip.Addr) (netip.Addr, bool) {
+	b := addr.As16()
+	switch {
+	case !addr.Is6():
+		return netip.Addr{}, false
+	case ipv4Compatible.Contains(addr), ipv4Translated.Contains(addr):
+		return netip.AddrFrom4([4]byte(b[12:16])), true
+	case sixToFour.Contains(addr):
+		return netip.AddrFrom4([4]byte(b[2:6])), true
+	}
+	return netip.Addr{}, false
 }
 
 func parseHostIP(host string) net.IP {

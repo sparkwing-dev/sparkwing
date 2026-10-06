@@ -545,3 +545,34 @@ func TestReportAttempt_ManySiblingsFinishingTogetherReleaseTheJoinOnce(t *testin
 	f.mustReport(t, "join", "success")
 	f.wantRun(t, "success")
 }
+
+// A plan listed deepest-first, where every node depends on every earlier one,
+// is the worst order for a cascade: one failed root must still decide each
+// dependent once, in the same report, with the verdict its upstreams imply.
+func TestReportAttempt_AFailedRootCascadesThroughADenseReversedPlan(t *testing.T) {
+	const depth = 100
+	f := newDispatchRun(t, "run-dense-cascade")
+	specs := []string{`rescue|"on_failure_of":"n99"`, "after-rescue:rescue"}
+	for i := depth - 1; i >= 0; i-- {
+		var deps []string
+		for j := range i {
+			deps = append(deps, fmt.Sprintf("n%d", j))
+		}
+		specs = append(specs, fmt.Sprintf("n%d:%s", i, strings.Join(deps, ",")))
+	}
+	f.mustAccept(t, planOf(specs...))
+	f.wantReleased(t, "n0", true)
+	f.mustReport(t, "n0", "failed")
+	for i := 1; i < depth; i++ {
+		id := fmt.Sprintf("n%d", i)
+		f.wantOutcome(t, id, "cancelled")
+		if n := f.node(t, id); n.Error != "upstream-failed" {
+			t.Fatalf("%s error = %q, want upstream-failed", id, n.Error)
+		}
+	}
+	f.wantOutcome(t, "rescue", "skipped")
+	f.wantReleased(t, "after-rescue", true)
+	f.wantRun(t, "running")
+	f.mustReport(t, "after-rescue", "success")
+	f.wantRun(t, "failed")
+}

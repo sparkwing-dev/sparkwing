@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -138,14 +137,7 @@ func oauthCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 			refuseOAuth(w, r, opts, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return
 		}
-		// safety: the browser's earlier session would otherwise stay live on the
-		// controller after its cookie is overwritten, with nothing left to end it.
-		if prior, err := r.Cookie(cookieName(sessionCookieName, secure)); err == nil &&
-			prior.Value != "" && prior.Value != exchanged.SessionID {
-			if err := controllerLogout(r.Context(), controllerURL, prior.Value); err != nil {
-				slog.Warn("oauth sign-in could not end the browser's earlier session", "err", err)
-			}
-		}
+		endPriorSession(r, controllerURL, secure, exchanged.SessionID)
 		setSessionCookies(w, &loginResp{SessionID: exchanged.SessionID, CSRFToken: sess.CSRFToken}, secure)
 		renderSignedIn(w, safeNext(flow.Next))
 	}

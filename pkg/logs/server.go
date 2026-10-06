@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1032,11 +1033,18 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, selectErr.Error(), http.StatusBadRequest)
 		return
 	}
-	var data []byte
-	if selected {
-		data, err = readLogFile(root, selectedPath)
-	} else {
-		data, err = readNodeLogData(root, runID, nodeID)
+	paths := []string{selectedPath}
+	if !selected {
+		var names []string
+		names, err = nodeLogNames(root, runID, nodeID)
+		paths = paths[:0]
+		for _, name := range names {
+			paths = append(paths, filepath.Join(runID, name))
+		}
+	}
+	var logical *logicalLog
+	if err == nil {
+		logical, err = snapshotLogicalLog(root, paths)
 	}
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1047,22 +1055,30 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "open node log", err)
 		return
 	}
+	defer logical.close()
+	out := bufio.NewWriter(w)
 	if filter.lineNumbers {
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		if err := filter.writeNumbered(w, data); err != nil {
-			s.logger.Warn("write numbered log matches", "err", err)
+		err = filter.writeNumbered(out, logical.reader())
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if filter.passThrough() {
+			// #nosec G705 -- the response is text/plain, never HTML
+			_, err = io.Copy(out, logical.reader())
+		} else {
+			err = filter.write(out, logical.reader)
 		}
-		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if filter.passThrough() {
-		// #nosec G705 -- the response is text/plain, never HTML
-		_, _ = w.Write(data)
-		return
+	if err == nil {
+		err = out.Flush()
 	}
-	// #nosec G705 -- the response is text/plain, never HTML
-	_, _ = w.Write(filter.apply(data))
+	if err != nil {
+		// safety: the status is already sent, so aborting the connection is
+		// the only way a client can tell a failed read from a complete log.
+		s.logger.Warn("read node log", "run", runID, "node", nodeID, "err", err)
+		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http recovers this sentinel and drops the connection
+	}
 }
 
 type logFilter struct {
@@ -1119,77 +1135,101 @@ func (f logFilter) passThrough() bool {
 	return f.tail == 0 && f.head == 0 && f.lineStart == 0 && f.grep == ""
 }
 
-func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
+func (f logFilter) writeNumbered(w io.Writer, r io.Reader) error {
 	encoder := json.NewEncoder(w)
-	count := 0
 	needle := []byte(f.grep)
-	for lineNo := 1; len(data) > 0; lineNo++ {
-		line := data
-		if end := bytes.IndexByte(data, '\n'); end >= 0 {
-			line, data = data[:end], data[end+1:]
-		} else {
-			data = nil
+	lineNo, count := 0, 0
+	var writeErr error
+	err := eachLine(r, func(line []byte) bool {
+		lineNo++
+		text := bytes.TrimSuffix(line, []byte{'\n'})
+		if !bytes.Contains(text, needle) {
+			return true
 		}
-		if !bytes.Contains(line, needle) {
-			continue
-		}
-		if err := encoder.Encode(GrepLine{LineNo: lineNo, Line: string(line)}); err != nil {
-			return err
+		if writeErr = encoder.Encode(GrepLine{LineNo: lineNo, Line: string(text)}); writeErr != nil {
+			return false
 		}
 		count++
-		if f.maxMatches > 0 && count >= f.maxMatches {
-			break
-		}
-	}
-	return nil
+		return f.maxMatches == 0 || count < f.maxMatches
+	})
+	return errors.Join(err, writeErr)
 }
 
-func (f logFilter) apply(data []byte) []byte {
-	a, b := max(1, f.lineStart), f.lineEnd
-	needle := []byte(f.grep)
-	walk := func(visit func([]byte)) {
-		matched := 0
-		for rest := data; len(rest) > 0; {
-			end := bytes.IndexByte(rest, '\n')
-			line, text := rest, rest
-			if end >= 0 {
-				line, text, rest = rest[:end+1], rest[:end], rest[end+1:]
-			} else {
-				rest = nil
-			}
-			if !bytes.Contains(text, needle) {
-				continue
-			}
-			matched++
-			if matched < a {
-				continue
-			}
-			if b > 0 && matched > b {
-				break
-			}
-			visit(line)
+// perf: tail needs the selection's length first, so it reads the log twice rather than hold lines.
+func (f logFilter) write(w io.Writer, open func() io.Reader) error {
+	first, last := 1, 0
+	if f.tail > 0 {
+		total := 0
+		if err := f.walk(open(), func([]byte) bool { total++; return true }); err != nil {
+			return err
 		}
-	}
-	total := 0
-	walk(func([]byte) { total++ })
-	if total == 0 {
-		return nil
-	}
-	first, last := 1, total
-	if f.tail > 0 && total > f.tail {
-		first = total - f.tail + 1
-	} else if f.head > 0 && total > f.head {
+		if total > f.tail {
+			first = total - f.tail + 1
+		} else {
+			last = f.head
+		}
+	} else {
 		last = f.head
 	}
-	var out []byte
 	selected := 0
-	walk(func(line []byte) {
+	var writeErr error
+	err := f.walk(open(), func(line []byte) bool {
 		selected++
-		if selected >= first && selected <= last {
-			out = append(out, line...)
+		if last > 0 && selected > last {
+			return false
 		}
+		if selected >= first {
+			_, writeErr = w.Write(line)
+		}
+		return writeErr == nil
 	})
-	return out
+	return errors.Join(err, writeErr)
+}
+
+// safety: grep selects before the lines range, so range numbers count matches.
+func (f logFilter) walk(r io.Reader, visit func([]byte) bool) error {
+	a, b := max(1, f.lineStart), f.lineEnd
+	needle := []byte(f.grep)
+	matched := 0
+	return eachLine(r, func(line []byte) bool {
+		if !bytes.Contains(bytes.TrimSuffix(line, []byte{'\n'}), needle) {
+			return true
+		}
+		matched++
+		if matched < a {
+			return true
+		}
+		if b > 0 && matched > b {
+			return false
+		}
+		return visit(line)
+	})
+}
+
+// perf: only a line longer than the read buffer is copied.
+func eachLine(r io.Reader, visit func([]byte) bool) error {
+	br := bufio.NewReaderSize(r, 32<<10)
+	var long []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			long = append(long, chunk...)
+			continue
+		}
+		line := chunk
+		if long != nil {
+			line, long = append(long, chunk...), nil
+		}
+		if len(line) > 0 && !visit(line) {
+			return nil
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func parseLinesRange(spec string) (int, int, error) {
@@ -1346,8 +1386,18 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
-	offsets := map[string]int64{}
-	pending := map[string]string{}
+	files := map[string]*streamFile{}
+	chunk := make([]byte, 32<<10)
+	var event []byte
+	emit := func(line []byte) error {
+		event = appendSSEData(event[:0], line)
+		_, err := out.Write(event)
+		// perf: one long line must not stay resident for the stream's lifetime.
+		if cap(event) > len(chunk) {
+			event = nil
+		}
+		return err
+	}
 	for {
 		select {
 		case <-r.Context().Done():
@@ -1366,27 +1416,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			wrote := false
 			for _, name := range names {
-				data, readErr := readLogFile(root, filepath.Join(runID, name))
-				if readErr != nil {
-					continue
+				file := files[name]
+				if file == nil {
+					file = &streamFile{}
+					files[name] = file
 				}
-				if int64(len(data)) < offsets[name] {
-					offsets[name] = 0
-					pending[name] = ""
+				sent, err := file.poll(root, filepath.Join(runID, name), chunk, emit)
+				if err != nil {
+					return
 				}
-				if int64(len(data)) == offsets[name] {
-					continue
-				}
-				buf := data[offsets[name]:]
-				offsets[name] = int64(len(data))
-				parts := splitKeepPartial(pending[name] + string(buf))
-				pending[name] = parts.trailing
-				for _, line := range parts.complete {
-					if _, err := fmt.Fprintf(out, "data: %s\n\n", sseEscape(line)); err != nil {
-						return
-					}
-					wrote = true
-				}
+				wrote = wrote || sent
 			}
 			if wrote {
 				if err := out.Flush(); err != nil {
@@ -1397,25 +1436,65 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type splitResult struct {
-	complete []string
-	trailing string
+// perf: each attributed file keeps its offset so a poll reads only appended bytes.
+type streamFile struct {
+	offset  int64
+	partial []byte
 }
 
-func splitKeepPartial(s string) splitResult {
-	out := splitResult{}
-	lines := strings.Split(s, "\n")
-	for i := 0; i < len(lines)-1; i++ {
-		out.complete = append(out.complete, lines[i])
+// safety: a read failure leaves the file for the next poll; only a write failure ends the stream.
+func (s *streamFile) poll(root *os.Root, path string, chunk []byte, emit func([]byte) error) (bool, error) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return false, nil
 	}
-	out.trailing = lines[len(lines)-1]
-	return out
+	size := info.Size()
+	if size < s.offset {
+		s.offset, s.partial = 0, nil
+	}
+	if size == s.offset {
+		return false, nil
+	}
+	f, err := root.Open(path)
+	if err != nil {
+		return false, nil
+	}
+	defer func() { _ = f.Close() }()
+	// safety: the Stat size bounds this poll; bytes appended meanwhile belong to the next one.
+	section := io.NewSectionReader(f, s.offset, size-s.offset)
+	sent := false
+	for {
+		n, readErr := section.Read(chunk)
+		s.offset += int64(n)
+		data := chunk[:n]
+		for end := bytes.IndexByte(data, '\n'); end >= 0; end = bytes.IndexByte(data, '\n') {
+			line := data[:end]
+			if len(s.partial) > 0 {
+				line = append(s.partial, line...)
+				s.partial = nil
+			}
+			if err := emit(line); err != nil {
+				return sent, err
+			}
+			sent = true
+			data = data[end+1:]
+		}
+		s.partial = append(s.partial, data...)
+		if readErr != nil {
+			return sent, nil
+		}
+	}
 }
 
-func sseEscape(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
+// safety: a carriage return would end the SSE event early; a split line holds no newline.
+func appendSSEData(dst, line []byte) []byte {
+	dst = append(dst, "data: "...)
+	for _, b := range line {
+		if b != '\r' {
+			dst = append(dst, b)
+		}
+	}
+	return append(dst, '\n', '\n')
 }
 
 // safety: os.Root confines every open, readdir and remove to the runs
@@ -1509,20 +1588,80 @@ func nodeTriggerAttemptPath(runID, nodeID string, generation int64, ordinal int)
 	return filepath.Join(runID, ".attempts", nodeFile(nodeID), fmt.Sprintf("a%020d_t%020d.log", ordinal, generation))
 }
 
-func readNodeLogData(root *os.Root, runID, nodeID string) ([]byte, error) {
-	names, err := nodeLogNames(root, runID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	var out bytes.Buffer
-	for _, name := range names {
-		data, err := readLogFile(root, filepath.Join(runID, name))
+// safety: a partial line at the end of one attempt continues into the next, and
+// lengths fixed at the snapshot keep every pass on the same bytes while the node appends.
+type logicalLog struct {
+	root  *os.Root
+	paths []string
+	// safety: identities from the snapshot stop a file deleted and recreated
+	// mid-response from being served as the bytes that were measured.
+	infos []os.FileInfo
+	// safety: one file at a time, so descriptors do not grow with attempt history.
+	file *os.File
+}
+
+func snapshotLogicalLog(root *os.Root, paths []string) (*logicalLog, error) {
+	l := &logicalLog{root: root, paths: paths}
+	for _, path := range paths {
+		info, err := root.Stat(path)
 		if err != nil {
 			return nil, err
 		}
-		_, _ = out.Write(data)
+		l.infos = append(l.infos, info)
 	}
-	return out.Bytes(), nil
+	return l, nil
+}
+
+func (l *logicalLog) reader() io.Reader {
+	l.close()
+	return &logicalReader{log: l}
+}
+
+// safety: closing a file opened only for reading cannot lose log bytes.
+func (l *logicalLog) close() {
+	if l.file != nil {
+		_ = l.file.Close()
+		l.file = nil
+	}
+}
+
+type logicalReader struct {
+	log     *logicalLog
+	next    int
+	section io.Reader
+}
+
+func (r *logicalReader) Read(p []byte) (int, error) {
+	for {
+		if r.section == nil {
+			if r.next == len(r.log.paths) {
+				return 0, io.EOF
+			}
+			f, err := r.log.root.Open(r.log.paths[r.next])
+			if err != nil {
+				return 0, err
+			}
+			r.log.file = f
+			info, err := f.Stat()
+			if err != nil {
+				return 0, err
+			}
+			if !os.SameFile(info, r.log.infos[r.next]) {
+				return 0, fmt.Errorf("%s replaced during read", r.log.paths[r.next])
+			}
+			r.section = io.NewSectionReader(f, 0, r.log.infos[r.next].Size())
+			r.next++
+		}
+		n, err := r.section.Read(p)
+		if !errors.Is(err, io.EOF) {
+			return n, err
+		}
+		r.section = nil
+		r.log.close()
+		if n > 0 {
+			return n, nil
+		}
+	}
 }
 
 func readLogFile(root *os.Root, path string) ([]byte, error) {

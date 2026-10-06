@@ -160,6 +160,7 @@ func TestGitCredentialMachineOptInIsForTheTeamsOwnRunnerTokens(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
+	seedMinter(t, st, "acme", "owner", store.RoleOwner)
 	now := time.Now()
 	_, tok, err := acme.CreateRunnerToken(ctx, "agent:laptop", []string{"nodes.claim"}, "owner", now)
 	if err != nil {

@@ -230,7 +230,10 @@ reading as an opt-out. Opting in without TLS also sets
 on the web Deployment, so the login gate still works over plain HTTP on
 a pod that binds a non-loopback address. The `ingress.tls` check is
 presence-only: an entry without `secretName` leaves TLS to the ingress
-controller's default certificate.
+controller's default certificate. An `ingress.tls` entry also passes
+`--hsts` to the web Deployment, so the dashboard sends
+Strict-Transport-Security, builds https OAuth redirect URIs and requires
+an https Origin on unsafe requests.
 
 ## Values cheat sheet
 
@@ -287,7 +290,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `ingress.enabled` | Create the Ingress resource. | `false` |
 | `ingress.className` | IngressClass. Empty = cluster default. | `""` |
 | `ingress.hosts[].host` | Hostname for the dashboard. | `sparkwing.example.com` |
-| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. | `[]` |
+| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. Any entry passes `--hsts` to the dashboard. | `[]` |
 | `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. Bool only. | `false` |
 
 ### Runner-bundle sub-chart
