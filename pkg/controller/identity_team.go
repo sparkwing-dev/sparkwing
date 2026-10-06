@@ -343,7 +343,7 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "mint runner token", err)
+		writeIdentityError(w, s, r, "mint runner token", err)
 		return
 	}
 	s.logger.Info("runner token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)

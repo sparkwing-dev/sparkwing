@@ -1399,6 +1399,16 @@ func (t *Tenant) createRunnerTokenOnce(
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return "", nil, err
 	}
+	// safety: the caller's role check ran before this transaction, and a
+	// removal or demotion committed since then has already swept the tokens
+	// this account minted, so a runner token minted now would outlive it.
+	role, err := t.roleTx(ctx, tx, createdBy)
+	if err != nil {
+		return "", nil, err
+	}
+	if !role.AtLeast(RoleEditor) {
+		return "", nil, ErrRoleAboveOwn
+	}
 	at := now.UTC().Unix()
 	var live int
 	if err := tx.QueryRowContext(ctx, `
