@@ -20,7 +20,9 @@ not found. See [Teams and sign-in](auth.md#teams-and-sign-in).
 
 Within a team, scopes and member roles decide which operations a caller may
 perform. Repository and environment names do not create separate tenant
-boundaries inside that team.
+boundaries inside that team. Repository and git ref do bound a run's cache
+writes: a run's cache, binary and artifact entries are written under its own
+repository and ref, as [Cache service](#cache-service) describes.
 
 **Operators and service credentials have separate authority.** `admin` is
 deployment authority. Service scopes such as `credits.grant`, `claims.launch`,
@@ -713,6 +715,18 @@ the mount rejects a request carrying no bearer before it extends the half-hour
 stream deadline or proxies anything, and caps concurrent Git streams. A
 direct cache receives the run's cache grant instead, which opens only that
 team's blob trees.
+
+Within a team, a grant carries the repository and refs the controller read
+from the run's trigger, and the cache writes `/cache`, `/bin` and `/artifacts`
+entries only under the run's own ref. It reads that ref, the pull request's
+base branch, the default branch, and then entries written before grants
+carried a scope, in that order. A branch's run therefore cannot replace or
+delete an entry its base branch's runs restore, and another repository's run
+does not read it. Only a signed GitHub webhook vouches for a ref: a run started
+any other way, including by a member with `runs.write` naming `main`, writes
+under a ref of its own and never over what `main`'s pushes restore. Entries a
+run writes under its own ref are still restored by that ref's later runs, so
+whoever can push a branch can poison that branch's cache.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's

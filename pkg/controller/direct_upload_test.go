@@ -123,7 +123,7 @@ func claimedUploadGrant(t *testing.T, f *appFixture, team, runID, prefix string)
 		t.Fatalf("node claim = %+v prefix=%q err=%v", claim, tokenPrefix, err)
 	}
 	claim.TokenPrefix = tokenPrefix
-	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", team, runID, time.Now(), time.Hour, &claim)
+	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", team, runID, time.Now(), time.Hour, &claim, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestPendingTriggerCanCommitBinaryCacheUpload(t *testing.T) {
 	}
 	t.Setenv(authwire.CacheGrantKeyEnv, "direct-test-grant-key")
 	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", owner.team, "run-pending-cache", time.Now(), time.Hour,
-		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: prefix})
+		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: prefix}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

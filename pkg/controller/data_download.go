@@ -344,12 +344,24 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		objectKey, err = bucket.Key(string(team), req.Key)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+		// safety: the cache writes a grant's binaries under its run's scope, so a
+		// grant reads the scopes it would read there, in the same order.
+		scopes := []string{""}
+		if grant != nil {
+			scopes = grant.ScopePrefixes()
 		}
-		object, headErr := bucket.Head(r.Context(), string(team), req.Key)
+		var object teamblob.Object
+		headErr := teamblob.ErrNotFound
+		for _, scope := range scopes {
+			objectKey, err = bucket.Key(string(team), scope+req.Key)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			if object, headErr = bucket.Head(r.Context(), string(team), scope+req.Key); !errors.Is(headErr, teamblob.ErrNotFound) {
+				break
+			}
+		}
 		if errors.Is(headErr, teamblob.ErrNotFound) {
 			http.NotFound(w, r)
 			return

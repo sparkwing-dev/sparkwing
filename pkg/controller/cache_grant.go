@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // CacheGrantResponse is the body of POST /api/v1/runs/{id}/cache-grant.
@@ -128,7 +130,12 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			}
 			claim = &authwire.CacheClaim{Kind: "trigger", Generation: generation, Principal: identity.Principal, TokenPrefix: identity.TokenPrefix}
 		}
-		grant, err := authwire.MintClaimCacheGrant(key, string(team), runID, now, ttl, claim)
+		scope, err := s.cacheGrantScope(r.Context(), team, runID)
+		if err != nil {
+			s.writeInternalError(w, r, "read cache grant scope", err)
+			return
+		}
+		grant, err := authwire.MintClaimCacheGrant(key, string(team), runID, now, ttl, claim, scope)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -144,4 +151,37 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			ExpiresAt: expiresAt.UTC(),
 		})
 	})
+}
+
+// safety: the cache scopes every key by the repository and refs a grant
+// carries, so they come from the run's trigger and never from the caller. A
+// run with no trigger gets the empty scope, which no branch's run reads.
+func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID string) (*authwire.CacheScope, error) {
+	trigger, err := s.store.GetTrigger(ctx, runID)
+	if errors.Is(err, store.ErrNotFound) {
+		return &authwire.CacheScope{Refs: []string{"manual:"}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if trigger.Team != team {
+		return nil, errors.New("the run's trigger belongs to another team")
+	}
+	repo, own, refs, err := s.triggerCacheScope(ctx, trigger)
+	if err != nil {
+		return nil, err
+	}
+	if repo == "" && trigger.Repo != "" {
+		repo = "name:" + trigger.Repo
+	}
+	// safety: only a signed webhook vouches for a ref, as the OIDC subject's trigger
+	// does, so any other run writes beside that ref's entries and never over them.
+	write := own
+	if trigger.TriggerSource != oidcWebhookSource || trigger.TriggerEnv[sparkwing.EnvGitHubEventName] == "" {
+		write = "manual:" + own
+	}
+	if len(refs) == 0 || refs[0] != write {
+		refs = append([]string{write}, refs...)
+	}
+	return &authwire.CacheScope{Repo: repo, Refs: refs}, nil
 }

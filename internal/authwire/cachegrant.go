@@ -4,10 +4,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -28,6 +30,41 @@ type CacheGrant struct {
 	Run     string      `json:"r"`
 	Expires int64       `json:"e"`
 	Claim   *CacheClaim `json:"c,omitempty"`
+	Scope   *CacheScope `json:"s,omitempty"`
+}
+
+// CacheScope is the repository and git refs the controller read from the
+// grant's run. Refs[0] is the run's own ref, the only one the grant writes
+// under; the rest are the pull request's base and the default branch, which
+// it also reads, in that order.
+type CacheScope struct {
+	Repo string   `json:"p"`
+	Refs []string `json:"f"`
+}
+
+// ScopePrefixes returns the key prefixes, within the grant's team namespace,
+// that the grant reads in order. It writes only under the first. A grant with
+// a scope reads the unscoped prefix last, so entries written before grants
+// carried a scope stay readable but are never written again; a grant without
+// one, minted by a controller that predates scopes, keeps the unscoped prefix.
+func (g CacheGrant) ScopePrefixes() []string {
+	if g.Scope == nil {
+		return []string{""}
+	}
+	refs := g.Scope.Refs
+	if len(refs) == 0 {
+		refs = []string{""}
+	}
+	var out []string
+	for _, ref := range refs {
+		// safety: a hash keeps any repository name or ref a single safe path
+		// segment, and the NUL keeps two different pairs from joining alike.
+		sum := sha256.Sum256([]byte(g.Scope.Repo + "\x00" + ref))
+		if p := "scopes/" + hex.EncodeToString(sum[:16]) + "/"; !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return append(out, "")
 }
 
 // CacheClaim binds a signed download to the claim that requested its grant.
@@ -75,11 +112,12 @@ const CacheGrantKeyEnv = "SPARKWING_CACHE_GRANT_KEY"
 // named by [CacheGrantKeyEnv], valid until now+ttl. The controller and the
 // cache hold that key; a runner does not, so it cannot mint.
 func MintCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration) (string, error) {
-	return MintClaimCacheGrant(signingKey, team, run, now, ttl, nil)
+	return MintClaimCacheGrant(signingKey, team, run, now, ttl, nil, nil)
 }
 
-// MintClaimCacheGrant signs a cache grant with its issuing live claim.
-func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration, claim *CacheClaim) (string, error) {
+// MintClaimCacheGrant signs a cache grant with its issuing live claim and the
+// repository and refs of its run.
+func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration, claim *CacheClaim, scope *CacheScope) (string, error) {
 	if strings.TrimSpace(signingKey) == "" {
 		return "", errors.New("cache grant: no grant key to sign with")
 	}
@@ -89,7 +127,7 @@ func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.D
 	if run == "" || ttl <= 0 {
 		return "", errors.New("cache grant: a run and a positive lifetime are required")
 	}
-	payload, err := json.Marshal(CacheGrant{Team: team, Run: run, Expires: now.Add(ttl).Unix(), Claim: claim})
+	payload, err := json.Marshal(CacheGrant{Team: team, Run: run, Expires: now.Add(ttl).Unix(), Claim: claim, Scope: scope})
 	if err != nil {
 		return "", err
 	}

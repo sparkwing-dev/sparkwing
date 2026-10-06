@@ -1276,7 +1276,7 @@ func serveBin(w http.ResponseWriter, r *http.Request, d blobDirs) {
 
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		f, digest, err := openBinForRead(d.bins, hash)
+		f, digest, err := openBinForRead(filepath.Dir(d.find(binsOf, hash)), hash)
 		if err != nil {
 			if os.IsNotExist(err) {
 				http.Error(w, "not found", http.StatusNotFound)
@@ -1423,7 +1423,7 @@ func serveCache(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	switch r.Method {
 	case http.MethodHead:
 		// #nosec G703 -- the blob path is built from a pattern-validated hash
-		_, err := os.Stat(path)
+		_, err := os.Stat(d.find(cachesOf, key+".tar.gz"))
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -1432,7 +1432,7 @@ func serveCache(w http.ResponseWriter, r *http.Request, d blobDirs) {
 
 	case http.MethodGet:
 		// #nosec G703 -- the blob path is built from a pattern-validated hash
-		f, err := os.Open(path)
+		f, err := os.Open(d.find(cachesOf, key+".tar.gz"))
 		if err != nil {
 			if gitcacheCacheMisses != nil {
 				gitcacheCacheMisses.Add(r.Context(), 1, metric.WithAttributes(
@@ -1562,10 +1562,11 @@ func serveArtifacts(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	case http.MethodPost:
 		artifactUpload(w, r, d.artifacts, jobID)
 	case http.MethodGet:
+		root := filepath.Dir(d.find(artifactsOf, jobID))
 		if r.URL.Query().Has("glob") {
-			artifactDownload(w, r, d.artifacts, jobID)
+			artifactDownload(w, r, root, jobID)
 		} else {
-			artifactList(w, r, d.artifacts, jobID)
+			artifactList(w, r, root, jobID)
 		}
 	default:
 		http.Error(w, "GET or POST only", http.StatusMethodNotAllowed)

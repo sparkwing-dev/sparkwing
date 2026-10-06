@@ -65,7 +65,7 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	if _, err := st.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`, token.Principal, token.Prefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: token.Prefix})
+	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: token.Prefix}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondGrant, err := authwire.MintClaimCacheGrant("grant-key", firstClaim.Team, firstClaim.Run, time.Now().Add(-time.Minute), time.Hour, firstClaim.Claim)
+	secondGrant, err := authwire.MintClaimCacheGrant("grant-key", firstClaim.Team, firstClaim.Run, time.Now().Add(-time.Minute), time.Hour, firstClaim.Claim, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

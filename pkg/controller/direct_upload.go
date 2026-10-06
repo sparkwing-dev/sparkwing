@@ -109,7 +109,11 @@ func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (rep
 	if trigger.Team != store.Team(grant.Team) {
 		return "", "", nil, errors.New("the cache grant's run belongs to another team")
 	}
-	repoID, err := s.store.TriggerRepoID(ctx, trigger.Team, grant.Run)
+	return s.triggerCacheScope(ctx, trigger)
+}
+
+func (s *Server) triggerCacheScope(ctx context.Context, trigger *store.Trigger) (repo, write string, read []string, err error) {
+	repoID, err := s.store.TriggerRepoID(ctx, trigger.Team, trigger.ID)
 	if err != nil {
 		return "", "", nil, err
 	}

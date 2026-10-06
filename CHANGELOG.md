@@ -20,6 +20,17 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+- **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
+  A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
+  service writes `/cache`, `/bin` and `/artifacts` entries only under the run's own ref. It reads the run's own
+  ref, then its pull request's base, then the default branch, then entries written before this release. A
+  branch's run therefore no longer replaces or deletes what its base branch's runs restore, and a run of
+  another repository in the team no longer reads it. A run no signed webhook started writes beside its ref's
+  entries rather than over them. Nothing to configure; caches written on one branch are no longer visible to
+  other branches except through that order. See
+  [Cache entries follow the repository and ref](docs/migrations/_unreleased.md#cache-entries-follow-the-repository-and-ref).
+
 ### Fixed
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.

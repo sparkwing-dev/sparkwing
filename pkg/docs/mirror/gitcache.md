@@ -387,7 +387,13 @@ repository, and a grant opens the team's whole tree.
 
 - `/bin/...`, `/cache/...` and `/artifacts/...` read and write the team's own
   tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
-  see or replace each other's bytes. A team's bins count toward the store
+  see or replace each other's bytes. Within that tree a grant writes only under
+  `scopes/<hash>/`, a hash of its run's repository and own ref, and reads its
+  own ref, its pull request's base, the default branch, and then the unscoped
+  entries written before grants carried a repository and ref. The controller
+  reads those from the run's trigger, and a run no signed webhook started
+  writes under a ref of its own. A grant minted by an older controller carries
+  none and keeps reading and writing the unscoped entries until it expires. A team's bins count toward the store
   ceiling.
 - `/git/<name>/...` with a grant for the operator's own team (`default`, a
   slug no other team can take) reads any registered mirror, SSH origins
@@ -500,8 +506,11 @@ The digest covers the window between the upload and the download: bytes altered
 in transit, or altered on the cache's disk without also rewriting the recorded
 digest, are discarded and the client recompiles. It says nothing about who
 uploaded the binary, because the cache derives the digest from the body it was
-handed. The bearer token on `PUT /bin/<name>` is what keeps an attacker from
-uploading a poisoned binary along with a digest that attests it.
+handed. The bearer on `PUT /bin/<name>` decides where an upload lands, not
+whether its bytes are honest: every run of a team holds a grant, and a grant
+writes under its run's repository and ref. A branch's run cannot replace the
+binary its base branch's runs restore, but it can upload a poisoned binary,
+with a digest that attests it, that later runs of its own ref restore.
 
 A `<name>` is one to four hyphen-joined groups of eight hex digits, optionally
 suffixed `.sha256`. That suffix is the digest sidecar a cache-backed artifact

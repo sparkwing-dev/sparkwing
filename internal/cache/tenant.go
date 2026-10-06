@@ -19,8 +19,16 @@ import (
 var teamsDir = "/data/teams"
 
 type cacheCaller struct {
-	team string
-	run  string
+	team   string
+	run    string
+	scopes []string
+}
+
+func (c cacheCaller) prefixes() []string {
+	if len(c.scopes) == 0 {
+		return []string{""}
+	}
+	return c.scopes
 }
 
 type cacheCallerKey struct{}
@@ -51,7 +59,7 @@ func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "unauthorized -- set Authorization: Bearer <token or cache grant> header", http.StatusUnauthorized)
 			return
 		}
-		ctx := context.WithValue(r.Context(), cacheCallerKey{}, cacheCaller{team: g.Team, run: g.Run})
+		ctx := context.WithValue(r.Context(), cacheCallerKey{}, cacheCaller{team: g.Team, run: g.Run, scopes: g.ScopePrefixes()})
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -61,20 +69,48 @@ type blobDirs struct {
 	bins      string
 	cache     string
 	tenant    bool
+	reads     []blobDirs
 }
+
+func (d blobDirs) readOrder() []blobDirs {
+	if len(d.reads) == 0 {
+		return []blobDirs{d}
+	}
+	return d.reads
+}
+
+func (d blobDirs) find(kind func(blobDirs) string, name string) string {
+	for _, tree := range d.readOrder() {
+		candidate := filepath.Join(kind(tree), name)
+		// #nosec G703 -- callers pass a pattern-validated key
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return filepath.Join(kind(d), name)
+}
+
+func binsOf(d blobDirs) string      { return d.bins }
+func cachesOf(d blobDirs) string    { return d.cache }
+func artifactsOf(d blobDirs) string { return d.artifacts }
 
 func dirsFor(r *http.Request) (blobDirs, error) {
 	c := callerFrom(r)
 	if c.team == "" {
 		return blobDirs{artifacts: artifactsDir, bins: binsDir, cache: cacheDir}, nil
 	}
-	root := filepath.Join(teamsDir, c.team)
-	d := blobDirs{
-		artifacts: filepath.Join(root, "artifacts"),
-		bins:      filepath.Join(root, "bins"),
-		cache:     filepath.Join(root, "cache"),
-		tenant:    true,
+	var trees []blobDirs
+	for _, prefix := range c.prefixes() {
+		root := filepath.Join(teamsDir, c.team, filepath.FromSlash(prefix))
+		trees = append(trees, blobDirs{
+			artifacts: filepath.Join(root, "artifacts"),
+			bins:      filepath.Join(root, "bins"),
+			cache:     filepath.Join(root, "cache"),
+			tenant:    true,
+		})
 	}
+	d := trees[0]
+	d.reads = trees
 	for _, dir := range []string{d.artifacts, d.bins, d.cache} {
 		// #nosec G703 -- the team is a DNS-safe slug a verified grant carried
 		if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -121,7 +121,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 		time.Now(), time.Hour, &authwire.CacheClaim{
 			Kind: "trigger", Generation: 1,
 			Principal: runner.Principal, TokenPrefix: runner.Prefix,
-		})
+		}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 			HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,
 			ReservationID: node.ReservationID, Generation: node.ClaimGeneration,
 			Principal: runner.Principal, TokenPrefix: runner.Prefix,
-		})
+		}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

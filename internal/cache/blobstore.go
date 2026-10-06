@@ -55,6 +55,32 @@ func blobError(w http.ResponseWriter, op string, err error) {
 	}
 }
 
+func getScoped(r *http.Request, rel string) (io.ReadCloser, teamblob.Object, error) {
+	c := callerFrom(r)
+	for _, prefix := range c.prefixes() {
+		rc, o, err := blobStore.Get(r.Context(), c.team, prefix+rel)
+		if !errors.Is(err, teamblob.ErrNotFound) {
+			return rc, o, err
+		}
+	}
+	return nil, teamblob.Object{}, teamblob.ErrNotFound
+}
+
+func headScoped(r *http.Request, rel string) (teamblob.Object, error) {
+	c := callerFrom(r)
+	for _, prefix := range c.prefixes() {
+		o, err := blobStore.Head(r.Context(), c.team, prefix+rel)
+		if !errors.Is(err, teamblob.ErrNotFound) {
+			return o, err
+		}
+	}
+	return teamblob.Object{}, teamblob.ErrNotFound
+}
+
+// safety: a grant writes only under its run's own repository and ref, so a branch's run
+// never replaces or deletes an entry its base branch's runs read.
+func ownScoped(r *http.Request, rel string) string { return callerFrom(r).prefixes()[0] + rel }
+
 func serveBinBlob(w http.ResponseWriter, r *http.Request) {
 	hash, valid := binStorageKey(strings.TrimPrefix(r.URL.Path, "/bin/"))
 	if !valid {
@@ -67,7 +93,7 @@ func serveBinBlob(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodHead:
-		o, err := blobStore.Head(ctx, team, rel)
+		o, err := headScoped(r, rel)
 		if errors.Is(err, teamblob.ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -80,7 +106,7 @@ func serveBinBlob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case http.MethodGet:
-		rc, o, err := blobStore.Get(ctx, team, rel)
+		rc, o, err := getScoped(r, rel)
 		if errors.Is(err, teamblob.ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -108,9 +134,9 @@ func serveBinBlob(w http.ResponseWriter, r *http.Request) {
 			blobError(w, "put bin", err)
 			return
 		}
-		putBinBlob(w, r, team, rel, hash)
+		putBinBlob(w, r, team, ownScoped(r, rel), hash)
 	case http.MethodDelete:
-		if err := blobStore.Delete(ctx, team, rel); err != nil {
+		if err := blobStore.Delete(ctx, team, ownScoped(r, rel)); err != nil {
 			blobError(w, "delete bin", err)
 			return
 		}
@@ -209,11 +235,10 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 	}
 	team := callerFrom(r).team
 	rel := "cache/" + key + ".tar.gz"
-	ctx := r.Context()
 
 	switch r.Method {
 	case http.MethodHead:
-		if _, err := blobStore.Head(ctx, team, rel); err != nil {
+		if _, err := headScoped(r, rel); err != nil {
 			if !errors.Is(err, teamblob.ErrNotFound) {
 				blobError(w, "head cache", err)
 				return
@@ -223,7 +248,7 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
-		rc, o, err := blobStore.Get(ctx, team, rel)
+		rc, o, err := getScoped(r, rel)
 		if errors.Is(err, teamblob.ErrNotFound) {
 			countCacheLookup(r, false)
 			http.Error(w, "not found", http.StatusNotFound)
@@ -258,7 +283,7 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength >= 0 {
 			size = r.ContentLength
 		}
-		n, ok := putStreamBlob(w, r, team, rel, size, "application/gzip", "cache archive", maxCacheArchiveBytes)
+		n, ok := putStreamBlob(w, r, team, ownScoped(r, rel), size, "application/gzip", "cache archive", maxCacheArchiveBytes)
 		if !ok {
 			return
 		}
@@ -360,7 +385,7 @@ func artifactUploadBlob(w http.ResponseWriter, r *http.Request, team, jobID stri
 	if r.ContentLength >= 0 {
 		size = r.ContentLength
 	}
-	n, ok := putStreamBlob(w, r, team, "artifacts/"+jobID+"/"+artifactPath, size, "application/octet-stream", "artifact", maxArtifactBytes)
+	n, ok := putStreamBlob(w, r, team, ownScoped(r, "artifacts/"+jobID+"/"+artifactPath), size, "application/octet-stream", "artifact", maxArtifactBytes)
 	if !ok {
 		return
 	}
@@ -370,20 +395,27 @@ func artifactUploadBlob(w http.ResponseWriter, r *http.Request, team, jobID stri
 	writeJSONBody(w, r, map[string]any{"path": artifactPath, "size": n})
 }
 
-func listJobBlobs(r *http.Request, team, jobID string) ([]teamblob.Object, error) {
-	prefix := "artifacts/" + jobID + "/"
-	objs, err := blobStore.List(r.Context(), team, prefix)
-	if err != nil {
-		return nil, err
+func listJobBlobs(r *http.Request, team, jobID string) ([]teamblob.Object, string, error) {
+	var objs []teamblob.Object
+	var prefix string
+	for _, scope := range callerFrom(r).prefixes() {
+		prefix = scope + "artifacts/" + jobID + "/"
+		var err error
+		if objs, err = blobStore.List(r.Context(), team, prefix); err != nil {
+			return nil, "", err
+		}
+		if len(objs) > 0 {
+			break
+		}
 	}
 	for i := range objs {
 		objs[i].Rel = strings.TrimPrefix(objs[i].Rel, prefix)
 	}
-	return objs, nil
+	return objs, prefix, nil
 }
 
 func artifactListBlob(w http.ResponseWriter, r *http.Request, team, jobID string) {
-	objs, err := listJobBlobs(r, team, jobID)
+	objs, _, err := listJobBlobs(r, team, jobID)
 	if err != nil {
 		blobError(w, "list artifacts", err)
 		return
@@ -398,7 +430,7 @@ func artifactListBlob(w http.ResponseWriter, r *http.Request, team, jobID string
 
 func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID string) {
 	glob := r.URL.Query().Get("glob")
-	objs, err := listJobBlobs(r, team, jobID)
+	objs, prefix, err := listJobBlobs(r, team, jobID)
 	if err != nil {
 		blobError(w, "list artifacts", err)
 		return
@@ -417,7 +449,6 @@ func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID st
 		http.Error(w, fmt.Sprintf("no artifacts matching %q for job %s", glob, jobID), http.StatusNotFound)
 		return
 	}
-	prefix := "artifacts/" + jobID + "/"
 	if len(matches) == 1 {
 		name := path.Base(matches[0].Rel)
 		rc, o, err := blobStore.Get(r.Context(), team, prefix+matches[0].Rel)
