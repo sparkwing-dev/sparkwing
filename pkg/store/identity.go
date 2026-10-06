@@ -1428,10 +1428,13 @@ func (t *Tenant) createRunnerTokenOnce(
 	return raw, tok, tx.Commit()
 }
 
+// safety: account deletion drops memberships without the team lock, so the
+// role is read under the membership row's lock; a read that did not wait on
+// an uncommitted deletion would let a mint land after the deletion's sweep.
 func (t *Tenant) roleTx(ctx context.Context, tx *storeTx, accountID string) (Role, error) {
 	var role string
 	err := tx.QueryRowContext(ctx,
-		`SELECT role FROM memberships WHERE team = ? AND account_id = ?`, string(t.team), accountID).Scan(&role)
+		`SELECT role FROM memberships WHERE team = ? AND account_id = ?`+tx.forUpdate(), string(t.team), accountID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotMember
 	}
