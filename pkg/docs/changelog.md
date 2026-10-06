@@ -20,27 +20,9 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-- **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
-- **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
-- **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.
-- **GitHub App webhooks:** Start `branch_delete` subscriptions on GitHub's real `delete` payload, which has no `master_branch`, at the default branch from `repository.default_branch`; a `delete` body carrying `master_branch` is a `create` body and starts nothing.
-- **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
-- **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
-- **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
-- **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
-- **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.
-- **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
-- **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
-- **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.
-- **Integration checks:** Build the MinIO fixture from pinned upstream source instead of pulling an unavailable image.
-- **Dependency proxy:** Retire inactive per-key locks after requests and eviction complete.
-
-- **Scaffolding:** Align source-build fallback and Kubernetes fixture SDK pins with v0.66.5
-- **sdk:** Return published manifest digests from Docker and Buildx pushes
-- **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
-
 ### Security
+
+- **cache:** Grants from other teams read a separate public mirror of an https origin that the cache fills with no credential, so operator-seeded commits, objects fetched with inherited credentials and commits pushed after a repository turned private stay with the operator. Existing mirrors keep serving the operator; the first foreign read after upgrade clones the public copy from origin.
 - **Controller dispatch:** Settle each node report in one dependency-ordered pass, so a failure cascading through a densely connected plan no longer holds the run's write transaction for seconds.
 - **CLI update:** Refuse a signed release asset whose binary reports a version other than the requested release, matching the install script.
 - **Clone URLs:** Refuse IPv4-compatible, SIIT-translated and 6to4 IPv6 addresses whose embedded IPv4 address is internal, both as literals and as resolved addresses.
@@ -67,7 +49,29 @@ unlock.
 - **Dashboard:** Encode run and node ids in API paths and refuse dot segments, so a crafted `?run=` link cannot turn a run action into a request to another route
 - **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
+### Fixed
+
+- **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
+- **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
+- **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.
+- **GitHub App webhooks:** Start `branch_delete` subscriptions on GitHub's real `delete` payload, which has no `master_branch`, at the default branch from `repository.default_branch`; a `delete` body carrying `master_branch` is a `create` body and starts nothing.
+- **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
+- **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
+- **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
+- **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
+- **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.
+- **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
+- **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
+- **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.
+- **Integration checks:** Build the MinIO fixture from pinned upstream source instead of pulling an unavailable image.
+- **Dependency proxy:** Retire inactive per-key locks after requests and eviction complete.
+
+- **Scaffolding:** Align source-build fallback and Kubernetes fixture SDK pins with v0.66.5
+- **sdk:** Return published manifest digests from Docker and Buildx pushes
+- **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
+
 ### Docs
+
 - **Auth:** Describe account linking as the code enforces it: a sign-in never joins an existing user by email address
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
