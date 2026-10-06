@@ -388,6 +388,7 @@ func startExecChild(self string, args []string) (Child, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
+	configureSupervisorChild(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
