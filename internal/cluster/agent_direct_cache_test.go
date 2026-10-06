@@ -154,6 +154,8 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	newRun(teamA, "run-a1")
 	newRun(teamA, "run-a2")
 	newRun(teamB, "run-b1")
+	newRun(teamA, "run-a-probe")
+	newRun(teamB, "run-b-probe")
 	laptopA, podA, laptopB := mint(teamA, "laptop-a"), mint(teamA, "pod-a"), mint(teamB, "laptop-b")
 
 	var proxied atomic.Int32
@@ -205,8 +207,19 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	}
 
 	key := pipelineKey(t, filepath.Join(origins, "acme", "app.git"))
-	grantA := orchestrator.RequestRunCacheGrant(ctx, ctrlSrv.URL, podA, "run-a2", discardLogger())
-	grantB := orchestrator.RequestRunCacheGrant(ctx, ctrlSrv.URL, laptopB, "run-b1", discardLogger())
+	probeGrant := func(token, runID string) string {
+		t.Helper()
+		claimed, err := client.NewWithToken(ctrlSrv.URL, nil, token).ClaimNodeByID(ctx, runID, "build", "probe:"+runID, time.Minute, false, nil)
+		if err != nil {
+			t.Fatalf("claim %s: %v", runID, err)
+		}
+		fenced := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+			HolderID: claimed.ClaimedBy, MembershipID: claimed.ClaimMembershipID,
+			ReservationID: claimed.ReservationID, ClaimGeneration: claimed.ClaimGeneration,
+		})
+		return orchestrator.RequestRunCacheGrant(fenced, ctrlSrv.URL, token, runID, discardLogger())
+	}
+	grantA, grantB := probeGrant(podA, "run-a-probe"), probeGrant(laptopB, "run-b-probe")
 	if err := bincache.TryBinary(ctx, cacheSrv.URL, grantA, key, filepath.Join(t.TempDir(), "bin")); err != nil {
 		t.Fatalf("team A's binary is not in the cache: %v", err)
 	}

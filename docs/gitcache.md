@@ -372,8 +372,12 @@ same name to the same URL stays idempotent.
 A multi-team controller gives runners a cache grant instead of the cache's
 token. `POST /api/v1/runs/<run>/cache-grant` answers `{grant, team,
 expires_at}`: a bearer the controller signs with the grant key
-(`SPARKWING_CACHE_GRANT_KEY`), naming the run's team and valid for six hours
-or until the requesting credential expires, whichever comes first. The cache
+(`SPARKWING_CACHE_GRANT_KEY`), naming the run's team. The route mints only
+for a live claim on the run: a claim token's grant lasts five minutes and its
+pod renews it, and a runner token must send its exact node or trigger claim
+fence, whose grant lasts six hours. A runner token with no fence gets
+`403 claim_required`. Either grant ends sooner if the requesting credential
+expires first. The cache
 verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
 without calling the controller and confines the request to that team. The
 grant key is a secret of its own: the cache refuses to start when it equals

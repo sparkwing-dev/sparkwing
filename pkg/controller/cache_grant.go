@@ -17,9 +17,10 @@ import (
 // CacheGrantResponse is the body of POST /api/v1/runs/{id}/cache-grant.
 type CacheGrantResponse struct {
 	// Grant is the bearer the runner sends to the cache in place of the
-	// cache's operator token. It opens only Team's blob stores, until
-	// ExpiresAt: six hours, or the requesting credential's own expiry if
-	// that comes first.
+	// cache's operator token. It opens only Team's blob stores, within the
+	// run's repository and ref, until ExpiresAt: five minutes for a claim
+	// token, six hours for a runner's live node or trigger claim, or the
+	// requesting credential's own expiry if that comes first.
 	Grant     string    `json:"grant"`
 	Team      string    `json:"team"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -94,6 +95,14 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			}
 		} else if node && trigger {
 			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		} else if !node && !trigger {
+			// safety: the cache honors a grant on its signature alone, so one minted with no
+			// live claim would outlive a revoked token, a removed member and a finished run.
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "claim_required", Principal: p.label(),
+				Message: "a cache grant needs the run's live node or trigger claim fence",
+			})
 			return
 		}
 		if node {
