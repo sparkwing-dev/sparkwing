@@ -234,6 +234,22 @@ func (s *Server) refVouched(ctx context.Context, trigger *store.Trigger) (bool, 
 	if root == trigger {
 		return true, nil
 	}
+	// safety: a submitter names the retry_of or parent it likes, so the lineage
+	// vouches only for the repository the root ran.
+	if repo := cacheRepository(trigger); repo == "" || repo != cacheRepository(root) {
+		return false, nil
+	}
+	rootID, err := s.store.TriggerRepoID(ctx, root.Team, root.ID)
+	if err != nil {
+		return false, err
+	}
+	ownID, err := s.store.TriggerRepoID(ctx, trigger.Team, trigger.ID)
+	if err != nil {
+		return false, err
+	}
+	if rootID > 0 && ownID > 0 && rootID != ownID {
+		return false, nil
+	}
 	return triggerOwnRef(trigger) == triggerOwnRef(root) && trigger.GitSHA == root.GitSHA &&
 		!strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") &&
 		trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] == "", nil

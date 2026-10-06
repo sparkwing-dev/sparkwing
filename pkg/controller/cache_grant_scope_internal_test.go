@@ -172,3 +172,36 @@ func TestCacheGrantKeepsTheRepositoryPort(t *testing.T) {
 		t.Fatalf("repositories on two ports share the cache scope %q", repos[0])
 	}
 }
+
+// A retry_of names a signed push, but the lineage vouches only for the
+// repository that push ran: a run naming another repository writes beside its
+// ref, whatever ref and commit it claims.
+func TestCacheGrantLineageVouchesOnlyForTheRootsRepository(t *testing.T) {
+	s, _, _ := downloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sha = "1111111111111111111111111111111111111111"
+	push := store.Trigger{
+		ID: "push-a", Pipeline: "demo", CreatedAt: time.Now(), RepoURL: "https://github.com/acme/attacker.git",
+		GitBranch: "main", GitSHA: sha, TriggerSource: oidcWebhookSource,
+		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push", "GITHUB_REF": "refs/heads/main"},
+	}
+	retry := store.Trigger{
+		ID: "retry-b", Pipeline: "demo", CreatedAt: time.Now(), RepoURL: "https://github.com/acme/protected.git",
+		GitBranch: "main", GitSHA: sha, TriggerSource: "api", RetryOf: push.ID,
+	}
+	for _, trig := range []store.Trigger{push, retry} {
+		if err := team.CreateTrigger(t.Context(), trig); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope, err := s.cacheGrantScope(t.Context(), "team-a", retry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scope.Refs[0] != "manual:refs/heads/main" {
+		t.Fatalf("another repository's push vouched for %s writes under %q", scope.Repo, scope.Refs[0])
+	}
+}
