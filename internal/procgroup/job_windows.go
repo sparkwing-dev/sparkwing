@@ -72,7 +72,8 @@ func (j *Job) Start(cmd *exec.Cmd) error {
 	}
 	// safety: suspension closes the window in which the command could spawn
 	// before it is assigned to the job.
-	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	// bug: background commands launched by consoleless parents otherwise create visible windows.
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW
 	if err := cmd.Start(); err != nil {
 		return err
 	}

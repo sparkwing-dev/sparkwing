@@ -66,7 +66,8 @@ func startAssistedChildProcess(cmd *exec.Cmd, logger *slog.Logger) (assistedChil
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	// safety: suspension closes the window in which pipeline code could spawn before job assignment.
-	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	// bug: detached dispatch must not allocate a visible console for its owned child.
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

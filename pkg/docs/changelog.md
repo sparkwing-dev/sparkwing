@@ -24,7 +24,7 @@ unlock.
 - **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
 ### Fixed
-- **Windows shell commands:** Preserve long Git Bash programs, standard input, and exit status when running native pipeline commands
+- **Windows shell commands:** Run owned commands without console windows, and preserve long Git Bash programs, standard input, and exit status when running native pipeline commands
 - **Windows dashboard builds:** Keep build locks across nested installer commands, preserve paths and exported settings across Git Bash and MSYS2, and verify build receipts through native pnpm launchers
 - **Windows configuration:** Create private configuration and secrets files with protected access lists before writing bytes, retain file identity during permission checks, and report Windows permissions correctly in `configure init`
 - **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
