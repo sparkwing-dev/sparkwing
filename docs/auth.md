@@ -1181,14 +1181,23 @@ request whose `Origin` is another site, a cross-site subresource request, and
 a browser write whose body is not `application/json`; `sparkwing serve`
 applies the same checks. Pass `--allow-origin https://dash.example` when a
 proxy on the same host publishes the dashboard under that name. A non-loopback
-listener is reachable directly, so these checks do not apply to it; use
-`--require-login` there.
+listener answers whatever name reaches it, so it cannot refuse a rebound name or
+a cross-site read; use `--require-login` there.
 
 A dashboard that carries `--token`, runs without `--require-login`, and binds a
 non-loopback address refuses to start, because every caller that reaches the
 listener would drive the controller with that token. Pass `--require-login`,
 bind a loopback address (chart: `web.addr`), or accept the exposure with
 `--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+In that mode the dashboard still refuses a write a browser sends from another
+site, so a page a visitor or an operator's `kubectl port-forward` session opens
+cannot cancel, retry or launch runs with the token. A `POST`, `PUT`, `PATCH` or
+`DELETE` answers `403` with the reason when its `Origin` host differs from the
+`Host` header, or when its `Sec-Fetch-Site` is `cross-site` or `same-site`. The
+dashboard's own pages send a matching `Origin`, and a client that sends neither
+header, such as `curl` or a script, passes unchanged, because the attack needs a
+victim's browser. A proxy in front of the dashboard must pass the browser's
+`Host` through, or same-origin writes are refused too. Reads are not checked.
 `--token` with no controller, logs, or profile backend is a startup error too:
 nothing would authenticate with it, so the dashboard would serve
 unauthenticated while the flag suggested otherwise.
