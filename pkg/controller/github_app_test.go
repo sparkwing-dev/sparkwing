@@ -1058,10 +1058,13 @@ func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
 	}
 	for _, event := range []string{"create", "delete"} {
 		branch := map[string]any{
-			"ref": "topic-" + event, "ref_type": "branch", "master_branch": "main",
+			"ref": "topic-" + event, "ref_type": "branch", "pusher_type": "user",
 			"installation": map[string]any{"id": 7},
-			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix()},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
 			"sender":       map[string]any{"login": "olga"},
+		}
+		if event == "create" {
+			branch["master_branch"] = "main"
 		}
 		check(event, branch, "dispatched")
 		branch["ref_type"] = "tag"
@@ -1426,11 +1429,13 @@ func TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents(t *testing.T) {
 		{"delete", "release", "dispatched"},
 	} {
 		payload := map[string]any{
-			"ref": tc.ref, "ref_type": "branch", "master_branch": "main",
+			"ref": tc.ref, "ref_type": "branch", "pusher_type": "user",
 			"installation": map[string]any{"id": 7},
-			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix()},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
 			"sender":       map[string]any{"login": "olga"},
-			"pusher_type":  tc.event,
+		}
+		if tc.event == "create" {
+			payload["master_branch"] = "main"
 		}
 		if _, out := f.deliver(tc.event, payload, ""); out["status"] != tc.want {
 			t.Fatalf("%s %s = %v, want %s", tc.event, tc.ref, out, tc.want)
@@ -1512,5 +1517,40 @@ func TestGitHubAppInstallationEventNamesThisApp(t *testing.T) {
 	}
 	if ids := f.installations(olga); len(ids) != 1 {
 		t.Fatalf("installations after foreign uninstalls = %v", ids)
+	}
+}
+
+// GitHub's delete payload names the deleted ref and the repository, and has
+// no master_branch, so the run starts at the repository's default branch.
+func TestGitHubAppBranchDeleteRunsOnGitHubsPayload(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "refs/heads/trunk", headSHA)
+	if code := f.subscribe(olga, "acme/widgets", "teardown", map[string]any{"push": false, "branch_delete": true}); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	deleted := func(ref string) map[string]any {
+		return map[string]any{
+			"ref": ref, "ref_type": "branch", "pusher_type": "user",
+			"installation": map[string]any{"id": 7},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "trunk"},
+			"sender":       map[string]any{"login": "olga"},
+		}
+	}
+	if _, out := f.deliver("delete", deleted("feature-x"), ""); out["status"] != "dispatched" {
+		t.Fatalf("GitHub-shaped delete = %v, want dispatched", out)
+	}
+	createShaped := deleted("feature-z")
+	createShaped["master_branch"] = "trunk"
+	if _, out := f.deliver("delete", createShaped, ""); out["status"] != "ignored" {
+		t.Fatalf("delete carrying master_branch = %v, want ignored", out)
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 1 {
+		t.Fatalf("triggers = %d, want 1", len(got))
+	}
+	if tr := got[0]; tr.Pipeline != "teardown" || tr.GitBranch != "trunk" || tr.GitSHA != headSHA || tr.TriggerEnv["GITHUB_REF"] != "refs/heads/feature-x" {
+		t.Fatalf("branch_delete trigger = branch %q sha %q env %v", tr.GitBranch, tr.GitSHA, tr.TriggerEnv)
 	}
 }

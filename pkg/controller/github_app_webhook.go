@@ -350,9 +350,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	}
 	if event == "create" || event == "delete" {
 		var p struct {
-			Ref          string `json:"ref"`
-			RefType      string `json:"ref_type"`
-			MasterBranch string `json:"master_branch"`
+			Ref          string          `json:"ref"`
+			RefType      string          `json:"ref_type"`
+			MasterBranch json.RawMessage `json:"master_branch"`
 			Repository   struct {
 				PushedAt  json.RawMessage `json:"pushed_at"`
 				UpdatedAt json.RawMessage `json:"updated_at"`
@@ -367,7 +367,12 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		if p.RefType != "branch" || p.Ref == "" || strings.Contains(p.Ref, "..") || strings.HasPrefix(p.Ref, "/") {
 			return githubAppIntake{}, "not a branch event", nil
 		}
-		if event == "delete" && p.MasterBranch == "" {
+		// safety: GitHub's delete payload has no master_branch and its create
+		// payload always does, so a delete carrying one is a create body.
+		if event == "delete" && p.MasterBranch != nil {
+			return githubAppIntake{}, "a branch deletion carries no master_branch", nil
+		}
+		if event == "delete" && env.Repository.DefaultBranch == "" {
 			return githubAppIntake{}, "branch deletion names no default branch", nil
 		}
 		base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = "refs/heads/"+p.Ref, "branch"
@@ -377,7 +382,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		}
 		branch := p.Ref
 		if event == "delete" {
-			branch = p.MasterBranch
+			branch = env.Repository.DefaultBranch
 		}
 		return githubAppIntake{user: p.Sender.Login, branch: branch, env: base, at: at}, "", nil
 	}

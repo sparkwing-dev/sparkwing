@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **GitHub App webhooks:** Start `branch_delete` subscriptions on GitHub's real `delete` payload, which has no `master_branch`, at the default branch from `repository.default_branch`; a `delete` body carrying `master_branch` is a `create` body and starts nothing.
 - **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
 - **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
