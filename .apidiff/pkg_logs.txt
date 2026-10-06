@@ -218,6 +218,7 @@ func WithReaderIdentity(ctx context.Context, id string) context.Context
 
 # methods on un-declared receiver types (likely a bug)
 func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error)
+func (r *logicalReader) Read(p []byte) (int, error)
 func (r *statusRecorder) Flush()
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)

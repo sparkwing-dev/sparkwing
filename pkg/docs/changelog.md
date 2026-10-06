@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
+- **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
+- **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **cache:** Accept artifact blob and manifest keys through the HTTP artifact-store adapter on filesystem and S3 backends
 - **Install-to-green:** Stage candidate builds from tagless source checkouts using the pipeline module's stable SDK pin.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
@@ -43,6 +45,8 @@ unlock.
 - **Runner tokens:** Recheck the minter's role inside the mint, so a removal or demotion that commits during a mint request leaves no live runner token.
 - **Token mints:** Make CLI and runner token mints wait on an in-flight account deletion on PostgreSQL, so a mint racing the deletion cannot leave a live token.
 - **Compute limits:** Record a claim's compute-limit refusal only on a run of the claimant's team; `Store.OldestWaitingReadyNodeForPrincipal` moves to `Tenant`.
+- **Live logs:** Read only bytes appended since the previous poll when streaming a node log, instead of rereading every attributed file each 200 ms.
+- **Log reads:** Serve node logs and their head, tail, range and grep filters from the files incrementally instead of buffering every attempt file in memory; a read that fails after the response starts now aborts the connection.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
 - **Controller client:** Keep bearer credentials out of cross-host redirects while preserving normal redirect handling and signed artifact transfers.
 
