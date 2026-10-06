@@ -38,6 +38,11 @@ unlock.
 
 ### Security
 - **Log filters:** Avoid allocating an entry for every stored line when serving filtered log reads, while preserving line selection and final newlines.
+- **Node attempt history:** Derive a node's lineage root only from the server's retry record and keep execution-attempt reads inside the run's team, so a node created with another team's run as `retry_root_run_id` no longer shows that team's attempt history.
+- **Team invitations:** Withdraw open invitations when their inviter is removed or deletes their account, and withdraw those above a demoted inviter's new role.
+- **Runner tokens:** Recheck the minter's role inside the mint, so a removal or demotion that commits during a mint request leaves no live runner token.
+- **Token mints:** Make CLI and runner token mints wait on an in-flight account deletion on PostgreSQL, so a mint racing the deletion cannot leave a live token.
+- **Compute limits:** Record a claim's compute-limit refusal only on a run of the claimant's team; `Store.OldestWaitingReadyNodeForPrincipal` moves to `Tenant`.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
 - **Controller client:** Keep bearer credentials out of cross-host redirects while preserving normal redirect handling and signed artifact transfers.
 
