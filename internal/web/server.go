@@ -322,29 +322,11 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.Handle("GET /docs/{rest...}", http.NotFoundHandler())
 
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
-	authedMux.HandleFunc("POST /github/app/connect", githubAppConnectHandler(opts, false))
-	authedMux.HandleFunc("POST /github/app/connect/existing", githubAppConnectHandler(opts, true))
-	authedMux.HandleFunc("GET "+githubAppCompletePath, githubAppCompleteHandler(opts))
-	authedMux.HandleFunc("POST /auth/{provider}/link", identityLinkHandler(opts))
-	authedMux.HandleFunc("GET /auth/{provider}/link/complete", identityLinkCompleteHandler(opts))
-	authedMux.HandleFunc("GET "+githubAppAvailablePath, githubAppAvailableHandler(opts))
-	authedMux.HandleFunc("POST /github/app/select", githubAppSelectHandler(opts))
 
 	authedMux.Handle("/", operatorPageGate(opts, spaHandler(bundleFS, opts)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)
-	router.HandleFunc("GET /login", loginPageHandler(opts))
-	loginLimiter := ratelimit.New(loginRateBurst, loginRateWindow)
-	router.Handle("POST /login",
-		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts))))
-	router.Handle("POST /login/bootstrap",
-		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts))))
-	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
-	router.HandleFunc("GET /auth/{provider}/start", oauthStartHandler(opts))
-	router.HandleFunc("GET /auth/{provider}/callback", oauthCallbackHandler(opts))
-	router.HandleFunc("GET /github/app/setup", githubAppSetupHandler(opts))
-	router.HandleFunc("GET "+githubAppCallbackPath, githubAppCallbackHandler(opts))
 	if opts.ControllerURL != "" {
 		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false, true))
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)

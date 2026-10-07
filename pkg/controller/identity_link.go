@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -75,94 +77,81 @@ func sessionBinding(key []byte, rawSession string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (s *Server) refuseIdentityChange(w http.ResponseWriter, p *Principal, status int, code, provider, message string) {
+func (s *Server) identityChangeRefusal(p *Principal, status int, code, provider, message string) *flowRefusal {
 	s.logger.Info("identity.change_refused", "account", p.AccountID, "provider", provider, "reason", code)
-	writeAuthError(w, status, authErrorBody{Code: code, Principal: p.label(), Message: message})
+	return refuse(status, code, message)
 }
 
-func (s *Server) recentSignIn(w http.ResponseWriter, p *Principal, provider string) bool {
+func (s *Server) refuseIdentityChange(w http.ResponseWriter, p *Principal, refusal *flowRefusal) {
+	writeAuthError(w, refusal.status, authErrorBody{Code: refusal.code, Principal: p.label(), Message: refusal.message})
+}
+
+func (s *Server) recentSignIn(p *Principal, provider string) *flowRefusal {
 	if time.Since(p.signedInAt) <= identityChangeSignInWindow {
-		return true
+		return nil
 	}
-	s.refuseIdentityChange(w, p, http.StatusForbidden, "reauth_required", provider,
+	return s.identityChangeRefusal(p, http.StatusForbidden, "reauth_required", provider,
 		"linking or unlinking a sign-in needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
-	return false
 }
 
-func (s *Server) linkAttemptAllowed(w http.ResponseWriter, p *Principal, provider string) bool {
+func (s *Server) linkAttemptAllowed(p *Principal, provider string) *flowRefusal {
 	if s.identityLinkLimit.allow(p.AccountID, identityLinkAttemptsPerMinute, time.Now()) {
-		return true
+		return nil
 	}
-	setRetryAfter(w, time.Minute)
-	s.refuseIdentityChange(w, p, http.StatusTooManyRequests, "rate_limited", provider,
+	return s.identityChangeRefusal(p, http.StatusTooManyRequests, "rate_limited", provider,
 		"too many link attempts; wait a minute and try again")
-	return false
 }
 
-func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	name := r.PathValue("provider")
-	provider, ok := s.offered(w, name)
-	if !ok || !s.linkAttemptAllowed(w, p, name) || !s.recentSignIn(w, p, name) {
-		return
-	}
-	var req oauthStartReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if !s.redirectAllowed(req.RedirectURI) {
-		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
-		return
-	}
-	ids, err := s.store.AccountIdentities(r.Context(), p.AccountID)
+func (s *Server) linkPreconditions(p *Principal, name string) (signInProvider, error) {
+	provider, err := s.offeredProvider(name)
 	if err != nil {
-		s.writeInternalError(w, r, "link start", err)
-		return
+		return nil, err
+	}
+	if refusal := s.linkAttemptAllowed(p, name); refusal != nil {
+		return nil, refusal
+	}
+	if refusal := s.recentSignIn(p, name); refusal != nil {
+		return nil, refusal
+	}
+	return provider, nil
+}
+
+func (s *Server) identityLinkBegin(ctx context.Context, p *Principal, name, redirectURI string) (oauthGrant, error) {
+	provider, err := s.linkPreconditions(p, name)
+	if err != nil {
+		return oauthGrant{}, err
+	}
+	if !s.redirectAllowed(redirectURI) {
+		return oauthGrant{}, refuse(http.StatusBadRequest, "", "redirect_uri is not on this controller's allowlist")
+	}
+	ids, err := s.store.AccountIdentities(ctx, p.AccountID)
+	if err != nil {
+		return oauthGrant{}, fmt.Errorf("link start: %w", err)
 	}
 	if slices.ContainsFunc(ids, func(id store.Identity) bool { return id.Provider == name }) {
-		s.refuseIdentityChange(w, p, http.StatusConflict, "provider_already_linked", name,
+		return oauthGrant{}, s.identityChangeRefusal(p, http.StatusConflict, "provider_already_linked", name,
 			"this account already has a "+providerLabels[name]+" sign-in; unlink it before linking another")
-		return
 	}
-	key, err := s.store.IdentityLinkStateKey(r.Context())
+	key, err := s.store.IdentityLinkStateKey(ctx)
 	if err != nil {
-		s.writeInternalError(w, r, "link start", err)
-		return
+		return oauthGrant{}, fmt.Errorf("link start: %w", err)
 	}
 	nonce, err := randomURLToken()
 	if err != nil {
-		s.writeInternalError(w, r, "link start", err)
-		return
+		return oauthGrant{}, err
 	}
 	verifier, err := randomURLToken()
 	if err != nil {
-		s.writeInternalError(w, r, "link start", err)
-		return
+		return oauthGrant{}, err
 	}
 	state, err := signFlowState(key, identityLinkState{
 		Account: p.AccountID, Session: sessionBinding(key, p.session), Provider: name,
 		Expires: time.Now().Add(identityLinkStateTTL).Unix(), Nonce: nonce, Verifier: verifierDigest(verifier),
 	})
 	if err != nil {
-		s.writeInternalError(w, r, "link start", err)
-		return
+		return oauthGrant{}, fmt.Errorf("link start: %w", err)
 	}
-	writeJSON(w, http.StatusOK, oauthStartResp{
-		AuthorizeURL: provider.AuthorizeURL(state, verifier, req.RedirectURI),
-		State:        state,
-		Verifier:     verifier,
-	})
-}
-
-type identityLinkCompleteReq struct {
-	State       string `json:"state"`
-	Verifier    string `json:"verifier"`
-	Code        string `json:"code"`
-	RedirectURI string `json:"redirect_uri"`
+	return oauthGrant{AuthorizeURL: provider.AuthorizeURL(state, verifier, redirectURI), State: state, Verifier: verifier}, nil
 }
 
 func openLinkState(key []byte, raw, verifier, provider string, p *Principal, now time.Time) (identityLinkState, string) {
@@ -182,96 +171,71 @@ func openLinkState(key []byte, raw, verifier, provider string, p *Principal, now
 	return st, ""
 }
 
-func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	name := r.PathValue("provider")
-	provider, ok := s.offered(w, name)
-	if !ok || !s.linkAttemptAllowed(w, p, name) || !s.recentSignIn(w, p, name) {
-		return
-	}
-	var req identityLinkCompleteReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, errors.New("code is required"))
-		return
-	}
-	if !s.redirectAllowed(req.RedirectURI) {
-		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
-		return
-	}
-	key, err := s.store.IdentityLinkStateKey(r.Context())
+func (s *Server) identityLinkFinish(ctx context.Context, p *Principal, name string, flow oauthFlowProof, redirectURI string) error {
+	provider, err := s.linkPreconditions(p, name)
 	if err != nil {
-		s.writeInternalError(w, r, "link complete", err)
-		return
+		return err
+	}
+	if flow.Code == "" {
+		return refuse(http.StatusBadRequest, "", "code is required")
+	}
+	if !s.redirectAllowed(redirectURI) {
+		return refuse(http.StatusBadRequest, "", "redirect_uri is not on this controller's allowlist")
+	}
+	key, err := s.store.IdentityLinkStateKey(ctx)
+	if err != nil {
+		return fmt.Errorf("link complete: %w", err)
 	}
 	now := time.Now()
-	st, reason := openLinkState(key, req.State, req.Verifier, name, p, now)
+	st, reason := openLinkState(key, flow.State, flow.Verifier, name, p, now)
 	if reason == "" {
 		// safety: the used state is recorded in the store, so no replica and no
 		// restart finishes the same flow twice.
-		fresh, err := s.store.ConsumeIdentityLinkState(r.Context(), st.Nonce, time.Unix(st.Expires, 0), now)
+		fresh, err := s.store.ConsumeIdentityLinkState(ctx, st.Nonce, time.Unix(st.Expires, 0), now)
 		if err != nil {
-			s.writeInternalError(w, r, "link state", err)
-			return
+			return fmt.Errorf("link state: %w", err)
 		}
 		if !fresh {
 			reason = "this link was already used; start linking again"
 		}
 	}
 	if reason != "" {
-		s.refuseIdentityChange(w, p, http.StatusForbidden, "link_state_invalid", name, reason)
-		return
+		return s.identityChangeRefusal(p, http.StatusForbidden, "link_state_invalid", name, reason)
 	}
 	label := providerLabels[name]
-	profile, err := provider.SignIn(r.Context(), req.Code, req.Verifier, req.RedirectURI)
+	profile, err := provider.SignIn(ctx, flow.Code, flow.Verifier, redirectURI)
 	switch {
 	case errors.Is(err, errSignInUnverified):
-		s.refuseIdentityChange(w, p, http.StatusForbidden, "provider_unverified", name,
+		return s.identityChangeRefusal(p, http.StatusForbidden, "provider_unverified", name,
 			label+" has not verified this account's email address")
-		return
 	case errors.Is(err, errSignInRejected):
-		s.refuseIdentityChange(w, p, http.StatusUnauthorized, "provider_rejected", name,
+		return s.identityChangeRefusal(p, http.StatusUnauthorized, "provider_rejected", name,
 			label+" did not confirm the sign-in; start linking again")
-		return
 	case err != nil:
 		s.logger.Warn("identity link failed", "provider", name, "error", err.Error())
-		writeAuthError(w, http.StatusBadGateway, authErrorBody{
-			Code: "provider_unreachable", Principal: p.label(),
-			Message: label + " could not be reached to finish linking",
-		})
-		return
+		return refuse(http.StatusBadGateway, "provider_unreachable", label+" could not be reached to finish linking")
 	}
-	if !s.recentSignIn(w, p, name) {
-		return
+	if refusal := s.recentSignIn(p, name); refusal != nil {
+		return refusal
 	}
-	linked, err := s.store.LinkIdentity(r.Context(), p.AccountID, profile, now)
+	linked, err := s.store.LinkIdentity(ctx, p.AccountID, profile, now)
 	switch {
 	case errors.Is(err, store.ErrIdentityLinkedElsewhere):
-		s.refuseIdentityChange(w, p, http.StatusConflict, "identity_linked_elsewhere", name,
+		return s.identityChangeRefusal(p, http.StatusConflict, "identity_linked_elsewhere", name,
 			"that "+label+" sign-in is already linked to another Sparkwing account, so nothing changed. "+
 				"Sparkwing does not combine accounts: invite one account into the other's team, "+
 				"or delete the other account and then link its sign-in here")
-		return
 	case errors.Is(err, store.ErrIdentityAlreadyLinked):
-		s.refuseIdentityChange(w, p, http.StatusConflict, "identity_already_linked", name,
+		return s.identityChangeRefusal(p, http.StatusConflict, "identity_already_linked", name,
 			"that "+label+" sign-in is already linked to this account")
-		return
 	case errors.Is(err, store.ErrProviderAlreadyLinked):
-		s.refuseIdentityChange(w, p, http.StatusConflict, "provider_already_linked", name,
+		return s.identityChangeRefusal(p, http.StatusConflict, "provider_already_linked", name,
 			"this account already has a "+label+" sign-in; unlink it before linking another")
-		return
 	case err != nil:
-		s.writeInternalError(w, r, "link identity", err)
-		return
+		return fmt.Errorf("link identity: %w", err)
 	}
 	s.logger.Info("identity.linked", "account", p.AccountID, "provider", name, "subject", linked.Subject)
-	writeJSON(w, http.StatusCreated, identityOut(linked))
+	return nil
 }
 
 func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +248,8 @@ func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("no sign-in provider by that name"))
 		return
 	}
-	if !s.recentSignIn(w, p, name) {
+	if refusal := s.recentSignIn(p, name); refusal != nil {
+		s.refuseIdentityChange(w, p, refusal)
 		return
 	}
 	gone, ended, err := s.store.UnlinkIdentity(r.Context(), p.AccountID, name, p.session, time.Now())
@@ -293,8 +258,8 @@ func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("this account has no "+providerLabels[name]+" sign-in"))
 		return
 	case errors.Is(err, store.ErrLastSignInMethod):
-		s.refuseIdentityChange(w, p, http.StatusConflict, "last_sign_in_method", name,
-			"this is the account's only sign-in method; link another before unlinking it")
+		s.refuseIdentityChange(w, p, s.identityChangeRefusal(p, http.StatusConflict, "last_sign_in_method", name,
+			"this is the account's only sign-in method; link another before unlinking it"))
 		return
 	case err != nil:
 		s.writeInternalError(w, r, "unlink identity", err)

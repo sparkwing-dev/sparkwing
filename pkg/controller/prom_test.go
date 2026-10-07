@@ -30,7 +30,7 @@ func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, 
 	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
-	ctrl := controller.New(s, nil).EnableAuthFromStore()
+	ctrl := controller.New(s, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{})
 	srv := httptest.NewServer(ctrl.Handler())
 	return srv.URL, admin, s, func() {
 		srv.Close()

@@ -72,30 +72,3 @@ func TestPipelinesHandler_NoYAMLReturnsEmpty(t *testing.T) {
 		t.Fatalf("expected empty pipelines, got %+v", body.Pipelines)
 	}
 }
-
-// A signed-up account's pipelines are its team's, which only the controller
-// knows, so the dashboard forwards that session's read; the operator's own
-// session still reads the pipelines declared in the working directory.
-func TestPipelinesHandler_AccountSessionReadsItsTeamsListFromTheController(t *testing.T) {
-	account := newIdentityController(t, true)
-	account.account = true
-	rec := httptest.NewRecorder()
-	teamDashboard(t, account.URL).ServeHTTP(rec, signedInRequest(http.MethodGet, "/api/v1/pipelines", ""))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("account session pipelines = %d, want the controller's 204: %s", rec.Code, rec.Body)
-	}
-	_, _, upstream, authz := account.snapshot()
-	if len(upstream) != 1 || upstream[0] != "GET /api/v1/pipelines" || authz[0] != "Session user-session" {
-		t.Fatalf("upstream = %v %v, want one GET /api/v1/pipelines under the user's session", upstream, authz)
-	}
-
-	operator := newIdentityController(t, true)
-	rec = httptest.NewRecorder()
-	teamDashboard(t, operator.URL).ServeHTTP(rec, signedInRequest(http.MethodGet, "/api/v1/pipelines", ""))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("operator session pipelines = %d, want 200 from the working directory: %s", rec.Code, rec.Body)
-	}
-	if _, _, upstream, _ := operator.snapshot(); len(upstream) != 0 {
-		t.Errorf("the operator's pipelines read reached the controller: %v", upstream)
-	}
-}

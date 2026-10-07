@@ -5,18 +5,13 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-type linkStartBody struct {
-	AuthorizeURL string `json:"authorize_url"`
-	State        string `json:"state"`
-	Verifier     string `json:"verifier"`
-}
 
 type refusalBody struct {
 	Code    string `json:"error"`
@@ -34,27 +29,74 @@ type identitiesBody struct {
 	Providers  []string       `json:"providers"`
 }
 
-func (f *identityFixture) linkStart(auth, provider string) linkStartBody {
+type linkFlow struct {
+	AuthorizeURL string
+	State        string
+	Verifier     string
+	cookie       *http.Cookie
+	outcome      string
+}
+
+const linked = "linked"
+
+func signInsOutcome(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusSeeOther || err != nil {
+		t.Fatalf("link answer = %d %q, want a redirect", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if loc.Path != "/account/sign-ins" {
+		return "redirect:" + loc.Path
+	}
+	if loc.Query().Has("linked") {
+		return linked
+	}
+	return loc.Query().Get("refused")
+}
+
+func (f *identityFixture) tryLinkStart(auth, provider string) linkFlow {
 	f.t.Helper()
-	var start linkStartBody
-	if code := f.call("POST", "/api/v1/me/identities/"+provider+"/link", auth,
-		map[string]string{"redirect_uri": dashRedirect}, &start); code != http.StatusOK {
-		f.t.Fatalf("link start %s = %d", provider, code)
+	resp := f.browserSend("POST", auth, "/auth/"+provider+"/link", url.Values{})
+	if resp.StatusCode != http.StatusOK {
+		return linkFlow{outcome: signInsOutcome(f.t, resp)}
+	}
+	cookie := responseCookie(resp, "__Host-sw_oauth")
+	if cookie == nil {
+		f.t.Fatal("link start set no flow cookie")
+	}
+	page := responseBody(f.t, resp)
+	_, after, _ := strings.Cut(page, `content="0;url=`)
+	authorize, _, _ := strings.Cut(after, `"`)
+	u, err := url.Parse(authorize)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return linkFlow{AuthorizeURL: authorize, State: u.Query().Get("state"), Verifier: flowVerifier(f.t, cookie), cookie: cookie}
+}
+
+func (f *identityFixture) linkStart(auth, provider string) linkFlow {
+	f.t.Helper()
+	start := f.tryLinkStart(auth, provider)
+	if start.cookie == nil {
+		f.t.Fatalf("link start %s refused: %s", provider, start.outcome)
 	}
 	return start
 }
 
-func (f *identityFixture) linkComplete(auth, provider string, start linkStartBody, code string, out any) int {
+func (f *identityFixture) linkComplete(auth, provider string, start linkFlow, code string) string {
 	f.t.Helper()
-	return f.call("POST", "/api/v1/me/identities/"+provider+"/link/complete", auth, map[string]string{
-		"state": start.State, "verifier": start.Verifier, "code": code, "redirect_uri": dashRedirect,
-	}, out)
+	flow := start.cookie
+	callback := f.browserGet("/auth/"+provider+"/callback?"+url.Values{"code": {code}, "state": {start.State}}.Encode(), flow)
+	if next := responseCookie(callback, "__Host-sw_oauth"); next != nil {
+		flow = next
+	}
+	return signInsOutcome(f.t, f.browserSend("GET", auth, "/auth/"+provider+"/link/complete", nil, flow))
 }
 
-func (f *identityFixture) linkGitHub(auth string, p githubtest.Person, out any) int {
+func (f *identityFixture) linkGitHub(auth string, p githubtest.Person) string {
 	f.t.Helper()
 	start := f.linkStart(auth, "github")
-	return f.linkComplete(auth, "github", start, f.github.Code(p, start.Verifier, dashRedirect), out)
+	return f.linkComplete(auth, "github", start, f.github.Code(p, start.Verifier, githubRedirect))
 }
 
 func (f *identityFixture) identities(auth string) identitiesBody {
@@ -74,18 +116,19 @@ func TestLinkGitHubWithAnotherEmailToAGoogleAccount(t *testing.T) {
 	owner := f.user("g-owner", "owner@example.com")
 	octo := ghPerson(501, "octo", "octo@elsewhere.org")
 
-	var linked identityBody
-	if code := f.linkGitHub(owner.auth, octo, &linked); code != http.StatusCreated {
-		t.Fatalf("link = %d %+v", code, linked)
+	if outcome := f.linkGitHub(owner.auth, octo); outcome != linked {
+		t.Fatalf("link = %s", outcome)
 	}
-	if linked.Provider != "github" || linked.Email != "octo@elsewhere.org" {
-		t.Fatalf("linked = %+v", linked)
+	ids := f.identities(owner.auth)
+	if !slices.ContainsFunc(ids.Identities, func(id identityBody) bool {
+		return id.Provider == "github" && id.Email == "octo@elsewhere.org"
+	}) {
+		t.Fatalf("identities after linking = %+v", ids)
 	}
 	back := f.signInGitHub(octo)
 	if back.User.ID != owner.id || back.User.Email != "owner@example.com" {
 		t.Fatalf("GitHub sign-in after linking = %+v, want the Google account and its email", back.User)
 	}
-	ids := f.identities(owner.auth)
 	if len(ids.Identities) != 2 || ids.Identities[0].Provider == ids.Identities[1].Provider ||
 		!slices.Equal(ids.Providers, []string{"google", "github"}) {
 		t.Fatalf("identities = %+v", ids)
@@ -103,12 +146,8 @@ func TestLinkRefusesASignInOnAnotherAccount(t *testing.T) {
 	octo := ghPerson(601, "octo", "octo@example.com")
 	other := f.signInGitHub(octo)
 
-	var refused refusalBody
-	if code := f.linkGitHub(owner.auth, octo, &refused); code != http.StatusConflict || refused.Code != "identity_linked_elsewhere" {
-		t.Fatalf("link = %d %+v, want 409 identity_linked_elsewhere", code, refused)
-	}
-	if refused.Message == "" {
-		t.Fatal("the refusal carries no message")
+	if outcome := f.linkGitHub(owner.auth, octo); outcome != "identity_linked_elsewhere" {
+		t.Fatalf("link = %s, want identity_linked_elsewhere", outcome)
 	}
 	if ids := f.identities(owner.auth); len(ids.Identities) != 1 {
 		t.Fatalf("owner identities after the refusal = %+v", ids)
@@ -119,8 +158,8 @@ func TestLinkRefusesASignInOnAnotherAccount(t *testing.T) {
 	if ids := f.identities(sessionAuth(other.SessionID)); len(ids.Identities) != 1 {
 		t.Fatalf("other identities after the refusal = %+v", ids)
 	}
-	if code := f.linkGitHub(owner.auth, ghPerson(602, "free", "free@example.com"), nil); code != http.StatusCreated {
-		t.Fatalf("control: linking a free GitHub account = %d", code)
+	if outcome := f.linkGitHub(owner.auth, ghPerson(602, "free", "free@example.com")); outcome != linked {
+		t.Fatalf("control: linking a free GitHub account = %s", outcome)
 	}
 }
 
@@ -133,25 +172,23 @@ func TestLinkRefusesAStateFromAnotherAccountSessionOrAReplay(t *testing.T) {
 	octo := ghPerson(701, "octo", "octo@example.com")
 
 	start := f.linkStart(owner.auth, "github")
-	code := func() string { return f.github.Code(octo, start.Verifier, dashRedirect) }
+	code := func() string { return f.github.Code(octo, start.Verifier, githubRedirect) }
 	for name, auth := range map[string]string{
 		"another account": stranger.auth,
 		"another session": sessionAuth(sameAccount.SessionID),
 	} {
-		var refused refusalBody
-		if status := f.linkComplete(auth, "github", start, code(), &refused); status != http.StatusForbidden || refused.Code != "link_state_invalid" {
-			t.Fatalf("%s finishing the flow = %d %+v, want 403 link_state_invalid", name, status, refused)
+		if outcome := f.linkComplete(auth, "github", start, code()); outcome != "link_state_invalid" {
+			t.Fatalf("%s finishing the flow = %s, want link_state_invalid", name, outcome)
 		}
 	}
-	var refused refusalBody
-	if status := f.linkComplete(owner.auth, "google", start, code(), &refused); status != http.StatusForbidden || refused.Code != "link_state_invalid" {
-		t.Fatalf("the flow finished for another provider = %d %+v, want 403 link_state_invalid", status, refused)
+	if outcome := f.linkComplete(owner.auth, "google", start, code()); outcome != "link_state_invalid" {
+		t.Fatalf("the flow finished for another provider = %s, want link_state_invalid", outcome)
 	}
-	if status := f.linkComplete(owner.auth, "github", start, code(), nil); status != http.StatusCreated {
-		t.Fatalf("finishing the flow = %d", status)
+	if outcome := f.linkComplete(owner.auth, "github", start, code()); outcome != linked {
+		t.Fatalf("finishing the flow = %s", outcome)
 	}
-	if status := f.linkComplete(owner.auth, "github", start, code(), &refused); status != http.StatusForbidden || refused.Code != "link_state_invalid" {
-		t.Fatalf("replaying the state = %d %+v, want 403 link_state_invalid", status, refused)
+	if outcome := f.linkComplete(owner.auth, "github", start, code()); outcome != "link_state_invalid" {
+		t.Fatalf("replaying the state = %s, want link_state_invalid", outcome)
 	}
 	if ids := f.identities(stranger.auth); len(ids.Identities) != 1 {
 		t.Fatalf("stranger identities = %+v", ids)
@@ -168,8 +205,8 @@ func TestUnlinkRefusesTheLastSignInMethod(t *testing.T) {
 	if code := f.call("DELETE", "/api/v1/me/identities/github", owner.auth, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("unlink a provider the account lacks = %d, want 404", code)
 	}
-	if code := f.linkGitHub(owner.auth, ghPerson(801, "octo", "octo@example.com"), nil); code != http.StatusCreated {
-		t.Fatalf("link = %d", code)
+	if outcome := f.linkGitHub(owner.auth, ghPerson(801, "octo", "octo@example.com")); outcome != linked {
+		t.Fatalf("link = %s", outcome)
 	}
 	if code := f.call("DELETE", "/api/v1/me/identities/google", owner.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("unlink google beside github = %d, want 204", code)
@@ -185,8 +222,8 @@ func TestUnlinkThenSignInNoLongerReachesTheAccount(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("g-owner", "owner@example.com")
 	octo := ghPerson(901, "octo", "owner@example.com")
-	if code := f.linkGitHub(owner.auth, octo, nil); code != http.StatusCreated {
-		t.Fatalf("link = %d", code)
+	if outcome := f.linkGitHub(owner.auth, octo); outcome != linked {
+		t.Fatalf("link = %s", outcome)
 	}
 	if back := f.signInGitHub(octo); back.User.ID != owner.id {
 		t.Fatal("control: the linked GitHub sign-in did not reach the account")
@@ -224,17 +261,16 @@ func TestUnlinkThenSignInNoLongerReachesTheAccount(t *testing.T) {
 func TestLinkAndUnlinkNeedARecentSignIn(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("g-owner", "owner@example.com")
-	if code := f.linkGitHub(owner.auth, ghPerson(1001, "octo", "octo@example.com"), nil); code != http.StatusCreated {
-		t.Fatalf("control: link with a fresh sign-in = %d", code)
+	if outcome := f.linkGitHub(owner.auth, ghPerson(1001, "octo", "octo@example.com")); outcome != linked {
+		t.Fatalf("control: link with a fresh sign-in = %s", outcome)
 	}
 	if _, err := f.store.DB().Exec(`UPDATE sessions SET created_at = created_at - 3600`); err != nil {
 		t.Fatal(err)
 	}
-	var refused refusalBody
-	if code := f.call("POST", "/api/v1/me/identities/github/link", owner.auth,
-		map[string]string{"redirect_uri": dashRedirect}, &refused); code != http.StatusForbidden || refused.Code != "reauth_required" {
-		t.Fatalf("link start with an hour-old sign-in = %d %+v, want 403 reauth_required", code, refused)
+	if outcome := f.tryLinkStart(owner.auth, "github").outcome; outcome != "reauth_required" {
+		t.Fatalf("link start with an hour-old sign-in = %s, want reauth_required", outcome)
 	}
+	var refused refusalBody
 	if code := f.call("DELETE", "/api/v1/me/identities/github", owner.auth, nil, &refused); code != http.StatusForbidden || refused.Code != "reauth_required" {
 		t.Fatalf("unlink with an hour-old sign-in = %d %+v, want 403 reauth_required", code, refused)
 	}
@@ -247,11 +283,10 @@ func TestLinkCompletionNeedsARecentSignIn(t *testing.T) {
 	if _, err := f.store.DB().Exec(`UPDATE sessions SET created_at = created_at - 3600`); err != nil {
 		t.Fatal(err)
 	}
-	var refused refusalBody
-	code := f.linkComplete(owner.auth, "github", start,
-		f.github.Code(ghPerson(1201, "octo", "octo@example.com"), start.Verifier, dashRedirect), &refused)
-	if code != http.StatusForbidden || refused.Code != "reauth_required" {
-		t.Fatalf("link completion after sign-in expired = %d %+v, want 403 reauth_required", code, refused)
+	outcome := f.linkComplete(owner.auth, "github", start,
+		f.github.Code(ghPerson(1201, "octo", "octo@example.com"), start.Verifier, githubRedirect))
+	if outcome != "reauth_required" {
+		t.Fatalf("link completion after sign-in expired = %s, want reauth_required", outcome)
 	}
 	if ids := f.identities(owner.auth); len(ids.Identities) != 1 {
 		t.Fatalf("identities after refused completion = %+v", ids)
@@ -262,42 +297,64 @@ func TestLinkAttemptsAreRateLimitedPerAccount(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("g-owner", "owner@example.com")
 	other := f.user("g-other", "other@example.com")
-	start := func(auth string, out any) int {
-		return f.call("POST", "/api/v1/me/identities/github/link", auth, map[string]string{"redirect_uri": dashRedirect}, out)
-	}
 	for i := range 10 {
-		if code := start(owner.auth, nil); code != http.StatusOK {
-			t.Fatalf("attempt %d = %d", i+1, code)
+		if outcome := f.tryLinkStart(owner.auth, "github").outcome; outcome != "" {
+			t.Fatalf("attempt %d = %s", i+1, outcome)
 		}
 	}
-	var refused refusalBody
-	if code := start(owner.auth, &refused); code != http.StatusTooManyRequests || refused.Code != "rate_limited" {
-		t.Fatalf("attempt 11 = %d %+v, want 429 rate_limited", code, refused)
+	if outcome := f.tryLinkStart(owner.auth, "github").outcome; outcome != "rate_limited" {
+		t.Fatalf("attempt 11 = %s, want rate_limited", outcome)
 	}
-	if code := start(other.auth, nil); code != http.StatusOK {
-		t.Fatalf("control: another account's attempt = %d", code)
+	if outcome := f.tryLinkStart(other.auth, "github").outcome; outcome != "" {
+		t.Fatalf("control: another account's attempt = %s", outcome)
 	}
 }
 
 func TestLinkStartRefusesAProviderAlreadyLinked(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("g-owner", "owner@example.com")
-	var refused refusalBody
-	if code := f.call("POST", "/api/v1/me/identities/google/link", owner.auth,
-		map[string]string{"redirect_uri": dashRedirect}, &refused); code != http.StatusConflict || refused.Code != "provider_already_linked" {
-		t.Fatalf("link google on a google account = %d %+v, want 409 provider_already_linked", code, refused)
+	if outcome := f.tryLinkStart(owner.auth, "google").outcome; outcome != "provider_already_linked" {
+		t.Fatalf("link google on a google account = %s, want provider_already_linked", outcome)
 	}
 	start := f.linkStart(owner.auth, "github")
 	u, err := url.Parse(start.AuthorizeURL)
-	if err != nil || u.Query().Get("state") != start.State || u.Query().Get("redirect_uri") != dashRedirect {
+	if err != nil || u.Query().Get("state") != start.State || u.Query().Get("redirect_uri") != githubRedirect {
 		t.Fatalf("authorize_url %s does not carry the flow's state and redirect", start.AuthorizeURL)
 	}
-	if code := f.call("POST", "/api/v1/me/identities/github/link", owner.auth,
-		map[string]string{"redirect_uri": "https://evil.example/cb"}, nil); code != http.StatusBadRequest {
-		t.Fatalf("link start with an unlisted redirect = %d, want 400", code)
+
+	csrf := f.csrfFor(owner.auth)
+	form := url.Values{"csrf_token": {csrf}}
+	req, err := http.NewRequest("POST", f.url+"/auth/github/link", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code := f.call("POST", "/api/v1/me/identities/github/link", "Bearer "+f.admin,
-		map[string]string{"redirect_uri": dashRedirect}, nil); code != http.StatusUnauthorized {
-		t.Fatalf("link start with a bearer token = %d, want 401", code)
+	req.Host = "evil.example"
+	req.Header.Set("Origin", "http://evil.example")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: sessionIDOf(owner.auth)})
+	req.AddCookie(&http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
+	resp, err := noRedirects.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if outcome := signInsOutcome(t, resp); outcome != "link_failed" {
+		t.Fatalf("link start from an unlisted host = %s, want link_failed", outcome)
+	}
+
+	bearer, err := http.NewRequest("POST", f.url+"/auth/github/link", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer.Host = dashHost
+	bearer.Header.Set("Authorization", "Bearer "+f.admin)
+	bearer.Header.Set("Origin", "http://"+dashHost)
+	resp, err = noRedirects.Do(bearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("link start with a bearer token and no browser session = %d, want 403", resp.StatusCode)
 	}
 }

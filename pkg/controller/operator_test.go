@@ -22,7 +22,6 @@ func operatorFixture(t *testing.T) (f *identityFixture, operator, owner signedIn
 func operatorRoutes(team string) [][2]string {
 	base := "/api/v1/operator/teams/" + team
 	return [][2]string{
-		{"GET", "/api/v1/operator/session"},
 		{"GET", "/api/v1/operator/teams?q=olga"},
 		{"GET", base},
 		{"POST", base + "/trust"},
@@ -51,7 +50,7 @@ func TestOperatorConsole_RefusesEveryCallerButTheListedOperatorsSession(t *testi
 			}
 		}
 	}
-	if code := f.call("GET", "/api/v1/operator/session", operator.auth, nil, nil); code != http.StatusOK {
+	if code := f.call("GET", "/api/v1/operator/teams?q=olga", operator.auth, nil, nil); code != http.StatusOK {
 		t.Errorf("the operator's session = %d want 200", code)
 	}
 
@@ -63,7 +62,7 @@ func TestOperatorConsole_RefusesEveryCallerButTheListedOperatorsSession(t *testi
 	}
 
 	f.srv.WithOperatorAccounts(nil)
-	if code := f.call("GET", "/api/v1/operator/session", operator.auth, nil, nil); code != http.StatusForbidden {
+	if code := f.call("GET", "/api/v1/operator/teams?q=olga", operator.auth, nil, nil); code != http.StatusForbidden {
 		t.Errorf("a delisted operator's session = %d want 403", code)
 	}
 }

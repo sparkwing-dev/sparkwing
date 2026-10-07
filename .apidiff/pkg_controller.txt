@@ -76,6 +76,8 @@ type Dashboard struct {
 
 	HSTS bool
 
+	Version string
+
 	InsecureCookies bool
 }
 type DataDownloadResponse struct {
@@ -430,6 +432,7 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
+func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)

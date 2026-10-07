@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,7 +28,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-const dashRedirect = "http://localhost:4343/auth/google/callback"
+const (
+	dashRedirect   = "http://localhost:4343/auth/google/callback"
+	githubRedirect = "http://localhost:4343/auth/github/callback"
+)
 
 type identityFixture struct {
 	t         *testing.T
@@ -38,6 +42,7 @@ type identityFixture struct {
 	admin     string
 	srv       *controller.Server
 	logsToken string
+	lastPage  string
 }
 
 type fixtureOpts struct {
@@ -90,8 +95,9 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	srv := controller.New(st, o.logger).EnableAuthFromStore().
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
-		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect}).
-		WithBillingCheckout(o.checkoutURL, o.checkoutToken)
+		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
+		WithBillingCheckout(o.checkoutURL, o.checkoutToken).
+		WithDashboard(controller.Dashboard{})
 	if o.configure != nil {
 		o.configure(srv)
 	}
@@ -152,30 +158,97 @@ type exchangeBody struct {
 
 func (f *identityFixture) signIn(p googletest.Person) exchangeBody {
 	f.t.Helper()
-	var start struct {
-		AuthorizeURL string `json:"authorize_url"`
-		State        string `json:"state"`
-		Verifier     string `json:"verifier"`
+	var out exchangeBody
+	if status := f.oauthSignIn("google", func(verifier string) string {
+		return f.google.Code(p, verifier, dashRedirect)
+	}, &out); status != http.StatusOK {
+		f.t.Fatalf("google sign-in = %d", status)
 	}
-	if code := f.call("POST", "/api/v1/auth/oauth/google/start", "",
-		map[string]string{"redirect_uri": dashRedirect}, &start); code != http.StatusOK {
-		f.t.Fatalf("start = %d", code)
-	}
-	u, err := url.Parse(start.AuthorizeURL)
+	return out
+}
+
+// safety: the browser surface derives its redirect URI from this host, so it is the one on the allowlist.
+const dashHost = "localhost:4343"
+
+var noRedirects = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+func (f *identityFixture) browserGet(path string, cookies ...*http.Cookie) *http.Response {
+	f.t.Helper()
+	req, err := http.NewRequest(http.MethodGet, f.url+path, nil)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if u.Query().Get("state") != start.State || u.Query().Get("redirect_uri") != dashRedirect {
-		f.t.Fatalf("authorize_url %s does not carry the flow's state and redirect", start.AuthorizeURL)
+	req.Host = dashHost
+	for _, c := range cookies {
+		req.AddCookie(c)
 	}
-	var out exchangeBody
-	code := f.google.Code(p, start.Verifier, dashRedirect)
-	if status := f.call("POST", "/api/v1/auth/oauth/google/exchange", "", map[string]string{
-		"code": code, "verifier": start.Verifier, "redirect_uri": dashRedirect,
-	}, &out); status != http.StatusOK {
-		f.t.Fatalf("exchange = %d", status)
+	resp, err := noRedirects.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
 	}
-	return out
+	f.t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func responseCookie(resp *http.Response, name string) *http.Cookie {
+	for _, c := range resp.Cookies() {
+		if c.Name == name && c.MaxAge >= 0 {
+			return c
+		}
+	}
+	return nil
+}
+
+func flowVerifier(t *testing.T, c *http.Cookie) string {
+	t.Helper()
+	raw, err := base64.RawURLEncoding.DecodeString(c.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flow struct {
+		Verifier string `json:"verifier"`
+	}
+	if err := json.Unmarshal(raw, &flow); err != nil {
+		t.Fatal(err)
+	}
+	return flow.Verifier
+}
+
+func (f *identityFixture) oauthSignIn(provider string, code func(verifier string) string, out *exchangeBody) int {
+	f.t.Helper()
+	start := f.browserGet("/auth/" + provider + "/start")
+	if start.StatusCode != http.StatusSeeOther {
+		f.t.Fatalf("%s start = %d", provider, start.StatusCode)
+	}
+	authorize, err := url.Parse(start.Header.Get("Location"))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if want := "http://" + dashHost + "/auth/" + provider + "/callback"; authorize.Query().Get("redirect_uri") != want {
+		f.t.Fatalf("authorize URL %s does not carry the dashboard's callback", authorize)
+	}
+	flow := responseCookie(start, "__Host-sw_oauth")
+	if flow == nil {
+		f.t.Fatalf("%s start set no flow cookie", provider)
+	}
+	callback := f.browserGet("/auth/"+provider+"/callback?"+url.Values{
+		"code": {code(flowVerifier(f.t, flow))}, "state": {authorize.Query().Get("state")},
+	}.Encode(), flow)
+	if callback.StatusCode != http.StatusOK {
+		f.lastPage = responseBody(f.t, callback)
+		return callback.StatusCode
+	}
+	session := responseCookie(callback, "__Host-sw_session")
+	if session == nil {
+		f.t.Fatalf("%s callback set no session cookie", provider)
+	}
+	if out != nil {
+		if status := f.call("GET", "/api/v1/me", sessionAuth(session.Value), nil, out); status != http.StatusOK {
+			f.t.Fatalf("me after sign-in = %d", status)
+		}
+		out.SessionID = session.Value
+	}
+	return callback.StatusCode
 }
 
 func sessionAuth(id string) string { return "Session " + id }
@@ -216,18 +289,10 @@ func splitLicense(t *testing.T, raw string) (payload, sig []byte) {
 	return payload, sig
 }
 
-func (f *identityFixture) githubExchange(p githubtest.Person, out any) int {
+func (f *identityFixture) githubExchange(p githubtest.Person, out *exchangeBody) int {
 	f.t.Helper()
-	var start struct {
-		AuthorizeURL string `json:"authorize_url"`
-		Verifier     string `json:"verifier"`
-	}
-	if code := f.call("POST", "/api/v1/auth/oauth/github/start", "",
-		map[string]string{"redirect_uri": dashRedirect}, &start); code != http.StatusOK {
-		f.t.Fatalf("github start = %d", code)
-	}
-	return f.call("POST", "/api/v1/auth/oauth/github/exchange", "", map[string]string{
-		"code": f.github.Code(p, start.Verifier, dashRedirect), "verifier": start.Verifier, "redirect_uri": dashRedirect,
+	return f.oauthSignIn("github", func(verifier string) string {
+		return f.github.Code(p, verifier, githubRedirect)
 	}, out)
 }
 
@@ -245,4 +310,63 @@ func ghPerson(id int64, login, email string) githubtest.Person {
 		ID: id, Login: login, Name: login + " Test",
 		Emails: []githubtest.Email{{Email: email, Primary: true, Verified: true}},
 	}
+}
+
+func sessionIDOf(auth string) string { return strings.TrimPrefix(auth, "Session ") }
+
+func (f *identityFixture) csrfFor(auth string) string {
+	f.t.Helper()
+	var sess struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if code := f.call("GET", "/api/v1/auth/session", auth, nil, &sess); code != http.StatusOK {
+		f.t.Fatalf("session = %d", code)
+	}
+	return sess.CSRFToken
+}
+
+func (f *identityFixture) browserSend(method, auth, path string, form url.Values, extra ...*http.Cookie) *http.Response {
+	f.t.Helper()
+	csrf := ""
+	if auth != "" {
+		csrf = f.csrfFor(auth)
+		if form != nil && !form.Has("csrf_token") {
+			form.Set("csrf_token", csrf)
+		}
+	}
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	req, err := http.NewRequest(method, f.url+path, body)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	req.Host = dashHost
+	if auth != "" {
+		req.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: sessionIDOf(auth)})
+		req.AddCookie(&http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
+	}
+	if form != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://"+dashHost)
+	}
+	for _, c := range extra {
+		req.AddCookie(c)
+	}
+	resp, err := noRedirects.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func responseBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return html.UnescapeString(string(raw))
 }

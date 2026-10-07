@@ -75,182 +75,6 @@ func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
 	}
 }
 
-func TestLoginFormsRejectInvalidCSRFFirst(t *testing.T) {
-	t.Parallel()
-	var mu sync.Mutex
-	mutations := 0
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			mu.Lock()
-			mutations++
-			mu.Unlock()
-		}
-		if r.URL.Path == "/api/v1/auth/bootstrap-needed" {
-			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
-			return
-		}
-		http.Error(w, "must not reach controller", http.StatusTeapot)
-	}))
-	t.Cleanup(controller.Close)
-
-	handler := HandlerFromOptionsWithBundle(HandlerOptions{
-		ControllerURL: controller.URL,
-		RequireLogin:  true,
-	}, authTestBundle)
-	tests := []struct {
-		name   string
-		path   string
-		origin string
-		cookie string
-		form   string
-	}{
-		{name: "login missing provenance", path: "/login", cookie: "same", form: "same"},
-		{name: "login cross origin", path: "/login", origin: "https://attacker.example", cookie: "same", form: "same"},
-		{name: "login mismatched token", path: "/login", origin: "https://dashboard.example", cookie: "cookie", form: "form"},
-		{name: "bootstrap missing token", path: "/login/bootstrap", origin: "https://dashboard.example"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			form := url.Values{
-				"username":   {"admin"},
-				"password":   {"correct-horse"},
-				"csrf_token": {test.form},
-			}
-			req := httptest.NewRequest(http.MethodPost, "https://dashboard.example"+test.path, strings.NewReader(form.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			if test.origin != "" {
-				req.Header.Set("Origin", test.origin)
-			}
-			if test.cookie != "" {
-				req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: test.cookie})
-			}
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("status = %d, want 403", rec.Code)
-			}
-		})
-	}
-	for range loginRateBurst + 1 {
-		form := url.Values{"csrf_token": {"same"}}
-		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Origin", "https://attacker.example")
-		req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "same"})
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("forged attempt status = %d, want 403 before rate limiting", rec.Code)
-		}
-	}
-	mu.Lock()
-	if mutations != 0 {
-		mu.Unlock()
-		t.Fatalf("invalid CSRF reached %d controller mutations", mutations)
-	}
-	mu.Unlock()
-
-	validForm := url.Values{
-		"username":   {"admin"},
-		"password":   {"correct-horse"},
-		"csrf_token": {"valid"},
-	}
-	valid := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(validForm.Encode()))
-	valid.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	valid.Header.Set("Origin", "https://dashboard.example")
-	valid.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "valid"})
-	validRec := httptest.NewRecorder()
-	handler.ServeHTTP(validRec, valid)
-	if validRec.Code == http.StatusTooManyRequests {
-		t.Fatal("forged CSRF attempts consumed the credential rate limit")
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if mutations != 1 {
-		t.Fatalf("valid form reached %d controller mutations, want 1", mutations)
-	}
-}
-
-func TestLogoutRequiresSessionBoundCSRFAndConfirmedRevocation(t *testing.T) {
-	t.Parallel()
-	var mu sync.Mutex
-	logoutStatus := http.StatusNoContent
-	logoutCalls := 0
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/auth/session":
-			_ = json.NewEncoder(w).Encode(sessionResp{
-				Principal: "admin",
-				Scopes:    []string{"admin"},
-				CSRFToken: "server-token",
-				ExpiresAt: time.Now().Add(time.Hour).Unix(),
-			})
-		case "/api/v1/auth/logout":
-			mu.Lock()
-			logoutCalls++
-			status := logoutStatus
-			mu.Unlock()
-			w.WriteHeader(status)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(controller.Close)
-	handler := HandlerFromOptionsWithBundle(HandlerOptions{
-		ControllerURL: controller.URL,
-		RequireLogin:  true,
-	}, authTestBundle)
-	crossOrigin := httptest.NewRequest(http.MethodPost, "https://dashboard.example/logout", strings.NewReader("csrf_token=chosen"))
-	crossOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	crossOrigin.Header.Set("Origin", "https://attacker.example")
-	crossOrigin.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "chosen"})
-	crossOriginRec := httptest.NewRecorder()
-	handler.ServeHTTP(crossOriginRec, crossOrigin)
-	if crossOriginRec.Code != http.StatusForbidden {
-		t.Fatalf("cross-origin sessionless logout = %d, want 403", crossOriginRec.Code)
-	}
-	assertNoClearedCookies(t, crossOriginRec.Result().Cookies())
-
-	request := func(token string) *httptest.ResponseRecorder {
-		form := url.Values{"csrf_token": {token}}
-		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example/logout", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Origin", "https://dashboard.example")
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-1"})
-		req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token})
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		return rec
-	}
-
-	mismatch := request("attacker-controlled")
-	if mismatch.Code != http.StatusForbidden {
-		t.Fatalf("controller-token mismatch = %d, want 403", mismatch.Code)
-	}
-	mu.Lock()
-	if logoutCalls != 0 {
-		mu.Unlock()
-		t.Fatal("controller-token mismatch reached logout")
-	}
-	logoutStatus = http.StatusInternalServerError
-	mu.Unlock()
-
-	failed := request("server-token")
-	if failed.Code != http.StatusBadGateway {
-		t.Fatalf("failed controller logout = %d, want 502", failed.Code)
-	}
-	assertNoClearedCookies(t, failed.Result().Cookies())
-
-	mu.Lock()
-	logoutStatus = http.StatusNoContent
-	mu.Unlock()
-	success := request("server-token")
-	if success.Code != http.StatusSeeOther || success.Header().Get("Location") != "/login" {
-		t.Fatalf("successful logout = %d %q, want 303 /login", success.Code, success.Header().Get("Location"))
-	}
-	assertClearedSessionCookies(t, success.Result().Cookies())
-}
-
 func TestRedirectPreservesOneEncodedSameOriginTarget(t *testing.T) {
 	t.Parallel()
 	rec := httptest.NewRecorder()
@@ -268,30 +92,6 @@ func TestRedirectPreservesOneEncodedSameOriginTarget(t *testing.T) {
 	}
 	if got := location.Query().Get("next"); got != "/runs?run=x&tab=logs" {
 		t.Fatalf("decoded next = %q", got)
-	}
-}
-
-func TestAuthenticatedLoginRejectsExternalNext(t *testing.T) {
-	t.Parallel()
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/auth/session" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(sessionResp{
-			Principal: "admin",
-			CSRFToken: "session-token",
-			ExpiresAt: time.Now().Add(time.Hour).Unix(),
-		})
-	}))
-	t.Cleanup(controller.Close)
-	handler := HandlerFromOptionsWithBundle(HandlerOptions{ControllerURL: controller.URL, RequireLogin: true}, authTestBundle)
-	req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/login?next=https%3A%2F%2Fattacker.example", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-1"})
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
-		t.Fatalf("authenticated malicious next = %d %q, want 303 /", rec.Code, rec.Header().Get("Location"))
 	}
 }
 
@@ -903,71 +703,6 @@ func gitcacheStream(dashboardURL string) func() (int, string, error) {
 	}
 }
 
-func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/auth/bootstrap-needed" {
-			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
-			return
-		}
-		if r.URL.Path == "/api/v1/auth/login" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"session_id": "session-id",
-				"csrf_token": "csrf-token",
-				"principal":  "admin",
-				"scopes":     []string{"admin"},
-			})
-			return
-		}
-		http.Error(w, "unexpected", http.StatusTeapot)
-	}))
-	t.Cleanup(controller.Close)
-
-	for _, tc := range []struct {
-		name       string
-		insecure   bool
-		wantSecure bool
-	}{
-		{name: "default", wantSecure: true},
-		{name: "insecure opt-in", insecure: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := HandlerFromOptionsWithBundle(HandlerOptions{
-				ControllerURL:   controller.URL,
-				RequireLogin:    true,
-				InsecureCookies: tc.insecure,
-			}, authTestBundle)
-			req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/login", nil)
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("GET /login = %d, want 200", rec.Code)
-			}
-			assertCookieSecure(t, rec.Result().Cookies(), cookieName(csrfCookieName, tc.wantSecure), tc.wantSecure)
-
-			form := url.Values{
-				"username":   {"admin"},
-				"password":   {"correct-horse"},
-				"csrf_token": {"login-token"},
-			}
-			submit := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
-			submit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			submit.Header.Set("Origin", "https://dashboard.example")
-			submit.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, tc.wantSecure), Value: "login-token"})
-			submitted := httptest.NewRecorder()
-			handler.ServeHTTP(submitted, submit)
-			if submitted.Code != http.StatusSeeOther {
-				t.Fatalf("POST /login = %d, want 303: %s", submitted.Code, submitted.Body)
-			}
-			assertCookieSecure(t, submitted.Result().Cookies(), cookieName(sessionCookieName, tc.wantSecure), tc.wantSecure)
-			assertCookieSecure(t, submitted.Result().Cookies(), cookieName(csrfCookieName, tc.wantSecure), tc.wantSecure)
-		})
-	}
-}
-
 func assertCookieSecure(t *testing.T, cookies []*http.Cookie, name string, want bool) {
 	t.Helper()
 	for _, c := range cookies {
@@ -980,4 +715,17 @@ func assertCookieSecure(t *testing.T, cookies []*http.Cookie, name string, want 
 		return
 	}
 	t.Fatalf("response set no %s cookie", name)
+}
+
+func assertClearedSessionCookies(t *testing.T, cookies []*http.Cookie) {
+	t.Helper()
+	cleared := map[string]bool{}
+	for _, cookie := range cookies {
+		if cookie.MaxAge < 0 && cookie.Value == "" {
+			cleared[cookie.Name] = true
+		}
+	}
+	if !cleared[sessionCookieName] || !cleared[csrfCookieName] {
+		t.Fatalf("cleared cookies = %v, want session and CSRF deletion", cleared)
+	}
 }

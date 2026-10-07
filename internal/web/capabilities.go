@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -75,21 +74,4 @@ func controllerIdentityCapabilities(ctx context.Context, controllerURL, sessionI
 		return identityCapabilities{}, fmt.Errorf("decode controller capabilities: %w", err)
 	}
 	return out, nil
-}
-
-// safety: a single-team controller offers no provider, so its sign-in page stays
-// password-only, and so does a dashboard that would not serve the account
-// session a provider signs in.
-func withSignInProviders(ctx context.Context, opts HandlerOptions, data loginPageData) loginPageData {
-	controllerURL := authControllerURL(opts)
-	if controllerURL == "" || !accountSessionsServed(opts) {
-		return data
-	}
-	caps, err := controllerIdentityCapabilities(ctx, controllerURL, "")
-	if err != nil || caps.Teams == nil || !caps.Teams.Enabled || caps.Auth == nil {
-		return data
-	}
-	data.Google = slices.Contains(caps.Auth.Providers, "google")
-	data.GitHub = slices.Contains(caps.Auth.Providers, "github")
-	return data
 }

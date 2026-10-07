@@ -45,40 +45,54 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("username and password required"))
 		return
 	}
-	now := time.Now().UTC()
-	client := s.loginLimit.client(r)
-	// safety: a drained failure budget answers before VerifyUser, so guessing one account costs no argon2 work.
-	if !s.loginLimit.accountAllowed(req.Username, client, now) {
-		writeRetryAfter(w, loginFailureWindow, "too many failed login attempts for this account")
+	raw, sess, u, err := s.passwordLogin(r, req.Username, req.Password)
+	switch {
+	case errors.Is(err, errLoginThrottled):
+		writeRetryAfter(w, loginFailureWindow, err.Error())
 		return
-	}
-	u, err := s.store.VerifyUser(req.Username, req.Password, now)
-	if err != nil {
-		if !errors.Is(err, store.ErrInvalidCredentials) {
-			s.writeLoginUnavailable(w, err)
-			return
-		}
-		s.loginLimit.accountFailed(req.Username, client, now)
+	case errors.Is(err, store.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, err)
 		return
-	}
-	rawSession, csrf, sess, err := s.store.CreateSession(r.Context(), u.Name, u.Scopes, s.sessionInitialTTL(), now)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	case err != nil:
+		s.writeLoginUnavailable(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, loginResp{
+		SessionID: raw,
+		CSRFToken: sess.CSRFToken,
+		Principal: u.Name,
+		Scopes:    u.Scopes,
+		ExpiresAt: sess.ExpiresAt.Unix(),
+	})
+}
+
+var errLoginThrottled = errors.New("too many failed login attempts for this account")
+
+// safety: a drained failure budget answers before VerifyUser, so guessing one account costs no argon2 work; only a
+// wrong pair spends that budget.
+func (s *Server) passwordLogin(r *http.Request, username, password string) (string, *store.Session, *store.User, error) {
+	now := time.Now().UTC()
+	client := s.loginLimit.client(r)
+	if !s.loginLimit.accountAllowed(username, client, now) {
+		return "", nil, nil, errLoginThrottled
+	}
+	u, err := s.store.VerifyUser(username, password, now)
+	if err != nil {
+		if errors.Is(err, store.ErrInvalidCredentials) {
+			s.loginLimit.accountFailed(username, client, now)
+		}
+		return "", nil, nil, err
+	}
+	rawSession, _, sess, err := s.store.CreateSession(r.Context(), u.Name, u.Scopes, s.sessionInitialTTL(), now)
+	if err != nil {
+		return "", nil, nil, err
 	}
 	s.logger.Info(
 		"login",
 		"principal", u.Name,
 		"expires_at", sess.ExpiresAt.Unix(),
 	)
-	writeJSON(w, http.StatusOK, loginResp{
-		SessionID: rawSession,
-		CSRFToken: csrf,
-		Principal: u.Name,
-		Scopes:    u.Scopes,
-		ExpiresAt: sess.ExpiresAt.Unix(),
-	})
+	return rawSession, sess, u, nil
 }
 
 // safety: the caller is unauthenticated, so a login the controller could not decide answers a generic 503.
@@ -280,22 +294,35 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	// safety: the first account is the only way to reach every other route once
-	// auth is on, so a scope set that would lock the operator out is refused
-	// rather than widened behind their back.
-	if !slices.Contains(scopes, ScopeAdmin) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("the first account must hold the %s scope", ScopeAdmin))
+	u, err := s.createFirstUser(r, req.Name, req.Password, scopes)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, store.ErrBootstrapClosed) {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err)
 		return
 	}
-	u, err := s.store.CreateFirstUser(req.Name, req.Password, scopes, time.Now().UTC())
+	writeJSON(w, http.StatusCreated, userJSON{
+		Name:      u.Name,
+		Scopes:    u.Scopes,
+		CreatedAt: u.CreatedAt.Unix(),
+	})
+}
+
+// safety: the first account is the only way to reach every other route once
+// auth is on, so a scope set that would lock the operator out is refused
+// rather than widened behind their back.
+func (s *Server) createFirstUser(r *http.Request, name, password string, scopes []string) (*store.User, error) {
+	if !slices.Contains(scopes, ScopeAdmin) {
+		return nil, fmt.Errorf("the first account must hold the %s scope", ScopeAdmin)
+	}
+	u, err := s.store.CreateFirstUser(name, password, scopes, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrBootstrapClosed) {
 			s.markBootstrapClosed()
-			writeError(w, http.StatusConflict, err)
-			return
 		}
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return nil, err
 	}
 	if principal, ok := PrincipalFromContext(r.Context()); ok {
 		s.logger.Info("bootstrap signup accepted: first admin created by authenticated principal",
@@ -305,17 +332,14 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 			"name", u.Name)
 	}
 	s.markBootstrapClosed()
-	writeJSON(w, http.StatusCreated, userJSON{
-		Name:      u.Name,
-		Scopes:    u.Scopes,
-		CreatedAt: u.CreatedAt.Unix(),
-	})
+	return u, nil
 }
 
-func (s *Server) handleBootstrapNeeded(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{
-		"needed": !s.AuthEnabled() && !s.MultiTeam() && s.bootstrapAllowed(),
-	})
+// safety: the sign-in page offers the first-admin form only where an anonymous
+// visitor could create that admin through the API anyway: an open single-team
+// controller whose users table is empty.
+func (s *Server) bootstrapOffered() bool {
+	return !s.AuthEnabled() && !s.MultiTeam() && s.bootstrapAllowed()
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {

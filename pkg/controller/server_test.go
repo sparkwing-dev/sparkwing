@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func(
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	ctrl := controller.New(s, nil)
+	ctrl := controller.New(s, nil).WithDashboard(controller.Dashboard{})
 	srv := httptest.NewServer(ctrl.Handler())
 	return srv.URL, s, func() {
 		srv.Close()

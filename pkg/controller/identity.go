@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -264,69 +265,36 @@ func (s *Server) redirectAllowed(uri string) bool {
 	return uri != "" && slices.Contains(s.identity.redirectURIs, uri)
 }
 
-func (s *Server) offered(w http.ResponseWriter, name string) (signInProvider, bool) {
+func (s *Server) offeredProvider(name string) (signInProvider, error) {
 	if p, ok := s.identity.providers[name]; ok && s.MultiTeam() {
-		return p, true
+		return p, nil
 	}
-	writeError(w, http.StatusNotFound, errors.New(name+" sign-in is not enabled on this controller"))
-	return nil, false
+	return nil, refuse(http.StatusNotFound, "", name+" sign-in is not enabled on this controller")
 }
 
-type oauthStartReq struct {
-	RedirectURI string `json:"redirect_uri"`
-}
-
-type oauthStartResp struct {
-	AuthorizeURL string `json:"authorize_url"`
-	State        string `json:"state"`
-	Verifier     string `json:"verifier"`
-}
-
-// safety: nothing is stored; the dashboard's __Host- cookie proves the same browser finishes the flow,
-// and the redirect allowlist is this controller's own check.
-func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
-	s.oauthStart(w, r, store.ProviderGoogle)
-}
-
-func (s *Server) handleGitHubStart(w http.ResponseWriter, r *http.Request) {
-	s.oauthStart(w, r, store.ProviderGitHub)
-}
-
-func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, name string) {
-	provider, ok := s.offered(w, name)
-	if !ok {
-		return
+// safety: nothing is stored; the browser surface's __Host- flow cookie proves the same browser finishes the
+// flow, and the redirect allowlist is this controller's own check.
+func (s *Server) oauthBegin(name, redirectURI string) (oauthGrant, error) {
+	provider, err := s.offeredProvider(name)
+	if err != nil {
+		return oauthGrant{}, err
 	}
-	var req oauthStartReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if !s.redirectAllowed(req.RedirectURI) {
-		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
-		return
+	if !s.redirectAllowed(redirectURI) {
+		return oauthGrant{}, refuse(http.StatusBadRequest, "", "redirect_uri is not on this controller's allowlist")
 	}
 	state, err := randomURLToken()
 	if err != nil {
-		s.writeInternalError(w, r, "oauth start", err)
-		return
+		return oauthGrant{}, err
 	}
 	verifier, err := randomURLToken()
 	if err != nil {
-		s.writeInternalError(w, r, "oauth start", err)
-		return
+		return oauthGrant{}, err
 	}
-	writeJSON(w, http.StatusOK, oauthStartResp{
-		AuthorizeURL: provider.AuthorizeURL(state, verifier, req.RedirectURI),
+	return oauthGrant{
+		AuthorizeURL: provider.AuthorizeURL(state, verifier, redirectURI),
 		State:        state,
 		Verifier:     verifier,
-	})
-}
-
-type oauthExchangeReq struct {
-	Code        string `json:"code"`
-	Verifier    string `json:"verifier"`
-	RedirectURI string `json:"redirect_uri"`
+	}, nil
 }
 
 type userJSONBody struct {
@@ -341,15 +309,6 @@ type teamRefJSON struct {
 	Role        string `json:"role"`
 }
 
-type oauthExchangeResp struct {
-	SessionID  string       `json:"session_id"`
-	CSRFToken  string       `json:"csrf_token"`
-	ExpiresAt  int64        `json:"expires_at"`
-	User       userJSONBody `json:"user"`
-	ActiveTeam *teamRefJSON `json:"active_team"`
-	Waitlisted bool         `json:"waitlisted"`
-}
-
 // safety: the refusal names none of the existing account's providers, because
 // whoever holds the address now may not be that account's owner.
 //
@@ -357,83 +316,52 @@ type oauthExchangeResp struct {
 var errAccountExistsSignIn = errors.New("An account with this email already exists. " + //nolint:staticcheck // shown to the person signing in
 	"Sign in the way you did before, then link this provider from account settings.")
 
-func (s *Server) handleGoogleExchange(w http.ResponseWriter, r *http.Request) {
-	s.oauthExchange(w, r, store.ProviderGoogle)
-}
-
-func (s *Server) handleGitHubExchange(w http.ResponseWriter, r *http.Request) {
-	s.oauthExchange(w, r, store.ProviderGitHub)
-}
-
 // safety: the verifier binds the code to the flow that started it, so a code injected into another
 // browser's callback fails at the provider, because that browser holds another verifier.
-func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name string) {
-	provider, ok := s.offered(w, name)
-	if !ok {
-		return
+func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirectURI string) (*store.Session, string, error) {
+	provider, err := s.offeredProvider(name)
+	if err != nil {
+		return nil, "", err
 	}
-	var req oauthExchangeReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if code == "" || verifier == "" {
+		return nil, "", refuse(http.StatusBadRequest, "", "code and verifier are required")
 	}
-	if req.Code == "" || req.Verifier == "" {
-		writeError(w, http.StatusBadRequest, errors.New("code and verifier are required"))
-		return
+	if !s.redirectAllowed(redirectURI) {
+		return nil, "", refuse(http.StatusBadRequest, "", "redirect_uri is not on this controller's allowlist")
 	}
-	if !s.redirectAllowed(req.RedirectURI) {
-		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
-		return
-	}
-	profile, err := provider.SignIn(r.Context(), req.Code, req.Verifier, req.RedirectURI)
+	profile, err := provider.SignIn(ctx, code, verifier, redirectURI)
 	switch {
 	case errors.Is(err, errSignInUnverified):
-		writeError(w, http.StatusForbidden, errors.New(name+" has not verified this account's email address"))
-		return
+		return nil, "", refuse(http.StatusForbidden, "", name+" has not verified this account's email address")
 	case errors.Is(err, errSignInRejected):
 		s.logger.Info("sign-in rejected", "provider", name, "reason", err.Error())
-		writeError(w, http.StatusUnauthorized, errors.New("that sign-in could not be verified; start again"))
-		return
+		return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in could not be verified; start again")
 	case err != nil:
 		s.logger.Warn("sign-in failed", "provider", name, "error", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New(name+" could not be reached to finish the sign-in"))
-		return
+		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()
-	res, err := s.store.ResolveSignIn(r.Context(), profile, s.signUpConditions(r.Context()), now)
+	res, err := s.store.ResolveSignIn(ctx, profile, s.signUpConditions(ctx), now)
 	if errors.Is(err, store.ErrAccountExists) {
-		writeError(w, http.StatusConflict, errAccountExistsSignIn)
-		return
+		return nil, "", refuse(http.StatusConflict, "", errAccountExistsSignIn.Error())
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "sign-in resolve", err)
-		return
+		return nil, "", fmt.Errorf("sign-in resolve: %w", err)
 	}
-	s.observeSignUp(r.Context(), name, res, now)
+	s.observeSignUp(ctx, name, res, now)
 	acct := res.Account
-	raw, csrf, sess, err := s.store.CreateIdentityAccountSession(r.Context(), acct, acct.ActiveTeam,
+	raw, _, sess, err := s.store.CreateIdentityAccountSession(ctx, acct, acct.ActiveTeam,
 		profile.Provider, profile.Subject, s.sessionInitialTTL(), now)
 	if err != nil {
 		if errors.Is(err, store.ErrIdentityUnlinked) {
-			writeError(w, http.StatusUnauthorized, errors.New("that sign-in changed while it was being verified; start again"))
-			return
+			return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in changed while it was being verified; start again")
 		}
-		s.writeInternalError(w, r, "session create", err)
-		return
+		return nil, "", fmt.Errorf("session create: %w", err)
 	}
 	s.logger.Info("signed in", "account", acct.ID, "provider", name,
 		"new_account", res.NewAccount, "personal_team", string(res.PersonalTeam),
 		"waitlisted", acct.Waitlisted)
-	active, err := s.teamRef(r.Context(), acct.ActiveTeam, acct.ID)
-	if err != nil {
-		s.writeInternalError(w, r, "sign-in team", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, oauthExchangeResp{
-		SessionID: raw, CSRFToken: csrf, ExpiresAt: sess.ExpiresAt.Unix(),
-		User: userJSONBody{ID: acct.ID, Email: acct.Email, Name: acct.Name}, ActiveTeam: active,
-		Waitlisted: acct.Waitlisted,
-	})
+	return sess, raw, nil
 }
 
 func (s *Server) teamRef(ctx context.Context, team store.Team, accountID string) (*teamRefJSON, error) {

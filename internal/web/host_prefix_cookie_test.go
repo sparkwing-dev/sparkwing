@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -118,55 +117,6 @@ func TestPlantedCookieSentFirstDoesNotShadowTheRealSession(t *testing.T) {
 	dashboard.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("cancel with a planted cookie in front = %d, want 200: %s", rec.Code, rec.Body)
-	}
-	if seen := calls.seen(); len(seen) != 1 || seen[0] != "victim-session" {
-		t.Fatalf("controller resolved %v, want one victim-session", seen)
-	}
-}
-
-// The local-http escape drops Secure, and a browser refuses a __Host- cookie
-// without it, so the escape has to drop the prefix from both names or sign
-// nobody in. It doubles as the negative control: with the prefix out of play
-// the plant from the first test is the cookie the dashboard reads.
-func TestInsecureCookieEscapeDropsThePrefixEndToEnd(t *testing.T) {
-	t.Parallel()
-	calls, dashboard := newHostPrefixDashboard(t, true)
-
-	page := httptest.NewRequest(http.MethodGet, "http://localhost:8080/login", nil)
-	rec := httptest.NewRecorder()
-	dashboard.ServeHTTP(rec, page)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /login = %d, want 200", rec.Code)
-	}
-	formToken := cookieByName(t, rec.Result().Cookies(), "sw_csrf")
-
-	form := url.Values{"username": {"victim"}, "password": {"correct-horse"}, "csrf_token": {formToken}}
-	submit := httptest.NewRequest(http.MethodPost, "http://localhost:8080/login", strings.NewReader(form.Encode()))
-	submit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	submit.Header.Set("Origin", "http://localhost:8080")
-	submit.AddCookie(&http.Cookie{Name: "sw_csrf", Value: formToken})
-	rec = httptest.NewRecorder()
-	dashboard.ServeHTTP(rec, submit)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST /login = %d, want 303: %s", rec.Code, rec.Body)
-	}
-	issued := rec.Result().Cookies()
-	for _, c := range issued {
-		if strings.HasPrefix(c.Name, hostPrefix) {
-			t.Fatalf("insecure deployment issued %q, which a browser without Secure drops", c.Name)
-		}
-	}
-	session := cookieByName(t, issued, "sw_session")
-	if cookieByName(t, issued, "sw_csrf") == "" {
-		t.Fatal("insecure deployment issued no sw_csrf cookie")
-	}
-
-	dashboardPage := httptest.NewRequest(http.MethodGet, "http://localhost:8080/", nil)
-	dashboardPage.AddCookie(&http.Cookie{Name: "sw_session", Value: session})
-	rec = httptest.NewRecorder()
-	dashboard.ServeHTTP(rec, dashboardPage)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unprefixed session on an insecure deployment = %d, want 200", rec.Code)
 	}
 	if seen := calls.seen(); len(seen) != 1 || seen[0] != "victim-session" {
 		t.Fatalf("controller resolved %v, want one victim-session", seen)
