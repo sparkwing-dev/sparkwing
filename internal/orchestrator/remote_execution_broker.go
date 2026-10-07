@@ -263,8 +263,10 @@ func (b *remoteExecutionBroker) putArtifact(r *http.Request, key string) error {
 	return b.artifact.Put(r.Context(), key, tmp)
 }
 
-// safety: {run} and {node} match only this broker's own run and node, {other} any node of
-// this run, {name} any one segment, and a trailing {name...} the rest of the path.
+// safety: {run} and {node} match only this broker's own run and node, {other} any one-part
+// node id of this run, {spawned} any node id including hierarchical ones such as build/linux,
+// {name} any one segment, and a trailing {name...} the rest of the path. {other} stays one
+// part because an upstream that decodes %2F would read a/metrics as another node's route.
 type brokerRoute struct {
 	method, pattern string
 	check           func(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool
@@ -276,8 +278,9 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodGet, "/api/v1/runs/{run}", nil},
 	{http.MethodGet, "/api/v1/triggers/{run}", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/steps", nil},
+	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}", nil},
-	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}/output", nil},
+	{http.MethodGet, "/api/v1/runs/{run}/nodes/{spawned}/output", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}/bounce", nil},
 	{http.MethodGet, "/api/v1/secrets/{name}", secretForThisRun},
 	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
@@ -360,7 +363,12 @@ func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[s
 			}
 		case w == "{other}":
 			node, err := url.PathUnescape(got)
-			if err != nil || node == "" || node == "." || node == ".." || strings.ContainsAny(node, "/\\") {
+			if err != nil || !runNodeID(node) || strings.Contains(node, "/") {
+				return nil, false
+			}
+		case w == "{spawned}":
+			node, err := url.PathUnescape(got)
+			if err != nil || !runNodeID(node) {
 				return nil, false
 			}
 		case strings.HasPrefix(w, "{"):
@@ -370,6 +378,20 @@ func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[s
 		}
 	}
 	return segments, len(path) == len(want)
+}
+
+// safety: spawned children carry hierarchical ids such as build/linux, so a slash
+// separates parts while an empty, dot or dot-dot part, or a backslash, is refused.
+func runNodeID(id string) bool {
+	if id == "" || strings.Contains(id, "\\") {
+		return false
+	}
+	for part := range strings.SplitSeq(id, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func secretForThisRun(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {

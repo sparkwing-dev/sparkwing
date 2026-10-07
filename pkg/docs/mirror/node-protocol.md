@@ -95,7 +95,7 @@ The protocol version is a string, currently `1`.
 
 ## Node-facing routes
 
-Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, and `{other}` matches any node of the same run. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
+Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a spawned child's hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
 
 <!-- node-routes:start -->
 | Method | Path | Reach | Request | Response | Handler |
@@ -103,8 +103,9 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | GET | `/api/v1/runs/{run}` | broker | none; `include=nodes` adds the nodes | 200 run record | `pkg/controller/handlers.go` `handleGetRun` |
 | GET | `/api/v1/triggers/{run}` | broker | none | 200 trigger record | `pkg/controller/handlers.go` `handleGetTrigger` |
 | GET | `/api/v1/runs/{run}/steps` | broker | none | 200 `{steps: [step]}` | `pkg/controller/handlers.go` `handleListNodeSteps` |
+| GET | `/api/v1/runs/{run}/nodes/{node}` | broker | none | 200 node record | `pkg/controller/handlers.go` `handleGetNode` |
 | GET | `/api/v1/runs/{run}/nodes/{other}` | broker | none | 200 node record | `pkg/controller/handlers.go` `handleGetNode` |
-| GET | `/api/v1/runs/{run}/nodes/{other}/output` | broker | none | 200 `{url?, sha256?, size?, expires?, source_run_id?}`; 409 until the node is done | `pkg/controller/node_output.go` `handleGetNodeOutput` |
+| GET | `/api/v1/runs/{run}/nodes/{spawned}/output` | broker | none | 200 `{url?, sha256?, size?, expires?, source_run_id?}`; 409 until the node is done | `pkg/controller/node_output.go` `handleGetNodeOutput` |
 | GET | `/api/v1/runs/{run}/nodes/{node}/bounce` | broker | none | 200 `{run_id, node_id, seq, requested_at, requested_by?, consumed_at?, outcome?}`; 204 when none is pending | `pkg/controller/bounce.go` `handlePendingNodeBounce` |
 | GET | `/api/v1/secrets/{name}` | broker | query `run` = the node's run | 200 `{name, value?, principal, pipeline?, masked, shared?, bound, created_at, updated_at}`; 404 when unset | `pkg/controller/claim_run.go` `handleClaimSecret` for a claim token, else `pkg/controller/secrets.go` `handleGetSecret` |
 | POST | `/api/v1/runs/{run}/events` | broker | `{node_id?, kind, payload?}`, payload base64 | 200 `{seq}` | `pkg/controller/handlers.go` `handleAppendEvent` |
