@@ -524,11 +524,12 @@ func (r *Runner) tokenDied(req runner.Request, err error) bool {
 	return true
 }
 
-// safety: a record is masked value by value before it is decoded, since
-// masking its text could hit a key and decoding could round a number.
+// safety: a whole-line record is masked field by field, since masking its
+// text could hit a key; anything else is masked as the text it is.
 type outputMasker interface {
 	Mask(string) string
-	MaskJSON([]byte) []byte
+	MaskTruncated(string) (string, int)
+	MaskRecord(sparkwing.LogRecord) sparkwing.LogRecord
 }
 
 func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger *slog.Logger) {
@@ -537,7 +538,6 @@ func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger
 		return
 	}
 	err := forwardLines(out, func(line []byte, truncated bool) {
-		line = mask.MaskJSON(line)
 		if len(bytes.TrimSpace(line)) == 0 {
 			return
 		}
@@ -546,25 +546,40 @@ func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger
 		// that happened to parse would report a record the node never
 		// emitted.
 		if !truncated {
-			var rec sparkwing.LogRecord
-			dec := json.NewDecoder(bytes.NewReader(line))
-			dec.UseNumber()
-			if dec.Decode(&rec) == nil && !dec.More() {
+			if rec, ok := wholeLineRecord(line); ok {
 				if rec.TS.IsZero() {
 					rec.TS = time.Now()
 				}
 				if rec.JobID == "" {
 					rec.JobID = req.NodeID
 				}
-				req.Delegate.Emit(rec)
+				req.Delegate.Emit(mask.MaskRecord(rec))
 				return
 			}
 		}
-		req.Delegate.Emit(rawLineRecord(req.NodeID, string(line), truncated))
+		req.Delegate.Emit(rawLineRecord(req.NodeID, maskLine(mask, string(line), truncated), truncated))
 	})
 	if err != nil && logger != nil {
 		logger.Debug("local runner: stdout forward ended", "node_id", req.NodeID, "err", err)
 	}
+}
+
+func wholeLineRecord(line []byte) (sparkwing.LogRecord, bool) {
+	var rec sparkwing.LogRecord
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if dec.Decode(&rec) != nil {
+		return rec, false
+	}
+	_, err := dec.Token()
+	return rec, errors.Is(err, io.EOF)
+}
+
+func maskLine(mask outputMasker, line string, truncated bool) string {
+	if truncated {
+		kept, _ := mask.MaskTruncated(line)
+		return kept
+	}
+	return mask.Mask(line)
 }
 
 func forwardStderr(errOut io.Reader, req runner.Request, mask outputMasker) {
@@ -573,7 +588,7 @@ func forwardStderr(errOut io.Reader, req runner.Request, mask outputMasker) {
 		return
 	}
 	_ = forwardLines(errOut, func(line []byte, truncated bool) {
-		text := mask.Mask(strings.TrimRight(string(line), "\r"))
+		text := maskLine(mask, strings.TrimRight(string(line), "\r"), truncated)
 		if strings.TrimSpace(text) == "" {
 			return
 		}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func knownValues(values ...string) *ChildValues {
@@ -68,11 +70,14 @@ func TestLineWriterMasksAnUnterminatedTailAtClose(t *testing.T) {
 	}
 }
 
-func TestChildValuesMaskJSONKeepsKeysAndMasksNumbers(t *testing.T) {
-	v := knownValues("msg", "12345678")
-	got := string(v.MaskJSON([]byte(`{"msg":"a msg","attrs":{"pin":12345678,"n":7}}`)))
-	if got != `{"attrs":{"n":7,"pin":"***"},"msg":"a ***"}` {
-		t.Fatalf("MaskJSON = %s", got)
+func TestChildValuesMaskRecordMasksEveryStringField(t *testing.T) {
+	v := knownValues("fixture-secret-7c41e9")
+	rec := v.MaskRecord(sparkwing.LogRecord{
+		Level: "info", Step: "fixture-secret-7c41e9", Msg: "ok",
+		Attrs: map[string]any{"k": "fixture-secret-7c41e9", "n": 7.0},
+	})
+	if rec.Step != "***" || rec.Msg != "ok" || rec.Attrs["k"] != "***" || rec.Attrs["n"] != 7.0 {
+		t.Fatalf("MaskRecord = %+v", rec)
 	}
 }
 

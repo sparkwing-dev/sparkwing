@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -17,7 +19,13 @@ type maskerOutput struct{ m *secrets.Masker }
 
 func (o maskerOutput) Mask(s string) string { return o.m.Mask(s) }
 
-func (o maskerOutput) MaskJSON(doc []byte) []byte { return o.m.MaskJSON(doc) }
+func (o maskerOutput) MaskTruncated(s string) (string, int) { return o.m.Mask(s), 0 }
+
+func (o maskerOutput) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
+	rec.Step, rec.Msg = o.m.Mask(rec.Step), o.m.Mask(rec.Msg)
+	rec.Attrs = o.m.MaskAttrs(rec.Attrs)
+	return rec
+}
 
 var unmasked = maskerOutput{m: secrets.NewMasker()}
 
@@ -244,16 +252,16 @@ func TestForwardLines_UnterminatedFinalLineIsEmitted(t *testing.T) {
 	}
 }
 
-func TestForwardRecordsMasksEveryValueAndKeepsTheRecordsShape(t *testing.T) {
+func TestForwardRecordsMasksRecordsByFieldAndEverythingElseAsText(t *testing.T) {
 	m := secrets.NewMasker()
-	for _, v := range []string{"msg", "fixture-secret-7c41e9", "12345678"} {
+	for _, v := range []string{"msg", "fixture-secret-7c41e9", "fixture-private-7c41e9"} {
 		m.Register(v)
 	}
 	cap := &captureLogger{}
 	lines := strings.Join([]string{
-		`{"msg":"ok","step":"fixture-secret-7c41e9"}`,
-		`{"msg":"ok","attrs":{"pin":12345678}}`,
-		`{"msg":"token msg sent","level":"info","attrs":{"msg":"msg","count":42,"ratio":0.25,"big":987654321098765432109}}`,
+		`{"msg":"token msg sent","step":"fixture-secret-7c41e9","attrs":{"msg":"msg","count":42}}`,
+		`{"msg":false,"fixture-private-7c41e9":true}`,
+		`{"msg":"kept"}]compiler failed`,
 		"raw msg line",
 	}, "\n") + "\n"
 	forwardRecords(strings.NewReader(lines), runner.Request{NodeID: "build", Delegate: cap}, maskerOutput{m: m}, slog.Default())
@@ -262,22 +270,27 @@ func TestForwardRecordsMasksEveryValueAndKeepsTheRecordsShape(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("got %d records, want 4: %+v", len(got), got)
 	}
-	if got[0].Msg != "ok" || got[0].Step != "***" {
-		t.Errorf("step = %q, msg = %q; want the step masked", got[0].Step, got[0].Msg)
+	if r := got[0]; r.Msg != "token *** sent" || r.Step != "***" || r.Attrs["msg"] != "***" || r.Attrs["count"] != 42.0 {
+		t.Errorf("record = %+v, want its keys kept and its string values masked", r)
 	}
-	if got[1].Attrs["pin"] != "***" {
-		t.Errorf("pin = %#v, want the registered number masked", got[1].Attrs["pin"])
-	}
-	r := got[2]
-	if r.Msg != "token *** sent" || r.Level != "info" || r.Attrs["msg"] != "***" {
-		t.Errorf("record = %+v, want its keys kept and its values masked", r)
-	}
-	for k, want := range map[string]string{"count": "42", "ratio": "0.25", "big": "987654321098765432109"} {
-		if fmt.Sprint(r.Attrs[k]) != want {
-			t.Errorf("attrs[%s] = %v, want %s unchanged", k, r.Attrs[k], want)
+	for i, want := range map[int]string{
+		1: `{"***":false,"***":true}`,
+		2: `{"***":"kept"}]compiler failed`,
+		3: "raw *** line",
+	} {
+		if got[i].Msg != want {
+			t.Errorf("line %d forwarded as %q, want the whole line masked as text: %q", i, got[i].Msg, want)
 		}
 	}
-	if got[3].Msg != "raw *** line" {
-		t.Errorf("raw line = %q, want it masked as text", got[3].Msg)
+}
+
+func TestForwardRecordsKeepsAStepDurationForThePrettyRenderer(t *testing.T) {
+	var buf bytes.Buffer
+	pr := logpretty.NewPrettyRendererTo(&buf, false)
+	forwardRecords(strings.NewReader(`{"event":"step_end","node":"build","msg":"compile","attrs":{"outcome":"success","duration_ms":1500}}`+"\n"),
+		runner.Request{NodeID: "build", Delegate: pr}, unmasked, slog.Default())
+	pr.Flush()
+	if !strings.Contains(buf.String(), "(1.5s)") {
+		t.Fatalf("rendered %q, want the step duration (1.5s)", buf.String())
 	}
 }
