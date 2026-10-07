@@ -72,6 +72,7 @@ func TestResolveArtifactStoreReportsAnS3ProfileAsAnS3URL(t *testing.T) {
 }
 
 func TestArtifactStoreURLReportsARelativeCachePathAsOneTheFlagAccepts(t *testing.T) {
+	t.Chdir(t.TempDir())
 	writePublishProfiles(t, "cache-dir")
 	p, err := resolveProfile("team")
 	if err != nil {
