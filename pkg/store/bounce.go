@@ -65,9 +65,14 @@ type NodeBounce struct {
 // this call and the kill is the race the consuming runner resolves:
 // the terminal row wins and the request is consumed as BounceMissed.
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error) {
+	return s.defaultTenant().RequestNodeBounce(ctx, runID, nodeID, requestedBy)
+}
+
+// RequestNodeBounce is [Store.RequestNodeBounce] confined to t's team.
+func (t *Tenant) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error) {
 	var runStatus string
-	switch err := s.queryRow(ctx,
-		`SELECT status FROM runs WHERE id = ?`, runID).Scan(&runStatus); {
+	switch err := t.s.queryRow(ctx,
+		`SELECT status FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&runStatus); {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, fmt.Errorf("run %s: %w", runID, ErrNotFound)
 	case err != nil:
@@ -78,9 +83,9 @@ func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedB
 	}
 
 	var nodeStatus string
-	switch err := s.queryRow(ctx,
-		`SELECT status FROM nodes WHERE run_id = ? AND node_id = ?`,
-		runID, nodeID).Scan(&nodeStatus); {
+	switch err := t.s.queryRow(ctx,
+		`SELECT status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(t.team), runID, nodeID).Scan(&nodeStatus); {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, fmt.Errorf("node %s in run %s: %w", nodeID, runID, ErrNotFound)
 	case err != nil:
@@ -95,7 +100,7 @@ func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedB
 	// concurrent bounces can choose the same primary key. The transaction is
 	// not enough on its own under Postgres' READ COMMITTED, so the node row
 	// is held across the read and the insert.
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,8 +108,8 @@ func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedB
 
 	var locked string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT node_id FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&locked); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		`SELECT node_id FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), runID, nodeID).Scan(&locked); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -112,13 +117,13 @@ func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedB
 	if err := tx.QueryRowContext(ctx, `
 SELECT COALESCE(MAX(seq), 0) + 1
   FROM node_bounces
- WHERE run_id = ? AND node_id = ?`, runID, nodeID).Scan(&seq); err != nil {
+ WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID).Scan(&seq); err != nil {
 		return nil, fmt.Errorf("assign next bounce seq: %w", err)
 	}
 	now := time.Now()
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_bounces (run_id, node_id, seq, requested_at, requested_by)
-VALUES (?,?,?,?,?)`, runID, nodeID, seq, now.UnixNano(), requestedBy); err != nil {
+INSERT INTO node_bounces (team, run_id, node_id, seq, requested_at, requested_by)
+VALUES (?,?,?,?,?,?)`, string(t.team), runID, nodeID, seq, now.UnixNano(), requestedBy); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -138,12 +143,17 @@ VALUES (?,?,?,?,?)`, runID, nodeID, seq, now.UnixNano(), requestedBy); err != ni
 // every supervision tick, so "none" is the common answer and is not an
 // error.
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error) {
-	row := s.queryRow(ctx, `
+	return s.defaultTenant().PendingNodeBounce(ctx, runID, nodeID)
+}
+
+// PendingNodeBounce is [Store.PendingNodeBounce] confined to t's team.
+func (t *Tenant) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error) {
+	row := t.s.queryRow(ctx, `
 SELECT run_id, node_id, seq, requested_at, requested_by, consumed_at, outcome
   FROM node_bounces
- WHERE run_id = ? AND node_id = ? AND consumed_at IS NULL
+ WHERE team = ? AND run_id = ? AND node_id = ? AND consumed_at IS NULL
  ORDER BY seq
- LIMIT 1`, runID, nodeID)
+ LIMIT 1`, string(t.team), runID, nodeID)
 	b, err := scanNodeBounce(row)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
@@ -159,19 +169,24 @@ SELECT run_id, node_id, seq, requested_at, requested_by, consumed_at, outcome
 // true one. A seq that names no row is ErrNotFound -- that is a caller
 // bug, not a replay.
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().ConsumeNodeBounce(ctx, runID, nodeID, seq, outcome)
+}
+
+// ConsumeNodeBounce is [Store.ConsumeNodeBounce] confined to t's team.
+func (t *Tenant) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
 UPDATE node_bounces
    SET consumed_at = ?, outcome = ?
- WHERE run_id = ? AND node_id = ? AND seq = ? AND consumed_at IS NULL`,
-		time.Now().UnixNano(), outcome, runID, nodeID, seq)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND seq = ? AND consumed_at IS NULL`,
+		time.Now().UnixNano(), outcome, string(t.team), runID, nodeID, seq)
 	if err != nil {
 		return err
 	}
@@ -185,7 +200,7 @@ UPDATE node_bounces
 	var exists int
 	if err := tx.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM node_bounces
- WHERE run_id = ? AND node_id = ? AND seq = ?`, runID, nodeID, seq).Scan(&exists); err != nil {
+ WHERE team = ? AND run_id = ? AND node_id = ? AND seq = ?`, string(t.team), runID, nodeID, seq).Scan(&exists); err != nil {
 		return err
 	}
 	if exists == 0 {
@@ -198,11 +213,16 @@ SELECT COUNT(*) FROM node_bounces
 // oldest first. It serves inspection -- a node's history, and tests --
 // rather than the runner's poll.
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListNodeBounces(ctx, runID)
+}
+
+// ListNodeBounces is [Store.ListNodeBounces] confined to t's team.
+func (t *Tenant) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error) {
+	rows, err := t.s.query(ctx, `
 SELECT run_id, node_id, seq, requested_at, requested_by, consumed_at, outcome
   FROM node_bounces
- WHERE run_id = ?
- ORDER BY requested_at, seq`, runID)
+ WHERE team = ? AND run_id = ?
+ ORDER BY requested_at, seq`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}

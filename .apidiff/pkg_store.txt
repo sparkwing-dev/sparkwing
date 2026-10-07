@@ -2643,6 +2643,7 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
+func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
@@ -2663,6 +2664,7 @@ func (t *Tenant) CloseCreditCheckout(
 ) (_ bool, err error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
+func (t *Tenant) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error
@@ -2763,7 +2765,9 @@ func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int
 func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error)
 func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
+func (t *Tenant) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error)
+func (t *Tenant) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error)
 func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error)
 func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error)
 func (t *Tenant) ListPendingApprovals(ctx context.Context) (_ []*Approval, err error)
@@ -2787,6 +2791,7 @@ func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
 func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
+func (t *Tenant) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
@@ -2813,6 +2818,7 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error
 func (t *Tenant) RequestCancel(ctx context.Context, id string) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
+func (t *Tenant) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (t *Tenant) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)

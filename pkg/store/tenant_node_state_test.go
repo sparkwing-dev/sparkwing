@@ -292,3 +292,56 @@ func TestTenantTriggersStayInTheirTeam(t *testing.T) {
 		t.Fatalf("acme.FindSpawnedChildTriggerID = %q, %v, want child-a", id, err)
 	}
 }
+
+// Bounce requests and metric samples belong to the run's team: another
+// team's handle can neither write them onto the node nor read them back.
+func TestTenantBouncesAndMetricsStayInTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := acme.StartNode(ctx, "run-a", "build"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := globex.RequestNodeBounce(ctx, "run-a", "build", "mallory"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.RequestNodeBounce = %v, want ErrNotFound", err)
+	}
+	b, err := acme.RequestNodeBounce(ctx, "run-a", "build", "alice")
+	if err != nil {
+		t.Fatalf("acme.RequestNodeBounce: %v", err)
+	}
+	if got, err := globex.PendingNodeBounce(ctx, "run-a", "build"); err != nil || got != nil {
+		t.Fatalf("globex.PendingNodeBounce = %+v, %v, want none", got, err)
+	}
+	if got, err := globex.ListNodeBounces(ctx, "run-a"); err != nil || len(got) != 0 {
+		t.Fatalf("globex.ListNodeBounces = %v, %v, want none", got, err)
+	}
+	if err := globex.ConsumeNodeBounce(ctx, "run-a", "build", b.Seq, store.BounceMissed); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.ConsumeNodeBounce = %v, want ErrNotFound", err)
+	}
+	if got, err := acme.PendingNodeBounce(ctx, "run-a", "build"); err != nil || got == nil || got.Seq != b.Seq {
+		t.Fatalf("acme.PendingNodeBounce = %+v, %v, want the open request", got, err)
+	}
+
+	sample := store.MetricSample{TS: time.Now(), CPUMillicores: 5}
+	if err := globex.AddNodeMetricSample(ctx, "run-a", "build", sample); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.AddNodeMetricSample = %v, want ErrNotFound", err)
+	}
+	if err := acme.AddNodeMetricSample(ctx, "run-a", "build", sample); err != nil {
+		t.Fatalf("acme.AddNodeMetricSample: %v", err)
+	}
+	if err := acme.AddNodeMetricSample(ctx, "run-a", "build", sample); err != nil {
+		t.Fatalf("an identical retry: %v", err)
+	}
+	if got, err := globex.ListNodeMetricsPage(ctx, "run-a", "build", time.Time{}, 0); err != nil || len(got) != 0 {
+		t.Fatalf("globex.ListNodeMetricsPage = %v, %v, want none", got, err)
+	}
+	if got, err := acme.ListNodeMetricsPage(ctx, "run-a", "build", time.Time{}, 0); err != nil || len(got) != 1 {
+		t.Fatalf("acme.ListNodeMetricsPage = %v, %v, want the one sample", got, err)
+	}
+}

@@ -19,6 +19,10 @@ type metricSample struct {
 }
 
 func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body metricSample
@@ -35,7 +39,7 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		}
 		ts = parsed
 	}
-	if err := s.store.AddNodeMetricSample(r.Context(), runID, nodeID, store.MetricSample{
+	if err := tenant.AddNodeMetricSample(r.Context(), runID, nodeID, store.MetricSample{
 		Kind:          body.Kind,
 		TS:            ts,
 		CPUMillicores: body.CPUMillicores,
@@ -100,12 +104,16 @@ func newMetricsPage(samples []store.MetricSample, limit int) metricsPage {
 }
 
 func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	after, limit, err := metricsPageRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	samples, err := s.store.ListNodeMetricsPage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), after, limit+1)
+	samples, err := tenant.ListNodeMetricsPage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), after, limit+1)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)

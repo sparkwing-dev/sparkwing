@@ -281,7 +281,7 @@ func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
 	if err := acme.WriteNodeDispatch(ctx, store.NodeDispatch{RunID: "run-acme", NodeID: "build", DispatchedAt: now}); err != nil {
 		t.Fatalf("WriteNodeDispatch: %v", err)
 	}
-	if err := st.AddNodeMetricSample(ctx, "run-acme", "build", store.MetricSample{TS: now, CPUMillicores: 1}); err != nil {
+	if err := acme.AddNodeMetricSample(ctx, "run-acme", "build", store.MetricSample{TS: now, CPUMillicores: 1}); err != nil {
 		t.Fatalf("AddNodeMetricSample: %v", err)
 	}
 

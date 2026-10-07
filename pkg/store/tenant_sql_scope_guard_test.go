@@ -307,8 +307,6 @@ var reviewedUnscopedSQL = map[string]string{
 // cannot be added without a reviewer seeing the number move.
 var unportedSQL = []string{
 	"(*Store).AcknowledgeNodeExecutionStart",
-	"(*Store).AddNodeMetricSample",
-	"(*Store).ConsumeNodeBounce",
 	"(*Store).CountUsers",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
@@ -319,13 +317,9 @@ var unportedSQL = []string{
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).finishNode",
 	"(*Store).ListLegacyAgentClaims",
-	"(*Store).ListNodeBounces",
-	"(*Store).ListNodeMetricsPage",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
 	"(*Store).NodeSettlement",
-	"(*Store).PendingNodeBounce",
-	"(*Store).RequestNodeBounce",
 	"(*Store).ResetNodeForAutoRetry",
 	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
@@ -367,7 +361,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 58
+const unportedSQLSize = 52
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
