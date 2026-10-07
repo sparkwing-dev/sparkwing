@@ -169,6 +169,7 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 		c.Pipeline = trig.Pipeline
 		branch, sha = trig.GitBranch, trig.GitSHA
 		owner, repo, repoURL = trig.GithubOwner, trig.GithubRepo, trig.RepoURL
+		c.RepositoryID = trig.GithubRepoID
 		// safety: the event name is reserved to the signed webhook, which records
 		// it at intake; a github source without one proves neither event.
 		event := trig.TriggerEnv[sparkwing.EnvGitHubEventName]

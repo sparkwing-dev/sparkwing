@@ -528,6 +528,10 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		}
 		p, err := a.authenticate(raw, ratelimit.ClientIP(r))
 		if err != nil {
+			// safety: only a token-shaped bearer has a prefix, which names the token without granting it.
+			if store.TokenKindFromPrefix(raw) != "" && len(raw) > store.PrefixLen {
+				noteAuditTarget(r.Context(), "attempted_prefix", tokenPrefixOf(raw))
+			}
 			a.writeAuthFailure(w, err)
 			return
 		}

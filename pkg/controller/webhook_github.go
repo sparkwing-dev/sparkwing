@@ -422,6 +422,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return
 	}
+	s.recordGitHubDelivery(r, tenant, pipeline, delivery, body)
 
 	s.recordQueueActivity(time.Now())
 
@@ -571,6 +572,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return
 	}
+	s.recordGitHubDelivery(r, tenant, pipeline, delivery, body)
 
 	pendingStatus := s.reserveGitHubCommitStatus(r.Context(), runID, "pending")
 	dispatchAccepted := false
@@ -611,14 +613,47 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 func (s *Server) githubDeliveryAlreadyRan(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, pipeline, delivery string, body []byte) bool {
 	existing, err := tenant.FindTriggerByWebhookReplay(
 		r.Context(), githubWebhookReplayKey(pipeline, body), delivery)
-	if err != nil || existing == nil {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return false
+	}
+	if existing == nil {
+		seen, err := s.store.GitHubAppDeliverySeen(r.Context(), githubDeliveryDigest(tenant.Team(), pipeline, body))
+		if err != nil {
+			s.writeInternalError(w, r, "github delivery", err)
+			return true
+		}
+		if !seen {
+			return false
+		}
+		s.logger.Warn("github delivery deduplicated",
+			"principal", githubFloodKey(tenant.Team(), pipeline, ""), "pipeline", pipeline, "delivery", delivery,
+			"reason", "the body digest started a run that has since been deleted")
+		writeJSON(w, http.StatusConflict, triggerResp{Status: "duplicate"})
+		return true
 	}
 	s.logger.Warn("github delivery deduplicated",
 		"principal", githubFloodKey(tenant.Team(), pipeline, ""), "pipeline", pipeline, "delivery", delivery,
 		"reason", "the delivery id or body digest already started a run", "run_id", existing.ID)
 	writeJSON(w, http.StatusConflict, triggerResp{RunID: existing.ID, Status: "duplicate"})
 	return true
+}
+
+// safety: the team is in the digest because two teams' webhooks can carry the same body to pipelines of
+// the same name, and the deliveries table it keys is shared by every team.
+func githubDeliveryDigest(team store.Team, pipeline string, body []byte) string {
+	sum := sha256.New()
+	sum.Write([]byte("webhook\x00" + string(team) + "\x00"))
+	sum.Write([]byte(githubWebhookReplayKey(pipeline, body)))
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+// safety: the trigger row still refuses a replay while its run exists, so a
+// failed write only shortens the window to the run's lifetime.
+func (s *Server) recordGitHubDelivery(r *http.Request, tenant *store.Tenant, pipeline, delivery string, body []byte) {
+	if err := s.store.RecordGitHubAppDelivery(r.Context(), githubDeliveryDigest(tenant.Team(), pipeline, body),
+		delivery, time.Now()); err != nil {
+		s.logger.Warn("github delivery not recorded", "pipeline", pipeline, "delivery", delivery, "err", err)
+	}
 }
 
 // safety: a delivery carries no principal, so the team whose binding signed it

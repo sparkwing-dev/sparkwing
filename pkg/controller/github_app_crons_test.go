@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -120,7 +121,7 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	if len(rows) != 1 || rows[0].LockedRef != headSHA || !rows[0].Declared {
 		t.Fatalf("failed read or parse changed schedule: %+v", rows)
 	}
-	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7}}, ""); code != http.StatusOK {
+	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, ""); code != http.StatusOK {
 		t.Fatalf("uninstall = %d", code)
 	}
 	f.deliver("push", cronPush(7, 701, "acme/widgets", next, "refs/heads/main"), "")

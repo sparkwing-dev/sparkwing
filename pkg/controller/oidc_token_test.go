@@ -130,14 +130,15 @@ func verifyAgainst(t *testing.T, srv *httptest.Server, token string) (runTokenCl
 }
 
 // A runner holding a push run's trigger claim gets a token that verifies
-// against the key set the controller serves and names the run.
+// against the key set the controller serves and names the run with the
+// subject docs/oidc.md shows.
 func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 	ctx := context.Background()
 	f := newOIDCFixture(t)
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-hook", Pipeline: "deploy", TriggerSource: "github",
 		GitBranch: "main", GitSHA: "0123456789abcdef0123456789abcdef01234567",
-		GithubOwner: "acme", GithubRepo: "api",
+		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 123456789,
 		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
 	})
 	raw := f.runner(t, f.acme, "agent:acme")
@@ -161,7 +162,7 @@ func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 	if len(claims.Aud) != 1 || claims.Aud[0] != "sts.amazonaws.com" {
 		t.Errorf("aud = %v, want [sts.amazonaws.com]", claims.Aud)
 	}
-	if want := "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"; claims.Sub != want {
+	if want := "team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"; claims.Sub != want {
 		t.Errorf("sub = %q, want %q", claims.Sub, want)
 	}
 	got := [...]string{claims.Team, claims.Pipeline, claims.Trigger, claims.RunnerKind, claims.Ref, claims.SHA, claims.Repository, claims.RunID}
@@ -185,6 +186,51 @@ func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 	}
 }
 
+// One pipeline name subscribed on two repositories of a team mints two
+// subjects, so a trust policy written for one repository refuses the other.
+func TestOIDCSubjectNamesTheRepository(t *testing.T) {
+	ctx := context.Background()
+	f := newOIDCFixture(t)
+	for _, tc := range []struct {
+		id, repo string
+		repoID   int64
+	}{{"run-prod", "prod-api", 1001}, {"run-sandbox", "intern-sandbox", 2002}} {
+		f.run(t, f.acme, store.Trigger{
+			ID: tc.id, Pipeline: "deploy", TriggerSource: "github",
+			GitBranch: "main", GitSHA: strings.Repeat("a", 40),
+			GithubOwner: "acme", GithubRepo: tc.repo, GithubRepoID: tc.repoID,
+			TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+		})
+	}
+	raw := f.runner(t, f.acme, "agent:acme")
+	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
+	c := client.NewWithToken(srv.URL, nil, raw)
+	subs := map[string]string{}
+	for _, run := range []string{"run-prod", "run-sandbox"} {
+		if _, err := c.ClaimSpecificTrigger(ctx, run, time.Minute); err != nil {
+			t.Fatalf("%s: ClaimSpecificTrigger: %v", run, err)
+		}
+		tok, err := c.OIDCToken(ctx, run, "sts.amazonaws.com")
+		if err != nil {
+			t.Fatalf("%s: OIDCToken: %v", run, err)
+		}
+		claims, err := verifyAgainst(t, srv, tok.Token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		subs[run] = claims.Sub
+	}
+	want := map[string]string{
+		"run-prod":    "team:acme:repository_id:1001:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main",
+		"run-sandbox": "team:acme:repository_id:2002:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main",
+	}
+	for run, sub := range want {
+		if subs[run] != sub {
+			t.Errorf("%s: sub = %q, want %q", run, subs[run], sub)
+		}
+	}
+}
+
 // The trigger claim reports cron only for the controller's own schedule,
 // whose marker a submitter cannot set, and manual for everything else.
 func TestOIDCTokenTriggerComesFromTheIntakeRow(t *testing.T) {
@@ -201,9 +247,9 @@ func TestOIDCTokenTriggerComesFromTheIntakeRow(t *testing.T) {
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
 	c := client.NewWithToken(srv.URL, nil, raw)
 	for _, tc := range []struct{ run, trigger, sub, repo string }{
-		{"run-cron", "cron", "team:acme:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", "github.com/Acme/API"},
-		{"run-fake-cron", "manual", "team:acme:pipeline:nightly:trigger:manual:runner:runner:ref:", ""},
-		{"run-cli", "manual", "team:acme:pipeline:nightly:trigger:manual:runner:runner:ref:", ""},
+		{"run-cron", "cron", "team:acme:repository_id::pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", "github.com/Acme/API"},
+		{"run-fake-cron", "manual", "team:acme:repository_id::pipeline:nightly:trigger:manual:runner:runner:ref:", ""},
+		{"run-cli", "manual", "team:acme:repository_id::pipeline:nightly:trigger:manual:runner:runner:ref:", ""},
 	} {
 		if _, err := c.ClaimSpecificTrigger(ctx, tc.run, time.Minute); err != nil {
 			t.Fatalf("%s: ClaimSpecificTrigger: %v", tc.run, err)
@@ -504,12 +550,12 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
 	c := client.NewWithToken(srv.URL, nil, raw)
 	for _, tc := range []struct{ run, sub, ref string }{
-		{"run-pr", "team:acme:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/7/head", "refs/pull/7/head"},
-		{"run-push", "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main", "refs/heads/main"},
-		{"run-no-event", "team:acme:pipeline:deploy:trigger:manual:runner:runner:ref:refs/heads/main", "refs/heads/main"},
-		{"run-release", "team:acme:pipeline:deploy:trigger:release:runner:runner:ref:refs/tags/v1", "refs/tags/v1"},
-		{"run-create", "team:acme:pipeline:deploy:trigger:create:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
-		{"run-delete", "team:acme:pipeline:deploy:trigger:delete:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
+		{"run-pr", "team:acme:repository_id::pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/7/head", "refs/pull/7/head"},
+		{"run-push", "team:acme:repository_id::pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+		{"run-no-event", "team:acme:repository_id::pipeline:deploy:trigger:manual:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+		{"run-release", "team:acme:repository_id::pipeline:deploy:trigger:release:runner:runner:ref:refs/tags/v1", "refs/tags/v1"},
+		{"run-create", "team:acme:repository_id::pipeline:deploy:trigger:create:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
+		{"run-delete", "team:acme:repository_id::pipeline:deploy:trigger:delete:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
 	} {
 		if _, err := c.ClaimSpecificTrigger(ctx, tc.run, time.Minute); err != nil {
 			t.Fatalf("%s: ClaimSpecificTrigger: %v", tc.run, err)
@@ -550,7 +596,7 @@ func TestOIDCTokenTagPushNamesTagRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Sub != "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3" || claims.Ref != "refs/tags/v1.2.3" {
+	if claims.Sub != "team:acme:repository_id::pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3" || claims.Ref != "refs/tags/v1.2.3" {
 		t.Fatalf("tag sub/ref = %q/%q", claims.Sub, claims.Ref)
 	}
 }

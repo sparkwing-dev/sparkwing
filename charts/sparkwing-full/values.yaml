@@ -214,18 +214,28 @@ controller:
   # token: "swu_" followed by at least 28 characters, for example
   # `printf 'swu_%s' "$(openssl rand -hex 24)"`.
   bootstrapAdminToken:
-    # Empty name disables; the controller bootstraps through an open window.
+    # Empty name disables; the render then refuses while requireAuth is
+    # true unless allowOpenBootstrap opts in.
     name: ""
     key: token
 
   # Refuse to start when no live token exists, which turns an
   # accidentally open controller into a failed rollout instead of a
-  # running hole. An upgrade of a cluster that already holds a token
-  # needs nothing else. A fresh install needs bootstrapAdminToken set
-  # alongside it, or the pod crash-loops with no way to mint the first
-  # token; the render does not refuse that pairing, because it cannot
-  # see what the state DB already holds.
-  requireAuth: false
+  # running hole. With bootstrapAdminToken set a fresh install starts
+  # authenticated. Without it the render refuses unless
+  # allowOpenBootstrap is true, because a fresh controller would have no
+  # way to mint its first token and would crash-loop.
+  requireAuth: true
+
+  # Start without bootstrapAdminToken. The chart then drops
+  # --require-auth, so a controller whose tokens table is empty serves
+  # every route unauthenticated -- token minting and first-admin
+  # creation included -- to anything that reaches its Service, until a
+  # token exists and the controller restarts. A controller that already
+  # holds a live token stays authenticated, so an upgrade can set this
+  # instead of creating a bootstrap Secret, at the cost of that open
+  # window reopening if the tokens table is ever emptied. Bool only.
+  allowOpenBootstrap: false
 
   # Optional Secret containing a PostgreSQL DSN. Empty keeps SQLite.
   databaseSecret:

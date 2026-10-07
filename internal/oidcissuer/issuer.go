@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -147,19 +148,31 @@ type Claims struct {
 	Ref        string
 	SHA        string
 	Repository string
-	RunID      string
+	// RepositoryID is GitHub's numeric repository id, zero when the run was
+	// not started by a GitHub App delivery. It survives renames and
+	// transfers, which the repository name does not.
+	RepositoryID int64
+	RunID        string
 }
 
 // Subject renders the stable sub claim:
 //
-//	team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
+//	team:<team>:repository_id:<id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
 //
-// It fails with ErrInvalidClaim when a value holds a separator, a wildcard
+// The repository sits between team and pipeline because a team holds
+// repositories and a repository declares pipelines, so a trust condition
+// ending in "*" narrows from coarse to fine, and a pipeline name shared by
+// two repositories never yields one subject. It fails with ErrInvalidClaim when a value holds a separator, a wildcard
 // a trust policy would match on, or whitespace, because such a value could
 // forge a later segment.
 func (c Claims) Subject() (string, error) {
+	repoID := ""
+	if c.RepositoryID > 0 {
+		repoID = strconv.FormatInt(c.RepositoryID, 10)
+	}
 	segs := []struct{ name, value string }{
 		{"team", c.Team},
+		{"repository_id", repoID},
 		{"pipeline", c.Pipeline},
 		{"trigger", c.Trigger},
 		{"runner", c.RunnerKind},
@@ -167,7 +180,7 @@ func (c Claims) Subject() (string, error) {
 	}
 	var b strings.Builder
 	for i, s := range segs {
-		if s.value == "" && s.name != "ref" {
+		if s.value == "" && s.name != "ref" && s.name != "repository_id" {
 			return "", fmt.Errorf("%w: %s is empty", ErrInvalidClaim, s.name)
 		}
 		if strings.ContainsFunc(s.value, forbiddenInSubject) {

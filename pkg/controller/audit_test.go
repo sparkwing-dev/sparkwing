@@ -55,8 +55,8 @@ func auditFixture(t *testing.T) (*identityFixture, *lockedBuffer) {
 }
 
 // A write is logged with who made it, for which team, and the route it
-// reached; the secret name in its path, its query and its bearer token are
-// not in the log.
+// reached; the name of a secret it did not find, its query and its bearer
+// token are not in the log.
 func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 	f, logs := auditFixture(t)
 	owner := f.user("o", "olga@example.com")
@@ -188,4 +188,110 @@ func TestAuditRecordCarriesAllowListedPathIDs(t *testing.T) {
 		}
 	}
 	t.Fatalf("no audit record for the node finish: %s", logs.String())
+}
+
+func auditFor(t *testing.T, logs *lockedBuffer, method, route string) map[string]any {
+	t.Helper()
+	var last map[string]any
+	for _, rec := range logs.records(t, "audit") {
+		if rec["method"] == method && rec["route"] == route {
+			last = rec
+		}
+	}
+	if last == nil {
+		t.Fatalf("no audit record for %s %s: %s", method, route, logs.String())
+	}
+	return last
+}
+
+// Reads that hand out a secret or a credential list, identity changes and
+// refused requests are audited with the caller and the target, so a leak or
+// a hostile member can be traced; the bearer itself never reaches the log.
+func TestAuditNamesReadersTargetsAndDeniedSubjects(t *testing.T) {
+	f, logs := auditFixture(t)
+	owner := f.user("o", "olga@example.com")
+	member := f.user("m", "mia@example.com")
+	f.join(owner, member, "mia@example.com", "reader")
+	if code := f.call("POST", "/api/v1/secrets", owner.auth, map[string]any{"name": "DEPLOY_KEY", "value": "s3cr3t-value", "masked": false}, nil); code != http.StatusNoContent {
+		t.Fatalf("create secret = %d", code)
+	}
+	if code := f.call("GET", "/api/v1/secrets/DEPLOY_KEY", owner.auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("read secret = %d", code)
+	}
+	f.call("GET", "/api/v1/team/cli-tokens", owner.auth, nil, nil)
+	if code := f.call("PATCH", "/api/v1/team/members/"+member.id, owner.auth, map[string]string{"role": "editor"}, nil); code != http.StatusNoContent {
+		t.Fatalf("set role = %d", code)
+	}
+	invitation := f.invite(owner, "nia@example.com", "reader")
+	if code := f.call("DELETE", "/api/v1/team/invitations/"+invitation, owner.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("withdraw invitation = %d", code)
+	}
+	runner := mintRunner(f, owner.auth, "pool")
+	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+runner.Prefix, owner.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("revoke runner token = %d", code)
+	}
+	forged := runner.Token[:len(runner.Token)-4] + "zzzz"
+	if code := f.call("GET", "/api/v1/runs", "Bearer "+forged, nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("forged bearer = %d, want 401", code)
+	}
+	if code := f.call("GET", "/api/v1/team/invitations", member.auth, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("editor listing invitations = %d, want 403", code)
+	}
+
+	for _, tc := range []struct {
+		method, route string
+		want          map[string]any
+	}{
+		{"GET", "/api/v1/secrets/{name}", map[string]any{"principal_id": owner.id, "team": owner.team, "secret_name": "DEPLOY_KEY"}},
+		{"POST", "/api/v1/secrets", map[string]any{"principal_id": owner.id, "secret_name": "DEPLOY_KEY"}},
+		{"GET", "/api/v1/team/cli-tokens", map[string]any{"principal_id": owner.id, "team": owner.team}},
+		{"PATCH", "/api/v1/team/members/{user_id}", map[string]any{"principal_id": owner.id, "member_id": member.id, "role": "editor"}},
+		{"POST", "/api/v1/team/invitations", map[string]any{"invitation_id": invitation, "role": "reader"}},
+		{"DELETE", "/api/v1/team/invitations/{id}", map[string]any{"invitation_id": invitation}},
+		{"DELETE", "/api/v1/team/runner-tokens/{prefix}", map[string]any{"token_prefix": runner.Prefix}},
+		{"GET", "/api/v1/runs", map[string]any{"status": float64(http.StatusUnauthorized), "attempted_prefix": runner.Prefix}},
+		{"GET", "/api/v1/team/invitations", map[string]any{"status": float64(http.StatusForbidden), "principal_id": member.id}},
+	} {
+		rec := auditFor(t, logs, tc.method, tc.route)
+		if rec["client_ip"] == nil || rec["client_ip"] == "" {
+			t.Errorf("%s %s: no client_ip: %v", tc.method, tc.route, rec)
+		}
+		for key, want := range tc.want {
+			if rec[key] != want {
+				t.Errorf("%s %s: %s = %v, want %v", tc.method, tc.route, key, rec[key], want)
+			}
+		}
+	}
+	all := logs.String()
+	for _, leak := range []string{"s3cr3t-value", forged, runner.Token} {
+		if strings.Contains(all, leak) {
+			t.Errorf("log carries %q", leak)
+		}
+	}
+}
+
+// A bearer pasted where a token prefix or a role belongs reaches the audit
+// record only as its prefix, and a role outside the role set not at all,
+// even when the request is refused.
+func TestAuditKeepsABearerInATargetOutOfTheLog(t *testing.T) {
+	f, logs := auditFixture(t)
+	owner := f.user("o", "olga@example.com")
+	member := f.user("m", "mia@example.com")
+	f.join(owner, member, "mia@example.com", "reader")
+	if code := f.call("GET", "/api/v1/tokens/"+f.admin, "Bearer "+f.admin, nil, nil); code != http.StatusNotFound {
+		t.Fatalf("token lookup by a full bearer = %d, want 404", code)
+	}
+	if code := f.call("PATCH", "/api/v1/team/members/"+member.id, owner.auth, map[string]string{"role": f.admin}, nil); code != http.StatusBadRequest {
+		t.Fatalf("role set to a bearer = %d, want 400", code)
+	}
+	lookup := auditFor(t, logs, "GET", "/api/v1/tokens/{prefix}")
+	if want := f.admin[:store.PrefixLen]; lookup["token_prefix"] != want {
+		t.Errorf("token_prefix = %v, want the bearer's prefix %s", lookup["token_prefix"], want)
+	}
+	if role := auditFor(t, logs, "PATCH", "/api/v1/team/members/{user_id}")["role"]; role != nil {
+		t.Errorf("an invalid role reached the record: %v", role)
+	}
+	if strings.Contains(logs.String(), f.admin) {
+		t.Errorf("the audit log carries the full bearer:\n%s", logs.String())
+	}
 }
