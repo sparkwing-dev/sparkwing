@@ -3,6 +3,7 @@
 package gotoolchain
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
@@ -76,11 +76,20 @@ func TestRunReportsCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ready, signal, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ready.Close() }()
+	cmd := exec.Command("sh", "-c", "echo started; exec sleep 10")
+	cmd.Stdout = signal
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		_, _ = bufio.NewReader(ready).ReadString('\n')
 		cancel()
 	}()
-	if err := Run(ctx, exec.Command("sh", "-c", "sleep 10")); !errors.Is(err, context.Canceled) {
+	err = Run(ctx, cmd)
+	_ = signal.Close()
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run returned %v, want the cancellation", err)
 	}
 }
@@ -94,8 +103,11 @@ func TestCancelledProbeStopsItsChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	pidFile := filepath.Join(bin, "child.pid")
-	script := "#!/bin/sh\n/bin/sleep 600 &\necho $! > '" + pidFile + "'\nwait\n"
+	fifo := filepath.Join(bin, "child.pid")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n/bin/sleep 600 &\necho $! > '" + fifo + "'\nwait\n"
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o700); err != nil { //nolint:gosec // an executable stub is the point
 		t.Fatal(err)
 	}
@@ -106,33 +118,20 @@ func TestCancelledProbeStopsItsChildren(t *testing.T) {
 		_, err := BuildEnv(ctx, dir, []string{"PATH=" + bin}, "")
 		done <- err
 	}()
-	child := waitForPID(t, pidFile)
+	data, err := os.ReadFile(fifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
 	cancel()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("error = %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("BuildEnv did not return after cancellation")
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
 	}
 	if err := syscall.Kill(child, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("the probe's child %d survived cancellation: %v", child, err)
 	}
-}
-
-func waitForPID(t *testing.T, path string) int {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(path); err == nil {
-			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-				return pid
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("no pid in %s", path)
-	return 0
 }
