@@ -193,10 +193,10 @@ func TestResolveGitRepo_AutoCloneIsBoundedByTheCooldown(t *testing.T) {
 	repoNamesMu.Unlock()
 	clones := countClones(t, "", true)
 
-	if _, err := resolveGitRepo("cooldown-fixture"); err == nil {
+	if _, err := resolveGitRepo("cooldown-fixture", false); err == nil {
 		t.Fatal("expected the auto-clone of a bogus URL to fail")
 	}
-	_, err := resolveGitRepo("cooldown-fixture")
+	_, err := resolveGitRepo("cooldown-fixture", false)
 	if err == nil {
 		t.Fatal("expected the second resolve to fail too")
 	}

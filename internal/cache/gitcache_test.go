@@ -441,7 +441,7 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	repoNames["auto-clone-fixture"] = upstream
 	repoNamesMu.Unlock()
 
-	bare, err := resolveGitRepo("auto-clone-fixture")
+	bare, err := resolveGitRepo("auto-clone-fixture", false)
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 		t.Fatalf("cloned bare missing HEAD: %v", err)
 	}
 
-	bare2, err := resolveGitRepo("auto-clone-fixture")
+	bare2, err := resolveGitRepo("auto-clone-fixture", false)
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
 	repoNames["bad-url-fixture"] = "/this/path/does/not/exist.git"
 	repoNamesMu.Unlock()
 
-	_, err := resolveGitRepo("bad-url-fixture")
+	_, err := resolveGitRepo("bad-url-fixture", false)
 	if err == nil {
 		t.Fatal("expected error from auto-clone of bogus URL")
 	}
