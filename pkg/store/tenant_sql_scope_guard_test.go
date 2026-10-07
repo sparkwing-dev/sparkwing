@@ -146,6 +146,31 @@ var reviewedUnscopedSQL = map[string]string{
 		"another team is refused; a dispute id is unique across teams",
 	"(*Store).DisputeTeam": "asks which team a dispute's hold is on, so an operator's release that names only the " +
 		"dispute answers with that team; a dispute id is unique across teams",
+	"applyMigrationSQLite": "the SQLite schema ladder rewrites every team's rows, and its early steps run before the team " +
+		"column exists",
+	"(*Store).applyMigrationPostgresTx": "the PostgreSQL schema ladder rewrites every team's rows, and its early steps run " +
+		"before the team column exists",
+	"applyFleetMigrationSQLite":   "a schema step that backfills every team's node offer and attempt columns",
+	"applyFleetMigrationPostgres": "a schema step that backfills every team's node offer and attempt columns",
+	"bridgeLegacyFleetSQLite": "bridges a database from an older release by numbering every team's nodes, as the step it " +
+		"replaces did",
+	"validateLegacyFleetShape": "reads no row: its WHERE 1 = 0 probes only prove the bridged tables carry the expected " +
+		"columns",
+	"addNodeMetricsRunCascadePostgres": "a schema repair that drops node metric rows whose run is gone in any team before " +
+		"it adds the cascade",
+	"backfillAgentLossRetryNodeSourcesTx": "a schema step that records every team's pre-snapshot agent-loss retries as " +
+		"deny-all, before the source table carries a team",
+	"backfillRunAnnotationRollup": "an open-time backfill of every team's run annotation rollup, which also runs as schema " +
+		"v1 before the team column exists",
+	"gatherRunAnnotations": "reads one run's node and step annotations for the open-time rollup backfill, which names the " +
+		"run from its own scan and predates the team column",
+	"scrubSecretInputHashes": "a schema step that strips secret input hashes from every team's run invocations",
+	"rehashSessions": "a schema step that drops every team's sessions minted under the retired digest, so each signs in " +
+		"again",
+	"duplicateGrantReferences": "a migration check that finds grant references repeated anywhere, because the index it " +
+		"gates is created over the whole table",
+	"duplicateTokenPrefixes": "a migration check that finds token prefixes repeated anywhere, because a token prefix is " +
+		"unique across teams",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -272,7 +297,6 @@ var unportedSQL = []string{
 	"(*Store).VerifyUser",
 	"(*Store).WriteNodeDispatch",
 	"(*Store).acknowledgeTriggerExecutionStart",
-	"(*Store).applyMigrationPostgresTx",
 	"(*Store).assertNodeMutationFenceTx",
 	"(*Store).awardBestExecutorOffer",
 	"(*Store).buildNodeExecutionPolicyTx",
@@ -321,21 +345,11 @@ var unportedSQL = []string{
 	"(*Store).startLocalNodeExecutionAttempt",
 	"(*Store).storageQuotaRow",
 	"(*Store).sweepTable",
-	"addNodeMetricsRunCascadePostgres",
 	"appendEventTx",
 	"appendRunAnnotation",
-	"applyFleetMigrationPostgres",
-	"applyFleetMigrationSQLite",
-	"applyMigrationSQLite",
-	"backfillAgentLossRetryNodeSourcesTx",
-	"backfillRunAnnotationRollup",
-	"bridgeLegacyFleetSQLite",
 	"claimedExecutorOffer",
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
-	"duplicateGrantReferences",
-	"duplicateTokenPrefixes",
-	"gatherRunAnnotations",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
 	"loadExecutorUsageTx",
@@ -343,21 +357,18 @@ var unportedSQL = []string{
 	"nodeChargeTx",
 	"nodeExecutorOfferCountTx",
 	"persistAgentLossRetryNodeSourceTx",
-	"rehashSessions",
 	"runElapsedSecondsTx",
 	"runPrincipalTx",
-	"scrubSecretInputHashes",
 	"selectTokensByPrefixTx",
 	"snapshotAgentLossRetryNodesTx",
 	"stampCreditExhaustionAnchorTx",
 	"storageQuotaForTx",
 	"tokenMeteredTx",
 	"txLiveRunningRunIDs",
-	"validateLegacyFleetShape",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 202
+const unportedSQLSize = 188
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
