@@ -118,7 +118,7 @@ func BuildEnv(ctx context.Context, dir string, env []string, overlay string) ([]
 		return nil, err
 	}
 	if err != nil {
-		// A failed probe only loses the override; go itself still reports a real floor mismatch.
+		// safety: a failed probe only loses the override; go itself still reports a real floor mismatch.
 		slog.Default().Debug("go toolchain probe failed", "err", err)
 		r = Report{}
 	}
@@ -126,7 +126,7 @@ func BuildEnv(ctx context.Context, dir string, env []string, overlay string) ([]
 	if env == nil {
 		result = append([]string(nil), s.env...)
 	}
-	// os/exec only sets PWD for a command's Dir when its Env is nil, and this env is always explicit.
+	// hack: os/exec only sets PWD for a command's Dir when its Env is nil, and this env is always explicit.
 	if abs, err := filepath.Abs(dir); err == nil {
 		result = setEnv(result, "PWD", abs)
 	}

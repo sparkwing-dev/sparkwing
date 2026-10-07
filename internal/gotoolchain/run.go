@@ -76,7 +76,7 @@ func toolchainResult(group *procgroup.Group, cmd *exec.Cmd, err error) error {
 }
 
 func runToolchainUngrouped(ctx context.Context, cmd *exec.Cmd) error {
-	// Killing go alone leaves any child holding captured output; the delay bounds the wait on those pipes.
+	// safety: killing go alone leaves any child holding captured output; the delay bounds the wait on those pipes.
 	if cmd.WaitDelay == 0 {
 		cmd.WaitDelay = time.Second
 	}

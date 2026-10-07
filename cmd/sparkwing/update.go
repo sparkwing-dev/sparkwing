@@ -394,7 +394,7 @@ func updateSDK(version string) (updateReceipt, error) {
 	}
 	target := sdkModulePath + "@" + resolved
 	fmt.Fprintf(os.Stderr, "bumping pipeline SDK to %s\n", resolved)
-	// Module downloads must not inherit the metadata lookup's three-second budget.
+	// safety: module downloads must not inherit the metadata lookup's three-second budget.
 	buildCtx := gotoolchain.WithSession(context.WithoutCancel(ctx), nil, nil)
 	if out, err := runGoModCmd(buildCtx, dir, "get", target); err != nil {
 		return result, fmt.Errorf("go get failed; SDK files may have changed: %w: %s", err, out)
