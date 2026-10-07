@@ -44,7 +44,7 @@ func TestClaimedUnknownPipelineFailsVisibly(t *testing.T) {
 	var logs bytes.Buffer
 	orchestrator.ExecuteClaimedTrigger(ctx, orchestrator.WorkerOptions{
 		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
-	}, orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli, trig)
+	}, orchestrator.RemoteBackends(context.Background(), cli, nil, nil, nil, 0), cli, trig)
 
 	got, err := cli.GetTrigger(ctx, id)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestClaimedDefinedPipelineSetupFailureFailsRun(t *testing.T) {
 				t.Fatalf("claim trigger: %v, %+v", err, trigger)
 			}
 			orchestrator.ExecuteClaimedTrigger(ctx, orchestrator.WorkerOptions{},
-				orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli, trigger)
+				orchestrator.RemoteBackends(context.Background(), cli, nil, nil, nil, 0), cli, trigger)
 
 			run, err := cli.GetRun(ctx, id)
 			if err != nil {
@@ -158,7 +158,7 @@ func TestClaimedSetupFailureKeepsTriggerOpenWhenRunWriteUnavailable(t *testing.T
 	defer srv.Close()
 	cli := client.New(srv.URL, nil)
 	orchestrator.ExecuteClaimedTrigger(context.Background(), orchestrator.WorkerOptions{},
-		orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli,
+		orchestrator.RemoteBackends(context.Background(), cli, nil, nil, nil, 0), cli,
 		&store.Trigger{ID: "setup-write-unavailable", Pipeline: "remote-ok"})
 	if !runRead.Load() || triggerDone.Load() {
 		t.Fatalf("run read attempted = %t, trigger marked done = %t", runRead.Load(), triggerDone.Load())
@@ -200,7 +200,7 @@ func TestClaimedSetupFailureConfirmsAmbiguousRunWrite(t *testing.T) {
 			defer srv.Close()
 			cli := client.New(srv.URL, nil)
 			orchestrator.ExecuteClaimedTrigger(context.Background(), orchestrator.WorkerOptions{},
-				orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli,
+				orchestrator.RemoteBackends(context.Background(), cli, nil, nil, nil, 0), cli,
 				&store.Trigger{ID: "ambiguous-setup", Pipeline: "remote-ok"})
 			if reads.Load() != 2 || writes.Load() != 1 || done.Load() != tc.wantDone {
 				t.Fatalf("run reads = %d, writes = %d, trigger done = %t; want 2, 1, %t",
@@ -232,7 +232,7 @@ func TestClaimedDefinedPipelineStillCompletes(t *testing.T) {
 		t.Fatalf("claim trigger: %v, %+v", err, trig)
 	}
 	orchestrator.ExecuteClaimedTrigger(ctx, orchestrator.WorkerOptions{},
-		orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli, trig)
+		orchestrator.RemoteBackends(context.Background(), cli, nil, nil, nil, 0), cli, trig)
 	got, err := cli.GetTrigger(ctx, id)
 	if err != nil {
 		t.Fatal(err)
