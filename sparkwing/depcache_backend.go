@@ -43,10 +43,7 @@ func selectDepCacheBackend() depCacheBackend {
 }
 
 func depCacheToken() string {
-	if t := authwire.CacheBearerFromEnv(); t != "" {
-		return t
-	}
-	return os.Getenv("SPARKWING_AGENT_TOKEN")
+	return authwire.CacheBearerFromEnv()
 }
 
 type localDepCache struct{}

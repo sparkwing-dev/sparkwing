@@ -1079,6 +1079,7 @@ func parentTriggerRepoDir() string {
 
 func maskerForInvokeArgs(reg *sparkwing.Registration, invokeArgs map[string]string) *secrets.Masker {
 	masker := secrets.NewMasker()
+	masker.Register(agentToken)
 	for _, v := range reg.SecretValues(invokeArgs) {
 		masker.Register(v)
 	}

@@ -455,3 +455,21 @@ operator token could list its mirror files with `GET /repos`.
 
 **Why:** each was a privileged route with no caller, and each needed its own
 review as the route table moves to one declared list.
+
+## Pipeline steps no longer see SPARKWING_AGENT_TOKEN
+
+- **Before:** the pipeline binary kept the runner's `SPARKWING_AGENT_TOKEN` in
+  its environment, so every command a step started inherited it, and a step
+  that printed it showed the raw value in the run's logs. `.CacheDir` used it
+  as the cache bearer when no `SPARKWING_CACHE_GRANT` or
+  `SPARKWING_CACHE_TOKEN` was set.
+- **After:** the pipeline binary removes the token from its environment when
+  it starts and masks it in node output. Commands a step starts do not see it,
+  and `.CacheDir` sends only the cache grant or cache token.
+- **Author steps:** a step that called the controller with
+  `$SPARKWING_AGENT_TOKEN` uses the SDK instead (`sparkwing.Secret`,
+  `sparkwing.RunAndAwait`), which reaches the controller through the node's own
+  connection.
+- **Operator steps:** a cache that accepted the agent token because its API
+  token was set to the same value now needs the controller to mint cache grants
+  (`SPARKWING_CACHE_GRANT_KEY` on the controller and the cache), or the dependency cache runs without the service.

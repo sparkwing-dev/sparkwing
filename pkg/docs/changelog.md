@@ -164,6 +164,9 @@ unlock.
   `controller.Serve`, `controller.AuditFields`, `logs.Serve`, `logs.ServeWithTokens`, `logs.ServePrivateWithTokens`, `sparkwinglogs.FromClient`, `store.DetectDialect`, `store.SetArgon2AcquireTimeout` and `backends.LayerSurfaces` are gone. See [migration guide](docs/migrations/_unreleased.md#unused-pkg-functions-are-removed).
 
 ### Security
+- **sdk + orchestrator (Breaking):** Commands a pipeline starts no longer inherit `SPARKWING_AGENT_TOKEN`
+  The pipeline binary moves the token out of its environment when it starts and masks it in node output, so a step's `sparkwing.Exec`, `os/exec` child or shell cannot read the runner's bearer from its environment or print it. The dependency cache (`.CacheDir`) authenticates only with `SPARKWING_CACHE_GRANT` or `SPARKWING_CACHE_TOKEN` and no longer falls back to the agent token. See the [migration guide](docs/migrations/_unreleased.md#pipeline-steps-no-longer-see-sparkwing_agent_token).
+
 - **orchestrator:** Mask a pipeline process's raw stdout and stderr in the process that starts it
   The claim launcher, the remote runner and the local runner now read the pipeline process's output through
   pipes and mask each line with every value that process registered, which it hands over on an inherited
