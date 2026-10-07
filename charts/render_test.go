@@ -3010,15 +3010,15 @@ func TestCacheStoreCeilingFlagsComeFromValues(t *testing.T) {
 	}
 
 	args := runnerContainer(t, helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing",
-		"cache.limits.maxArtifactBytes=104857600",
+		"cache.limits.maxCacheArchiveBytes=104857600",
 		"cache.limits.maxStoreBytes=536870912000",
 		"cache.limits.maxStoreObjects=2000000",
 		"cache.limits.storeReconcile=2h")).Args
 	for flag, want := range map[string]string{
-		"--max-artifact-bytes": "104857600",
-		"--max-store-bytes":    "536870912000",
-		"--max-store-objects":  "2000000",
-		"--store-reconcile":    "2h",
+		"--max-cache-archive-bytes": "104857600",
+		"--max-store-bytes":         "536870912000",
+		"--max-store-objects":       "2000000",
+		"--store-reconcile":         "2h",
 	} {
 		if got := argValue(args, flag); got != want {
 			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, args)

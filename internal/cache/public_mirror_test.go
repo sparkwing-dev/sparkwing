@@ -109,53 +109,6 @@ func registerForTest(t *testing.T, name, repoURL string) {
 	})
 }
 
-// The operator seeds an unpublished commit into the mirror of an https origin.
-// The operator still reads it; another team's grant sees neither its ref nor its
-// objects, even when it asks for the commit by id.
-func TestTeamGrantsNeverReadSeededCommits(t *testing.T) {
-	const token = "operator-token"
-	srv := newBudgetedServer(t, token, egress.Config{})
-	root := t.TempDir()
-	src := filepath.Join(root, "src")
-	sha := commitTo(t, src, filepath.Join(root, "scratch.git"), "unpublished.txt", "private fixture data")
-	ref := "refs/sparkwing-seed/" + sha
-	runGit(t, src, "update-ref", ref, sha)
-	bundle := filepath.Join(root, "seed.bundle")
-	runGit(t, src, "bundle", "create", bundle, ref)
-	raw, err := os.ReadFile(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	origin := "https://git.example.invalid/public/project.git"
-	name := sourceurl.ClaimedRepoNameFromURL(origin)
-	if code, body := send(t, srv, http.MethodPost, "/sync/seed?repo="+url.QueryEscape(origin)+"&sha="+sha, token, string(raw)); code != http.StatusOK {
-		t.Fatalf("seed = %d: %s", code, body)
-	}
-	if code, body := send(t, srv, http.MethodPost, "/git/register?name="+name+"&repo="+url.QueryEscape(origin), token, ""); code != http.StatusOK {
-		t.Fatalf("register = %d: %s", code, body)
-	}
-	t.Cleanup(func() {
-		repoNamesMu.Lock()
-		delete(repoNames, name)
-		repoNamesMu.Unlock()
-	})
-
-	if code, body := send(t, srv, http.MethodGet, "/git/"+name+"/info/refs?service=git-upload-pack", token, ""); code != http.StatusOK || !strings.Contains(body, ref) {
-		t.Errorf("operator reading its seeded mirror = %d, want 200 advertising %s", code, ref)
-	}
-	if !fetchFromCache(t, srv, name, token, sha) {
-		t.Error("the operator could not fetch its own seeded commit")
-	}
-	grant := grantFor(t, token, "unrelated-team")
-	if _, body := send(t, srv, http.MethodGet, "/git/"+name+"/info/refs?service=git-upload-pack", grant, ""); strings.Contains(body, sha) {
-		t.Error("another team's grant was advertised the seeded commit")
-	}
-	if fetchFromCache(t, srv, name, grant, sha) {
-		t.Error("another team's grant fetched the seeded commit by id")
-	}
-}
-
 // A mirror the cache filled using a credential its own environment supplies
 // holds a private repository behind an https URL. Another team's grant reads
 // only what origin serves without a credential: the public repository, but not
@@ -202,8 +155,10 @@ func TestTeamGrantsReadOnlyWhatOriginServesAnonymously(t *testing.T) {
 
 	origin.setPrivate("public.git", true)
 	laterSHA := commitTo(t, filepath.Join(root, "public-src"), filepath.Join(repos, "public.git"), "later.txt", "private now")
-	// safety: the operator's refresh reaches the now-private origin with the cache's credential.
-	send(t, srv, http.MethodPost, "/git/refresh?name="+publicName, token, "")
+	// safety: the operator's read clones its own mirror of the now-private origin with the cache's credential.
+	if !fetchFromCache(t, srv, publicName, token, laterSHA) {
+		t.Fatal("the operator could not fetch the commit its credential reaches")
+	}
 	if fetchFromCache(t, srv, publicName, grant, laterSHA) {
 		t.Error("another team's grant fetched a commit pushed after its origin turned private")
 	}

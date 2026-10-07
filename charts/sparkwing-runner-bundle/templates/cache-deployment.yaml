@@ -57,7 +57,6 @@ spec:
             {{- end }}
             {{- $limits := .Values.cache.limits | default dict }}
             {{- range $limit := list
-                  (dict "flag" "--max-artifact-bytes" "value" $limits.maxArtifactBytes)
                   (dict "flag" "--max-cache-archive-bytes" "value" $limits.maxCacheArchiveBytes)
                   (dict "flag" "--max-store-bytes" "value" $limits.maxStoreBytes)
                   (dict "flag" "--max-store-objects" "value" $limits.maxStoreObjects)

@@ -57,7 +57,7 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	savedMeter := egressMeter
 	egressMeter = nil
 	t.Cleanup(func() { egressMeter = savedMeter })
-	saved := []*string{&dataRoot, &repoDir, &archDir, &artifactsDir, &binsDir, &cacheDir, &uploadsDir, &namesFile, &proxyDir, &sshKeyDir, &apiToken, &teamsDir, &grantKey}
+	saved := []*string{&dataRoot, &repoDir, &binsDir, &cacheDir, &namesFile, &proxyDir, &sshKeyDir, &apiToken, &teamsDir, &grantKey}
 	values := make([]string, len(saved))
 	for i, p := range saved {
 		values[i] = *p
@@ -129,7 +129,6 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 	writes := []struct{ method, write, read string }{
 		{http.MethodPut, "/bin/deadbeef", "/bin/deadbeef"},
 		{http.MethodPut, "/cache/go-mod-abc", "/cache/go-mod-abc"},
-		{http.MethodPost, "/artifacts/run-1?path=out.txt", "/artifacts/run-1?glob=out.txt"},
 	}
 	for _, w := range writes {
 		if code, body := send(t, srv, w.method, w.write, teamA, "team-a secret"); code/100 != 2 {
@@ -151,19 +150,12 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 			t.Errorf("team B's write replaced team A's %s with %q", w.read, body)
 		}
 	}
-	for _, bad := range []string{"/artifacts/run-1?path=../../teams/team-a/bins/deadbeef", "/artifacts/a%20b?path=x", "/artifacts/run-1?path=/abs"} {
-		if code, _ := send(t, srv, http.MethodPost, bad, teamB, "x"); code != http.StatusBadRequest {
-			t.Errorf("POST %s as team B = %d, want 400", bad, code)
-		}
-	}
 
 	want := map[string]bool{
 		"cache/teams/team-a/bins/deadbeef":           true,
 		"cache/teams/team-a/cache/go-mod-abc.tar.gz": true,
-		"cache/teams/team-a/artifacts/run-1/out.txt": true,
 		"cache/teams/team-b/bins/deadbeef":           true,
 		"cache/teams/team-b/cache/go-mod-abc.tar.gz": true,
-		"cache/teams/team-b/artifacts/run-1/out.txt": true,
 	}
 	got := bucketKeys(t, raw)
 	for _, k := range got {
@@ -195,18 +187,18 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 	}
 }
 
-// An artifact past the cap is refused and leaves nothing in the bucket:
+// An archive past the cap is refused and leaves nothing in the bucket:
 // no object and no open multipart upload.
-func TestBlobStoreRefusesAnOversizedArtifactWithoutLeavingParts(t *testing.T) {
+func TestBlobStoreRefusesAnOversizedArchiveWithoutLeavingParts(t *testing.T) {
 	const token = "operator-token"
 	srv, raw := newBlobServer(t, token)
-	saved := maxArtifactBytes
-	maxArtifactBytes = 6 << 20
-	t.Cleanup(func() { maxArtifactBytes = saved })
+	saved := maxCacheArchiveBytes
+	maxCacheArchiveBytes = 6 << 20
+	t.Cleanup(func() { maxCacheArchiveBytes = saved })
 	grant := grantFor(t, token, "team-a")
 
 	body := strings.Repeat("z", 7<<20)
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/artifacts/run-1?path=big.bin", strings.NewReader(body))
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPut, srv.URL+"/cache/big", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+grant)
 	req.ContentLength = -1
 	resp, err := srv.Client().Do(req)
@@ -215,10 +207,10 @@ func TestBlobStoreRefusesAnOversizedArtifactWithoutLeavingParts(t *testing.T) {
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
-		t.Fatalf("oversized artifact = %d, want 413", resp.StatusCode)
+		t.Fatalf("oversized archive = %d, want 413", resp.StatusCode)
 	}
 	if keys := bucketKeys(t, raw); len(keys) != 0 {
-		t.Fatalf("a refused artifact left %v", keys)
+		t.Fatalf("a refused archive left %v", keys)
 	}
 	uploads, err := raw.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String(blobTestBucket)})
 	if err != nil {
@@ -251,7 +243,6 @@ func TestBlobStoreRefusesWritesFastWhileTheBucketDeniesThem(t *testing.T) {
 	for _, w := range []struct{ method, path string }{
 		{http.MethodPut, "/cache/new"},
 		{http.MethodPut, "/bin/deadbeef"},
-		{http.MethodPost, "/artifacts/run-1?path=out.txt"},
 	} {
 		req, _ := http.NewRequestWithContext(t.Context(), w.method, srv.URL+w.path, strings.NewReader("x"))
 		req.Header.Set("Authorization", "Bearer "+grant)

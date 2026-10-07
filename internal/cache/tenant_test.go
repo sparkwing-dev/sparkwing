@@ -58,7 +58,6 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 	writes := []struct{ method, write, read string }{
 		{http.MethodPut, "/bin/deadbeef", "/bin/deadbeef"},
 		{http.MethodPut, "/cache/go-mod-abc", "/cache/go-mod-abc"},
-		{http.MethodPost, "/artifacts/run-1?path=out.txt", "/artifacts/run-1?glob=out.txt"},
 	}
 	for _, w := range writes {
 		if code, body := send(t, srv, w.method, w.write, teamA, "team-a secret"); code/100 != 2 {
@@ -82,7 +81,7 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 	}
 }
 
-// A grant opens the blob stores and cloning. Seeding, archives, uploads and the
+// A grant opens the blob stores and cloning. The repository listing and the
 // admin routes act on the shared mirrors or the whole store.
 func TestGrantsDoNotReachMirrorsOrAdminRoutes(t *testing.T) {
 	const token = "operator-token"
@@ -91,18 +90,43 @@ func TestGrantsDoNotReachMirrorsOrAdminRoutes(t *testing.T) {
 
 	operatorOnly := []struct{ method, path string }{
 		{http.MethodGet, "/repos"},
-		{http.MethodGet, "/archive?repo=https://github.com/acme/private.git&ref=main"},
-		{http.MethodGet, "/file?repo=https://github.com/acme/private.git&ref=main&path=README"},
-		{http.MethodPost, "/git/refresh?repo=https://github.com/acme/private.git"},
-		{http.MethodPost, "/sync/seed?repo=https://github.com/acme/private.git&sha=" + strings.Repeat("a", 40)},
-		{http.MethodPost, "/sync/negotiate"},
-		{http.MethodPost, "/upload"},
-		{http.MethodGet, "/uploads/abc"},
 		{http.MethodPost, "/admin/store-ceiling/thaw"},
+		{http.MethodPost, "/admin/store-ceiling/measure"},
+		{http.MethodDelete, "/admin/teams/team-a"},
 	}
 	for _, r := range operatorOnly {
 		if code, body := send(t, srv, r.method, r.path, grant, ""); code != http.StatusUnauthorized {
 			t.Errorf("%s %s with a grant = %d, want 401: %s", r.method, r.path, code, body)
+		}
+	}
+}
+
+// The source-read, upload, seed, refresh and job-artifact routes are gone,
+// so even the operator token reaches nothing there.
+func TestRemovedRoutesAnswerNotFound(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+
+	for _, r := range []struct{ method, path string }{
+		{http.MethodGet, "/archive?repo=https://github.com/acme/app.git&branch=main"},
+		{http.MethodGet, "/file?repo=https://github.com/acme/app.git&branch=main&path=README"},
+		{http.MethodGet, "/tree-hash?repo=https://github.com/acme/app.git&branch=main"},
+		{http.MethodGet, "/branch-contains?repo=https://github.com/acme/app.git&branch=main&commit=main"},
+		{http.MethodPost, "/upload"},
+		{http.MethodGet, "/uploads/abc"},
+		{http.MethodPost, "/sync/negotiate"},
+		{http.MethodPost, "/sync/seed?repo=https://github.com/acme/app.git&sha=" + strings.Repeat("a", 40)},
+		{http.MethodPost, "/git/refresh?repo=https://github.com/acme/app.git"},
+		{http.MethodPost, "/artifacts/job-1?path=out.txt"},
+		{http.MethodGet, "/artifacts/job-1?glob=*"},
+	} {
+		// safety: /git/refresh now lands on the clone route, which reads "refresh" as a repository name.
+		want := http.StatusNotFound
+		if strings.HasPrefix(r.path, "/git/") {
+			want = http.StatusBadRequest
+		}
+		if code, body := send(t, srv, r.method, r.path, token, "x"); code != want {
+			t.Errorf("%s %s with the operator token = %d, want %d: %s", r.method, r.path, code, want, body)
 		}
 	}
 }

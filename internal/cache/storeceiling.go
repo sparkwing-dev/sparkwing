@@ -36,7 +36,7 @@ var storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
 // safety: every tree on the cache volume counts, the git mirrors included,
 // because a mirror fills the same disk a pipeline's writes need.
 func storeDirs() []string {
-	dirs := []string{artifactsDir, cacheDir, uploadsDir, repoDir}
+	dirs := []string{cacheDir, repoDir}
 	if _, err := os.Stat(teamsDir); err == nil {
 		dirs = append(dirs, teamsDir)
 	}

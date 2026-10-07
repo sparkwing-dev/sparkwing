@@ -43,7 +43,6 @@ func TestGrantsScopeBlobsToTheRunsRepositoryAndRef(t *testing.T) {
 			entries := []struct{ method, write, read string }{
 				{http.MethodPut, "/bin/01234567-89abcdef", "/bin/01234567-89abcdef"},
 				{http.MethodPut, "/cache/dep-go-linux-amd64-abc", "/cache/dep-go-linux-amd64-abc"},
-				{http.MethodPost, "/artifacts/job-1?path=out.txt", "/artifacts/job-1?glob=out.txt"},
 			}
 			for _, e := range entries {
 				if code, body := send(t, srv, e.method, e.write, main, "main bytes"); code/100 != 2 {

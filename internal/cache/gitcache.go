@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,30 +26,18 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 var (
-	gitcacheArchiveServed metric.Int64Counter
-	gitcacheFileServed    metric.Int64Counter
-	gitcacheFetchDur      metric.Float64Histogram
-	gitcacheCacheHits     metric.Int64Counter
-	gitcacheCacheMisses   metric.Int64Counter
-	gitcacheRecoveryRecl  metric.Int64Counter
+	gitcacheFetchDur    metric.Float64Histogram
+	gitcacheCacheHits   metric.Int64Counter
+	gitcacheCacheMisses metric.Int64Counter
 )
 
 func initGitcacheMetrics() {
 	meter := otelutil.Meter("sparkwing-cache")
-
-	gitcacheArchiveServed, _ = meter.Int64Counter("sparkwing.gitcache.archives_served",
-		metric.WithDescription("Total archives served"),
-		metric.WithUnit("{archive}"))
-
-	gitcacheFileServed, _ = meter.Int64Counter("sparkwing.gitcache.files_served",
-		metric.WithDescription("Total files served"),
-		metric.WithUnit("{file}"))
 
 	gitcacheFetchDur, _ = meter.Float64Histogram("sparkwing.gitcache.fetch_duration",
 		metric.WithDescription("Mirror fetch duration, by what asked for the fetch"),
@@ -64,10 +51,6 @@ func initGitcacheMetrics() {
 	gitcacheCacheMisses, _ = meter.Int64Counter("sparkwing.gitcache.cache_misses",
 		metric.WithDescription("Archive cache misses"),
 		metric.WithUnit("{miss}"))
-
-	gitcacheRecoveryRecl, _ = meter.Int64Counter("sparkwing.gitcache.recovery_reclones",
-		metric.WithDescription("Recovery reclones after a failed mirror fetch"),
-		metric.WithUnit("{reclone}"))
 }
 
 const (
@@ -106,43 +89,11 @@ func initProxyMetrics() {
 		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10))
 }
 
-var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
-
-var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
-
-const maxNegotiateCommits = 256
-
-func validateGitRef(ref string) error {
-	if ref == "" {
-		return fmt.Errorf("empty git ref")
-	}
-	// safety: a ref that leads with a dash is read by git as an option, not a revision.
-	if strings.HasPrefix(ref, "-") {
-		return fmt.Errorf("invalid git ref %q: begins with '-'", ref)
-	}
-	if !validGitRef.MatchString(ref) {
-		return fmt.Errorf("invalid git ref %q: contains unsafe characters", ref)
-	}
-	if strings.Contains(ref, "..") {
-		return fmt.Errorf("invalid git ref %q: contains '..'", ref)
-	}
-	return nil
-}
-
-func short(ref string) string {
-	if len(ref) <= 8 {
-		return ref
-	}
-	return ref[:8]
-}
-
 var (
-	dataRoot     = "/data"
-	repoDir      = "/data/repos"
-	archDir      = "/data/archives"
-	artifactsDir = "/data/artifacts"
-	binsDir      = "/data/bins"
-	cacheDir     = "/data/cache"
+	dataRoot = "/data"
+	repoDir  = "/data/repos"
+	binsDir  = "/data/bins"
+	cacheDir = "/data/cache"
 
 	apiToken              string
 	sshKeyDir             = "/etc/ssh-key"
@@ -151,8 +102,6 @@ var (
 	fetchFreshWindow = 10 * time.Second
 
 	recloneCooldown = 1 * time.Hour
-
-	workspaceSeedMaxAge = 24 * time.Hour
 
 	repoLocks   = map[string]*sync.Mutex{}
 	repoLocksMu sync.Mutex
@@ -263,8 +212,6 @@ type repoFetchState struct {
 	nextRetry   time.Time
 	backoff     time.Duration
 	lastOK      time.Time
-	lastReclone time.Time
-	reclones    []time.Time
 	lastClone   time.Time
 	lastRequest time.Time
 }
@@ -325,30 +272,8 @@ func (fs *fetchState) fresh(name string) bool {
 	return time.Since(rs.lastOK) < fetchFreshWindow
 }
 
-func (fs *fetchState) allowReclone(name string) bool {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	rs := fs.entry(name)
-	now := time.Now()
-	if !rs.lastReclone.IsZero() && now.Sub(rs.lastReclone) < recloneCooldown {
-		return false
-	}
-	rs.lastReclone = now
-	kept := rs.reclones[:0]
-	for _, t := range rs.reclones {
-		if now.Sub(t) < 24*time.Hour {
-			kept = append(kept, t)
-		}
-	}
-	rs.reclones = append(kept, now)
-	return true
-}
-
-// allowClone bounds the clone-if-missing path. A recovery reclone deletes
-// the mirror before cloning, so a reclone that fails leaves no mirror and
-// every later request would re-download the whole repository. Recording
-// the attempt costs nothing on the happy path: a clone that succeeds
-// leaves a mirror, and markFetched clears the record.
+// perf: a clone that fails leaves no mirror, so without this bound every later request would
+// re-download the whole repository; a clone that succeeds leaves one, and markFetched clears the record.
 func (fs *fetchState) allowClone(name string) bool {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -409,15 +334,6 @@ func cooldownRemaining(last time.Time) time.Duration {
 	return left.Truncate(time.Second)
 }
 
-func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-	if rs := fs.repos[name]; rs != nil {
-		return cooldownRemaining(rs.lastReclone)
-	}
-	return 0
-}
-
 // safety: git writes a mirror's files itself, so no write passes through the
 // store's running count; the store is re-measured once a clone or fetch
 // finishes instead, coalesced so a burst of fetches costs one walk.
@@ -464,11 +380,6 @@ func mirrorEnv(bareRepo string) []string {
 	return env
 }
 
-var recloneMirror = func(repoURL, bareRepo string) (string, error) {
-	_ = os.RemoveAll(bareRepo)
-	return mirrorWritten(gitCmd("clone", "--bare", "--", repoURL, bareRepo))
-}
-
 const mirrorFetchTimeout = 2 * time.Minute
 
 func fetchMirrorIfStale(ctx context.Context, hash, bareRepo string) (out string, skipped bool, err error) {
@@ -502,22 +413,11 @@ func (fs *fetchState) problems() []string {
 		return []string{"gitcache: background fetch failing"}
 	}
 	for _, rs := range fs.repos {
-		if recentReclones(rs.reclones) > 1 ||
-			(rs.lastError != "" && time.Since(rs.lastErrorAt) <= 10*time.Minute) {
+		if rs.lastError != "" && time.Since(rs.lastErrorAt) <= 10*time.Minute {
 			return []string{"gitcache: background fetch failing"}
 		}
 	}
 	return nil
-}
-
-func recentReclones(at []time.Time) int {
-	n := 0
-	for _, t := range at {
-		if time.Since(t) < 24*time.Hour {
-			n++
-		}
-	}
-	return n
 }
 
 const keepWarmWindow = time.Hour
@@ -669,163 +569,6 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 	writeJSONBody(w, r, resp)
 }
 
-func handleArchive(w http.ResponseWriter, r *http.Request) {
-	repoURL := r.URL.Query().Get("repo")
-	branch := r.URL.Query().Get("branch")
-	if repoURL == "" || branch == "" {
-		http.Error(w, "repo and branch required", http.StatusBadRequest)
-		return
-	}
-	var err error
-	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		http.Error(w, "invalid repo URL: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateGitRef(branch); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	hash := repoHash(repoURL)
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	bareRepo := filepath.Join(repoDir, hash+".git")
-
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		if !bgFetch.allowClone(stateKey(hash)) {
-			left := bgFetch.cloneCooldownRemaining(stateKey(hash))
-			last := bgFetch.lastErrorFor(stateKey(hash))
-			log.Printf("archive: mirror for %s is missing and cloning is on cooldown (%s left): %s", hash, left, last)
-			http.Error(w, fmt.Sprintf(
-				"mirror is missing and cloning is on cooldown for another %s -- a clone already ran for this repo and the mirror is still absent.\n"+
-					"last error: %s\n"+
-					"This needs an operator: the mirror was either never cloned successfully or removed by a recovery reclone, which deletes it before it clones. "+
-					"Cloning on every archive request costs a full download each time. Fix the git error above, then re-register the repo to clear the cooldown, or wait for it to expire.",
-				left, last), http.StatusBadGateway)
-			return
-		}
-		// #nosec G706 -- the repository URL is validated at registration and redacted here
-		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
-		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
-			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
-			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
-			return
-		}
-		enableSHAFetch(bareRepo)
-		bgFetch.markFetched(stateKey(hash))
-	} else {
-		enableSHAFetch(bareRepo)
-		out, skipped, err := fetchMirrorIfStale(r.Context(), hash, bareRepo)
-		switch {
-		case skipped:
-			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
-		case errors.Is(err, errGitForkUnavailable):
-			writeGitForkUnavailable(w, err)
-			return
-		case err != nil:
-
-			if !bgFetch.allowReclone(stateKey(hash)) {
-				left := bgFetch.recloneCooldownRemaining(stateKey(hash))
-				log.Printf("archive: fetch failed for %s and recovery reclone is on cooldown (%s left): %v", hash, left, err)
-				http.Error(w, fmt.Sprintf(
-					"fetch failed: %s\n%s\nrecovery reclone is on cooldown for another %s -- a reclone already ran for this repo and the fetch is still failing.\n"+
-						"This needs an operator: fix the git error above (a conflicting local ref after a branch rename is the usual cause, cleared with `git remote prune origin` / removing the conflicting ref in the mirror), because recloning the repository on every archive request costs a full download each time.",
-					err, sshHint(out), left), http.StatusBadGateway)
-				return
-			}
-			log.Printf("recovery reclone: %s -- fetch failed, recloning from origin (this re-downloads the whole repository): %v %s",
-				hash, err, strings.TrimSpace(out))
-			if gitcacheRecoveryRecl != nil {
-				// safety: /metrics is unauthenticated, and a per-repo label enumerates the mirror set.
-				gitcacheRecoveryRecl.Add(r.Context(), 1)
-			}
-			if recloneOut, err2 := recloneMirror(repoURL, bareRepo); err2 != nil {
-				log.Printf("recovery reclone: %s failed: %v %s", hash, err2, strings.TrimSpace(recloneOut))
-				http.Error(w, fmt.Sprintf("fetch failed: %s\n%s\nreclone also failed: %s %s", err, sshHint(out), err2, recloneOut), http.StatusInternalServerError)
-				return
-			}
-			enableSHAFetch(bareRepo)
-			bgFetch.markFetched(stateKey(hash))
-			log.Printf("recovery reclone: %s succeeded", hash)
-		default:
-			log.Printf("archive: fetched %s", hash)
-		}
-	}
-
-	commitBytes, err := gitOutput("-C", bareRepo, "rev-parse", "--verify", "--end-of-options", branch)
-	if errors.Is(err, errGitForkUnavailable) {
-		writeGitForkUnavailable(w, err)
-		return
-	}
-	if err != nil {
-		http.Error(w, fmt.Sprintf("branch %q not found", branch), http.StatusNotFound)
-		return
-	}
-	commit := strings.TrimSpace(string(commitBytes))
-	// safety: this becomes a path component, so it must be a git object id and nothing else git printed.
-	if !gitObjectRE.MatchString(commit) {
-		http.Error(w, fmt.Sprintf("unexpected commit hash for branch %q: %q", branch, commit), http.StatusInternalServerError)
-		return
-	}
-	shortCommit := short(commit)
-
-	tarball := filepath.Join(archDir, hash+"-"+shortCommit+".tar.gz")
-	// #nosec G703 -- the archive name is a repository hash plus a hex-validated commit prefix
-	_, err = os.Stat(tarball)
-	if err == nil {
-		// #nosec G706 -- the repository hash and the short commit are pattern-validated
-		log.Printf("cache hit: %s@%s", hash, shortCommit)
-		if gitcacheCacheHits != nil {
-			gitcacheCacheHits.Add(r.Context(), 1)
-		}
-		if gitcacheArchiveServed != nil {
-			gitcacheArchiveServed.Add(r.Context(), 1)
-		}
-		serveTarball(w, r, tarball, hash, commit)
-		return
-	}
-
-	if gitcacheCacheMisses != nil {
-		gitcacheCacheMisses.Add(r.Context(), 1)
-	}
-
-	// #nosec G706 -- the repository hash and the short commit are pattern-validated
-	log.Printf("cache hit: archiving %s@%s", hash, shortCommit)
-	tmpTar := tarball + ".tmp"
-	if err := archiveToFile(bareRepo, branch, tmpTar); err != nil {
-		// #nosec G703 -- a temporary name beside the hex-validated archive path this handler built
-		_ = os.Remove(tmpTar)
-		if errors.Is(err, errGitForkUnavailable) {
-			writeGitForkUnavailable(w, err)
-			return
-		}
-		http.Error(w, fmt.Sprintf("archive failed: %s", err), http.StatusInternalServerError)
-		return
-	}
-	// #nosec G703 -- a temporary name beside the hex-validated archive path this handler built
-	err = os.Rename(tmpTar, tarball)
-	if err != nil {
-		// #nosec G703 -- a temporary name beside the hex-validated archive path this handler built
-		_ = os.Remove(tmpTar)
-		http.Error(w, fmt.Sprintf("rename archive failed: %s", err), http.StatusInternalServerError)
-		return
-	}
-
-	cleanOldArchives(hash)
-
-	serveTarball(w, r, tarball, hash, commit)
-}
-
-func serveTarball(w http.ResponseWriter, r *http.Request, path, hash, commit string) {
-	w.Header().Set("X-Commit", commit)
-	w.Header().Set("X-Repo-Hash", hash)
-	// #nosec G703 -- the archive name is a repository hash plus a hex-validated commit prefix
-	http.ServeFile(w, r, path)
-}
-
 func handleRepos(w http.ResponseWriter, r *http.Request) {
 	entries, _ := os.ReadDir(repoDir)
 	type repoInfo struct {
@@ -963,187 +706,6 @@ func gitOutput(args ...string) ([]byte, error) {
 		return out, fmt.Errorf("git timed out after %s: git %s", gitDefaultTimeout, strings.Join(args, " "))
 	}
 	return out, err
-}
-
-func archiveToFile(bareRepo, branch, outPath string) error {
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
-	release, err := acquireGitFork(waitCtx, "archive "+bareRepo)
-	cancelWait()
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
-	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", branch)
-	gzipCmd := exec.Command("gzip")
-
-	pipe, err := gitArchive.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("pipe setup: %w", err)
-	}
-	gzipCmd.Stdin = pipe
-
-	// #nosec G703 -- an output path this handler built from the hex-validated archive name
-	outFile, err := os.Create(outPath)
-	if err != nil {
-		return fmt.Errorf("create output: %w", err)
-	}
-	defer outFile.Close()
-	gzipCmd.Stdout = outFile
-
-	if err := gitArchive.Start(); err != nil {
-		return fmt.Errorf("git archive start: %w", err)
-	}
-	if err := gzipCmd.Start(); err != nil {
-		_ = gitArchive.Process.Kill()
-		return fmt.Errorf("gzip start: %w", err)
-	}
-
-	if err := gitArchive.Wait(); err != nil {
-		_ = gzipCmd.Process.Kill()
-		return fmt.Errorf("git archive: %w", err)
-	}
-	if err := gzipCmd.Wait(); err != nil {
-		return fmt.Errorf("gzip: %w", err)
-	}
-	return nil
-}
-
-func handleFile(w http.ResponseWriter, r *http.Request) {
-	repoURL := r.URL.Query().Get("repo")
-	branch := r.URL.Query().Get("branch")
-	filePath := r.URL.Query().Get("path")
-	if repoURL == "" || branch == "" || filePath == "" {
-		http.Error(w, "repo, branch, and path required", http.StatusBadRequest)
-		return
-	}
-	if err := validateGitRef(branch); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	hash := repoHash(repoURL)
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	bareRepo := filepath.Join(repoDir, hash+".git")
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		http.Error(w, "repo not cached -- trigger an archive first", http.StatusNotFound)
-		return
-	}
-
-	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
-
-	out, err := gitOutput("-C", bareRepo, "show", "--end-of-options", branch+":"+filePath)
-	if errors.Is(err, errGitForkUnavailable) {
-		writeGitForkUnavailable(w, err)
-		return
-	}
-	if err != nil {
-		http.Error(w, fmt.Sprintf("file not found: %s:%s", branch, filePath), http.StatusNotFound)
-		return
-	}
-
-	if gitcacheFileServed != nil {
-		gitcacheFileServed.Add(r.Context(), 1)
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	// #nosec G705 -- the response is text/plain, never HTML
-	w.Write(out)
-}
-
-func handleTreeHash(w http.ResponseWriter, r *http.Request) {
-	repoURL := r.URL.Query().Get("repo")
-	branch := r.URL.Query().Get("branch")
-	path := r.URL.Query().Get("path")
-	if repoURL == "" || branch == "" {
-		http.Error(w, "repo and branch required", http.StatusBadRequest)
-		return
-	}
-	if err := validateGitRef(branch); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	hash := repoHash(repoURL)
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	bareRepo := filepath.Join(repoDir, hash+".git")
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		http.Error(w, "repo not cached", http.StatusNotFound)
-		return
-	}
-
-	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
-
-	ref := branch
-	if path != "" {
-		ref = branch + ":" + path
-	}
-
-	out, err := gitOutput("-C", bareRepo, "rev-parse", "--verify", "--end-of-options", ref)
-	if errors.Is(err, errGitForkUnavailable) {
-		writeGitForkUnavailable(w, err)
-		return
-	}
-	if err != nil {
-		http.Error(w, fmt.Sprintf("path not found: %s", ref), http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	// #nosec G705 -- the response is text/plain, never HTML
-	w.Write([]byte(strings.TrimSpace(string(out))))
-}
-
-func handleBranchContains(w http.ResponseWriter, r *http.Request) {
-	repoURL := r.URL.Query().Get("repo")
-	branch := r.URL.Query().Get("branch")
-	commit := r.URL.Query().Get("commit")
-	if repoURL == "" || branch == "" || commit == "" {
-		http.Error(w, "repo, branch, and commit required", http.StatusBadRequest)
-		return
-	}
-	if err := validateGitRef(branch); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateGitRef(commit); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	hash := repoHash(repoURL)
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	bareRepo := filepath.Join(repoDir, hash+".git")
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		http.Error(w, "repo not cached", http.StatusNotFound)
-		return
-	}
-
-	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
-
-	_, err := gitOutput("-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch)
-	if errors.Is(err, errGitForkUnavailable) {
-		writeGitForkUnavailable(w, err)
-		return
-	}
-	if err != nil {
-		http.Error(w, fmt.Sprintf("commit %s is not on branch %s", commit, branch), http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	// #nosec G705 -- the ref and the commit are pattern-validated and the body is not HTML
-	fmt.Fprintf(w, "commit %s is on branch %s", commit, branch)
 }
 
 var (
@@ -1592,757 +1154,12 @@ func serveCache(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	}
 }
 
-const workspaceRefPrefix = "refs/sparkwing-workspace/"
-
-const (
-	workspaceArchiveRefPrefix = "refs/sparkwing-workspace-archive/"
-	workspaceArchiveAgeFactor = 7
-)
-
-var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
-
-const artifactTempPrefix = ".sparkwing-upload-"
-
-// Default per-object caps. One pipeline that tars a dataset or caches a
-// multi-gigabyte directory should not spend a team's whole quota, or the
-// bucket ceiling, in a single run.
-const (
-	// DefaultMaxArtifactBytes caps one uploaded artifact.
-	DefaultMaxArtifactBytes int64 = 500 << 20
-	// DefaultMaxCacheArchiveBytes caps one stored dependency archive.
-	DefaultMaxCacheArchiveBytes int64 = 500 << 20
-)
-
-var (
-	maxArtifactBytes     = DefaultMaxArtifactBytes
-	maxCacheArchiveBytes = DefaultMaxCacheArchiveBytes
-)
-
-func handleArtifacts(w http.ResponseWriter, r *http.Request) {
-	if blobStore != nil {
-		serveArtifactsBlob(w, r)
-		return
-	}
-	withBlobDirs(serveArtifacts)(w, r)
-}
-
-func serveArtifacts(w http.ResponseWriter, r *http.Request, d blobDirs) {
-	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) == 0 || parts[0] == "" {
-		http.Error(w, "job ID required: /artifacts/{jobID}", http.StatusBadRequest)
-		return
-	}
-	jobID := parts[0]
-	// safety: the path is decoded here, so a job ID that is not one segment escapes the root.
-	if jobID == "." || jobID == ".." || !validJobID.MatchString(jobID) {
-		http.Error(w, "invalid job ID: must be 1-128 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodPost:
-		artifactUpload(w, r, d.artifacts, jobID)
-	case http.MethodGet:
-		root := filepath.Dir(d.find(artifactsOf, jobID))
-		if r.URL.Query().Has("glob") {
-			artifactDownload(w, r, root, jobID)
-		} else {
-			artifactList(w, r, root, jobID)
-		}
-	default:
-		http.Error(w, "GET or POST only", http.StatusMethodNotAllowed)
-	}
-}
-
-func artifactUpload(w http.ResponseWriter, r *http.Request, root, jobID string) {
-	if err := storeCeiling.Allow(); err != nil {
-		http.Error(w, err.Error(), http.StatusInsufficientStorage)
-		return
-	}
-	artifactPath := r.URL.Query().Get("path")
-	if artifactPath == "" {
-		http.Error(w, "path query param required", http.StatusBadRequest)
-		return
-	}
-
-	artifactPath = filepath.Clean(artifactPath)
-	if strings.Contains(artifactPath, "..") || filepath.IsAbs(artifactPath) {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-	for seg := range strings.SplitSeq(artifactPath, string(filepath.Separator)) {
-		// safety: bsdtar reads a member name that leads with @ as an archive to inline, and -- does not stop it.
-		if strings.HasPrefix(seg, "@") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-		// safety: the list and download routes hide this prefix, so an artifact wearing it would be unreachable.
-		if strings.HasPrefix(seg, artifactTempPrefix) {
-			http.Error(w, "invalid path: "+artifactTempPrefix+" is reserved for uploads in flight", http.StatusBadRequest)
-			return
-		}
-	}
-
-	jobDir := filepath.Join(root, jobID)
-	dest := filepath.Join(jobDir, artifactPath)
-	absRoot, rootErr := filepath.Abs(root)
-	absDest, _ := filepath.Abs(dest)
-	// safety: contain against the artifacts root, not the job directory a job ID could have moved.
-	if rootErr != nil || !strings.HasPrefix(absDest, absRoot+string(filepath.Separator)) {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-
-	destDir := filepath.Dir(dest)
-	// #nosec G703 -- the destination is contained under the artifacts root
-	err := os.MkdirAll(destDir, 0o755)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// safety: an unbounded or half-written body must never reach the path a download serves.
-	if maxArtifactBytes > 0 {
-		r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
-	}
-
-	// #nosec G703 -- the staging file sits beside a destination contained under the artifacts root
-	tmp, err := os.CreateTemp(destDir, artifactTempPrefix+"*")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpPath := tmp.Name()
-
-	n, err := io.Copy(tmp, r.Body)
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		// #nosec G703 -- a staging name this handler created beside the destination
-		_ = os.Remove(tmpPath)
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			http.Error(w, fmt.Sprintf("artifact exceeds the %d byte upload limit", maxArtifactBytes),
-				http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// safety: an artifact written twice under one path replaces the first, so only
-	// the size difference reaches the ceiling.
-	storeBytes, storeObjects := storeDelta(dest, n)
-	// #nosec G703 -- both names are contained under the artifacts root
-	if err := os.Rename(tmpPath, dest); err != nil {
-		// #nosec G703 -- a staging name this handler created beside the destination
-		_ = os.Remove(tmpPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	storeCeiling.Record(storeBytes, storeObjects)
-	// #nosec G706 -- %q escapes control characters in the caller-supplied path
-	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, map[string]any{"path": artifactPath, "size": n})
-}
-
-func artifactDownload(w http.ResponseWriter, r *http.Request, root, jobID string) {
-	glob := r.URL.Query().Get("glob")
-	jobDir := filepath.Join(root, jobID)
-
-	// #nosec G703 -- the job directory is built from a pattern-validated job ID
-	_, err := os.Stat(jobDir)
-	if os.IsNotExist(err) {
-		http.Error(w, "no artifacts for job "+jobID, http.StatusNotFound)
-		return
-	}
-
-	var matches []string
-	collect := func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		if strings.HasPrefix(filepath.Base(path), artifactTempPrefix) {
-			return nil
-		}
-		rel, _ := filepath.Rel(jobDir, path)
-		if matched, _ := filepath.Match(glob, filepath.Base(rel)); matched {
-			matches = append(matches, rel)
-		}
-		if matched, _ := filepath.Match(glob, rel); matched && !contains(matches, rel) {
-			matches = append(matches, rel)
-		}
-		return nil
-	}
-	// #nosec G703 -- the job directory is built from a pattern-validated job ID
-	if err := filepath.Walk(jobDir, collect); err != nil {
-		http.Error(w, fmt.Sprintf("walk artifacts: %s", err), http.StatusInternalServerError)
-		return
-	}
-
-	if len(matches) == 0 {
-		http.Error(w, fmt.Sprintf("no artifacts matching %q for job %s", glob, jobID), http.StatusNotFound)
-		return
-	}
-
-	if len(matches) == 1 {
-		// safety: an artifact is caller-supplied content, so it downloads instead of rendering in place.
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", attachmentDisposition(filepath.Base(matches[0])))
-		// #nosec G703 -- the match came from walking the job directory itself
-		http.ServeFile(w, r, filepath.Join(jobDir, matches[0]))
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
-	// #nosec G702 -- tar runs as argv with a constant binary and -- ends its option list
-	cmd := exec.Command("tar", append([]string{"-cf", "-", "-C", jobDir, "--"}, matches...)...)
-	cmd.Stdout = w
-	if err := cmd.Run(); err != nil {
-		// #nosec G706 -- the job ID is pattern-validated
-		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
-	}
-}
-
-func attachmentDisposition(name string) string {
-	return "attachment; filename=" + strconv.Quote(strings.ReplaceAll(name, `"`, ""))
-}
-
-func artifactList(w http.ResponseWriter, r *http.Request, root, jobID string) {
-	jobDir := filepath.Join(root, jobID)
-
-	// #nosec G703 -- the job directory is built from a pattern-validated job ID
-	_, err := os.Stat(jobDir)
-	if os.IsNotExist(err) {
-		w.Header().Set("Content-Type", "application/json")
-		writeJSONBody(w, r, []string{})
-		return
-	}
-
-	files := []string{}
-	collect := func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		if strings.HasPrefix(filepath.Base(path), artifactTempPrefix) {
-			return nil
-		}
-		rel, _ := filepath.Rel(jobDir, path)
-		files = append(files, rel)
-		return nil
-	}
-	// #nosec G703 -- the job directory is built from a pattern-validated job ID
-	if err := filepath.Walk(jobDir, collect); err != nil {
-		http.Error(w, fmt.Sprintf("walk artifacts: %s", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, files)
-}
-
-func contains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
-}
-
-var uploadsDir = "/data/uploads"
-
-var validUploadID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
-
-func handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	if err := storeCeiling.Allow(); err != nil {
-		http.Error(w, err.Error(), http.StatusInsufficientStorage)
-		return
-	}
-
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBufferedBodyBytes))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, "read failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	repoURL := r.URL.Query().Get("repo")
-	base := r.URL.Query().Get("base")
-
-	if base != "" && repoURL != "" {
-		id, size, err := handleIncrementalUpload(data, repoURL, base)
-		if err != nil {
-			log.Printf("warning: incremental upload failed, storing as-is: %v", err)
-		} else {
-			storeCeiling.Record(int64(size), 1)
-			log.Printf("describe: upload %s (incremental from %s, %d bytes)", id, short(base), size)
-			w.Header().Set("Content-Type", "application/json")
-			writeJSONBody(w, r, map[string]any{"id": id, "size": size})
-			return
-		}
-	}
-
-	id := fmt.Sprintf("%x", sha256.Sum256(data))[:16]
-	path := filepath.Join(uploadsDir, id+".tar.gz")
-	storeBytes, storeObjects := storeDelta(path, int64(len(data)))
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	storeCeiling.Record(storeBytes, storeObjects)
-	log.Printf("describe: upload %s (%d bytes)", id, len(data))
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, map[string]any{"id": id, "size": len(data)})
-}
-
-func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int, error) {
-	if err := validateGitRef(base); err != nil {
-		return "", 0, fmt.Errorf("invalid base ref: %w", err)
-	}
-
-	hash := repoHash(repoURL)
-	bareRepo := filepath.Join(repoDir, hash+".git")
-
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		return "", 0, fmt.Errorf("repo not cached: %s", hash)
-	}
-
-	workDir, err := os.MkdirTemp("", "sparkwing-incremental-*")
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() { _ = os.RemoveAll(workDir) }()
-
-	if err := archiveToDir(bareRepo, base, workDir); err != nil {
-		return "", 0, fmt.Errorf("checkout base %s: %w", short(base), err)
-	}
-
-	tmpDiff, err := os.CreateTemp("", "sparkwing-diff-*.tar.gz")
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() { _ = os.Remove(tmpDiff.Name()) }()
-	if _, err := tmpDiff.Write(diffData); err != nil {
-		tmpDiff.Close()
-		return "", 0, fmt.Errorf("write diff: %w", err)
-	}
-	tmpDiff.Close()
-
-	cmd := exec.Command("tar", "-xzf", tmpDiff.Name(), "-C", workDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", 0, fmt.Errorf("extract diff: %s: %w", string(out), err)
-	}
-
-	tmpCombined, err := os.CreateTemp("", "sparkwing-combined-*.tar.gz")
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() { _ = os.Remove(tmpCombined.Name()) }()
-	tmpCombined.Close()
-
-	tarCmd := exec.Command("tar", "-czf", tmpCombined.Name(), "-C", workDir, ".")
-	if out, err := tarCmd.CombinedOutput(); err != nil {
-		return "", 0, fmt.Errorf("create combined tarball: %s: %w", string(out), err)
-	}
-
-	combined, err := os.ReadFile(tmpCombined.Name())
-	if err != nil {
-		return "", 0, err
-	}
-
-	id := fmt.Sprintf("%x", sha256.Sum256(combined))[:16]
-	path := filepath.Join(uploadsDir, id+".tar.gz")
-	// #nosec G703 -- the upload name is a sha256 digest of the bundle
-	err = os.WriteFile(path, combined, 0o644)
-	if err != nil {
-		return "", 0, err
-	}
-
-	return id, len(combined), nil
-}
-
-func archiveToDir(bareRepo, ref, dir string) error {
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
-	release, err := acquireGitFork(waitCtx, "archive "+bareRepo)
-	cancelWait()
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
-	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", ref)
-	tarExtract := exec.Command("tar", "-xf", "-", "-C", dir)
-
-	pipe, err := gitArchive.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	tarExtract.Stdin = pipe
-
-	if err := gitArchive.Start(); err != nil {
-		return err
-	}
-	if err := tarExtract.Start(); err != nil {
-		_ = gitArchive.Process.Kill()
-		return err
-	}
-	if err := gitArchive.Wait(); err != nil {
-		_ = tarExtract.Process.Kill()
-		return err
-	}
-	return tarExtract.Wait()
-}
-
-func handleUploadDownload(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/uploads/")
-	id = strings.TrimSuffix(id, ".tar.gz")
-	if id == "" {
-		http.Error(w, "upload ID required", http.StatusBadRequest)
-		return
-	}
-	// safety: the path is decoded here, so an id that is not one segment escapes the uploads root.
-	if id == "." || id == ".." || !validUploadID.MatchString(id) {
-		http.Error(w, "invalid upload ID: must be 1-128 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
-		return
-	}
-
-	path := filepath.Join(uploadsDir, id+".tar.gz")
-	// #nosec G703 -- the upload id is pattern-validated to a single path segment
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		http.Error(w, "upload not found: "+id, http.StatusNotFound)
-		return
-	}
-
-	// #nosec G703 -- ServeFile rejects a request path that contains a dot-dot element
-	http.ServeFile(w, r, path)
-}
-
-func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		Repo    string   `json:"repo"`
-		Commits []string `json:"commits"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.Repo == "" || len(req.Commits) == 0 {
-		http.Error(w, "repo and commits required", http.StatusBadRequest)
-		return
-	}
-	// safety: one batch process reads this whole list into memory, so it stays bounded.
-	if len(req.Commits) > maxNegotiateCommits {
-		http.Error(w, fmt.Sprintf("at most %d commits per negotiate request", maxNegotiateCommits), http.StatusBadRequest)
-		return
-	}
-	for _, commit := range req.Commits {
-		// safety: each commit reaches git as a revision argument, so only an object id may pass.
-		if !gitObjectRE.MatchString(commit) {
-			http.Error(w, "each commit must be a 40-64 character hex object id", http.StatusBadRequest)
-			return
-		}
-	}
-
-	hash := repoHash(req.Repo)
-	bareRepo := filepath.Join(repoDir, hash+".git")
-
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		w.Header().Set("Content-Type", "application/json")
-		writeJSONBody(w, r, map[string]any{"ancestor": "", "found": false})
-		return
-	}
-
-	lock := repoLock(hash)
-	lock.Lock()
-	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
-	lock.Unlock()
-
-	ancestor, err := firstCachedObject(bareRepo, req.Commits)
-	if err != nil {
-		// safety: a client that hears "no ancestor" re-uploads, which is slow but still correct.
-		log.Printf("warning: sync negotiate for %s could not read the mirror, answering not-found: %v", hash, err)
-	}
-	if ancestor != "" {
-		log.Printf("sync negotiate: found common ancestor %s for %s", short(ancestor), hash)
-		w.Header().Set("Content-Type", "application/json")
-		writeJSONBody(w, r, map[string]any{"ancestor": ancestor, "found": true})
-		return
-	}
-
-	log.Printf("sync negotiate: no common ancestor for %s (%d commits checked)", hash, len(req.Commits))
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, map[string]any{"ancestor": "", "found": false})
-}
-
-// safety: one batch process bounds the forks a single request can cost, whatever the commit count.
-func firstCachedObject(bareRepo string, ids []string) (string, error) {
-	if len(ids) == 0 {
-		return "", nil
-	}
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
-	release, err := acquireGitFork(waitCtx, "cat-file --batch-check "+bareRepo)
-	cancelWait()
-	if err != nil {
-		return "", err
-	}
-	defer release()
-
-	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
-	defer cancel()
-
-	cmd := gitCommand(ctx, "-C", bareRepo, "cat-file", "--batch-check")
-	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-
-	for i, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if i >= len(ids) {
-			break
-		}
-		// safety: git answers "<name> missing" for an object it does not have, and three fields for one it does.
-		if len(strings.Fields(line)) == 3 {
-			return ids[i], nil
-		}
-	}
-	return "", nil
-}
-
-func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-
-	repoURL := r.URL.Query().Get("repo")
-	if repoURL == "" {
-		http.Error(w, "repo query param required", http.StatusBadRequest)
-		return
-	}
-	// safety: this URL becomes the mirror's origin, which a later request fetches.
-	validRepoURL, err := sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		http.Error(w, "invalid repo URL: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	repoURL = validRepoURL
-	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
-	if !gitObjectRE.MatchString(sha) {
-		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
-		return
-	}
-	workspace := r.URL.Query().Get("workspace") == "1"
-
-	tmpBundle, err := os.CreateTemp("", "seed-*.bundle")
-	if err != nil {
-		http.Error(w, "temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = os.Remove(tmpBundle.Name()) }()
-	body := http.MaxBytesReader(w, r.Body, 500<<20)
-	size, err := io.Copy(tmpBundle, body)
-	if closeErr := tmpBundle.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		http.Error(w, "read bundle: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	hash := repoHash(repoURL)
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	bareRepo := filepath.Join(repoDir, hash+".git")
-	bundleRef := bincache.SeedRef(sha)
-	seedRef := bundleRef
-	if workspace {
-		seedRef = "refs/sparkwing-workspace-incoming/" + sha
-	}
-
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		// #nosec G706 -- the repository hash and the commit are pattern-validated
-		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, short(sha))
-		if out, err := gitCmd("init", "--bare", bareRepo); err != nil {
-			http.Error(w, fmt.Sprintf("init bare repo failed: %s\n%s", err, out), http.StatusInternalServerError)
-			return
-		}
-		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), bundleRef+":"+seedRef); err != nil {
-			_ = os.RemoveAll(bareRepo)
-			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
-			return
-		}
-		if out, err := gitCmd("-C", bareRepo, "config", "remote.origin.url", repoURL); err != nil { //nolint:contextcheck // safety: finish mirror metadata under its lock if the caller disconnects; gitCmd bounds the operation.
-			http.Error(w, fmt.Sprintf("configure mirror origin failed: %s\n%s", err, out), http.StatusInternalServerError)
-			return
-		}
-		enableSHAFetch(bareRepo)
-	} else {
-		enableSHAFetch(bareRepo)
-		// #nosec G706 -- the repository hash and the commit are pattern-validated
-		log.Printf("seed: updating bare repo from bundle for %s at %s", hash, short(sha))
-		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), bundleRef+":"+seedRef); err != nil {
-			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
-			return
-		}
-	}
-	if out, err := gitCmd("-C", bareRepo, "cat-file", "-e", sha+"^{commit}"); err != nil {
-		if workspace {
-			_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
-			pruneUnreachableSeedObjects(bareRepo)
-		}
-		http.Error(w, fmt.Sprintf("seeded commit missing: %s\n%s", err, out), http.StatusBadRequest)
-		return
-	}
-	if workspace {
-		if err := retainWorkspaceSeed(bareRepo, seedRef, sha, 128, workspaceSeedMaxAge); err != nil {
-			_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
-			pruneUnreachableSeedObjects(bareRepo)
-			http.Error(w, "retain workspace seed: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-	pruneUnreachableSeedObjects(bareRepo)
-
-	// #nosec G706 -- the repository hash and the commit are pattern-validated
-	log.Printf("seed: %s seeded %s (%d bytes)", hash, short(sha), size)
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, map[string]any{"ok": true, "size": size})
-}
-
-type workspaceRef struct {
-	name   string
-	object string
-}
-
-func listWorkspaceRefs(bareRepo, prefix string) ([]workspaceRef, error) {
-	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname) %(objectname)", "--sort=-refname", prefix)
-	if err != nil {
-		return nil, fmt.Errorf("list %s refs: %w: %s", prefix, err, out)
-	}
-	var refs []workspaceRef
-	for _, line := range strings.Split(out, "\n") {
-		name, object, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || name == "" || object == "" {
-			continue
-		}
-		refs = append(refs, workspaceRef{name: name, object: object})
-	}
-	return refs, nil
-}
-
-func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.Duration) error {
-	refs, err := listWorkspaceRefs(bareRepo, workspaceRefPrefix)
-	if err != nil {
-		return err
-	}
-	kept := 0
-	var superseded []string
-	var expired []workspaceRef
-	now := time.Now().UTC()
-	for _, existing := range refs {
-		switch {
-		case strings.HasSuffix(existing.name, "/"+sha):
-			superseded = append(superseded, existing.name)
-		case workspaceRefExpired(existing.name, workspaceRefPrefix, now, maxAge):
-			expired = append(expired, existing)
-		default:
-			kept++
-		}
-	}
-	if kept >= limit {
-		_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
-		return fmt.Errorf("workspace ref limit %d reached", limit)
-	}
-	ref := fmt.Sprintf(workspaceRefPrefix+"%020d/%s", now.UnixNano(), sha)
-	if out, err := gitCmd("-C", bareRepo, "update-ref", ref, sha); err != nil {
-		return fmt.Errorf("create workspace ref: %w: %s", err, out)
-	}
-	// safety: a retry of an older run still fetches its snapshot, so expiry archives the ref instead of dropping objects.
-	for _, aged := range expired {
-		archived := workspaceArchiveRefPrefix + strings.TrimPrefix(aged.name, workspaceRefPrefix)
-		if out, err := gitCmd("-C", bareRepo, "update-ref", archived, aged.object); err != nil {
-			return fmt.Errorf("archive workspace ref %s: %w: %s", aged.name, err, out)
-		}
-		superseded = append(superseded, aged.name)
-	}
-	for _, stale := range superseded {
-		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", stale); deleteErr != nil {
-			return fmt.Errorf("expire workspace ref %s: %w: %s", stale, deleteErr, deleted)
-		}
-	}
-	if err := pruneWorkspaceArchive(bareRepo, limit, maxAge, now); err != nil {
-		return err
-	}
-	if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", seedRef); err != nil {
-		return fmt.Errorf("remove transient seed ref: %w: %s", err, out)
-	}
-	return nil
-}
-
-func pruneWorkspaceArchive(bareRepo string, limit int, maxAge time.Duration, now time.Time) error {
-	archived, err := listWorkspaceRefs(bareRepo, workspaceArchiveRefPrefix)
-	if err != nil {
-		return err
-	}
-	for i, aged := range archived {
-		if i < limit && !workspaceRefExpired(aged.name, workspaceArchiveRefPrefix, now, maxAge*workspaceArchiveAgeFactor) {
-			continue
-		}
-		if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", aged.name); err != nil {
-			return fmt.Errorf("expire archived workspace ref %s: %w: %s", aged.name, err, out)
-		}
-	}
-	return nil
-}
-
-func workspaceRefExpired(ref, prefix string, now time.Time, maxAge time.Duration) bool {
-	if maxAge <= 0 {
-		return false
-	}
-	stamp, _, ok := strings.Cut(strings.TrimPrefix(ref, prefix), "/")
-	if !ok {
-		return false
-	}
-	nanos, err := strconv.ParseInt(stamp, 10, 64)
-	if err != nil {
-		return false
-	}
-	return now.Sub(time.Unix(0, nanos)) > maxAge
-}
-
-func pruneUnreachableSeedObjects(bareRepo string) {
-	if out, err := gitCmd("-C", bareRepo, "reflog", "expire", "--expire=now", "--all"); err != nil {
-		log.Printf("warning: seed reflog prune failed: %v %s", err, out)
-	}
-	if out, err := gitCmd("-C", bareRepo, "gc", "--prune=now"); err != nil {
-		log.Printf("warning: seed object prune failed: %v %s", err, out)
-	}
-}
+// DefaultMaxCacheArchiveBytes caps one stored dependency archive. One
+// pipeline that caches a multi-gigabyte directory should not spend a team's
+// whole quota, or the bucket ceiling, in a single run.
+const DefaultMaxCacheArchiveBytes int64 = 500 << 20
+
+var maxCacheArchiveBytes = DefaultMaxCacheArchiveBytes
 
 var (
 	repoNames   = map[string]string{}
@@ -2448,7 +1265,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
 		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
 			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
-			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
+			log.Printf("git register: clone failed: %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONBody(w, r, map[string]any{"name": name, "hash": hash, "cloned": false})
 			return
@@ -2470,55 +1287,6 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	log.Printf("git register: %s → %s (%s)", name, sourceurl.Redact(repoURL), hash)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSONBody(w, r, map[string]any{"name": name, "hash": hash, "cloned": true})
-}
-
-func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	name := r.URL.Query().Get("name")
-	repoURL := r.URL.Query().Get("repo")
-	if name == "" && repoURL == "" {
-		http.Error(w, "name or repo query param required", http.StatusBadRequest)
-		return
-	}
-	if repoURL == "" {
-		repoNamesMu.RLock()
-		repoURL = repoNames[name]
-		repoNamesMu.RUnlock()
-		if repoURL == "" {
-			http.Error(w, fmt.Sprintf("repo %q not registered", name), http.StatusNotFound)
-			return
-		}
-	}
-
-	hash := repoHash(repoURL)
-	bareRepo := filepath.Join(repoDir, hash+".git")
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		http.Error(w, fmt.Sprintf("repo not cached: %s", hash), http.StatusNotFound)
-		return
-	}
-
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	enableSHAFetch(bareRepo)
-
-	bgFetch.markRequested(stateKey(hash))
-	start := time.Now()
-	out, err := mirrorFetch(45*time.Second, bareRepo)
-	recordMirrorFetch(r.Context(), fetchReasonOnDemand, time.Since(start), err != nil)
-	if err != nil {
-		log.Printf("eager refresh: %s failed: %v %s", hash, err, out)
-		http.Error(w, fmt.Sprintf("fetch failed: %s\n%s", err, sshHint(out)), http.StatusBadGateway)
-		return
-	}
-	bgFetch.markFetched(stateKey(hash))
-	log.Printf("eager refresh: %s ok", hash)
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, map[string]any{"ok": true, "hash": hash})
 }
 
 func autoRegisterRepos() {
@@ -2660,9 +1428,8 @@ func resolveGitRepo(name string, public bool) (string, error) {
 	if !bgFetch.allowClone(stateKey(hash)) {
 		return "", fmt.Errorf(
 			"repo %q registered but not cloned -- cloning is on cooldown for another %s after a failed attempt (%s); "+
-				"fix that error and re-register the repo to clear the cooldown, "+
-				"or seed manually via POST /sync/seed?repo=%s&sha=<commit>",
-			name, bgFetch.cloneCooldownRemaining(stateKey(hash)), bgFetch.lastErrorFor(stateKey(hash)), repoURL,
+				"fix that error and re-register the repo to clear the cooldown",
+			name, bgFetch.cloneCooldownRemaining(stateKey(hash)), bgFetch.lastErrorFor(stateKey(hash)),
 		)
 	}
 	// #nosec G706 -- the repository name is pattern-validated and its URL was validated at registration
@@ -2670,8 +1437,8 @@ func resolveGitRepo(name string, public bool) (string, error) {
 	if out, err := cloneMirror(repoURL, bareRepo); err != nil {
 		bgFetch.markError(stateKey(hash), fmt.Sprintf("auto-clone failed: %s", err))
 		return "", fmt.Errorf(
-			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s&sha=<commit>",
-			name, err, sshHint(out), repoURL,
+			"repo %q registered but not cloned -- auto-clone failed (%w%s); give the cache access to origin and re-register it",
+			name, err, sshHint(out),
 		)
 	}
 	enableSHAFetch(bareRepo)
@@ -2734,34 +1501,6 @@ func handleGitReceivePack(w http.ResponseWriter, _ *http.Request, _, repoName st
 	// #nosec G706 -- the repository name is pattern-validated
 	log.Printf("git receive-pack rejected for %s -- gitcache is read-only", repoName)
 	http.Error(w, "gitcache is read-only -- push directly to GitHub", http.StatusForbidden)
-}
-
-func cleanOldArchives(repoHash string) {
-	entries, _ := os.ReadDir(archDir)
-	type archiveEntry struct {
-		name    string
-		modTime time.Time
-	}
-	var matching []archiveEntry
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), repoHash+"-") {
-			info, _ := e.Info()
-			matching = append(matching, archiveEntry{e.Name(), info.ModTime()})
-		}
-	}
-	if len(matching) <= 5 {
-		return
-	}
-	for i := 0; i < len(matching)-5; i++ {
-		oldest := 0
-		for j := range matching {
-			if matching[j].modTime.Before(matching[oldest].modTime) {
-				oldest = j
-			}
-		}
-		_ = os.Remove(filepath.Join(archDir, matching[oldest].name))
-		matching = append(matching[:oldest], matching[oldest+1:]...)
-	}
 }
 
 // safety: the status line is already on the wire, so a body that will not

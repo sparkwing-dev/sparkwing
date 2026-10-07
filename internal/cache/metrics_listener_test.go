@@ -9,7 +9,7 @@ import (
 
 func newServerForListeners(t *testing.T, metricsAddr string) *Server {
 	t.Helper()
-	saved := []*string{&dataRoot, &repoDir, &archDir, &artifactsDir, &binsDir, &cacheDir, &uploadsDir, &namesFile, &proxyDir, &sshKeyDir, &apiToken, &teamsDir}
+	saved := []*string{&dataRoot, &repoDir, &binsDir, &cacheDir, &namesFile, &proxyDir, &sshKeyDir, &apiToken, &teamsDir}
 	values := make([]string, len(saved))
 	for i, p := range saved {
 		values[i] = *p

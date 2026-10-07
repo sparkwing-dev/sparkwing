@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"archive/tar"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -324,183 +322,6 @@ func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, siz
 	}
 	counted.stored(wr.AddedBytes)
 	return wr.Bytes, true
-}
-
-func serveArtifactsBlob(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/artifacts/")
-	jobID, _, _ := strings.Cut(rest, "/")
-	if jobID == "" {
-		http.Error(w, "job ID required: /artifacts/{jobID}", http.StatusBadRequest)
-		return
-	}
-	if jobID == "." || jobID == ".." || !validJobID.MatchString(jobID) {
-		http.Error(w, "invalid job ID: must be 1-128 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
-		return
-	}
-	team := callerFrom(r).team
-	switch r.Method {
-	case http.MethodPost:
-		artifactUploadBlob(w, r, team, jobID)
-	case http.MethodGet:
-		if r.URL.Query().Has("glob") {
-			artifactDownloadBlob(w, r, team, jobID)
-		} else {
-			artifactListBlob(w, r, team, jobID)
-		}
-	default:
-		http.Error(w, "GET or POST only", http.StatusMethodNotAllowed)
-	}
-}
-
-func artifactUploadBlob(w http.ResponseWriter, r *http.Request, team, jobID string) {
-	if err := storeCeiling.Allow(); err != nil {
-		http.Error(w, err.Error(), http.StatusInsufficientStorage)
-		return
-	}
-	artifactPath := r.URL.Query().Get("path")
-	if artifactPath == "" {
-		http.Error(w, "path query param required", http.StatusBadRequest)
-		return
-	}
-	artifactPath = path.Clean(filepath.ToSlash(artifactPath))
-	if strings.Contains(artifactPath, "..") || strings.HasPrefix(artifactPath, "/") || artifactPath == "." {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-	for seg := range strings.SplitSeq(artifactPath, "/") {
-		if strings.HasPrefix(seg, "@") || strings.HasPrefix(seg, artifactTempPrefix) {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-	}
-	size := int64(-1)
-	if maxArtifactBytes > 0 {
-		if r.ContentLength > maxArtifactBytes {
-			http.Error(w, fmt.Sprintf("artifact exceeds the %d byte upload limit", maxArtifactBytes),
-				http.StatusRequestEntityTooLarge)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
-	}
-	if r.ContentLength >= 0 {
-		size = r.ContentLength
-	}
-	n, ok := putStreamBlob(w, r, team, ownScoped(r, "artifacts/"+jobID+"/"+artifactPath), size, "application/octet-stream", "artifact", maxArtifactBytes)
-	if !ok {
-		return
-	}
-	// #nosec G706 -- %q escapes control characters in the caller-supplied path
-	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, map[string]any{"path": artifactPath, "size": n})
-}
-
-func listJobBlobs(r *http.Request, team, jobID string) ([]teamblob.Object, string, error) {
-	var objs []teamblob.Object
-	var prefix string
-	for _, scope := range callerFrom(r).prefixes() {
-		prefix = scope + "artifacts/" + jobID + "/"
-		var err error
-		if objs, err = blobStore.List(r.Context(), team, prefix); err != nil {
-			return nil, "", err
-		}
-		if len(objs) > 0 {
-			break
-		}
-	}
-	for i := range objs {
-		objs[i].Rel = strings.TrimPrefix(objs[i].Rel, prefix)
-	}
-	return objs, prefix, nil
-}
-
-func artifactListBlob(w http.ResponseWriter, r *http.Request, team, jobID string) {
-	objs, _, err := listJobBlobs(r, team, jobID)
-	if err != nil {
-		blobError(w, "list artifacts", err)
-		return
-	}
-	files := make([]string, 0, len(objs))
-	for _, o := range objs {
-		files = append(files, o.Rel)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, files)
-}
-
-func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID string) {
-	glob := r.URL.Query().Get("glob")
-	objs, prefix, err := listJobBlobs(r, team, jobID)
-	if err != nil {
-		blobError(w, "list artifacts", err)
-		return
-	}
-	if len(objs) == 0 {
-		http.Error(w, "no artifacts for job "+jobID, http.StatusNotFound)
-		return
-	}
-	var matches []teamblob.Object
-	for _, o := range objs {
-		if globMatches(glob, path.Base(o.Rel)) || globMatches(glob, o.Rel) {
-			matches = append(matches, o)
-		}
-	}
-	if len(matches) == 0 {
-		http.Error(w, fmt.Sprintf("no artifacts matching %q for job %s", glob, jobID), http.StatusNotFound)
-		return
-	}
-	if len(matches) == 1 {
-		name := path.Base(matches[0].Rel)
-		rc, o, err := blobStore.Get(r.Context(), team, prefix+matches[0].Rel)
-		if err != nil {
-			blobError(w, "get artifact", err)
-			return
-		}
-		defer rc.Close()
-		// safety: an artifact is caller-supplied content, so it downloads instead of rendering in place.
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", attachmentDisposition(name))
-		w.Header().Set("Content-Length", strconv.FormatInt(o.Size, 10))
-		if _, err := io.Copy(w, rc); err != nil {
-			// #nosec G706 -- the job ID is pattern-validated
-			log.Printf("warning: artifact copy for %s: %v", jobID, err)
-		}
-		return
-	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
-	tw := tar.NewWriter(w)
-	for _, m := range matches {
-		if err := tarBlob(r.Context(), tw, team, prefix, m); err != nil {
-			// #nosec G706 -- the job ID is pattern-validated
-			log.Printf("warning: tar artifacts for %s: %v", jobID, err)
-			return
-		}
-	}
-	if err := tw.Close(); err != nil {
-		// #nosec G706 -- the job ID is pattern-validated
-		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
-	}
-}
-
-func tarBlob(ctx context.Context, tw *tar.Writer, team, prefix string, m teamblob.Object) error {
-	rc, o, err := blobStore.Get(ctx, team, prefix+m.Rel)
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-	hdr := &tar.Header{Name: m.Rel, Mode: 0o644, Size: o.Size, ModTime: m.LastModified, Typeflag: tar.TypeReg}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	_, err = io.Copy(tw, rc)
-	return err
-}
-
-// safety: a malformed pattern matches nothing, as the volume's walk treats it.
-func globMatches(glob, name string) bool {
-	ok, err := path.Match(glob, name)
-	return err == nil && ok
 }
 
 func countCacheLookup(r *http.Request, hit bool) {
