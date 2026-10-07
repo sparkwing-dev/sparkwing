@@ -5180,9 +5180,9 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 }
 
 const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
-       (SELECT o.key FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       (SELECT o.size FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       (SELECT o.sha256 FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.key FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.size FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.sha256 FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
        started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, prefers_labels,
        requested_cores, requested_memory_bytes, requested_slots,
@@ -5198,7 +5198,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 	   placement_reason, placement_hold_from, credit_cpu_class,
-	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
+	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte

@@ -210,6 +210,12 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).retainingPrincipals": "the storage pass lists every team's retaining principals with their teams and charges " +
 		"each against that team",
 	"txLiveRunningRunIDs": "the concurrency reapers ask which of the runs they found in any team are still live",
+	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
+		"account deletion can tell sole ownership from shared",
+	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +
+		"with their teams, and frees each in that team",
+	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
+		"team's runs",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -432,7 +438,7 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			continue
 		}
 		unscoped := unscopedSubqueries(stmt.text)
-		if statementCarriesTeam(stmt.text) && len(unscoped) == 0 {
+		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
 			continue
 		}
 		if exemptFromScope(stmt.key) {
@@ -547,12 +553,17 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"unscoped exists", `SELECT id FROM nodes WHERE team = ? AND EXISTS (SELECT 1 FROM runs r WHERE r.id = nodes.run_id)`, false},
 		{"unscoped nested subquery", `SELECT id FROM nodes WHERE team = ? AND run_id IN (SELECT id FROM runs WHERE team = ? AND retry_of IN (SELECT id FROM runs WHERE id = ?))`, false},
 		{"subquery deriving the team", `INSERT INTO nodes (team, run_id) VALUES ((SELECT team FROM runs WHERE id = ?), ?)`, true},
+		{"predicate only in a select-list subquery", `SELECT (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id) FROM nodes WHERE run_id = ?`, false},
+		{"outer filtered by a scoped IN", `SELECT run_id FROM approvals WHERE resolved_at IS NULL AND run_id IN (SELECT id FROM runs WHERE team = ?)`, true},
+		{"outer filtered by a scoped EXISTS", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, true},
+		{"scoped subquery in a SET clause", `UPDATE nodes SET x = (SELECT x FROM runs WHERE team = ? AND id = ?) WHERE run_id = ?`, false},
+		{"outer reading no table", `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?), (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`, true},
 		{"parenthesis in a literal", `SELECT id FROM runs WHERE team = ? AND note = '(' AND id IN (SELECT run_id FROM nodes WHERE team = ?)`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			unscoped := len(tenantTablesTouchedBy(c.sql)) > 0 &&
-				(!statementCarriesTeam(c.sql) || len(unscopedSubqueries(c.sql)) > 0)
+				(!outerCarriesTeam(c.sql) || len(unscopedSubqueries(c.sql)) > 0)
 			if unscoped == c.scope {
 				t.Errorf("sql %q: guard says scoped=%v, want %v", c.sql, !unscoped, c.scope)
 			}
@@ -607,12 +618,13 @@ func statementCarriesTeam(sql string) bool {
 	return teamPredicateRe.MatchString(sql)
 }
 
-// safety: an outer predicate says nothing about a subquery reading another tenant table by a bare id, so
-// each parenthesized SELECT is judged on its own text. One selecting only the team column is exempt: asking
-// which team owns an id is how a write takes its row's team.
+// safety: an outer predicate says nothing about a subquery reading another tenant table by a bare id, and
+// a predicate inside a subquery says nothing about the outer rows, so the statement and each parenthesized
+// SELECT are judged on their own text. A subquery selecting only the team column is exempt: asking which
+// team owns an id is how a write takes its row's team.
 func unscopedSubqueries(sql string) []string {
 	var out []string
-	for _, sub := range subqueryTexts(sql) {
+	for _, sub := range splitSubqueries(sql).subs {
 		if len(tenantTablesTouchedBy(sub)) == 0 || teamPredicateRe.MatchString(sub) || teamDerivationRe.MatchString(sub) {
 			continue
 		}
@@ -621,13 +633,27 @@ func unscopedSubqueries(sql string) []string {
 	return out
 }
 
+// safety: a scoped subquery behind IN or EXISTS filters the outer rows to the team, so it scopes the outer
+// statement; one in a select list or a SET clause does not, and is cut out before the outer is judged.
+func outerCarriesTeam(sql string) bool {
+	outer := splitSubqueries(sql).outer
+	return len(tenantTablesTouchedBy(outer)) == 0 || statementCarriesTeam(outer)
+}
+
 var teamDerivationRe = regexp.MustCompile(`(?is)^\s*SELECT\s+(?:[a-z_][a-z0-9_]*\.)?team\s+FROM\b`)
 
 var subqueryStartRe = regexp.MustCompile(`(?is)^\s*(?:SELECT|WITH)\b`)
 
+var filterBeforeRe = regexp.MustCompile(`(?is)\b(?:IN|EXISTS)\s*$`)
+
+type splitSQL struct {
+	outer string
+	subs  []string
+}
+
 // safety: skips quoted literals, because a parenthesis inside a string is
 // not one of the statement's and would misalign every span after it.
-func subqueryTexts(sql string) []string {
+func splitSubqueries(sql string) splitSQL {
 	type span struct{ from, to int }
 	var open []int
 	var spans []span
@@ -647,18 +673,35 @@ func subqueryTexts(sql string) []string {
 			}
 		}
 	}
-	out := make([]string, 0, len(spans))
-	for _, sp := range spans {
-		own := []byte(sql[sp.from:sp.to])
+	own := func(sp span) string {
+		b := []byte(sql[sp.from:sp.to])
 		for _, inner := range spans {
 			if inner.from > sp.from && inner.to < sp.to {
 				for j := inner.from - sp.from; j < inner.to-sp.from; j++ {
-					own[j] = ' '
+					b[j] = ' '
 				}
 			}
 		}
-		out = append(out, string(own))
+		return string(b)
 	}
+	outer := []byte(sql)
+	var out splitSQL
+	for _, sp := range spans {
+		text := own(sp)
+		out.subs = append(out.subs, text)
+		nested := slices.ContainsFunc(spans, func(o span) bool { return o.from < sp.from && o.to > sp.to })
+		if nested {
+			continue
+		}
+		fill := byte(' ')
+		for j := sp.from; j < sp.to; j++ {
+			outer[j] = fill
+		}
+		if filterBeforeRe.MatchString(sql[:sp.from-1]) && teamPredicateRe.MatchString(text) {
+			copy(outer[sp.from:], " team = ? ")
+		}
+	}
+	out.outer = string(outer)
 	return out
 }
 
