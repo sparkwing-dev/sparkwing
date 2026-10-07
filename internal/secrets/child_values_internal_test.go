@@ -49,6 +49,51 @@ func TestLineWriterMasksASecretAcrossALongLinesChunkBoundary(t *testing.T) {
 	}
 }
 
+func TestLineWriterKeepsAMatchWholeInsideALongRunOfAnOverlappingValue(t *testing.T) {
+	const secret = "fixture-secret-7c41e9a"
+	pad := strings.Repeat("a", (maxMaskedLine+2-len(secret))/2)
+	v := knownValues("aaaa", secret)
+	var out bytes.Buffer
+	w := v.Writer(&out)
+	if _, err := w.Write([]byte(pad + secret + pad + "aa")); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+	if strings.Contains(out.String(), "fixture") {
+		t.Fatal("part of the secret reached the destination")
+	}
+}
+
+func TestLineWriterKeepsASecretWholeAcrossConsecutiveFlushes(t *testing.T) {
+	const secret = "fixture-secret-7c41e9"
+	filler := strings.Repeat("x", maxMaskedLine)
+	v := knownValues(secret)
+	var out bytes.Buffer
+	w := v.Writer(&out)
+	cuts := []int{3, 9, 15, 20}
+	prev := 0
+	for _, c := range cuts {
+		if _, err := w.Write([]byte(secret[prev:] + filler + secret[:c])); err != nil {
+			t.Fatal(err)
+		}
+		prev = c
+	}
+	if _, err := w.Write([]byte(secret[prev:] + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+	got := out.String()
+	if strings.Contains(got, "fixture") || strings.Contains(got, "7c41e9") {
+		t.Fatal("part of the secret reached the destination")
+	}
+	if n := strings.Count(got, "***"); n != len(cuts)+1 {
+		t.Fatalf("masked %d secrets, want %d", n, len(cuts)+1)
+	}
+	if want := len(cuts)*len(filler) + (len(cuts)+1)*len("***") + 1; len(got) != want {
+		t.Fatalf("got %d bytes, want %d", len(got), want)
+	}
+}
+
 func TestChildValuesMaskRecordKeepsFieldsNamedLikeASecret(t *testing.T) {
 	v := knownValues("msg")
 	rec := v.MaskRecord(sparkwing.LogRecord{Level: "info", Msg: "a msg", Attrs: map[string]any{"msg": "msg"}})

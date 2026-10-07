@@ -210,25 +210,20 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// safety: the split leaves no occurrence of a pattern across it and keeps the
-// last len(pattern)-1 bytes, where an occurrence finishing in later output could begin.
+// safety: a value can only cross the split if the bytes before it end with a
+// proper prefix of that value, so keeping the longest such suffix keeps every
+// crossing value whole, and that suffix is shorter than the longest value.
 func safeCut(s string, patterns []string) int {
-	cut := len(s)
+	keep := 0
 	for _, p := range patterns {
-		cut = min(cut, len(s)-len(p)+1)
-	}
-	// perf: overlapping occurrences could walk the split back to the start
-	// and hold the line forever, so at least half of it is always written.
-	for moved := true; moved && cut > len(s)/2; {
-		moved = false
-		for _, p := range patterns {
-			lo := max(0, cut-len(p)+1)
-			if i := strings.Index(s[lo:min(len(s), cut+len(p)-1)], p); i >= 0 && lo+i < cut {
-				cut, moved = lo+i, true
+		for k := min(len(p)-1, len(s)); k > keep; k-- {
+			if strings.HasSuffix(s, p[:k]) {
+				keep = k
+				break
 			}
 		}
 	}
-	return max(cut, len(s)/2)
+	return len(s) - keep
 }
 
 func (w *LineWriter) flush() {
