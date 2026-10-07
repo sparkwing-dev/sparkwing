@@ -6952,44 +6952,78 @@ type DebugPause struct {
 	ReleaseKind string     `json:"release_kind,omitempty"`
 }
 
-// CreateDebugPause inserts (or upserts) an open pause row.
+// CreateDebugPause inserts (or upserts) an open pause row in the default team.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
-	_, err := s.exec(ctx, `
+	return s.defaultTenant().CreateDebugPause(ctx, p)
+}
+
+// CreateDebugPause inserts (or upserts) an open pause row on one of t's
+// runs. A run of another team reads as [ErrNotFound].
+func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, p.RunID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
 INSERT INTO debug_pauses (team, run_id, node_id, reason, paused_at, expires_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?)
+VALUES (?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
     paused_at = excluded.paused_at,
     expires_at = excluded.expires_at,
     released_at = NULL,
     released_by = '',
-    release_kind = ''`,
-		p.RunID, p.RunID, p.NodeID, p.Reason,
+    release_kind = ''
+  WHERE debug_pauses.team = excluded.team`,
+		string(t.team), p.RunID, p.NodeID, p.Reason,
 		p.PausedAt.UnixNano(), p.ExpiresAt.UnixNano())
-	return err
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return err
+		}
+		return notFound("run", p.RunID)
+	}
+	return tx.Commit()
 }
 
-// GetActiveDebugPause returns the open pause for a node, if any.
+// GetActiveDebugPause returns the open pause for a node of the default team, if any.
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
-	row := s.queryRow(ctx, `
+	return s.defaultTenant().GetActiveDebugPause(ctx, runID, nodeID)
+}
+
+// GetActiveDebugPause returns the open pause for a node of one of t's runs, if any.
+func (t *Tenant) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
+	row := t.s.queryRow(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
- WHERE run_id = ? AND node_id = ? AND released_at IS NULL
+ WHERE team = ? AND run_id = ? AND node_id = ? AND released_at IS NULL
  ORDER BY paused_at DESC
- LIMIT 1`, runID, nodeID)
+ LIMIT 1`, string(t.team), runID, nodeID)
 	return scanDebugPause(row)
 }
 
-// ListDebugPauses returns all pause rows for a run, newest first.
+// ListDebugPauses returns all pause rows for a run of the default team, newest first.
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListDebugPauses(ctx, runID)
+}
+
+// ListDebugPauses returns all pause rows for one of t's runs, newest first.
+func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugPause, err error) {
+	rows, err := t.s.query(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
- WHERE run_id = ?
- ORDER BY paused_at DESC`, runID)
+ WHERE team = ? AND run_id = ?
+ ORDER BY paused_at DESC`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []*DebugPause
 	for rows.Next() {
 		p, err := scanDebugPause(rows)
@@ -7001,13 +7035,19 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 	return out, rows.Err()
 }
 
-// ReleaseDebugPause closes the open pause; ErrNotFound when none.
+// ReleaseDebugPause closes the open pause of a default-team node; ErrNotFound when none.
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
-	res, err := s.exec(ctx, `
+	return s.defaultTenant().ReleaseDebugPause(ctx, runID, nodeID, releasedBy, kind)
+}
+
+// ReleaseDebugPause closes the open pause of a node of one of t's runs;
+// ErrNotFound when none.
+func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
+	res, err := t.s.exec(ctx, `
 UPDATE debug_pauses
    SET released_at = ?, released_by = ?, release_kind = ?
- WHERE run_id = ? AND node_id = ? AND released_at IS NULL`,
-		time.Now().UnixNano(), releasedBy, kind, runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND released_at IS NULL`,
+		time.Now().UnixNano(), releasedBy, kind, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}

@@ -2592,7 +2592,15 @@ func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, errors.New("node_id and reason are required"))
 		return
 	}
-	if err := s.store.CreateDebugPause(r.Context(), body); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.CreateDebugPause(r.Context(), body); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2632,7 +2640,11 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	pauses, err := s.store.ListDebugPauses(r.Context(), runID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	pauses, err := tenant.ListDebugPauses(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -2646,7 +2658,11 @@ func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetActiveDebugPause(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	p, err := s.store.GetActiveDebugPause(r.Context(), runID, nodeID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	p, err := tenant.GetActiveDebugPause(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -2669,7 +2685,11 @@ func (s *Server) handleReleaseDebugPause(w http.ResponseWriter, r *http.Request)
 		body.ReleaseKind = store.PauseReleaseManual
 	}
 	releasedBy := auditPrincipal(r)
-	if err := s.store.ReleaseDebugPause(r.Context(), runID, nodeID, releasedBy, body.ReleaseKind); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.ReleaseDebugPause(r.Context(), runID, nodeID, releasedBy, body.ReleaseKind); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
