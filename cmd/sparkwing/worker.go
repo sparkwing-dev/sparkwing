@@ -12,6 +12,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -64,6 +65,12 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 		prof.Name, prof.ControllerURL(), poll)
 
 	token := prof.ControllerToken()
+	logsURL := prof.ExplicitLogsURL()
+	if logsURL == "" {
+		if logsURL, err = orchestrator.DiscoverLogsURL(ctx, prof.ControllerURL(), token); err != nil {
+			return fmt.Errorf("worker: %w", err)
+		}
+	}
 	cli := client.NewWithToken(prof.ControllerURL(), nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("worker"))
 	shed := client.NewShedLog(client.ShedWarnInterval)
@@ -111,7 +118,7 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), prof.ControllerURL(), token, heartbeat)
+		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), logsURL, token, heartbeat)
 	}
 }
 

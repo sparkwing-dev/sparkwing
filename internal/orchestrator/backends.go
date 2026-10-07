@@ -312,9 +312,11 @@ func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore
 	}
 }
 
-// safety: only sparkwing-logs routes /api/v1/logs, so a controller that names
-// no logs service gets an error rather than every node's log lines.
-func discoverLogsURL(ctx context.Context, controllerURL, token string) (string, error) {
+// DiscoverLogsURL returns the logs service URL the controller announces on
+// GET /api/v1/services, or an error naming the controller when it announces
+// none. Only sparkwing-logs routes /api/v1/logs, so the controller's own URL
+// is never a substitute.
+func DiscoverLogsURL(ctx context.Context, controllerURL, token string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, logsDiscoveryTimeout)
 	defer cancel()
 	svc, err := discovery.ServicesFor(ctx, controllerURL, token)

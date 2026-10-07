@@ -345,8 +345,9 @@ The controller announces that URL on `GET /api/v1/services`, and a
 runner with no `logs:` surface of its own posts there. The local
 dashboard, which mounts the controller and the logs service on one mux,
 announces its own URL. Without an announcement a run refuses to start,
-and `sparkwing pipeline trigger` and `sparkwing runs grep` refuse to read
-logs, with an error naming the controller and the missing logs service.
+`sparkwing cluster worker` refuses to start, and `sparkwing pipeline
+trigger` and `sparkwing runs grep` refuse to read logs, each with an error
+naming the controller and the missing logs service.
 
 #### Watching a run live without the logs service
 

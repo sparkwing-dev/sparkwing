@@ -40,7 +40,7 @@ func TestDiscoverLogsURL(t *testing.T) {
 			discovery.ResetCache()
 			t.Cleanup(discovery.ResetCache)
 
-			got, err := discoverLogsURL(t.Context(), srv.URL, "")
+			got, err := DiscoverLogsURL(t.Context(), srv.URL, "")
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), srv.URL) {
 					t.Fatalf("err = %v, want one naming %s and %q", err, srv.URL, tc.wantErr)
@@ -49,7 +49,7 @@ func TestDiscoverLogsURL(t *testing.T) {
 					t.Fatalf("url = %q alongside the error", got)
 				}
 			} else if err != nil || got != tc.want {
-				t.Fatalf("discoverLogsURL = %q, %v; want %q", got, err, tc.want)
+				t.Fatalf("DiscoverLogsURL = %q, %v; want %q", got, err, tc.want)
 			}
 			if logAppends != 0 {
 				t.Fatalf("the controller received %d log request(s)", logAppends)

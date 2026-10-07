@@ -98,7 +98,7 @@ func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, op
 	}
 	if logsURL == "" {
 		var err error
-		if logsURL, err = discoverLogsURL(ctx, controllerURL, token); err != nil {
+		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
 			return fmt.Errorf("runs grep: %w", err)
 		}
 	}

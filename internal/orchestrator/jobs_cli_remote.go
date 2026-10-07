@@ -219,7 +219,7 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	if logsURL == "" {
 		var err error
-		if logsURL, err = discoverLogsURL(ctx, controllerURL, token); err != nil {
+		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
 			return err
 		}
 	}

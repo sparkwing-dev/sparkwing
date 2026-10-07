@@ -832,7 +832,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 			if opts.LogStore != nil {
 				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
 			} else {
-				logsURL, err := discoverLogsURL(ctx, s.BaseURL(), s.Token())
+				logsURL, err := DiscoverLogsURL(ctx, s.BaseURL(), s.Token())
 				if err != nil {
 					return nil, err
 				}
