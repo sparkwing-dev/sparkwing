@@ -14,11 +14,11 @@ func TestTakeAgentTokenHidesItFromChildrenAndMasksIt(t *testing.T) {
 	t.Setenv(agentTokenEnv, tok)
 	t.Cleanup(func() { agentToken = "" })
 
-	if got := takeAgentToken(); got != tok {
-		t.Fatalf("takeAgentToken = %q, want the started-with token", got)
+	if err := takeAgentToken(); err != nil || agentToken != tok {
+		t.Fatalf("takeAgentToken = %v, held %q; want the started-with token", err, agentToken)
 	}
-	if got := takeAgentToken(); got != tok {
-		t.Fatalf("second takeAgentToken = %q, want the same token", got)
+	if err := takeAgentToken(); err != nil || agentToken != tok {
+		t.Fatalf("a second takeAgentToken = %v, held %q; want the same token", err, agentToken)
 	}
 
 	out, err := exec.Command("env").Output()

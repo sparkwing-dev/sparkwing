@@ -26,7 +26,10 @@ import (
 
 func Main() {
 	secrets.ShareRegisteredFromEnv()
-	takeAgentToken()
+	if err := takeAgentToken(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	projectCfg := bindProjectPipelines()
 
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {

@@ -18,7 +18,7 @@ func runHandleTriggerCLI(args []string) error {
 		"controller URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")
 	logsURL := fs.String("logs", ResolveDevEnvURL("SPARKWING_LOGS_URL"),
 		"logs service URL (env: SPARKWING_LOGS_URL, falls back to $SPARKWING_HOME/dev.env)")
-	token := fs.String("token", takeAgentToken(),
+	token := fs.String("token", agentToken,
 		"bearer token for controller + logs calls (env: SPARKWING_AGENT_TOKEN)")
 	heartbeat := fs.Duration("heartbeat", 0,
 		"heartbeat cadence for the trigger claim (cluster mode only); 0 leaves it to the process that claimed the trigger, as the runner's trigger loop does")

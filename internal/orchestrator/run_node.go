@@ -389,7 +389,7 @@ func runNodeCLI(args []string) error {
 	}
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
-	token := takeAgentToken()
+	token := agentToken
 	if isClaimToken(token) && apiSocket == "" {
 		return runClaimedNode(ctx, *controllerURL, *logsURL, runID, nodeID, token)
 	}

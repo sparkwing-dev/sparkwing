@@ -36,7 +36,7 @@ func runPlanCLI(args []string) error {
 	os.Stdout = os.Stderr
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	c := client.NewWithToken(os.Getenv("SPARKWING_CONTROLLER_URL"), nil, takeAgentToken())
+	c := client.NewWithToken(os.Getenv("SPARKWING_CONTROLLER_URL"), nil, agentToken)
 	run, err := c.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("read run %s: %w", runID, err)
