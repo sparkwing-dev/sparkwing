@@ -95,8 +95,8 @@ unlock.
 ### Removed
 - **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
-- **backends:** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
-  No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes.
+- **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
+  No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes. See [migration guide](docs/migrations/_unreleased.md#unimplemented-backend-types-are-removed).
 - **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
   `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
   `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
