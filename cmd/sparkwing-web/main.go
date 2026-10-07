@@ -76,7 +76,10 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-web"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-web"})
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	if *token == "" {

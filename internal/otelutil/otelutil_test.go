@@ -170,7 +170,10 @@ func TestInitPreservesConfiguredLogging(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
 	var output bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	telemetry := Init(t.Context(), Config{ServiceName: "test"})
+	telemetry, err := Init(t.Context(), Config{ServiceName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		if err := telemetry.Shutdown(context.Background()); err != nil {
 			t.Error(err)
@@ -219,7 +222,10 @@ func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
 	handler := &startupLogHandler{Handler: slog.NewTextHandler(io.Discard, nil), ready: make(chan struct{})}
 	slog.SetDefault(slog.New(handler))
-	telemetry := Init(t.Context(), Config{ServiceName: "shutdown-test"})
+	telemetry, err := Init(t.Context(), Config{ServiceName: "shutdown-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		select {
 		case <-handler.ready:
@@ -257,7 +263,13 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 	log.SetOutput(io.Discard)
 
 	done := make(chan *Telemetry, 1)
-	go func() { done <- Init(t.Context(), Config{ServiceName: "test"}) }()
+	go func() {
+		telemetry, err := Init(t.Context(), Config{ServiceName: "test"})
+		if err != nil {
+			t.Error(err)
+		}
+		done <- telemetry
+	}()
 	var telemetry *Telemetry
 	select {
 	case telemetry = <-done:

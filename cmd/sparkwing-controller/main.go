@@ -406,7 +406,10 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	bootstrapToken, bterr := loadBootstrapAdminToken(*bootstrapAdminTokenFile)

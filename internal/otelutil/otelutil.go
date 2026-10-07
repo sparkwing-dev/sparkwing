@@ -2,6 +2,7 @@ package otelutil
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -73,7 +74,7 @@ func Meter(name string) metric.Meter {
 	return otel.Meter(name)
 }
 
-func Init(ctx context.Context, cfg Config) *Telemetry {
+func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	t := &Telemetry{}
 
 	serviceName := cfg.ServiceName
@@ -96,8 +97,7 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	registry := promclient.NewRegistry()
 	promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
 	if err != nil {
-		log.Printf("warning: otel prometheus exporter failed: %v", err)
-		t.PromHandler = http.NotFoundHandler()
+		return nil, fmt.Errorf("otel prometheus exporter: %w", err)
 	}
 	t.PromHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 
@@ -164,7 +164,7 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 
 	log.Printf("otel: metrics enabled (prometheus /metrics)")
 
-	return t
+	return t, nil
 }
 
 // Go's built-in slog handler writes through log.Default, and slog.SetDefault

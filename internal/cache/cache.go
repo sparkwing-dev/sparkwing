@@ -283,7 +283,11 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{cfg: cfg}
 	// bug: instruments bind to the meter provider current when they are created, so telemetry starts first.
-	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
+	tel, err := otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
+	if err != nil {
+		return nil, err
+	}
+	s.tel = tel
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()

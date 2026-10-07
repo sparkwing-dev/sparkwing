@@ -201,7 +201,10 @@ func run(args []string) error {
 		}
 		archive = &logs.ArchiveOptions{Store: store, Idle: *archiveIdle}
 	}
-	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 	return logs.ServeWith(ctx, logs.ServeOptions{
 		Root:          *root,

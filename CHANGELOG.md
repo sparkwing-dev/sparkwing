@@ -55,6 +55,9 @@ unlock.
 
 ### Fixed
 
+- **controller + logs + cache + web + runner:** A service whose Prometheus exporter cannot be built refuses to start with the cause
+  It used to log a warning and hand the meter provider a nil reader.
+
 - **runner:** Lost resource samples no longer fail or retry successful work or block spawned children
   Capacity learning tolerates losses up to 1%; larger losses produce one warning and can only raise the resource profile. Exact exit accounting remains usable.
 

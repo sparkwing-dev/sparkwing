@@ -557,7 +557,10 @@ func runRunnerCLI(args []string, version string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner"})
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	logger := slog.Default()
