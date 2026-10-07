@@ -193,7 +193,7 @@ file. Other syntax and workflow checks remain active.
   coverage. The ten-minute budget keeps the entire short suite and its
   checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
-  week, and `sparkwing runs timeline --run <id> --steps` breaks one run into
+  week, and `sparkwing runs status <id> --view timeline --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
   by repo before reading a per-pipeline figure as this one's.
 - **The short test class:** the release cut runs `go test -short`. Use

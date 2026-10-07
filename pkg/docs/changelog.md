@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Fold eleven `runs` verbs into `runs status`, `runs list` and `runs logs`, and move `runs triggers` to `cluster triggers`
+  `runs get` is `runs status -o json`; `runs wait` is `runs status --follow --timeout D` with the same exit codes (0, 1, 2 on timeout, 3 on a failed read); `runs summary`, `timeline`, `receipt`, `errors` and `tree` are `runs status --view NAME`; `runs last` is `runs list --limit 1` (`--watch` keeps printing newer runs); `runs find` is `runs list` with `--repo`, `--root-only` and `--wait`; `runs failures` is `runs list --status failed --group-by run|step|node`; `runs grep --pattern P` is `runs logs --grep P` without `--run`. The folded readers follow the `--profile` chain `runs status` uses. See [migration guide](docs/migrations/_unreleased.md#runs-verbs-fold-into-status-list-and-logs).
+
 - **cli (Breaking):** Remove `cluster gc`, the hidden `examples scaffold`, and the refusals for flags retired in v0.5.0
   `sparkwing cluster gc` swept a warm root its help said the cut `cluster worker` maintained; `sparkwing-runner runner` still sweeps its own root at startup. `examples scaffold` rendered a registry example into a repo; read one with `sparkwing examples --name NAME --body`. `--on`, `--sw-on`, `--sw-profile`, `--sw-target` and `--sw-isolated-home` no longer print a migration pointer: `run` refuses the `--sw-` ones as unknown runner flags and every other verb refuses them as unknown flags. See [migration guide](docs/migrations/_unreleased.md#cluster-gc-examples-scaffold-and-retired-flag-pointers-are-removed).
 

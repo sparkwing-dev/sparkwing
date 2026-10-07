@@ -301,7 +301,7 @@ sparkwing configure profiles test --profile prod
 sparkwing runs list --profile prod
 
 # One run still carries its nodes.
-sparkwing runs get --run <id> --profile prod
+sparkwing runs status <id> -o json --exit-zero --profile prod
 
 # Secret rows are present.
 sparkwing secrets list --profile prod

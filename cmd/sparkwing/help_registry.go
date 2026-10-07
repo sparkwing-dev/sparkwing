@@ -209,7 +209,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "users", "tokens", "limits", "image", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "triggers", "users", "tokens", "limits", "image", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -2364,7 +2364,7 @@ var cmdJobs = Command{
 	Description: `Inspect recorded pipeline executions and control their lifecycle.
 Commands support local runs and runs stored through a named profile.
 Pass --profile NAME to select that profile's backend.`,
-	SubcommandOrder: []string{"consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "bounce", "prune"},
+	SubcommandOrder: []string{"consumer", "list", "status", "logs", "stats", "annotations", "approvals", "retry", "cancel", "bounce", "prune"},
 }
 
 var cmdJobsList = Command{
@@ -2400,7 +2400,13 @@ refused: this listing serves pages, so a page of zero has no meaning.
 
 --by-pipeline aggregates every run the filters admit. Its JSON ends with
 a kind:summary record carrying truncated and, where it stopped short,
-reason, in place of a kind:page record.`,
+reason, in place of a kind:page record.
+
+--status failed --group-by run lists each failed run with its failing step
+and error; --group-by step or node clusters those failures. --wait blocks
+until a run matches (a CI job waiting for the run its push started), and
+--watch keeps printing each newer matching run. Both match on --pipeline,
+--status, --branch, --sha, --repo, --root-only and --since.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "status", Argument: "STATUS", Desc: "Filter by status: running|success|failed|cancelled (repeatable; prefix `!` to exclude)", Group: "Filter"},
@@ -2420,9 +2426,15 @@ reason, in place of a kind:page record.`,
 		{Name: "by-pipeline", Desc: "Pivot into one row per pipeline with a status sparkline of the last N runs", Group: "Output"},
 		{Name: "sparkline", Argument: "N", Desc: "Sparkline length when --by-pipeline is set", Default: "30", Group: "Output"},
 		{Name: "style", Argument: "STYLE", Desc: "Sparkline glyph style: ascii|block|dot", Default: "ascii", Group: "Output"},
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "Filter by the repository a run declared (repeatable)", Group: "Filter"},
+		{Name: "root-only", Desc: "Exclude child runs", Group: "Filter"},
+		{Name: "group-by", Argument: "KEY", Desc: "With --status failed: list each failure (run) or cluster them by step or node", Group: "Output"},
+		{Name: "wait", Desc: "Block until at least one run matches, then list (exit 2 on timeout)", Group: "Behavior"},
+		{Name: "wait-timeout", Argument: "DURATION", Desc: "How long --wait blocks", Default: "2m", Group: "Behavior"},
+		{Name: "watch", Short: "w", Desc: "After listing, print each newer matching run as it appears", Group: "Behavior"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
-	GroupOrder: []string{"Filter", "Output", "System", "Other"},
+	GroupOrder: []string{"Filter", "Output", "Behavior", "System", "Other"},
 	Examples: []Example{
 		{"Last 20 local runs", "sparkwing runs list"},
 		{"Continue after a truncated page", "sparkwing runs list --since 30d --cursor 1700000000000000000:run-fictional:1697408000000000000"},
@@ -2435,6 +2447,9 @@ reason, in place of a kind:page record.`,
 		{"By-pipeline rollup with sparkline", "sparkwing runs list --by-pipeline --since 7d"},
 		{"By-pipeline JSON for an agent", "sparkwing runs list --by-pipeline -o json --since 24h"},
 		{"Pipe the most recent run id into another verb", "sparkwing runs list --limit 1 -q | xargs -I{} sparkwing runs logs --run {}"},
+		{"Cluster the past week's failures by step", "sparkwing runs list --status failed --since 7d --group-by step"},
+		{"Wait for the run a push started", "sparkwing runs list --sha abc123 --repo acme/web --root-only --wait -q"},
+		{"Print each new run as it starts", "sparkwing runs list --limit 1 --watch"},
 	},
 }
 
@@ -2466,7 +2481,19 @@ Exit code contract: after rendering, 'runs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
-while returning zero. For a blocking wait, use 'runs wait'.`,
+while returning zero.
+
+--follow --timeout D blocks until the run is terminal, polling every
+--poll, then renders once. It exits 0 on success, 1 on failed or
+cancelled, 2 when D elapses first, and 3 when the run cannot be read.
+
+--view renders one view of the run instead of the status summary:
+  summary   groups, work items, modifiers and annotations
+  timeline  an ASCII waterfall of nodes (--steps adds steps, --width sets bars)
+  receipt   the audit and cost receipt, always JSON; a local run carries
+            zero cost because no rate is configured on this machine
+  errors    each failed node's error chain
+  tree      the run and every descendant run`,
 	PosArgs: []PosArg{
 		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
 	},
@@ -2476,11 +2503,19 @@ while returning zero. For a blocking wait, use 'runs wait'.`,
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "steps", Desc: "Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too.", Group: "Output"},
 		{Name: "exit-zero", Desc: "Return exit code 0 even when the run failed/cancelled", Group: "Output"},
+		{Name: "view", Argument: "VIEW", Desc: "Render one view: summary|timeline|receipt|errors|tree", Group: "Output"},
+		{Name: "width", Argument: "N", Desc: "Timeline bar width (--view timeline)", Default: "60", Group: "Output"},
+		{Name: "timeout", Argument: "DURATION", Desc: "With --follow, exit 2 when the run is not terminal after this long", Group: "Output"},
+		{Name: "poll", Argument: "DURATION", Desc: "Poll interval while --follow waits without the live view", Default: "3s", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Check a local run once", "sparkwing runs status run-fictional"},
+		{"Block until a run finishes (exit 2 after 30m)", "sparkwing runs status run-fictional --follow --timeout 30m"},
+		{"The run's full record as JSON", "sparkwing runs status run-fictional -o json --exit-zero"},
+		{"Waterfall of a run's nodes and steps", "sparkwing runs status run-fictional --view timeline --steps"},
+		{"Why a run failed", "sparkwing runs status run-fictional --view errors"},
 		{"Follow a running job to completion", "sparkwing runs status --run run-fictional --follow"},
 		{"Inspect a known-failed run without nonzero exit", "sparkwing runs status --run run-fictional --exit-zero"},
 		{"Expand every step on every node", "sparkwing runs status --run run-fictional --steps"},
@@ -2510,13 +2545,18 @@ concurrency_wait, cache_hit, ...) -- a different record shape. That is
 any profile whose state is a shared database, an object store or a
 controller, and any profile that declares its own logs surface.
 
+--grep without --run searches the logs of recent runs instead, scanning up
+to --limit runs the run filters (--pipeline, --status, --branch, --sha,
+--since, --started-after, --started-before) select and printing up to
+--max-matches lines per node; -q prints only the matching run ids.
+
 When a node's logs live in a logs service, a line framed by em dashes
 follows its log when the log is not known to be whole: lines missing
 after the runner sealed it, a stream that ended without the runner's
 seal, or a runner that does not seal. The line is the reader's, never
 part of the stored log, and JSON output omits it.`,
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", RequiredWhen: "unless --grep searches across runs", Group: "Input"},
 		{Name: "node", Argument: "NODE_ID", Desc: "Limit output to one node id", Group: "Filter"},
 		{Name: "tail", Argument: "N", Desc: "Print only the last N lines", Group: "Filter"},
 		{Name: "head", Argument: "N", Desc: "Print only the first N lines", Group: "Filter"},
@@ -2529,63 +2569,28 @@ part of the stored log, and JSON output omits it.`,
 		{Name: "follow", Short: "f", Desc: "Tail the log(s) until the run terminates", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (omit for local-only reads)", Group: "System"},
+		{Name: "pipeline", Argument: "NAME", Desc: "Cross-run search: filter runs by pipeline (repeatable; prefix `!` to exclude)", Group: "Search"},
+		{Name: "status", Argument: "STATUS", Desc: "Cross-run search: filter runs by status (repeatable; prefix `!` to exclude)", Group: "Search"},
+		{Name: "branch", Argument: "BRANCH", Desc: "Cross-run search: filter runs by git branch (repeatable; prefix `!` to exclude)", Group: "Search"},
+		{Name: "sha", Argument: "PREFIX", Desc: "Cross-run search: filter runs by git sha prefix (repeatable; prefix `!` to exclude)", Group: "Search"},
+		{Name: "started-after", Argument: "DATE", Desc: "Cross-run search: only runs whose StartedAt >= this", Group: "Search"},
+		{Name: "started-before", Argument: "DATE", Desc: "Cross-run search: only runs whose StartedAt <= this", Group: "Search"},
+		{Name: "limit", Argument: "N", Desc: "Cross-run search: max candidate runs to scan", Default: "50", Group: "Search"},
+		{Name: "max-matches", Argument: "N", Desc: "Cross-run search: per-node match cap (0 = no cap)", Default: "5", Group: "Search"},
+		{Name: "quiet", Short: "q", Desc: "Cross-run search: print only the unique matching run ids", Group: "Search"},
 	},
-	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
+	GroupOrder: []string{"Input", "Filter", "Search", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Read local logs", "sparkwing runs logs --run run-fictional"},
 		{"Last 20 lines of a remote run", "sparkwing runs logs --run run-fictional --profile prod --tail 20"},
 		{"Only the most recent attempt's output", "sparkwing runs logs --run run-fictional --profile prod --since 5m"},
 		{"Search logs for an error substring", "sparkwing runs logs --run run-fictional --grep 'permission denied'"},
+		{"Find which recent failed runs logged a message", "sparkwing runs logs --grep 'connection reset' --status failed --since 24h"},
 		{"Merge a parent run with every descendant", "sparkwing runs logs --run run-fictional --tree"},
 		{"Read only structured event records", "sparkwing runs logs --run run-fictional --events-only"},
 		{"JSON stream for an agent", "sparkwing runs logs --run run-fictional -o json"},
 		{"Plain text with node/step prefix", "sparkwing runs logs --run run-fictional -o plain"},
 		{"Force the colored renderer when piping", "sparkwing runs logs --run run-fictional -o pretty | less -R"},
-	},
-}
-
-var cmdJobsErrors = Command{
-	Path:     "sparkwing runs errors",
-	Synopsis: "Surface the error trail for a failed run",
-	Description: `Prints each failed node's error chain. Reads the local run store,
-or the controller a --profile names.`,
-	PosArgs: []PosArg{
-		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
-	},
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Inspect a local failure", "sparkwing runs errors run-fictional"},
-		{"As JSON", "sparkwing runs errors --run run-fictional -o json"},
-		{"Read a controller-held run", "sparkwing runs errors run-fictional --profile prod"},
-	},
-}
-
-var cmdJobsFailures = Command{
-	Path:     "sparkwing runs failures",
-	Synopsis: "List recent failed runs, optionally clustered",
-	Description: `Fetches recent runs with status=failed and extracts the first failing node's
-step + error message for each. --group-by clusters the output by step so a
-systemic failure surfaces as one row with a count.`,
-	Flags: []FlagSpec{
-		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
-		{Name: "git-sha", Argument: "SHA", Desc: "Restrict to a git SHA prefix", Group: "Filter"},
-		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one repository", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Only failures newer than this (24h, 7d, and similar durations)", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Maximum failures to analyze", Default: "20", Group: "Filter"},
-		{Name: "group-by", Argument: "KEY", Desc: "Cluster by: step | node", Group: "Output"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Recent local failures", "sparkwing runs failures --since 24h"},
-		{"Prod failures clustered by step", "sparkwing runs failures --profile prod --group-by step"},
 	},
 }
 
@@ -2626,235 +2631,6 @@ pinned rows, samples, and demand floors.`,
 		{"Measured capacity per pipeline", "sparkwing runs stats --capacity"},
 		{"Reset a poisoned profile", "sparkwing runs stats --reset --pipeline myrepo/build"},
 		{"Reset every learned profile", "sparkwing runs stats --reset --all --yes"},
-	},
-}
-
-var cmdJobsLast = Command{
-	Path:     "sparkwing runs last",
-	Synopsis: "Print the most recent run",
-	Description: `Shorthand for 'runs list --limit 1' with a compact one-line output. --watch
-tails for new runs, reprinting whenever a newer run ID appears.`,
-	Flags: []FlagSpec{
-		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
-		{Name: "watch", Short: "w", Desc: "Tail for new runs", Group: "Output"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Local last run", "sparkwing runs last"},
-		{"Watch prod for new runs", "sparkwing runs last --profile prod --watch"},
-	},
-}
-
-var cmdJobsTree = Command{
-	Path:     "sparkwing runs tree",
-	Synopsis: "Show a run and every descendant run as an ASCII tree",
-	Description: `Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under
-their originating run. Local mode reads from SQLite; --profile NAME reads from
-the profile's controller.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Root run identifier", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Tree for a local run", "sparkwing runs tree --run run-fictional"},
-		{"Tree for a prod run as JSON", "sparkwing runs tree --run run-fictional --profile prod -o json"},
-	},
-}
-
-var cmdJobsGet = Command{
-	Path:     "sparkwing runs get",
-	Synopsis: "Emit one run's raw JSON (run + nodes)",
-	Description: `Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path
-when the run wrote its logs to a filesystem (the directory on the machine that
-executed it). Consumed by agents and scripts that need the full store shape
-instead of the summary 'status' command renders.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Fetch a local run as JSON", "sparkwing runs get --run run-fictional"},
-		{"Fetch a prod run", "sparkwing runs get --run run-fictional --profile prod"},
-	},
-}
-
-var cmdJobsReceipt = Command{
-	Path:     "sparkwing runs receipt",
-	Synopsis: "Emit a run's audit + cost receipt as JSON",
-	Description: `Recomputes the per-run receipt from the run + nodes
-rows on demand and prints it as JSON. The receipt bundles identity
-hashes (pipeline_version_hash, inputs_hash, plan_hash, per-node
-outputs_hash), per-step observability (durations, outcomes), and
-runner-time and compute-cost accounting.
-
-inputs_hash is empty when the run carries a caller-supplied
-secret:"true" argument, so the receipt cannot verify guesses of that value.
-
-Local mode reads from the SQLite store and reports zero cost because no
-local billing rate is configured. --profile NAME reads from the remote
-controller's receipt endpoint and uses the controller's configured rate.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json (default)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Local receipt as JSON", "sparkwing runs receipt --run run-fictional"},
-		{"Prod receipt", "sparkwing runs receipt --run run-fictional --profile prod"},
-	},
-}
-
-var cmdJobsWait = Command{
-	Path:     "sparkwing runs wait",
-	Synopsis: "Block until a run reaches a terminal status",
-	Description: `Polls until the run succeeds, fails, or is cancelled.
-
-Exit codes:
-  0   succeeded
-  1   failed or cancelled
-  2   timed out
-  3+  lookup or infrastructure failure
-
-Use 'runs find --wait' to find the run before waiting for its outcome.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier to wait on", Required: true, Group: "Input"},
-		{Name: "timeout", Argument: "DURATION", Desc: "Give up (exit 2) after this long", Default: "10m", Group: "Input"},
-		{Name: "poll", Argument: "DURATION", Desc: "Poll interval", Default: "3s", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to poll the local SQLite store.", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Wait for a local run", "sparkwing runs wait --run run-fictional"},
-		{"Wait with a custom timeout", "sparkwing runs wait --run run-fictional --timeout 30m --profile prod"},
-		{"Tight polling on a fast run", "sparkwing runs wait --run run-fictional --poll 500ms --profile prod"},
-	},
-}
-
-var cmdJobsFind = Command{
-	Path:     "sparkwing runs find",
-	Synopsis: "Find runs by source identity or pipeline",
-	Description: `Searches recent runs for a match. Use --git-sha to find
-the run that was fired by a specific commit; add --pipeline to
-disambiguate when multiple pipelines respond to the same push. --repo
-matches the repository identity stored on the run (owner/name).
-
-With --wait, blocks until at least one match appears, up to
---find-timeout. Pairs with 'runs wait' for the push-and-follow loop:
-
-  git push && \
-  sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline X --wait --profile prod -q | \
-    xargs -n1 -I{} sparkwing runs wait --run {} --profile prod
-
-Exit code 0 on match, non-zero on timeout-without-match or
-infrastructure error.`,
-	Flags: []FlagSpec{
-		{Name: "git-sha", Argument: "SHA", Desc: "Match runs whose git SHA starts with this value (prefix match)", Group: "Filter"},
-		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one stored repository identity", Group: "Filter"},
-		{Name: "root-only", Desc: "Exclude child runs", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Lookback window", Default: "1h", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Maximum results", Default: "20", Group: "Filter"},
-		{Name: "wait", Desc: "Block until at least one match appears", Group: "Output"},
-		{Name: "find-timeout", Argument: "DURATION", Desc: "Give up (nonzero exit) after this long when --wait is set", Default: "2m", Group: "Output"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (JSON strings with -o json)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to search the local SQLite store.", Group: "System"},
-	},
-	GroupOrder: []string{"Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Find a run by SHA + pipeline on prod", "sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline fictional-build --profile prod"},
-		{"Block until the matching run appears", "sparkwing runs find --git-sha abc123 --pipeline X --wait --profile prod"},
-		{"Pipe matching ids into runs wait", "sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} sparkwing runs wait --run {} --profile prod"},
-	},
-}
-
-var cmdJobsGrep = Command{
-	Path:     "sparkwing runs grep",
-	Synopsis: "Search log bodies across recent runs for a substring",
-	Description: `Walks runs selected by pipeline, status, branch, SHA prefix, and since,
-then substring-greps every node's log. Those positive filters apply before
-the run limit. Exclusions and started-date bounds apply after fetching at
-most 1,000 runs. In cluster mode the grep runs server-side per (run, node),
-so only matching lines and their original line numbers come back over the wire.
-A profile logs URL supplied explicitly is used directly; otherwise grep
-requires the logs service URL the controller announces.
-
-CLI log text matching is case-sensitive and --max-matches caps each node.
-Dashboard Search matches text without case and caps its whole response.
-
-Default output is a table of RUN / NODE / LINE / TEXT. -q
-(quiet) prints the unique matching run ids -- the usual
-shape for piping into ` + "`runs logs`" + ` or ` + "`runs status`" + `.
-
-Exit code 0 even when there are no matches.`,
-	Flags: []FlagSpec{
-		{Name: "pattern", Argument: "TEXT", Desc: "Substring to match (case-sensitive)", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Restrict candidate runs to one pipeline (repeatable; `!` to exclude)", Group: "Filter"},
-		{Name: "status", Argument: "STATUS", Desc: "Restrict by status (repeatable; `!` to exclude)", Group: "Filter"},
-		{Name: "branch", Argument: "BRANCH", Desc: "Restrict by git branch (repeatable; `!` to exclude)", Group: "Filter"},
-		{Name: "sha", Argument: "PREFIX", Desc: "Restrict by git sha prefix (repeatable; `!` to exclude)", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this", Group: "Filter"},
-		{Name: "started-after", Argument: "DATE", Desc: "Only runs whose StartedAt >= this", Group: "Filter"},
-		{Name: "started-before", Argument: "DATE", Desc: "Only runs whose StartedAt <= this", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Maximum candidate runs to scan", Default: "50", Group: "Output"},
-		{Name: "max-matches", Argument: "M", Desc: "Per-node match cap (0 = no cap)", Default: "5", Group: "Output"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Find every run that hit a permission-denied line in the past week", "sparkwing runs grep --pattern 'permission denied' --since 7d"},
-		{"Pipe matching run ids into runs logs", "sparkwing runs grep --pattern OOMKilled --since 24h -q | xargs -I{} sparkwing runs logs --run {}"},
-		{"Search prod runs as JSON for an agent", "sparkwing runs grep --pattern 'connection refused' --profile prod --since 24h -o json"},
-	},
-}
-
-var cmdJobsSummary = Command{
-	Path:     "sparkwing runs summary",
-	Synopsis: "Aggregated work view: groups, work items, modifiers, annotations",
-	Description: `Prints the run header, annotations, node groups, work items, modifiers,
-and approval state together. Use --output json for structured output.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Quick run rollup", "sparkwing runs summary --run run-fictional"},
-		{"JSON for an agent", "sparkwing runs summary --run run-fictional -o json"},
-	},
-}
-
-var cmdJobsTimeline = Command{
-	Path:     "sparkwing runs timeline",
-	Synopsis: "ASCII waterfall of nodes (and optional steps) for a run",
-	Description: `Renders one row per node, laid out along the run's wall-clock
-span. With --steps each node also expands into its inner Work
-steps. Useful for an agent reasoning about parallelism and the
-critical path without correlating logs by hand. JSON output
-emits start/end offsets in milliseconds per row.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
-		{Name: "steps", Desc: "Include per-step rows under each node", Group: "Output"},
-		{Name: "width", Argument: "N", Desc: "Bar width in characters", Default: "60", Group: "Output"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Default node waterfall", "sparkwing runs timeline --run run-fictional"},
-		{"Expand into per-step bars", "sparkwing runs timeline --run run-fictional --steps"},
-		{"JSON for an agent", "sparkwing runs timeline --run run-fictional --steps -o json"},
 	},
 }
 
@@ -3310,8 +3086,8 @@ rotation opens and reseals them in place.`,
 }
 
 var cmdTriggers = Command{
-	Path:     "sparkwing runs triggers",
-	Synopsis: "Fire, list, or inspect controller triggers",
+	Path:     "sparkwing cluster triggers",
+	Synopsis: "List or inspect controller triggers",
 	Description: `Inspect the controller's queue of pipeline triggers. 'list' shows pending,
 claimed, and completed entries. 'get' reads one trigger by identifier.
 Select the controller with --profile NAME.
@@ -3319,14 +3095,14 @@ Select the controller with --profile NAME.
 Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.`,
 	SubcommandOrder: []string{"list", "get"},
 	Examples: []Example{
-		{"List pending triggers on prod", "sparkwing runs triggers list --profile prod --status pending"},
-		{"Inspect one trigger", "sparkwing runs triggers get --id run-fictional --profile prod"},
+		{"List pending triggers on prod", "sparkwing cluster triggers list --profile prod --status pending"},
+		{"Inspect one trigger", "sparkwing cluster triggers get --id run-fictional --profile prod"},
 		{"Submit a trigger", "sparkwing pipeline trigger fictional-deploy --profile prod"},
 	},
 }
 
 var cmdTriggersList = Command{
-	Path:     "sparkwing runs triggers list",
+	Path:     "sparkwing cluster triggers list",
 	Synopsis: "List pending / claimed / done / failed triggers",
 	Description: `Queries GET /api/v1/triggers on the selected profile's
 controller. Empty filters return the most recent 20 entries
@@ -3350,14 +3126,14 @@ an older entry is not reported.`,
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Recent triggers on prod", "sparkwing runs triggers list --profile prod"},
-		{"Just pending", "sparkwing runs triggers list --profile prod --status pending"},
-		{"Pipeline-specific, JSON", "sparkwing runs triggers list --profile prod --pipeline fictional-build --limit 5 -o json"},
+		{"Recent triggers on prod", "sparkwing cluster triggers list --profile prod"},
+		{"Just pending", "sparkwing cluster triggers list --profile prod --status pending"},
+		{"Pipeline-specific, JSON", "sparkwing cluster triggers list --profile prod --pipeline fictional-build --limit 5 -o json"},
 	},
 }
 
 var cmdTriggersGet = Command{
-	Path:     "sparkwing runs triggers get",
+	Path:     "sparkwing cluster triggers get",
 	Synopsis: "Inspect one trigger's full metadata by id",
 	Description: `Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
 git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
@@ -3369,8 +3145,8 @@ json emits the raw response.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Inspect one trigger", "sparkwing runs triggers get --id run-fictional --profile prod"},
-		{"Raw JSON for scripting", "sparkwing runs triggers get --id run-fictional --profile prod -o json"},
+		{"Inspect one trigger", "sparkwing cluster triggers get --id run-fictional --profile prod"},
+		{"Raw JSON for scripting", "sparkwing cluster triggers get --id run-fictional --profile prod -o json"},
 	},
 }
 

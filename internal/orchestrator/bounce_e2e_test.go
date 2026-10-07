@@ -55,7 +55,7 @@ func TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun(t *testing.T) {
 	waitForAttempts(t, probe, 1, 120*time.Second)
 
 	bounceOut := runBin(t, mod, runEnv, cli,
-		"runs", "bounce", "--run", runID, "--node", "work", "--home", home)
+		"runs", "bounce", "--run", runID, "--node", "work")
 	if !strings.Contains(bounceOut, "bounce requested") {
 		t.Fatalf("bounce verb said:\n%s", bounceOut)
 	}

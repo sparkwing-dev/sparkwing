@@ -58,7 +58,7 @@ func resolveRunLimit(opts GrepOpts) int {
 
 func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
-		return errors.New("runs grep: PATTERN is required")
+		return errors.New("runs logs --grep: PATTERN is required")
 	}
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -92,18 +92,18 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 
 func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
-		return errors.New("runs grep: PATTERN is required")
+		return errors.New("runs logs --grep: PATTERN is required")
 	}
 	if controllerURL == "" {
-		return errors.New("runs grep: profile must carry a controller URL")
+		return errors.New("runs logs --grep: profile must carry a controller URL")
 	}
 	if logsURL == "" {
 		services, err := discovery.ServicesFor(ctx, controllerURL, token)
 		if err != nil {
-			return fmt.Errorf("runs grep: discover logs service: %w", err)
+			return fmt.Errorf("runs logs --grep: discover logs service: %w", err)
 		}
 		if services.Logs == "" {
-			return errors.New("runs grep: controller announces no logs service; configure the profile's logs URL")
+			return errors.New("runs logs --grep: controller announces no logs service; configure the profile's logs URL")
 		}
 		logsURL = services.Logs
 	}

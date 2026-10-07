@@ -136,7 +136,7 @@ For scripting, `--sw-output json` gives `{run_id, log_path, ...}` and
 
 ```bash
 RUN=$(sparkwing run build --sw-detached --sw-output plain)
-sparkwing runs wait --run "$RUN"
+sparkwing runs status "$RUN" --follow --timeout 10m
 ```
 
 Sparkwing's own flags all carry the `--sw-` prefix and all sit after the
@@ -1240,11 +1240,11 @@ failing, because a commit hook is not the place to fail for a reservation
 nothing else on the box is honoring either. What every standalone run
 loses is the same thing: host CPU and memory are not arbitrated, so a
 standalone run and a hosted one may oversubscribe the box. The read verbs
-still find it. `sparkwing runs list`, `jobs`, `runs find`, and
-`runs failures` merge this home's own `state.db` with every standalone
-store and mark each row with the store it came from; `runs status`,
-`runs get`, `runs receipt`, `runs summary`, and `runs timeline` look an id
-up in the shared store first and then in each standalone store. The
+still find it. `sparkwing runs list`, including `--wait` and
+`--group-by`, merges this home's own `state.db` with every standalone
+store and marks each row with the store it came from; `runs status` and
+each of its `--view` renderings look an id up in the shared store first
+and then in each standalone store. The
 dashboard reads `state.db` alone and does not see the run.
 
 Some failures are still failures. A daemon whose runs store is unreadable

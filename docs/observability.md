@@ -187,7 +187,7 @@ secret values redacted. The node's `error` carries it as text, led by
 the failure headline and, when output was dropped, a marker naming the
 `sparkwing runs logs` command that prints the whole thing.
 
-`sparkwing runs errors -o json` and `sparkwing runs status -o json` also
+`sparkwing runs status --view errors -o json` and `sparkwing runs status -o json` also
 carry the excerpt as structured fields, so a consumer does not have to
 parse the error string:
 

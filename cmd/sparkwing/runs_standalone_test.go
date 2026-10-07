@@ -51,8 +51,8 @@ func writeRun(t *testing.T, path, id string) {
 func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
 	paths := standaloneHome(t)
 	out := captureStdout(t, func() {
-		if err := runJobsReceipt(context.Background(), paths, []string{"--run", "run-alone"}); err != nil {
-			t.Fatalf("runJobsReceipt: %v", err)
+		if err := renderRunView(context.Background(), paths, runView{name: "receipt", runID: "run-alone", format: "json"}); err != nil {
+			t.Fatalf("receipt view: %v", err)
 		}
 	})
 	var rec map[string]any

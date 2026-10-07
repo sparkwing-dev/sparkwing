@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,6 +36,8 @@ type ListOpts struct {
 	Limit     int
 	Pipelines []string
 	Statuses  []string
+	Repos     []string
+	RootOnly  bool
 	Since     time.Duration
 	JSON      bool
 
@@ -48,6 +51,42 @@ type ListOpts struct {
 	Pivot      PivotOpts
 
 	Cursor string
+}
+
+// LatestRuns returns up to n of the newest runs the server-side part of
+// opts selects (pipeline, status, branch, SHA, repository, root-only and
+// lookback), merged across this home's standalone stores when opts reads
+// locally.
+func LatestRuns(ctx context.Context, paths Paths, opts ListOpts, n int) (latest []*store.Run, err error) {
+	if err := paths.EnsureRoot(); err != nil {
+		return nil, err
+	}
+	b, closer, err := readBackendFor(ctx, paths, opts.Profile)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, closer.Close()) }()
+	opts.Limit, opts.Cursor, opts.ByPipeline = n, "", false
+	filter, _, _, err := runsQueryFor(opts)
+	if err != nil {
+		return nil, err
+	}
+	filter.Limit = n
+	runs, err := b.ListRuns(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	rows := TagShared(runs)
+	//nolint:contextcheck // hack: mergesStandalone takes no context; ListJobs makes the same call.
+	if mergesStandalone(b, paths, opts.Profile) {
+		standalone := OpenStandaloneStores(ctx, paths)
+		defer func() { err = errors.Join(err, standalone.Close()) }()
+		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
+	}
+	if len(rows) > n {
+		rows = rows[:n]
+	}
+	return untagRuns(rows), nil
 }
 
 func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) error {

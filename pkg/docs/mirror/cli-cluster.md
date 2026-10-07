@@ -22,6 +22,7 @@ local dashboard with 'sparkwing serve'.
 - `agents` -- Inspect the controller's fleet view
 - `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
+- `triggers` -- List or inspect controller triggers
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
 - `limits` -- Read and set the compute guards
@@ -728,6 +729,101 @@ window short.
 ```sh
 # Rotate a token with a 48h grace window
 sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
+```
+
+## `sparkwing cluster triggers`
+
+List or inspect controller triggers
+
+Inspect the controller's queue of pipeline triggers. 'list' shows pending,
+claimed, and completed entries. 'get' reads one trigger by identifier.
+Select the controller with --profile NAME.
+
+Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.
+
+### Subcommands
+
+- `list` -- List pending / claimed / done / failed triggers
+- `get` -- Inspect one trigger's full metadata by id
+
+### Examples
+
+```sh
+# List pending triggers on prod
+sparkwing cluster triggers list --profile prod --status pending
+
+# Inspect one trigger
+sparkwing cluster triggers get --id run-fictional --profile prod
+
+# Submit a trigger
+sparkwing pipeline trigger fictional-deploy --profile prod
+```
+
+## `sparkwing cluster triggers get`
+
+Inspect one trigger's full metadata by id
+
+Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
+git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
+json emits the raw response.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--id TRIGGER_ID` | Trigger / run identifier (the value 'pipeline trigger' prints) (required) |
+| `-o, --output FORMAT` | Output format: json emits the raw response |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Inspect one trigger
+sparkwing cluster triggers get --id run-fictional --profile prod
+
+# Raw JSON for scripting
+sparkwing cluster triggers get --id run-fictional --profile prod -o json
+```
+
+## `sparkwing cluster triggers list`
+
+List pending / claimed / done / failed triggers
+
+Queries GET /api/v1/triggers on the selected profile's
+controller. Empty filters return the most recent 20 entries
+across all statuses.
+
+Useful when the queue looks stuck ("why isn't my trigger being
+claimed?"): --status pending shows unclaimed work, --status
+claimed shows what a worker has in-flight. The repo filter
+matches GITHUB_REPOSITORY on the trigger env so webhook-driven
+entries match the selected repository; that value is not indexed, so the
+search covers the newest 5,000 triggers matching the other filters and
+an older entry is not reported.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--status STATUS` | Filter by status: pending \| claimed \| done \| failed |
+| `--pipeline NAME` | Filter by pipeline name |
+| `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
+| `--limit N` | Maximum triggers to show (default: 20) |
+| `-q, --quiet` | Print only trigger ids, newline-separated |
+| `-o, --output FORMAT` | Output format: json emits the raw triggers array |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Recent triggers on prod
+sparkwing cluster triggers list --profile prod
+
+# Just pending
+sparkwing cluster triggers list --profile prod --status pending
+
+# Pipeline-specific, JSON
+sparkwing cluster triggers list --profile prod --pipeline fictional-build --limit 5 -o json
 ```
 
 ## `sparkwing cluster users`

@@ -532,3 +532,35 @@ instead of naming its replacement.
 - `SPARKWING_PROFILE` is set for a pipeline's own process by
   `sparkwing run --profile P`, so a `sparkwing runs ...` call inside a step
   now reads P's store.
+
+## Runs verbs fold into status, list and logs
+
+| Before | After |
+|---|---|
+| `sparkwing runs get --run ID` | `sparkwing runs status ID -o json --exit-zero` |
+| `sparkwing runs wait --run ID [--timeout 10m] [--poll 3s]` | `sparkwing runs status ID --follow --timeout 10m [--poll 3s]` |
+| `sparkwing runs summary --run ID` | `sparkwing runs status ID --view summary --exit-zero` |
+| `sparkwing runs timeline --run ID [--steps] [--width N]` | `sparkwing runs status ID --view timeline [--steps] [--width N] --exit-zero` |
+| `sparkwing runs receipt --run ID` | `sparkwing runs status ID --view receipt --exit-zero` |
+| `sparkwing runs errors ID` | `sparkwing runs status ID --view errors --exit-zero` |
+| `sparkwing runs tree --run ID` | `sparkwing runs status ID --view tree --exit-zero` |
+| `sparkwing runs last [--pipeline P] [--watch]` | `sparkwing runs list --limit 1 [--pipeline P] [--watch]` |
+| `sparkwing runs find --git-sha S --repo R --root-only --wait --find-timeout D` | `sparkwing runs list --sha S --repo R --root-only --wait --wait-timeout D` |
+| `sparkwing runs failures [--group-by step\|node]` | `sparkwing runs list --status failed --group-by run\|step\|node` |
+| `sparkwing runs grep --pattern P [filters]` | `sparkwing runs logs --grep P [filters]` |
+| `sparkwing runs triggers list\|get` | `sparkwing cluster triggers list\|get` |
+
+- **Exit codes:** `runs status` exits 1 for a run that did not succeed, and
+  every view inherits that; add `--exit-zero` where a script read a view of a
+  failed run. `--follow --timeout` keeps `runs wait`'s codes: 0 succeeded, 1
+  failed or cancelled, 2 timed out, 3 the run could not be read.
+- **Output shape:** `runs wait -o json` printed the run record; `runs status -o json`
+  prints `{"run": ..., "nodes": ...}`, so read `.run.status` instead of
+  `.status`. `runs get -o json` output is a subset of `runs status -o json`.
+- **Defaults:** `runs find` looked back one hour by default; `runs list` has no
+  default lookback, so pass `--since 1h` to keep that window. `runs failures`
+  printed one row per failed run; that is `--group-by run`.
+- **Profiles:** `runs get`, `wait`, `last`, `find`, `failures`, `grep` and the
+  views read the local store unless `--profile` was given. Their replacements
+  follow `runs status`: `--profile`, then `SPARKWING_PROFILE`, then the
+  project's `defaults.profile`.

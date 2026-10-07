@@ -25,7 +25,7 @@ import (
 const SubmitRequestIDKey = "_SPARKWING_SUBMIT_REQUEST_ID"
 
 // submitTriggerSourcePrefix keeps the value written before `runs submit` folded
-// into `run --sw-detached`, so stored rows and `runs find` queries still match.
+// into `run --sw-detached`, so stored rows and `runs list --sha` queries still match.
 const submitTriggerSourcePrefix = "runs-submit"
 
 const detachedPath = "run --sw-detached"
