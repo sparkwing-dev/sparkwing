@@ -35,7 +35,7 @@ func runRunsConsumer(args []string) error {
 		return runRunsConsumerStart(args[1:])
 	case "status":
 		return runRunsConsumerStatus(args[1:])
-	case "stop", "kill":
+	case "stop":
 		return runRunsConsumerStop(args[1:])
 	default:
 		PrintHelp(cmdJobsConsumer, os.Stderr)

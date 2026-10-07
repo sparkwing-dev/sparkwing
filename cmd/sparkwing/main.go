@@ -403,8 +403,6 @@ func runSparkwing(args []string) error {
 		return runPipeline(args[1:])
 	case "run":
 		return dispatchRun(args[1:])
-	case "run-node":
-		return orchestrator.RunNodeCommand(args[1:])
 	case "runs":
 		return runJobs(args[1:])
 	case "queue":
@@ -462,24 +460,8 @@ func runSparkwing(args []string) error {
 		return runDashboardSupervise(args[1:])
 	case consumerSpawnVerb:
 		return runRunsConsumeDetached(args[1:])
-	case "_complete-profiles":
-		return runInternalCompleteProfiles(args[1:])
-	case "_complete-pipelines":
-		return runInternalCompletePipelines(args[1:])
-	case "_complete-flags":
-		return runInternalCompleteFlags(args[1:])
-	case "_complete-verbs":
-		return runInternalCompleteVerbs(args[1:])
-	case "_complete-hint":
-		return runInternalCompleteHint(args[1:])
-	case "_complete-pipeline-flags":
-		return runInternalCompletePipelineFlags(args[1:])
-	case "_complete-targets":
-		return runInternalCompleteTargets(args[1:])
-	case "_complete-runners":
-		return runInternalCompleteRunners(args[1:])
-	case "_complete-profiles-for-pipeline":
-		return runInternalCompleteProfilesForPipeline(args[1:])
+	case "__complete":
+		return runInternalComplete(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdSparkwing, os.Stdout)
 		return nil

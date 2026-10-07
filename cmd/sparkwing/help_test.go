@@ -250,9 +250,9 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 			want: "  sparkwing queue [<subcommand>] [flags]\n",
 		},
 		{
-			name: "runnable parent with positional",
+			name: "leaf with positional",
 			cmd:  cmdRun,
-			want: "  sparkwing run <pipeline> [<subcommand>] [flags] [-- pipeline-flags...]\n",
+			want: "  sparkwing run <pipeline> [flags] [-- pipeline-flags...]\n",
 		},
 		{
 			name: "runnable parent with flags",

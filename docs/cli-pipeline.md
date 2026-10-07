@@ -73,12 +73,16 @@ frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.
 
+--secrets compiles the pipeline and prints each declared secret, its
+source binding, and its resolution status instead of the metadata.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `--name NAME` | Pipeline name to describe (required) |
+| `--secrets` | Print the pipeline's declared secrets with provenance instead of its metadata |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -89,6 +93,9 @@ sparkwing pipeline describe --name release
 
 # Agent-readable
 sparkwing pipeline describe --name fictional-release -o json
+
+# Inspect the declared secrets
+sparkwing pipeline describe --name fictional-release --secrets -o json
 ```
 
 ## `sparkwing pipeline discover`

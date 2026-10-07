@@ -18,10 +18,12 @@ var cmdRun = Command{
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name", Required: true},
 	},
-	SubcommandOrder: []string{"config"},
 }
 
-var cmdRunConfig = Command{Path: "sparkwing run config"}
+var cmdHandleTrigger = Command{
+	Path:   "sparkwing handle-trigger",
+	Hidden: true,
+}
 
 var cmdPipeline = Command{
 	Path:            "sparkwing pipeline",
@@ -63,7 +65,6 @@ func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
 		"sparkwing pipeline list",
 		"sparkwing pipeline hooks",
 		"sparkwing configure xrepo",
-		"sparkwing run-node",
 		"sparkwing handle-trigger",
 	}
 	for _, p := range wantValid {
@@ -95,7 +96,6 @@ func TestResolvePath(t *testing.T) {
 		{"unknown subcommand under group", []string{"pipeline", "sparkz"}, "sparkz"},
 		{"unknown top-level verb", []string{"nope"}, "nope"},
 		{"positional after posargs command", []string{"run", "my-pipeline"}, ""},
-		{"subcommand still wins over positional", []string{"run", "config"}, ""},
 		{"positional after leaf command", []string{"pipeline", "list", "extra"}, ""},
 		{"flag ends the walk", []string{"pipeline", "--help"}, ""},
 		{"placeholder ends the walk", []string{"configure", "xrepo", "add"}, ""},

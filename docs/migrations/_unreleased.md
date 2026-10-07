@@ -455,3 +455,34 @@ operator token could list its mirror files with `GET /repos`.
 
 **Why:** each was a privileged route with no caller, and each needed its own
 review as the route table moves to one declared list.
+
+## CLI aliases and internal verbs
+
+Every verb the CLI dispatches is now a registered command, so `--help`,
+`sparkwing commands` and completion see the whole surface.
+
+| Before | After |
+|---|---|
+| `sparkwing configure profiles ls` | `sparkwing configure profiles list` |
+| `sparkwing configure profiles rm NAME`, `... delete NAME` | `sparkwing configure profiles remove NAME` |
+| `sparkwing configure profiles dup ...` | `sparkwing configure profiles duplicate ...` |
+| `sparkwing secrets rm ...`, `sparkwing secrets remove ...` | `sparkwing secrets delete ...` |
+| `sparkwing pipeline sparks ls`, `... rm ...` | `sparkwing pipeline sparks list`, `... remove ...` |
+| `sparkwing configure xrepo ls`, `... rm ...` | `sparkwing configure xrepo list`, `... remove ...` |
+| `sparkwing runs consumer kill` | `sparkwing runs consumer stop` |
+| `sparkwing run <pipeline> config [-o json]` | `sparkwing pipeline describe --name <pipeline> --secrets [-o json]` |
+| `sparkwing pipeline publish` | none; a runner compiles the pipeline on first use and shares the binary through the cache |
+| `sparkwing run-node` | none; the pipeline binary and `sparkwing-runner run-node` keep the node protocol |
+
+- **Shell completion:** the nine `_complete-*` helpers are one hidden
+  `sparkwing __complete KIND`. A completion script installed by an earlier
+  release calls the old names and completes nothing; regenerate it:
+
+  ```bash
+  sparkwing completion --shell zsh > "${fpath[1]}/_sparkwing"
+  ```
+
+- **`crons tick`:** hidden from `--help` and `sparkwing commands`, and still
+  invoked by the same name. OS timers installed by `crons install` need
+  nothing. A host that runs the tick from its own scheduler keeps calling
+  `sparkwing crons tick`.

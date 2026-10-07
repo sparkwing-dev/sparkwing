@@ -45,6 +45,26 @@ func runCompletion(args []string) error {
 	}
 }
 
+var internalCompleters = map[string]func([]string) error{
+	"profiles":       runInternalCompleteProfiles,
+	"pipelines":      runInternalCompletePipelines,
+	"flags":          runInternalCompleteFlags,
+	"verbs":          runInternalCompleteVerbs,
+	"hint":           runInternalCompleteHint,
+	"pipeline-flags": runInternalCompletePipelineFlags,
+}
+
+func runInternalComplete(args []string) error {
+	if len(args) == 0 {
+		return errors.New("__complete: KIND required")
+	}
+	complete, ok := internalCompleters[args[0]]
+	if !ok {
+		return fmt.Errorf("__complete: unknown kind %q", args[0])
+	}
+	return complete(args[1:])
+}
+
 func runInternalCompleteProfiles(_ []string) error {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -382,7 +402,7 @@ _sparkwing_complete() {
     # Flag completion: current word starts with '-'.
     if [[ "$cur" == -* ]]; then
         local -a out=()
-        while IFS= read -r line; do out+=("$line"); done < <(sparkwing _complete-flags ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
+        while IFS= read -r line; do out+=("$line"); done < <(sparkwing __complete flags ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
         COMPREPLY=( $(compgen -W "${out[*]-}" -- "$cur") )
         return
     fi
@@ -390,7 +410,7 @@ _sparkwing_complete() {
     # Value completion for --profile names.
     if [[ "$prev" == "--profile" ]]; then
         local names
-        names=$(sparkwing _complete-profiles 2>/dev/null)
+        names=$(sparkwing __complete profiles 2>/dev/null)
         COMPREPLY=( $(compgen -W "$names" -- "$cur") )
         return
     fi
@@ -398,7 +418,7 @@ _sparkwing_complete() {
     # Value completion for --pipeline pipeline names.
     if [[ "$prev" == "--pipeline" ]]; then
         local names
-        names=$(sparkwing _complete-pipelines 2>/dev/null | cut -f1)
+        names=$(sparkwing __complete pipelines 2>/dev/null | cut -f1)
         COMPREPLY=( $(compgen -W "$names" -- "$cur") )
         return
     fi
@@ -408,7 +428,7 @@ _sparkwing_complete() {
     # for specific flags (above: --profile, --pipeline) happens before this
     # block.
     local -a kids=()
-    while IFS= read -r line; do kids+=("$line"); done < <(sparkwing _complete-verbs ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
+    while IFS= read -r line; do kids+=("$line"); done < <(sparkwing __complete verbs ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
     if (( ${#kids[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${kids[*]}" -- "$cur") )
         return
@@ -420,7 +440,7 @@ _sparkwing_complete() {
     # so we replicate it here. Filtering by "$cur" is a no-op when
     # empty, but keeps things tidy if the user typed a partial flag.
     local -a leafFlags=()
-    while IFS= read -r line; do leafFlags+=("$line"); done < <(sparkwing _complete-flags ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
+    while IFS= read -r line; do leafFlags+=("$line"); done < <(sparkwing __complete flags ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
     if (( ${#leafFlags[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${leafFlags[*]}" -- "$cur") )
     fi
@@ -461,7 +481,7 @@ _sparkwing() {
     local w
     local i
     # Rebuild the non-flag argv path up to (but not including) the
-    # current word. Feeds the _complete-* hidden helpers.
+    # current word. Feeds the hidden __complete helper.
     for (( i=2; i<CURRENT; i++ )); do
         w="${words[i]}"
         [[ "$w" == -* ]] && continue
@@ -477,7 +497,7 @@ _sparkwing() {
     # Value completion: --profile <TAB> -> profile names.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--profile" ]]; then
         local -a profs
-        profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
+        profs=( ${(f)"$(sparkwing __complete profiles 2>/dev/null)"} )
         _describe -t profiles 'profile' profs
         return
     fi
@@ -520,7 +540,7 @@ _sparkwing() {
 # doesn't try to auto-select a value (there is no enumerable set).
 _sparkwing_positional_hint() {
     local line name req desc
-    line=$(sparkwing _complete-hint "$@" 2>/dev/null)
+    line=$(sparkwing __complete hint "$@" 2>/dev/null)
     if [[ -z "$line" ]]; then
         return 1
     fi
@@ -551,7 +571,7 @@ _sparkwing_complete_verbs() {
         else
             descs+=("${(r:14:: :)name}  $desc")
         fi
-    done < <(sparkwing _complete-verbs "$@" 2>/dev/null)
+    done < <(sparkwing __complete verbs "$@" 2>/dev/null)
     if (( ${#names[@]} > 0 )); then
         compadd -l -d descs -a names
         return 0
@@ -595,12 +615,12 @@ _sparkwing_complete_flags() {
     if (( $# >= 2 )) && [[ "$1" == "run" ]]; then
         while IFS= read -r line; do
             _sw_absorb_flag_line
-        done < <(sparkwing _complete-pipeline-flags "$2" 2>/dev/null)
+        done < <(sparkwing __complete pipeline-flags "$2" 2>/dev/null)
     fi
 
     while IFS= read -r line; do
         _sw_absorb_flag_line
-    done < <(sparkwing _complete-flags "$@" 2>/dev/null)
+    done < <(sparkwing __complete flags "$@" 2>/dev/null)
 
     (( ${#names[@]} == 0 )) && return
     compadd -l -J "flags" -d descs -a names
@@ -644,7 +664,7 @@ _sparkwing_complete_pipelines() {
         local _sw_len=${#name}
         (( _sw_len > _sw_name_cap )) && _sw_len=$_sw_name_cap
         (( _sw_len > _sw_name_width )) && _sw_name_width=$_sw_len
-    done < <(sparkwing _complete-pipelines 2>/dev/null)
+    done < <(sparkwing __complete pipelines 2>/dev/null)
 
     # Second pass: render every row at the single global width.
     local g nm k d col padded padded_name label
@@ -720,12 +740,12 @@ func renderFish() string {
 #   (or write to ~/.config/fish/completions/sparkwing.fish)
 
 function __sparkwing_profiles
-    sparkwing _complete-profiles 2>/dev/null
+    sparkwing __complete profiles 2>/dev/null
 end
 
 function __sparkwing_pipelines
     # Columns: name, group, kind, desc. Fish wants name\tdesc.
-    sparkwing _complete-pipelines 2>/dev/null | awk -F '\t' '{print $1"\t"$4}'
+    sparkwing __complete pipelines 2>/dev/null | awk -F '\t' '{print $1"\t"$4}'
 end
 
 function __sparkwing_has_path

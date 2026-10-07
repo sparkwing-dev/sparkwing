@@ -77,8 +77,6 @@ func runPipeline(args []string) error {
 		return dispatchRun(args[1:])
 	case "trigger":
 		return runPipelineTrigger(args[1:])
-	case "publish":
-		return runPipelinePublish(args[1:])
 	case "hooks":
 		return runHooks(args[1:])
 	case "sparks":
@@ -248,6 +246,7 @@ func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
+	secretsOnly := fs.Bool("secrets", false, "print the declared secrets with provenance")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -267,6 +266,13 @@ func runPipelineDescribe(args []string) error {
 		return err
 	}
 	name := *pipelineName
+	if *secretsOnly {
+		// safety: only the pipeline binary can resolve secret bindings, so it answers this.
+		if format != "json" {
+			format = "pretty"
+		}
+		return dispatchRun([]string{name, "config", "-o", format})
+	}
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
 		return err

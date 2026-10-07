@@ -113,7 +113,7 @@ func TestNoteVersionTransition_QuietVerbsSkip(t *testing.T) {
 	_, stamp := noticeHome(t)
 	seedStamp(t, stamp, "test-binary", "v0.14.0")
 
-	for _, verb := range []string{"completion", "doctor", "_complete-verbs", "wingd", "handle-trigger", "update", "version"} {
+	for _, verb := range []string{"completion", "doctor", "__complete", "wingd", "handle-trigger", "update", "version"} {
 		var buf bytes.Buffer
 		noteVersionTransition(&buf, verb)
 		if buf.Len() != 0 {

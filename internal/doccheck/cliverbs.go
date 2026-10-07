@@ -12,8 +12,6 @@ var registryPathRE = regexp.MustCompile(`Path:\s*"(sparkwing[^"]*)"`)
 
 var posArgsFieldRE = regexp.MustCompile(`^\s*PosArgs:`)
 
-var hiddenTopLevel = []string{"run-node", "handle-trigger"}
-
 type cliVerb struct {
 	file   string
 	line   int
@@ -103,9 +101,6 @@ func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
 	}
 	if len(valid) == 0 {
 		return nil, nil, fmt.Errorf("no Command paths found in help_registry.go")
-	}
-	for _, v := range hiddenTopLevel {
-		valid["sparkwing "+v] = true
 	}
 	return valid, posArgs, nil
 }

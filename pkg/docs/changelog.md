@@ -104,6 +104,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Remove the CLI's unlisted verb spellings, `run config`, and `pipeline publish`
+  The alias spellings `configure profiles ls/rm/delete/dup`, `secrets rm/remove`, `pipeline sparks ls/rm`, `configure xrepo ls/rm` and `runs consumer kill` are gone; use the listed verb. `sparkwing run <pipeline> config` becomes `sparkwing pipeline describe --name <pipeline> --secrets`. The unlisted `sparkwing pipeline publish` upload verb and the CLI's `run-node` case are gone. The nine `_complete-*` helpers become one hidden `__complete KIND`, so an installed completion script must be regenerated with `sparkwing completion --shell <shell>`. `crons tick` is now hidden from help and the command index and still runs under the same name. See [migration guide](docs/migrations/_unreleased.md#cli-aliases-and-internal-verbs).
+
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
 

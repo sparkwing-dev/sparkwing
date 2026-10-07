@@ -15,7 +15,7 @@ import (
 )
 
 var allCommands = []*Command{
-	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdDaemonExplain, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun, &cmdRunConfig,
+	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdDaemonExplain, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun,
 	&cmdConfigure, &cmdConfigureInit, &cmdConfigureXrepo, &cmdConfigureXrepoList, &cmdConfigureXrepoAdd, &cmdConfigureXrepoRemove, &cmdConfigureXrepoPrune,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsGuides, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
@@ -59,6 +59,8 @@ var allCommands = []*Command{
 	&cmdCronsLock, &cmdCronsUnlock, &cmdCronsSet, &cmdCronsReset,
 	&cmdCronsStatus, &cmdCronsList,
 	&cmdCronsShow, &cmdCronsNext, &cmdCronsPause, &cmdCronsResume, &cmdCronsRun, &cmdCronsTick,
+	&cmdWingd, &cmdWingdRun, &cmdWingdSupervise, &cmdDashboardSupervise, &cmdRunsConsume,
+	&cmdHandleTrigger, &cmdComplete,
 }
 
 type CommandIndexJSON struct {

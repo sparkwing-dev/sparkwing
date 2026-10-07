@@ -1426,16 +1426,21 @@ var cmdPipelineDescribe = Command{
 description, typed args, examples, triggers, and (for scripts)
 frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
-hidden flag shouldn't surprise you.`,
+hidden flag shouldn't surprise you.
+
+--secrets compiles the pipeline and prints each declared secret, its
+source binding, and its resolution status instead of the metadata.`,
 	Flags: []FlagSpec{
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
+		{Name: "secrets", Desc: "Print the pipeline's declared secrets with provenance instead of its metadata", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable", "sparkwing pipeline describe --name release"},
 		{"Agent-readable", "sparkwing pipeline describe --name fictional-release -o json"},
+		{"Inspect the declared secrets", "sparkwing pipeline describe --name fictional-release --secrets -o json"},
 	},
 }
 
@@ -1661,23 +1666,6 @@ downstream predicates are evaluated with the resulting state.`,
 	},
 }
 
-var cmdRunConfig = Command{
-	Path:     "sparkwing run config",
-	Synopsis: "Print a pipeline's declared Secrets with provenance",
-	Description: `Lists each declared secret, its source binding, and its resolution status.
-Invoke it with 'sparkwing run <pipeline> config'. The pipeline binary
-handles this inspection command.`,
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-	},
-	GroupOrder: []string{"Output", "Other"},
-	Examples: []Example{
-		{"Inspect the declared secrets", "sparkwing run fictional-release config"},
-		{"Agent-readable form", "sparkwing run fictional-release config -o json"},
-	},
-	HideFromComplete: true,
-}
-
 var cmdRun = Command{
 	Path:     "sparkwing run",
 	Synopsis: "Invoke a pipeline",
@@ -1773,11 +1761,9 @@ is running and exits after five idle minutes; see
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
-	Flags:              runFlagSpecs,
-	GroupOrder:         []string{"Source", "Range", "Safety", "System", "Other"},
-	SubcommandOrder:    []string{"config"},
-	SubcommandOptional: true,
-	UsageSuffix:        "[-- pipeline-flags...]",
+	Flags:       runFlagSpecs,
+	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
+	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run fictional-build"},
 		{"Pass a typed pipeline arg", "sparkwing run fictional-release --version v0.28.1"},
@@ -4373,7 +4359,7 @@ from a loop of its own, one evaluator per store, and each fire becomes a
 trigger the cluster clones and runs.`,
 	SubcommandOrder: []string{
 		"install", "uninstall", "disarm", "lock", "unlock", "set", "reset",
-		"status", "list", "show", "next", "pause", "resume", "run", "tick",
+		"status", "list", "show", "next", "pause", "resume", "run",
 	},
 	Examples: []Example{
 		{"Arm this repo's schedules on this host", "sparkwing crons install"},
@@ -4725,6 +4711,7 @@ instants, so the next one still fires on time.`,
 var cmdCronsTick = Command{
 	Path:     "sparkwing crons tick",
 	Synopsis: "Evaluate every armed schedule once (the OS timer's entry point)",
+	Hidden:   true,
 	Description: `What the systemd timer or launchd agent runs every minute.
 It takes an exclusive lock so two ticks never resolve the same instant,
 re-reads the declaration of every schedule that follows its checkout -- a
@@ -4748,5 +4735,53 @@ machine's own scheduler, once a minute.`,
 	Examples: []Example{
 		{"Evaluate every armed schedule once", "sparkwing crons tick"},
 		{"See what this minute would do", "sparkwing crons tick --dry-run"},
+	},
+}
+
+// safety: an older daemon's takeover, a detached child's argv and installed
+// completion scripts invoke these names, so renaming one strands its caller.
+
+var cmdWingd = Command{
+	Path:     "sparkwing wingd",
+	Synopsis: "Host the local admission daemon (spawned by the CLI)",
+	Hidden:   true,
+}
+
+var cmdWingdRun = Command{
+	Path:     "sparkwing wingd run",
+	Synopsis: "Serve the admission daemon in this process",
+	Hidden:   true,
+}
+
+var cmdWingdSupervise = Command{
+	Path:     "sparkwing wingd supervise",
+	Synopsis: "Supervise a wingd run child and restart it when it wedges",
+	Hidden:   true,
+}
+
+var cmdDashboardSupervise = Command{
+	Path:     "sparkwing __dashboard-supervise",
+	Synopsis: "Supervise a detached dashboard started by serve start",
+	Hidden:   true,
+}
+
+var cmdRunsConsume = Command{
+	Path:     "sparkwing __runs-consume",
+	Synopsis: "Serve the detached-run consumer for one home",
+	Hidden:   true,
+}
+
+var cmdHandleTrigger = Command{
+	Path:     "sparkwing handle-trigger",
+	Synopsis: "Run one claimed trigger (spawned by cluster worker)",
+	Hidden:   true,
+}
+
+var cmdComplete = Command{
+	Path:     "sparkwing __complete",
+	Synopsis: "Print completion candidates for the shell scripts",
+	Hidden:   true,
+	PosArgs: []PosArg{
+		{Name: "KIND", Desc: "profiles | pipelines | flags | verbs | hint | pipeline-flags", Required: true},
 	},
 }

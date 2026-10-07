@@ -98,10 +98,6 @@ SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.
 
-### Subcommands
-
-- `config` -- Print a pipeline's declared Secrets with provenance
-
 ### Arguments
 
 - `<pipeline>` (required) -- Pipeline name registered in .sparkwing/sparkwing.yaml
@@ -167,28 +163,4 @@ sparkwing runs retry --run run-fictional --failed
 
 # Submit to a remote controller
 sparkwing pipeline trigger deploy --profile prod
-```
-
-## `sparkwing run config`
-
-Print a pipeline's declared Secrets with provenance
-
-Lists each declared secret, its source binding, and its resolution status.
-Invoke it with 'sparkwing run <pipeline> config'. The pipeline binary
-handles this inspection command.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Inspect the declared secrets
-sparkwing run fictional-release config
-
-# Agent-readable form
-sparkwing run fictional-release config -o json
 ```

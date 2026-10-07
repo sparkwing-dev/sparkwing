@@ -52,7 +52,6 @@ trigger the cluster clones and runs.
 - `pause` -- Stop a schedule firing, keeping it armed
 - `resume` -- Let a paused schedule fire again
 - `run` -- Launch a schedule's pipeline now
-- `tick` -- Evaluate every armed schedule once (the OS timer's entry point)
 
 ### Examples
 
@@ -485,43 +484,6 @@ sparkwing crons status -o json
 
 # Read a controller's scheduler
 sparkwing crons status --profile prod
-```
-
-## `sparkwing crons tick`
-
-Evaluate every armed schedule once (the OS timer's entry point)
-
-What the systemd timer or launchd agent runs every minute.
-It takes an exclusive lock so two ticks never resolve the same instant,
-re-reads the declaration of every schedule that follows its checkout -- a
-pinned schedule keeps the declaration it was armed with -- evaluates every
-declared unpaused schedule against its cursor, launches what is due, and
-records each outcome.
-
-Quiet on success: one summary line and the id of each run it launched. It
-exits non-zero only when the tick itself could not run, so a schedule that
-fails to launch is recorded against that schedule and the timer stays green.
-
---dry-run prints what this minute would resolve and writes nothing.
-
-Run it by hand on a host whose platform has no sparkwing timer, from that
-machine's own scheduler, once a minute.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--dry-run` | Evaluate and report without launching or recording anything |
-| `-o, --output FMT` | Output format: pretty\|json\|plain |
-
-### Examples
-
-```sh
-# Evaluate every armed schedule once
-sparkwing crons tick
-
-# See what this minute would do
-sparkwing crons tick --dry-run
 ```
 
 ## `sparkwing crons uninstall`

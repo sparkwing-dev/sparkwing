@@ -28,13 +28,13 @@ func runProfiles(args []string) error {
 	switch args[0] {
 	case "add":
 		return runProfilesAdd(args[1:])
-	case "list", "ls":
+	case "list":
 		return runProfilesList(args[1:])
 	case "show":
 		return runProfilesShow(args[1:])
-	case "remove", "rm", "delete":
+	case "remove":
 		return runProfilesRemove(args[1:])
-	case "duplicate", "dup":
+	case "duplicate":
 		return runProfilesDuplicate(args[1:])
 	case "set":
 		return runProfilesSet(args[1:])

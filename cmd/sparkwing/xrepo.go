@@ -25,11 +25,11 @@ func runXrepo(args []string) error {
 		os.Exit(2)
 	}
 	switch args[0] {
-	case "list", "ls":
+	case "list":
 		return runXrepoList(args[1:])
 	case "add":
 		return runXrepoAdd(args[1:])
-	case "remove", "rm":
+	case "remove":
 		return runXrepoRemove(args[1:])
 	case "prune":
 		return runXrepoPrune(args[1:])

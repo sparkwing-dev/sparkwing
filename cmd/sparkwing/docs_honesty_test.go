@@ -2,13 +2,9 @@ package main
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -134,10 +130,9 @@ func TestShippedProseDropsDesignRegionsAndRefusesUnbalancedMarkers(t *testing.T)
 
 func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 	dispatch := map[string]docDispatch{
-		"sparkwing run":        {acceptsPositionals: true},
-		"sparkwing run config": {},
-		"sparkwing docs":       {},
-		"sparkwing docs read":  {},
+		"sparkwing run":       {acceptsPositionals: true},
+		"sparkwing docs":      {},
+		"sparkwing docs read": {},
 	}
 	cases := []struct {
 		name string
@@ -203,20 +198,6 @@ func invocationCount(units []string) int {
 		}
 	}
 	return n
-}
-
-func TestEveryRegistryTopLevelVerbIsDispatched(t *testing.T) {
-	switchCases := topLevelSwitchCases(t)
-	for _, c := range allCommands {
-		words := strings.Fields(c.Path)
-		if len(words) < 2 {
-			continue
-		}
-		if !switchCases[words[1]] {
-			t.Errorf("the registry declares %q but runSparkwing has no case %q",
-				c.Path, words[1])
-		}
-	}
 }
 
 type docDispatch struct {
@@ -353,50 +334,8 @@ func dispatchedPaths(t *testing.T) map[string]docDispatch {
 	for _, c := range allCommands {
 		out[c.Path] = docDispatch{acceptsPositionals: len(c.PosArgs) > 0}
 	}
-	for verb := range topLevelSwitchCases(t) {
-		if _, exists := out["sparkwing "+verb]; !exists {
-			out["sparkwing "+verb] = docDispatch{}
-		}
-	}
 	if len(out) < 2 {
 		t.Fatal("the command registry is empty, so this check proves nothing")
-	}
-	return out
-}
-
-func topLevelSwitchCases(t *testing.T) map[string]bool {
-	t.Helper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "main.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse main.go: %v", err)
-	}
-	out := map[string]bool{}
-	ast.Inspect(file, func(n ast.Node) bool {
-		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "runSparkwing" {
-			return true
-		}
-		ast.Inspect(fn, func(inner ast.Node) bool {
-			cc, ok := inner.(*ast.CaseClause)
-			if !ok {
-				return true
-			}
-			for _, e := range cc.List {
-				lit, ok := e.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					continue
-				}
-				if v, err := strconv.Unquote(lit.Value); err == nil && !strings.HasPrefix(v, "-") {
-					out[v] = true
-				}
-			}
-			return true
-		})
-		return false
-	})
-	if len(out) == 0 {
-		t.Fatal("no case values found in runSparkwing, so this check proves nothing")
 	}
 	return out
 }

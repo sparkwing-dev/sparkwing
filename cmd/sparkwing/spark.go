@@ -38,7 +38,7 @@ func runSparks(args []string) error {
 	switch args[0] {
 	case "catalog":
 		return runSparksCatalog(args[1:])
-	case "list", "ls":
+	case "list":
 		return runSparksList(args[1:])
 	case "lint":
 		return runSparksLint(args[1:])
@@ -48,7 +48,7 @@ func runSparks(args []string) error {
 		return runSparksUpdate(args[1:])
 	case "add":
 		return runSparksAdd(args[1:])
-	case "remove", "rm":
+	case "remove":
 		return runSparksRemove(args[1:])
 	case "warmup":
 		return runSparksWarmup(args[1:])
