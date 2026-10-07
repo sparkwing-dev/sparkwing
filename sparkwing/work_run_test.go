@@ -455,11 +455,9 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
 	scan := sparkwing.JobSpawn(w, "scan", func(ctx context.Context) error { return nil }).Needs(a)
-	var afterSawSpawn bool
+	var spawned, afterSawSpawn bool
 	sparkwing.Step(w, "after", func(ctx context.Context) error {
-		if scan.ResolvedID() == "test-node/scan" {
-			afterSawSpawn = true
-		}
+		afterSawSpawn = spawned
 		return nil
 	}).Needs(scan)
 
@@ -472,7 +470,7 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 		if id != "scan" {
 			t.Errorf("handler id = %q, want scan", id)
 		}
-		sparkwing.RuntimePlumbing.Fns.SpawnSpecSetResolvedID(scan, parent+"/"+id)
+		spawned = true
 		return nil, nil
 	})
 
@@ -484,7 +482,7 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 		t.Fatalf("handler called %d times, want 1", calls)
 	}
 	if !afterSawSpawn {
-		t.Fatal("downstream step did not see the resolved spawn id (sequencing broken)")
+		t.Fatal("downstream step ran before the spawn handler (sequencing broken)")
 	}
 }
 

@@ -104,6 +104,9 @@ unlock.
 
 ### Removed
 
+- **sdk (Breaking):** Remove six exported SDK names nothing called and no guide documented
+  `sparkwing.Cache`, `sparkwing.Logs` and `sparkwing.State` (aliases for `pkg/storage.ArtifactStore`, `LogStore` and `StateStore`), `sparkwing.TypeName`, `sparkwing.FailureFromContext` and `(*SpawnSpec).ResolvedID` are gone. Import `pkg/storage` for the store interfaces, and read the `Failure` an `OnFailure` handler receives as its second argument. `ResolvedID` always returned an empty string because the engine never set it. See [migration guide](docs/migrations/_unreleased.md#six-unused-sdk-names-are-removed).
+
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
 

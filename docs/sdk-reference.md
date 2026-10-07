@@ -56,10 +56,9 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func ToolCacheDir(tool string) string` -- ToolCacheDir returns a cache directory for an external tool, scoped to the worktree the pipeline is running in.
 - `func ToolCostCenticores(cores float64) int` -- ToolCostCenticores converts a measured per-invocation core cost into the integer units BoxToolBudget counts in, clamping to at least one so a tool measured at near-zero still draws a unit and cannot be admitted without limit.
 - `func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)` -- ToolSlot takes cost units of g for the duration of one step inside an already-running job, and reports whether it got them.
-- `func TypeName(p any) string` -- TypeName returns the Go type name of p, suitable for matching against a sparkwing.yaml `entrypoint:` field.
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
-- `func WithFailure(ctx context.Context, f Failure) context.Context` -- WithFailure returns a context carrying f, read back by a failure-aware recovery callback via FailureFromContext.
+- `func WithFailure(ctx context.Context, f Failure) context.Context` -- WithFailure returns a context carrying f, read back by a failure-aware recovery callback.
 - `func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context` -- WithResolvedArgs installs a resolved-args map on the context so sparkwing.Arg[T] / ArgOrDefault can read it from any step body.
 - `func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context` -- WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec report each finished command's measured CPU and memory.
 - `func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context` -- WithSecretResolver returns a derived ctx carrying the given resolver.
@@ -218,15 +217,6 @@ BeforeRunFn runs once before the first Run attempt.
 
 ```
 type BeforeRunFn func(ctx context.Context) error
-```
-
-
-### type Cache
-
-Cache is the artifact store interface the orchestrator and pipeline authors reach for.
-
-```
-type Cache = storage.ArtifactStore
 ```
 
 
@@ -612,7 +602,6 @@ type Failure struct {
 }
 ```
 
-- `func FailureFromContext(ctx context.Context) Failure` -- FailureFromContext returns the Failure installed by WithFailure, or the zero Failure (StageAction, nil Err) when none is present.
 
 ### type FailureRecoveryFn
 
@@ -922,15 +911,6 @@ type Logger interface {
 ```
 
 - `func LoggerFromContext(ctx context.Context) Logger` -- LoggerFromContext returns the active logger or a no-op if none is set.
-
-### type Logs
-
-Logs is the per-job log stream store the orchestrator and pipeline authors reach for.
-
-```
-type Logs = storage.LogStore
-```
-
 
 ### type MemoizeConfig
 
@@ -1819,18 +1799,8 @@ type SpawnSpec struct {
 - `func (s *SpawnSpec) ID() string` -- ID returns the spawn's local id (not the eventual Plan node id, which is namespaced by the spawning Job).
 - `func (s *SpawnSpec) Job() Workable` -- Job returns the spawn's target.
 - `func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec` -- Needs declares which Steps / Spawns inside the same Work must complete before the spawn fires.
-- `func (s *SpawnSpec) ResolvedID() string` -- ResolvedID returns the assigned Plan node id, populated after the spawn fires.
 - `func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec` -- SkipIf registers a predicate the orchestrator evaluates before firing the spawn.
 - `func (s *SpawnSpec) SkipPredicates() []SkipPredicate` -- SkipPredicates returns the spawn's registered predicates.
-
-### type State
-
-State is the run-record store: persists runs, nodes, steps, annotations, approvals, and the schema migrations the orchestrator depends on.
-
-```
-type State = storage.StateStore
-```
-
 
 ### type StepError
 
@@ -2121,13 +2091,12 @@ var RuntimePlumbing = struct {
         OIDCTokenSource:   oidcTokenSourceKey{},
     },
     Fns: runtimePlumbingFns{
-        PlanInsertChild:        (*Plan).insertChild,
-        PlanInsertExpanded:     (*Plan).insertExpanded,
-        JobGroupFinalize:       (*JobGroup).finalize,
-        WorkStepFn:             func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
-        WorkStepMarkDone:       (*WorkStep).markDone,
-        SpawnSpecSetResolvedID: (*SpawnSpec).setResolvedID,
-        SpawnSpecMarkDone:      (*SpawnSpec).markDone,
+        PlanInsertChild:    (*Plan).insertChild,
+        PlanInsertExpanded: (*Plan).insertExpanded,
+        JobGroupFinalize:   (*JobGroup).finalize,
+        WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
+        WorkStepMarkDone:   (*WorkStep).markDone,
+        SpawnSpecMarkDone:  (*SpawnSpec).markDone,
     },
 }
 ```

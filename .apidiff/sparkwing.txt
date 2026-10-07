@@ -64,7 +64,6 @@ func BindPipelinesFromYAML(cfg interface {
 },
 )
 func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
-type Cache = storage.ArtifactStore
 type CacheKey string
 func (k CacheKey) IsNoCache() bool
 type CacheKeyFn func(ctx context.Context) (CacheKey, error)
@@ -237,7 +236,6 @@ type Failure struct {
 
 	Err error
 }
-func FailureFromContext(ctx context.Context) Failure
 type FailureRecoveryFn func(ctx context.Context, f Failure) error
 type FailureStage int
 func (s FailureStage) String() string
@@ -429,7 +427,6 @@ type Logger interface {
 	Emit(rec LogRecord)
 }
 func LoggerFromContext(ctx context.Context) Logger
-type Logs = storage.LogStore
 func Lookup(name string) (*Registration, bool)
 func Max(v any) Constraint
 func MaxAge(d time.Duration) RefOption
@@ -686,13 +683,12 @@ var RuntimePlumbing = struct {
 		OIDCTokenSource:   oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
-		PlanInsertChild:        (*Plan).insertChild,
-		PlanInsertExpanded:     (*Plan).insertExpanded,
-		JobGroupFinalize:       (*JobGroup).finalize,
-		WorkStepFn:             func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
-		WorkStepMarkDone:       (*WorkStep).markDone,
-		SpawnSpecSetResolvedID: (*SpawnSpec).setResolvedID,
-		SpawnSpecMarkDone:      (*SpawnSpec).markDone,
+		PlanInsertChild:    (*Plan).insertChild,
+		PlanInsertExpanded: (*Plan).insertExpanded,
+		JobGroupFinalize:   (*JobGroup).finalize,
+		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
+		WorkStepMarkDone:   (*WorkStep).markDone,
+		SpawnSpecMarkDone:  (*SpawnSpec).markDone,
 	},
 }
 const Satisfied Outcome = "satisfied"
@@ -781,12 +777,10 @@ func (s *SpawnSpec) DepIDs() []string
 func (s *SpawnSpec) ID() string
 func (s *SpawnSpec) Job() Workable
 func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec
-func (s *SpawnSpec) ResolvedID() string
 func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec
 func (s *SpawnSpec) SkipPredicates() []SkipPredicate
 const StageAction FailureStage = iota
 const StageVerify
-type State = storage.StateStore
 func Step(w *Work, id string, fn any) *WorkStep
 type StepError struct {
 	StepID string
@@ -823,7 +817,6 @@ type TriggerInfo struct {
 
 	PullRequest *PullRequest
 }
-func TypeName(p any) string
 type VerifyError struct{ Err error }
 func (e *VerifyError) Error() string
 func (e *VerifyError) Unwrap() error
