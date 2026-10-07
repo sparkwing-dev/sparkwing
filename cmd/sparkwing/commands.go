@@ -46,8 +46,6 @@ var allCommands = []*Command{
 	&cmdTriggers, &cmdTriggersList, &cmdTriggersGet,
 	&cmdImage, &cmdImageRollout,
 	&cmdHealth,
-	&cmdWebhooks, &cmdWebhooksConnect, &cmdWebhooksDisconnect,
-	&cmdWebhooksList, &cmdWebhooksDeliveries, &cmdWebhooksReplay,
 	&cmdAgents, &cmdAgentsList, &cmdAgentsEnroll, &cmdClusterConcurrency, &cmdClusterObjectStore, &cmdClusterObjectStoreStatus, &cmdClusterObjectStoreResetBreaker,
 	&cmdRunners, &cmdRunnersAdd, &cmdRunnersRemove,
 	&cmdCloud, &cmdCloudConnect, &cmdCloudStatus, &cmdCloudDisconnect,
