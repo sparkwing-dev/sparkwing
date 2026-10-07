@@ -90,7 +90,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if err := st.CreateNode(ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateApproval(ctx, store.Approval{RunID: f.runA, NodeID: "n1", RequestedAt: now}); err != nil {
+	if err := f.teamA.CreateApproval(ctx, store.Approval{RunID: f.runA, NodeID: "n1", RequestedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.teamA.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
@@ -398,7 +398,7 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 		if run.Status != "running" {
 			t.Errorf("team B's requests moved team A's run to %q", run.Status)
 		}
-		approval, err := f.st.GetApproval(ctx, f.runA, "n1")
+		approval, err := f.teamA.GetApproval(ctx, f.runA, "n1")
 		if err != nil {
 			t.Fatal(err)
 		}

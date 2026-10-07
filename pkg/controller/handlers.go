@@ -449,7 +449,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		steps, _ := s.store.ListNodeSteps(r.Context(), runID)
-		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
+		approvals, _ := tenant.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
 		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run, s.secretValuesAllowed), "nodes": decorated})

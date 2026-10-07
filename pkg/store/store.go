@@ -9026,13 +9026,20 @@ type Approval struct {
 	Comment     string     `json:"comment,omitempty"`
 }
 
-// CreateApproval inserts a pending approval and flips node status to
-// approval_pending in one txn. Re-runs a gate from scratch.
+// CreateApproval inserts a pending approval on a default-team node and flips
+// its status to approval_pending in one txn. Re-runs a gate from scratch.
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
+	return s.defaultTenant().CreateApproval(ctx, a)
+}
+
+// CreateApproval inserts a pending approval on a node of one of t's runs and
+// flips the node's status to approval_pending in one txn. Re-runs a gate from
+// scratch. A run of another team reads as [ErrNotFound].
+func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error {
 	if a.OnTimeout == "" {
 		a.OnTimeout = ApprovalOnTimeoutFail
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -9040,8 +9047,12 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, a.RunID); err != nil {
+		return err
+	}
 	var executorName, currentStatus string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), a.RunID, a.NodeID).Scan(&executorName, &currentStatus)
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), a.RunID, a.NodeID).Scan(&executorName, &currentStatus)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -9053,9 +9064,9 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 			return ErrLockHeld
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id) DO UPDATE SET
     requested_at = excluded.requested_at,
     message      = excluded.message,
@@ -9064,49 +9075,66 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
     approver     = '',
     resolved_at  = NULL,
     resolution   = '',
-    comment      = ''`,
-		a.RunID, a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
-		a.Message, a.TimeoutMS, a.OnTimeout); err != nil {
+    comment      = ''
+  WHERE approvals.team = excluded.team`,
+		string(t.team), a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
+		a.Message, a.TimeoutMS, a.OnTimeout)
+	if err != nil {
 		return err
 	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return err
+		}
+		return notFound("run", a.RunID)
+	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`,
-		NodeStatusApprovalPending, a.RunID, a.NodeID); err != nil {
+		`UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		NodeStatusApprovalPending, string(t.team), a.RunID, a.NodeID); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// GetApproval returns the row, or ErrNotFound.
+// GetApproval returns the row of a default-team node, or ErrNotFound.
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
-	row := s.queryRow(ctx, `
+	return s.defaultTenant().GetApproval(ctx, runID, nodeID)
+}
+
+// GetApproval returns the row of a node of one of t's runs, or ErrNotFound.
+func (t *Tenant) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
+	row := t.s.queryRow(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
-  FROM approvals WHERE run_id = ? AND node_id = ?`, runID, nodeID)
+  FROM approvals WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
 	return scanApproval(row)
 }
 
-// ResolveApproval stamps resolution on a pending row.
+// ResolveApproval stamps resolution on a pending default-team row.
 // ErrNotFound when missing; ErrLockHeld when already resolved.
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
-	if handled, err := s.resolveControllerApproval(ctx, runID, nodeID, resolution, approver, comment); err != nil {
+	return s.defaultTenant().ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
+}
+
+// ResolveApproval stamps resolution on a pending row of one of t's runs.
+// ErrNotFound when missing or another team's; ErrLockHeld when already
+// resolved.
+func (t *Tenant) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
+	if handled, err := t.s.resolveControllerApproval(ctx, t.team, runID, nodeID, resolution, approver, comment); err != nil {
 		return nil, err
 	} else if handled {
-		return s.GetApproval(ctx, runID, nodeID)
+		return t.GetApproval(ctx, runID, nodeID)
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var pkRun, pkNode string
 	var resolvedNS sql.NullInt64
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT run_id, node_id, resolved_at FROM approvals
-		  WHERE run_id = ? AND node_id = ?`, runID, nodeID,
-	).Scan(&pkRun, &pkNode, &resolvedNS)
+	err = tx.QueryRowContext(ctx,
+		`SELECT resolved_at FROM approvals WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(t.team), runID, nodeID).Scan(&resolvedNS)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("approval", runID+"/"+nodeID)
@@ -9120,28 +9148,33 @@ func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE approvals
    SET resolution = ?, approver = ?, comment = ?, resolved_at = ?
- WHERE run_id = ? AND node_id = ? AND resolved_at IS NULL`,
+ WHERE team = ? AND run_id = ? AND node_id = ? AND resolved_at IS NULL`,
 		resolution, approver, comment, time.Now().UnixNano(),
-		runID, nodeID); err != nil {
+		string(t.team), runID, nodeID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return s.GetApproval(ctx, runID, nodeID)
+	return t.GetApproval(ctx, runID, nodeID)
 }
 
-// ListApprovalsForRun returns all rows in request order.
+// ListApprovalsForRun returns a default-team run's rows in request order.
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListApprovalsForRun(ctx, runID)
+}
+
+// ListApprovalsForRun returns the rows of one of t's runs in request order.
+func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error) {
+	rows, err := t.s.query(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
-  FROM approvals WHERE run_id = ?
- ORDER BY requested_at ASC`, runID)
+  FROM approvals WHERE team = ? AND run_id = ?
+ ORDER BY requested_at ASC`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []*Approval
 	for rows.Next() {
 		a, err := scanApproval(rows)
@@ -9153,26 +9186,10 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	return out, rows.Err()
 }
 
-// ListPendingApprovals returns unresolved approvals oldest-first.
+// ListPendingApprovals returns the default team's unresolved approvals
+// oldest-first.
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error) {
-	rows, err := s.query(ctx, `
-SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
-       approver, resolved_at, resolution, comment
-  FROM approvals WHERE resolved_at IS NULL
- ORDER BY requested_at ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*Approval
-	for rows.Next() {
-		a, err := scanApproval(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return s.defaultTenant().ListPendingApprovals(ctx)
 }
 
 func scanApproval(rs rowScanner) (*Approval, error) {

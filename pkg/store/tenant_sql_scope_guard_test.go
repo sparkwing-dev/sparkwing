@@ -301,7 +301,6 @@ var unportedSQL = []string{
 	"(*Store).CountPendingNodes",
 	"(*Store).CountPendingTriggers",
 	"(*Store).CountUsers",
-	"(*Store).CreateApproval",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
 	"(*Store).CreateTokenIfNoneExist",
@@ -320,13 +319,11 @@ var unportedSQL = []string{
 	"(*Store).FinishRunsIfActive",
 	"(*Store).FinishTrigger",
 	"(*Store).FinishTriggerAtGeneration",
-	"(*Store).GetApproval",
 	"(*Store).GetNode",
 	"(*Store).GetNodeDispatch",
 	"(*Store).GetRun",
 	"(*Store).GetTrigger",
 	"(*Store).HeartbeatTrigger",
-	"(*Store).ListApprovalsForRun",
 	"(*Store).ListCreditCharges",
 	"(*Store).ListCreditGrants",
 	"(*Store).ListEgressUsage",
@@ -337,7 +334,6 @@ var unportedSQL = []string{
 	"(*Store).ListNodeMetricsPage",
 	"(*Store).ListNodeSteps",
 	"(*Store).ListNodes",
-	"(*Store).ListPendingApprovals",
 	"(*Store).ListPendingTriggersForParent",
 	"(*Store).ListSpawnedChildrenByRun",
 	"(*Store).ListStorageQuotas",
@@ -351,7 +347,6 @@ var unportedSQL = []string{
 	"(*Store).RequestNodeBounce",
 	"(*Store).RequeueUnstartedClaim",
 	"(*Store).ResetNodeForAutoRetry",
-	"(*Store).ResolveApproval",
 	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
 	"(*Store).RunExceedsWallClock",
@@ -416,7 +411,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 128
+const unportedSQLSize = 123
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

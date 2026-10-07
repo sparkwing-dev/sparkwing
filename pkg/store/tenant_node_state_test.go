@@ -46,3 +46,40 @@ func TestTenantDebugPausesStayInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.ListDebugPauses = %+v, %v, want the released pause", pauses, err)
 	}
 }
+
+// An approval gate belongs to its run's team: another team's handle can
+// neither open one on that run nor read, list or resolve it.
+func TestTenantApprovalsStayInTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	gate := store.Approval{RunID: "run-a", NodeID: "ship", RequestedAt: time.Now(), Message: "ship it?"}
+
+	if err := globex.CreateApproval(ctx, gate); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.CreateApproval = %v, want ErrNotFound", err)
+	}
+	if err := acme.CreateApproval(ctx, gate); err != nil {
+		t.Fatalf("acme.CreateApproval: %v", err)
+	}
+	if _, err := globex.GetApproval(ctx, "run-a", "ship"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.GetApproval = %v, want ErrNotFound", err)
+	}
+	if rows, err := globex.ListApprovalsForRun(ctx, "run-a"); err != nil || len(rows) != 0 {
+		t.Fatalf("globex.ListApprovalsForRun = %v, %v, want none", rows, err)
+	}
+	if rows, err := globex.ListPendingApprovals(ctx); err != nil || len(rows) != 0 {
+		t.Fatalf("globex.ListPendingApprovals = %v, %v, want none", rows, err)
+	}
+	if _, err := globex.ResolveApproval(ctx, "run-a", "ship", store.ApprovalResolutionApproved, "mallory", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.ResolveApproval = %v, want ErrNotFound", err)
+	}
+	got, err := acme.ResolveApproval(ctx, "run-a", "ship", store.ApprovalResolutionApproved, "alice", "")
+	if err != nil || got.Approver != "alice" {
+		t.Fatalf("acme.ResolveApproval = %+v, %v, want alice's approval", got, err)
+	}
+	if rows, err := acme.ListApprovalsForRun(ctx, "run-a"); err != nil || len(rows) != 1 || rows[0].Resolution != store.ApprovalResolutionApproved {
+		t.Fatalf("acme.ListApprovalsForRun = %+v, %v, want the approved gate", rows, err)
+	}
+}
