@@ -4436,8 +4436,10 @@ paths:
         card that did, grants nothing and holds the team, except that a
         pay-now payment of exactly the open charge by a card warned only on
         another payment repays what the team owes at settlement, since any
-        card may repay usage already consumed, and keeps the rest unapplied
-        rather than as credit; it also holds the team, and the controller logs
+        card may repay usage already consumed, closes the charge even when
+        nothing is left to repay, and keeps the rest unapplied rather than as
+        credit, so a refund of that rest reverses nothing; it also holds the
+        team, and the controller logs
         `alert=card_payment_warned` for either outcome. A repeat of a
         settled payment changes nothing. A payment reference already credited
         to another team is refused, including one recorded as a prepaid grant.

@@ -7,8 +7,9 @@ running install.
 
 `Store.SettleCardPayment` gains a middle return, a `*store.WarnedCardPayment`
 that is nil unless an actionable early fraud warning matched the payment or
-the card that paid. It names the warning, the debt the payment repaid and the
-rest the ledger does not hold. A caller alerts on it, because a warned payment
+the card that paid. It names the warning, whether the payment settled the
+open charge as a repayment (`Repays`), the debt it repaid and the rest the
+ledger does not hold. A caller alerts on it, because a warned payment
 either repays a pay-now debt with the team held or grants nothing, and any
 unapplied rest is the operator's to return.
 

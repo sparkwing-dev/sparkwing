@@ -256,10 +256,12 @@ An early fraud warning gives each affected team its own hold, blocks the
 card's fingerprint for every team, and refunds the payment; the refund then
 reverses the credits as above. Debt is usage already consumed, so any card may
 repay it through `POST /api/v1/team/billing/pay`: a payment of the open charge
-by a card warned on another payment repays what the team owes at that moment,
-grants nothing beyond it, holds the team, and logs `alert=card_payment_warned`
-with the repaid and unapplied amounts. Returning the unapplied rest, or the
-whole payment, is the operator's decision. Use the returned hold id to release
+by a card warned on another payment pays off that charge, repays what the
+team owes at that moment, grants nothing beyond it, holds the team, and logs
+`alert=card_payment_warned` with the repaid and unapplied amounts. Returning
+the unapplied rest, or the whole payment, is the operator's decision; a refund
+returns the unapplied rest first, which reverses nothing, and only what it
+returns beyond that reopens the debt. Use the returned hold id to release
 that hold. Existing warning holds keep their ids, and replaying
 a warning does not undo an operator's release. Business events retain the
 provider's warning id alongside the hold id.

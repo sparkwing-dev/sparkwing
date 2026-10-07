@@ -235,7 +235,7 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
 		switch {
-		case warned != nil && warned.RepaidMicro > 0:
+		case warned != nil && warned.Repays:
 			s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return",
 				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
 				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,

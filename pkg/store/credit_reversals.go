@@ -32,6 +32,8 @@ type CreditReversal struct {
 // repeat returns the reversal already written. The team is the one the
 // payment funded, and the balance may go below zero, because the credits may
 // already be spent; the claim path then refuses the team's new metered work.
+// A partial refund of a payment with an unapplied rest returns that rest
+// first, which takes nothing back.
 func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
 ) (_ CreditReversal, err error) {
@@ -80,6 +82,13 @@ func (s *Store) ReversePayment(
 	if err != nil {
 		return CreditReversal{}, err
 	}
+	if out.Grant == nil && amountMicro > 0 {
+		released, err := releaseUnappliedTx(ctx, tx, paid.Team, paymentID, reference, createdBy, amountMicro)
+		if err != nil {
+			return CreditReversal{}, err
+		}
+		already -= released
+	}
 	if out.Grant == nil && already < paid.AmountMicro {
 		now := time.Now().UTC()
 		take := paid.AmountMicro - already
@@ -111,6 +120,34 @@ func (s *Store) ReversePayment(
 		return CreditReversal{}, err
 	}
 	return out, nil
+}
+
+// safety: a refund returns a payment's unapplied rest first, released here up
+// to amountMicro, so its reversal takes back only what it returns beyond it.
+func releaseUnappliedTx(
+	ctx context.Context, tx *storeTx, team Team, paymentID, reference, createdBy string, amountMicro int64,
+) (int64, error) {
+	var held sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
+	    WHERE team = ? AND kind = ? AND reverses = ? AND reference LIKE ?`,
+		string(team), CreditGrantReversal, paymentID, unappliedPrefix+"%").Scan(&held); err != nil {
+		return 0, err
+	}
+	release := min(amountMicro, -held.Int64)
+	if release <= 0 {
+		return 0, nil
+	}
+	id, err := newCreditID("grant")
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses,
+	    created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(team), id, CreditGrantReversal, release, unappliedPrefix+"refund:"+reference, paymentID, createdBy,
+		time.Now().UTC().UnixNano()); err != nil {
+		return 0, fmt.Errorf("credits: release unapplied payment: %w", err)
+	}
+	return release, nil
 }
 
 // PaymentTeam returns the team a payment funded.

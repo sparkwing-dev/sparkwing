@@ -3042,6 +3042,8 @@ type WaitlistedAccount struct {
 type WarnedCardPayment struct {
 	WarningID string
 
+	Repays bool
+
 	RepaidMicro int64
 
 	UnappliedMicro int64

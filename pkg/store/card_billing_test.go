@@ -492,7 +492,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 		repaid, unapplied int64
 		created           bool
 	}{
-		{"reservation refunded in full", 15_000, 0, 15_000, false},
+		{"reservation refunded in full", 15_000, 0, 15_000, true},
 		{"reservation refunded in part", 5_000, 10_000, 5_000, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -518,6 +518,28 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 			}
 			if n := count(t, s, `SELECT COUNT(*) FROM card_refunds WHERE payment_intent = 'pi_recovery'`); n != 0 {
 				t.Fatalf("queued refunds = %d, want none", n)
+			}
+			if n := count(t, s, `SELECT COUNT(*) FROM card_charges WHERE id = ? AND state = 'paid'`, rec.ChargeID); n != 1 {
+				t.Fatalf("charge not paid; a later pay-now would charge the cleared debt again")
+			}
+			if _, err := acme.StartRecoveryAttempt(ctx, now); !errors.Is(err, store.ErrNoPayableCharge) {
+				t.Fatalf("pay-now after settlement = %v, want ErrNoPayableCharge", err)
+			}
+			for range 2 {
+				if _, err := s.ReversePayment(ctx, "pi_recovery", "re_unapplied", "billing",
+					tc.unapplied*store.MicroCreditsPerCent); err != nil {
+					t.Fatalf("reverse the unapplied rest: %v", err)
+				}
+				if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != 0 {
+					t.Fatalf("balance = %d, %v; want returning the unapplied rest to leave the repayment", bal, err)
+				}
+			}
+			if _, err := s.ReversePayment(ctx, "pi_recovery", "re_rest", "billing",
+				tc.repaid*store.MicroCreditsPerCent+1); err != nil {
+				t.Fatalf("reverse the rest: %v", err)
+			}
+			if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != -tc.repaid*store.MicroCreditsPerCent {
+				t.Fatalf("balance = %d, %v; want a refund beyond the unapplied rest to reopen only the repaid debt", bal, err)
 			}
 		})
 	}
