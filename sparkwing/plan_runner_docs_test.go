@@ -25,20 +25,6 @@ func TestPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
 	}
 }
 
-func TestExecutionModelIsClearlyHistorical(t *testing.T) {
-	data, err := os.ReadFile("../DESIGN-execution-model.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	status := strings.ToLower(string(data))
-	if !strings.Contains(status, "status:** historical design record") {
-		t.Fatal("execution model does not identify itself as a historical design record")
-	}
-	if !strings.Contains(status, "not a description of current behavior") {
-		t.Fatal("execution model does not disclaim current-behavior authority")
-	}
-}
-
 func TestGeneratedPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
 	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)

@@ -549,12 +549,9 @@ in-process counter, so they survive a controller restart.
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `sparkwing.gitcache.archives_served` | Counter | Archive downloads |
-| `sparkwing.gitcache.files_served` | Counter | Single-file downloads |
 | `sparkwing.gitcache.fetch_duration` | Histogram | Background fetch time |
-| `sparkwing.gitcache.cache_hits` | Counter | Cache hits (git archive and binary/dependency, distinguished by `type` attribute) |
-| `sparkwing.gitcache.cache_misses` | Counter | Cache misses (git archive and binary/dependency, distinguished by `type` attribute) |
-| `sparkwing.gitcache.recovery_reclones` | Counter | Full mirror re-downloads after a failed fetch, by `repo` hash. Should be near zero -- a repo that keeps appearing here has a persistent fetch failure (see [Cache](gitcache.md#recovery-reclone-circuit-breaker)) |
+| `sparkwing.gitcache.cache_hits` | Counter | Binary and dependency-archive cache hits, distinguished by `type` attribute |
+| `sparkwing.gitcache.cache_misses` | Counter | Binary and dependency-archive cache misses, distinguished by `type` attribute |
 
 ## Object-store request budget
 
@@ -641,7 +638,7 @@ working, because deleting is how a store gets back under its ceiling.
 
 | Service | What it bounds | Refusal | State on |
 |--------|------|-------------|------|
-| `sparkwing-cache` | the artifact, dependency-archive, upload, team and git mirror trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
+| `sparkwing-cache` | the dependency-archive, team and git mirror trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
 | `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
 | `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
 

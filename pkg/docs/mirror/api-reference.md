@@ -70,8 +70,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
-| `POST` | `/api/v1/gitcache/refresh` | `admin` |
-| `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |

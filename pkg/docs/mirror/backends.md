@@ -43,9 +43,9 @@ defaults. `sparkwing profile` prints which profile resolved and why.
 
 | Surface | Types | Use |
 | --- | --- | --- |
-| `state` | `sqlite`, `postgres`, `s3`, `gcs`, `azure-blob`, `controller` | Run records, plan snapshots, status |
-| `cache` | `filesystem`, `s3`, `gcs`, `azure-blob`, `controller` | Content-addressed artifact and compiled-binary store |
-| `logs`  | `filesystem`, `s3`, `gcs`, `azure-blob`, `controller`, `stdout` | Per-job log stream persistence |
+| `state` | `sqlite`, `postgres`, `s3`, `controller` | Run records, plan snapshots, status |
+| `cache` | `filesystem`, `s3`, `controller` | Content-addressed artifact and compiled-binary store |
+| `logs`  | `filesystem`, `s3`, `controller`, `stdout` | Per-job log stream persistence |
 
 ### Object-store log batching
 
@@ -92,10 +92,9 @@ Each state backend is one deployment shape. See
 [Deployment modes](deployment-modes.md) for when to pick each:
 
 - `sqlite` -- the local path; the default when no profile is selected.
-- `s3`, `gcs`, `azure-blob` -- per-run NDJSON state on a shared bucket.
+- `s3` -- per-run NDJSON state on a shared bucket.
   Cache reservation, approvals, and debug pauses coordinate
-  over object-store CAS where the bucket enforces write preconditions
-  (S3 today; `gcs`/`azure-blob` recognized but not yet implemented).
+  over object-store CAS where the bucket enforces write preconditions.
   Where it does not, cache reservation degrades to last-write-wins,
   while approvals and debug pauses report not-supported and need
   Postgres. Pipeline triggers report not-supported here whatever the
@@ -106,8 +105,8 @@ Each state backend is one deployment shape. See
 - `controller` -- runners talk to a hosted controller over HTTP,
   Sparkwing Cloud included. The controller owns the underlying database.
 
-`mysql` is reserved in the schema but not implemented; declaring it
-fails at run start with a clear error.
+Any other type fails at run start with an error naming the types its
+surface accepts.
 
 Local execution is process-per-node under every state backend. A node
 body runs in its own process of the pipeline binary and reaches run
@@ -128,8 +127,8 @@ controller) on the machine whose capacity you want learned.
 Required fields per type:
 
 - `filesystem` -- `path`
-- `s3`, `gcs`, `azure-blob` -- `bucket` (plus optional `prefix`)
-- `postgres`, `mysql` -- exactly one of `url` or `url_source` (the
+- `s3` -- `bucket` (plus optional `prefix`)
+- `postgres` -- exactly one of `url` or `url_source` (the
   latter names a secret in the resolved source)
 - `controller` requires `controller: <profile-name>` or `url:`. A profile with a sibling `controller:` block inherits that profile name.
 - `stdout`, `sqlite` -- no required fields

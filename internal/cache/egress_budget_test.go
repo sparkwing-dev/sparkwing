@@ -25,17 +25,17 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	t.Cleanup(func() { egressMeter = savedMeter })
 
 	saved := struct {
-		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir string
-		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken        string
-		teamsDir                                                    string
+		dataRoot, repoDir, binsDir, cacheDir     string
+		namesFile, proxyDir, sshKeyDir, apiToken string
+		teamsDir                                 string
 	}{
-		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir,
-		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken,
+		dataRoot, repoDir, binsDir, cacheDir,
+		namesFile, proxyDir, sshKeyDir, apiToken,
 		teamsDir,
 	}
 	t.Cleanup(func() {
-		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.archDir, saved.artifactsDir, saved.binsDir, saved.cacheDir
-		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken = saved.uploadsDir, saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
+		dataRoot, repoDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.binsDir, saved.cacheDir
+		namesFile, proxyDir, sshKeyDir, apiToken = saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
 		teamsDir = saved.teamsDir
 	})
 
@@ -61,13 +61,9 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	return srv
 }
 
-func seedArtifact(t *testing.T, job, name string, size int) {
+func seedCacheEntry(t *testing.T, key string, size int) {
 	t.Helper()
-	dir := filepath.Join(artifactsDir, job)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.Repeat("x", size)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cacheDir, key+".tar.gz"), []byte(strings.Repeat("x", size)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -104,7 +100,7 @@ func get(t *testing.T, srv *httptest.Server, path, token string) fetched {
 	return fetch(t, srv, http.MethodGet, path, token)
 }
 
-const artifactDownloadPath = "/artifacts/job1?glob=*"
+const cacheDownloadPath = "/cache/job1"
 
 // safety: the cache resolves every credentialed caller to one name, so a
 // per-principal refusal here would stop every runner's checkout and
@@ -113,11 +109,11 @@ const artifactDownloadPath = "/artifacts/job1?glob=*"
 // service, where the principal is real.
 func TestTheCacheNeverRefusesADownload(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
-	seedArtifact(t, "job1", "out.tar", 100)
+	seedCacheEntry(t, "job1", 100)
 
 	var served int
 	for i := range 12 {
-		got := get(t, srv, artifactDownloadPath, "s3cret")
+		got := get(t, srv, cacheDownloadPath, "s3cret")
 		if got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download %d = %d with %d bytes, want 200 and a body", i, got.status, len(got.body))
 		}
@@ -150,15 +146,12 @@ func TestTheCacheCarriesNoPerPrincipalBudget(t *testing.T) {
 
 func TestDownloadRoutesStillRequireTheBearer(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{})
-	seedArtifact(t, "job1", "out.tar", 10)
+	seedCacheEntry(t, "job1", 10)
 
 	for _, path := range []string{
-		artifactDownloadPath,
-		"/archive?repo=x&branch=main",
+		cacheDownloadPath,
 		"/bin/anything",
 		"/cache/anything",
-		"/uploads/anything",
-		"/file?repo=x&branch=main&path=p",
 	} {
 		if got := get(t, srv, path, "").status; got != http.StatusUnauthorized {
 			t.Errorf("GET %s without a bearer = %d, want 401", path, got)
@@ -169,7 +162,7 @@ func TestDownloadRoutesStillRequireTheBearer(t *testing.T) {
 	}
 
 	// safety: the credentialed fetch a runner makes must keep working.
-	got := get(t, srv, artifactDownloadPath, "s3cret")
+	got := get(t, srv, cacheDownloadPath, "s3cret")
 	if got.status != http.StatusOK || len(got.body) == 0 {
 		t.Fatalf("a bearer fetch = %d with %d bytes, want 200 and a body", got.status, len(got.body))
 	}
@@ -180,16 +173,16 @@ func TestDownloadRoutesStillRequireTheBearer(t *testing.T) {
 // a HEAD once let eight of them latch the alarm with nothing on the wire.
 func TestBodylessAndRefusedResponsesChargeNothing(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
-	seedArtifact(t, "job1", "out.tar", 1<<16)
+	seedCacheEntry(t, "job1", 1<<16)
 
 	for range 8 {
-		if got := fetch(t, srv, http.MethodHead, artifactDownloadPath, "s3cret"); got.status < 400 {
-			t.Fatalf("HEAD = %d, want the route to answer it without a body", got.status)
+		if got := fetch(t, srv, http.MethodHead, cacheDownloadPath, "s3cret"); got.status != http.StatusOK || len(got.body) != 0 {
+			t.Fatalf("HEAD = %d with %d bytes, want 200 and no body", got.status, len(got.body))
 		}
-		if got := get(t, srv, "/artifacts/job1?glob=nothing-matches-this", "s3cret"); got.status >= 500 {
-			t.Fatalf("an empty glob = %d", got.status)
+		if got := get(t, srv, "/cache/nothing-is-stored-here", "s3cret"); got.status != http.StatusNotFound {
+			t.Fatalf("a missing entry = %d, want 404", got.status)
 		}
-		if got := get(t, srv, artifactDownloadPath, ""); got.status != http.StatusUnauthorized {
+		if got := get(t, srv, cacheDownloadPath, ""); got.status != http.StatusUnauthorized {
 			t.Fatalf("an unauthenticated download = %d, want 401", got.status)
 		}
 	}
@@ -227,7 +220,7 @@ func TestASecondServerKeepsAnUnchangedMetersCounters(t *testing.T) {
 
 func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
-	seedArtifact(t, "job1", "out.tar", 100)
+	seedCacheEntry(t, "job1", 100)
 
 	var health struct {
 		Status   string         `json:"status"`
@@ -242,7 +235,7 @@ func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 		t.Fatalf("health egress = %+v, want no alarm", health.Egress)
 	}
 
-	if got := get(t, srv, artifactDownloadPath, "s3cret").status; got != http.StatusOK {
+	if got := get(t, srv, cacheDownloadPath, "s3cret").status; got != http.StatusOK {
 		t.Fatalf("download = %d", got)
 	}
 
@@ -263,11 +256,11 @@ func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 
 func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{})
-	seedArtifact(t, "job1", "out.tar", 100)
+	seedCacheEntry(t, "job1", 100)
 
 	var served int
 	for range 3 {
-		got := get(t, srv, artifactDownloadPath, "s3cret")
+		got := get(t, srv, cacheDownloadPath, "s3cret")
 		if got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download = %d with %d bytes, want 200 and a body", got.status, len(got.body))
 		}
@@ -282,9 +275,9 @@ func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 // every download is served whole and the alarm stands.
 func TestTheCacheDailyAlarmRefusesNothing(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 150})
-	seedArtifact(t, "job1", "out.tar", 100)
+	seedCacheEntry(t, "job1", 100)
 	for i := range 3 {
-		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK || len(got.body) == 0 {
+		if got := get(t, srv, cacheDownloadPath, "s3cret"); got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download %d = %d with %d bytes, want 200 and the whole body", i, got.status, len(got.body))
 		}
 	}

@@ -1,9 +1,8 @@
 // Package s3state implements storage.StateStore over an object store
-// (S3, GCS, Azure Blob, or any backend exposing the
-// storage.ArtifactStore interface). It is the data-plane storage for
-// Mode 2 ("S3-only shared") in DESIGN-shared-state.md: runners
-// serialize per-run state to runs/<runID>/state.ndjson with no
-// database and no controller.
+// (S3, or any backend exposing the storage.ArtifactStore interface). It
+// is the data-plane storage for the bucket-only shared shape: runners
+// serialize per-run state to runs/<runID>/state.ndjson with no database
+// and no controller.
 //
 // Cross-runner coordination (dispatch claims, debug pauses, approvals,
 // trigger enqueue, child-trigger lookup) is implemented in cas.go as

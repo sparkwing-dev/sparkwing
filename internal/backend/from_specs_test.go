@@ -27,8 +27,6 @@ func TestParseInlineSpec(t *testing.T) {
 		{"postgresql://u:p@h:5432/d", backends.Spec{Type: backends.TypePostgres, URL: "postgresql://u:p@h:5432/d"}},
 		{"s3://my-bucket/runs", backends.Spec{Type: backends.TypeS3, Bucket: "my-bucket", Prefix: "runs"}},
 		{"s3://only-bucket", backends.Spec{Type: backends.TypeS3, Bucket: "only-bucket"}},
-		{"gcs://b/p", backends.Spec{Type: backends.TypeGCS, Bucket: "b", Prefix: "p"}},
-		{"azure-blob://b/p", backends.Spec{Type: backends.TypeAzureBlob, Bucket: "b", Prefix: "p"}},
 		{"controller://prod", backends.Spec{Type: backends.TypeController, Controller: "prod"}},
 		{"fs:///var/log/sparkwing", backends.Spec{Type: backends.TypeFilesystem, Path: "/var/log/sparkwing"}},
 		{"stdout:", backends.Spec{Type: backends.TypeStdout}},
@@ -57,12 +55,14 @@ func TestParseInlineSpec_Empty(t *testing.T) {
 }
 
 func TestParseInlineSpec_Unknown(t *testing.T) {
-	_, err := backend.ParseInlineSpec("redis://localhost:6379")
-	if err == nil {
-		t.Fatal("expected error for unknown scheme")
-	}
-	if !strings.Contains(err.Error(), "unknown spec scheme") {
-		t.Errorf("want 'unknown spec scheme', got: %v", err)
+	for _, in := range []string{"redis://localhost:6379", "gcs://b/p", "mysql://u@h/d"} {
+		_, err := backend.ParseInlineSpec(in)
+		if err == nil {
+			t.Fatalf("%s: expected error for unknown scheme", in)
+		}
+		if !strings.Contains(err.Error(), "(expected sqlite, postgres, s3, controller, fs, stdout)") {
+			t.Errorf("%s: want the supported scheme list, got: %v", in, err)
+		}
 	}
 }
 

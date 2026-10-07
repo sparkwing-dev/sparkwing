@@ -39,34 +39,25 @@ func TestOpenLogStoreFromSpec_Filesystem(t *testing.T) {
 	}
 }
 
-func TestOpenArtifactStoreFromSpec_Unimplemented(t *testing.T) {
-	cases := []string{backends.TypeGCS, backends.TypeAzureBlob}
-	for _, ty := range cases {
-		t.Run(ty, func(t *testing.T) {
-			_, err := storeurl.OpenArtifactStoreFromSpec(context.Background(),
-				backends.Spec{Type: ty, Bucket: "x"}, nil)
-			if err == nil {
-				t.Fatal("expected error")
+func TestOpenFromSpec_UnrecognizedType(t *testing.T) {
+	ctx := context.Background()
+	for _, ty := range []string{"nope", "gcs", "azure-blob", "mysql"} {
+		spec := backends.Spec{Type: ty, Bucket: "x", URL: "x"}
+		_, cacheErr := storeurl.OpenArtifactStoreFromSpec(ctx, spec, nil)
+		_, logsErr := storeurl.OpenLogStoreFromSpec(ctx, spec, nil)
+		_, stateErr := storeurl.OpenStateStoreFromSpec(ctx, spec, nil)
+		for _, tc := range []struct {
+			err  error
+			want string
+		}{
+			{cacheErr, "(use filesystem, s3 or controller)"},
+			{logsErr, "(use filesystem, s3, stdout or controller)"},
+			{stateErr, "(use sqlite, postgres, s3 or controller)"},
+		} {
+			if tc.err == nil || !strings.Contains(tc.err.Error(), tc.want) {
+				t.Errorf("type %q: err = %v, want it to name %s", ty, tc.err, tc.want)
 			}
-			if !strings.Contains(err.Error(), "not implemented in this build") {
-				t.Errorf("want 'not implemented in this build', got: %v", err)
-			}
-		})
-	}
-}
-
-func TestOpenLogStoreFromSpec_Unimplemented(t *testing.T) {
-	for _, ty := range []string{backends.TypeGCS, backends.TypeAzureBlob} {
-		t.Run(ty, func(t *testing.T) {
-			_, err := storeurl.OpenLogStoreFromSpec(context.Background(),
-				backends.Spec{Type: ty, Bucket: "x"}, nil)
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if !strings.Contains(err.Error(), "not implemented in this build") {
-				t.Errorf("want 'not implemented in this build', got: %v", err)
-			}
-		})
+		}
 	}
 }
 
@@ -89,19 +80,6 @@ func TestOpenLogStoreFromSpec_StdoutRejectsExtraFields(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does not accept configuration fields") {
 		t.Errorf("want 'does not accept configuration fields', got: %v", err)
-	}
-}
-
-func TestOpenFromSpec_UnrecognizedType(t *testing.T) {
-	_, err := storeurl.OpenArtifactStoreFromSpec(context.Background(),
-		backends.Spec{Type: "nope"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "not recognized") {
-		t.Errorf("want 'not recognized', got: %v", err)
-	}
-	_, err = storeurl.OpenLogStoreFromSpec(context.Background(),
-		backends.Spec{Type: "nope"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "not recognized") {
-		t.Errorf("want 'not recognized', got: %v", err)
 	}
 }
 
@@ -141,21 +119,6 @@ func TestOpenStateStoreFromSpec_SQLiteMissingPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "path is required") {
 		t.Errorf("want 'path is required', got: %v", err)
-	}
-}
-
-func TestOpenStateStoreFromSpec_Unimplemented(t *testing.T) {
-	for _, ty := range []string{backends.TypeMySQL} {
-		t.Run(ty, func(t *testing.T) {
-			_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-				backends.Spec{Type: ty, URL: "x"}, nil)
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if !strings.Contains(err.Error(), "not implemented in this build") {
-				t.Errorf("want 'not implemented in this build', got: %v", err)
-			}
-		})
 	}
 }
 
@@ -225,8 +188,8 @@ func TestOpenStateStoreFromSpec_ControllerRequiresLookup(t *testing.T) {
 func TestOpenStateStoreFromSpec_UnrecognizedType(t *testing.T) {
 	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
 		backends.Spec{Type: backends.TypeFilesystem, Path: "/tmp/x"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "not recognized") {
-		t.Errorf("want 'not recognized', got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "(use sqlite, postgres, s3 or controller)") {
+		t.Errorf("want the supported state types, got: %v", err)
 	}
 }
 

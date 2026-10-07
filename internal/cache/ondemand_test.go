@@ -257,8 +257,8 @@ func TestKeepWarm_RefreshesAMirrorARequestAskedForAndStopsWhenItGoesIdle(t *test
 	setWindows(t, time.Minute, time.Hour)
 	fetches := countFetches(t, nil)
 
-	if w := fileRequest(t, repoURL); w.Code != http.StatusOK {
-		t.Fatalf("file request: status %d, body=%s", w.Code, w.Body.String())
+	if w := refsRequest(t); w.Code != http.StatusOK {
+		t.Fatalf("refs request: status %d, body=%s", w.Code, w.Body.String())
 	}
 	if got := fetches.Load(); got != 1 {
 		t.Fatalf("setup: the request itself fetched %d times, want 1", got)

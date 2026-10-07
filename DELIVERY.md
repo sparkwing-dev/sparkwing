@@ -14,6 +14,23 @@ launcher when testing isolated tool state.
 
 ## Checks
 
+### Cutting a release
+
+A release is a tag push. The `release` pipeline resolves the version, renames
+`## [Unreleased]` in CHANGELOG.md to the version, commits that from a clean
+tree, checks the section covers any schema or wire change since the previous
+tag, and pushes the branch and an annotated `vX.Y.Z` tag. Run it from the
+sparkwing checkout under a temporary home, which the pipeline requires so a
+newer embedded schema cannot migrate the operational runs store:
+
+```bash
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
+```
+
+`push-tag` declares the `destructive` and `prod` risk labels, so only the
+second command tags and pushes. The tag push starts the hosted release below.
+
 ### Release build and publication
 
 The hosted release builds the dashboard once and shares it with six target
@@ -549,7 +566,7 @@ file. Other syntax and workflow checks remain active.
   sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
   collapses it into one block and re-syncs the mirror.
 - **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `docs/changelog-style.md`. Mark breaking changes and supply migration
+  follows `CHANGELOG-STYLE.md`. Mark breaking changes and supply migration
   guidance before release. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.

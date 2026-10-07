@@ -165,7 +165,7 @@ is_covered() {
     internal/*)           return 1 ;;
     docs/*|examples/*)    return 1 ;;
     pkg/docs/mirror/*|pkg/docs/changelog.md) return 1 ;;
-    bench/*|build/*)      return 1 ;;
+    build/*)              return 1 ;;
     charts/*/values.yaml|charts/*/values.schema.json) return 0 ;;
     charts/*/templates/*|charts/*/charts/*.tgz) return 0 ;;
     charts/*/Chart.yaml|charts/*/Chart.lock) return 0 ;;
