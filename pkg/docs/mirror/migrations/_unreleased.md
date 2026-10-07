@@ -177,7 +177,8 @@ To move a repository:
 5. Remove `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN`
    from the controller's environment, and `controller.githubWebhookSecret` and
    `controller.githubStatusToken` from Helm values. The controller ignores
-   them, so leaving them changes nothing but hides what is configured.
+   the environment variables, and the `sparkwing-full` chart refuses to
+   render while either value still names a Secret.
 
 **Edge cases:**
 

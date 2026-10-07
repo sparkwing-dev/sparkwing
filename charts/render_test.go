@@ -1623,6 +1623,24 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 	}
 }
 
+func TestRemovedGitHubWebhookValuesFailTheRender(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
+	for _, value := range []string{"githubWebhookSecret", "githubStatusToken"} {
+		t.Run(value, func(t *testing.T) {
+			out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller."+value+".name=leftover")
+			for _, want := range []string{"controller." + value + " was removed", "Per-pipeline GitHub webhooks are removed"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("render error lacks %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+	// safety: --reuse-values carries the old defaults, whose names were empty, so they must still render.
+	helmTemplate(t, "sparkwing", "controller.githubWebhookSecret.name=", "controller.githubStatusToken.name=")
+}
+
 func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
