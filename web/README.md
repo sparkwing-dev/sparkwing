@@ -64,10 +64,9 @@ assets do not resolve a session.
 `sparkwing-web --require-login` refuses to start without `--controller URL` or
 a selected profile that declares `controller.url`. A state-only backend does
 not provide browser sessions by itself. Login cookies are `Secure`; use HTTPS,
-or set `SPARKWING_WEB_INSECURE_COOKIES=1` for a loopback-only local development
-process. On a non-loopback bind that variable also needs
-`--allow-insecure-cookies-remote`, which says the operator accepts session
-cookies travelling without TLS.
+or pass `--insecure-cookies` for a local development process. On a
+non-loopback bind the same flag says the operator accepts session cookies
+travelling without TLS.
 
 ## Learn more
 

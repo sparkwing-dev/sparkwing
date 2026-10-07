@@ -195,10 +195,6 @@ export async function startAuthenticatedDashboard(
       ["--fixture-home", join(temporary, "fixture-home"), "--web-out", output],
       {
         cwd: repositoryRoot,
-        env: {
-          ...process.env,
-          SPARKWING_WEB_INSECURE_COOKIES: "1",
-        },
       },
     );
     child = fixture;

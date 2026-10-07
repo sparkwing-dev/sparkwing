@@ -350,6 +350,26 @@ ran it.
   rather than leaving them beside the flags. `sparkwing-runner agent`, which
   reads `config.yaml`, is unchanged.
 
+## Leftover variable names are removed
+
+- **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper
+  ahead of `SPARKWING_GITCACHE_URL`. `sparkwing-web` turned insecure cookies on
+  from `SPARKWING_WEB_INSECURE_COOKIES=1` and accepted them on a non-loopback
+  bind only with `--allow-insecure-cookies-remote` as well, and it still
+  accepted the deprecated `--api-url`.
+- **After:** the clone helper reads `SPARKWING_GITCACHE_URL` alone.
+  `sparkwing-web --insecure-cookies` is the one switch, on any bind; the
+  variable and `--allow-insecure-cookies-remote` are gone, and `--api-url` is
+  an unknown flag.
+- **Operator steps:** rename `SPARKWING_GITCACHE` to `SPARKWING_GITCACHE_URL`.
+  Replace `SPARKWING_WEB_INSECURE_COOKIES=1`, with or without
+  `--allow-insecure-cookies-remote`, by `--insecure-cookies`. Drop `--api-url`.
+  The `sparkwing-full` chart renders the new flag itself.
+- **Edge cases:** `SPARKWING_TOKEN`, `SPARKWING_TRIGGER_CLAIM_GENERATION`,
+  `SPARKWING_TRIGGER_GENERATION` and `SPARKWING_ATTEMPT_ORDINAL` were stripped
+  from child environments although nothing set or read them; they no longer
+  appear in the code.
+
 ## Flag-mirror environment variables are no longer read
 
 Each of these variables only supplied a flag's default. Neither chart sets

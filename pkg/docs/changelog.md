@@ -104,6 +104,9 @@ unlock.
 
 ### Removed
 
+- **sdk + web (Breaking):** Remove the `SPARKWING_GITCACHE` alias, `SPARKWING_WEB_INSECURE_COOKIES` and `sparkwing-web --api-url`
+  The SDK's clone helper reads `SPARKWING_GITCACHE_URL` alone. `sparkwing-web --insecure-cookies` replaces the `SPARKWING_WEB_INSECURE_COOKIES` variable and `--allow-insecure-cookies-remote`, and the deprecated `--api-url` is an unknown flag. See [migration guide](docs/migrations/_unreleased.md#leftover-variable-names-are-removed).
+
 - **runner (Breaking):** `sparkwing-runner runner` and `launch` read their token from `--credentials-dir`, and the Job ceilings become runner flags
   The bearer is the file `agent-token` under `--credentials-dir`; `--token` and `SPARKWING_AGENT_TOKEN` are gone for both commands, and the token Sparkwing hands a Job or trigger child is unchanged. `runner` gains `--cpu-ceiling`, `--memory-ceiling`, `--deadline` and `--team-nodes`, the launcher's names, in place of `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING`, `SPARKWING_K8S_JOB_DEADLINE` and `SPARKWING_RUNNER_TEAM_NODES`, which `handle-trigger` no longer reads; it also ignores `SPARKWING_CONTROLLER_URL`, `SPARKWING_LOGS_URL`, `SPARKWING_GITCACHE_URL`, `SPARKWING_RUNNER_SA`, `SPARKWING_CACHE_URL`, `SPARKWING_DEPENDENCY_PROXY_URL`, `SPARKWING_IMAGE_PULL_POLICY`, `SPARKWING_WARM_MODULES`, `SPARKWING_LOCAL_RESERVE` and `SPARKWING_TEAM` in favour of their flags. The dashboard's connect command writes the token file before starting the runner, and the runner-bundle chart mounts the token and passes the ceilings; an external gitcache moves to `runner.gitcacheUrl`. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-reads-flags-and-a-credentials-directory).
 

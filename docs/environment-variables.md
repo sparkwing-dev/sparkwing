@@ -117,7 +117,6 @@ Kinds:
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_WEB_INSECURE_COOKIES` | [auth](auth.md) |
 
 ## Runtime
 
@@ -137,7 +136,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
 | `SPARKWING_CACHE_GRANT` | [gitcache](gitcache.md) |
 | `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_GITCACHE` | [gitcache](gitcache.md) |
 | `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
 | `SPARKWING_PIPELINE_REV` | [local-execution](local-execution.md) |
 | `SPARKWING_RUN_HANDLE_FILE` | [local-execution](local-execution.md) |

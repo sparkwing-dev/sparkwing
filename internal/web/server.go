@@ -454,7 +454,7 @@ func validateCookieExposure(opts HandlerOptions, addr string) error {
 	}
 	return fmt.Errorf(
 		"insecure cookies are enabled and the dashboard binds non-loopback address %q: "+
-			"serve HTTPS, bind a loopback address, or pass --allow-insecure-cookies-remote to accept "+
+			"serve HTTPS, bind a loopback address, or pass --insecure-cookies to accept "+
 			"session cookies that travel without TLS", addr)
 }
 

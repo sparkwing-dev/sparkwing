@@ -37,15 +37,15 @@ func run(args []string) error {
 	controllerURL := fs.String("controller", "", "controller URL to read from (legacy; prefer --state-spec=controller://<profile>)")
 	logsURL := fs.String("logs", "", "sparkwing-logs URL (legacy; prefer --logs-spec)")
 	token := fs.String("token", "", "controller bearer token (also SPARKWING_AGENT_TOKEN)")
-	_ = fs.String("api-url", "", "deprecated; the dashboard proxies the API on its own origin")
 	requireLogin := fs.Bool("require-login", false,
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
 	allowUnauthenticatedRemote := fs.Bool("allow-unauthenticated-remote", false,
 		"serve a token-backed dashboard without --require-login on a non-loopback address, handing the controller to every caller that reaches it")
 	allowOrigins := fs.String("allow-origin", "",
 		"comma-separated browser origins a loopback dashboard without --require-login also answers, such as a same-host proxy's public name")
-	allowInsecureCookiesRemote := fs.Bool("allow-insecure-cookies-remote", false,
-		"accept SPARKWING_WEB_INSECURE_COOKIES on a non-loopback address, for a dashboard published over plain HTTP through a proxy or ingress")
+	insecureCookies := fs.Bool("insecure-cookies", false,
+		"drop Secure from the session and CSRF cookies so a browser keeps a session over plain HTTP: a loopback development "+
+			"process, or a dashboard published over plain HTTP through a proxy or ingress, whose cookies then travel without TLS")
 	hsts := fs.Bool("hsts", false,
 		"assert that browsers reach this dashboard over TLS: send Strict-Transport-Security and require an https origin on unsafe requests. "+
 			"Unneeded when this process serves TLS itself or a proxy reaching --trusted-proxy-addr forwards X-Forwarded-Proto")
@@ -58,12 +58,7 @@ func run(args []string) error {
 	logsSpecFlag := fs.String("logs-spec", "", "inline logs backend spec, e.g. s3://bucket/logs or stdout:")
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")
 
-	if err := fs.MarkDeprecated("api-url", "the dashboard proxies the API on its own origin"); err != nil {
-		return err
-	}
-
 	_ = fs.Parse(args)
-	insecureCookies := insecureCookiesRequested(os.Getenv("SPARKWING_WEB_INSECURE_COOKIES"))
 
 	paths, err := swpaths.DefaultPaths()
 	if err != nil {
@@ -106,8 +101,8 @@ func run(args []string) error {
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 			AllowOrigins:               splitOrigins(*allowOrigins),
-			InsecureCookies:            insecureCookies,
-			AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
+			InsecureCookies:            *insecureCookies,
+			AllowInsecureCookiesRemote: *insecureCookies,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -142,8 +137,8 @@ func run(args []string) error {
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 			AllowOrigins:               splitOrigins(*allowOrigins),
-			InsecureCookies:            insecureCookies,
-			AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
+			InsecureCookies:            *insecureCookies,
+			AllowInsecureCookiesRemote: *insecureCookies,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -158,8 +153,8 @@ func run(args []string) error {
 		TrustedProxyAddr: *trustedProxyAddr,
 		HSTS:             *hsts,
 
-		InsecureCookies:            insecureCookies,
-		AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
+		InsecureCookies:            *insecureCookies,
+		AllowInsecureCookiesRemote: *insecureCookies,
 	})
 }
 
@@ -171,10 +166,6 @@ func splitOrigins(raw string) []string {
 		}
 	}
 	return out
-}
-
-func insecureCookiesRequested(v string) bool {
-	return v == "1" || strings.EqualFold(v, "true")
 }
 
 func validateLoginBackend(requireLogin bool, controllerURL string) error {

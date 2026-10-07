@@ -522,13 +522,13 @@ every one; these are the ones a deployment usually sets.
 
 A malformed value stops the cache at startup with an error naming the flag.
 The controller reads the same token as `SPARKWING_CACHE_TOKEN`; from its own
-credentials directory it will read the same `cache-token` file name. On the client side,
-`SPARKWING_GITCACHE` forces a specific gitcache base URL for git clones:
-set it to a reachable cache server and sparkwing routes clones through
-that server instead of probing for a local one. `SPARKWING_GITCACHE_URL`,
-the variable the runner chart stamps on every runner pod, is the fallback
-when `SPARKWING_GITCACHE` is empty, so a chart-deployed runner already
-names its cache. With neither set, sparkwing auto-detects a cache on
+credentials directory it will read the same `cache-token` file name.
+
+On the client side, `SPARKWING_GITCACHE_URL` names a specific gitcache base
+URL for git clones: set it to a reachable cache server and sparkwing routes
+clones through that server instead of probing for a local one. The runner
+chart stamps it on every runner pod, so a chart-deployed runner already names
+its cache. Unset, sparkwing auto-detects a cache on
 `localhost:18090` and falls back to a direct clone when none answers.
 
 A clone through a named cache carries the run's `SPARKWING_CACHE_GRANT`, or

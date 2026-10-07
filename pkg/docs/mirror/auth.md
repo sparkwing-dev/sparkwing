@@ -1273,14 +1273,12 @@ session on every protected request and clears invalid cookies.
 Login cookies are `Secure` by default, so a login-required dashboard must be
 served over HTTPS. A plain `http://localhost` port-forward can reach health
 endpoints but cannot retain those cookies. For a loopback-only development
-process, `SPARKWING_WEB_INSECURE_COOKIES=1` permits HTTP cookies. The dashboard
-reads that variable once at startup and refuses a non-loopback bind with it
-set. That check reads the bind address only: a proxy or sidecar in front of a
-loopback bind still carries the cookie unencrypted to everything it publishes.
-An operator who publishes the dashboard over plain HTTP through a proxy or
-ingress adds `--allow-insecure-cookies-remote` to accept cookies that travel
-without TLS; the chart renders that flag with the variable whenever
-`ingress.allowInsecure` opts a TLS-less ingress in.
+process, `--insecure-cookies` permits HTTP cookies. The same flag is how an
+operator who publishes the dashboard over plain HTTP through a proxy or
+ingress accepts session cookies that travel without TLS; the chart renders it
+whenever `ingress.allowInsecure` opts a TLS-less ingress in. A proxy or sidecar
+in front of a loopback bind carries the cookie unencrypted to everything it
+publishes, so pass the flag only where that is acceptable.
 
 ## First-visit signup
 

@@ -39,7 +39,6 @@ func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
 		"SPARKWING_NODE_CLAIM_GENERATION=17",
 		"SPARKWING_NODE_CLAIM_MEMBERSHIP=membership-secret",
 		"SPARKWING_NODE_CLAIM_RESERVATION=reservation-secret",
-		"SPARKWING_TRIGGER_CLAIM_GENERATION=9",
 	}
 	got, err := remoteExecutionChildEnvironment(append(private,
 		"PATH=/safe/bin", "AWS_REGION=us-west-2", submissionEnvironmentAllowKey+"=AWS_REGION"))
