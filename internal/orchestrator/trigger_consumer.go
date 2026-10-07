@@ -687,7 +687,7 @@ func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlig
 }
 
 func claimOwner(ctx context.Context, st *store.Store, id string) (*store.Tenant, error) {
-	team, err := st.AsOperator().RunTeam(ctx, id)
+	team, err := st.AsOperator().TriggerTeam(ctx, id)
 	if err != nil {
 		return nil, err
 	}

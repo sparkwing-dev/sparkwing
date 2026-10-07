@@ -1517,7 +1517,7 @@ const runHeartbeatStaleAfter = 3 * time.Minute
 func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 	var tenant *store.Tenant
 	var run *store.Run
-	team, err := s.store.AsOperator().RunTeam(ctx, id)
+	team, err := s.store.AsOperator().TriggerTeam(ctx, id)
 	if err == nil {
 		tenant, err = s.tenantForTeam(ctx, team)
 	}

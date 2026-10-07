@@ -1309,7 +1309,7 @@ func scanRefWorktrees(ctx context.Context, st *store.Store, homeRoot *os.Root) (
 // safety: a worktree is reclaimed only once its trigger, read in whichever
 // team owns it, has finished; a default-team read misses every other team's.
 func triggerInItsTeam(ctx context.Context, st *store.Store, id string) (*store.Trigger, error) {
-	team, err := st.AsOperator().RunTeam(ctx, id)
+	team, err := st.AsOperator().TriggerTeam(ctx, id)
 	if err != nil {
 		return nil, err
 	}

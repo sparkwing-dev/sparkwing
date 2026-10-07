@@ -1550,6 +1550,7 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
+func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
 func (o *Operator) UsageMetrics(ctx context.Context, now time.Time, weeks int, exclude []Team) (*UsageMetrics, error)
 func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)

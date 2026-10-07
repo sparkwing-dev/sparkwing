@@ -63,3 +63,49 @@ func TestDoctorReadsRunsAndTriggersOfEveryTeam(t *testing.T) {
 		t.Fatalf("stale worktrees = %v, want acme's live trigger kept", stale)
 	}
 }
+
+// A worktree belongs to its trigger; another team's run under the same id
+// does not make a live trigger's worktree reclaimable.
+func TestDoctorKeepsALiveTriggersWorktreeWhenAnotherTeamsRunSharesItsID(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	acme, err := st.ForTeam(ctx, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := st.CreateRun(ctx, store.Run{ID: "shared", Pipeline: "deploy", Status: "running", CreatedAt: now, StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "shared", Pipeline: "deploy", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	dirs := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dirs, "shared"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settled := now.Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(dirs, "shared"), settled, settled); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dirs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	stale, err := scanUnreclaimedRefWorktrees(ctx, st, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 0 {
+		t.Fatalf("stale worktrees = %v, want acme's live trigger kept", stale)
+	}
+}

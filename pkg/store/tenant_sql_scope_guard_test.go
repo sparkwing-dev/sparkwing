@@ -277,6 +277,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"selected, in the order the claim path names, and read nothing back",
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
+	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
+		"through that team's handle; an answer scoped to the asker is no answer",
 	"(*Store).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
 		"the deployment's alarm; the route serves it to an admin only",
 	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
