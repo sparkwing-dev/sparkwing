@@ -212,7 +212,9 @@ func isKilledChildRegistry(cfg *Config) bool {
 
 func waitForStagingFile(t *testing.T, dir string) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	// perf: the child builds and marshals 100k entries under -race before its
+	// first staging file, close to 10s alone and more beside parallel packages.
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		matches, err := filepath.Glob(filepath.Join(dir, ".config-*.yaml"))
 		if err != nil {
