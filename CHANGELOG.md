@@ -55,6 +55,9 @@ unlock.
 
 ### Fixed
 
+- **cache:** The cache keeps an operator's `GIT_SSH_COMMAND` and its own offers only the staged key
+  It used to replace the environment's `GIT_SSH_COMMAND` with one that dropped `IdentitiesOnly=yes`, so ssh could also offer agent or default keys to the mirror's host.
+
 - **orchestrator + cli:** A run against a controller that announces no logs service refuses to start instead of posting its logs to the controller
   `RemoteBackends` used to fall back to the controller's own URL, which serves no `/api/v1/logs` route. The error names the controller and asks for the profile's `logs.url`, `SPARKWING_LOGS_URL` or the controller's `--logs-url`. `sparkwing pipeline trigger` follows logs from the profile's logs URL or the announced one instead of the controller URL, and the local dashboard announces itself as the logs service.
 

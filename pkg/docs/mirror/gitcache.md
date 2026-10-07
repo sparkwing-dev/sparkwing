@@ -499,7 +499,10 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 - **Image**: `sparkwing-cache`
 - **Port**: 8090 (service port 80)
 - **Storage**: PVC at `/data`
-- **SSH**: Optional, mounted at `/etc/ssh-key` from `ssh-key` secret
+- **SSH**: Optional, mounted at `/etc/ssh-key` from `ssh-key` secret. The
+  cache stages the key under `$HOME/.ssh` and sets `GIT_SSH_COMMAND` to offer
+  only that key (`IdentitiesOnly=yes`) against the pinned `known_hosts`; a
+  `GIT_SSH_COMMAND` already in the environment is kept as the operator set it
 - **Ingress**: your dashboard host's `cache-` subdomain
 
 ### Environment Variables

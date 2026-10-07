@@ -153,7 +153,11 @@ func setupSSH() error {
 		}
 	}
 
-	if err := os.Setenv("GIT_SSH_COMMAND", "ssh -i "+filepath.Join(sshDir, "id_ed25519")+" -o UserKnownHostsFile="+filepath.Join(sshDir, "known_hosts")+" -o StrictHostKeyChecking=yes"); err != nil {
+	if os.Getenv("GIT_SSH_COMMAND") != "" {
+		log.Printf("SSH key staged from %s; GIT_SSH_COMMAND from the environment chooses the key", sshKeyDir)
+		return nil
+	}
+	if err := os.Setenv("GIT_SSH_COMMAND", "ssh -i "+filepath.Join(sshDir, "id_ed25519")+" -o UserKnownHostsFile="+filepath.Join(sshDir, "known_hosts")+" -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"); err != nil {
 		return fmt.Errorf("cache: stage SSH key: set GIT_SSH_COMMAND: %w", err)
 	}
 	log.Printf("SSH key configured from %s", sshKeyDir)
