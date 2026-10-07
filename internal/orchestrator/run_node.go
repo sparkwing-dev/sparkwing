@@ -147,7 +147,7 @@ func RunNodeOnce(
 			return runner.Result{}, fmt.Errorf("artifact store: %w", err)
 		}
 	}
-	backends := RemoteBackends(ctx, stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
 	if cfg.claim != nil {
 		backends.State = cfg.claim
 	}

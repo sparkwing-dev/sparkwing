@@ -342,12 +342,11 @@ sparkwing-controller --logs-url https://sparkwing-logs.example.dev
 ```
 
 The controller announces that URL on `GET /api/v1/services`, and a
-runner with no `logs:` surface of its own posts there. Without the
-announcement a runner falls back to the controller's own URL, which is
-correct only when one process serves both -- the local dashboard mounts
-the controller and the logs service on a single mux. When it is wrong,
-every append gets a 404 and the run fails naming the missing service,
-rather than losing the lines silently.
+runner with no `logs:` surface of its own posts there. The local
+dashboard, which mounts the controller and the logs service on one mux,
+announces its own URL. Without an announcement a run refuses to start,
+and `sparkwing pipeline trigger` and `sparkwing runs grep` refuse to read
+logs, with an error naming the controller and the missing logs service.
 
 #### Watching a run live without the logs service
 

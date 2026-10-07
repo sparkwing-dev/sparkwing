@@ -200,6 +200,9 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	}
 
 	baseURL := "http://" + opts.Addr
+	if ctrl != nil && logsSrv != nil {
+		ctrl.WithLogsURL(baseURL)
+	}
 	if err := writeDevEnv(paths.Root, baseURL); err != nil {
 		return fmt.Errorf("write dev.env: %w", err)
 	}

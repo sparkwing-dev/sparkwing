@@ -209,7 +209,7 @@ func TestStartRunLoopback_MirroredRunTeesChildWritesToBothStores(t *testing.T) {
 
 	ctx := context.Background()
 	const runID = "run-mirrored"
-	backends := RemoteBackends(context.Background(), canonical, nil, nil, nil, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(canonical, localLogs{paths: newInternalPaths(t)}, nil, nil, store.DefaultConcurrencyLease)
 	backends.State = newMirrorStateBackend(backends.State, mirror, quietTestLogger())
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "mirrored", Status: "running", StartedAt: time.Now().UTC(),

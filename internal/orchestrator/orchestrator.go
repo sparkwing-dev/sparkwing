@@ -831,8 +831,14 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 			var logsBackend LogBackend
 			if opts.LogStore != nil {
 				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
+			} else {
+				logsURL, err := discoverLogsURL(ctx, s.BaseURL(), s.Token())
+				if err != nil {
+					return nil, err
+				}
+				logsBackend = NewHTTPLogsWithToken(logsURL, nil, s.Token(), nil)
 			}
-			backends = RemoteBackends(ctx, s, logsBackend, opts.ArtifactStore, nil, 0)
+			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
 		default:
 			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 		}

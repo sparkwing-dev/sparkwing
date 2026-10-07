@@ -67,7 +67,7 @@ func TestTriggerBrokerCarriesAClaimedRunWithoutTheRunnerToken(t *testing.T) {
 	child := client.NewWithToken(broker.URL(), httpClient, broker.Capability())
 	orchestrator.ExecuteClaimedTrigger(context.Background(),
 		orchestrator.WorkerOptions{Logger: rig.logger, ControllerURL: broker.URL(), Token: broker.Capability()},
-		orchestrator.RemoteBackends(context.Background(), child, nil, nil, httpClient, store.DefaultConcurrencyLease), child, trig)
+		orchestrator.RemoteBackends(child, testLogBackend(t), nil, httpClient, store.DefaultConcurrencyLease), child, trig)
 
 	if run := mustRun(t, rig.st, trig.ID); run.Status != "success" {
 		t.Fatalf("brokered run status = %q, want success; log:\n%s", run.Status, rig.logs.String())

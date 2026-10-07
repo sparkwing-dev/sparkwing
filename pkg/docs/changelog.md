@@ -55,6 +55,9 @@ unlock.
 
 ### Fixed
 
+- **orchestrator + cli:** A run against a controller that announces no logs service refuses to start instead of posting its logs to the controller
+  `RemoteBackends` used to fall back to the controller's own URL, which serves no `/api/v1/logs` route. The error names the controller and asks for the profile's `logs.url`, `SPARKWING_LOGS_URL` or the controller's `--logs-url`. `sparkwing pipeline trigger` follows logs from the profile's logs URL or the announced one instead of the controller URL, and the local dashboard announces itself as the logs service.
+
 - **controller + logs + cache + web + runner:** A service whose Prometheus exporter cannot be built refuses to start with the cause
   It used to log a warning and hand the meter provider a nil reader.
 

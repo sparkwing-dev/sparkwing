@@ -199,7 +199,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if opts.LogsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, nil, opts.Token, opts.Logger)
 	}
-	backends := RemoteBackends(ctx, stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)
 	if err != nil {

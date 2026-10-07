@@ -130,7 +130,7 @@ func newTriggerWorkerRig(t *testing.T) *triggerWorkerRig {
 	return &triggerWorkerRig{
 		st:      st,
 		client:  c,
-		backend: orchestrator.RemoteBackends(context.Background(), c, nil, nil, httpClient, store.DefaultConcurrencyLease),
+		backend: orchestrator.RemoteBackends(c, testLogBackend(t), nil, httpClient, store.DefaultConcurrencyLease),
 		logs:    buf,
 		logger:  slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}

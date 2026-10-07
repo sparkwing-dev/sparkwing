@@ -133,7 +133,7 @@ func runPipelineTrigger(args []string) error {
 		if ferr != nil {
 			return ferr
 		}
-		followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(),
+		followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ExplicitLogsURL(), prof.ControllerToken(),
 			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
 		return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 	}
