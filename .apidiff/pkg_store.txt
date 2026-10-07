@@ -1357,7 +1357,7 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (sample MetricSample) Marker() bool
-func (m MetricSample) OneShot() bool
+func (sample MetricSample) OneShot() bool
 func (sample MetricSample) ValidateResourceValues() error
 const MetricUnknown MetricKind = ""
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
