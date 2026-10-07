@@ -20,7 +20,7 @@ before(async () => {
       return;
     }
     if (req.url === "/blob/tampered") {
-      res.writeHead(200).end(JSON.stringify({ digest: "evil" }));
+      res.writeHead(200).end(JSON.stringify({ digest: "sha-2" }));
       return;
     }
     if (req.headers.authorization !== "Bearer node-token") {
@@ -33,7 +33,13 @@ before(async () => {
       case "/node/v1/nodes/build/output":
         return json(200, { url: "/blob/build", sha256: outputSum, size: Buffer.byteLength(outputBytes) });
       case "/node/v1/nodes/tampered/output":
-        return json(200, { url: "/blob/tampered", sha256: outputSum });
+        return json(200, { url: "/blob/tampered", sha256: outputSum, size: Buffer.byteLength(outputBytes) });
+      case "/node/v1/nodes/undigested/output":
+        return json(200, { url: "/blob/build", size: Buffer.byteLength(outputBytes) });
+      case "/node/v1/nodes/unsized/output":
+        return json(200, { url: "/blob/build", sha256: outputSum });
+      case "/node/v1/nodes/empty/output":
+        return json(200, {});
       case "/node/v1/nodes/running/output":
         return json(409, { error: "node is not done" });
       default:
@@ -58,6 +64,19 @@ test("secret and output call the node routes with the bearer and protocol header
 test("an output whose bytes do not match the grant's digest is refused", async () => {
   const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
   await assert.rejects(routes.output("tampered"), /sha256 .* the grant says/);
+});
+
+test("a grant that names an object without its digest or size is refused before the fetch", async () => {
+  const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
+  const fetchesBefore = seen.filter((s) => s.url.startsWith("/blob/")).length;
+  await assert.rejects(routes.output("undigested"), /without its size and sha256/);
+  await assert.rejects(routes.output("unsized"), /without its size and sha256/);
+  assert.equal(seen.filter((s) => s.url.startsWith("/blob/")).length, fetchesBefore);
+});
+
+test("a node that recorded no output reads as null", async () => {
+  const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
+  assert.equal(await routes.output("empty"), null);
 });
 
 test("a refused, missing or unfinished route fails loud with its status", async () => {

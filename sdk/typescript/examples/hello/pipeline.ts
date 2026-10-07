@@ -16,6 +16,7 @@ definePipeline({
     plan
       .job("publish", async (ctx) => {
         const out = await ctx.output<{ digest: string }>("build");
+        if (!out) throw new Error("build recorded no output");
         ctx.log.info(`published ${out.digest} to ${run.args["target"] ?? "staging"}`);
       })
       .needs(build)

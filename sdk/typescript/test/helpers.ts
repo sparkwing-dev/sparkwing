@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { serve, type ServeOptions } from "../src/runner.ts";
 import type { NodeRoutes } from "../src/routes.ts";
@@ -37,4 +38,9 @@ export async function converse(requests: unknown[], routes?: NodeRoutes, env: Se
   input.end();
   await done;
   return out;
+}
+
+/** A signed-output grant for the given bytes, as the node host answers it. */
+export function grantFor(bytes: string): { url: string; sha256: string; size: number } {
+  return { url: "/blob", sha256: createHash("sha256").update(bytes).digest("hex"), size: Buffer.byteLength(bytes) };
 }

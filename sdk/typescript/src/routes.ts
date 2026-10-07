@@ -57,24 +57,26 @@ export class NodeRoutes {
   }
 
   /**
-   * Returns the JSON output another node of this run produced. The route
-   * answers with a signed grant; the bytes come from the grant's URL and must
-   * match its digest.
+   * Returns the JSON output another node of this run produced, or null when
+   * it recorded none. The route answers with a signed grant; the bytes come
+   * from the grant's URL and must match its size and sha256, so a grant that
+   * names an object without both is refused.
    */
-  async output<T = unknown>(nodeId: string): Promise<T> {
+  async output<T = unknown>(nodeId: string): Promise<T | null> {
     const route = `/node/v1/nodes/${encodeURIComponent(nodeId)}/output`;
     const grant = (await this.#route("GET", route)) as OutputGrant | null;
-    if (!grant?.url) throw new Error(`output of ${nodeId}: the grant names no URL`);
+    if (!grant?.url) return null;
+    if (typeof grant.sha256 !== "string" || grant.sha256 === "" || typeof grant.size !== "number") {
+      throw new Error(`output of ${nodeId}: the grant names an object without its size and sha256`);
+    }
     const res = await this.#fetch(new URL(grant.url, this.#base + "/"));
     const bytes = Buffer.from(await res.arrayBuffer());
     if (!res.ok) throw new RouteError(`GET output of ${nodeId}`, res.status, bytes.toString("utf8").slice(0, 512));
-    if (grant.size !== undefined && bytes.length !== grant.size) {
+    if (bytes.length !== grant.size) {
       throw new Error(`output of ${nodeId}: ${bytes.length} bytes, the grant says ${grant.size}`);
     }
-    if (grant.sha256 !== undefined) {
-      const got = createHash("sha256").update(bytes).digest("hex");
-      if (got !== grant.sha256) throw new Error(`output of ${nodeId}: sha256 ${got}, the grant says ${grant.sha256}`);
-    }
+    const got = createHash("sha256").update(bytes).digest("hex");
+    if (got !== grant.sha256) throw new Error(`output of ${nodeId}: sha256 ${got}, the grant says ${grant.sha256}`);
     return JSON.parse(bytes.toString("utf8")) as T;
   }
 

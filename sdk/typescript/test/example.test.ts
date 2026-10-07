@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { grantFor } from "./helpers.ts";
 
 const example = fileURLToPath(new URL("../examples/hello/pipeline.ts", import.meta.url));
 
@@ -30,12 +31,13 @@ test("the example prints its describe document", async () => {
 
 test("one example process per node attempt plans, runs its node and exits at end of stdin", async () => {
   const server = createServer((req, res) => {
+    const blob = JSON.stringify({ digest: "sha-hello" });
     if (req.url === "/node/v1/nodes/build/output" && req.headers.authorization === "Bearer tok") {
-      res.writeHead(200).end(JSON.stringify({ url: "/blob/build" }));
+      res.writeHead(200).end(JSON.stringify({ ...grantFor(blob), url: "/blob/build" }));
       return;
     }
     if (req.url === "/blob/build") {
-      res.writeHead(200).end(JSON.stringify({ digest: "sha-hello" }));
+      res.writeHead(200).end(blob);
       return;
     }
     res.writeHead(404).end();

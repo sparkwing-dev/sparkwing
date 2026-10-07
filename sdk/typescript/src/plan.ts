@@ -20,7 +20,7 @@ export interface NodeContext {
   dryRun: boolean;
   log: LogWriter;
   secret(name: string): Promise<string>;
-  output<T = unknown>(nodeId: string): Promise<T>;
+  output<T = unknown>(nodeId: string): Promise<T | null>;
 }
 
 export type Body = (ctx: NodeContext) => unknown;

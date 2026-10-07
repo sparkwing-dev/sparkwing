@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { definePipeline, resetPipelines } from "../src/plan.ts";
 import { NodeRoutes } from "../src/routes.ts";
-import { converse } from "./helpers.ts";
+import { converse, grantFor } from "./helpers.ts";
 
 const plan = { id: "p", op: "plan", pipeline: "ship", args: { env: "prod" }, run: { run_id: "run-1", pipeline: "ship", git_sha: "abc" } };
 let planCalls = 0;
@@ -29,7 +29,7 @@ beforeEach(() => {
       });
       deploy.step("apply", async (node) => {
         const out = await node.output<{ digest: string }>("build");
-        node.log.info(`applying ${out.digest}`);
+        node.log.info(`applying ${out?.digest}`);
       });
     },
   });
@@ -60,10 +60,11 @@ test("a throwing body is a failed outcome, not a failed reply", async () => {
 });
 
 test("run_step runs one step and reads a dependency's output through the routes", async () => {
+  const blob = JSON.stringify({ digest: "sha-1" });
   const fake = (async (input: string | URL | Request) => {
     const url = String(input);
-    if (url === "http://engine/node/v1/nodes/build/output") return new Response(JSON.stringify({ url: "/blob" }));
-    if (url === "http://engine/blob") return new Response(JSON.stringify({ digest: "sha-1" }));
+    if (url === "http://engine/node/v1/nodes/build/output") return new Response(JSON.stringify(grantFor(blob)));
+    if (url === "http://engine/blob") return new Response(blob);
     return new Response("", { status: 404 });
   }) as typeof fetch;
   const routes = new NodeRoutes({ baseUrl: "http://engine", token: "t", fetch: fake });
