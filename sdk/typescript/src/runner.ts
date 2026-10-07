@@ -70,7 +70,7 @@ class Session {
       const result = await this.#handle(req);
       writeReply(this.#opts.output, { reply: req.id, ok: true, result: result ?? null });
     } catch (err) {
-      writeReply(this.#opts.output, { reply: req.id, ok: false, error: { message: (err as Error).message } });
+      writeReply(this.#opts.output, { reply: req.id, ok: false, error: { message: messageOf(err) } });
     }
   }
 
@@ -141,7 +141,7 @@ class Session {
       const output = await body(ctx);
       return output === undefined ? { outcome: "success" } : { outcome: "success", output };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = messageOf(err);
       ctx.log.error(message);
       return { outcome: "failed", error: message };
     }
@@ -168,6 +168,10 @@ class Session {
     this.#routes ??= new NodeRoutes(routeConfigFromEnv(this.#opts.env ?? process.env));
     return this.#routes;
   }
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function str(req: Request, key: string): string {

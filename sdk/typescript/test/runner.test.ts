@@ -95,6 +95,28 @@ test("an eval is answered while a node body is still running; the body waits on 
   assert.deepEqual(order, ["p", "e", "n"]);
 });
 
+test("a closure or plan that throws a non-Error still gets a failed reply with its text", async () => {
+  definePipeline({
+    name: "odd",
+    plan(p, run) {
+      if (run.args["mode"] === "null") throw null;
+      p.job("j", () => undefined).skipIf(() => {
+        throw "plain string";
+      });
+    },
+  });
+  const run = { run_id: "r", pipeline: "odd" };
+  const out = await converse([
+    { id: "p", op: "plan", pipeline: "odd", run },
+    { id: "e", op: "eval", closure: "j/skip_if/0" },
+    { id: "n", op: "plan", pipeline: "odd", args: { mode: "null" }, run },
+    { id: "d", op: "describe" },
+  ]);
+  assert.deepEqual(out.reply("e"), { reply: "e", ok: false, error: { message: "plain string" } });
+  assert.deepEqual(out.reply("n"), { reply: "n", ok: false, error: { message: "null" } });
+  assert.equal(out.reply("d")?.["ok"], true, "the loop keeps answering after a thrown null");
+});
+
 test("bad requests get a failed reply, and a line with no id becomes a log record", async () => {
   const out = await converse([
     "not json",
