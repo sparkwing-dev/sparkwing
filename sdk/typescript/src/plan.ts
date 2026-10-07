@@ -3,22 +3,24 @@
 // it. Bodies and closures stay in this process and run when the engine asks.
 
 import type { LogWriter } from "./log.ts";
-import type { PlanDoc, PlanNode } from "./describe.ts";
+import { PROTOCOL_VERSION, type PlanDoc, type PlanNode } from "./describe.ts";
 
 export interface RunContext {
   runId: string;
   pipeline: string;
   args: Record<string, string>;
+  git: Record<string, unknown>;
 }
 
 export interface NodeContext {
   runId: string;
   nodeId: string;
+  attempt: number;
   args: Record<string, string>;
+  dryRun: boolean;
   log: LogWriter;
   secret(name: string): Promise<string>;
   output<T = unknown>(nodeId: string): Promise<T>;
-  signal: AbortSignal;
 }
 
 export type Body = (ctx: NodeContext) => unknown;
@@ -59,8 +61,8 @@ export class Job {
   readonly id: string;
   readonly body: Body | undefined;
   readonly steps: Step[] = [];
-  skipIfFn: Predicate | undefined;
-  #needs: string[] = [];
+  readonly skipIfs: Predicate[] = [];
+  #deps: string[] = [];
   #retry: { attempts: number; backoffMs?: number } | undefined;
   #timeoutMs: number | undefined;
 
@@ -72,20 +74,23 @@ export class Job {
 
   /** Runs this job only after every named job succeeds. */
   needs(...jobs: Array<Job | string>): this {
-    for (const j of jobs) this.#needs.push(typeof j === "string" ? j : j.id);
+    for (const j of jobs) this.#deps.push(typeof j === "string" ? j : j.id);
     return this;
   }
 
   /** Lets the engine start the job again, up to attempts more times, after a failure. */
   retry(attempts: number, opts: RetryOptions = {}): this {
     if (!Number.isInteger(attempts) || attempts < 0) throw new Error(`job ${this.id}: retry attempts must be a non-negative integer`);
+    if (opts.backoffMs !== undefined && (!Number.isInteger(opts.backoffMs) || opts.backoffMs < 0)) {
+      throw new Error(`job ${this.id}: retry backoff must be a non-negative integer of milliseconds`);
+    }
     this.#retry = opts.backoffMs === undefined ? { attempts } : { attempts, backoffMs: opts.backoffMs };
     return this;
   }
 
   /** Bounds one attempt's wall time; the engine kills the node process when it passes. */
   timeout(ms: number): this {
-    if (!Number.isFinite(ms) || ms <= 0) throw new Error(`job ${this.id}: timeout must be a positive number of milliseconds`);
+    if (!Number.isInteger(ms) || ms <= 0) throw new Error(`job ${this.id}: timeout must be a positive integer of milliseconds`);
     this.#timeoutMs = ms;
     return this;
   }
@@ -99,28 +104,34 @@ export class Job {
     return s;
   }
 
-  /** Registers a closure the engine calls by id before starting the job. */
+  /** Adds a predicate the engine evaluates by closure id before starting the job; true skips it. */
   skipIf(fn: Predicate): this {
-    this.skipIfFn = fn;
+    this.skipIfs.push(fn);
     return this;
   }
 
+  skipIfIds(): string[] {
+    return this.skipIfs.map((_, i) => `${this.id}/skip_if/${i}`);
+  }
+
   toNode(): PlanNode {
-    const node: PlanNode = { id: this.id, needs: [...this.#needs] };
+    const node: PlanNode = { id: this.id, deps: [...this.#deps] };
+    const m: NonNullable<PlanNode["modifiers"]> = {};
     if (this.#retry) {
-      node.retry = this.#retry.backoffMs === undefined
-        ? { attempts: this.#retry.attempts }
-        : { attempts: this.#retry.attempts, backoff_ms: this.#retry.backoffMs };
+      m.retry = this.#retry.attempts;
+      if (this.#retry.backoffMs !== undefined) m.retry_backoff_ms = this.#retry.backoffMs;
     }
-    if (this.#timeoutMs !== undefined) node.timeout_ms = this.#timeoutMs;
-    if (this.steps.length > 0) node.steps = this.steps.map((s) => ({ id: s.id, needs: [...s.needIds] }));
-    if (this.skipIfFn) node.closures = { skip_if: closureId(this.id, "skip_if") };
+    if (this.#timeoutMs !== undefined) m.timeout_ms = this.#timeoutMs;
+    if (this.skipIfs.length > 0) m.has_skip_if = true;
+    if (Object.keys(m).length > 0) node.modifiers = m;
+    if (this.steps.length > 0) {
+      node.work = {
+        steps: this.steps.map((s) => (s.needIds.length > 0 ? { id: s.id, needs: [...s.needIds] } : { id: s.id })),
+      };
+    }
+    if (this.skipIfs.length > 0) node.closures = { skip_if: this.skipIfIds() };
     return node;
   }
-}
-
-export function closureId(jobId: string, kind: string): string {
-  return `${jobId}/${kind}`;
 }
 
 export class Plan {
@@ -139,21 +150,21 @@ export class Plan {
   }
 
   /** Validates the graph and returns the plan document the engine schedules. */
-  toDoc(pipeline: string): PlanDoc {
+  toDoc(pipeline: string, runId: string): PlanDoc {
     const nodes = this.jobs.map((j) => j.toNode());
     for (const j of this.jobs) {
       if (!j.body && j.steps.length === 0) throw new Error(`job ${j.id} has neither a body nor steps`);
-      assertAcyclic(`job ${j.id} steps`, j.steps.map((s) => ({ id: s.id, needs: [...s.needIds] })));
+      assertAcyclic(`job ${j.id} steps`, j.steps.map((s) => ({ id: s.id, deps: [...s.needIds] })));
     }
     assertAcyclic("plan", nodes);
-    return { pipeline, nodes };
+    return { protocol: PROTOCOL_VERSION, pipeline, run_id: runId, nodes };
   }
 }
 
-function assertAcyclic(what: string, nodes: Array<{ id: string; needs: string[] }>): void {
+function assertAcyclic(what: string, nodes: Array<{ id: string; deps: string[] }>): void {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   for (const n of nodes) {
-    for (const d of n.needs) {
+    for (const d of n.deps) {
       if (!byId.has(d)) throw new Error(`${what}: ${n.id} needs ${d}, which does not exist`);
     }
   }
@@ -162,7 +173,7 @@ function assertAcyclic(what: string, nodes: Array<{ id: string; needs: string[] 
     if (state.get(id) === "done") return;
     if (state.get(id) === "visiting") throw new Error(`${what}: cycle ${[...path, id].join(" -> ")}`);
     state.set(id, "visiting");
-    for (const d of byId.get(id)?.needs ?? []) visit(d, [...path, id]);
+    for (const d of byId.get(id)?.deps ?? []) visit(d, [...path, id]);
     state.set(id, "done");
   };
   for (const n of nodes) visit(n.id, []);
@@ -174,6 +185,7 @@ export interface ArgSpec {
   required?: boolean;
   desc?: string;
   default?: string;
+  enum?: string[];
   secret?: boolean;
 }
 
@@ -187,7 +199,7 @@ export interface PipelineDef {
 
 const registry = new Map<string, PipelineDef>();
 
-/** Registers a pipeline with this process; describe and serve answer for it. */
+/** Registers a pipeline with this process; describe and the runner loop answer for it. */
 export function definePipeline(def: PipelineDef): PipelineDef {
   checkId("pipeline", def.name);
   if (registry.has(def.name)) throw new Error(`pipeline ${def.name} is already defined`);

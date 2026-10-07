@@ -1,19 +1,20 @@
-// The describe and plan documents. describe is static: it names the protocol
-// this SDK speaks and the pipelines it holds. The plan document depends on
-// a run's args, so the engine asks for it per run over stdio.
+// The describe and plan documents, shaped by the node protocol's describe
+// schema. describe is static: the protocol version and the pipelines. The
+// plan document depends on a run's args, so the engine asks for it per run.
 
 import { pipelines } from "./plan.ts";
 import type { LineSink } from "./log.ts";
 
-export const PROTOCOL_VERSION = 1;
-export const SDK_VERSION = "0.0.0";
+export const PROTOCOL_VERSION = "1";
 
 export interface DescribeArg {
   name: string;
-  type: string;
+  go_name: string;
+  type: "string" | "bool" | "int";
   required: boolean;
   desc?: string;
   default?: string;
+  enum?: string[];
   secret?: boolean;
 }
 
@@ -25,36 +26,52 @@ export interface DescribePipeline {
 }
 
 export interface DescribeDoc {
-  protocol: number;
-  sdk: { language: "typescript"; version: string };
+  protocol: string;
   pipelines: DescribePipeline[];
+}
+
+export interface Closures {
+  skip_if?: string[];
+}
+
+export interface PlanStep {
+  id: string;
+  needs?: string[];
+}
+
+export interface Modifiers {
+  retry?: number;
+  retry_backoff_ms?: number;
+  timeout_ms?: number;
+  has_skip_if?: boolean;
 }
 
 export interface PlanNode {
   id: string;
-  needs: string[];
-  retry?: { attempts: number; backoff_ms?: number };
-  timeout_ms?: number;
-  steps?: Array<{ id: string; needs: string[] }>;
-  closures?: { skip_if?: string };
+  deps: string[];
+  modifiers?: Modifiers;
+  work?: { steps: PlanStep[] };
+  closures?: Closures;
 }
 
 export interface PlanDoc {
+  protocol: string;
   pipeline: string;
+  run_id: string;
   nodes: PlanNode[];
 }
 
 export function describe(): DescribeDoc {
   return {
     protocol: PROTOCOL_VERSION,
-    sdk: { language: "typescript", version: SDK_VERSION },
     pipelines: pipelines().map((p) => {
       const out: DescribePipeline = {
         name: p.name,
         args: (p.args ?? []).map((a) => {
-          const arg: DescribeArg = { name: a.name, type: a.type ?? "string", required: a.required ?? false };
+          const arg: DescribeArg = { name: a.name, go_name: a.name, type: a.type ?? "string", required: a.required ?? false };
           if (a.desc !== undefined) arg.desc = a.desc;
           if (a.default !== undefined) arg.default = a.default;
+          if (a.enum !== undefined) arg.enum = [...a.enum];
           if (a.secret) arg.secret = true;
           return arg;
         }),

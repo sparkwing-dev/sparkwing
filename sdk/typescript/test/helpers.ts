@@ -13,16 +13,20 @@ export class Lines {
     return this.lines.map((l) => JSON.parse(l) as Record<string, unknown>);
   }
 
-  responses(): Array<Record<string, unknown>> {
-    return this.json().filter((r) => typeof r["id"] === "number");
+  replies(): Array<Record<string, unknown>> {
+    return this.json().filter((r) => "reply" in r);
+  }
+
+  reply(id: string): Record<string, unknown> | undefined {
+    return this.replies().find((r) => r["reply"] === id);
   }
 
   records(): Array<Record<string, unknown>> {
-    return this.json().filter((r) => !("id" in r));
+    return this.json().filter((r) => !("reply" in r));
   }
 }
 
-/** Sends requests to an in-process serve loop and returns everything it wrote. */
+/** Sends requests to an in-process runner loop and returns everything it wrote. */
 export async function converse(requests: unknown[], routes?: NodeRoutes, env: ServeOptions["env"] = {}): Promise<Lines> {
   const input = new PassThrough();
   const out = new Lines();

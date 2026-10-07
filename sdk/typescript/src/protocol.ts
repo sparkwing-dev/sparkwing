@@ -1,32 +1,34 @@
-// Stdio framing between the engine and an SDK process. The engine writes one
-// JSON request per line to stdin. The SDK writes one JSON object per line to
-// stdout: a line with a numeric "id" answers the request with that id, and
-// every other line is a log record.
+// Stdio framing between the engine and an SDK process, per the node
+// protocol. The engine writes one JSON request per line to stdin. The SDK
+// writes one JSON object per line to stdout: a line with "reply" answers the
+// request with that id, and every other line is a log record.
 
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import type { LineSink } from "./log.ts";
 
-export type Method = "describe" | "plan" | "run_node" | "run_step" | "call" | "shutdown";
+export type Op = "describe" | "plan" | "run_node" | "run_step" | "eval";
 
 export interface Request {
-  id: number;
-  method: Method;
-  params?: Record<string, unknown>;
+  id: string;
+  op: Op;
+  [field: string]: unknown;
 }
 
-export interface ProtocolError {
-  code: "bad_request" | "unknown_method" | "unknown_pipeline" | "unknown_node" | "unknown_step" | "unknown_closure" | "internal";
-  message: string;
+export type Reply =
+  | { reply: string; ok: true; result: unknown }
+  | { reply: string; ok: false; error: { message: string } };
+
+export interface InvalidLine {
+  id: string | null;
+  invalid: string;
 }
 
-export interface Response {
-  id: number;
-  result?: unknown;
-  error?: ProtocolError;
+export function isInvalid(line: Request | InvalidLine): line is InvalidLine {
+  return typeof (line as { invalid?: unknown }).invalid === "string" && (line as { op?: unknown }).op === undefined;
 }
 
-export async function* readRequests(input: Readable): AsyncGenerator<Request | { id: number | null; invalid: string }> {
+export async function* readRequests(input: Readable): AsyncGenerator<Request | InvalidLine> {
   const lines = createInterface({ input, crlfDelay: Infinity });
   for await (const line of lines) {
     if (line.trim() === "") continue;
@@ -37,15 +39,16 @@ export async function* readRequests(input: Readable): AsyncGenerator<Request | {
       yield { id: null, invalid: `request is not JSON: ${(err as Error).message}` };
       continue;
     }
-    const r = parsed as Partial<Request>;
-    if (typeof r !== "object" || r === null || typeof r.id !== "number" || typeof r.method !== "string") {
-      yield { id: typeof r?.id === "number" ? r.id : null, invalid: "request needs a numeric id and a string method" };
+    const r = parsed as Partial<Request> | null;
+    const id = typeof r?.id === "string" && r.id !== "" ? r.id : null;
+    if (id === null || typeof r?.op !== "string") {
+      yield { id, invalid: "a request needs a non-empty string id and a string op" };
       continue;
     }
     yield r as Request;
   }
 }
 
-export function writeResponse(out: LineSink, res: Response): void {
-  out.write(JSON.stringify(res) + "\n");
+export function writeReply(out: LineSink, reply: Reply): void {
+  out.write(JSON.stringify(reply) + "\n");
 }

@@ -1,12 +1,12 @@
-export { describe, emitDescribe, PROTOCOL_VERSION, SDK_VERSION } from "./describe.ts";
-export type { DescribeArg, DescribeDoc, DescribePipeline, PlanDoc, PlanNode } from "./describe.ts";
+export { describe, emitDescribe, PROTOCOL_VERSION } from "./describe.ts";
+export type { Closures, DescribeArg, DescribeDoc, DescribePipeline, Modifiers, PlanDoc, PlanNode, PlanStep } from "./describe.ts";
 export { LogWriter } from "./log.ts";
 export type { Level, LineSink, LogRecord, LogScope } from "./log.ts";
 export { main } from "./main.ts";
 export { definePipeline, Job, lookupPipeline, Plan, pipelines, resetPipelines, Step } from "./plan.ts";
 export type { ArgSpec, Body, NodeContext, PipelineDef, Predicate, RetryOptions, RunContext } from "./plan.ts";
-export { readRequests, writeResponse } from "./protocol.ts";
-export type { Method, ProtocolError, Request, Response } from "./protocol.ts";
+export { isInvalid, readRequests, writeReply } from "./protocol.ts";
+export type { InvalidLine, Op, Reply, Request } from "./protocol.ts";
 export { NodeRoutes, RouteError, routeConfigFromEnv } from "./routes.ts";
 export type { NodeRouteConfig } from "./routes.ts";
 export { serve } from "./runner.ts";
