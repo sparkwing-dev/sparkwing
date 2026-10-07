@@ -607,7 +607,11 @@ func (s *Store) recordExecutorOfferAt(ctx context.Context, claimant ClaimIdentit
 	offer.Lease = clampNodeLease(offer.Lease)
 	if err := s.ValidateExecutorClaimReservation(ctx, claimant, offer.RunID, offer.NodeID,
 		offer.ExecutorName, offer.ReservationID, offer.Slot, offer.ResourceDigest); err == nil {
-		n, err := s.GetNode(ctx, offer.RunID, offer.NodeID)
+		runTeam, err := s.runTenant(ctx, offer.RunID)
+		if err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+		n, err := runTeam.GetNode(ctx, offer.RunID, offer.NodeID)
 		if err != nil {
 			return ExecutorClaimOfferResult{}, err
 		}

@@ -169,7 +169,7 @@ func sourceOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 // srcNode already stored, such as a cache hit's origin: the node's ref names
 // that object instead of a second copy of its bytes.
 func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error {
-	return s.finishNode(ctx, runID, nodeID, outcome, "", nil, &copySource{run: srcRun, node: srcNode}, reason, nil)
+	return s.defaultTenant().finishNode(ctx, runID, nodeID, outcome, "", nil, &copySource{run: srcRun, node: srcNode}, reason, nil)
 }
 
 type copySource struct{ run, node string }
@@ -655,7 +655,7 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 // directory, checking them against the recorded digest. A node with no
 // output returns nil.
 func (s *Store) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
-	n, err := s.GetNode(ctx, runID, nodeID)
+	n, err := s.defaultTenant().GetNode(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}

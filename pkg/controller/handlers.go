@@ -627,6 +627,10 @@ type finishNodeReq struct {
 }
 
 func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body finishNodeReq
@@ -638,7 +642,7 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("outcome is required"))
 		return
 	}
-	if err := s.store.FinishNodeWithOutputRef(r.Context(), runID, nodeID, body.Outcome, body.Error, body.Output, body.FailureReason, body.ExitCode); err != nil {
+	if err := tenant.FinishNodeWithOutputRef(r.Context(), runID, nodeID, body.Outcome, body.Error, body.Output, body.FailureReason, body.ExitCode); err != nil {
 		if errors.Is(err, store.ErrInvalidInput) {
 			writeError(w, http.StatusUnprocessableEntity, err)
 			return
@@ -2300,13 +2304,17 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	ctx := r.Context()
 	if now := time.Now(); s.runnerPresence.complete(now, s.placement.liveness) {
 		ctx = store.WithQueueRunners(ctx, s.runnerPresence.live(now, s.placement.liveness, presenceKey{}))
 	}
-	if err := s.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := tenant.MarkNodeReady(ctx, runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -2318,7 +2326,11 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResetNodeForAutoRetry(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.ResetNodeForAutoRetry(r.Context(), r.PathValue("id"), r.PathValue("nodeID")); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.ResetNodeForAutoRetry(r.Context(), r.PathValue("id"), r.PathValue("nodeID")); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -2356,9 +2368,13 @@ type revokeResp struct {
 }
 
 func (s *Server) handleRevokeNodeReady(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	ok, err := s.store.RevokeNodeReady(r.Context(), runID, nodeID)
+	ok, err := tenant.RevokeNodeReady(r.Context(), runID, nodeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -2476,6 +2492,10 @@ func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2485,7 +2505,7 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
+	if err := tenant.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
 		runID, nodeID, body.ManifestDigest); err != nil {
 		if writeStorageWriteRefusal(w, s.logger, err) {
 			return

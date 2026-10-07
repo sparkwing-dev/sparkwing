@@ -114,7 +114,15 @@ func (f *appFixture) addNode(runID, nodeID, outcome, errMsg string) {
 	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.store.FinishNode(ctx, runID, nodeID, outcome, errMsg, nil); err != nil {
+	team, err := f.store.AsOperator().RunTeam(ctx, runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	tn, err := f.store.ForTeam(ctx, team)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := tn.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, nil, store.FailureUnknown, nil); err != nil {
 		f.t.Fatal(err)
 	}
 }

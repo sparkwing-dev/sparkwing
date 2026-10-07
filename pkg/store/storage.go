@@ -831,20 +831,27 @@ func (s *Store) AppendEventCharged(
 func (s *Store) SetNodeArtifactManifestCharged(
 	ctx context.Context, principal, runID, nodeID, manifestDigest string,
 ) (err error) {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().SetNodeArtifactManifestCharged(ctx, principal, runID, nodeID, manifestDigest)
+}
+
+// SetNodeArtifactManifestCharged is [Store.SetNodeArtifactManifestCharged] confined to t's team.
+func (t *Tenant) SetNodeArtifactManifestCharged(
+	ctx context.Context, principal, runID, nodeID, manifestDigest string,
+) (err error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
-	if err := s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
+	if err := t.s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET artifact_manifest = ? WHERE run_id = ? AND node_id = ?`,
-		manifestDigest, runID, nodeID)
+		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		manifestDigest, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}

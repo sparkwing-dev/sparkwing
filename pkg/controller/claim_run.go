@@ -99,7 +99,7 @@ func (s *Server) handleEnqueueChildRun(w http.ResponseWriter, r *http.Request) {
 			errors.New("a controller-dispatched node starts children of its own repository and commit only"))
 		return
 	}
-	ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), tok.RunID)
+	ancestors, err := tenant.GetRunAncestorPipelines(r.Context(), tok.RunID)
 	if err != nil {
 		s.writeInternalError(w, r, "ancestor walk", err)
 		return

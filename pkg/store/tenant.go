@@ -200,6 +200,20 @@ UNION ALL SELECT team FROM triggers WHERE id = ? LIMIT 1`, runID, runID).Scan(&t
 	return Team(team), err
 }
 
+// safety: a Store call that names a run and holds no handle acts in the run's
+// own team, where the run's rows were written; an unknown run is the default
+// team's, as every pre-tenant row is.
+func (s *Store) runTenant(ctx context.Context, runID string) (*Tenant, error) {
+	team, err := s.AsOperator().RunTeam(ctx, runID)
+	if errors.Is(err, ErrNotFound) {
+		return s.defaultTenant(), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &Tenant{s: s, team: team}, nil
+}
+
 // safety: a type rather than an empty team meaning "all", because that
 // sentinel cannot be told from a team a caller failed to set; the zero
 // value here scopes to the empty team, which matches nothing.

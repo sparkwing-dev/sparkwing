@@ -313,15 +313,11 @@ var unportedSQL = []string{
 	"(*Store).CreateUser",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
-	"(*Store).finishNode",
 	"(*Store).ListLegacyAgentClaims",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
 	"(*Store).NodeSettlement",
-	"(*Store).ResetNodeForAutoRetry",
-	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
-	"(*Store).SetNodeArtifactManifestCharged",
 	"(*Store).SetStorageAllowance",
 	"(*Store).SetStorageQuota",
 	"(*Store).SetTokenMetered",
@@ -334,7 +330,6 @@ var unportedSQL = []string{
 	"(*Store).chargeStorageTx",
 	"(*Store).createAgentLossRetryTx",
 	"(*Store).lookupUser",
-	"(*Store).markNodeReady",
 	"(*Store).mergeAgentLossRetryTx",
 	"(*Store).mintCSRFKey",
 	"(*Store).requiredAgentLossRetryNodeSourceTx",
@@ -355,7 +350,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 46
+const unportedSQLSize = 41
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

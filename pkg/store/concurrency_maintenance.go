@@ -98,7 +98,7 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 	} else {
 		res.StaleHolders = stale
 		for _, h := range stale {
-			if promoted, err := s.PromoteNextWaiters(ctx, h.Key, opts.Lease); err != nil {
+			if promoted, err := (&Tenant{s: s, team: h.team}).PromoteNextWaiters(ctx, h.Key, opts.Lease); err != nil {
 				errs = append(errs, fmt.Errorf("promote after reaping holder on %q: %w", h.Key, err))
 			} else {
 				res.Promoted += len(promoted)

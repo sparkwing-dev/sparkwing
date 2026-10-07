@@ -4944,23 +4944,28 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrOutputNotStored, err)
 	}
-	return s.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
+	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
 }
 
 // FinishNodeWithOutputRef finishes a node whose output, when there is one,
 // is already a committed object named by ref.
 func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
-	return s.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
 
-func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
+// FinishNodeWithOutputRef is [Store.FinishNodeWithOutputRef] confined to t's team.
+func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
+	return t.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+}
+
+func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
 	reason string, exitCode *int,
 ) error {
 	var code any
 	if exitCode != nil {
 		code = *exitCode
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -4968,12 +4973,12 @@ func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
 	var executorName, team string
 	var generation, consumed int64
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -4999,9 +5004,9 @@ func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 UPDATE nodes
 	   SET status = ?, outcome = ?, error = ?, finished_at = ?,
 	       failure_reason = ?, exit_code = ?
-	 WHERE run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
+	 WHERE team = ? AND run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
 		nodeStatusDone, outcome, errMsg, time.Now().UnixNano(), reason, code,
-		runID, nodeID, nodeStatusDone)
+		string(t.team), runID, nodeID, nodeStatusDone)
 	if err != nil {
 		return err
 	}
@@ -5684,16 +5689,30 @@ WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
 
 // MarkNodeReady opens the node's offer round with the highest attainable
 // executor priority from the same transaction that snapshots its requirements.
+// The node is opened in its run's own team, where CreateNode wrote it.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	return s.markNodeReady(ctx, runID, nodeID, nil)
+	t, err := s.runTenant(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return t.MarkNodeReady(ctx, runID, nodeID)
+}
+
+// MarkNodeReady is [Store.MarkNodeReady] confined to t's team.
+func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
+	return t.markNodeReady(ctx, runID, nodeID, nil)
 }
 
 func (s *Store) markNodeReadyWithExecutionPolicy(ctx context.Context, runID, nodeID string, policy nodeExecutionPolicy) error {
-	return s.markNodeReady(ctx, runID, nodeID, &policy)
+	t, err := s.runTenant(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return t.markNodeReady(ctx, runID, nodeID, &policy)
 }
 
-func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
-	tx, err := s.beginTx(ctx)
+func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -5703,17 +5722,17 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	node := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
-  FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID), node); err != nil {
+  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
 		return err
 	}
 	var pipeline string
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE id = ?`, runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", runID+"/"+nodeID)
 	} else if err != nil {
 		return err
 	}
 	opened := node.OfferStartedAt != nil
-	retrySource, isAgentLossRetry, err := s.requiredAgentLossRetryNodeSourceTx(ctx, tx, runID, nodeID)
+	retrySource, isAgentLossRetry, err := t.s.requiredAgentLossRetryNodeSourceTx(ctx, tx, runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5731,7 +5750,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 			}
 			policy = &existing
 		} else {
-			built, eligible, policyErr := s.buildNodeExecutionPolicyTx(ctx, tx, node, pipeline)
+			built, eligible, policyErr := t.s.buildNodeExecutionPolicyTx(ctx, tx, node, pipeline)
 			if policyErr != nil {
 				return policyErr
 			}
@@ -5784,11 +5803,11 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 			   SET execution_policy_json = ?, execution_policy_hash = ?, execution_policy_version = ?, execution_body_protocol = ?,
        execution_supervisor_requirements_json = ?, execution_supervisor_requirements_hash = ?,
        execution_body_requirements_json = ?, execution_body_requirements_hash = ?
-			 WHERE run_id = ? AND node_id = ? AND offer_started_at IS NULL
+			 WHERE team = ? AND run_id = ? AND node_id = ? AND offer_started_at IS NULL
 			   AND `+nodeExecutionUnsealed,
 				persisted.PolicyJSON, persisted.PolicyHash, persisted.PolicyVersion, persisted.BodyProtocol,
 				persisted.SupervisorRequirementsJSON, persisted.SupervisorRequirementsHash,
-				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, runID, nodeID)
+				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, string(t.team), runID, nodeID)
 			if err != nil {
 				return err
 			}
@@ -5811,11 +5830,11 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 			return err
 		}
 		now = time.Now()
-		summary, err = s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+		summary, err = t.s.schedulingSummaryTx(ctx, tx, runID, nodeID)
 		if err != nil {
 			return err
 		}
-		target, executorEligible, err = s.highestActiveExecutorPriorityTx(
+		target, executorEligible, err = t.s.highestActiveExecutorPriorityTx(
 			ctx, tx, summary, now.Add(-ExecutorRegistrationActiveWindow), now,
 		)
 		if err != nil {
@@ -5831,7 +5850,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	offerStart := now
 	if !opened && !executorEligible {
-		idle, err := s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
+		idle, err := t.s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
 		if err != nil {
 			return err
 		}
@@ -5846,8 +5865,8 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		                  offer_started_at = COALESCE(offer_started_at, ?),
 		                  credit_cpu_class = ?,
 		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
-		  WHERE run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, target, runID, nodeID,
+		  WHERE team = ? AND run_id = ? AND node_id = ?`,
+		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, target, string(t.team), runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -5860,7 +5879,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		return notFound("node", runID+"/"+nodeID)
 	}
 	if !opened {
-		if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
+		if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "executor_offer_round_opened", map[string]any{
 			"deadline":               offerStart.Add(nodeClaimOfferWindow),
 			"priority_target":        target,
 			"hard_capabilities":      summary.HardCapabilities,
@@ -5876,7 +5895,12 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 }
 
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().ResetNodeForAutoRetry(ctx, runID, nodeID)
+}
+
+// ResetNodeForAutoRetry is [Store.ResetNodeForAutoRetry] confined to t's team.
+func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -5888,14 +5912,14 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return ErrLockHeld
 	}
 	if _, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
-		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
+		if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 			return err
 		}
 	}
 	var status, outcome, failureReason, executorName string
 	var claimedBy sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by, claim_executor
-  FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(), runID, nodeID).Scan(
+  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(), string(t.team), runID, nodeID).Scan(
 		&status, &outcome, &failureReason, &claimedBy, &executorName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
@@ -5913,19 +5937,16 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 	if status != nodeStatusDone || outcome != "failed" || failureReason == FailureAgentLost {
 		return ErrLockHeld
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return err
 	}
 	// safety: the reset puts the claim generation back to 0, so a token from
 	// the reset attempt would authorize again once a later claim reaches its
 	// generation.
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return err
-	}
+	team := t.team
 	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_tokens WHERE team = ? AND run_id = ? AND node_id = ?`,
 		string(team), runID, nodeID); err != nil {
 		return err
@@ -5944,8 +5965,8 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        credit_charged_through = 0,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
- WHERE run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
-		nodeStatusPending, runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
+		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
 	if err != nil {
 		return err
 	}
@@ -5961,16 +5982,21 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 
 // RevokeNodeReady cancels an unclaimed offer round.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().RevokeNodeReady(ctx, runID, nodeID)
+}
+
+// RevokeNodeReady is [Store.RevokeNodeReady] confined to t's team.
+func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
-		  WHERE run_id = ? AND node_id = ?
+		  WHERE team = ? AND run_id = ? AND node_id = ?
 		    AND claimed_by IS NULL AND `+nodeNotDone,
-		runID, nodeID,
+		string(t.team), runID, nodeID,
 	)
 	if err != nil {
 		return false, err
@@ -5986,7 +6012,7 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 		return false, nil
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		`DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -8401,7 +8427,7 @@ func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline, staleHeartbe
 	nowNS := now.UnixNano()
 
 	rows, err := s.query(ctx, `
-SELECT r.id
+SELECT r.id, r.team
   FROM runs r
   JOIN triggers t ON t.id = r.id
  WHERE r.finished_at IS NULL
@@ -8418,13 +8444,15 @@ SELECT r.id
 		return nil, err
 	}
 	var candidates []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			closeRowsOrLog(rows)
 			return nil, err
 		}
 		candidates = append(candidates, id)
+		teams[id] = Team(team)
 	}
 	closeRowsOrLog(rows)
 	if err := rows.Err(); err != nil {
@@ -8454,7 +8482,7 @@ UPDATE runs SET status = ?, error = ?, finished_at = ?
 		}
 		// safety: the trigger outlives the run it names, so a late claimant would
 		// compile and execute a child for a run this sweep already failed.
-		if err := s.FinishTrigger(ctx, id); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).FinishTrigger(ctx, id); err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)

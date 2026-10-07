@@ -31,7 +31,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 		if err := f.st.CreateNode(ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.st.FinishNode(ctx, leaderB, "lead", "success", "", nil); err != nil {
+		if err := f.teamB.FinishNodeWithOutputRef(ctx, leaderB, "lead", "success", "", nil, store.FailureUnknown, nil); err != nil {
 			t.Fatal(err)
 		}
 
