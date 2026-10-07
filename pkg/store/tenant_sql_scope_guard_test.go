@@ -326,7 +326,6 @@ var unportedSQL = []string{
 	"applyMigrationSQLite",
 	"backfillAgentLossRetryNodeSourcesTx",
 	"backfillRunAnnotationRollup",
-	"bridgeLegacyFleetSQLite",
 	"claimedExecutorOffer",
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
@@ -350,11 +349,10 @@ var unportedSQL = []string{
 	"storageQuotaForTx",
 	"tokenMeteredTx",
 	"txLiveRunningRunIDs",
-	"validateLegacyFleetShape",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 201
+const unportedSQLSize = 199
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

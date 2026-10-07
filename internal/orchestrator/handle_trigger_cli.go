@@ -25,11 +25,11 @@ func runHandleTriggerCLI(args []string) error {
 		"heartbeat cadence for the claim lease (cluster mode only)")
 	runnerKind := fs.String("runner", "inprocess", "node runner: inprocess | k8s | warm")
 	k8sNamespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace for runner Jobs (k8s)")
-	k8sImage := fs.String("image", os.Getenv("SPARKWING_RUNNER_IMAGE"), "runner image (k8s)")
+	k8sImage := fs.String("image", "", "runner image (k8s)")
 	k8sSA := fs.String("runner-sa", os.Getenv("SPARKWING_RUNNER_SA"), "service account name for runner pods (k8s)")
-	k8sPullSecret := fs.String("image-pull-secret", os.Getenv("SPARKWING_IMAGE_PULL_SECRET"), "imagePullSecret for runner pods (k8s)")
-	k8sCtrlURL := fs.String("runner-controller-url", os.Getenv("SPARKWING_RUNNER_CONTROLLER_URL"), "controller URL the runner pod should talk to (defaults to --controller)")
-	k8sLogsURL := fs.String("runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"), "logs-service URL the runner pod should talk to (defaults to --logs)")
+	k8sPullSecret := fs.String("image-pull-secret", "", "imagePullSecret for runner pods (k8s)")
+	k8sCtrlURL := fs.String("runner-controller-url", "", "controller URL the runner pod should talk to (defaults to --controller)")
+	k8sLogsURL := fs.String("runner-logs-url", "", "logs-service URL the runner pod should talk to (defaults to --logs)")
 	artifactStoreURL := fs.String("artifact-store", os.Getenv("SPARKWING_CACHE_URL"), "artifact/cache store URL passed to runner pods (k8s)")
 	dependencyProxy := fs.String("dependency-proxy", os.Getenv("SPARKWING_DEPENDENCY_PROXY_URL"),
 		"base URL of the in-cluster pull-through package proxy stamped on runner pods as GOPROXY / npm_config_registry / PIP_INDEX_URL; "+
@@ -45,10 +45,10 @@ func runHandleTriggerCLI(args []string) error {
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	var k8sLabels stringSliceFlag
 	fs.Var(&k8sLabels, "runner-label", "static capability every runner Job advertises (repeatable)")
-	k8sNodeSelector := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR")))
-	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
-	k8sTolerations := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_TOLERATION")))
-	fs.Var(&k8sTolerations, "runner-toleration", "toleration for runner pods, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
+	var k8sNodeSelector stringSliceFlag
+	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable)")
+	var k8sTolerations stringSliceFlag
+	fs.Var(&k8sTolerations, "runner-toleration", "toleration for runner pods, key[=value]:Effect (repeatable)")
 	teamNodesDefault := false
 	if raw := os.Getenv("SPARKWING_RUNNER_TEAM_NODES"); raw != "" {
 		v, err := strconv.ParseBool(raw)

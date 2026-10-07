@@ -103,6 +103,13 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+
+- **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
+  `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
+
+- **runner + cache + cli (Breaking):** Twelve environment variables that only mirrored a flag are no longer read
+  `SPARKWING_TRIGGER_RUNNER`, `SPARKWING_RUNNER_IMAGE`, `SPARKWING_IMAGE_PULL_SECRET`, `SPARKWING_RUNNER_CONTROLLER_URL`, `SPARKWING_RUNNER_LOGS_URL`, `SPARKWING_RUNNER_NODE_SELECTOR` and `SPARKWING_RUNNER_TOLERATION` give way to the `sparkwing-runner runner --trigger-runner*` flags; `SPARKWING_GITCACHE_CONCURRENCY` to `sparkwing-cache --git-fork-limit`; `SPARKWING_WINGD_VERSION` to `sparkwing wingd run --version`; `SPARKWING_FORCE_COLOR` to `CLICOLOR_FORCE=1`. `SPARKWING_BAKED_BINARY` and its fallback are gone: a trigger with no repository fails with that reason instead of running an in-image binary the runner image never shipped. `SPARKWING_CHAOS_KEEP` was a test knob. See [migration guide](docs/migrations/_unreleased.md#flag-mirror-environment-variables-are-no-longer-read).
+
 - **controller + charts (Breaking):** Remove the warm-PVC pool
   The controller no longer creates, warms or hands out Docker-cache PVCs, and no longer serves `GET /api/v1/pool` or
   `POST /api/v1/pool/{checkout,return,heartbeat}`. Nothing Sparkwing ships mounted a pool PVC, so the pool held
@@ -150,7 +157,22 @@ unlock.
   controller mints one. See
   [Cache grants need a claim and a scope](docs/migrations/_unreleased.md#cache-grants-need-a-claim-and-a-scope).
 
+- **cli (Breaking):** `sparkwing doctor` and `sparkwing queue` no longer look for box-slot locks from pipelines pinned before v0.16
+  Nothing has taken a box slot since v0.16, and a binary that old refuses the current store. `doctor -o json` drops `legacy_box_slot_files_removed` and `live_legacy_holders`, `-o plain` drops their rows, and the legacy-pinned warning is gone. See [migration guide](docs/migrations/_unreleased.md#doctor-no-longer-reports-box-slot-locks).
+
+- **pkg (Breaking):** Remove nine exported functions nothing in Sparkwing calls
+  `controller.Serve`, `controller.AuditFields`, `logs.Serve`, `logs.ServeWithTokens`, `logs.ServePrivateWithTokens`, `sparkwinglogs.FromClient`, `store.DetectDialect`, `store.SetArgon2AcquireTimeout` and `backends.LayerSurfaces` are gone. See [migration guide](docs/migrations/_unreleased.md#unused-pkg-functions-are-removed).
+
 ### Security
+- **orchestrator:** Mask a pipeline process's raw stdout and stderr in the process that starts it
+  The claim launcher, the remote runner and the local runner now read the pipeline process's output through
+  pipes and mask each line with every value that process registered, which it hands over on an inherited
+  descriptor before the value can be printed. Output that bypasses the SDK, a child process inheriting its stdio,
+  and the runtime's report of an unrecovered panic no longer reach container logs or run logs with a secret in
+  the clear. An unterminated progress line now appears once its newline or the process's exit arrives, and a
+  line longer than 1 MiB is replaced by a `[line over 1 MiB dropped]` marker instead of being truncated. Windows
+  keeps only the pipeline process's own masking, and a pipeline built against an earlier SDK hands over no values.
+
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no
   claim, which the cache honored after the token's member was removed and after the run finished. Sparkwing's
@@ -195,6 +217,9 @@ unlock.
 - **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+
+- **docs:** [Environment variables](docs/environment-variables.md) lists every `SPARKWING_*` variable the code reads, as configuration, runtime, plumbing, test or undecided, with the page that describes each
+  The docs contract test now fails when a variable is missing from that page or the page lists one nothing reads.
 
 - **security:** Record the accepted trust facts: editors can read masked secrets through a runner token they mint, the launcher token reaches every team's claim tokens, a run's plan declares its own secrets, pipeline stdout outside the exec helper is unmasked in container logs, and `docker -e K=V` is visible in a shared host's process table
 

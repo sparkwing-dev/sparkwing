@@ -253,18 +253,6 @@ func envOr(name, fallback string) string {
 
 var lookupEnv = os.LookupEnv
 
-// LayerSurfaces overlays over on top of base per surface: a non-nil
-// surface in over wins, otherwise base's surface is kept. Used to
-// layer overrides on top of project defaults.
-func LayerSurfaces(base, over Surfaces) Surfaces {
-	return Surfaces{
-		Secrets: layerSpec(base.Secrets, over.Secrets),
-		Cache:   layerSpec(base.Cache, over.Cache),
-		Logs:    layerSpec(base.Logs, over.Logs),
-		State:   layerSpec(base.State, over.State),
-	}
-}
-
 // ValidateSecrets enforces the type vocabulary for the secrets
 // surface: only controller / filesystem / env make sense (state
 // backends like sqlite are nonsensical for secret lookup). Returns
@@ -294,55 +282,4 @@ func (s *Spec) ValidateSecrets() error {
 
 func secretsErr(format string, a ...any) error {
 	return fmt.Errorf("secrets backend: "+format, a...)
-}
-
-func layerSpec(base, over *Spec) *Spec {
-	if over == nil {
-		return base
-	}
-	if base == nil || base.Type != over.Type {
-		clone := *over
-		return &clone
-	}
-	merged := *over
-	if merged.Bucket == "" {
-		merged.Bucket = base.Bucket
-	}
-	if merged.Prefix == "" {
-		merged.Prefix = base.Prefix
-	}
-	if merged.Path == "" {
-		merged.Path = base.Path
-	}
-	if merged.URL == "" {
-		merged.URL = base.URL
-	}
-	if merged.URLSource == "" {
-		merged.URLSource = base.URLSource
-	}
-	if merged.Token == "" {
-		merged.Token = base.Token
-	}
-	if merged.TokenEnv == "" {
-		merged.TokenEnv = base.TokenEnv
-	}
-	if merged.Controller == "" {
-		merged.Controller = base.Controller
-	}
-	if merged.Binaries == nil {
-		merged.Binaries = base.Binaries
-	}
-	if merged.BatchInterval == 0 {
-		merged.BatchInterval = base.BatchInterval
-	}
-	if merged.BatchBytes == 0 {
-		merged.BatchBytes = base.BatchBytes
-	}
-	if merged.MaxLogObjects == 0 {
-		merged.MaxLogObjects = base.MaxLogObjects
-	}
-	if merged.MaxLogBytes == 0 {
-		merged.MaxLogBytes = base.MaxLogBytes
-	}
-	return &merged
 }

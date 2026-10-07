@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -37,7 +38,7 @@ func TestRunProfileHasOneRecorder(t *testing.T) {
 				t.Cleanup(func() { _ = st.Close() })
 				server := httptest.NewServer(controller.New(st, nil).WithLocalExecution().Handler())
 				t.Cleanup(server.Close)
-				backends = RemoteBackends(client.New(server.URL, nil), nil, nil, nil, time.Minute)
+				backends = RemoteBackends(context.Background(), client.New(server.URL, nil), nil, nil, nil, time.Minute)
 			}
 			if backends.LocalCoordination != daemon {
 				t.Fatalf("local recorder ownership=%t, daemon=%t", backends.LocalCoordination, daemon)

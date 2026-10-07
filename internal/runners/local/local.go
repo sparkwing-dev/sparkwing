@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -168,6 +169,12 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 	cmd.ExtraFiles = []*os.File{livenessR}
+	values, err := secrets.ShareWithChild(cmd)
+	if err != nil {
+		closeAll(stdout, stdoutW, stderr, stderrW, livenessR, livenessW)
+		return failedResult(fmt.Errorf("local runner: %w", err)), false
+	}
+	defer values.Close()
 
 	// safety: the dispatcher holds only the write end. Its close -- deliberate
 	// here, or by the kernel when the dispatcher dies -- is the EOF the
@@ -186,8 +193,8 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 
 	var forwarders sync.WaitGroup
 	forwarders.Add(2)
-	go func() { defer forwarders.Done(); forwardRecords(stdout, req, r.cfg.Logger) }()
-	go func() { defer forwarders.Done(); forwardStderr(stderr, req) }()
+	go func() { defer forwarders.Done(); forwardRecords(stdout, req, values, r.cfg.Logger) }()
+	go func() { defer forwarders.Done(); forwardStderr(stderr, req, values) }()
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 		fmt.Sprintf("running, pid %d", group.ID()))
@@ -517,7 +524,15 @@ func (r *Runner) tokenDied(req runner.Request, err error) bool {
 	return true
 }
 
-func forwardRecords(out io.Reader, req runner.Request, logger *slog.Logger) {
+// safety: a whole-line JSON document is masked value by value, since masking
+// its text could hit a key; anything else is masked as the text it is.
+type outputMasker interface {
+	Mask(string) string
+	MaskJSON([]byte) []byte
+	MaskRecord(sparkwing.LogRecord) sparkwing.LogRecord
+}
+
+func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger *slog.Logger) {
 	if req.Delegate == nil {
 		_, _ = io.Copy(io.Discard, out)
 		return
@@ -531,33 +546,63 @@ func forwardRecords(out io.Reader, req runner.Request, logger *slog.Logger) {
 		// that happened to parse would report a record the node never
 		// emitted.
 		if !truncated {
-			var rec sparkwing.LogRecord
-			if json.Unmarshal(line, &rec) == nil {
+			rec, isRecord, isJSON := wholeLineRecord(line)
+			if isRecord {
 				if rec.TS.IsZero() {
 					rec.TS = time.Now()
 				}
 				if rec.JobID == "" {
 					rec.JobID = req.NodeID
 				}
-				req.Delegate.Emit(rec)
+				req.Delegate.Emit(mask.MaskRecord(rec))
+				return
+			}
+			if isJSON {
+				// safety: value masking leaves keys alone, and a key can hold a value too.
+				req.Delegate.Emit(rawLineRecord(req.NodeID, mask.Mask(string(mask.MaskJSON(line))), false))
 				return
 			}
 		}
-		req.Delegate.Emit(rawLineRecord(req.NodeID, string(line), truncated))
+		req.Delegate.Emit(rawLineRecord(req.NodeID, maskLine(mask, string(line), truncated), truncated))
 	})
 	if err != nil && logger != nil {
 		logger.Debug("local runner: stdout forward ended", "node_id", req.NodeID, "err", err)
 	}
 }
 
-func forwardStderr(errOut io.Reader, req runner.Request) {
+// safety: numbers keep their exact text, so an integer past 2^53 is forwarded
+// as written rather than rounded through float64.
+func wholeLineRecord(line []byte) (rec sparkwing.LogRecord, isRecord, isJSON bool) {
+	var doc json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if dec.Decode(&doc) != nil {
+		return rec, false, false
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return rec, false, false
+	}
+	dec = json.NewDecoder(bytes.NewReader(doc))
+	dec.UseNumber()
+	return rec, dec.Decode(&rec) == nil, true
+}
+
+// safety: any part of an overlong line could end inside a value whose rest
+// the masker never sees with it, so none of the line is forwarded.
+func maskLine(mask outputMasker, line string, truncated bool) string {
+	if truncated {
+		return ""
+	}
+	return mask.Mask(line)
+}
+
+func forwardStderr(errOut io.Reader, req runner.Request, mask outputMasker) {
 	if req.Delegate == nil {
 		_, _ = io.Copy(io.Discard, errOut)
 		return
 	}
 	_ = forwardLines(errOut, func(line []byte, truncated bool) {
-		text := strings.TrimRight(string(line), "\r")
-		if strings.TrimSpace(text) == "" {
+		text := maskLine(mask, strings.TrimRight(string(line), "\r"), truncated)
+		if strings.TrimSpace(text) == "" && !truncated {
 			return
 		}
 		req.Delegate.Emit(rawLineRecord(req.NodeID, text, truncated))
@@ -572,7 +617,7 @@ func rawLineRecord(nodeID, text string, truncated bool) sparkwing.LogRecord {
 		Msg:   text,
 	}
 	if truncated {
-		rec.Msg += truncationMarker
+		rec.Msg = droppedLineMarker
 		rec.Attrs = map[string]any{"truncated": true, "limit_bytes": maxLogLineBytes}
 	}
 	return rec
@@ -631,7 +676,7 @@ const maxLogLineBytes = 1 << 20
 
 const lineReadBufferBytes = 64 * 1024
 
-const truncationMarker = " …[truncated: line exceeded the 1MiB forwarding limit]"
+const droppedLineMarker = "[line over 1 MiB dropped]"
 
 func failedResult(err error) runner.Result {
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}

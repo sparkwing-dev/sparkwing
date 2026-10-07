@@ -37,12 +37,6 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save replaces the repos section of the config.yaml at path with cfg,
-// keeping every other section; see [userconfig.Write].
-func Save(path string, cfg *Config) error {
-	return userconfig.Write(path, userconfig.Repos, "the repo registry", cfg)
-}
-
 // safety: the registry changes under the settings file's lock, so two
 // registrations racing each keep their entry.
 func update(change func(cfg *Config) (bool, error)) error {
@@ -186,23 +180,6 @@ func List() ([]ListEntry, error) {
 			le.Worktree = true
 		}
 		out = append(out, le)
-	}
-	return out, nil
-}
-
-func FallbackDirs() ([]string, error) {
-	cfgPath, err := DefaultPath()
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(cfg.FallbackPaths))
-	for _, p := range cfg.FallbackPaths {
-		exp := expandHome(p)
-		out = append(out, exp)
 	}
 	return out, nil
 }

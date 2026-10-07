@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,32 +37,6 @@ func pivotRowTotal(t *testing.T, out string) int {
 		t.Fatalf("decode pivot row %q: %v", line, err)
 	}
 	return row.Total
-}
-
-func TestListJobsRemoteByPipeline_CountsEveryMatchingRunNotThePage(t *testing.T) {
-	ctx := context.Background()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller-state.db"))
-	if err != nil {
-		t.Fatalf("store open: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	seedPivotRuns(t, st, 40)
-	srv := NewControllerServer(t, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	var buf bytes.Buffer
-	opts := ListOpts{
-		Limit:      5,
-		JSON:       true,
-		ByPipeline: true,
-		Filter:     CompiledFilter{StartedAfter: time.Unix(0, 0)},
-		Pivot:      PivotOpts{SparklineLen: 30, Style: SparkASCII},
-	}
-	if err := ListJobsRemote(ctx, srv.URL, "", opts, &buf); err != nil {
-		t.Fatalf("ListJobsRemote: %v", err)
-	}
-	if got := pivotRowTotal(t, buf.String()); got != 40 {
-		t.Fatalf("remote rollup counted %d runs, want all 40", got)
-	}
 }
 
 func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
@@ -108,50 +80,6 @@ func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
 	}
 	if got := pivotRowTotal(t, buf.String()); got != successes {
 		t.Fatalf("rollup counted %d successful runs, want %d", got, successes)
-	}
-}
-
-func TestListJobsRemote_CursorWalksEveryRunExactlyOnce(t *testing.T) {
-	ctx := context.Background()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "remote-page-state.db"))
-	if err != nil {
-		t.Fatalf("store open: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	seedPivotRuns(t, st, 25)
-	srv := NewControllerServer(t, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	seen := map[string]int{}
-	cursor, pages := "", 0
-	for range 20 {
-		var buf bytes.Buffer
-		if err := ListJobsRemote(ctx, srv.URL, "", ListOpts{Limit: 7, JSON: true, Cursor: cursor}, &buf); err != nil {
-			t.Fatalf("ListJobsRemote: %v", err)
-		}
-		got := decodeListing(t, buf.String())
-		pages++
-		for _, id := range got.ids {
-			seen[id]++
-		}
-		if !got.page.Truncated {
-			break
-		}
-		if got.page.NextCursor == "" {
-			t.Fatal("a truncated remote page carried no cursor")
-		}
-		cursor = got.page.NextCursor
-	}
-
-	if pages < 2 {
-		t.Fatalf("walked %d page(s); the cursor was never exercised", pages)
-	}
-	if len(seen) != 25 {
-		t.Errorf("walked %d distinct runs, want 25", len(seen))
-	}
-	for id, n := range seen {
-		if n != 1 {
-			t.Errorf("run %s served %d times across pages, want once", id, n)
-		}
 	}
 }
 

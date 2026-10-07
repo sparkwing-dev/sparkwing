@@ -56,18 +56,6 @@ type LocalAdmission struct {
 	reservedNodeLeaseToken string
 }
 
-// NewReservedNodeAdmission attaches node execution to capacity that a caller
-// already reserved. The caller retains ownership of the lease and must release
-// it after execution stops.
-func NewReservedNodeAdmission(home, version, leaseToken string, origin wingwire.Origin) *LocalAdmission {
-	return &LocalAdmission{
-		Home:                   home,
-		Version:                version,
-		Origin:                 origin,
-		reservedNodeLeaseToken: leaseToken,
-	}
-}
-
 func (la *LocalAdmission) attachReservedNode(ctx context.Context, runID string, priority int) (context.Context, bool) {
 	if la == nil || la.reservedNodeLeaseToken == "" {
 		return ctx, false

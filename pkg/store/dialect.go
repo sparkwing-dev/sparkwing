@@ -37,19 +37,6 @@ func (d Dialect) String() string {
 	}
 }
 
-// DetectDialect infers the dialect from a DSN string. A URL with a
-// `postgres://` or `postgresql://` scheme is Postgres; anything else is
-// treated as a SQLite path (the historical default). Callers that need
-// to be explicit should use the Open / OpenPostgres constructors
-// directly rather than relying on detection.
-func DetectDialect(dsn string) Dialect {
-	low := strings.ToLower(strings.TrimSpace(dsn))
-	if strings.HasPrefix(low, "postgres://") || strings.HasPrefix(low, "postgresql://") {
-		return DialectPostgres
-	}
-	return DialectSQLite
-}
-
 func (s *Store) forUpdateSkipLocked() string {
 	if s.dialect == DialectPostgres {
 		return " FOR UPDATE SKIP LOCKED"

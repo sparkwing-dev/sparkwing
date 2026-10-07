@@ -832,7 +832,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 			if opts.LogStore != nil {
 				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
 			}
-			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
+			backends = RemoteBackends(ctx, s, logsBackend, opts.ArtifactStore, nil, 0)
 		default:
 			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 		}
@@ -881,10 +881,6 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		}
 	}
 	return res, runErr
-}
-
-func DumpRunState(ctx context.Context, st *store.Store, runID string, art storage.ArtifactStore) error {
-	return dumpRunState(ctx, localState{st: st}, runID, art)
 }
 
 func dumpRunState(ctx context.Context, state StateBackend, runID string, art storage.ArtifactStore) error {

@@ -17,7 +17,7 @@ func TestRenderDoctor_ACopiedLegacyFileIsANoticeNotARepair(t *testing.T) {
 		t.Fatal("a copied legacy file left for older binaries made the report unclean")
 	}
 	var pretty bytes.Buffer
-	if err := opsview.RenderDoctor(&pretty, report, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&pretty, report, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"notice: 1 legacy settings file(s) already copied", "/home/op/.config/sparkwing/fleet.yaml", "delete each once"} {
@@ -38,7 +38,7 @@ func TestRenderDoctor_NamesLegacySettingsAndWhereTheyBelong(t *testing.T) {
 		t.Fatal("a report with a legacy setting left reads as clean")
 	}
 	var pretty, plain bytes.Buffer
-	if err := opsview.RenderDoctor(&pretty, report, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&pretty, report, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"/home/op/.config/sparkwing/budget -> the admission.budget section of config.yaml", "disagree"} {
@@ -46,7 +46,7 @@ func TestRenderDoctor_NamesLegacySettingsAndWhereTheyBelong(t *testing.T) {
 			t.Errorf("pretty output lacks %q:\n%s", want, pretty.String())
 		}
 	}
-	if err := opsview.RenderDoctor(&plain, report, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&plain, report, "plain"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(plain.String(), "legacy_settings\t1\n") {

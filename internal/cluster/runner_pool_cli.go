@@ -415,19 +415,19 @@ func runRunnerCLI(args []string, version string) error {
 			"the controller supplies a snapshot's code, which no listed repository holds")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
-	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
+	triggerRunnerKind := fs.String("trigger-runner", "",
 		"node runner used by claimed triggers: inprocess | k8s | warm")
 	triggerRunnerNamespace := fs.String("trigger-runner-namespace", os.Getenv("POD_NAMESPACE"),
 		"namespace for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerImage := fs.String("trigger-runner-image", os.Getenv("SPARKWING_RUNNER_IMAGE"),
+	triggerRunnerImage := fs.String("trigger-runner-image", "",
 		"runner image for trigger-spawned runner Jobs (k8s or warm fallback)")
 	triggerRunnerSA := fs.String("trigger-runner-sa", os.Getenv("SPARKWING_RUNNER_SA"),
 		"service account for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerPullSecret := fs.String("trigger-runner-image-pull-secret", os.Getenv("SPARKWING_IMAGE_PULL_SECRET"),
+	triggerRunnerPullSecret := fs.String("trigger-runner-image-pull-secret", "",
 		"imagePullSecret for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", os.Getenv("SPARKWING_RUNNER_CONTROLLER_URL"),
+	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", "",
 		"controller URL for trigger-spawned runner Jobs (defaults to --controller)")
-	triggerRunnerLogsURL := fs.String("trigger-runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"),
+	triggerRunnerLogsURL := fs.String("trigger-runner-logs-url", "",
 		"logs-service URL for trigger-spawned runner Jobs (defaults to --logs)")
 	triggerRunnerKubeconfig := fs.String("trigger-runner-kubeconfig", os.Getenv("KUBECONFIG"),
 		"kubeconfig path for creating trigger-spawned Jobs (empty = in-cluster)")
@@ -443,12 +443,12 @@ func runRunnerCLI(args []string, version string) error {
 	var triggerRunnerLabels multiFlag
 	fs.Var(&triggerRunnerLabels, "trigger-runner-label",
 		"static capability every trigger-spawned runner Job advertises (repeatable)")
-	var triggerRunnerNodeSelector multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
+	var triggerRunnerNodeSelector multiFlag
 	fs.Var(&triggerRunnerNodeSelector, "trigger-runner-node-selector",
-		"node selector for trigger-spawned runner Jobs, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
-	var triggerRunnerTolerations multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_TOLERATION"))
+		"node selector for trigger-spawned runner Jobs, key=value (repeatable)")
+	var triggerRunnerTolerations multiFlag
 	fs.Var(&triggerRunnerTolerations, "trigger-runner-toleration",
-		"toleration for trigger-spawned runner Jobs, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
+		"toleration for trigger-spawned runner Jobs, key[=value]:Effect (repeatable)")
 	warmModules := fs.String("warm-modules", os.Getenv("SPARKWING_WARM_MODULES"),
 		"comma-separated modules downloaded into GOMODCACHE at startup so the first pipeline compile after a "+
 			"restart is not fully cold; each entry may carry an @version, \"off\" warms nothing "+

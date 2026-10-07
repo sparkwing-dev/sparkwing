@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -77,47 +78,6 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 	}
 }
 
-var undocumentedEnvVars = []string{
-	"SPARKWING_AUTO_REGISTER_WORKTREES",
-	"SPARKWING_BAKED_BINARY",
-	"SPARKWING_BINARY_SOURCE",
-	"SPARKWING_BROKERED_ARTIFACTS",
-	"SPARKWING_BROKERED_NODE_CLAIM",
-	"SPARKWING_CHAOS_KEEP",
-	"SPARKWING_CHILD_LEASE_TOKEN",
-	"SPARKWING_DEBUG_PAUSE_AFTER",
-	"SPARKWING_DEBUG_PAUSE_BEFORE",
-	"SPARKWING_DEBUG_PAUSE_ON_FAILURE",
-	"SPARKWING_DISPATCH_WAIT_TIMEOUT",
-	"SPARKWING_DOCS_BASE_URL",
-	"SPARKWING_EXECUTION_CAPABILITY_STDIN",
-	"SPARKWING_FORCE_COLOR",
-	"SPARKWING_GITCACHE_CONCURRENCY",
-	"SPARKWING_IMAGE_PULL_SECRET",
-	"SPARKWING_LEASE_TOKEN",
-	"SPARKWING_LOCAL_ONLY",
-	"SPARKWING_LOG_LEVEL",
-	"SPARKWING_NAMESPACE",
-	"SPARKWING_NODE_SPEC_HASH",
-	"SPARKWING_NO_CACHE",
-	"SPARKWING_NO_UPDATE",
-	"SPARKWING_ONLY",
-	"SPARKWING_PROFILE",
-	"SPARKWING_REF",
-	"SPARKWING_RUNNER_CONTROLLER_URL",
-	"SPARKWING_RUNNER_IMAGE",
-	"SPARKWING_RUNNER_LOGS_URL",
-	"SPARKWING_RUNNER_NODE_SELECTOR",
-	"SPARKWING_RUNNER_TOLERATION",
-	"SPARKWING_SECRETS_PROFILE",
-	"SPARKWING_SQLITE_BUSY_TIMEOUT_MS",
-	"SPARKWING_STOP_AT",
-	"SPARKWING_STORE_WEDGE_BUDGET",
-	"SPARKWING_TESTLEAK_HOST",
-	"SPARKWING_TRIGGER_RUNNER",
-	"SPARKWING_WINGD_VERSION",
-}
-
 var userNamedEnvReads = map[string]string{
 	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
 	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
@@ -150,35 +110,37 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 
 	documented := allDocsText(t)
 	source := sourceDocsText(t)
-	recorded := map[string]bool{}
-	for _, name := range undocumentedEnvVars {
-		recorded[name] = true
-	}
-
 	for _, name := range names {
-		switch {
-		case docsMentionEnvVar(documented, name) && recorded[name]:
-			t.Errorf("%s is documented now; drop it from undocumentedEnvVars", name)
-		case !docsMentionEnvVar(documented, name) && !recorded[name]:
-			if docsMentionEnvVar(source, name) {
-				t.Errorf("docs/ names %s but the embedded mirror this check reads does not; "+
-					"run bash bin/sync-docs.sh and commit pkg/docs/", name)
-				break
-			}
-			t.Errorf("no docs page names %s, which the code reads", name)
+		if docsMentionEnvVar(documented, name) {
+			continue
 		}
+		if docsMentionEnvVar(source, name) {
+			t.Errorf("docs/ names %s but the embedded mirror this check reads does not; "+
+				"run bash bin/sync-docs.sh and commit pkg/docs/", name)
+			continue
+		}
+		t.Errorf("no docs page names %s, which the code reads; add it to docs/environment-variables.md", name)
 	}
 
+	reference, err := docs.ReadRaw("environment-variables")
+	if err != nil {
+		t.Fatal(err)
+	}
 	read := map[string]bool{}
 	for _, name := range names {
 		read[name] = true
+		if !docsMentionEnvVar(reference, name) {
+			t.Errorf("docs/environment-variables.md does not list %s, which the code reads", name)
+		}
 	}
-	for _, name := range undocumentedEnvVars {
+	for _, name := range envVarTokens.FindAllString(reference, -1) {
 		if !read[name] {
-			t.Errorf("undocumentedEnvVars lists unread variable %s; remove the entry", name)
+			t.Errorf("docs/environment-variables.md lists %s, which nothing reads; remove its row", name)
 		}
 	}
 }
+
+var envVarTokens = regexp.MustCompile(`\b` + envPrefix + `[A-Z0-9_]+\b`)
 
 func TestEnvVarWalkReadsNestedPackagesAndSkipsNestedModules(t *testing.T) {
 	root := t.TempDir()

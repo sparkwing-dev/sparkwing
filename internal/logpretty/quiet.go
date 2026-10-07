@@ -27,10 +27,6 @@ func NewQuietRenderer() *QuietRenderer {
 	}
 }
 
-func NewQuietRendererTo(w io.Writer, useColor bool) *QuietRenderer {
-	return &QuietRenderer{w: w, errW: w, useColor: useColor}
-}
-
 func (q *QuietRenderer) color(s, code string) string {
 	if !q.useColor {
 		return s

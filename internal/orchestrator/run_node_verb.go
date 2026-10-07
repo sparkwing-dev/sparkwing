@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -34,6 +35,7 @@ import (
 // exits. Without them the node runs unfenced, which is what an unclaimed local
 // invocation wants.
 func RunNodeCommand(args []string) error {
+	secrets.ShareRegisteredFromEnv()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"), "controller base URL")
 	logsURL := fs.String("logs", ResolveDevEnvURL("SPARKWING_LOGS_URL"), "logs-service URL")

@@ -1,6 +1,5 @@
 # pkg/backends
 
-func LayerSurfaces(base, over Surfaces) Surfaces
 type Spec struct {
 	Type string
 

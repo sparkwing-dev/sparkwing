@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -694,18 +693,4 @@ func contextWithPrincipal(ctx context.Context, p *Principal) context.Context {
 func PrincipalFromContext(ctx context.Context) (*Principal, bool) {
 	p, ok := ctx.Value(principalCtxKey{}).(*Principal)
 	return p, ok
-}
-
-// AuditFields returns slog.Attrs for the principal for structured
-// access logs.
-func AuditFields(ctx context.Context) []slog.Attr {
-	p, ok := PrincipalFromContext(ctx)
-	if !ok {
-		return []slog.Attr{slog.String("principal", authwire.AnonymousPrincipal)}
-	}
-	return []slog.Attr{
-		slog.String("principal", p.Name),
-		slog.String("kind", p.Kind),
-		slog.String("token_prefix", p.TokenPrefix),
-	}
 }

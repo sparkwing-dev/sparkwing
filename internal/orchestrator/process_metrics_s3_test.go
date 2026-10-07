@@ -49,7 +49,7 @@ func TestS3CoordinatedExecutionToleratesLostUnknownAccounting(t *testing.T) {
 			if err := c.AcknowledgeNodeExecutionStart(ctx, "run", "build", store.ExecutionStart{AttemptOrdinal: 1, ExecutorKind: store.ExecutorKindLocal, ExecutorID: "local"}); err == nil {
 				t.Fatal("shim unexpectedly supports execution acknowledgement")
 			}
-			backends := RemoteBackends(c, localLogs{paths: newInternalPaths(t)}, art, nil, 0)
+			backends := RemoteBackends(context.Background(), c, localLogs{paths: newInternalPaths(t)}, art, nil, 0)
 			if reject {
 				backends.State = rejectUnknownMetric{c}
 			}
