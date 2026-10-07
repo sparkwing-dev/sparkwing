@@ -56,3 +56,36 @@ func TestChildValuesMaskRecordKeepsFieldsNamedLikeASecret(t *testing.T) {
 		t.Fatalf("MaskRecord = %+v", rec)
 	}
 }
+
+func TestRegisterSharesAValueEqualToAnEarlierValuesEncoding(t *testing.T) {
+	var shared bytes.Buffer
+	shareMu.Lock()
+	shareTo = &shared
+	shareMu.Unlock()
+	t.Cleanup(func() {
+		shareMu.Lock()
+		shareTo = nil
+		shareMu.Unlock()
+	})
+	m := NewMasker()
+	first := "first-secret-value"
+	encoded := encodedForms(first)[len(encodedForms(first))-1]
+	m.Register(first)
+	m.Register(encoded)
+	m.Register(first)
+
+	sent := shared.String()
+	shareMu.Lock()
+	shareTo = nil
+	shareMu.Unlock()
+	launcher := &ChildValues{masker: NewMasker()}
+	launcher.take([]byte(sent))
+	for _, form := range encodedForms(encoded) {
+		if got := launcher.masker.Mask(form); got != "***" {
+			t.Errorf("launcher left %q unmasked (%q); it never learned the second value", form, got)
+		}
+	}
+	if lines := strings.Count(sent, "\n"); lines != 2 {
+		t.Errorf("shared %d values, want 2 (each original once)", lines)
+	}
+}
