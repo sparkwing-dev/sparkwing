@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -100,14 +101,18 @@ func ShareWithChild(cmd *exec.Cmd) (*ChildValues, error) {
 
 // Mask masks s with every value the child registered before it wrote s.
 func (v *ChildValues) Mask(s string) string {
+	return v.synced().Mask(s)
+}
+
+func (v *ChildValues) synced() *Masker {
 	v.mu.Lock()
 	// safety: the child writes a value here before Register returns, so any
-	// bytes still in the pipe may name a value s already holds.
+	// bytes still in the pipe may name a value the output already holds.
 	for !v.done && v.pending() > 0 {
 		v.cond.Wait()
 	}
 	v.mu.Unlock()
-	return v.masker.Mask(s)
+	return v.masker
 }
 
 func (v *ChildValues) take(b []byte) {
@@ -187,10 +192,32 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 	}
 	w.buf = append(w.buf[:0], w.buf[start:]...)
 	if len(w.buf) > maxMaskedLine {
-		w.emit(w.buf)
-		w.buf = w.buf[:0]
+		cut := safeCut(string(w.buf), w.v.synced().Values())
+		w.emit(w.buf[:cut])
+		w.buf = append(w.buf[:0], w.buf[cut:]...)
 	}
 	return len(p), nil
+}
+
+// safety: the split leaves no occurrence of a pattern across it and keeps the
+// last len(pattern)-1 bytes, where an occurrence finishing in later output could begin.
+func safeCut(s string, patterns []string) int {
+	cut := len(s)
+	for _, p := range patterns {
+		cut = min(cut, len(s)-len(p)+1)
+	}
+	// perf: overlapping occurrences could walk the split back to the start
+	// and hold the line forever, so at least half of it is always written.
+	for moved := true; moved && cut > len(s)/2; {
+		moved = false
+		for _, p := range patterns {
+			lo := max(0, cut-len(p)+1)
+			if i := strings.Index(s[lo:min(len(s), cut+len(p)-1)], p); i >= 0 && lo+i < cut {
+				cut, moved = lo+i, true
+			}
+		}
+	}
+	return max(cut, len(s)/2)
 }
 
 func (w *LineWriter) flush() {
