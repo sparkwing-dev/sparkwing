@@ -107,6 +107,8 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, store.ErrUnknownPayment):
 		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, store.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err)
 		return
 	case s.writeDisputeConflict(w, r, err, req.Reference, req.PaymentID):
 		return

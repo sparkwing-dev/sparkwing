@@ -660,6 +660,9 @@ func (req CreditGrantRequest) validate() error {
 	if !ValidCreditGrantKind(req.Kind) {
 		return fmt.Errorf("credits: unknown grant kind %q", req.Kind)
 	}
+	if strings.HasPrefix(req.Reference, unappliedPrefix) {
+		return fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
+	}
 	if req.Kind != CreditGrantReversal {
 		if req.AmountMicro <= 0 {
 			return errors.New("credits: grant amount must be positive")

@@ -1056,7 +1056,8 @@ type WarnedCardPayment struct {
 }
 
 // safety: this prefix marks the reversal keeping part of a payment off the
-// balance and each release of it, which a refund reads before reversing.
+// balance and each release of it; no caller reference may carry it, so a
+// refund never mistakes its own reference for that rest.
 const unappliedPrefix = "unapplied:"
 
 // safety: the payment's grant carries all of it so a refund or a dispute can

@@ -41,6 +41,9 @@ func (s *Store) ReversePayment(
 	if paymentID == "" || reference == "" {
 		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
 	}
+	if strings.HasPrefix(reference, unappliedPrefix) {
+		return CreditReversal{}, fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
+	}
 	id, err := newCreditID("grant")
 	if err != nil {
 		return CreditReversal{}, err
