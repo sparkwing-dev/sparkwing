@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
 )
@@ -21,8 +20,8 @@ func runHandleTriggerCLI(args []string) error {
 		"logs service URL (env: SPARKWING_LOGS_URL, falls back to $SPARKWING_HOME/dev.env)")
 	token := fs.String("token", takeAgentToken(),
 		"bearer token for controller + logs calls (env: SPARKWING_AGENT_TOKEN)")
-	heartbeat := fs.Duration("heartbeat", 5*time.Second,
-		"heartbeat cadence for the claim lease (cluster mode only)")
+	heartbeat := fs.Duration("heartbeat", 0,
+		"heartbeat cadence for the trigger claim (cluster mode only); 0 leaves it to the process that claimed the trigger, as the runner's trigger loop does")
 	runnerKind := fs.String("runner", "inprocess", "node runner: inprocess | k8s | warm")
 	k8sNamespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace for runner Jobs (k8s)")
 	k8sImage := fs.String("image", "", "runner image (k8s)")
