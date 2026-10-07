@@ -8,9 +8,13 @@ import { grantFor } from "./helpers.ts";
 
 const example = fileURLToPath(new URL("../examples/hello/pipeline.ts", import.meta.url));
 
-function runExample(args: string[], stdin: string, env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
+const lingering = fileURLToPath(new URL("./fixtures/lingering.ts", import.meta.url));
+
+function runExample(args: string[], stdin: string, env: Record<string, string> = {}, file = example): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [example, ...args], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [file, ...args], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const guard = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    child.on("close", () => clearTimeout(guard));
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
@@ -73,4 +77,15 @@ test("an unknown argument is a usage error", async () => {
   const { code, stderr } = await runExample(["serve"], "");
   assert.equal(code, 2);
   assert.match(stderr, /usage/);
+});
+
+test("the node process exits at end of stdin even when a body left an interval running", async () => {
+  const stdin = [
+    { id: "p", op: "plan", pipeline: "lingering", run: { run_id: "r1", pipeline: "lingering" } },
+    { id: "n", op: "run_node", node: "poll", attempt: 1 },
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n";
+  const { code, stdout, stderr } = await runExample(["--sw-node-protocol"], stdin, {}, lingering);
+  assert.equal(code, 0, `killed by the guard or failed: ${stderr}`);
+  const reply = stdout.trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l["reply"] === "n");
+  assert.deepEqual(reply?.["result"], { outcome: "success", output: { started: true } });
 });
