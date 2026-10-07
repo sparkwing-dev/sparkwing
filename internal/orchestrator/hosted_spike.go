@@ -160,6 +160,9 @@ func hostedCheck(snap planSnapshot) error {
 	if len(snap.Requires) > 0 {
 		return fmt.Errorf("hosted run: the pipeline requires runner labels %v, which the hosted spike does not place", snap.Requires)
 	}
+	if snap.PlanConc != nil || len(snap.PlanConcs) > 0 {
+		return errors.New("hosted run: the pipeline joins a plan-level concurrency group, which the hosted spike does not acquire")
+	}
 	deps := make(map[string][]string, len(snap.Nodes))
 	for _, n := range snap.Nodes {
 		if _, dup := deps[n.ID]; dup {

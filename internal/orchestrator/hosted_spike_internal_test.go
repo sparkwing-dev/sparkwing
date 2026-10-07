@@ -69,3 +69,17 @@ func TestHostedCheck_RefusesPlacementItDoesNotEnforce(t *testing.T) {
 		})
 	}
 }
+
+func TestHostedCheck_RefusesPlanLevelConcurrency(t *testing.T) {
+	for name, snap := range map[string]planSnapshot{
+		"plan_concurrency":        {PlanConc: &snapshotConc{}, Nodes: []snapshotNode{{ID: "a"}}},
+		"plan_concurrency_groups": {PlanConcs: []snapshotConc{{}}, Nodes: []snapshotNode{{ID: "a"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := hostedCheck(snap)
+			if err == nil || !strings.Contains(err.Error(), "plan-level concurrency") {
+				t.Fatalf("err = %v, want a refusal", err)
+			}
+		})
+	}
+}
