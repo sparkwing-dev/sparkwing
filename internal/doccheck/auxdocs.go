@@ -119,9 +119,6 @@ func checkAuxDocs(repoRoot string) bool {
 			}
 		}
 
-		if unshippedDesignRE.Match(data) {
-			continue
-		}
 		for _, inv := range extractInvocations(rel, doc) {
 			verbs++
 			if unknown := resolvePath(inv.tokens, valid, posArgs); unknown != "" {

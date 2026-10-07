@@ -114,7 +114,7 @@ the `metering` feature in its signed license. A signed `multi-team` license
 includes metering, including licenses issued before `metering` was named.
 Without either feature, credit and team billing routes return `404`, claims
 never check a balance or write charges, and the dashboard omits Billing.
-Customers who need metering can contact Korey for help running sparkwing-ops.
+Customers who need metering can ask the Sparkwing maintainers for help running sparkwing-ops.
 
 Cloud runner time is prepaid. One credit is $0.001, and that value is fixed:
 prices change by moving rates, never by changing the credit. Amounts are
@@ -524,7 +524,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
-| `runs.write`      | POST `/api/v1/triggers`: starting new work. `/gitcache/refresh` fetches any repository with the operator's cache credential, so it takes `admin`; the CLI warms the cache with it before a trigger and proceeds without it |
+| `runs.write`      | POST `/api/v1/triggers`: starting new work |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
@@ -537,7 +537,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.

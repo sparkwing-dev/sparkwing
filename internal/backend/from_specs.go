@@ -41,7 +41,7 @@ func FromSpecs(
 	}
 
 	switch stateSpec.Type {
-	case backends.TypeSQLite, backends.TypePostgres, backends.TypeMySQL:
+	case backends.TypeSQLite, backends.TypePostgres:
 		ss, err := storeurl.OpenStateStoreFromSpec(ctx, *stateSpec, profileLookup)
 		if err != nil {
 			return nil, nopCloser{}, fmt.Errorf("state backend: %w", err)
@@ -54,7 +54,7 @@ func FromSpecs(
 		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, false))
 		return b, &multiCloser{closers: append([]io.Closer{st}, logCloser...)}, nil
 
-	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
+	case backends.TypeS3:
 		art, err := storeurl.OpenArtifactStoreFromSpec(ctx, *stateSpec, profileLookup)
 		if err != nil {
 			return nil, nopCloser{}, fmt.Errorf("artifact backend: %w", err)
@@ -84,10 +84,10 @@ func FromSpecs(
 func capabilitiesFor(state, logs, artifacts *backends.Spec, readOnly bool) Capabilities {
 	mode := "local"
 	switch state.Type {
-	case backends.TypePostgres, backends.TypeMySQL:
+	case backends.TypePostgres:
 		mode = "shared-db"
-	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
-		mode = state.Type + "-only"
+	case backends.TypeS3:
+		mode = "s3-only"
 	case backends.TypeController:
 		mode = "cluster"
 	}
@@ -108,7 +108,7 @@ func capabilitiesFor(state, logs, artifacts *backends.Spec, readOnly bool) Capab
 		ReadOnly: readOnly,
 	}
 	switch state.Type {
-	case backends.TypeSQLite, backends.TypePostgres, backends.TypeMySQL, backends.TypeController:
+	case backends.TypeSQLite, backends.TypePostgres, backends.TypeController:
 		c.Features = append(c.Features, "secrets", "approvals", "cross-pipeline-refs")
 	}
 	return c
@@ -135,13 +135,9 @@ func ParseInlineSpec(s string) (*backends.Spec, error) {
 		return &backends.Spec{Type: backends.TypeSQLite, Path: path}, nil
 	case "postgres", "postgresql":
 		return &backends.Spec{Type: backends.TypePostgres, URL: s}, nil
-	case "mysql":
-		return &backends.Spec{Type: backends.TypeMySQL, URL: s}, nil
-	case "s3", "gcs", "azure-blob":
-		ty := strings.ToLower(u.Scheme)
-		bucket := u.Host
+	case "s3":
 		prefix := strings.TrimPrefix(u.Path, "/")
-		return &backends.Spec{Type: ty, Bucket: bucket, Prefix: prefix}, nil
+		return &backends.Spec{Type: backends.TypeS3, Bucket: u.Host, Prefix: prefix}, nil
 	case "controller":
 		profile := u.Host
 		if profile == "" {
@@ -160,7 +156,7 @@ func ParseInlineSpec(s string) (*backends.Spec, error) {
 	case "stdout":
 		return &backends.Spec{Type: backends.TypeStdout}, nil
 	default:
-		return nil, fmt.Errorf("unknown spec scheme %q (expected sqlite, postgres, s3, gcs, azure-blob, controller, fs, stdout)", u.Scheme)
+		return nil, fmt.Errorf("unknown spec scheme %q (expected sqlite, postgres, s3, controller, fs, stdout)", u.Scheme)
 	}
 }
 

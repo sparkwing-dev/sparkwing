@@ -682,7 +682,6 @@ func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
 		{"POST", "/release", map[string]any{"holder_id": "run-own/b", "outcome": "success"}},
 		{"GET", "/holder?holder_id=run-own%2Fb", nil},
 		{"GET", "/resolve?run_id=run-own&node_id=b", nil},
-		{"GET", "/notify?run_id=run-own&node_id=b", nil},
 	} {
 		if !siblingHeld() {
 			seed()

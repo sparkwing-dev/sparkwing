@@ -177,12 +177,12 @@ func TestCoordinatedLogBackend_UnopenableSurfaceFailsTheNode(t *testing.T) {
 	_, err := coordinatedLogBackend(context.Background(), &profile.Profile{
 		Name:  "shared-team",
 		State: &backends.Spec{Type: backends.TypeSQLite, Path: filepath.Join(t.TempDir(), "state.db")},
-		Logs:  &backends.Spec{Type: backends.TypeGCS, Bucket: "team"},
+		Logs:  &backends.Spec{Type: "ftp", Bucket: "team"},
 	})
 	if err == nil {
 		t.Fatal("an unopenable logs surface did not fail the node")
 	}
-	for _, want := range []string{"shared-team", "gcs"} {
+	for _, want := range []string{"shared-team", "ftp"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
 		}

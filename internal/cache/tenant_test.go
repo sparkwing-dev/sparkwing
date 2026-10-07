@@ -1,6 +1,10 @@
 package cache
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,13 +24,37 @@ import (
 
 func testGrantKey(token string) string { return token + "-grant-key" }
 
-func grantFor(t *testing.T, token, team string) string {
+var (
+	testClaim = &authwire.CacheClaim{
+		Kind: authwire.CacheClaimToken, NodeID: "build", Generation: 1,
+		Principal: "agent:runner", TokenPrefix: "swc_test",
+	}
+	testScope = &authwire.CacheScope{Repo: "github.com/acme/app", Refs: []string{"refs/heads/main"}}
+)
+
+func mintGrant(t *testing.T, key, team, run string, now time.Time, scope *authwire.CacheScope) string {
 	t.Helper()
-	g, err := authwire.MintCacheGrant(testGrantKey(token), team, "run-"+team, time.Now(), time.Hour)
+	g, err := authwire.MintClaimCacheGrant(key, team, run, now, time.Hour, testClaim, scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return g
+}
+
+func grantFor(t *testing.T, token, team string) string {
+	t.Helper()
+	return mintGrant(t, testGrantKey(token), team, "run-"+team, time.Now(), testScope)
+}
+
+// safety: the derivation is the wire contract authwire pins, repeated here because a controller
+// that predates claims and scopes signed grants authwire no longer mints.
+func signWholeTeamGrant(key, team string, expires time.Time) string {
+	payload := fmt.Sprintf(`{"t":%q,"r":"run-1","e":%d}`, team, expires.Unix())
+	body := authwire.CacheGrantPrefix + base64.RawURLEncoding.EncodeToString([]byte(payload))
+	derived := sha256.Sum256([]byte("sparkwing cache grant v1\x00" + key))
+	mac := hmac.New(sha256.New, derived[:])
+	mac.Write([]byte(body))
+	return body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func send(t *testing.T, srv *httptest.Server, method, path, bearer, body string) (int, string) {
@@ -58,7 +86,6 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 	writes := []struct{ method, write, read string }{
 		{http.MethodPut, "/bin/deadbeef", "/bin/deadbeef"},
 		{http.MethodPut, "/cache/go-mod-abc", "/cache/go-mod-abc"},
-		{http.MethodPost, "/artifacts/run-1?path=out.txt", "/artifacts/run-1?glob=out.txt"},
 	}
 	for _, w := range writes {
 		if code, body := send(t, srv, w.method, w.write, teamA, "team-a secret"); code/100 != 2 {
@@ -82,23 +109,17 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 	}
 }
 
-// A grant opens the blob stores and cloning. Seeding, archives, uploads and the
-// admin routes act on the shared mirrors or the whole store.
+// A grant opens the blob stores and cloning. The admin routes act on the
+// whole store.
 func TestGrantsDoNotReachMirrorsOrAdminRoutes(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	grant := grantFor(t, token, "team-a")
 
 	operatorOnly := []struct{ method, path string }{
-		{http.MethodGet, "/repos"},
-		{http.MethodGet, "/archive?repo=https://github.com/acme/private.git&ref=main"},
-		{http.MethodGet, "/file?repo=https://github.com/acme/private.git&ref=main&path=README"},
-		{http.MethodPost, "/git/refresh?repo=https://github.com/acme/private.git"},
-		{http.MethodPost, "/sync/seed?repo=https://github.com/acme/private.git&sha=" + strings.Repeat("a", 40)},
-		{http.MethodPost, "/sync/negotiate"},
-		{http.MethodPost, "/upload"},
-		{http.MethodGet, "/uploads/abc"},
 		{http.MethodPost, "/admin/store-ceiling/thaw"},
+		{http.MethodPost, "/admin/store-ceiling/measure"},
+		{http.MethodDelete, "/admin/teams/team-a"},
 	}
 	for _, r := range operatorOnly {
 		if code, body := send(t, srv, r.method, r.path, grant, ""); code != http.StatusUnauthorized {
@@ -107,15 +128,43 @@ func TestGrantsDoNotReachMirrorsOrAdminRoutes(t *testing.T) {
 	}
 }
 
+// The source-read, upload, seed, refresh and job-artifact routes are gone,
+// so even the operator token reaches nothing there.
+func TestRemovedRoutesAnswerNotFound(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+
+	for _, r := range []struct{ method, path string }{
+		{http.MethodGet, "/archive?repo=https://github.com/acme/app.git&branch=main"},
+		{http.MethodGet, "/file?repo=https://github.com/acme/app.git&branch=main&path=README"},
+		{http.MethodGet, "/tree-hash?repo=https://github.com/acme/app.git&branch=main"},
+		{http.MethodGet, "/branch-contains?repo=https://github.com/acme/app.git&branch=main&commit=main"},
+		{http.MethodPost, "/upload"},
+		{http.MethodGet, "/uploads/abc"},
+		{http.MethodPost, "/sync/negotiate"},
+		{http.MethodPost, "/sync/seed?repo=https://github.com/acme/app.git&sha=" + strings.Repeat("a", 40)},
+		{http.MethodPost, "/git/refresh?repo=https://github.com/acme/app.git"},
+		{http.MethodPost, "/artifacts/job-1?path=out.txt"},
+		{http.MethodGet, "/artifacts/job-1?glob=*"},
+	} {
+		// safety: /git/refresh now lands on the clone route, which reads "refresh" as a repository name.
+		want := http.StatusNotFound
+		if strings.HasPrefix(r.path, "/git/") {
+			want = http.StatusBadRequest
+		}
+		if code, body := send(t, srv, r.method, r.path, token, "x"); code != want {
+			t.Errorf("%s %s with the operator token = %d, want %d: %s", r.method, r.path, code, want, body)
+		}
+	}
+}
+
 func TestCacheRefusesGrantsItCannotVerify(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	forged := grantFor(t, "some-other-token", "team-a")
-	expired, err := authwire.MintCacheGrant(testGrantKey(token), "team-a", "run-1", time.Now().Add(-2*time.Hour), time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, bearer := range map[string]string{"forged": forged, "expired": expired, "none": ""} {
+	expired := mintGrant(t, testGrantKey(token), "team-a", "run-1", time.Now().Add(-2*time.Hour), testScope)
+	wholeTeam := signWholeTeamGrant(testGrantKey(token), "team-a", time.Now().Add(time.Hour))
+	for name, bearer := range map[string]string{"forged": forged, "expired": expired, "whole-team": wholeTeam, "none": ""} {
 		if code, _ := send(t, srv, http.MethodPut, "/bin/deadbeef", bearer, "x"); code != http.StatusUnauthorized {
 			t.Errorf("%s grant PUT /bin = %d, want 401", name, code)
 		}
@@ -257,10 +306,7 @@ func TestStoreCeilingCountsTheMirrors(t *testing.T) {
 func TestCacheVerifiesGrantsWithTheGrantKeyAlone(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
-	byToken, err := authwire.MintCacheGrant(token, "team-a", "run-1", time.Now(), time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	byToken := mintGrant(t, token, "team-a", "run-1", time.Now(), testScope)
 	if code, _ := send(t, srv, http.MethodPut, "/bin/deadbeef", byToken, "x"); code != http.StatusUnauthorized {
 		t.Errorf("a grant signed with the operator token = %d, want 401", code)
 	}

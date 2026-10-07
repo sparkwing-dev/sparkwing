@@ -153,11 +153,6 @@ func TestDeclaredRepo_AWebhookRunStillResolvesItsOwnSecrets(t *testing.T) {
 	c := client.NewWithToken(f.url, nil, raw)
 
 	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "deploy-web", false)
-	if err := f.store.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
-		Pipeline: "deploy-web", Repo: "acme/web", Secret: "hook-secret",
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err := f.store.CreateTrigger(ctx, store.Trigger{
 		ID: "run-web", Pipeline: "deploy-web", Status: "running", Repo: "acme/web",
 		RepoURL: "git@github.com:acme/web.git", WebhookDelivery: "delivery-1",

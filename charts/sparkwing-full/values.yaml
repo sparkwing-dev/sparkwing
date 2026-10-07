@@ -11,7 +11,7 @@
 #   1. controller.*               -- the orchestrator
 #   2. web.*                      -- the dashboard SPA host
 #   3. ingress.*                  -- optional public ingress for the dashboard
-#   4. serviceAccount / rbac      -- shared identity / permissions
+#   4. serviceAccount             -- the controller's identity
 #   5. secrets.*                  -- references to pre-created Secrets
 #   6. imagePullSecrets / security defaults
 #   7. sparkwing-runner-bundle.*  -- sub-chart pass-through
@@ -46,31 +46,6 @@ controller:
   # without a bearer, so only an in-cluster scraper reaches it.
   metricsPort: 0
 
-  # The controller's warm-PVC pool feature (creates ephemeral
-  # warmer pods to pre-pull images onto PVCs). Requires K8s API
-  # access in the install namespace; rbac.create must be true.
-  pool:
-    enabled: true
-    # Empty = use install namespace. Override only if the controller
-    # should manage a pool in a *different* namespace.
-    namespace: ""
-
-  # Webhook signing. Enables HMAC verification on
-  # POST /webhooks/github/{pipeline}. Reference an existing Secret
-  # (rotation = kubectl edit secret + rollout restart, no helm
-  # upgrade needed).
-  githubWebhookSecret:
-    # Empty name disables the env var injection (webhooks accept
-    # without HMAC verification -- fine for kind/dev, not prod).
-    name: ""
-    key: webhook-secret
-
-  # GitHub commit statuses for pull_request webhook runs. The token
-  # needs commit-status write access to every repository whose webhook
-  # reaches this controller. Empty name disables status reporting.
-  githubStatusToken:
-    name: ""
-    key: token
 
   # Memory ceiling in MiB for concurrent argon2id password and token
   # hashing. Each hash holds 64 MiB while it runs, so the default
@@ -94,13 +69,14 @@ controller:
   # live for the hold above. Empty keeps the controller default of 30s.
   placementLiveness: ""
 
-  # Runs one principal may create in a rolling hour. A webhook delivery counts
-  # against the repository it names. Past the cap the controller answers 429
+  # Runs one principal may create in a rolling hour. Each run a GitHub App
+  # delivery creates counts against the team the installation is bound to.
+  # Past the cap the controller answers 429
   # with a Retry-After. The budget lives in controller memory, so a restart
   # refills every principal. 0 is unlimited.
   maxRunsPerPrincipalHour: 0
 
-  # Pending-trigger depth of one team past which that team's new webhook
+  # Pending-trigger depth of one team past which that team's new GitHub App
   # deliveries and API submissions are shed with 503 and a Retry-After rather
   # than queued. 0 never sheds.
   shedQueueDepth: 0
@@ -389,11 +365,10 @@ ingress:
   allowInsecure: false
 
 # -----------------------------------------------------------------------
-# 4. ServiceAccount + RBAC for the controller. The controller needs
-#    K8s API access for its warm-PVC pool: namespaces/get, PVC CRUD,
-#    pods CRUD, configmaps/events read, plus a small ClusterRole on
-#    storage.k8s.io/storageclasses for the startup default-class
-#    probe.
+# 4. ServiceAccount for the controller. The controller makes no
+#    Kubernetes API calls, so the chart grants it no Role and mounts no
+#    API token; the account exists to carry IRSA / Workload Identity
+#    annotations for S3 and similar cloud access.
 #
 #    The runner-side SA + RBAC is managed by the sparkwing-runner-bundle
 #    sub-chart -- see `sparkwing-runner-bundle.serviceAccount` /
@@ -409,18 +384,6 @@ serviceAccount:
   # Annotations on the SA. Common case: IRSA (EKS) role binding for
   # ECR pulls, S3 backups, etc.
   annotations: {}
-
-rbac:
-  # Create the namespace-scoped Role + RoleBinding for the
-  # controller's pool feature. Set false to drop the chart-managed
-  # RBAC (e.g. you've pre-applied your own).
-  create: true
-  # Cluster-scoped read on storage.k8s.io/storageclasses for the
-  # startup default-class probe. Without it the controller logs a
-  # one-line "skipped: list StorageClasses: forbidden" warning at
-  # boot but otherwise functions. Set false in clusters where you
-  # can't grant ClusterRole.
-  clusterStorageClasses: true
 
 # -----------------------------------------------------------------------
 # 5. Image pull secrets applied to controller + web. The runner-side

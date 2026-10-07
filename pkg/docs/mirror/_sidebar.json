@@ -46,8 +46,7 @@
         "hooks",
         "crons",
         "api",
-        "api-reference",
-        "mcp"
+        "api-reference"
       ]
     },
     {
@@ -62,7 +61,6 @@
         "scheduling",
         "github-actions-runners",
         "github-app",
-        "warm-pool",
         "gitcache",
         "git-credentials"
       ]
@@ -97,5 +95,5 @@
       ]
     }
   ],
-  "excluded": ["proposals/", "migrations/", "changelog-style"]
+  "excluded": ["migrations/"]
 }

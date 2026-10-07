@@ -8,9 +8,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
+var (
+	testClaim = &authwire.CacheClaim{Kind: authwire.CacheClaimToken, NodeID: "build", Generation: 1, Principal: "agent:a", TokenPrefix: "swc_abc"}
+	testScope = &authwire.CacheScope{Repo: "github.com/acme/app", Refs: []string{"refs/heads/main"}}
+)
+
+func mint(key, team, run string, now time.Time, ttl time.Duration) (string, error) {
+	return authwire.MintClaimCacheGrant(key, team, run, now, ttl, testClaim, testScope)
+}
+
 func TestCacheGrantVerifiesOnlyWhatTheTokenSigned(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	raw, err := authwire.MintCacheGrant("operator-token", "team-a", "run-1", now, time.Hour)
+	raw, err := mint("operator-token", "team-a", "run-1", now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +35,7 @@ func TestCacheGrantVerifiesOnlyWhatTheTokenSigned(t *testing.T) {
 		t.Error("an expired grant verified")
 	}
 
-	other, err := authwire.MintCacheGrant("operator-token", "team-b", "run-1", now, time.Hour)
+	other, err := mint("operator-token", "team-b", "run-1", now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +50,7 @@ func TestCacheGrantVerifiesOnlyWhatTheTokenSigned(t *testing.T) {
 
 func TestCacheGrantRefusesATeamThatCouldLeaveItsDirectory(t *testing.T) {
 	for _, team := range []string{"", "..", "a/b", "Team", "-a"} {
-		if _, err := authwire.MintCacheGrant("operator-token", team, "run-1", time.Now(), time.Hour); err == nil {
+		if _, err := mint("operator-token", team, "run-1", time.Now(), time.Hour); err == nil {
 			t.Errorf("minted a grant for team %q", team)
 		}
 	}
@@ -50,11 +59,12 @@ func TestCacheGrantRefusesATeamThatCouldLeaveItsDirectory(t *testing.T) {
 func TestCacheGrantWireFormatIsStable(t *testing.T) {
 	// safety: the controller mints and the cache verifies on possibly different builds,
 	// so the MAC key derivation and payload encoding are a wire contract.
-	raw, err := authwire.MintCacheGrant("k", "team-a", "r", time.Unix(1_800_000_000, 0), time.Hour)
+	raw, err := mint("k", "team-a", "r", time.Unix(1_800_000_000, 0), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "swcg1.eyJ0IjoidGVhbS1hIiwiciI6InIiLCJlIjoxODAwMDAzNjAwfQ.8evRyDhk8hVXLPYuYmoZ7GWongdZ7Kv8Hjg_gPkCXcM"
+	const want = "swcg1.eyJ0IjoidGVhbS1hIiwiciI6InIiLCJlIjoxODAwMDAzNjAwLCJjIjp7ImsiOiJjbGFpbSIsIm4iOiJidWlsZCIsImciOjEsInAiOiJhZ2VudDphIiwidCI6InN3Y19hYmMifSwicyI6eyJwIjoiZ2l0aHViLmNvbS9hY21lL2FwcCIsImYiOlsicmVmcy9oZWFkcy9tYWluIl19fQ" +
+		".hs8lTK_F21V7nW1hEF833LS0LrD0QsfNkQ2R2y5X4TY"
 	if raw != want {
 		t.Fatalf("grant = %s, want %s", raw, want)
 	}
@@ -63,11 +73,29 @@ func TestCacheGrantWireFormatIsStable(t *testing.T) {
 func TestCacheGrantMintRefusesMissingInputs(t *testing.T) {
 	now := time.Now()
 	cases := map[string]func() (string, error){
-		"blank key": func() (string, error) { return authwire.MintCacheGrant("  ", "team-a", "run-1", now, time.Hour) },
-		"no run":    func() (string, error) { return authwire.MintCacheGrant("k", "team-a", "", now, time.Hour) },
-		"zero ttl":  func() (string, error) { return authwire.MintCacheGrant("k", "team-a", "run-1", now, 0) },
+		"blank key": func() (string, error) { return mint("  ", "team-a", "run-1", now, time.Hour) },
+		"no run":    func() (string, error) { return mint("k", "team-a", "", now, time.Hour) },
+		"zero ttl":  func() (string, error) { return mint("k", "team-a", "run-1", now, 0) },
 	}
 	for name, mint := range cases {
+		if raw, err := mint(); err == nil {
+			t.Errorf("%s: minted %q", name, raw)
+		}
+	}
+}
+
+// A grant with no claim or no scope opened the team's whole tree on its
+// signature alone, so none is minted.
+func TestCacheGrantMintRefusesAGrantWithoutClaimOrScope(t *testing.T) {
+	now := time.Now()
+	for name, mint := range map[string]func() (string, error){
+		"no claim": func() (string, error) {
+			return authwire.MintClaimCacheGrant("k", "team-a", "run-1", now, time.Hour, nil, testScope)
+		},
+		"no scope": func() (string, error) {
+			return authwire.MintClaimCacheGrant("k", "team-a", "run-1", now, time.Hour, testClaim, nil)
+		},
+	} {
 		if raw, err := mint(); err == nil {
 			t.Errorf("%s: minted %q", name, raw)
 		}

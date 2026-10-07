@@ -213,40 +213,6 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 	}
 }
 
-func TestRun_ArtifactsEndpoint(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-
-	home := t.TempDir()
-	artRoot := filepath.Join(t.TempDir(), "remote-art")
-	as, err := fs.NewArtifactStore(artRoot)
-	if err != nil {
-		t.Fatalf("NewArtifactStore: %v", err)
-	}
-	if err := as.Put(context.Background(), "abcd1234",
-		readerOf("hello-artifact")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-
-	addr := startLocalws(t, Options{
-		Home:               home,
-		ArtifactStore:      as,
-		ArtifactStoreLabel: "fs",
-	})
-
-	resp := mustGet(t, "http://"+addr+"/api/v1/artifacts/abcd1234")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "hello-artifact" {
-		t.Errorf("body = %q", body)
-	}
-}
-
 // safety: the real bundle is gitignored, so a checkout that has not built the
 // dashboard has none to serve; the suite carries its own shell instead.
 func fixtureShell() fstest.MapFS {

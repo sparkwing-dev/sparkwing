@@ -131,6 +131,10 @@ func TestFindTriggerByWebhookReplay(t *testing.T) {
 	if err := st.CreateTrigger(ctx, seed); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		name      string
@@ -144,7 +148,7 @@ func TestFindTriggerByWebhookReplay(t *testing.T) {
 		{"empty arguments never match the default", "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := st.FindTriggerByWebhookReplay(ctx, tc.replayKey, tc.delivery)
+			got, err := tenant.FindTriggerByWebhookReplay(ctx, tc.replayKey, tc.delivery)
 			if tc.wantID == "" {
 				if !errors.Is(err, store.ErrNotFound) {
 					t.Fatalf("err = %v, want ErrNotFound", err)

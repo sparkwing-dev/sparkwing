@@ -301,11 +301,10 @@ func TestKubernetesE2EExistingClusterUninstallsOnlyItsAttemptedRelease(t *testin
 	attemptOwner := strings.Index(got, "--labels sparkwing.dev/e2e-owner="+kubernetesE2ETestOwner)
 	ownedList := strings.Index(got, "list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kubernetesE2ETestOwner)
 	labelReleasePVCs := strings.Index(got, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
-	labelPoolPVCs := strings.Index(got, "label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache")
 	uninstall := strings.Index(got, "uninstall sparkwing --namespace sparkwing-e2e")
 	ownedDelete := strings.Index(got, "delete deployment,service,configmap,secret,persistentvolumeclaim -l sparkwing.dev/e2e-owned=true,sparkwing.dev/e2e-owner="+kubernetesE2ETestOwner)
 	if attempt < 0 || attemptOwner < attempt || ownedList < attemptOwner || labelReleasePVCs < ownedList ||
-		labelPoolPVCs < labelReleasePVCs || uninstall < labelPoolPVCs || ownedDelete < uninstall {
+		uninstall < labelReleasePVCs || ownedDelete < uninstall {
 		t.Fatalf("attempted release was not ownership-proved before labeling PVCs and uninstalling:\n%s", got)
 	}
 }
@@ -339,10 +338,9 @@ func TestKubernetesE2EExistingClusterReprovesDeployedReleaseBeforeCleanup(t *tes
 	}
 	afterProof := got[ownedList:]
 	labelReleasePVCs := strings.Index(afterProof, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
-	labelPoolPVCs := strings.Index(afterProof, "label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache")
 	uninstall := strings.Index(afterProof, "uninstall sparkwing --namespace sparkwing-e2e")
 	ownedDelete := strings.Index(afterProof, "delete deployment,service,configmap,secret,persistentvolumeclaim -l sparkwing.dev/e2e-owned=true,sparkwing.dev/e2e-owner="+kubernetesE2ETestOwner)
-	if labelReleasePVCs < 0 || labelPoolPVCs < labelReleasePVCs || uninstall < labelPoolPVCs || ownedDelete < uninstall {
+	if labelReleasePVCs < 0 || uninstall < labelReleasePVCs || ownedDelete < uninstall {
 		t.Fatalf("deployed release ownership did not authorize cleanup in order:\n%s", afterProof)
 	}
 }
@@ -441,13 +439,8 @@ func TestKubernetesE2EExistingClusterRetainsReleaseWhenPVCAdoptionIsIncomplete(t
 		t.Fatalf("cleanup did not prove current release ownership:\n%s", got)
 	}
 	afterProof := got[ownedList:]
-	for _, required := range []string{
-		"label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing",
-		"label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache",
-	} {
-		if !strings.Contains(afterProof, required) {
-			t.Fatalf("cleanup did not attempt PVC adoption via %q:\n%s", required, afterProof)
-		}
+	if !strings.Contains(afterProof, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing") {
+		t.Fatalf("cleanup did not attempt PVC adoption:\n%s", afterProof)
 	}
 	for _, forbidden := range []string{" uninstall ", " delete "} {
 		if strings.Contains(afterProof, forbidden) {
@@ -554,11 +547,9 @@ func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *tes
 		"configmap sparkwing-k8s-fixture",
 		"initContainers:",
 		"readinessProbe:",
-		"invalid webhook returned $invalid_webhook_status, want 401",
-		"sha256=0000000000000000000000000000000000000000000000000000000000000000",
+		"invalid trigger token returned $invalid_trigger_status, want 401",
 		".runs | length == 0",
-		"X-Hub-Signature-256",
-		"/webhooks/github/${pipeline}",
+		"/api/v1/triggers",
 		"/api/v1/tokens",
 		"/api/v1/agents",
 		"/logs/prove-controller-runner-logs",
@@ -614,10 +605,10 @@ func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *tes
 	if got := strings.Count(script, `start_forward "$controller_service" 80`); got != 4 {
 		t.Fatalf("controller forward starts = %d, want bootstrap, authenticated, restarted, and reinstalled", got)
 	}
-	invalidWebhook := strings.Index(script, "k8s-e2e: proving invalid webhook authentication")
-	validWebhook := strings.Index(script, "send_webhook k8s-success")
-	if invalidWebhook < 0 || validWebhook < 0 || invalidWebhook > validWebhook {
-		t.Fatal("Kubernetes harness does not reject an invalid HMAC before its first valid webhook")
+	invalidTrigger := strings.Index(script, "k8s-e2e: proving invalid trigger authentication")
+	validTrigger := strings.Index(script, "submit_trigger k8s-success")
+	if invalidTrigger < 0 || validTrigger < 0 || invalidTrigger > validTrigger {
+		t.Fatal("Kubernetes harness does not reject an invalid token before its first valid trigger")
 	}
 	fixture := readHostedCIFile(t, "testdata/k8s-e2e/repo/.sparkwing/jobs/k8s.go")
 	for _, marker := range []string{
@@ -739,7 +730,7 @@ func runWaitRunStatus(t *testing.T, responses ...string) (scriptResult, int) {
 	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
 	waitFunction := "wait_run_status() {\n" + between(t, script,
 		"wait_run_status() {\n",
-		"\n}\n\necho \"k8s-e2e: proving invalid webhook authentication\"",
+		"\n}\n\necho \"k8s-e2e: proving invalid trigger authentication\"",
 	) + "\n}\n"
 	responseDir := t.TempDir()
 	for i, response := range responses {

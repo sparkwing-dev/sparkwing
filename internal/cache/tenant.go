@@ -40,8 +40,8 @@ func callerFrom(r *http.Request) cacheCaller {
 
 var grantKey string
 
-// safety: seeding, refresh, archives, uploads and admin routes stay behind requireToken,
-// because the mirrors are shared and a seed lands one team's source in them.
+// safety: the repository listing and admin routes stay behind requireToken, because they reach
+// every team's trees and the operator's mirrors.
 func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 	token, key := apiToken, grantKey
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -65,11 +65,10 @@ func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 }
 
 type blobDirs struct {
-	artifacts string
-	bins      string
-	cache     string
-	tenant    bool
-	reads     []blobDirs
+	bins   string
+	cache  string
+	tenant bool
+	reads  []blobDirs
 }
 
 func (d blobDirs) readOrder() []blobDirs {
@@ -90,28 +89,26 @@ func (d blobDirs) find(kind func(blobDirs) string, name string) string {
 	return filepath.Join(kind(d), name)
 }
 
-func binsOf(d blobDirs) string      { return d.bins }
-func cachesOf(d blobDirs) string    { return d.cache }
-func artifactsOf(d blobDirs) string { return d.artifacts }
+func binsOf(d blobDirs) string   { return d.bins }
+func cachesOf(d blobDirs) string { return d.cache }
 
 func dirsFor(r *http.Request) (blobDirs, error) {
 	c := callerFrom(r)
 	if c.team == "" {
-		return blobDirs{artifacts: artifactsDir, bins: binsDir, cache: cacheDir}, nil
+		return blobDirs{bins: binsDir, cache: cacheDir}, nil
 	}
 	var trees []blobDirs
 	for _, prefix := range c.prefixes() {
 		root := filepath.Join(teamsDir, c.team, filepath.FromSlash(prefix))
 		trees = append(trees, blobDirs{
-			artifacts: filepath.Join(root, "artifacts"),
-			bins:      filepath.Join(root, "bins"),
-			cache:     filepath.Join(root, "cache"),
-			tenant:    true,
+			bins:   filepath.Join(root, "bins"),
+			cache:  filepath.Join(root, "cache"),
+			tenant: true,
 		})
 	}
 	d := trees[0]
 	d.reads = trees
-	for _, dir := range []string{d.artifacts, d.bins, d.cache} {
+	for _, dir := range []string{d.bins, d.cache} {
 		// #nosec G703 -- the team is a DNS-safe slug a verified grant carried
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return blobDirs{}, err
@@ -151,7 +148,7 @@ func grantMayUseMirror(name, repoURL string) bool {
 
 func (c cacheCaller) operator() bool { return c.team == "" || c.operatorGrant() }
 
-// safety: a seed or a credential the cache inherits puts private objects in the operator's mirror of
+// safety: a credential the cache inherits puts private objects in the operator's mirror of
 // even an https URL, so another team's grant reads only the separate public mirror of an https origin
 // the operator registered, which the cache fills with no credential.
 func (c cacheCaller) mayReadMirror(name string) bool {

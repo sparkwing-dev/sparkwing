@@ -23,6 +23,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const webhookBodyLimit = 1 << 20
+
+var defaultPullRequestActions = map[string]struct{}{
+	"opened":      {},
+	"synchronize": {},
+	"reopened":    {},
+}
+
 type githubAppRepoRef struct {
 	ID            int64  `json:"id"`
 	FullName      string `json:"full_name"`

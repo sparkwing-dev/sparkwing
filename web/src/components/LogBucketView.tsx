@@ -5,8 +5,6 @@ import {
   type ParsedLog,
   type StepSection,
   type LogSection,
-  parseLogSections,
-  parseLogLines,
   hasStepBanners,
   stepNameFromSection,
 } from "@/lib/logParser";
@@ -1223,28 +1221,6 @@ export default function LogBucketView({
       )}
     </div>
   );
-}
-
-export function LogBucketViewFromRaw({
-  rawLog,
-  jobId,
-}: {
-  rawLog: string;
-  jobId?: string;
-}) {
-  const parsed = useMemo(() => parseLogSections(rawLog), [rawLog]);
-  return <LogBucketView parsed={parsed} jobId={jobId} />;
-}
-
-export function LogBucketViewFromLines({
-  lines,
-  jobId,
-}: {
-  lines: string[];
-  jobId?: string;
-}) {
-  const parsed = useMemo(() => parseLogLines(lines), [lines]);
-  return <LogBucketView parsed={parsed} jobId={jobId} />;
 }
 
 export { hasStepBanners };

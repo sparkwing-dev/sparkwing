@@ -97,10 +97,6 @@ keeps controller + web distinct under one release.
 {{- include "sparkwing-full.componentFullname" (dict "root" . "component" "web") }}
 {{- end }}
 
-{{- define "sparkwing-full.controller.storageClassesFullname" -}}
-{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "controller-storageclasses") }}
-{{- end }}
-
 {{/*
 ServiceAccount name for the controller. If serviceAccount.create is
 true and no explicit name is provided, fall back to a per-component
@@ -112,15 +108,6 @@ name so it doesn't collide with the sub-chart's SA.
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
-{{- end }}
-
-{{/*
-ServiceAccount name for the warm-pool warmer pods. Release-scoped so two
-releases in one namespace do not fight over the same account; the
-controller is told the name with --warmer-service-account.
-*/}}
-{{- define "sparkwing-full.warmerServiceAccountName" -}}
-{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "cache-warmer") }}
 {{- end }}
 
 {{/*

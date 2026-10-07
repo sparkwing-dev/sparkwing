@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -460,4 +461,66 @@ func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link st
 		summary.WriteString(".")
 	}
 	return summary.String()
+}
+
+const githubStatusTimeout = 10 * time.Second
+
+type githubCommitStatusRequest struct {
+	State       string `json:"state"`
+	TargetURL   string `json:"target_url,omitempty"`
+	Description string `json:"description"`
+	Context     string `json:"context"`
+}
+
+func githubCommitState(runStatus string) (state, description string) {
+	switch runStatus {
+	case "pending":
+		return "pending", "Sparkwing pipeline is running"
+	case "success":
+		return "success", "Sparkwing pipeline passed"
+	case "failed", "timed_out":
+		return "failure", "Sparkwing pipeline failed"
+	default:
+		return "error", "Sparkwing pipeline could not complete"
+	}
+}
+
+func githubRunTargetURL(baseURL, runID string) string {
+	if baseURL == "" {
+		return ""
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if (scheme != "http" && scheme != "https") ||
+		u.Hostname() == "" ||
+		u.User != nil ||
+		u.RawQuery != "" ||
+		u.ForceQuery ||
+		u.Fragment != "" ||
+		strings.Contains(baseURL, "#") {
+		return ""
+	}
+	u.Scheme = scheme
+	u.Path = strings.TrimRight(u.Path, "/") + "/runs"
+	u.RawPath = ""
+	q := url.Values{}
+	q.Set("run", runID)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus string) {
+	if s.githubApp == nil {
+		return
+	}
+	trigger, err := s.store.GetTrigger(ctx, runID)
+	if err != nil || trigger.TriggerEnv[envGitHubAppInstallation] == "" {
+		return
+	}
+	if update, ok := s.githubAppCheckUpdate(ctx, trigger, runStatus); ok {
+		s.githubApp.checks.enqueue(s.logger, update)
+	}
 }

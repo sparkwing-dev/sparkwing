@@ -47,7 +47,7 @@ func checkServicePorts(contentDir, repoRoot string) bool {
 		if werr != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return werr
 		}
-		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
+		if strings.Contains(path, "/migrations/") {
 			return nil
 		}
 		// #nosec G122 -- a TOCTOU swap here needs write access to the checkout this build-time check already trusts

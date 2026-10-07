@@ -191,19 +191,20 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 }
 
 func oidcTriggerKind(trig *store.Trigger) string {
-	// safety: the event name is reserved to the signed webhook, which records
-	// it at intake; a github source without one proves neither event.
+	// safety: the event name is reserved to the signed App webhook, which records it with the
+	// repository id at intake; a github source without both proves no event and no repository.
 	event := trig.TriggerEnv[sparkwing.EnvGitHubEventName]
+	signed := trig.TriggerSource == oidcWebhookSource && trig.GithubRepoID > 0
 	switch {
-	case trig.TriggerSource == oidcWebhookSource && event == githubEventPush:
+	case signed && event == githubEventPush:
 		return oidcTriggerPush
-	case trig.TriggerSource == oidcWebhookSource && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
+	case signed && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
 		return oidcTriggerPR
-	case trig.TriggerSource == oidcWebhookSource && event == "release" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/tags/"):
+	case signed && event == "release" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/tags/"):
 		return oidcTriggerRelease
-	case trig.TriggerSource == oidcWebhookSource && event == "create" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
+	case signed && event == "create" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
 		return oidcTriggerCreate
-	case trig.TriggerSource == oidcWebhookSource && event == "delete" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
+	case signed && event == "delete" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
 		return oidcTriggerDelete
 	// safety: submitters cannot set the schedule key, which the intake
 	// strips, so a "schedule" source without it is a submitter's word.

@@ -25,11 +25,9 @@ import (
 // the principal and the reason at warn. Nothing is dropped silently.
 type FloodPolicy struct {
 	// RunsPerPrincipalHour caps the runs one principal may create in a rolling
-	// hour. Zero is unlimited. A delivery to an operator webhook binding
-	// counts against the team and repository it names, because an
-	// unauthenticated delivery has no principal of its own; each run a GitHub
-	// App delivery creates counts against the team the installation is bound
-	// to.
+	// hour. Zero is unlimited. Each run a GitHub App delivery creates counts
+	// against the team the installation is bound to, because a delivery has
+	// no principal of its own.
 	RunsPerPrincipalHour int
 
 	// ShedQueueDepth is the pending-trigger depth of one team past which that

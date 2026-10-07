@@ -72,9 +72,9 @@ func TestTheProxyCapEvictsTheLeastRecentlyServedEntries(t *testing.T) {
 // like every other download, because the alarm refuses nothing.
 func TestTheRegistryProxyIsOpenPastTheEgressAlarm(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 150})
-	seedArtifact(t, "job1", "out.tar", 100)
+	seedCacheEntry(t, "job1", 100)
 	for range 2 {
-		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK {
+		if got := get(t, srv, cacheDownloadPath, "s3cret"); got.status != http.StatusOK {
 			t.Fatalf("download = %d", got.status)
 		}
 	}
