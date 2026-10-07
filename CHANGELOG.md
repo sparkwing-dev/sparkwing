@@ -31,7 +31,7 @@ unlock.
 ### Changed
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
-  service writes `/cache`, `/bin` and `/artifacts` entries only under the run's own ref. It reads the run's own
+  service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own
   ref, then its pull request's base, then the default branch, then entries written before this release. A
   branch's run therefore no longer replaces or deletes what its base branch's runs restore, and a run of
   another repository in the team no longer reads it. A run whose ref and commit its submitter chose (the CLI,
@@ -97,6 +97,21 @@ unlock.
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
 - **backends:** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
   No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes.
+- **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
+  `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
+  `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
+  longer serves `POST /api/v1/gitcache/refresh` or `POST /api/v1/gitcache/seed`. Nothing Sparkwing ships called
+  them: runners clone through `/git/<name>`, which refreshes a stale mirror itself, `--working-tree` uploads to
+  the direct data store, and artifacts use content-addressed `/bin` keys. The cache fills a mirror only from
+  origin. `--max-artifact-bytes` and `--workspace-seed-max-age` are gone, so a cache started with either exits
+  with an unknown-flag error, and the runner-bundle chart drops `cache.limits.maxArtifactBytes`. The
+  `sparkwing.gitcache.archives_served`, `files_served` and `recovery_reclones` metrics are gone. See
+  [Legacy cache routes are removed](docs/migrations/_unreleased.md#legacy-cache-routes-are-removed).
+- **cache + controller (Breaking):** Refuse cache grants that name no claim or no repository scope
+  Such a grant, minted by a controller from before grants carried a scope, opened its team's whole cache tree
+  on its signature alone until it expired. The cache and the controller's data routes now answer it 401, and no
+  controller mints one. See
+  [Cache grants need a claim and a scope](docs/migrations/_unreleased.md#cache-grants-need-a-claim-and-a-scope).
 
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence

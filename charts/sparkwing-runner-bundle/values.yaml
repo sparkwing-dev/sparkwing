@@ -232,17 +232,15 @@ cache:
 
   # Size bounds passed to sparkwing-cache. Each entry becomes the flag
   # of the same name; leave one empty to keep the binary's default.
-  # The two object caps ship at 500 MB; the store ceilings are off
+  # The dependency-archive cap ships at 500 MB; the store ceilings are off
   # until you set them, and at or above one every upload is refused
   # with 507 until a measurement finds the store back under it. Size them
   # against storage.size below. See docs/caching.md.
   limits:
-    # Size cap for one uploaded artifact (default 500MB; 0 accepts any).
-    maxArtifactBytes: ""
     # Size cap for one dependency archive (default 500MB; 0 accepts any).
     maxCacheArchiveBytes: ""
-    # Stored bytes across the artifact, archive, upload, team and git
-    # mirror trees at or above which every upload is refused. Empty
+    # Stored bytes across the archive, team and git mirror trees at or
+    # above which every upload is refused. Empty
     # leaves the store unlimited.
     maxStoreBytes: ""
     # Stored files across those trees at or above which every upload is

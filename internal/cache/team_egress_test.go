@@ -78,25 +78,6 @@ func TestAFreeTeamPastItsDailyDownloadCapIsRefused(t *testing.T) {
 	}
 }
 
-// A response of unknown length is checked for room when it starts and
-// charged what it sent when it ends.
-func TestAStreamedDownloadIsChargedWhatItSent(t *testing.T) {
-	srv, ctl, token := newTeamEgressServer(t)
-	free := grantFor(t, token, "free")
-	for _, name := range []string{"a.txt", "b.txt"} {
-		if code, body := send(t, srv, http.MethodPost, "/artifacts/job-1?path="+name, free, strings.Repeat("a", 20)); code/100 != 2 {
-			t.Fatalf("upload = %d %s", code, body)
-		}
-	}
-	got := get(t, srv, "/artifacts/job-1?glob=*", free)
-	if got.status != http.StatusOK || got.header.Get("Content-Length") != "" {
-		t.Fatalf("artifact tar = %d, Content-Length %q; want a 200 stream", got.status, got.header.Get("Content-Length"))
-	}
-	if charged := ctl.Downloaded("free"); charged != int64(len(got.body)) {
-		t.Fatalf("the controller charged %d bytes for a %d-byte stream", charged, len(got.body))
-	}
-}
-
 // While the controller cannot count, a free team's download is refused with
 // 503 before any byte; the operator and a team answered funded moments
 // before download on.

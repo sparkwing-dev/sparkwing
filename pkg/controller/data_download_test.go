@@ -2,12 +2,15 @@ package controller
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,6 +29,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
+
+var testGrantScope = &authwire.CacheScope{Refs: []string{"manual:"}}
+
+// safety: the fixture's store holds every key, so a scoped grant's first read, its own scope, is the one it signs.
+var scopedBinKey = "cache/teams/team-a/" + authwire.CacheGrant{Scope: testGrantScope}.ScopePrefixes()[0] + "bins/abc"
 
 type downloadHead struct {
 	teamblob.Client
@@ -65,7 +73,7 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	if _, err := st.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`, token.Principal, token.Prefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: token.Prefix}, nil)
+	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: token.Prefix}, testGrantScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +129,7 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondGrant, err := authwire.MintClaimCacheGrant("grant-key", firstClaim.Team, firstClaim.Run, time.Now().Add(-time.Minute), time.Hour, firstClaim.Claim, nil)
+	secondGrant, err := authwire.MintClaimCacheGrant("grant-key", firstClaim.Team, firstClaim.Run, time.Now().Add(-time.Minute), time.Hour, firstClaim.Claim, firstClaim.Scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,11 +403,11 @@ func TestDataDownloadSignsOnlyGrantsTeamAndChargesAtSigning(t *testing.T) {
 	if first.Code != http.StatusOK {
 		t.Fatalf("first=%d: %s", first.Code, first.Body.String())
 	}
-	if len(head.keys) != 1 || head.keys[0] != "cache/teams/team-a/bins/abc" {
+	if len(head.keys) != 1 || head.keys[0] != scopedBinKey {
 		t.Fatalf("head keys=%v", head.keys)
 	}
 	u, err := url.Parse(body.URL)
-	if err != nil || !strings.Contains(u.Path, "/cache/teams/team-a/bins/abc") || u.Query().Get("X-Amz-Expires") != "60" {
+	if err != nil || !strings.Contains(u.Path, "/"+scopedBinKey) || u.Query().Get("X-Amz-Expires") != "60" {
 		t.Fatalf("S3 URL=%q err=%v", body.URL, err)
 	}
 	if body.Size != 4 || body.SHA256 != strings.Repeat("a", 64) {
@@ -504,7 +512,7 @@ func TestDataDownloadIngressGetsExactExpiringCloudFrontPolicy(t *testing.T) {
 	if err := json.Unmarshal(policy, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if len(parsed.Statement) != 1 || parsed.Statement[0].Resource != "https://cdn.example.test/cache/teams/team-a/bins/abc" {
+	if len(parsed.Statement) != 1 || parsed.Statement[0].Resource != "https://cdn.example.test/"+scopedBinKey {
 		t.Fatalf("policy=%s", policy)
 	}
 	if got := parsed.Statement[0].Condition["DateLessThan"]["AWS:EpochTime"]; got != body.Expires.Unix() {
@@ -534,15 +542,22 @@ func TestDataDownloadRejectsFormerClaimantsGrant(t *testing.T) {
 	}
 }
 
-func TestDataDownloadRejectsUnboundCacheGrant(t *testing.T) {
+// safety: an older controller signed grants with no claim or scope; the derivation is authwire's wire contract.
+func signWholeTeamGrant(key, team, run string, expires time.Time) string {
+	payload := fmt.Sprintf(`{"t":%q,"r":%q,"e":%d}`, team, run, expires.Unix())
+	body := authwire.CacheGrantPrefix + base64.RawURLEncoding.EncodeToString([]byte(payload))
+	derived := sha256.Sum256([]byte("sparkwing cache grant v1\x00" + key))
+	mac := hmac.New(sha256.New, derived[:])
+	mac.Write([]byte(body))
+	return body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func TestDataDownloadRejectsAWholeTeamCacheGrant(t *testing.T) {
 	s, _, head := downloadFixture(t)
-	grant, err := authwire.MintCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	grant := signWholeTeamGrant("grant-key", "team-a", "run-1", time.Now().Add(time.Hour))
 	rec, _ := callDownload(t, s, grant, "bins/abc", false)
-	if rec.Code != http.StatusForbidden || len(head.keys) != 0 {
-		t.Fatalf("unbound grant: status=%d heads=%v", rec.Code, head.keys)
+	if rec.Code != http.StatusUnauthorized || len(head.keys) != 0 {
+		t.Fatalf("whole-team grant: status=%d heads=%v", rec.Code, head.keys)
 	}
 }
 
@@ -556,7 +571,7 @@ func TestPendingTriggerCanSignBinaryDownloadWhileClaimIsLive(t *testing.T) {
 		t.Fatalf("pending trigger binary GET = %d, heads=%v: %s", rec.Code, head.keys, rec.Body.String())
 	}
 	u, err := url.Parse(signed.URL)
-	if err != nil || !strings.Contains(u.Path, "/cache/teams/team-a/bins/abc") || u.Query().Get("X-Amz-Expires") != "60" {
+	if err != nil || !strings.Contains(u.Path, "/"+scopedBinKey) || u.Query().Get("X-Amz-Expires") != "60" {
 		t.Fatalf("pending trigger S3 URL = %q, err=%v", signed.URL, err)
 	}
 	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_seq = 2 WHERE id = ?`, "run-1"); err != nil {
