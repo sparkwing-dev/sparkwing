@@ -212,7 +212,10 @@ func (e *directSourceE2E) startRunner(name, command string) {
 		"SPARKWING_HOME="+filepath.Join(t.TempDir(), ".sparkwing"),
 		"HOME="+t.TempDir(),
 	)
-	setup, run, _ := strings.Cut(command, " && ")
+	setup, run, ok := splitConnectCommand(command)
+	if !ok {
+		t.Fatalf("%s: the connect command has no token setup before the runner", name)
+	}
 	prepare := exec.CommandContext(e.ctx, "sh", "-c", setup)
 	prepare.Env = env
 	if out, err := prepare.CombinedOutput(); err != nil {
@@ -286,14 +289,6 @@ func runStatus(f *identityFixture, who signedIn, id string) string {
 		return "none"
 	}
 	return out.Status
-}
-
-func redactToken(cmd string) string {
-	_, run, ok := strings.Cut(cmd, " && ")
-	if !ok {
-		return cmd
-	}
-	return "<token setup> && " + run
 }
 
 func envOr(name, fallback string) string {
