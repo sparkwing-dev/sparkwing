@@ -29,9 +29,16 @@ type NodeDispatch struct {
 	RedactedKeys     []byte    `json:"redacted_keys,omitempty"` // JSON []string
 }
 
-// WriteNodeDispatch persists a snapshot; Seq<0 = auto-assign.
-// Over-cap envelopes become truncation stubs (size preserved).
+// WriteNodeDispatch persists a snapshot on a default-team run; Seq<0 =
+// auto-assign. Over-cap envelopes become truncation stubs (size preserved).
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
+	return s.defaultTenant().WriteNodeDispatch(ctx, d)
+}
+
+// WriteNodeDispatch persists a snapshot on one of t's runs; Seq<0 =
+// auto-assign. Over-cap envelopes become truncation stubs (size preserved).
+// A run of another team reads as [ErrNotFound].
+func (t *Tenant) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 	if d.RunID == "" || d.NodeID == "" {
 		return fmt.Errorf("WriteNodeDispatch: run_id and node_id required")
 	}
@@ -45,12 +52,15 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 	if d.DispatchedAt.IsZero() {
 		d.DispatchedAt = time.Now()
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, d.RunID, d.NodeID); err != nil {
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, d.RunID); err != nil {
+		return err
+	}
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, d.RunID, d.NodeID); err != nil {
 		return err
 	}
 	seq := d.Seq
@@ -58,8 +68,8 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COALESCE(MAX(seq), -1) + 1
 			  FROM node_dispatches
-			 WHERE run_id = ? AND node_id = ?
-		`, d.RunID, d.NodeID).Scan(&seq); err != nil {
+			 WHERE team = ? AND run_id = ? AND node_id = ?
+		`, string(t.team), d.RunID, d.NodeID).Scan(&seq); err != nil {
 			return fmt.Errorf("assign next seq: %w", err)
 		}
 	}
@@ -69,9 +79,9 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 			code_version, binary_hash, runner_labels, env_json,
 			workdir, input_envelope_json, input_size_bytes, secret_redactions,
 			redacted_keys
-		) VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		d.RunID, d.RunID, d.NodeID, seq, d.DispatchedAt.UnixNano(),
+		string(t.team), d.RunID, d.NodeID, seq, d.DispatchedAt.UnixNano(),
 		d.CodeVersion, d.BinaryHash, d.RunnerLabels, d.EnvJSON,
 		d.Workdir, envelope, origSize, d.SecretRedactions,
 		d.RedactedKeys,
@@ -81,27 +91,33 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 	return tx.Commit()
 }
 
-// GetNodeDispatch returns the snapshot at seq; seq<0 = latest.
+// GetNodeDispatch returns a default-team snapshot at seq; seq<0 = latest.
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error) {
+	return s.defaultTenant().GetNodeDispatch(ctx, runID, nodeID, seq)
+}
+
+// GetNodeDispatch returns the snapshot of a node of one of t's runs at seq;
+// seq<0 = latest.
+func (t *Tenant) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error) {
 	const cols = `run_id, node_id, seq, dispatched_at,
 	              code_version, binary_hash, runner_labels, env_json,
 	              workdir, input_envelope_json, input_size_bytes, secret_redactions,
 	              redacted_keys`
 	var row *sql.Row
 	if seq < 0 {
-		row = s.queryRow(ctx, `
+		row = t.s.queryRow(ctx, `
 			SELECT `+cols+`
 			  FROM node_dispatches
-			 WHERE run_id = ? AND node_id = ?
+			 WHERE team = ? AND run_id = ? AND node_id = ?
 			 ORDER BY seq DESC
 			 LIMIT 1
-		`, runID, nodeID)
+		`, string(t.team), runID, nodeID)
 	} else {
-		row = s.queryRow(ctx, `
+		row = t.s.queryRow(ctx, `
 			SELECT `+cols+`
 			  FROM node_dispatches
-			 WHERE run_id = ? AND node_id = ? AND seq = ?
-		`, runID, nodeID, seq)
+			 WHERE team = ? AND run_id = ? AND node_id = ? AND seq = ?
+		`, string(t.team), runID, nodeID, seq)
 	}
 	d, err := scanNodeDispatch(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -113,21 +129,27 @@ func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq i
 	return d, nil
 }
 
-// ListNodeDispatches returns all snapshots oldest-first.
+// ListNodeDispatches returns a default-team node's snapshots oldest-first.
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListNodeDispatches(ctx, runID, nodeID)
+}
+
+// ListNodeDispatches returns the snapshots of a node of one of t's runs
+// oldest-first.
+func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error) {
+	rows, err := t.s.query(ctx, `
 		SELECT run_id, node_id, seq, dispatched_at,
 		       code_version, binary_hash, runner_labels, env_json,
 		       workdir, input_envelope_json, input_size_bytes, secret_redactions,
 		       redacted_keys
 		  FROM node_dispatches
-		 WHERE run_id = ? AND node_id = ?
+		 WHERE team = ? AND run_id = ? AND node_id = ?
 		 ORDER BY seq ASC
-	`, runID, nodeID)
+	`, string(t.team), runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []*NodeDispatch
 	for rows.Next() {
 		d, err := scanNodeDispatch(rows.Scan)

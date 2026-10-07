@@ -83,3 +83,30 @@ func TestTenantApprovalsStayInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.ListApprovalsForRun = %+v, %v, want the approved gate", rows, err)
 	}
 }
+
+// A dispatch snapshot belongs to its run's team: another team's handle can
+// neither write one onto that run nor read or list it.
+func TestTenantNodeDispatchesStayInTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	d := store.NodeDispatch{RunID: "run-a", NodeID: "build", Seq: -1, CodeVersion: "v1"}
+
+	if err := globex.WriteNodeDispatch(ctx, d); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.WriteNodeDispatch = %v, want ErrNotFound", err)
+	}
+	if err := acme.WriteNodeDispatch(ctx, d); err != nil {
+		t.Fatalf("acme.WriteNodeDispatch: %v", err)
+	}
+	if _, err := globex.GetNodeDispatch(ctx, "run-a", "build", -1); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.GetNodeDispatch = %v, want ErrNotFound", err)
+	}
+	if out, err := globex.ListNodeDispatches(ctx, "run-a", "build"); err != nil || len(out) != 0 {
+		t.Fatalf("globex.ListNodeDispatches = %v, %v, want none", out, err)
+	}
+	if got, err := acme.GetNodeDispatch(ctx, "run-a", "build", 0); err != nil || got.CodeVersion != "v1" {
+		t.Fatalf("acme.GetNodeDispatch = %+v, %v, want the snapshot", got, err)
+	}
+}

@@ -2705,6 +2705,7 @@ func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*Concurre
 func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
 func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
+func (t *Tenant) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
 func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
@@ -2745,6 +2746,7 @@ func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugP
 func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error)
 func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
+func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error)
 func (t *Tenant) ListPendingApprovals(ctx context.Context) (_ []*Approval, err error)
 func (t *Tenant) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
 func (t *Tenant) ListPipelines(ctx context.Context, limit int) ([]PipelineSummary, error)
@@ -2823,6 +2825,7 @@ func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot 
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
+func (t *Tenant) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
 	Hash   string

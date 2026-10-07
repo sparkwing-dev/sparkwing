@@ -1637,6 +1637,10 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var d store.NodeDispatch
@@ -1646,7 +1650,7 @@ func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request)
 	}
 	d.RunID = runID
 	d.NodeID = nodeID
-	if err := s.store.WriteNodeDispatch(r.Context(), d); err != nil {
+	if err := tenant.WriteNodeDispatch(r.Context(), d); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1654,6 +1658,10 @@ func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	seq := -1
@@ -1665,7 +1673,7 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 		}
 		seq = n
 	}
-	d, err := s.store.GetNodeDispatch(r.Context(), runID, nodeID, seq)
+	d, err := tenant.GetNodeDispatch(r.Context(), runID, nodeID, seq)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1678,9 +1686,13 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	out, err := s.store.ListNodeDispatches(r.Context(), runID, nodeID)
+	out, err := tenant.ListNodeDispatches(r.Context(), runID, nodeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
