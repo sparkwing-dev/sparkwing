@@ -134,7 +134,11 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if err := f.store.DB().QueryRow(`SELECT github_repo_id FROM triggers WHERE id = ?`, childID).Scan(&repoID); err != nil || repoID != 701 {
 		t.Fatalf("child repository id = %d %v, want the parent's 701", repoID, err)
 	}
-	if _, err := f.store.GetNode(context.Background(), childID, store.PlanNodeID); err != nil {
+	team, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := team.GetNode(context.Background(), childID, store.PlanNodeID); err != nil {
 		t.Fatalf("the child of an opted-in repository has no planning node: %v", err)
 	}
 	for body, want := range map[string]int{
@@ -544,17 +548,21 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 			t.Errorf("%s = %d from %s, want %d", what, code, in.RunID, c.want)
 		}
 	}
+	team, err := f.store.ForTeam(ctx, store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
 	copied := func(node string, from store.ClaimInputRequest) (int, *store.Node) {
 		t.Helper()
 		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/attempt", tokens[node],
 			map[string]any{"outcome": "cached", "output_from": from}, nil)
-		n, _ := f.store.GetNode(ctx, "run-in", node)
+		n, _ := team.GetNode(ctx, "run-in", node)
 		return code, n
 	}
 	if code, _ := copied("r", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusUnprocessableEntity {
 		t.Errorf("a report copying an input its node does not declare = %d, want 422", code)
 	}
-	origin, _ := f.store.GetNode(ctx, "run-origin", "m")
+	origin, _ := team.GetNode(ctx, "run-origin", "m")
 	if code, n := copied("m", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusOK || n.OutputRef == nil || *n.OutputRef != *origin.OutputRef {
 		t.Errorf("a cache hit's report = %d with ref %+v, want the origin's %+v", code, n.OutputRef, origin.OutputRef)
 	}

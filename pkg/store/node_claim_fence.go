@@ -179,24 +179,26 @@ func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runI
 	return err == nil, err
 }
 
-func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
+// safety: the fence reads the node in the mutating handle's team; a caller without a handle passes
+// the run's own team, so the fence still binds the claim to the holder that owns that node.
+func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
 	fence, ok := NodeClaimFenceFromContext(ctx)
 	var held int
 	var err error
 	if ok {
 		err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
-	WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+	WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by = ?
 	  AND claim_principal = ? AND claim_token_prefix = ?
 	  AND claim_membership_id = ? AND reservation_id = ? AND claim_generation = ?
 	  AND `+nodeClaimLiveSQL("")+s.forUpdate(),
-			runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
+			string(team), runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
 	} else if _, triggerOK := TriggerClaimFenceFromContext(ctx); triggerOK {
-		if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
+		if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 			return err
 		}
 		err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
- WHERE run_id = ? AND node_id = ?`+s.forUpdate(), runID, nodeID).Scan(&held)
+ WHERE team = ? AND run_id = ? AND node_id = ?`+s.forUpdate(), string(team), runID, nodeID).Scan(&held)
 	} else {
 		return nil
 	}
@@ -209,13 +211,32 @@ func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runI
 	return nil
 }
 
-func (s *Store) execNodeMutation(ctx context.Context, runID, nodeID, query string, args ...any) (rowsAffected, bool, error) {
-	tx, err := s.beginTx(ctx)
+// safety: a caller without a tenant handle fences the node in its run's own team, the team the
+// node was written into.
+func (s *Store) assertNodeMutationFenceInRunsTeamTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	return s.assertNodeMutationFenceTx(ctx, tx, team, runID, nodeID)
+}
+
+// safety: a node of another team's run reads as not found before the fence is
+// consulted, so a mutation that matched nothing cannot pass for one that did.
+func (t *Tenant) assertNodeMutationTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+		return err
+	}
+	return t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID)
+}
+
+func (t *Tenant) execNodeMutation(ctx context.Context, runID, nodeID, query string, args ...any) (rowsAffected, bool, error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return nil, false, err
 	}
 	result, err := tx.ExecContext(ctx, query, args...)

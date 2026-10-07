@@ -9,6 +9,10 @@ import (
 )
 
 func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	run, err := s.store.GetRun(r.Context(), runID)
 	if err != nil {
@@ -19,7 +23,7 @@ func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	nodes, err := s.store.ListNodes(r.Context(), runID)
+	nodes, err := tenant.ListNodes(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

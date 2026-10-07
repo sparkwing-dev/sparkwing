@@ -151,6 +151,10 @@ func (b nodeUsageReq) validate() error {
 }
 
 func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	var body nodeUsageReq
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -160,7 +164,7 @@ func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.AddNodeUsage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.NodeUsage{
+	if err := tenant.AddNodeUsage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.NodeUsage{
 		CPUTime:     time.Duration(body.CPUTimeNanos),
 		MaxRSSBytes: body.MaxRSSBytes,
 		Wall:        time.Duration(body.WallNanos),

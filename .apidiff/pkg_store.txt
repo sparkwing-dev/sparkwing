@@ -2645,7 +2645,10 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
+func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
+func (t *Tenant) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
+func (t *Tenant) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
@@ -2695,6 +2698,7 @@ func (t *Tenant) DeleteSecret(name, pipeline string) error
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
+func (t *Tenant) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (t *Tenant) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error)
 func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
@@ -2705,6 +2709,7 @@ func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*Concurre
 func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
 func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
+func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (t *Tenant) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
@@ -2747,6 +2752,8 @@ func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error)
 func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error)
+func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error)
+func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error)
 func (t *Tenant) ListPendingApprovals(ctx context.Context) (_ []*Approval, err error)
 func (t *Tenant) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
 func (t *Tenant) ListPipelines(ctx context.Context, limit int) ([]PipelineSummary, error)
@@ -2811,16 +2818,26 @@ func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, ena
 func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string, ids map[string]int64) error
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
+func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
+func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
+func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispatch RepoDispatch, now time.Time) error
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error
+func (t *Tenant) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
+func (t *Tenant) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpend, err error)
 func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error)
+func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error
+func (t *Tenant) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error)
 func (t *Tenant) Team() Team
 func (t *Tenant) TeamOwnerEmails(ctx context.Context) (_ []string, err error)
+func (t *Tenant) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error
+func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
+func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)

@@ -430,7 +430,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if includeHas(r.URL.Query().Get("include"), "nodes") {
-		nodes, err := s.store.ListNodes(r.Context(), runID)
+		nodes, err := tenant.ListNodes(r.Context(), runID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -448,7 +448,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 				n.Deps = []string{}
 			}
 		}
-		steps, _ := s.store.ListNodeSteps(r.Context(), runID)
+		steps, _ := tenant.ListNodeSteps(r.Context(), runID)
 		approvals, _ := tenant.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
@@ -508,8 +508,12 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
-	nodes, err := s.store.ListNodes(r.Context(), runID)
+	nodes, err := tenant.ListNodes(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -593,9 +597,13 @@ func finishedRunConflict(runID string, run *store.Run, nodeID string) error {
 }
 
 func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	if err := s.store.StartNode(r.Context(), runID, nodeID); err != nil {
+	if err := tenant.StartNode(r.Context(), runID, nodeID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -640,6 +648,10 @@ type updateDepsReq struct {
 }
 
 func (s *Server) handleUpdateNodeDeps(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body updateDepsReq
@@ -647,7 +659,7 @@ func (s *Server) handleUpdateNodeDeps(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.UpdateNodeDeps(r.Context(), runID, nodeID, body.Deps); err != nil {
+	if err := tenant.UpdateNodeDeps(r.Context(), runID, nodeID, body.Deps); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1617,9 +1629,13 @@ func writeExecutionAdmissionError(w http.ResponseWriter, err error, bindings ...
 }
 
 func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	n, err := tenant.GetNode(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1995,7 +2011,11 @@ func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID
 	if !ok || p.HasScope(ScopeAdmin) {
 		return true
 	}
-	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return false
+	}
+	n, err := tenant.GetNode(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -2342,13 +2362,17 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
 		Detail string `json:"detail"`
 	}
 	_ = decodeJSON(r, &body)
-	if err := s.store.UpdateNodeActivity(r.Context(), runID, nodeID, body.Detail); err != nil {
+	if err := tenant.UpdateNodeActivity(r.Context(), runID, nodeID, body.Detail); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2356,6 +2380,10 @@ func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2365,7 +2393,7 @@ func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.AppendNodeAnnotation(r.Context(), runID, nodeID, body.Message); err != nil {
+	if err := tenant.AppendNodeAnnotation(r.Context(), runID, nodeID, body.Message); err != nil {
 		if status := runLimitStatus(err); status != 0 {
 			writeError(w, status, err)
 			return
@@ -2377,6 +2405,10 @@ func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2386,7 +2418,7 @@ func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.SetNodeSummary(r.Context(), runID, nodeID, body.Markdown); err != nil {
+	if err := tenant.SetNodeSummary(r.Context(), runID, nodeID, body.Markdown); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2419,6 +2451,10 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2432,7 +2468,7 @@ func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
 		return
 	}
-	if err := s.store.StartNodeStep(r.Context(), runID, nodeID, body.StepID); err != nil {
+	if err := tenant.StartNodeStep(r.Context(), runID, nodeID, body.StepID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2440,6 +2476,10 @@ func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2458,7 +2498,7 @@ func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.FinishNodeStep(r.Context(), runID, nodeID, body.StepID, body.Status); err != nil {
+	if err := tenant.FinishNodeStep(r.Context(), runID, nodeID, body.StepID, body.Status); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2466,6 +2506,10 @@ func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkipNodeStep(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2479,7 +2523,7 @@ func (s *Server) handleSkipNodeStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
 		return
 	}
-	if err := s.store.SkipNodeStep(r.Context(), runID, nodeID, body.StepID); err != nil {
+	if err := tenant.SkipNodeStep(r.Context(), runID, nodeID, body.StepID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2487,6 +2531,10 @@ func (s *Server) handleSkipNodeStep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2501,7 +2549,7 @@ func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
 		return
 	}
-	if err := s.store.AppendStepAnnotation(r.Context(), runID, nodeID, body.StepID, body.Message); err != nil {
+	if err := tenant.AppendStepAnnotation(r.Context(), runID, nodeID, body.StepID, body.Message); err != nil {
 		if status := runLimitStatus(err); status != 0 {
 			writeError(w, status, err)
 			return
@@ -2513,6 +2561,10 @@ func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleSetStepSummary(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2527,7 +2579,7 @@ func (s *Server) handleSetStepSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
 		return
 	}
-	if err := s.store.SetStepSummary(r.Context(), runID, nodeID, body.StepID, body.Markdown); err != nil {
+	if err := tenant.SetStepSummary(r.Context(), runID, nodeID, body.StepID, body.Markdown); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2535,8 +2587,12 @@ func (s *Server) handleSetStepSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
-	steps, err := s.store.ListNodeSteps(r.Context(), runID)
+	steps, err := tenant.ListNodeSteps(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -2548,9 +2604,13 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	if err := s.store.TouchNodeHeartbeat(r.Context(), runID, nodeID); err != nil {
+	if err := tenant.TouchNodeHeartbeat(r.Context(), runID, nodeID); err != nil {
 		s.writeNodeStoreError(w, "touch node heartbeat", runID, nodeID, err)
 		return
 	}
@@ -2720,6 +2780,10 @@ func auditPrincipal(r *http.Request) string {
 }
 
 func (s *Server) handleSetNodeStatus(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	var body struct {
@@ -2733,7 +2797,7 @@ func (s *Server) handleSetNodeStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("status is required"))
 		return
 	}
-	if err := s.store.SetNodeStatus(r.Context(), runID, nodeID, body.Status); err != nil {
+	if err := tenant.SetNodeStatus(r.Context(), runID, nodeID, body.Status); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

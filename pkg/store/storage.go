@@ -798,7 +798,7 @@ func (s *Store) AppendEventCharged(
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if nodeID != "" {
-		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
@@ -836,7 +836,7 @@ func (s *Store) SetNodeArtifactManifestCharged(
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if err := s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {

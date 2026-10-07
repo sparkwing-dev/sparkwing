@@ -3364,13 +3364,13 @@ var (
 // perf: every append rereads and rewrites the run's whole list, and the
 // node's or step's, so a run's annotations cost O(n^2) bytes written; the
 // bounds above cap that at about 1000 rewrites of at most 4 MiB each.
-func appendRunAnnotation(tx *storeTx, runID, msg string) error {
+func appendRunAnnotation(tx *storeTx, team Team, runID, msg string) error {
 	if len(msg) > MaxAnnotationBytes {
 		return ErrAnnotationTooLarge
 	}
 	var blob []byte
 	err := tx.QueryRow(
-		`SELECT annotations_json FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&blob)
+		`SELECT annotations_json FROM runs WHERE team = ? AND id = ?`+tx.forUpdate(), string(team), runID).Scan(&blob)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -3389,7 +3389,7 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	if len(next) > MaxRunAnnotationBytes {
 		return ErrRunAnnotationBytes
 	}
-	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE id = ?`, next, runID)
+	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE team = ? AND id = ?`, next, string(team), runID)
 	return err
 }
 
@@ -4868,10 +4868,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 // A no-op is silent: every caller starts a node it is about to
 // execute and finish, and none reads the row count.
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID, `
+	return s.defaultTenant().StartNode(ctx, runID, nodeID)
+}
+
+// StartNode is [Store.StartNode] confined to t's team.
+func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID, `
 UPDATE nodes SET status = ?, started_at = ?
- WHERE run_id = ? AND node_id = ? AND status != ?`,
-		nodeStatusRunning, time.Now().UnixNano(), runID, nodeID, nodeStatusDone)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status != ?`,
+		nodeStatusRunning, time.Now().UnixNano(), string(t.team), runID, nodeID, nodeStatusDone)
 	if err != nil {
 		return err
 	}
@@ -4880,7 +4885,12 @@ UPDATE nodes SET status = ?, started_at = ?
 
 // SetNodeStatus updates only the status column.
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().SetNodeStatus(ctx, runID, nodeID, status)
+}
+
+// SetNodeStatus is [Store.SetNodeStatus] confined to t's team.
+func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -4888,11 +4898,12 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	var executorName, currentStatus string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &currentStatus)
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), runID, nodeID).Scan(&executorName, &currentStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -4907,7 +4918,8 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 			return ErrLockHeld
 		}
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`, status, runID, nodeID)
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		status, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -4919,11 +4931,16 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 
 // UpdateNodeDeps rewrites a node's stored dependency list.
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
+	return s.defaultTenant().UpdateNodeDeps(ctx, runID, nodeID, deps)
+}
+
+// UpdateNodeDeps is [Store.UpdateNodeDeps] confined to t's team.
+func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	depsJSON, _ := json.Marshal(deps)
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET deps_json = ?
-		  WHERE run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
-		depsJSON, runID, nodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
+		depsJSON, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -4972,7 +4989,7 @@ func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	var executorName, team string
@@ -5047,9 +5064,14 @@ UPDATE node_steps SET status = ?, finished_at = ?
 // FinishNode flip so a consumer dispatched on completion always sees
 // the reference. Empty digest is a no-op-equivalent clear.
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET artifact_manifest = ? WHERE run_id = ? AND node_id = ?`,
-		manifestDigest, runID, nodeID)
+	return s.defaultTenant().SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest)
+}
+
+// SetNodeArtifactManifest is [Store.SetNodeArtifactManifest] confined to t's team.
+func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
+		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		manifestDigest, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5081,20 +5103,26 @@ type NodeUsage struct {
 // the same time. Negative inputs and overflowing totals reject the entire observation.
 // Zero stays the value every reader treats as absent.
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
+	return s.defaultTenant().AddNodeUsage(ctx, runID, nodeID, u)
+}
+
+// AddNodeUsage is [Store.AddNodeUsage] confined to t's team; a node of
+// another team reads as missing, which is the no-op a missing node gets.
+func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
 	if u.CPUTime < 0 || u.Wall < 0 || u.MaxRSSBytes < 0 {
 		return errors.New("node usage requires nonnegative CPU time, wall time and peak RSS")
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
 	var cpu, wall int64
 	err = tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes
- WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&cpu, &wall)
+ WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&cpu, &wall)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -5115,7 +5143,8 @@ UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,
        process_wall_nanos = process_wall_nanos + ?,
        max_rss_bytes = CASE WHEN ? > max_rss_bytes THEN ? ELSE max_rss_bytes END
- WHERE run_id = ? AND node_id = ?`, int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ?`,
+		int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5130,10 +5159,15 @@ UPDATE nodes
 // update on Postgres. Rows a pre-v29 Postgres store wrote carry no
 // sequence and fall back to node id.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
-	rows, err := s.query(ctx, `SELECT `+nodeSelectColumns+`
+	return s.defaultTenant().ListNodes(ctx, runID)
+}
+
+// ListNodes is [Store.ListNodes] confined to t's team.
+func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
+	rows, err := t.s.query(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ?
- ORDER BY seq, node_id`, runID)
+ WHERE team = ? AND run_id = ?
+ ORDER BY seq, node_id`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -5153,7 +5187,7 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 		return nil, err
 	}
 	for _, n := range out {
-		attempts, err := s.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
+		attempts, err := t.s.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -5164,14 +5198,19 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 
 // GetNode fetches a single node row; ErrNotFound when missing.
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	row := s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
+	return s.defaultTenant().GetNode(ctx, runID, nodeID)
+}
+
+// GetNode is [Store.GetNode] confined to t's team.
+func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
+	row := t.s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ? AND node_id = ?`, runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
 	record := &nodeRecord{}
 	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
-	attempts, err := s.ListNodeExecutionAttempts(ctx, runID, nodeID)
+	attempts, err := t.s.ListNodeExecutionAttempts(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -5308,18 +5347,23 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 // concurrent appenders from losing entries: the transaction alone does
 // not, since Postgres runs it at READ COMMITTED.
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().AppendNodeAnnotation(ctx, runID, nodeID, msg)
+}
+
+// AppendNodeAnnotation is [Store.AppendNodeAnnotation] confined to t's team.
+func (t *Tenant) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	var current []byte
 	row := tx.QueryRowContext(ctx,
-		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID)
+		`SELECT annotations_json FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), runID, nodeID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
@@ -5338,16 +5382,16 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET annotations_json = ? WHERE run_id = ? AND node_id = ?`,
-		next, runID, nodeID); err != nil {
+		`UPDATE nodes SET annotations_json = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		next, string(t.team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
-		msg, runID); err != nil {
+		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?`,
+		msg, string(t.team), runID); err != nil {
 		return err
 	}
-	if err := appendRunAnnotation(tx, runID, msg); err != nil {
+	if err := appendRunAnnotation(tx, t.team, runID, msg); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5358,8 +5402,13 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 // ErrNotFound if the node row doesn't exist. Driven by
 // sparkwing.Summary() emitted outside any step body.
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET summary = ? WHERE run_id = ? AND node_id = ?`, md, runID, nodeID)
+	return s.defaultTenant().SetNodeSummary(ctx, runID, nodeID, md)
+}
+
+// SetNodeSummary is [Store.SetNodeSummary] confined to t's team.
+func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
+		`UPDATE nodes SET summary = ? WHERE team = ? AND run_id = ? AND node_id = ?`, md, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5420,19 +5469,25 @@ type NodeStep struct {
 // step) is a no-op, leaving the original started_at intact so a
 // retry doesn't reset the clock.
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().StartNodeStep(ctx, runID, nodeID, stepID)
+}
+
+// StartNodeStep is [Store.StartNodeStep] confined to t's team.
+func (t *Tenant) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
+VALUES (?,?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5443,25 +5498,31 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 // the running state. Creates the row if missing so the rare reorder where
 // step_end lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	return s.defaultTenant().FinishNodeStep(ctx, runID, nodeID, stepID, status)
+}
+
+// FinishNodeStep is [Store.FinishNodeStep] confined to t's team.
+func (t *Tenant) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	if err := ValidateStepTerminalStatus(status); err != nil {
 		return err
 	}
 	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
-    finished_at = excluded.finished_at`,
-		runID, runID, nodeID, stepID, status, now, now); err != nil {
+    finished_at = excluded.finished_at
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, status, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5471,22 +5532,28 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // phase). started_at == finished_at == now so duration computes to 0
 // without special-casing nulls in the wire-shape serializer.
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	return s.defaultTenant().SkipNodeStep(ctx, runID, nodeID, stepID)
+}
+
+// SkipNodeStep is [Store.SkipNodeStep] confined to t's team.
+func (t *Tenant) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
-    finished_at = excluded.finished_at`,
-		runID, runID, nodeID, stepID, StepSkipped, now, now); err != nil {
+    finished_at = excluded.finished_at
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, StepSkipped, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5496,11 +5563,16 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // nodes. Returned in (node_id, started_at) order so callers can
 // stream-bucket by node without a second sort.
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListNodeSteps(ctx, runID)
+}
+
+// ListNodeSteps is [Store.ListNodeSteps] confined to t's team.
+func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
+	rows, err := t.s.query(ctx, `
 SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
 FROM node_steps
-WHERE run_id = ?
-ORDER BY node_id, started_at`, runID)
+WHERE team = ? AND run_id = ?
+ORDER BY node_id, started_at`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -5538,12 +5610,17 @@ ORDER BY node_id, started_at`, runID)
 // row it locked, so an appender that lost the insert waits for the
 // winner rather than reading past it.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
+}
+
+// AppendStepAnnotation is [Store.AppendStepAnnotation] confined to t's team.
+func (t *Tenant) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 
@@ -5554,10 +5631,11 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 	var current []byte
 	if err := tx.QueryRowContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status)
-VALUES (`+runTeamSQL+`,?,?,?,?)
+VALUES (?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+  WHERE node_steps.team = excluded.team
 RETURNING annotations_json`,
-		runID, runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
+		string(t.team), runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
@@ -5573,16 +5651,16 @@ RETURNING annotations_json`,
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE node_steps SET annotations_json = ?
-WHERE run_id = ? AND node_id = ? AND step_id = ?`,
-		next, runID, nodeID, stepID); err != nil {
+WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
+		next, string(t.team), runID, nodeID, stepID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
-		msg, runID); err != nil {
+		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?`,
+		msg, string(t.team), runID); err != nil {
 		return err
 	}
-	if err := appendRunAnnotation(tx, runID, msg); err != nil {
+	if err := appendRunAnnotation(tx, t.team, runID, msg); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5595,25 +5673,31 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 // pattern AppendStepAnnotation uses. Driven by sparkwing.Summary()
 // emitted inside a step body.
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().SetStepSummary(ctx, runID, nodeID, stepID, md)
+}
+
+// SetStepSummary is [Store.SetStepSummary] confined to t's team.
+func (t *Tenant) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status)
-VALUES (`+runTeamSQL+`,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, runID, nodeID, stepID, StepRunning); err != nil {
+VALUES (?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, StepRunning); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE node_steps SET summary = ?
-WHERE run_id = ? AND node_id = ? AND step_id = ?`,
-		md, runID, nodeID, stepID); err != nil {
+WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
+		md, string(t.team), runID, nodeID, stepID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5825,7 +5909,7 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return ErrLockHeld
 	}
 	if _, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
-		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 			return err
 		}
 	}
@@ -6416,9 +6500,14 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
+	return s.defaultTenant().UpdateNodeActivity(ctx, runID, nodeID, detail)
+}
+
+// UpdateNodeActivity is [Store.UpdateNodeActivity] confined to t's team.
+func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
-		  WHERE run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), runID, nodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -6427,9 +6516,14 @@ func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail st
 
 // TouchNodeHeartbeat stamps last_heartbeat=now.
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET last_heartbeat = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), runID, nodeID)
+	return s.defaultTenant().TouchNodeHeartbeat(ctx, runID, nodeID)
+}
+
+// TouchNodeHeartbeat is [Store.TouchNodeHeartbeat] confined to t's team.
+func (t *Tenant) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
+		`UPDATE nodes SET last_heartbeat = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		time.Now().UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -6852,7 +6946,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 	}
 	defer func() { _ = tx.Rollback() }()
 	if nodeID != "" {
-		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {

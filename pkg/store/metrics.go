@@ -71,7 +71,7 @@ func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, s
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	var held int

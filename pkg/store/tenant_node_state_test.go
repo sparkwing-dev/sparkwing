@@ -110,3 +110,60 @@ func TestTenantNodeDispatchesStayInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.GetNodeDispatch = %+v, %v, want the snapshot", got, err)
 	}
 }
+
+// A node's writes and its steps belong to its run's team: every write
+// another team's handle aims at the node reads as not found and leaves it
+// as it was, and that handle lists none of its steps.
+func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+
+	writes := map[string]func(*store.Tenant) error{
+		"StartNode":               func(tn *store.Tenant) error { return tn.StartNode(ctx, "run-a", "build") },
+		"SetNodeStatus":           func(tn *store.Tenant) error { return tn.SetNodeStatus(ctx, "run-a", "build", "running") },
+		"UpdateNodeDeps":          func(tn *store.Tenant) error { return tn.UpdateNodeDeps(ctx, "run-a", "build", []string{"lint"}) },
+		"UpdateNodeActivity":      func(tn *store.Tenant) error { return tn.UpdateNodeActivity(ctx, "run-a", "build", "compiling") },
+		"TouchNodeHeartbeat":      func(tn *store.Tenant) error { return tn.TouchNodeHeartbeat(ctx, "run-a", "build") },
+		"AppendNodeAnnotation":    func(tn *store.Tenant) error { return tn.AppendNodeAnnotation(ctx, "run-a", "build", "note") },
+		"SetNodeSummary":          func(tn *store.Tenant) error { return tn.SetNodeSummary(ctx, "run-a", "build", "# done") },
+		"SetNodeArtifactManifest": func(tn *store.Tenant) error { return tn.SetNodeArtifactManifest(ctx, "run-a", "build", "sha256:x") },
+		"StartNodeStep":           func(tn *store.Tenant) error { return tn.StartNodeStep(ctx, "run-a", "build", "compile") },
+		"FinishNodeStep":          func(tn *store.Tenant) error { return tn.FinishNodeStep(ctx, "run-a", "build", "compile", "passed") },
+		"SkipNodeStep":            func(tn *store.Tenant) error { return tn.SkipNodeStep(ctx, "run-a", "build", "test") },
+		"AppendStepAnnotation":    func(tn *store.Tenant) error { return tn.AppendStepAnnotation(ctx, "run-a", "build", "compile", "slow") },
+		"SetStepSummary":          func(tn *store.Tenant) error { return tn.SetStepSummary(ctx, "run-a", "build", "compile", "ok") },
+	}
+	for name, write := range writes {
+		if err := write(globex); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("globex.%s = %v, want ErrNotFound", name, err)
+		}
+	}
+	usage := store.NodeUsage{CPUTime: time.Second, Wall: time.Second}
+	if err := globex.AddNodeUsage(ctx, "run-a", "build", usage); err != nil {
+		t.Errorf("globex.AddNodeUsage = %v, want the no-op a missing node gets", err)
+	}
+	n, err := acme.GetNode(ctx, "run-a", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Status != "pending" || n.Summary != "" || len(n.Annotations) != 0 || n.ArtifactManifest != "" || n.CPUNanos != 0 {
+		t.Fatalf("another team's writes changed the node: %+v", n)
+	}
+	for name, write := range writes {
+		if err := write(acme); err != nil {
+			t.Errorf("acme.%s: %v", name, err)
+		}
+	}
+	if steps, err := globex.ListNodeSteps(ctx, "run-a"); err != nil || len(steps) != 0 {
+		t.Fatalf("globex.ListNodeSteps = %v, %v, want none", steps, err)
+	}
+	if steps, err := acme.ListNodeSteps(ctx, "run-a"); err != nil || len(steps) != 2 {
+		t.Fatalf("acme.ListNodeSteps = %v, %v, want compile and test", steps, err)
+	}
+}

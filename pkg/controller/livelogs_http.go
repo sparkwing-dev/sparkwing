@@ -40,11 +40,15 @@ type LiveLogRead struct {
 }
 
 func (s *Server) handleAppendNodeLiveLog(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	// safety: a trigger-claim principal may write any node id under its own
 	// run, so without this a caller could mint a buffer per invented name.
-	if _, err := s.store.GetNode(r.Context(), runID, nodeID); err != nil {
+	if _, err := tenant.GetNode(r.Context(), runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return

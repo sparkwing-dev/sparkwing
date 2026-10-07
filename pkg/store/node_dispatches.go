@@ -57,10 +57,7 @@ func (t *Tenant) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, d.RunID); err != nil {
-		return err
-	}
-	if err := t.s.assertNodeMutationFenceTx(ctx, tx, d.RunID, d.NodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, d.RunID, d.NodeID); err != nil {
 		return err
 	}
 	seq := d.Seq

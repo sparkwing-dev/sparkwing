@@ -164,7 +164,7 @@ func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `

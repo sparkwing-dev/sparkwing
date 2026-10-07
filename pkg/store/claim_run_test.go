@@ -233,11 +233,11 @@ func TestEnqueueChildRun_RoutesAChildByItsRepository(t *testing.T) {
 	}
 	child(0, "child-probe", "probe")
 	child(1, "child-other", "other")
-	if _, err := st.GetNode(ctx, "child-probe", store.PlanNodeID); err != nil {
+	if _, err := alpha.GetNode(ctx, "child-probe", store.PlanNodeID); err != nil {
 		t.Fatalf("the opted-in child has no planning node: %v", err)
 	}
 	requireTriggerStatus(t, st, "child-probe", "done")
-	if _, err := st.GetNode(ctx, "child-other", store.PlanNodeID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := alpha.GetNode(ctx, "child-other", store.PlanNodeID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the opted-out child got a planning node: %v", err)
 	}
 	requireTriggerStatus(t, st, "child-other", "pending")
