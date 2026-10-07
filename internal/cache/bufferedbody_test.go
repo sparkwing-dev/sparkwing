@@ -45,27 +45,6 @@ func TestBufferedBodiesRejectOverflow(t *testing.T) {
 					}
 				})
 			})
-			t.Run("upload", func(t *testing.T) {
-				oldDir := uploadsDir
-				uploadsDir = t.TempDir()
-				t.Cleanup(func() { uploadsDir = oldDir })
-				w := httptest.NewRecorder()
-				handleUpload(w, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(payload)))
-				want := http.StatusOK
-				if size > 32 {
-					want = http.StatusRequestEntityTooLarge
-				}
-				if w.Code != want {
-					t.Errorf("status = %d, want %d", w.Code, want)
-				}
-				entries, err := os.ReadDir(uploadsDir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if size > 32 && len(entries) != 0 {
-					t.Errorf("oversized upload left %d files", len(entries))
-				}
-			})
 		})
 	}
 }

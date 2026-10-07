@@ -162,8 +162,7 @@ Dashboard ─────► Logs              live log stream (SSE)
 
 Cache ─────────► GitHub            git fetch (background, every 30s)
 
-sparkwing CLI ──────► Cache             refresh or seed an exact Git commit
-sparkwing CLI ──────► Controller        seed/query source through authenticated proxy
+sparkwing CLI ──────► Controller        create triggers; upload working-tree sources
 ```
 
 ### Network policies

@@ -21,7 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-// safety: a push resolves a repository, seeds the gitcache and writes rows, so
+// safety: a push resolves a repository and writes rows, so
 // it gets more room than a read of the same controller.
 const cronsProfileTimeout = 2 * time.Minute
 

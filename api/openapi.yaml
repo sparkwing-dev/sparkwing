@@ -2715,55 +2715,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/gitcache/refresh:
-    post:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Refresh the cache's mirror of a repository.
-      description: |
-        Proxied to the cache's `/git/refresh`. `repo` is validated with the
-        clone-URL rules, so it cannot name a local path, a loopback or
-        private address, or a URL carrying embedded credentials.
-      parameters:
-        - {$ref: "#/components/parameters/GitcacheRepo"}
-      responses:
-        "200": {description: "The cache's answer, forwarded verbatim."}
-        "400": {description: Missing or rejected repo URL.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-
-  /api/v1/gitcache/seed:
-    post:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Push a pack of objects into the cache's mirror.
-      description: |
-        Proxied to the cache's `/sync/seed` with a 500 MiB body cap.
-        `workspace=1` seeds an uncommitted working-tree snapshot instead of
-        a committed ref.
-      parameters:
-        - {$ref: "#/components/parameters/GitcacheRepo"}
-        - in: query
-          name: sha
-          required: true
-          schema: {type: string, pattern: "^[0-9a-f]{40,64}$"}
-          description: Hex object id the pack tips at.
-        - in: query
-          name: workspace
-          schema: {type: string, enum: ["1"]}
-      requestBody:
-        required: true
-        content:
-          application/octet-stream:
-            schema: {type: string, format: binary}
-      responses:
-        "200": {description: "The cache's answer, forwarded verbatim."}
-        "400": {description: "Missing or rejected repo URL, sha, or workspace flag."}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-
   /api/v1/gitcache/git/register:
     post:
       x-sparkwing-scope: admin

@@ -87,7 +87,9 @@ each Job a claim token for its own work and no Kubernetes API token.
 
 **Cache and source sharing have their own provenance requirements.** A source
 URL and a cache grant alone do not establish that every Git object in a shared
-mirror is public. Assess imported and seeded objects separately from
+mirror is public. Other teams read only the cache's separate public mirrors,
+which it fills from origin without a credential; the operator's mirrors may
+still hold objects an earlier release seeded. Assess those separately from
 controller API permissions. This guide makes no tenant-isolation guarantee
 for those shared mirrors.
 
@@ -739,8 +741,9 @@ the published images are known bad.
 
 `sparkwing-cache` requires a bearer token (`--api-token`, falling back to
 `$SPARKWING_API_TOKEN`) on every route that touches repository content: git
-clone and registration, archives, single files, tree hashes, branch
-membership, the repo listing, artifacts, and the blob and sync endpoints. It
+clone and registration, the repo listing, the binary and dependency-archive
+blob routes, and the admin routes. The cache serves no source archives, single
+files, uploads or seeds: it fills a mirror only from origin. It
 refuses to start without one unless the operator passes
 `--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
 logs a startup warning. The guard has no network-location exemption: an
@@ -757,8 +760,8 @@ route to.
 Registering a repository name validates it against
 `^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
 different repository requires the token even on an unauthenticated cache.
-Every response carries `X-Content-Type-Options: nosniff`, and artifact
-downloads are served as `application/octet-stream` attachments.
+Every response carries `X-Content-Type-Options: nosniff`, and blob downloads
+are served as `application/octet-stream` or `application/gzip`.
 
 Off-cluster runners read Git through
 `/api/v1/runs/<run>/gitcache/git/...`. That route requires `nodes.claim`, a
@@ -770,11 +773,17 @@ exposes those paths to machine bearers without accepting browser sessions:
 the mount rejects a request carrying no bearer before it extends the half-hour
 stream deadline or proxies anything, and caps concurrent Git streams. A
 direct cache receives the run's cache grant instead, which opens only that
-team's blob trees.
+team's blob trees. Every grant names the live claim that asked for it and the
+run's repository and refs; the cache refuses one that names neither, so no
+grant opens a team's whole tree. A claim token's grant lasts five minutes and
+its pod renews it. A runner token's grant, minted through its live node or
+trigger claim fence, lasts six hours or until the token expires, and the cache
+honors it on its signature alone for that window even after the member who
+held the token is removed.
 
 Within a team, a grant carries the repository and refs the controller read
-from the run's trigger, and the cache writes `/cache`, `/bin` and `/artifacts`
-entries only under the run's own ref. It reads that ref, the pull request's
+from the run's trigger, and the cache writes `/cache` and `/bin` entries only
+under the run's own ref. It reads that ref, the pull request's
 base branch, the default branch, and then entries written before grants
 carried a scope, in that order. A branch's run therefore cannot replace or
 delete an entry its base branch's runs restore, and another repository's run

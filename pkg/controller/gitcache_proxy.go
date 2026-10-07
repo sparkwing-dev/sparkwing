@@ -20,43 +20,6 @@ var (
 	gitcacheRepoName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
-func (s *Server) handleGitcacheRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	repoURL, ok := validateGitcacheRepoURL(w, r)
-	if !ok {
-		return
-	}
-	s.proxyGitcache(w, r, "/git/refresh", repoURL, "", false, nil)
-}
-
-func (s *Server) handleGitcacheSeed(w http.ResponseWriter, r *http.Request) {
-	extendGitcacheStreamDeadline(w, r)
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	repoURL, ok := validateGitcacheRepoURL(w, r)
-	if !ok {
-		return
-	}
-	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
-	if !gitObjectSHA.MatchString(sha) {
-		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
-		return
-	}
-	workspace := r.URL.Query().Get("workspace")
-	if workspace != "" && workspace != "1" {
-		http.Error(w, "workspace query param must be 1 when set", http.StatusBadRequest)
-		return
-	}
-	body := http.MaxBytesReader(w, r.Body, 500<<20)
-	defer func() { _ = body.Close() }()
-	s.proxyGitcache(w, r, "/sync/seed", repoURL, sha, workspace == "1", body)
-}
-
 func (s *Server) handleGitcacheRegister(w http.ResponseWriter, r *http.Request) {
 	extendGitcacheStreamDeadline(w, r)
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
@@ -170,18 +133,6 @@ func validateGitcacheRepoURL(w http.ResponseWriter, r *http.Request) (string, bo
 		return "", false
 	}
 	return validated, true
-}
-
-func (s *Server) proxyGitcache(w http.ResponseWriter, r *http.Request, path, repoURL, sha string, workspace bool, body io.Reader) {
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	if sha != "" {
-		q.Set("sha", sha)
-	}
-	if workspace {
-		q.Set("workspace", "1")
-	}
-	s.proxyGitcacheRequest(w, r, http.MethodPost, path, q.Encode(), body)
 }
 
 func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, method, path, rawQuery string, body io.Reader) {

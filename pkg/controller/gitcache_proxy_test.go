@@ -17,62 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestGitcacheProxy_WorkspaceSeedForwardsBundleAndRetentionMarker(t *testing.T) {
-	sha := "0123456789abcdef0123456789abcdef01234567"
-	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST", r.Method)
-		}
-		if r.URL.Path != "/sync/seed" {
-			t.Fatalf("path = %s, want /sync/seed", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("repo"); got != "https://git.example.com/acme/widgets.git" {
-			t.Fatalf("repo = %q", got)
-		}
-		if got := r.URL.Query().Get("sha"); got != sha {
-			t.Fatalf("sha = %q", got)
-		}
-		if got := r.URL.Query().Get("workspace"); got != "1" {
-			t.Fatalf("workspace = %q, want 1", got)
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		if string(body) != "bundle" {
-			t.Fatalf("body = %q, want bundle", body)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer cache.Close()
-
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctrl := controller.New(st, nil).WithCacheURL(cache.URL)
-	srv := httptest.NewServer(ctrl.Handler())
-	defer srv.Close()
-
-	resp, err := http.Post(
-		srv.URL+"/api/v1/gitcache/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha,
-		"application/octet-stream",
-		strings.NewReader("bundle"),
-	)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d: %s", resp.StatusCode, body)
-	}
-}
-
 func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 	var targetRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -91,11 +35,9 @@ func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
 	defer srv.Close()
-	sha := strings.Repeat("a", 40)
 	for name, request := range map[string]*http.Request{
-		"seed": mustRequest(t, http.MethodPost,
-			srv.URL+"/api/v1/gitcache/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha,
-			strings.NewReader("private bundle")),
+		"register": mustRequest(t, http.MethodPost,
+			srv.URL+"/api/v1/gitcache/git/register?name=widgets&repo=https://git.example.com/acme/widgets.git", nil),
 		"git": mustRequest(t, http.MethodPost,
 			srv.URL+"/api/v1/gitcache/git/widgets/git-upload-pack", strings.NewReader("want")),
 	} {
@@ -413,51 +355,6 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 	}
 	if string(body) != "firstsecond" {
 		t.Fatalf("body = %q", body)
-	}
-}
-
-func TestGitcacheProxy_AllowsSlowWorkspaceUploadBeyondDefaultDeadline(t *testing.T) {
-	var gotBody string
-	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		gotBody = string(body)
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	defer cache.Close()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
-	server.Config.ReadTimeout = 20 * time.Millisecond
-	server.Start()
-	defer server.Close()
-	reader, writer := io.Pipe()
-	go func() {
-		_, _ = writer.Write([]byte("first"))
-		time.Sleep(60 * time.Millisecond)
-		_, _ = writer.Write([]byte("second"))
-		_ = writer.Close()
-	}()
-	sha := strings.Repeat("a", 40)
-	req, err := http.NewRequest(http.MethodPost,
-		server.URL+"/api/v1/gitcache/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha, reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || gotBody != "firstsecond" {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body/cache body = %d/%q/%q", resp.StatusCode, body, gotBody)
 	}
 }
 

@@ -414,8 +414,7 @@ sparkwing crons install --profile prod --repo ~/code/my-app
 ```
 
 The push reads the repository's controller entries, resolves the checkout's
-git origin, branch and HEAD, seeds the controller's git cache with that
-commit, and sends the whole set. Entries declared `where: local` are reported
+git origin, branch and HEAD, and sends the whole set. Entries declared `where: local` are reported
 as this host's, and the same command with no `--profile` arms them here.
 
 The repository needs a git origin, because the cluster clones the pipeline
@@ -424,8 +423,7 @@ push refuses a HEAD no remote branch carries -- `git branch -r --contains HEAD`
 empty -- since every fire would fail at the clone: push the branch first, or
 use `--follow` to clone the branch tip instead. Uncommitted edits are a warning
 rather than a refusal, because the controller clones the pushed commit and they
-are simply not part of what fires. A seed that fails is a warning too: the
-trigger loop fetches the commit itself when it finds the cache short.
+are simply not part of what fires.
 
 ### Pinned by commit, or following the branch
 

@@ -24,49 +24,6 @@ func countClones(t *testing.T, upstream string, fail bool) *atomic.Int32 {
 	return &n
 }
 
-// After a recovery reclone deletes the mirror and its own clone fails, the
-// mirror is gone: every later /archive request lands on the clone-if-missing
-// path, which re-downloaded the whole repository with nothing bounding it.
-func TestCloneBreaker_SecondMissingMirrorInsideCooldownDoesNotClone(t *testing.T) {
-	repoURL, _, upstream := gitcacheFixture(t)
-	setWindows(t, -1, time.Hour)
-	countFetches(t, &gitError{"cannot lock ref 'refs/heads/foo'"})
-
-	old := recloneMirror
-	recloneMirror = func(_, bareRepo string) (string, error) {
-		_ = os.RemoveAll(bareRepo)
-		return "fatal: could not read from remote repository\n", &gitError{"reclone failed"}
-	}
-	t.Cleanup(func() { recloneMirror = old })
-
-	if w := archiveRequest(t, repoURL); w.Code == 200 {
-		t.Fatal("setup: the failing recovery reclone should fail the request")
-	}
-
-	clones := countClones(t, upstream, true)
-
-	if w := archiveRequest(t, repoURL); w.Code == 200 {
-		t.Fatal("second archive should fail: the mirror is gone and the clone fails")
-	}
-	if got := clones.Load(); got != 1 {
-		t.Fatalf("clones on the first missing-mirror request: got %d, want 1", got)
-	}
-
-	w := archiveRequest(t, repoURL)
-	if w.Code == 200 {
-		t.Fatal("third archive should fail")
-	}
-	if got := clones.Load(); got != 1 {
-		t.Errorf("clones after the cooldown should have stopped it: got %d, want 1", got)
-	}
-	body := w.Body.String()
-	for _, want := range []string{"cooldown", "operator"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body %q does not mention %q", body, want)
-		}
-	}
-}
-
 // A repository whose mirror is simply absent still gets its first clone.
 func TestCloneBreaker_FirstCloneIsNotBlocked(t *testing.T) {
 	repoURL, _, upstream := gitcacheFixture(t)
@@ -77,7 +34,7 @@ func TestCloneBreaker_FirstCloneIsNotBlocked(t *testing.T) {
 	}
 	clones := countClones(t, upstream, false)
 
-	if w := archiveRequest(t, repoURL); w.Code != 200 {
+	if w := refsRequest(t); w.Code != 200 {
 		t.Fatalf("first clone must proceed: status %d, body=%s", w.Code, w.Body.String())
 	}
 	if got := clones.Load(); got != 1 {
@@ -105,10 +62,10 @@ func TestCloneBreaker_CooldownExpiryPermitsOneClone(t *testing.T) {
 	}
 	clones := countClones(t, upstream, true)
 
-	if w := archiveRequest(t, repoURL); w.Code == 200 {
+	if w := refsRequest(t); w.Code == 200 {
 		t.Fatal("setup: the failing clone should fail the request")
 	}
-	if w := archiveRequest(t, repoURL); w.Code == 200 {
+	if w := refsRequest(t); w.Code == 200 {
 		t.Fatal("setup: the second request should be refused")
 	}
 	if got := clones.Load(); got != 1 {
@@ -117,7 +74,7 @@ func TestCloneBreaker_CooldownExpiryPermitsOneClone(t *testing.T) {
 
 	backdateClone(t, repoHash(repoURL), 2*time.Hour)
 
-	if w := archiveRequest(t, repoURL); w.Code == 200 {
+	if w := refsRequest(t); w.Code == 200 {
 		t.Fatal("the clone still fails, so the request still fails")
 	}
 	if got := clones.Load(); got != 2 {
@@ -136,14 +93,14 @@ func TestCloneBreaker_SuccessfulFetchClearsTheCooldown(t *testing.T) {
 	}
 	clones := countClones(t, upstream, false)
 
-	if w := archiveRequest(t, repoURL); w.Code != 200 {
+	if w := refsRequest(t); w.Code != 200 {
 		t.Fatalf("first clone: status %d, body=%s", w.Code, w.Body.String())
 	}
 	if err := os.RemoveAll(bareRepo); err != nil {
 		t.Fatalf("prune mirror: %v", err)
 	}
 
-	if w := archiveRequest(t, repoURL); w.Code != 200 {
+	if w := refsRequest(t); w.Code != 200 {
 		t.Fatalf("a prune after a healthy clone must be recloneable: status %d, body=%s", w.Code, w.Body.String())
 	}
 	if got := clones.Load(); got != 2 {
@@ -161,7 +118,7 @@ func TestCloneBreaker_NegativeCooldownDisablesTheGuard(t *testing.T) {
 	clones := countClones(t, upstream, true)
 
 	for i := range 3 {
-		if w := archiveRequest(t, repoURL); w.Code == 200 {
+		if w := refsRequest(t); w.Code == 200 {
 			t.Fatalf("request %d should fail", i)
 		}
 	}

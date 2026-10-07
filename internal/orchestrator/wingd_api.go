@@ -106,7 +106,6 @@ var apiReadRoutes = []string{
 var apiStreamRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream",
 	"GET /api/v1/artifacts/{key}",
-	"POST /api/v1/gitcache/seed",
 	"POST /api/v1/gitcache/git/register",
 	"GET /api/v1/gitcache/git/{path...}",
 	"POST /api/v1/gitcache/git/{path...}",

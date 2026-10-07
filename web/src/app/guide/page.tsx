@@ -545,7 +545,7 @@ func JobArtifactTest() {
 }
 \`\`\`
 
-Artifacts are stored in the git cache service and keyed by job ID.
+Artifacts are content-addressed: the direct data store holds them, or the cache's binary store when no data store is configured.
 
 ## Download artifacts in another job
 
@@ -572,8 +572,7 @@ func JobBuildAll() {
 \`\`\`
 
 **What to verify:**
-- Artifacts upload to gitcache successfully
-- Artifacts can be downloaded by job ID
+- Artifacts upload successfully
 - Glob patterns match correctly
 `,
   },
@@ -1031,7 +1030,7 @@ func JobDeployWithAlerts() {
     content: `
 ## Git cache service
 
-The git cache clones repos once and serves them as tarballs. This eliminates redundant git clones across runners.
+The git cache clones repos once and serves git clones to runners. This eliminates redundant clones from origin across runners.
 
 \`\`\`bash
 # Health check
@@ -1041,26 +1040,26 @@ curl -s http://localhost:9001/health
 kubectl exec -n sparkwing deploy/sparkwing-gitcache -- ls /data/repos/
 \`\`\`
 
-## Archive endpoint
+## Clone through the cache
 
 \`\`\`bash
-# Request a repo archive
-curl -s -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \\
-  "http://<gitcache>:8090/archive?repo=https://github.com/you/repo.git&branch=main" -o repo.tar
+# Clone a registered repo through the cache
+git -c http.extraHeader="Authorization: Bearer $SPARKWING_CACHE_TOKEN" \\
+  clone "http://<gitcache>:8090/git/<name>" repo
 \`\`\`
 
 The git cache:
 - Clones the repo on first request
-- Fetches on subsequent requests
+- Fetches when a clone finds the mirror stale
 - Locks per-repo to prevent duplicate clones
 - Supports SSH keys for private repos
 
-## Artifact storage
+## Binary and dependency storage
 
-Artifacts are also stored in the git cache service:
+Pipeline binaries and dependency archives are also stored in the git cache service:
 
 \`\`\`bash
-kubectl exec -n sparkwing deploy/sparkwing-gitcache -- ls /data/artifacts/
+kubectl exec -n sparkwing deploy/sparkwing-gitcache -- ls /data/bins/ /data/teams/
 \`\`\`
 `,
   },
