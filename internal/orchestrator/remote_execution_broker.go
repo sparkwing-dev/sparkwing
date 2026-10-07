@@ -138,18 +138,13 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 		http.Error(w, "execution capability required", http.StatusUnauthorized)
 		return
 	}
-	if strings.HasPrefix(r.URL.EscapedPath(), "/bin/") {
-		b.serveArtifact(w, r)
+	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
+	if !b.allow(r) || (logsRequest && b.logs == nil) {
+		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
 		return
 	}
-	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
-	if logsRequest {
-		if b.logs == nil || !b.allowLogs(r) {
-			http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
-			return
-		}
-	} else if !b.allowController(r) {
-		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
+	if strings.HasPrefix(r.URL.EscapedPath(), "/bin/") {
+		b.serveArtifact(w, r)
 		return
 	}
 	if err := b.bindRequest(r); err != nil {
@@ -265,81 +260,131 @@ func (b *remoteExecutionBroker) putArtifact(r *http.Request, key string) error {
 	return b.artifact.Put(r.Context(), key, tmp)
 }
 
-func (b *remoteExecutionBroker) allowLogs(r *http.Request) bool {
-	prefix := "/api/v1/logs/" + url.PathEscape(b.runID) + "/" + url.PathEscape(b.nodeID)
-	return (r.Method == http.MethodGet || r.Method == http.MethodPost) &&
-		(r.URL.EscapedPath() == prefix || strings.HasPrefix(r.URL.EscapedPath(), prefix+"/"))
+// safety: {run} and {node} match only this broker's own run and node, {other} any node of
+// this run, {name} any one segment, and a trailing {name...} the rest of the path.
+type brokerRoute struct {
+	method, pattern string
+	check           func(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool
 }
 
-func (b *remoteExecutionBroker) allowController(r *http.Request) bool {
-	runPath := "/api/v1/runs/" + url.PathEscape(b.runID)
-	nodePath := runPath + "/nodes/" + url.PathEscape(b.nodeID)
-	triggerPath := "/api/v1/triggers/" + url.PathEscape(b.runID)
-	path := r.URL.EscapedPath()
-	if strings.HasPrefix(path, "/api/v1/concurrency/") {
-		return b.allowConcurrency(r)
-	}
-	if r.Method == http.MethodGet {
-		if path == runPath || path == triggerPath || path == nodePath || path == nodePath+"/output" || path == nodePath+"/bounce" || path == runPath+"/steps" {
-			return true
+// safety: this is everything a brokered node reaches; docs/node-protocol.md lists the
+// same set, and a test holds the two equal.
+var brokerRoutes = []brokerRoute{
+	{http.MethodGet, "/api/v1/runs/{run}", nil},
+	{http.MethodGet, "/api/v1/triggers/{run}", nil},
+	{http.MethodGet, "/api/v1/runs/{run}/steps", nil},
+	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}", nil},
+	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}/output", nil},
+	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}/bounce", nil},
+	{http.MethodGet, "/api/v1/secrets/{name}", secretForThisRun},
+	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/heartbeat", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/start", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/finish", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/deps", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/dispatch", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/metrics", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/execution-start", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/execution-finish", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/output-upload", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/output-commit", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/activity", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/touch", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/annotations", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/summary", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/artifact-manifest", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/steps/start", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/steps/finish", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/steps/skip", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/steps/annotations", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/steps/summary", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/bounce/consume", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/status", nil},
+	{http.MethodGet, "/api/v1/concurrency/{key}/holder", concurrencyForThisNode},
+	{http.MethodGet, "/api/v1/concurrency/{key}/resolve", concurrencyForThisNode},
+	{http.MethodPost, "/api/v1/concurrency/{key}/acquire", concurrencyForThisNode},
+	{http.MethodPost, "/api/v1/concurrency/{key}/heartbeat", concurrencyForThisNode},
+	{http.MethodPost, "/api/v1/concurrency/{key}/release", concurrencyForThisNode},
+	{http.MethodPost, "/api/v1/concurrency/{key}/cancel-waiter", concurrencyForThisNode},
+	{http.MethodGet, "/api/v1/logs/{run}/{node}", nil},
+	{http.MethodPost, "/api/v1/logs/{run}/{node}", nil},
+	{http.MethodGet, "/api/v1/logs/{run}/{node}/seal", nil},
+	{http.MethodPost, "/api/v1/logs/{run}/{node}/seal", nil},
+	{http.MethodGet, "/api/v1/logs/{run}/{node}/stream", nil},
+	{http.MethodGet, "/bin/{key...}", nil},
+	{http.MethodHead, "/bin/{key...}", nil},
+	{http.MethodPut, "/bin/{key...}", nil},
+}
+
+func (b *remoteExecutionBroker) allow(r *http.Request) bool {
+	path := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
+	for _, route := range brokerRoutes {
+		if route.method != r.Method {
+			continue
 		}
-		if encoded, ok := strings.CutPrefix(path, runPath+"/nodes/"); ok {
-			node, err := url.PathUnescape(encoded)
-			if err == nil && node != "" && node != "." && node != ".." && !strings.ContainsAny(node, "/\\") {
-				return true
-			}
+		segments, ok := b.matchRoute(route.pattern, path)
+		if !ok {
+			continue
 		}
-		if strings.HasPrefix(path, runPath+"/nodes/") && strings.HasSuffix(path, "/output") {
-			return true
-		}
-		if strings.HasPrefix(path, "/api/v1/secrets/") {
-			return r.URL.Query().Get("run") == b.runID
-		}
-		return false
-	}
-	if r.Method != http.MethodPost {
-		return false
-	}
-	if path == runPath+"/events" || path == runPath+"/heartbeat" {
-		return true
-	}
-	for _, suffix := range []string{
-		"/start", "/finish", "/deps", "/dispatch", "/metrics", "/execution-start", "/execution-finish",
-		"/output-upload", "/output-commit",
-		"/activity", "/touch", "/annotations", "/summary", "/artifact-manifest", "/steps/start",
-		"/steps/finish", "/steps/skip", "/steps/annotations", "/steps/summary", "/bounce/consume", "/status",
-	} {
-		if path == nodePath+suffix {
-			return true
-		}
+		return route.check == nil || route.check(b, r, segments)
 	}
 	return false
 }
 
-func (b *remoteExecutionBroker) allowConcurrency(r *http.Request) bool {
-	parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/concurrency/"), "/")
-	if len(parts) != 2 || parts[0] == "" {
-		return false
+func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[string]string, bool) {
+	want := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
+	segments := map[string]string{}
+	for i, w := range want {
+		if strings.HasSuffix(w, "...}") {
+			if i >= len(path) {
+				return nil, false
+			}
+			segments[strings.Trim(w, "{.}")] = strings.Join(path[i:], "/")
+			return segments, true
+		}
+		if i >= len(path) {
+			return nil, false
+		}
+		got := path[i]
+		switch {
+		case w == "{run}":
+			if got != url.PathEscape(b.runID) {
+				return nil, false
+			}
+		case w == "{node}":
+			if got != url.PathEscape(b.nodeID) {
+				return nil, false
+			}
+		case w == "{other}":
+			node, err := url.PathUnescape(got)
+			if err != nil || node == "" || node == "." || node == ".." || strings.ContainsAny(node, "/\\") {
+				return nil, false
+			}
+		case strings.HasPrefix(w, "{"):
+			segments[strings.Trim(w, "{}")] = got
+		case w != got:
+			return nil, false
+		}
 	}
-	key, err := url.PathUnescape(parts[0])
+	return segments, len(path) == len(want)
+}
+
+func secretForThisRun(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	return r.URL.Query().Get("run") == b.runID
+}
+
+func concurrencyForThisNode(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool {
+	key, err := url.PathUnescape(segments["key"])
 	if err != nil || key == "" || strings.Contains(key, "/") {
 		return false
 	}
 	holder := b.runID + "/" + b.nodeID
-	if r.Method == http.MethodGet {
-		switch parts[1] {
-		case "holder":
-			return r.URL.Query().Get("holder_id") == holder
-		case "resolve":
-			return r.URL.Query().Get("run_id") == b.runID && r.URL.Query().Get("node_id") == b.nodeID
-		}
-		return false
-	}
-	if r.Method != http.MethodPost {
-		return false
-	}
-	if parts[1] != "acquire" && parts[1] != "heartbeat" && parts[1] != "release" && parts[1] != "cancel-waiter" {
-		return false
+	action := r.URL.EscapedPath()[strings.LastIndex(r.URL.EscapedPath(), "/")+1:]
+	switch action {
+	case "holder":
+		return r.URL.Query().Get("holder_id") == holder
+	case "resolve":
+		return r.URL.Query().Get("run_id") == b.runID && r.URL.Query().Get("node_id") == b.nodeID
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
 	if err != nil || len(body) > 1<<20 {
@@ -356,13 +401,13 @@ func (b *remoteExecutionBroker) allowConcurrency(r *http.Request) bool {
 	if json.Unmarshal(body, &slot) != nil {
 		return false
 	}
-	if parts[1] == "cancel-waiter" {
+	if action == "cancel-waiter" {
 		return slot.RunID == b.runID && slot.NodeID == b.nodeID
 	}
 	if slot.HolderID != holder {
 		return false
 	}
-	if parts[1] == "acquire" {
+	if action == "acquire" {
 		return slot.RunID == b.runID && slot.NodeID == b.nodeID &&
 			slot.InheritedHolderID == ""
 	}
