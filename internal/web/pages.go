@@ -246,7 +246,10 @@ func RuntimeConfig(version string, signIn bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = io.WriteString(w, body)
+		// safety: the status is already sent, so a client that went away mid-body is the only failure left to see.
+		if _, err := io.WriteString(w, body); err != nil {
+			return
+		}
 	})
 }
 

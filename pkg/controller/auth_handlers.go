@@ -317,7 +317,7 @@ func (s *Server) createFirstUser(r *http.Request, name, password string, scopes 
 	if !slices.Contains(scopes, ScopeAdmin) {
 		return nil, fmt.Errorf("the first account must hold the %s scope", ScopeAdmin)
 	}
-	u, err := s.store.CreateFirstUser(name, password, scopes, time.Now().UTC())
+	u, err := s.store.CreateFirstUser(name, password, scopes, time.Now().UTC()) //nolint:contextcheck // the store's first-user insert takes no context
 	if err != nil {
 		if errors.Is(err, store.ErrBootstrapClosed) {
 			s.markBootstrapClosed()

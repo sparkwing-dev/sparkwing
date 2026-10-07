@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -315,7 +316,10 @@ func parseDisplayLine(raw string) displayLine {
 		return displayLine{body: rec.Msg, step: rec.Step, show: true}
 	}
 	if len(rec.Attrs) > 0 {
-		attrBytes, _ := json.Marshal(rec.Attrs)
+		attrBytes, err := json.Marshal(rec.Attrs)
+		if err != nil {
+			return displayLine{body: raw, show: true}
+		}
 		return displayLine{body: string(attrBytes), step: rec.Step, show: true}
 	}
 	return displayLine{body: "", step: rec.Step, show: true}
@@ -361,13 +365,14 @@ func RunLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 		sem := make(chan struct{}, fanout)
 		results := make([]nodeResult, len(nodes))
 		var wg sync.WaitGroup
+		ctx := r.Context()
 		for i, n := range nodes {
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(i int, nodeID string) {
+			go func(ctx context.Context, i int, nodeID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				content, err := b.ReadNodeLog(r.Context(), runID, nodeID, backend.ReadOpts{})
+				content, err := b.ReadNodeLog(ctx, runID, nodeID, backend.ReadOpts{})
 				if err != nil || len(content) == 0 {
 					return
 				}
@@ -396,7 +401,7 @@ func RunLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 				}
 				local.truncated = errors.Is(sc.Err(), bufio.ErrTooLong)
 				results[i] = local
-			}(i, n.NodeID)
+			}(ctx, i, n.NodeID)
 		}
 		wg.Wait()
 		matches := make([]match, 0, 64)
@@ -656,7 +661,10 @@ func EventsStreamHandler(b backend.Backend) http.HandlerFunc {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	// safety: the status is already sent, so a client that went away mid-body is the only failure left to see.
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		return
+	}
 }
 
 func writeErr(w http.ResponseWriter, status int, err error) {

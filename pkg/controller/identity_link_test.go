@@ -39,7 +39,7 @@ type linkFlow struct {
 
 const linked = "linked"
 
-func signInsOutcome(t *testing.T, resp *http.Response) string {
+func signInsOutcome(t *testing.T, resp *browserResponse) string {
 	t.Helper()
 	loc, err := url.Parse(resp.Header.Get("Location"))
 	if resp.StatusCode != http.StatusSeeOther || err != nil {
@@ -324,7 +324,7 @@ func TestLinkStartRefusesAProviderAlreadyLinked(t *testing.T) {
 
 	csrf := f.csrfFor(owner.auth)
 	form := url.Values{"csrf_token": {csrf}}
-	req, err := http.NewRequest("POST", f.url+"/auth/github/link", strings.NewReader(form.Encode()))
+	req, err := http.NewRequest(http.MethodPost, f.url+"/auth/github/link", strings.NewReader(form.Encode()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,28 +333,19 @@ func TestLinkStartRefusesAProviderAlreadyLinked(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: sessionIDOf(owner.auth)})
 	req.AddCookie(&http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	resp, err := noRedirects.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	resp := f.browserDo(req)
 	if outcome := signInsOutcome(t, resp); outcome != "link_failed" {
 		t.Fatalf("link start from an unlisted host = %s, want link_failed", outcome)
 	}
 
-	bearer, err := http.NewRequest("POST", f.url+"/auth/github/link", strings.NewReader(""))
+	bearer, err := http.NewRequest(http.MethodPost, f.url+"/auth/github/link", strings.NewReader(""))
 	if err != nil {
 		t.Fatal(err)
 	}
 	bearer.Host = dashHost
 	bearer.Header.Set("Authorization", "Bearer "+f.admin)
 	bearer.Header.Set("Origin", "http://"+dashHost)
-	resp, err = noRedirects.Do(bearer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusForbidden {
+	if resp := f.browserDo(bearer); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("link start with a bearer token and no browser session = %d, want 403", resp.StatusCode)
 	}
 }

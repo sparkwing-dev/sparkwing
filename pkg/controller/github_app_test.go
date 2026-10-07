@@ -150,7 +150,7 @@ func (f *appFixture) issueCode(ghID int64, verifier string, orgs map[string]gith
 	return code
 }
 
-func connected(resp *http.Response) int {
+func connected(resp *browserResponse) int {
 	if resp.StatusCode == http.StatusSeeOther && strings.HasPrefix(resp.Header.Get("Location"), "/team/github?connected=") {
 		return http.StatusCreated
 	}

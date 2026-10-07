@@ -172,7 +172,7 @@ const dashHost = "localhost:4343"
 
 var noRedirects = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-func (f *identityFixture) browserGet(path string, cookies ...*http.Cookie) *http.Response {
+func (f *identityFixture) browserGet(path string, cookies ...*http.Cookie) *browserResponse {
 	f.t.Helper()
 	req, err := http.NewRequest(http.MethodGet, f.url+path, nil)
 	if err != nil {
@@ -182,15 +182,34 @@ func (f *identityFixture) browserGet(path string, cookies ...*http.Cookie) *http
 	for _, c := range cookies {
 		req.AddCookie(c)
 	}
+	return f.browserDo(req)
+}
+
+// safety: the browser helpers read and close each body here, so no test holds a body it could leave open.
+type browserResponse struct {
+	StatusCode int
+	Header     http.Header
+	cookies    []*http.Cookie
+	body       string
+}
+
+func (r *browserResponse) Cookies() []*http.Cookie { return r.cookies }
+
+func (f *identityFixture) browserDo(req *http.Request) *browserResponse {
+	f.t.Helper()
 	resp, err := noRedirects.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	f.t.Cleanup(func() { _ = resp.Body.Close() })
-	return resp
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return &browserResponse{StatusCode: resp.StatusCode, Header: resp.Header, cookies: resp.Cookies(), body: string(raw)}
 }
 
-func responseCookie(resp *http.Response, name string) *http.Cookie {
+func responseCookie(resp *browserResponse, name string) *http.Cookie {
 	for _, c := range resp.Cookies() {
 		if c.Name == name && c.MaxAge >= 0 {
 			return c
@@ -325,7 +344,7 @@ func (f *identityFixture) csrfFor(auth string) string {
 	return sess.CSRFToken
 }
 
-func (f *identityFixture) browserSend(method, auth, path string, form url.Values, extra ...*http.Cookie) *http.Response {
+func (f *identityFixture) browserSend(method, auth, path string, form url.Values, extra ...*http.Cookie) *browserResponse {
 	f.t.Helper()
 	csrf := ""
 	if auth != "" {
@@ -354,19 +373,9 @@ func (f *identityFixture) browserSend(method, auth, path string, form url.Values
 	for _, c := range extra {
 		req.AddCookie(c)
 	}
-	resp, err := noRedirects.Do(req)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	f.t.Cleanup(func() { _ = resp.Body.Close() })
-	return resp
+	return f.browserDo(req)
 }
 
-func responseBody(t *testing.T, resp *http.Response) string {
-	t.Helper()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return html.UnescapeString(string(raw))
+func responseBody(_ *testing.T, resp *browserResponse) string {
+	return html.UnescapeString(resp.body)
 }

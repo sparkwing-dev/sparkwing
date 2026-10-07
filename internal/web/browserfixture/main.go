@@ -121,7 +121,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if err := st.Close(); err != nil {
+			log.Printf("browser fixture store close: %v", err)
+		}
+	}()
 	now := time.Now().UTC()
 	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
 	if err != nil {
@@ -137,7 +141,11 @@ func main() {
 		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure.
 		InsecureCookies: true,
 	})
-	defer func() { _ = srv.Shutdown(context.Background()) }()
+	defer func() {
+		if err := srv.Shutdown(context.Background()); err != nil {
+			log.Printf("browser fixture shutdown: %v", err)
+		}
+	}()
 
 	dashboardListener, dashboardServer, err := listen(srv.Handler())
 	if err != nil {
@@ -145,7 +153,9 @@ func main() {
 	}
 	controlListener, controlServer, err := listen(controlHandler(st))
 	if err != nil {
-		_ = dashboardServer.Close()
+		if err := dashboardServer.Close(); err != nil {
+			log.Printf("browser fixture close: %v", err)
+		}
 		log.Fatal(err)
 	}
 	started := map[string]string{
@@ -160,8 +170,11 @@ func main() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	<-signals
-	_ = dashboardServer.Close()
-	_ = controlServer.Close()
+	for _, server := range []*http.Server{dashboardServer, controlServer} {
+		if err := server.Close(); err != nil {
+			log.Printf("browser fixture close: %v", err)
+		}
+	}
 }
 
 const (
