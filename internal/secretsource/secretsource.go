@@ -101,8 +101,12 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return "", false, fmt.Errorf("secrets backend %s: %d %s", base, resp.StatusCode, http.StatusText(resp.StatusCode))
 	default:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", false, fmt.Errorf("secrets backend %s: %d %s: %s", base, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		detail := strings.TrimSpace(string(body))
+		if readErr != nil {
+			detail += fmt.Sprintf(" (reading the body failed: %v)", readErr)
+		}
+		return "", false, fmt.Errorf("secrets backend %s: %d %s: %s", base, resp.StatusCode, http.StatusText(resp.StatusCode), detail)
 	}
 	var body struct {
 		Value  string `json:"value"`
