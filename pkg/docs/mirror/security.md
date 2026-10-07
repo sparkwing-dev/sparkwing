@@ -70,6 +70,19 @@ and storage credentials, and controlled volume mounts. A multi-team license
 does not configure those protections or isolate pipeline code from a shared
 host's OS permissions.
 
+**A warm runner's pool token belongs to an operator-only team.** A warm
+runner claims triggers with its pool token, and only for that token's team,
+then runs that team's pipeline code in its own pod or in Jobs it creates. That
+code can read whatever the runner holds: the pool token itself, a GitHub token
+the runner carries for private modules, the service account it creates Jobs
+with, and the cloud role attached to that account, which the cloud's identity
+webhook still injects into Jobs that disable the Kubernetes token. Creating a
+Job in the runner's namespace can mount any Secret there. Every member of the
+pool token's team therefore has operator authority over that namespace and
+role, so put nobody but operators in it. Customer pipelines belong on runners
+whose token's team they own, launched through controller dispatch, which gives
+each Job a claim token for its own work and no Kubernetes API token.
+
 **Cache and source sharing have their own provenance requirements.** A source
 URL and a cache grant alone do not establish that every Git object in a shared
 mirror is public. Assess imported and seeded objects separately from
@@ -334,6 +347,12 @@ principal that owns that run and two tenants submitting the same body get
 a run each. A GitHub redelivery is deduped regardless: the store holds
 one trigger per delivery id and one per body digest, so a retried
 delivery answers `409` naming the original run whatever this window says.
+The body digest is also kept for 90 days apart from the run, so a
+signed push or pull request delivered again after its run was deleted
+answers `409` with no run id instead of starting the commit again. Past
+those 90 days a legacy webhook delivery is accepted again; GitHub App
+deliveries carry an event time and are refused once it is that old (see
+[GitHub App](github-app.md)).
 
 Deduplication runs before the shed and the cap, so a redelivery is
 answered with its original run rather than a refusal, and retrying one
@@ -954,9 +973,12 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   example `printf 'swu_%s' "$(openssl rand -hex 24)"` -- because a
   bearer lookup selects on that prefix. The chart mounts it from
   `controller.bootstrapAdminToken.name` as a file, renders the flag, and
-  renders `--require-auth` from `controller.requireAuth`. Without it,
-  minting the first token needs the controller open, so enable auth by
-  creating an admin token through that window and restarting.
+  renders `--require-auth` from `controller.requireAuth`, which defaults
+  to `true`. Without a bootstrap token the render refuses unless
+  `controller.allowOpenBootstrap=true`, which drops `--require-auth` so
+  the first token can be minted through the open window and auth enabled
+  by a restart. Anything that reaches the Service during that window can
+  mint an admin token, so keep it closed to everything but the operator.
 - **Know what the bootstrap flag treats as an empty table.** It writes
   when no token *authenticates*: every row is revoked, expired, or the
   table is empty. That is what recovers a cluster whose only credential

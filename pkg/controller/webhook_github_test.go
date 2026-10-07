@@ -710,3 +710,40 @@ func TestParseGitHubWebhookConfig_BindingCounts(t *testing.T) {
 		t.Errorf("BindingCounts() = %+v, want %+v", got, want)
 	}
 }
+
+// A captured signed push stays refused after the run it started is deleted,
+// because the deliveries table outlives the trigger row.
+func TestWebhookGitHub_ReplayAfterRunDeleteIsRefused(t *testing.T) {
+	ts, st := newWebhookServer(t, testWebhookSecret)
+	body := pushBodyFor("acme/sample-app")
+	sig := signWebhook(testWebhookSecret, body)
+	url := ts.URL + "/webhooks/github/sample-app-build"
+	first := postWebhookDelivery(t, url, "push", "delivery-1", body, sig)
+	defer func() { _ = first.Body.Close() }()
+	var accepted struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if first.StatusCode != http.StatusAccepted || accepted.RunID == "" {
+		t.Fatalf("first delivery = %d %q, want a dispatched run", first.StatusCode, accepted.RunID)
+	}
+	if err := st.DeleteRun(context.Background(), accepted.RunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, delivery := range []string{"delivery-1", "delivery-2"} {
+		replay := postWebhookDelivery(t, url, "push", delivery, body, sig)
+		raw, _ := io.ReadAll(replay.Body)
+		_ = replay.Body.Close()
+		if replay.StatusCode != http.StatusConflict {
+			t.Fatalf("replay %s after run delete = %d %s, want 409", delivery, replay.StatusCode, raw)
+		}
+	}
+	expectNoTrigger(t, st)
+	other := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-test", "push", "delivery-3", body, sig)
+	defer func() { _ = other.Body.Close() }()
+	if other.StatusCode != http.StatusAccepted {
+		t.Fatalf("the same body for another pipeline = %d, want 202", other.StatusCode)
+	}
+}

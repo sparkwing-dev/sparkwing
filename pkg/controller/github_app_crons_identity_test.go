@@ -72,7 +72,7 @@ func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
 			f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
 			switch action {
 			case "uninstall":
-				f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7}}, "")
+				f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, "")
 			case "team_unbind":
 				if code := f.call("DELETE", "/api/v1/team/github-app/installations/7", olga.auth, nil, nil); code != http.StatusNoContent {
 					t.Fatalf("team unbind = %d", code)
@@ -82,7 +82,7 @@ func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
 					t.Fatalf("operator unbind = %d", code)
 				}
 			case "suspend":
-				f.deliver("installation", map[string]any{"action": "suspend", "installation": map[string]any{"id": 7}}, "")
+				f.deliver("installation", map[string]any{"action": "suspend", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, "")
 			case "repository_removed", "selection_changed", "repository_removed_api_failure":
 				f.app.SetRepos(7, githubRepo(702, "acme/plans"))
 				removed := []any{map[string]any{"id": 701, "full_name": "acme/widgets"}}

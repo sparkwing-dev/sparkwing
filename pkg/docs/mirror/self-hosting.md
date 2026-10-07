@@ -32,7 +32,11 @@ pipeline.
 Use the [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) for a
 shared controller, dashboard, cache, logs service, and Kubernetes runner. The
 chart requires Kubernetes and an explicitly compatible image set; its README
-lists the required values and install command.
+lists the required values and install command. The controller starts with
+`--require-auth` by default, so the render refuses unless
+`controller.bootstrapAdminToken.name` names a Secret holding the first admin
+token, or `controller.allowOpenBootstrap=true` accepts a controller that
+serves every route unauthenticated until a token exists.
 
 The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
