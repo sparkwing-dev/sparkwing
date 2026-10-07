@@ -914,9 +914,9 @@ controller's own row and needs no saving. A cache without a controller and
 the logs service count in memory alone: their counters are per process and
 start over on a restart.
 
-Read the controller's meter, including the principals that have
-downloaded the most this month, with `GET /api/v1/egress` on an `admin`
-token.
+Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
+and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether
+the alarm is up.
 
 ### One meter per process
 

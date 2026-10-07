@@ -93,6 +93,33 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+- **controller + charts (Breaking):** Remove the warm-PVC pool
+  The controller no longer creates, warms or hands out Docker-cache PVCs, and no longer serves `GET /api/v1/pool` or
+  `POST /api/v1/pool/{checkout,return,heartbeat}`. Nothing Sparkwing ships mounted a pool PVC, so the pool held
+  Kubernetes PVC and pod create rights and ran privileged warmer pods for no consumer. `sparkwing-controller` drops
+  `--pool`, `--pool-namespace`, `--warmer-service-account` and `--kubeconfig`, so a controller started with any of
+  them exits with an unknown-flag error, and it no longer links a Kubernetes client. `sparkwing-full` drops
+  `controller.pool.*` and `rbac.*`, renders no Role, ClusterRole or warmer ServiceAccount for the controller, and
+  stops mounting an API token in its pod. `sparkwing cluster status` drops its `pool` probe, and the
+  `sparkwing.pool.*` metrics are gone. See
+  [The warm-PVC pool is removed](docs/migrations/_unreleased.md#the-warm-pvc-pool-is-removed).
+- **controller (Breaking):** Remove the concurrency waiter event stream
+  `GET /api/v1/concurrency/{key}/notify` answers 404. The SDK, the CLI and the dashboard never opened it; a waiter
+  learns its outcome from `GET /api/v1/concurrency/{key}/resolve`, which they already poll. Removing it drops a
+  30-minute stream a claim token could hold open. See
+  [The concurrency notify stream is removed](docs/migrations/_unreleased.md#the-concurrency-notify-stream-is-removed).
+- **controller (Breaking):** Remove the controller's artifact read route
+  `GET /api/v1/artifacts/{key}` answers 404 on the controller, the local daemon and the loopback. No CLI, SDK or
+  dashboard code read it; nodes stage artifacts through the cache's `/bin` routes or the direct data store.
+  See [The controller artifact route is removed](docs/migrations/_unreleased.md#the-controller-artifact-route-is-removed).
+- **controller + cache (Breaking):** Remove four operator routes nothing called
+  The controller no longer serves `GET /api/v1/egress`, `GET /api/v1/credits/teams/{team}` or
+  `PUT /api/v1/storage/teams/{team}/free-slot`, and `sparkwing-cache` no longer serves `GET /repos`. Neither the CLI,
+  the dashboard nor `sparkwing-ops` called them. `pkg/controller.StorageTierResponse` is gone. See
+  [Four operator routes are removed](docs/migrations/_unreleased.md#four-operator-routes-are-removed).
+- **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
+  `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/_unreleased.md#per-pipeline-github-webhooks-are-removed).
+  The `sparkwing-full` chart refuses to render while `controller.githubWebhookSecret.name` or `controller.githubStatusToken.name` is still set, naming the value and the migration guide section, so a `helm upgrade --reuse-values` that carries them fails at render time instead of leaving deliveries to 404.
 - **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
 - **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`

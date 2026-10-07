@@ -118,8 +118,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
 	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
-	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
-		"binding of the pipeline is a candidate until its secret verifies the signature",
 	"(*Store).DeleteAccount": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
 	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
@@ -182,7 +180,6 @@ var unportedSQL = []string{
 	"(*Store).ExpireSessions",
 	"(*Store).FindSpawnedChildTriggerID",
 	"(*Store).FindTriggerByIdempotencyKey",
-	"(*Store).FindTriggerByWebhookReplay",
 	"(*Store).FinishLapsedClaim",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).FinishNodeStep",
@@ -357,7 +354,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 202
+const unportedSQLSize = 201
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

@@ -6,7 +6,7 @@
 // mode is determined by which functional options the consumer sets,
 // not by a build flag.
 //
-//   - Cluster mode wires [Server.AttachPool] + [Server.WithCostRate].
+//   - Cluster mode wires [Server.WithCostRate].
 //   - Laptop mode wires [Server.WithArtifactStore] +
 //     [Server.WithReconcileHook].
 //   - The handler set is otherwise identical so the dashboard
@@ -24,7 +24,7 @@
 // chainable options: [Server.WithDispatcher] (default
 // [NoopDispatcher]), [Server.WithAuthenticator] (default no auth),
 // [Server.WithQueueTimeout], [Server.WithSecretsCipher] (any
-// [Cipher] implementation), [Server.WithGitHubWebhookSecret], and
+// [Cipher] implementation), [Server.WithGitHubApp], and
 // the mode-specific options above. Call [Server.Handler] to get the
 // routed `http.Handler` to wire into a server.
 //

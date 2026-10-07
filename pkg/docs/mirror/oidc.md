@@ -73,7 +73,7 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 team:<team>:repository_id:<repository_id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
 ```
 
-`<repository_id>` is GitHub's numeric repository id, which survives a rename or a transfer. Read it with `gh api repos/<owner>/<name> --jq .id`. It is set when a GitHub App delivery started the run, and for a retry or a child run that inherits that repository. It is empty for every other run, including runs started by a per-pipeline legacy webhook, the CLI, the API and a schedule. Two repositories that reach one pipeline through legacy webhooks therefore share the empty segment; move them to the GitHub App before a trust policy relies on the subject to tell them apart.
+`<repository_id>` is GitHub's numeric repository id, which survives a rename or a transfer. Read it with `gh api repos/<owner>/<name> --jq .id`. It is set when a GitHub App delivery started the run, and for a retry or a child run that inherits that repository. It is empty for every other run, including runs started by the CLI, the API and a schedule. A run whose trigger names a GitHub event but no repository id mints `trigger:manual`, so `trigger:push`, `trigger:pull_request`, `trigger:release`, `trigger:create` and `trigger:delete` always carry a repository id.
 
 For example, a push to `main` of repository `123456789` delivered by the GitHub App and executed by a team runner:
 

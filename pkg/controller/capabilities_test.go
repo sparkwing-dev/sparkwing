@@ -1,9 +1,7 @@
 package controller_test
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,32 +10,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-type fakeArtifactStore struct {
-	objects map[string][]byte
-	gets    []string
-}
-
-func (f *fakeArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	f.gets = append(f.gets, key)
-	b, ok := f.objects[key]
-	if !ok {
-		return nil, storage.ErrNotFound
-	}
-	return io.NopCloser(bytes.NewReader(b)), nil
-}
-func (f *fakeArtifactStore) Put(context.Context, string, io.Reader) error { return nil }
-func (f *fakeArtifactStore) Has(context.Context, string) (bool, error)    { return false, nil }
-func (f *fakeArtifactStore) Delete(context.Context, string) error         { return nil }
-func (f *fakeArtifactStore) List(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-
-func newServerWithArtifacts(t *testing.T, art storage.ArtifactStore) string {
+func newPlainServer(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	s, err := teststore.Open(filepath.Join(dir, "state.db"))
@@ -45,126 +22,9 @@ func newServerWithArtifacts(t *testing.T, art storage.ArtifactStore) string {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	ctrl := controller.New(s, nil).WithArtifactStore(art)
-	srv := httptest.NewServer(ctrl.Handler())
-	t.Cleanup(srv.Close)
-	return srv.URL
-}
-
-func TestArtifactsEndpoint_RouteAbsentWhenUnconfigured(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	base := newServerWithArtifacts(t, nil)
-
-	resp, err := http.Get(base + "/api/v1/artifacts/abcd1234")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", resp.StatusCode)
-	}
-}
-
-func TestArtifactsEndpoint_RoundTrip(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	art := &fakeArtifactStore{
-		objects: map[string][]byte{"good-key": []byte("payload")},
-	}
-	base := newServerWithArtifacts(t, art)
-
-	resp, err := http.Get(base + "/api/v1/artifacts/good-key")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "payload" {
-		t.Errorf("body = %q", body)
-	}
-
-	resp2, err := http.Get(base + "/api/v1/artifacts/missing")
-	if err != nil {
-		t.Fatalf("get missing: %v", err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusNotFound {
-		t.Errorf("missing status = %d", resp2.StatusCode)
-	}
-}
-
-func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
-	t.Parallel()
-	targets := []string{
-		"/api/v1/artifacts/..%2f..%2fetc%2fpasswd",
-		"/api/v1/artifacts/%252e%252e%252fetc%252fpasswd",
-		"/api/v1/artifacts/..x",
-		"/api/v1/artifacts/a%23frag",
-		"/api/v1/artifacts/a%3Fdelete=1",
-	}
-	rejectsAll := func(t *testing.T, h http.Handler, art *fakeArtifactStore) {
-		t.Helper()
-		for _, target := range targets {
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("%s: status = %d, want 400", target, rec.Code)
-			}
-		}
-		if len(art.gets) != 0 {
-			t.Errorf("store reached with keys %v", art.gets)
-		}
-	}
-
-	t.Run("server", func(t *testing.T) {
-		t.Parallel()
-		art := &fakeArtifactStore{}
-		dir := t.TempDir()
-		st, err := teststore.Open(filepath.Join(dir, "state.db"))
-		if err != nil {
-			t.Fatalf("open store: %v", err)
-		}
-		t.Cleanup(func() { _ = st.Close() })
-		rejectsAll(t, controller.New(st, nil).WithArtifactStore(art).Handler(), art)
-	})
-
-	t.Run("loopback", func(t *testing.T) {
-		t.Parallel()
-		art := &fakeArtifactStore{}
-		rejectsAll(t, controller.NewLoopback(nil, "run-1", "", nil).WithArtifactStore(art).Handler(), art)
-	})
-}
-
-func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	dir := t.TempDir()
-	s, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
 	srv := httptest.NewServer(controller.New(s, nil).Handler())
 	t.Cleanup(srv.Close)
-
-	resp, err := http.Get(srv.URL + "/api/v1/pool")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("GET /api/v1/pool: status=%d want 404", resp.StatusCode)
-	}
+	return srv.URL
 }
 
 func TestReconcileHook_RunsBeforeReads(t *testing.T) {

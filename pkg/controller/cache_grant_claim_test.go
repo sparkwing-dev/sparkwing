@@ -14,7 +14,7 @@ import (
 // its minter's removal would keep the team's cache open for its whole life.
 func TestCacheGrantRefusesARunnerTokenWithoutALiveClaim(t *testing.T) {
 	t.Setenv(authwire.CacheGrantKeyEnv, "cache-grant-key-distinct-from-operator-token")
-	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	f := newTenancyFixture(t, openSQLiteStore(t))
 
 	code, raw := f.do(http.MethodPost, "/api/v1/team/runner-tokens", f.editorA,
 		map[string]any{"name": "dave-box", "repos": []string{"github.com/acme/*"}})

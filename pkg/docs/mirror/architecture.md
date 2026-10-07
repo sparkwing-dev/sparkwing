@@ -32,8 +32,8 @@ the chart does not deploy.
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
 │  │  Controller  │  │   Cache      │  │   Web        │             │
 │  │ (API + queue │  │  (git HTTP + │  │  (dashboard) │             │
-│  │  + webhooks  │  │   blob store │  │              │             │
-│  │  + pool mgmt)│  │   + pkg proxy│  │              │             │
+│  │  + webhooks) │  │   blob store │  │              │             │
+│  │              │  │   + pkg proxy│  │              │             │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘             │
 │         │                                                          │
 │  ┌──────┴───────┐  ┌──────────────┐                               │
@@ -151,7 +151,6 @@ component talks over HTTP - there are no custom protocols.
 ```
 sparkwing CLI ──────► Controller   trigger a run; poll until terminal
 GitHub ────────► Controller        push webhook (HMAC verified)
-Controller ────► k8s API           warm PVC pool (PVCs, warmer pods)
 Runner ────────► k8s API           create / watch per-node Jobs
 Runner ────────► Controller        claim node; heartbeat; report finish; fetch details
 Runner ────────► Cache             clone repo, download code + packages
@@ -175,7 +174,7 @@ ingress, each component needs these allow rules:
 |-----------|---------------------|
 | Controller | External (webhooks), Dashboard, Runners |
 | Cache | Controller, Runners |
-| DinD | Runners, Controller (cache warmers) |
+| DinD | Runners |
 | Dashboard | External (port 4343) |
 | Logs | Runners, Dashboard |
 | Registry | Runners, Nodes (image pulls) |

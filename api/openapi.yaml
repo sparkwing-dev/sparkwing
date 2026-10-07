@@ -29,13 +29,6 @@ info:
     functional options the process wires into the
     [pkg/controller.Server][1] instance.
 
-    Mode-conditional routes are marked in each operation's `description`:
-
-    - **cluster-only** -- wired when the process calls `AttachPool`
-      (warm-PVC pool routes under `/api/v1/pool/*`).
-    - **laptop-only** -- wired when the process calls `WithArtifactStore`
-      (`GET /api/v1/artifacts/{key}`).
-
     See [VERSIONING.md][2] for stability promises around this surface:
     JSON field renames and behavioral changes are tracked under module
     semver. The Go client lives at `pkg/controller/client/`.
@@ -72,10 +65,6 @@ tags:
     description: Distributed mutual exclusion + coalescing.
   - name: debug-pauses
     description: Operator-induced pauses for live debugging.
-  - name: pool
-    description: Warm-PVC pool (cluster-only).
-  - name: artifacts
-    description: Content-addressed blob reads (laptop-only).
   - name: tokens
     description: Bearer-token CRUD (admin).
   - name: users
@@ -1587,63 +1576,6 @@ paths:
               schema: {$ref: "#/components/schemas/ConcurrencyState"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/concurrency/{key}/notify:
-    parameters:
-      - in: path
-        name: key
-        required: true
-        schema: {type: string}
-      - in: query
-        name: run_id
-        required: true
-        schema: {type: string}
-      - in: query
-        name: node_id
-        required: false
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: claim or runs.read
-      tags: [concurrency]
-      summary: Server-sent event stream of waiter resolution events.
-      description: |
-        Streams Server-Sent Events for a single (run_id, node_id)
-        waiter on this concurrency key. The server polls the
-        concurrency state at 250ms cadence and emits exactly one
-        terminal event per stream, then closes:
-
-        - `event: ready` -- the caller is now a holder of the slot.
-        - `event: superseded` -- the caller is no longer a waiter
-          (slot acquired elsewhere, run cancelled, etc.).
-        - `event: stream_end` -- fail-safe timeout (max 30 minutes
-          per stream) or the concurrency key no longer exists; the
-          event payload carries a `reason` field
-          (`"max_wait"` or `"key_not_found"`).
-
-        Every event payload also carries the `key` and `run_id`
-        fields, plus `node_id` when one was supplied. The stream
-        opens with a `: open` comment line so proxies don't buffer.
-      responses:
-        "200":
-          description: |
-            SSE stream of resolution events. The response is
-            `text/event-stream`; clients consume it line-by-line
-            until the terminal event arrives.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: |
-                  SSE frames. Each event has the form
-
-                  ```
-                  event: ready|superseded|stream_end
-                  data: {"key":"...","run_id":"...","node_id":"...","reason":"..."}
-                  ```
-
-                  `node_id` is present when the request supplied one;
-                  `reason` is present only on `stream_end`.
-        "400": {$ref: "#/components/responses/BadRequest"}
-
   /api/v1/concurrency/{key}/holder:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
@@ -1675,7 +1607,7 @@ paths:
       description: |
         Answers where the caller sits in the queue and what the leader it
         coalesced behind produced. `bypass_read=true` skips the cache
-        lookup. The polling counterpart to the `notify` stream.
+        lookup.
       parameters:
         - in: query
           name: run_id
@@ -1915,92 +1847,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
-
-  /api/v1/pool:
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [pool]
-      summary: List warm-PVC pool. **cluster-only** (requires `AttachPool`).
-      responses:
-        "200":
-          description: Pool snapshot.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PoolListResponse"}
-        "503": {description: Pool not ready.}
-
-  /api/v1/pool/checkout:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Check out a clean PVC. **cluster-only**.
-      parameters:
-        - in: query
-          name: job_id
-          required: true
-          schema: {type: string}
-      responses:
-        "200":
-          description: Checked-out PVC name.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [pvc]
-                properties:
-                  pvc: {type: string}
-        "409": {description: No clean PVC available -- fall back to cache-less build.}
-
-  /api/v1/pool/return:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Return a PVC to the pool (marks it dirty). **cluster-only**.
-      parameters:
-        - in: query
-          name: pvc
-          required: true
-          schema: {type: string}
-      responses:
-        "204": {description: Returned.}
-
-  /api/v1/pool/heartbeat:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Keep ownership of an in-use PVC alive. **cluster-only**.
-      parameters:
-        - in: query
-          name: pvc
-          required: true
-          schema: {type: string}
-        - in: query
-          name: job_id
-          required: true
-          schema: {type: string}
-      responses:
-        "204": {description: Renewed.}
-        "409": {description: Heartbeat lost (job_id mismatch or PVC expired).}
-
-  /api/v1/artifacts/{key}:
-    parameters:
-      - in: path
-        name: key
-        required: true
-        schema: {type: string}
-        description: Content-addressed artifact key.
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [artifacts]
-      summary: Stream an artifact's bytes. **laptop-only** (requires `WithArtifactStore`).
-      responses:
-        "200":
-          description: Artifact bytes.
-          content:
-            application/octet-stream:
-              schema: {type: string, format: binary}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/tokens:
     post:
@@ -2910,32 +2756,6 @@ paths:
         "405": {description: Anything but an upload-pack fetch.}
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
-
-  /webhooks/github/{pipeline}:
-    parameters:
-      - in: path
-        name: pipeline
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: public
-      tags: [webhooks]
-      summary: GitHub webhook intake. HMAC-verified; no bearer auth.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: GitHub webhook payload (push, pull_request, ...).
-      responses:
-        "202": {description: Accepted; trigger queued.}
-        "400": {description: Missing X-GitHub-Delivery header or undecodable payload.}
-        "401": {description: "Invalid HMAC signature, or no secret covers the named repository."}
-        "404": {description: The repository is not bound to this pipeline.}
-        "409": {description: This body was already accepted; the run it produced is in run_id.}
-        "503": {description: GitHub webhook secret not configured anywhere.}
 
   /api/v1/services:
     get:
@@ -4616,61 +4436,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/webhooks/github/bindings:
-    delete:
-      x-sparkwing-scope: admin
-      tags: [webhooks]
-      summary: Disconnect one repository from one pipeline.
-      description: |
-        Removes the stored binding, so deliveries from that repository are
-        verified against the `GITHUB_WEBHOOK_BINDINGS` document and the
-        shared secret again, and refused where neither covers them. Delete
-        the webhook on GitHub first; `sparkwing cluster webhooks disconnect`
-        does both in that order.
-      parameters:
-        - in: query
-          name: pipeline
-          required: true
-          schema: {type: string}
-          description: Pipeline the binding fires.
-        - in: query
-          name: repo
-          required: true
-          schema: {type: string}
-          description: Repository slug, owner/name.
-      responses:
-        "200":
-          description: Whether a binding was there to remove.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/GitHubWebhookDisconnectResponse"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-    post:
-      x-sparkwing-scope: admin
-      tags: [webhooks]
-      summary: Connect one repository to one pipeline.
-      description: |
-        Stores the secret deliveries from this repository to this pipeline
-        are signed with, and adds the repository to that pipeline's
-        allow-list. The binding takes precedence over the
-        `GITHUB_WEBHOOK_BINDINGS` document for the same pipeline and
-        repository, and adds to it everywhere else. Posting again replaces
-        the secret, which is how a connect rotates it. The secret is sealed
-        with the controller's secrets key when one is configured, and no
-        route reads it back.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/GitHubWebhookBindingRequest"}
-      responses:
-        "201":
-          description: The stored binding and the URL GitHub must deliver to.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/GitHubWebhookBindingResponse"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-
   /api/v1/storage:
     get:
       x-sparkwing-scope: runs.read
@@ -4762,37 +4527,6 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/teams/{team}/free-slot:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    put:
-      x-sparkwing-scope: admin
-      tags: [storage]
-      summary: Grant a team a free-tier slot.
-      description: |
-        Admits a team without credits to the free tier whether or not a slot
-        is left, which is how an operator admits a team once every one of
-        `--free-team-slots` is taken. The slot lasts until the team is
-        deleted. The answer is the team's tier and the allowance its
-        per-store shares are cut from.
-      responses:
-        "200":
-          description: The team's storage tier.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/controller.StorageTierResponse
-                properties:
-                  team: {type: string}
-                  tier: {type: string, enum: [funded, free, none]}
-                  allowance_bytes: {type: integer, format: int64}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
   /api/v1/storage/settings:
     put:
       x-sparkwing-scope: admin
@@ -4855,28 +4589,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/UsageMetrics"}
         "400": {description: weeks is outside 1 to 104.}
-
-  /api/v1/egress:
-    get:
-      x-sparkwing-scope: admin
-      tags: [cluster]
-      summary: Read the controller's egress budgets and top consumers.
-      description: |
-        Reports the per-principal monthly download budget, the global daily
-        alarm threshold, what the process has sent today and this month,
-        whether the alarm is up, and the principals that have downloaded the
-        most this month. Changes nothing.
-      responses:
-        "200":
-          description: The egress meter as it stands.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: "none"
-                properties:
-                  enabled: {type: boolean}
-                  egress: {type: object}
 
   /api/v1/compute-limits:
     get:
@@ -5449,19 +5161,6 @@ paths:
         schema: {type: string}
     get:
       x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
-  /api/v1/credits/teams/{team}:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: admin
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -8955,39 +8654,6 @@ components:
         charges:
           type: array
           items: {$ref: "#/components/schemas/CreditCharge"}
-    GitHubWebhookBindingRequest:
-      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingRequest
-      type: object
-      required: [pipeline, repo, secret]
-      properties:
-        pipeline: {type: string, description: Pipeline the deliveries fire.}
-        repo: {type: string, description: Repository slug (owner/name) stored folded to lower case.}
-        secret: {type: string, description: HMAC secret the repository's deliveries are signed with.}
-        events: {type: array, items: {type: string}, description: GitHub events the webhook subscribes to.}
-        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub.}
-    GitHubWebhookBindingResponse:
-      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingResponse
-      type: object
-      description: One stored binding. It never carries the secret.
-      required: [pipeline, repo, delivery_url, created_at, updated_at]
-      properties:
-        pipeline: {type: string}
-        repo: {type: string}
-        events: {type: array, items: {type: string}}
-        hook_id: {type: integer, format: int64}
-        delivery_url: {type: string, description: Where GitHub posts this pipeline's deliveries.}
-        created_at: {type: integer, format: int64, description: Unix seconds.}
-        updated_at: {type: integer, format: int64, description: Unix seconds.}
-    GitHubWebhookDisconnectResponse:
-      x-sparkwing-go-type: pkg/controller.GitHubWebhookDisconnectResponse
-      type: object
-      required: [pipeline, repo, removed, delivery_url]
-      properties:
-        pipeline: {type: string}
-        repo: {type: string}
-        removed: {type: boolean, description: False when the controller held no such binding.}
-        delivery_url: {type: string, description: Where the removed binding's deliveries were posted.}
-        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub the binding recorded.}
     CreateGrantRequest:
       x-sparkwing-go-type: pkg/controller.createGrantReq
       type: object
@@ -9506,27 +9172,6 @@ components:
         size: {type: integer, format: int64}
         expires: {type: string, format: date-time}
         source_run_id: {type: string, description: The run the output was read from.}
-    PoolListResponse:
-      x-sparkwing-go-type: none
-      type: object
-      description: Snapshot of the warm-PVC pool (cluster-only).
-      properties:
-        pool_size: {type: integer}
-        pvc_size: {type: string}
-        pvcs:
-          type: array
-          items:
-            type: object
-            x-sparkwing-go-type: none
-            required: [name]
-            properties:
-              name: {type: string}
-              state:
-                type: string
-                enum: [clean, in-use, dirty, warming, unknown]
-              warmed_at: {type: string}
-              checked_out_by: {type: string}
-              checked_out_at: {type: string}
     CronTimerState:
       x-sparkwing-go-type: internal/crons.TimerStateView
       type: object

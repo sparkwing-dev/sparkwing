@@ -297,8 +297,7 @@ The cache is exposed externally via ingress at your dashboard host's
 `cache-` subdomain. Every route except `/health`, `/metrics`, `/stats`, and the
 package proxy under `/proxy/` requires a bearer token, on reads as well as
 writes: the git protocol and registration routes (`/git/...`), the blob routes
-(`/bin/...`, `/cache/...`), the repository listing (`/repos`), and the admin
-routes (`/admin/...`). The package proxy
+(`/bin/...`, `/cache/...`), and the admin routes (`/admin/...`). The package proxy
 stays open because Go, npm, and pip fetch through it without a credential;
 it serves upstream registry bytes, not repository content. The controller's
 `/api/v1/gitcache/git/...` proxy requires admin scope and permits upload-pack
@@ -384,7 +383,7 @@ scope.
   grant with 403, because a registration clones onto the cache volume with the
   cache's own credentials; such a runner asks anyway and fetches from a mirror
   already registered. The mirrors count toward the store ceiling.
-- `/repos` and the `/admin/...` routes refuse a grant with 401.
+- The `/admin/...` routes refuse a grant with 401.
 
 The operator token keeps its unscoped access, and a cache started with
 `--allow-unauthenticated` accepts no grants because it has no key to verify
@@ -490,7 +489,6 @@ binary names and storage paths keep their existing format.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (`{"status":"ok"}`) |
-| GET | `/repos` | List registered repos (auth required) |
 
 ## Deployment
 
