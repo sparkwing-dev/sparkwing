@@ -254,7 +254,14 @@ with debt or a charge open cannot be deleted.
 
 An early fraud warning gives each affected team its own hold, blocks the
 card's fingerprint for every team, and refunds the payment; the refund then
-reverses the credits as above. Use the returned hold id to release
+reverses the credits as above. Debt is usage already consumed, so any card may
+repay it through `POST /api/v1/team/billing/pay`: a payment of the open charge
+by a card warned on another payment pays off that charge, repays what the
+team owes at that moment, grants nothing beyond it, holds the team, and logs
+`alert=card_payment_warned` with the repaid and unapplied amounts. Returning
+the unapplied rest, or the whole payment, is the operator's decision; a refund
+returns the unapplied rest first, which reverses nothing, and only what it
+returns beyond that reopens the debt. Use the returned hold id to release
 that hold. Existing warning holds keep their ids, and replaying
 a warning does not undo an operator's release. Business events retain the
 provider's warning id alongside the hold id.
@@ -529,7 +536,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
-| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
+| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's

@@ -55,6 +55,7 @@ const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
 const CardOnFileCode = "card_on_file"
+const CardSetupOrderCapability = "card-setup-order-v1"
 const CheckoutAmountCode = "amount_out_of_range"
 const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
@@ -280,6 +281,7 @@ type ObjectStoreBreakerResponse struct {
 	Thawed bool
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
+const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 const PaymentWarnedCode = "payment_warned"
 type PoolConfig struct {
@@ -436,6 +438,7 @@ type SourceTokenResponse struct {
 	ExtraRepositories []string
 }
 const SpendLimitCode = "spend_limit"
+const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 type StorageTierResponse struct {
@@ -467,6 +470,7 @@ type TrendPoint struct {
 	AvgWaitMs int64
 }
 const UnknownCheckoutCode = "unknown_checkout"
+const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)

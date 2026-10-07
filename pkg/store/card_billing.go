@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -284,7 +285,10 @@ type Card struct {
 	Fingerprint   string
 	Brand         string
 	Last4         string
-	AddedAt       time.Time
+	// AddedAt is when the card was added. Given to SaveCard, it is when the
+	// owner completed the setup, to the second, and a setup completed before
+	// a card on file saved the same way is refused with ErrStaleCardSetup.
+	AddedAt time.Time
 }
 
 // CardCharge is one obligation billed to a team's card.
@@ -485,8 +489,13 @@ func headroomTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (int
 	return room, nil
 }
 
+// ErrStaleCardSetup is SaveCard's refusal of a setup completed before the
+// card already on file, such as a delayed delivery of an older setup.
+var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
+
 // SaveCard records the card an owner added through Stripe. A charge that
-// failed on the old card is tried again at once.
+// failed on the old card is tried again at once. A non-zero c.AddedAt orders
+// saves by setup completion; without it the card is stamped now.
 func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) (err error) {
 	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
 		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
@@ -502,10 +511,30 @@ func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Ti
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ? WHERE name = ?`,
-		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, now.UnixNano(), string(t.team)); err != nil {
+	// hack: with no column for it, a completion time is stored in whole seconds
+	// and a receipt time never is, so a card saved without one, including every
+	// save from before ordering, never makes a later ordered save look stale.
+	addedAt, newerThan := now.UnixNano(), int64(math.MaxInt64)
+	if addedAt%int64(time.Second) == 0 {
+		addedAt++
+	}
+	if !c.AddedAt.IsZero() {
+		addedAt = c.AddedAt.Unix() * int64(time.Second)
+		newerThan = addedAt
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
+	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
+	    WHERE name = ? AND (card_added_at % 1000000000 <> 0 OR card_added_at <= ?)`,
+		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(t.team), newerThan)
+	if err != nil {
 		return err
+	}
+	saved, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if saved == 0 {
+		return ErrStaleCardSetup
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET next_attempt_at = ? WHERE team = ? AND state = ?`,
 		now.UnixNano(), string(t.team), CardChargeOpen); err != nil {
@@ -832,7 +861,7 @@ type CardPayment struct {
 }
 
 type cardAttemptRow struct {
-	team, chargeID, status, paymentIntent string
+	team, chargeID, kind, status, paymentIntent string
 }
 
 // SettleCardPayment is the one path a card payment reaches the ledger by: the
@@ -842,101 +871,118 @@ type cardAttemptRow struct {
 // a decline's hold. Any other money that arrived, a second payment or the
 // wrong amount, is granted and queued for a refund, whose reversal takes the
 // grant back. A payment that drew an early fraud warning, or was made on a
-// card that did, grants nothing and holds the team.
-func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, err error) {
+// card that did, grants nothing and holds the team, except that a pay-now
+// payment by a card warned only on another payment still pays off the open
+// charge, repays the debt the team owes at settlement, keeps the rest
+// unapplied off the balance, and holds the team. warned is non-nil when an
+// actionable early fraud warning matched the payment or its card, for the
+// operator's alert.
+func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error) {
 	if p.PaymentIntent == "" || p.AmountCents <= 0 || p.ChargeID == "" || p.AttemptID == "" {
-		return false, fmt.Errorf("%w: a card payment names its charge, attempt, payment intent and amount", ErrInvalidInput)
+		return false, nil, fmt.Errorf("%w: a card payment names its charge, attempt, payment intent and amount", ErrInvalidInput)
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	var a cardAttemptRow
-	err = tx.QueryRowContext(ctx, `SELECT team, charge_id, status, payment_intent FROM card_attempts WHERE id = ?`,
-		p.AttemptID).Scan(&a.team, &a.chargeID, &a.status, &a.paymentIntent)
+	err = tx.QueryRowContext(ctx, `SELECT team, charge_id, kind, status, payment_intent FROM card_attempts WHERE id = ?`,
+		p.AttemptID).Scan(&a.team, &a.chargeID, &a.kind, &a.status, &a.paymentIntent)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("%w: card attempt %q", ErrNotFound, p.AttemptID)
+		return false, nil, fmt.Errorf("%w: card attempt %q", ErrNotFound, p.AttemptID)
 	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if a.chargeID != p.ChargeID || (p.Team != "" && Team(a.team) != p.Team) {
-		return false, fmt.Errorf("%w: card attempt %q is not for charge %q of this team", ErrInvalidInput, p.AttemptID, p.ChargeID)
+		return false, nil, fmt.Errorf("%w: card attempt %q is not for charge %q of this team", ErrInvalidInput, p.AttemptID, p.ChargeID)
 	}
 	team := Team(a.team)
 	if done, err := cardPaymentSeenTx(ctx, tx, team, p.PaymentIntent); err != nil || done {
-		return false, err
+		return false, nil, err
 	}
 	var state string
 	var frozenAmount int64
 	if err := tx.QueryRowContext(ctx, `SELECT state, amount_micro FROM card_charges WHERE id = ?`, p.ChargeID).
 		Scan(&state, &frozenAmount); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	nowNS := now.UnixNano()
 	amount := p.AmountCents * MicroCreditsPerCent
-	warning, err := paymentWarningTx(ctx, tx, p.PaymentIntent, p.Fingerprint)
-	if err != nil {
-		return false, err
-	}
-	if warning != "" {
-		if err := settleWarnedTx(ctx, tx, team, p, warning, now); err != nil {
-			return false, err
-		}
-		return false, tx.Commit()
-	}
-	if err := insertCardGrantTx(ctx, tx, team, amount, p.PaymentIntent, nowNS); err != nil {
-		return false, err
-	}
 	payable := state == CardChargeOpen && a.status == CardAttemptLive && amount == frozenAmount &&
 		(a.paymentIntent == "" || a.paymentIntent == p.PaymentIntent)
+	warning, err := paymentWarningTx(ctx, tx, p.PaymentIntent, p.Fingerprint)
+	if err != nil {
+		return false, nil, err
+	}
+	if warning != "" {
+		repays, repaid, err := warnedCardRepaidTx(ctx, tx, team, a.kind, p.PaymentIntent, payable, amount)
+		if err != nil {
+			return false, nil, err
+		}
+		warned = &WarnedCardPayment{WarningID: warning, Repays: repays, RepaidMicro: repaid, UnappliedMicro: amount - repaid}
+		if err := settleWarnedTx(ctx, tx, team, p, *warned, now); err != nil {
+			return false, nil, err
+		}
+		if !repays {
+			return false, warned, tx.Commit()
+		}
+	}
+	if err := insertCardGrantTx(ctx, tx, team, amount, p.PaymentIntent, nowNS); err != nil {
+		return false, nil, err
+	}
+	if warned != nil && warned.UnappliedMicro > 0 {
+		if err := insertUnappliedTx(ctx, tx, team, p.PaymentIntent, warned.UnappliedMicro, nowNS); err != nil {
+			return false, nil, err
+		}
+	}
 	if !payable {
 		reason := "duplicate"
 		if amount != frozenAmount {
 			reason = "amount_mismatch"
 		}
 		if err := queueCardRefundTx(ctx, tx, team, p, reason, now); err != nil {
-			return false, err
+			return false, nil, err
 		}
-		return true, tx.Commit()
+		return true, nil, tx.Commit()
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
 	    WHERE id = ?`, CardAttemptPaid, p.PaymentIntent, nowNS, p.AttemptID); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET state = ?, payment_intent = ?, closed_at = ?
 	    WHERE id = ?`, CardChargePaid, p.PaymentIntent, nowNS, p.ChargeID); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE credit_freezes SET released_at = ?
 	    WHERE team = ? AND cause = ? AND released_at IS NULL`, nowNS, string(team), FreezeCauseDecline); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardCharged, SubjectID: p.PaymentIntent, Actor: "card", At: now,
 		Attrs: map[string]any{"charge_id": p.ChargeID, "attempt_id": p.AttemptID, "amount_micro": amount},
 	}); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if balance > 0 {
 		if err := clearTeamCreditExhaustedTx(ctx, tx, team, nowNS); err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
 	// safety: what is still owed opens the next charge in this transaction,
 	// so a payment that settles less than the debt never leaves it unbilled.
 	if err := decideCardChargeTx(ctx, tx, team, now); err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return true, tx.Commit()
+	return true, warned, tx.Commit()
 }
 
 // safety: a payment already granted, queued for refund or refused over a
@@ -995,17 +1041,76 @@ func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerpri
 	return id, err
 }
 
-func settleWarnedTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, warning string, now time.Time) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
-	    WHERE team = ? AND id = ?`, CardAttemptWarned, p.PaymentIntent, now.UnixNano(), string(team), p.AttemptID); err != nil {
+// WarnedCardPayment is a card payment whose payment or card drew an
+// actionable early fraud warning.
+type WarnedCardPayment struct {
+	WarningID string
+	// Repays is true when the payment settled the open charge as a debt
+	// repayment, even one a refunded reservation had already cleared.
+	Repays bool
+	// RepaidMicro is the debt the payment repaid; zero when it granted nothing.
+	RepaidMicro int64
+	// UnappliedMicro is the rest of the payment, which the ledger does not
+	// hold: returning it is the operator's decision.
+	UnappliedMicro int64
+}
+
+// safety: this prefix marks the reversal keeping part of a payment off the
+// balance and each release of it; no caller reference may carry it, so a
+// refund never mistakes its own reference for that rest.
+const unappliedPrefix = "unapplied:"
+
+// safety: the payment's grant carries all of it so a refund or a dispute can
+// find it, and this reversal keeps the unapplied rest off the balance; a
+// refund first releases this rest, so returning it leaves the repayment alone.
+func insertUnappliedTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string, micro, nowNS int64) error {
+	id, err := newCreditID("grant")
+	if err != nil {
 		return err
 	}
-	if err := holdForWarningTx(ctx, tx, team, warning, p.PaymentIntent, now); err != nil {
+	_, err = tx.ExecContext(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses,
+	    created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'card', ?)`,
+		string(team), id, CreditGrantReversal, -micro, unappliedPrefix+paymentIntent, paymentIntent, nowNS)
+	return err
+}
+
+// safety: debt is usage already consumed, so any card may repay it; a pay-now
+// payment of the open charge by a card warned only elsewhere repays what the
+// team still owes now, which a refunded reservation may have lowered since the
+// charge opened, and never becomes prepaid credit.
+func warnedCardRepaidTx(
+	ctx context.Context, tx *storeTx, team Team, kind, paymentIntent string, payable bool, amount int64,
+) (repays bool, repaid int64, err error) {
+	if kind != CardAttemptRecovery || !payable {
+		return false, 0, nil
+	}
+	if own, err := rowPresentTx(ctx, tx, `SELECT 1 FROM payment_warnings WHERE actionable = 1 AND payment_intent = ?`,
+		paymentIntent); err != nil || own {
+		return false, 0, err
+	}
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, min(amount, max(0, -balance)), nil
+}
+
+func settleWarnedTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, w WarnedCardPayment, now time.Time) error {
+	if !w.Repays {
+		if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
+		    WHERE team = ? AND id = ?`, CardAttemptWarned, p.PaymentIntent, now.UnixNano(), string(team), p.AttemptID); err != nil {
+			return err
+		}
+	}
+	if err := holdForWarningTx(ctx, tx, team, w.WarningID, p.PaymentIntent, now); err != nil {
 		return err
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
 		Team: team, Kind: BusinessEventCardWarned, SubjectID: p.PaymentIntent, Actor: "card", At: now,
-		Attrs: map[string]any{"charge_id": p.ChargeID, "attempt_id": p.AttemptID, "warning_id": warning},
+		Attrs: map[string]any{
+			"charge_id": p.ChargeID, "attempt_id": p.AttemptID, "warning_id": w.WarningID,
+			"repaid_micro": w.RepaidMicro, "unapplied_micro": w.UnappliedMicro,
+		},
 	})
 }
 

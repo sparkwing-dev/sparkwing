@@ -197,3 +197,33 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 		t.Fatalf("release by dispute = %d, %v; want exactly the one row", n, err)
 	}
 }
+
+// A caller's reference may not carry the prefix that marks a warned
+// repayment's unapplied rest, so a refund under such a name cannot pass for
+// that rest and keep later refunds from reversing.
+func TestAReversalMayNotUseTheUnappliedPrefix(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	dollars := func(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantPaid, AmountMicro: dollars(100), Reference: "pi_1", CreatedBy: "billing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReversePayment(ctx, "pi_1", "unapplied:refund-1", "ops", dollars(30)); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("reverse under the reserved prefix = %v, want ErrInvalidInput", err)
+	}
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantReversal, AmountMicro: -dollars(30), Reference: "unapplied:refund-1", Reverses: "pi_1",
+		CreatedBy: "ops",
+	}); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("grant under the reserved prefix = %v, want ErrInvalidInput", err)
+	}
+	if _, err := s.ReversePayment(ctx, "pi_1", "refund-2", "ops", dollars(20)); err != nil {
+		t.Fatal(err)
+	}
+	if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != dollars(80) {
+		t.Fatalf("balance = %d, %v; want $80 after the one $20 refund", bal, err)
+	}
+}

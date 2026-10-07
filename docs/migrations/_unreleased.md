@@ -71,6 +71,25 @@ After:
 - A policy that ends in `*` after an earlier segment, such as `team:acme:*`, keeps matching, and now also matches every repository. Narrow it to `team:acme:repository_id:<id>:*` when the role belongs to one repository.
 - Google Cloud and Vault examples that condition on the individual claims keep working, but they should add a condition on `repository`, because a pipeline name is not unique across a team's repositories. See [OIDC tokens for cloud roles](../oidc.md).
 
+Go callers of `pkg/store` update one call site; nothing else changes on a
+running install.
+
+## SettleCardPayment returns the matched warning
+
+`Store.SettleCardPayment` gains a middle return, a `*store.WarnedCardPayment`
+that is nil unless an actionable early fraud warning matched the payment or
+the card that paid. It names the warning, whether the payment settled the
+open charge as a repayment (`Repays`), the debt it repaid and the rest the
+ledger does not hold. A caller alerts on it, because a warned payment
+either repays a pay-now debt with the team held or grants nothing, and any
+unapplied rest is the operator's to return.
+
+- **Before:** `created, err := st.SettleCardPayment(ctx, payment, now)`
+- **After:** `created, warned, err := st.SettleCardPayment(ctx, payment, now)`
+
+A redelivery of a settled payment returns nil, so an alert keyed on it fires
+once per payment.
+
 The cache service keeps a run's cache entries apart by repository and git ref.
 Nothing needs configuring; expect more cache misses on new branches at first.
 

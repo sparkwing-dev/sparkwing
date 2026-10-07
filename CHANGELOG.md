@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
+  It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
+
+- **controller:** A saved card may name its setup's completion time, and an older setup no longer replaces a newer card
+  `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
+
 ### Changed
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
@@ -34,6 +42,9 @@ unlock.
   and refuses a grant's delete of one. Nothing to configure; caches written on one branch are no longer visible to
   other branches except through that order. See
   [Cache entries follow the repository and ref](docs/migrations/_unreleased.md#cache-entries-follow-the-repository-and-ref).
+
+- **store (Breaking):** `Store.SettleCardPayment` returns the matched early fraud warning
+  It now returns `(created bool, warned *WarnedCardPayment, err error)`. See [migration guide](docs/migrations/_unreleased.md#settlecardpayment-returns-the-matched-warning).
 - **controller (Breaking):** The OIDC subject names the repository: `team:<team>:repository_id:<id>:pipeline:...`, with GitHub's numeric repository id, empty for runs no GitHub App delivery started
   Two repositories of one team that subscribe the same pipeline name no longer mint the same `sub`, so a push to a weaker repository no longer satisfies a trust policy written for another. Every trust policy that matches `sub` must be updated, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main` becomes `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. See [migration guide](docs/migrations/_unreleased.md#oidc-subject-names-the-repository).
 
@@ -41,6 +52,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt
+  The ledger kept that money without granting anything or alerting. It now repays what the team owes at settlement, which a refunded reservation may have lowered since the charge opened, keeps the rest unapplied rather than as prepaid credit (a reversal under `unapplied:<payment>` on the payment's full grant), closes the open charge even when nothing was left to repay, so pay-now does not charge a cleared debt again, keeps the team held, and logs `alert=card_payment_warned` with the repaid and unapplied amounts; a warned payment that still grants nothing logs the same alert. A refund of that payment returns the unapplied rest first, which takes no credits back, and reverses only what it returns beyond it. Grant and reversal references starting with `unapplied:` are reserved for that record and answered 400.
 - **Dashboard build:** Update `source-map-js` to 1.2.2 so `pnpm audit` passes GHSA-68fv-2mgg-jv7q; the static dashboard export never runs it at serve time.
 - **controller:** The team boundary reads the run or trigger id the way the router does, so a percent-encoded spelling of a run route no longer reaches another team's run.
 - **GitHub App:** An installation covering more than 1000 repositories no longer reads as covering only the first 1000: `installation_repositories` deliveries no longer withdraw the schedules of the repositories past that point, and subscribing, extra repositories and renames answer 502 for a repository the listing cannot confirm instead of refusing it.
@@ -83,6 +96,7 @@ unlock.
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no
   claim, which the cache honored after the token's member was removed and after the run finished. Sparkwing's
   own runners already send their fence; an unclaimed manual `run-node` invocation runs without the cache.
+
 - **controller:** The request audit log names readers, targets and refused subjects
   Reads of secrets, tokens and operator routes, and every `401` and `403`, are now `audit` records with `client_ip`, `principal_id` and `team` instead of `http` records. Identity changes add `member_id`, `invitation_id`, `token_prefix`, `secret_name` and `role`, and a refused token-shaped bearer adds `attempted_prefix`. Log parsers keyed on the `http` message for those reads should match `audit` too. See [Request audit log](docs/security.md#request-audit-log).
 - **sdk:** A step's session ledger record masks the run's secret values in its command line, so the `stray_session_reaped` event a sweep copies from it no longer stores a secret passed as an argument
@@ -122,6 +136,7 @@ unlock.
 - **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+
 - **security:** Record the accepted trust facts: editors can read masked secrets through a runner token they mint, the launcher token reaches every team's claim tokens, a run's plan declares its own secrets, pipeline stdout outside the exec helper is unmasked in container logs, and `docker -e K=V` is visible in a shared host's process table
 
 - **security:** State that a warm runner's pool token must belong to an operator-only team, because that team's pipeline code reaches the pool token, the runner's GitHub token, its Job-creating service account and its cloud role.

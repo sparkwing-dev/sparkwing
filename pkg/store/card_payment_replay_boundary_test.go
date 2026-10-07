@@ -32,7 +32,8 @@ func TestCardPaymentReferenceCannotFundTwoTeams(t *testing.T) {
 			}
 			settle := func(kind string, p store.CardPayment) (bool, error) {
 				if kind == "card" {
-					return s.SettleCardPayment(ctx, p, now)
+					created, _, err := s.SettleCardPayment(ctx, p, now)
+					return created, err
 				}
 				team, err := s.ForTeam(ctx, p.Team)
 				if err != nil {
