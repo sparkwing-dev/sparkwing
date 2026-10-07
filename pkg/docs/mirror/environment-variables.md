@@ -158,7 +158,6 @@ Kinds:
 | Variable | Described in |
 |---|---|
 | `SPARKWING_RELEASE_SIGNING_KEY` | [security](security.md) |
-| `SPARKWING_UPDATE_SIGNING_KEY` | [security](security.md) |
 
 ## Configuration: `sparkwing-web`
 
