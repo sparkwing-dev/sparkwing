@@ -906,7 +906,6 @@ type WrapperInputs struct {
 using the `sw-` prefix for its long control options:
 
 ```
--C, --sw-cd PATH          // re-anchor .sparkwing/ discovery
     --sw-ref REF          // compile the pipeline at a git ref
 -v, --sw-verbose          // debug logging
     --sw-start-at STEP    // start the run at STEP

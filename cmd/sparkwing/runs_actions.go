@@ -123,7 +123,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
 	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
-	home := fs.String("home", "", "sparkwing home holding local runs (default: $SPARKWING_HOME or ~/.sparkwing)")
 	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
 	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
@@ -140,8 +139,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s: --failed and --all are mutually exclusive", cmdJobsRetry.Path)
 	case !*fromFailed && !*all:
 		return fmt.Errorf("%s: pass --failed (reuse passed nodes) or --all (re-execute everything)", cmdJobsRetry.Path)
-	case *on != "" && *home != "":
-		return fmt.Errorf("%s: --home and --profile are mutually exclusive", cmdJobsRetry.Path)
 	}
 	full := *all
 	ids, err := collectRunIDs(*runIDs, os.Stdin)
@@ -155,7 +152,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	requested := len(ids)
 	if *on == "" {
 		var refused []runResult
-		refused, ids = standaloneLocalRuns(ctx, *home, ids, cmdJobsRetry.Path,
+		refused, ids = standaloneLocalRuns(ctx, "", ids, cmdJobsRetry.Path,
 			orchestrator.StandaloneSubmitRefusal)
 		for _, r := range refused {
 			failures++
@@ -164,7 +161,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		if len(ids) == 0 {
 			return fmt.Errorf("retry: %d of %d failed", failures, requested)
 		}
-		results, localErr := retryLocalRuns(ctx, *home, ids)
+		results, localErr := retryLocalRuns(ctx, "", ids)
 		if localErr != nil {
 			return localErr
 		}
@@ -233,7 +230,6 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
 	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
-	home := fs.String("home", "", "sparkwing home whose local daemon arbitrates (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -254,14 +250,14 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	var results []runResult
 	remaining := ids
 	if *on == "" {
-		results, remaining = cancelLocalRunsViaDaemon(ctx, *home, Version, ids)
+		results, remaining = cancelLocalRunsViaDaemon(ctx, "", Version, ids)
 
 		var queued []runResult
-		queued, remaining = cancelQueuedLocalRuns(ctx, *home, remaining)
+		queued, remaining = cancelQueuedLocalRuns(ctx, "", remaining)
 		results = append(results, queued...)
 
 		var standalone []runResult
-		standalone, remaining = standaloneLocalRuns(ctx, *home, remaining, cmdJobsCancel.Path,
+		standalone, remaining = standaloneLocalRuns(ctx, "", remaining, cmdJobsCancel.Path,
 			orchestrator.StandaloneCancelRefusal)
 		results = append(results, standalone...)
 	}

@@ -279,7 +279,7 @@ values that should remain independent of a caller's ambient environment.
 
 #### Which checkout runs
 
-The checkout you are standing in wins, and `--sw-cd PATH` points at a
+The checkout you are standing in wins, and `sparkwing -C PATH run` points at a
 different one. Only if neither declares the pipeline does the repo
 registry get consulted. The chosen directory is recorded on the run, so
 the consumer executes the tree you launched from even when a second

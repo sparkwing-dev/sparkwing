@@ -29,7 +29,8 @@ func TestDispatchRunSwitchesBeforeStartingADaemon(t *testing.T) {
 	ensureRunDaemonFn = func() { order = append(order, "daemon") }
 	t.Cleanup(func() { toolchainExecFn, ensureRunDaemonFn = prevExec, prevDaemon })
 
-	err := dispatchRun([]string{"hello", "-C", repo})
+	t.Chdir(repo)
+	err := dispatchRun([]string{"hello"})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("dispatchRun = %v, want the exec stub's error", err)
 	}

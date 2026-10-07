@@ -402,7 +402,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
 		"--target", "--profile",
-		"--sw-cd", "--sw-verbose",
+		"--sw-verbose",
 		"--sw-allow",
 	}
 	for _, tc := range cases {
@@ -428,7 +428,7 @@ func TestCompletionFlagsListsHotOnly(t *testing.T) {
 		"--help",
 	}
 	advancedFlags := []string{
-		"--sw-cd", "--sw-verbose",
+		"--sw-verbose",
 		"--sw-allow",
 	}
 	for _, tc := range []struct {
@@ -613,7 +613,7 @@ func TestExamplesUseOnlyDeclaredFlags(t *testing.T) {
 	}
 	for _, command := range allCommands {
 		for _, example := range command.Examples {
-			line := example.Command
+			line := stripRootFlags(example.Command)
 			if i := strings.IndexAny(line, "|;&"); i >= 0 {
 				line = line[:i]
 			}

@@ -80,7 +80,6 @@ source binding, and its resolution status instead of the metadata.
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `--name NAME` | Pipeline name to describe (required) |
 | `--secrets` | Print the pipeline's declared secrets with provenance instead of its metadata |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
@@ -114,7 +113,6 @@ score descending; agents should prefer -o json for consumption.
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `--query TEXT` | Search query (one or more tokens, all must hit some field) (required) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
@@ -219,7 +217,6 @@ This command verifies pre-commit hooks.
 
 | Flag | Description |
 |---|---|
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Fire the gate in every registered repo instead of one |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -258,7 +255,6 @@ gate.
 
 | Flag | Description |
 |---|---|
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Install into every registered repo instead of one |
 | `--no-prove` | Claim core.hooksPath without running the gate first |
 | `--profile NAME` | Pin the hook's runs to this storage profile (default: local-only) |
@@ -270,7 +266,7 @@ gate.
 sparkwing pipeline hooks install
 
 # Install in a different repo
-sparkwing pipeline hooks install --repo /path/to/repo
+sparkwing -C /path/to/repo pipeline hooks install
 
 # Arm every registered repo
 sparkwing pipeline hooks install --fleet
@@ -292,7 +288,6 @@ the command that repairs them.
 | Flag | Description |
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints hook names. |
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 
 ### Examples
 
@@ -345,12 +340,6 @@ Remove sparkwing-managed git hooks
 Deletes every file under .git/hooks/ that carries the "Installed by sparkwing"
 marker. Hand-written hooks are left alone.
 
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
-
 ### Examples
 
 ```sh
@@ -398,7 +387,6 @@ override with --dir.
 | `--rules` | Print each rule's charter (what it forbids and why) and exit |
 | `--dir DIR` | Directory of pipeline source to scan (default: <.sparkwing>/jobs) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -434,7 +422,6 @@ omitted.
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--all` | Include entries marked hidden |
 
@@ -479,7 +466,7 @@ Generated actions print placeholder output. Replace them with the work the
 pipeline should perform. Use 'sparkwing docs read --guide authoring' for
 pipeline authoring guidance and 'sparkwing examples' for complete examples.
 
---sw-cd/-C selects another repository. --hidden hides the entry from default
+'sparkwing -C DIR pipeline new' selects another repository. --hidden hides the entry from default
 listings. --short sets its description.
 
 ### Flags
@@ -487,7 +474,6 @@ listings. --short sets its description.
 | Flag | Description |
 |---|---|
 | `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
-| `-C, --sw-cd DIR` | Scaffold as if started in this directory (re-anchors the .sparkwing search) |
 | `--template SHAPE` | DAG to scaffold: minimal (1 node) \| build-test-deploy (3) \| ci-pr-check (3) \| release (3) \| scheduled-report (5) (default: minimal) |
 | `--on EVENT` | Trigger(s) to declare: pull_request \| push \| schedule \| pre_commit \| pre_push \| post_commit \| manual (repeatable or comma-separated) (default: the shape's own) |
 | `--hidden` | Mark the entry hidden in default tab-complete menus |
@@ -576,7 +562,6 @@ separator passes through unchanged.
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd PATH` | Run as if started in PATH |
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
 | `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
 | `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
@@ -679,7 +664,6 @@ a duplicate (same source or same name).
 | `--source PATH` | Go module path (required) |
 | `--version VER` | Declared version ('latest', exact tag, or semver range) |
 | `--name NAME` | Short library name (default: last path segment of --source) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
 
@@ -721,7 +705,6 @@ packages[] row as its package name.
 |---|---|
 | `--library MODULE` | Spark library module path (default: github.com/sparkwing-dev/sparks-core) |
 | `--path DIR` | Read a library checkout on disk instead of downloading it |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -760,7 +743,6 @@ module replacement.
 | Flag | Description |
 |---|---|
 | `--module NAME` | Sparks-core module name or full module path (required) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-o, --output FMT` | Output format: pretty\|json |
 
 ### Examples
@@ -828,7 +810,6 @@ proxy calls when offline.
 
 | Flag | Description |
 |---|---|
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 | `--no-resolve` | Skip module-proxy lookups; print declared versions only |
 
@@ -856,7 +837,6 @@ Removes the entry matching NAME (or matching its source path).
 | Flag | Description |
 |---|---|
 | `--name NAME` | Library name or source path to remove (required) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
 
@@ -880,7 +860,6 @@ overlay already matches. The repository's module file stays unchanged.
 
 | Flag | Description |
 |---|---|
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-q, --quiet` | Suppress the 'up-to-date' message |
 
 ### Examples
@@ -912,7 +891,6 @@ one library still, pin its "version:" field in
 | Flag | Description |
 |---|---|
 | `--name NAME` | Refused; update re-resolves every declared library |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
 
@@ -933,7 +911,6 @@ Warmup uses the same compilation path and cache key as 'sparkwing run'.
 
 | Flag | Description |
 |---|---|
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `--clear-cache` | Delete the local pipeline binary cache before compiling |
 
 ### Examples

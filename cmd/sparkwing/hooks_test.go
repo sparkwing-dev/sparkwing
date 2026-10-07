@@ -464,7 +464,7 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
 	})
 	if !strings.Contains(out, "pre-commit -> lint") ||
 		!strings.Contains(out, "pipelines declare pre-push but no gate is installed") ||
-		!strings.Contains(out, "sparkwing pipeline hooks install --repo "+repo) {
+		!strings.Contains(out, "sparkwing -C "+repo+" pipeline hooks install") {
 		t.Fatalf("status did not identify and remedy the missing declared hook:\n%s", out)
 	}
 }
@@ -643,7 +643,7 @@ func dispatchesCommand(cmdline string) bool {
 	for _, c := range allCommands {
 		registered[c.Path] = true
 	}
-	words := strings.Fields(cmdline)
+	words := strings.Fields(stripRootFlags(cmdline))
 	for n := len(words); n >= 2; n-- {
 		if registered[strings.Join(words[:n], " ")] {
 			return true

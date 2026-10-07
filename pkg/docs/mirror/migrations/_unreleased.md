@@ -500,3 +500,35 @@ Every verb the CLI dispatches is now a registered command, so `--help`,
 
 The retired spellings still fail; the error now says the flag is unknown
 instead of naming its replacement.
+
+## Root flags replace per-verb directory and home flags
+
+`-C DIR` goes before the verb and applies to every verb.
+
+| Before | After |
+|---|---|
+| `sparkwing run X --sw-cd DIR`, `sparkwing run X -C DIR` | `sparkwing -C DIR run X` |
+| `sparkwing pipeline list --sw-cd DIR` (and every other verb that took `--sw-cd`) | `sparkwing -C DIR pipeline list` |
+| `sparkwing pipeline sparks list --sparkwing-dir DIR/.sparkwing` | `sparkwing -C DIR pipeline sparks list` |
+| `sparkwing cache explain --dir DIR/.sparkwing` | `sparkwing -C DIR cache explain` |
+| `sparkwing pipeline hooks install --repo DIR` (also `uninstall`, `status`, `fire`) | `sparkwing -C DIR pipeline hooks install` |
+| `sparkwing crons install --repo DIR` (also `uninstall`) | `sparkwing -C DIR crons install` |
+| `sparkwing daemon status --home DIR` (also `queue`, `doctor`, `serve *`, `runs cancel/retry/bounce`, `runs consumer *`) | `SPARKWING_HOME=DIR sparkwing daemon status` |
+
+- `-C` walks up from DIR to the nearest `.sparkwing/`, so it accepts any
+  directory inside the repository. `--sparkwing-dir` and `cache explain --dir`
+  named the `.sparkwing/` directory itself; pass its parent to `-C`.
+- `pipeline lint --dir` still names the pipeline source to scan. `--repo`
+  still names a registered repository on `repos`, and an `OWNER/NAME`
+  filter on `runs` and `cluster` verbs.
+- `--profile NAME` may also go before the verb, for verbs that accept it.
+  Without `--profile`, verbs that read runs (`runs list/status/logs/stats`,
+  `run`, `pipeline hooks`, `serve`, `pipeline trigger`) use
+  `SPARKWING_PROFILE`, then the project's `defaults.profile`. `runs stats`
+  read the local store unless `--profile` was given; it now follows that
+  chain, so a repository with `defaults.profile` reads its controller. Verbs
+  that change state elsewhere (`secrets`, `crons`, `runs cancel/retry/bounce/prune`,
+  `cluster`) still act locally unless `--profile` is given.
+- `SPARKWING_PROFILE` is set for a pipeline's own process by
+  `sparkwing run --profile P`, so a `sparkwing runs ...` call inside a step
+  now reads P's store.

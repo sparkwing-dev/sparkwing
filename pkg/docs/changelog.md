@@ -32,6 +32,9 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
+- **cli (Breaking):** `-C DIR` before the verb replaces `--sw-cd`, `--sparkwing-dir`, `--dir` and the path form of `--repo`; `--home` gives way to `SPARKWING_HOME`; `--profile` may precede the verb and falls back to `SPARKWING_PROFILE`
+  `sparkwing -C DIR <verb>` works for every verb, as in git. `--sw-cd`/`-C` after the verb, `pipeline sparks * --sparkwing-dir`, `cache explain --dir`, and `--repo DIR` on `pipeline hooks install/uninstall/status/fire` and `crons install/uninstall` are gone; `pipeline lint --dir` (the source directory to scan) and `--repo` that names a registered repo or an `OWNER/NAME` filter stay. `--home` is gone from `queue`, `daemon`, `doctor`, `serve`, `runs cancel/retry/bounce` and `runs consumer`; set `SPARKWING_HOME`. A verb that reads runs without `--profile` now resolves `SPARKWING_PROFILE` before the project's `defaults.profile`, and `runs stats` follows that chain as `runs status` does instead of reading the local store. See [migration guide](docs/migrations/_unreleased.md#root-flags-replace-per-verb-directory-and-home-flags).
+
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
   service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own

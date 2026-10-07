@@ -54,7 +54,6 @@ func runHooks(args []string) error {
 
 func runHooksInstall(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksInstall.Path, flag.ContinueOnError)
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "install into every registered repo")
 	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
 	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: local-only)")
@@ -74,12 +73,9 @@ func runHooksInstall(args []string) error {
 		opts.prove = runPipelineForProof(opts.profile)
 	}
 	if *fleet {
-		if *repo != "" {
-			return errors.New("hooks install: --fleet installs into every registered repo; drop --repo or drop --fleet")
-		}
 		return installFleet(opts)
 	}
-	repoRoot, sparkwingDir, err := resolveHooksRepo(*repo)
+	repoRoot, sparkwingDir, err := resolveHooksRepo()
 	if err != nil {
 		return fmt.Errorf("hooks install: %w", err)
 	}
@@ -698,14 +694,13 @@ func lastLine(out []byte) string {
 
 func runHooksUninstall(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksUninstall.Path, flag.ContinueOnError)
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	if err := parseAndCheck(cmdHooksUninstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	repoRoot, _, err := resolveHooksRepo(*repo)
+	repoRoot, _, err := resolveHooksRepo()
 	if err != nil {
 		return fmt.Errorf("hooks uninstall: %w", err)
 	}
@@ -771,7 +766,6 @@ func releaseHooksPath(git githooks.Git, repoRoot, hooksDir string) {
 func runHooksStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksStatus.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	if err := parseAndCheck(cmdHooksStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -783,7 +777,7 @@ func runHooksStatus(args []string) error {
 		return err
 	}
 
-	repoRoot, _, err := resolveHooksRepo(*repo)
+	repoRoot, _, err := resolveHooksRepo()
 	if err != nil {
 		return fmt.Errorf("hooks status: %w", err)
 	}
@@ -1012,23 +1006,22 @@ func describeManagedHook(script string) (pipes []string, chained bool) {
 	return pipes, chained
 }
 
-func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
-	if repo == "" {
-		dir, err := findSparkwingDir()
-		if err != nil {
-			return "", "", err
-		}
-		return filepath.Dir(dir), dir, nil
-	}
-	abs, err := filepath.Abs(repo)
+// safety: hooks and schedules read only sparkwing.yaml, so a checkout whose
+// .sparkwing/ holds no main.go yet still resolves.
+func resolveHooksRepo() (repoRoot, sparkwingDir string, err error) {
+	cwd, err := os.Getwd()
 	if err != nil {
 		return "", "", err
 	}
-	candidate := filepath.Join(abs, ".sparkwing")
-	if info, err := os.Stat(candidate); err != nil || !info.IsDir() {
-		return "", "", fmt.Errorf("no .sparkwing/ directory under %s", abs)
+	for dir := cwd; ; dir = filepath.Dir(dir) {
+		candidate := filepath.Join(dir, ".sparkwing")
+		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+			return dir, candidate, nil
+		}
+		if filepath.Dir(dir) == dir {
+			return "", "", fmt.Errorf("no .sparkwing/ directory in %s or above it (pass -C DIR)", cwd)
+		}
 	}
-	return abs, candidate, nil
 }
 
 func renderHookScript(hookName string, pipes []string, chainGlobal bool, profileName string) string {

@@ -11,7 +11,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
+// safety: every verb resolves one way: --profile, then SPARKWING_PROFILE, then
+// the project defaults.profile, so two readers of one run agree on its store.
 func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
+	if name == "" {
+		if env := os.Getenv("SPARKWING_PROFILE"); env != "" {
+			p, chain, path, err := resolveProfileChain(env)
+			if chain.Source == profile.ChainSourceFlag {
+				chain.Source = profile.ChainSourceEnv
+			}
+			return p, chain, path, err
+		}
+	}
 	path, err := profile.DefaultPath()
 	if err != nil {
 		return nil, profile.Chain{}, "", err

@@ -75,7 +75,7 @@ func TestInfoLeadsWithMissingDeclaredHooks(t *testing.T) {
 	}}
 
 	steps := nextStepsFor(info)
-	if len(steps) == 0 || !strings.Contains(steps[0].Command, "sparkwing pipeline hooks install") ||
+	if len(steps) == 0 || !strings.Contains(steps[0].Command, "pipeline hooks install") ||
 		!strings.Contains(steps[0].Purpose, "pre-commit") {
 		t.Fatalf("info next steps = %+v, want missing hook repair first", steps)
 	}

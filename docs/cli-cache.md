@@ -50,7 +50,6 @@ answer to why a rebuild happened.
 
 | Flag | Description |
 |---|---|
-| `--dir PATH` | Pipeline module directory (default: ./.sparkwing) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples

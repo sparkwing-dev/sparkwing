@@ -87,18 +87,6 @@ func runPipeline(args []string) error {
 	}
 }
 
-const chdirFlagUsage = "operate as if started in this directory (re-anchors the .sparkwing search)"
-
-func applyChdir(dir string) error {
-	if dir == "" {
-		return nil
-	}
-	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("--sw-cd %q: %w", dir, err)
-	}
-	return nil
-}
-
 func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")

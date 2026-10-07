@@ -51,7 +51,7 @@ func TestRenderHooksFire_NamesEachUnenforcedRepoAndItsFix(t *testing.T) {
 		"2 of 4 repo(s) did not refuse a commit",
 		"/code/sparkwing/.git/hooks/pre-commit",
 		"--unset core.hooksPath",
-		"hooks install --repo /code/toolbox",
+		"sparkwing -C /code/toolbox pipeline hooks install",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output = %q, want it to carry %q", got, want)

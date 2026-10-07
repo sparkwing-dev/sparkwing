@@ -63,7 +63,7 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 	}
 
 	//nolint:contextcheck // The repo registry read predates a context-aware API.
-	repoDir, declared, err := resolveSubmitRepo(ctx, pipelineName, wf.changeDir, wf.pipelineRef)
+	repoDir, declared, err := resolveSubmitRepo(ctx, pipelineName, wf.pipelineRef)
 	if err != nil {
 		return err
 	}
@@ -544,11 +544,8 @@ func submitPaths(home string) (orchestrator.Paths, error) {
 	return orchestrator.DefaultPaths()
 }
 
-func resolveSubmitRepo(ctx context.Context, pipeline, changeDir, pipelineRef string) (string, []sparkwing.DescribePipeline, error) {
-	start := changeDir
-	if start == "" {
-		start = mustGetwd()
-	}
+func resolveSubmitRepo(ctx context.Context, pipeline, pipelineRef string) (string, []sparkwing.DescribePipeline, error) {
+	start := mustGetwd()
 	if pipelineRef == "" {
 		if dir, err := findSparkwingDirFrom(start); err == nil {
 			source, err := projectconfig.PipelineSource(filepath.Dir(dir), pipeline)

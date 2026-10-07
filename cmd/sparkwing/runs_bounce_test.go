@@ -38,8 +38,9 @@ func bounceHome(t *testing.T) string {
 
 func TestRunsBounce_RecordsTheRequestAgainstTheHomesStore(t *testing.T) {
 	home := bounceHome(t)
+	t.Setenv("SPARKWING_HOME", home)
 	if err := runRunsBounce(context.Background(),
-		[]string{"--run", "run-1", "--node", "build", "--home", home}); err != nil {
+		[]string{"--run", "run-1", "--node", "build"}); err != nil {
 		t.Fatalf("runs bounce: %v", err)
 	}
 
@@ -72,7 +73,8 @@ func TestRunsBounce_RefusalsSayWhichThingIsWrong(t *testing.T) {
 		{"no target", []string{"--run", "run-1"}, "--run RUN_ID and --node NODE_ID are required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runRunsBounce(ctx, append(tc.args, "--home", home))
+			t.Setenv("SPARKWING_HOME", home)
+			err := runRunsBounce(ctx, tc.args)
 			if err == nil {
 				t.Fatalf("bounce %v succeeded; want a refusal", tc.args)
 			}
@@ -95,7 +97,8 @@ func TestRunsBounce_RefusesAFinishedRun(t *testing.T) {
 	}
 	_ = st.Close()
 
-	err = runRunsBounce(ctx, []string{"--run", "run-1", "--node", "build", "--home", home})
+	t.Setenv("SPARKWING_HOME", home)
+	err = runRunsBounce(ctx, []string{"--run", "run-1", "--node", "build"})
 	if err == nil || !strings.Contains(err.Error(), "already finished") {
 		t.Errorf("error = %v, want it to name the run as already finished", err)
 	}

@@ -531,7 +531,7 @@ func renderCronsPush(w io.Writer, report cronsPushReport, format string) error {
 }
 
 var errCronsProfileAndFleet = errors.New(
-	"--fleet arms every repo registered on this host; name one repo with --repo when pushing to a controller")
+	"--fleet arms every repo registered on this host; run it from one repo (or pass -C DIR) when pushing to a controller")
 
 // safety: the same edit the local path applies, spelled for the wire: a field
 // the operator did not name is left out, and args ride whole.

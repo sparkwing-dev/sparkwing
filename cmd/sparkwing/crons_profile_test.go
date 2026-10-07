@@ -135,7 +135,7 @@ func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.
 	repo := newCronsControllerRepo(t)
 
 	out := captureStdout(t, func() {
-		if err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "--follow", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCrons, "install", "--profile", "prod", "--follow", "-o", "pretty"); err != nil {
 			t.Errorf("crons install --profile: %v", err)
 		}
 	})
@@ -165,7 +165,7 @@ func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.
 	}
 
 	out = captureStdout(t, func() {
-		if err := runCrons([]string{"uninstall", "--profile", "prod", "--repo", repo, "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCrons, "uninstall", "--profile", "prod", "-o", "pretty"); err != nil {
 			t.Errorf("crons uninstall --profile: %v", err)
 		}
 	})
@@ -244,7 +244,7 @@ func TestCronsInstallProfile_RefusesAHeadNoRemoteBranchCarries(t *testing.T) {
 	newCronsProfileFixture(t)
 	repo := newCronsControllerRepo(t)
 
-	err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "-o", "pretty"})
+	err := runIn(t, repo, runCrons, "install", "--profile", "prod", "-o", "pretty")
 	if err == nil {
 		t.Fatal("a commit no remote branch carries was pushed anyway")
 	}
@@ -266,7 +266,7 @@ func TestCronsInstallProfile_PushesOnceARemoteBranchCarriesHeadAndWarnsWhenDirty
 	var out string
 	warning := captureStderr(t, func() {
 		out = captureStdout(t, func() {
-			if err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "-o", "pretty"}); err != nil {
+			if err := runIn(t, repo, runCrons, "install", "--profile", "prod", "-o", "pretty"); err != nil {
 				t.Errorf("crons install --profile: %v", err)
 			}
 		})
@@ -291,7 +291,7 @@ func TestCronsInstallProfile_PlainPrintsBareNames(t *testing.T) {
 	repo := newCronsControllerRepo(t)
 
 	out := captureStdout(t, func() {
-		if err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "--follow", "-o", "plain"}); err != nil {
+		if err := runIn(t, repo, runCrons, "install", "--profile", "prod", "--follow", "-o", "plain"); err != nil {
 			t.Errorf("crons install --profile -o plain: %v", err)
 		}
 	})

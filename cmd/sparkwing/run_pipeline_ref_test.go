@@ -49,14 +49,15 @@ func pipelineRefRepo(t *testing.T) string {
 
 func TestPipelineRefResolutionDoesNotBuildTheCallerPipeline(t *testing.T) {
 	repo := pipelineRefRepo(t)
-	got, _, err := resolveSubmitRepo(t.Context(), "build", repo, "main")
+	t.Chdir(repo)
+	got, _, err := resolveSubmitRepo(t.Context(), "build", "main")
 	if err != nil || got != repo {
 		t.Fatalf("resolve checkout without pipeline source = %q, %v; want %q", got, err, repo)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("not valid Go"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, _, err = resolveSubmitRepo(t.Context(), "build", repo, "main")
+	got, _, err = resolveSubmitRepo(t.Context(), "build", "main")
 	if err != nil || got != repo {
 		t.Fatalf("resolve checkout without a buildable pipeline = %q, %v; want %q", got, err, repo)
 	}
@@ -64,10 +65,11 @@ func TestPipelineRefResolutionDoesNotBuildTheCallerPipeline(t *testing.T) {
 
 func TestPipelineRefRequiresExecutionProjectConfiguration(t *testing.T) {
 	repo := pipelineRefRepo(t)
+	t.Chdir(repo)
 	if err := os.Remove(filepath.Join(repo, ".sparkwing", "sparkwing.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := resolveSubmitRepo(t.Context(), "build", repo, "main"); err == nil {
+	if _, _, err := resolveSubmitRepo(t.Context(), "build", "main"); err == nil {
 		t.Fatal("submission accepted an execution checkout without project configuration")
 	}
 }

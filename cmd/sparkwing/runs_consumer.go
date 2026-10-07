@@ -46,7 +46,6 @@ func runRunsConsumer(args []string) error {
 func runRunsConsumerStart(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStart.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	idle := fs.Duration("idle", 0, "exit after this long with no work (default 5m; 0 means the default)")
 	claimLease := fs.Duration("claim-lease", 0,
 		"lease stamped on each claimed run, renewed while it executes (default 3m)")
@@ -61,7 +60,7 @@ func runRunsConsumerStart(args []string) error {
 		return err
 	}
 
-	layout, err := orchestrator.ConsumerLayoutFor(*home)
+	layout, err := orchestrator.ConsumerLayoutFor("")
 	if err != nil {
 		return err
 	}
@@ -75,7 +74,6 @@ func runRunsConsumerStart(args []string) error {
 func runRunsConsumerStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStatus.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsConsumerStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -87,7 +85,7 @@ func runRunsConsumerStatus(args []string) error {
 		return err
 	}
 
-	layout, err := orchestrator.ConsumerLayoutFor(*home)
+	layout, err := orchestrator.ConsumerLayoutFor("")
 	if err != nil {
 		return err
 	}
@@ -108,7 +106,6 @@ func runRunsConsumerStatus(args []string) error {
 func runRunsConsumerStop(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStop.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsConsumerStop, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -120,7 +117,7 @@ func runRunsConsumerStop(args []string) error {
 		return err
 	}
 
-	layout, err := orchestrator.ConsumerLayoutFor(*home)
+	layout, err := orchestrator.ConsumerLayoutFor("")
 	if err != nil {
 		return err
 	}

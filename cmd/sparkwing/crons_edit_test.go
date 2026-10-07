@@ -88,7 +88,7 @@ func TestCronsInstallPinsLocalEntriesAndReportsTheControllerOnes(t *testing.T) {
 	head := cronsGit(t, repo, "rev-parse", "HEAD")
 
 	out := captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -136,7 +136,7 @@ func TestCronsInstallOnlyArmsTheNamedEntries(t *testing.T) {
 	repo := cronsTestGitRepo(t, cronsTwoSidedRepo)
 
 	out := captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--only", "sweep/quick", "--no-timer", "-o", "json"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--only", "sweep/quick", "--no-timer", "-o", "json"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -150,7 +150,7 @@ func TestCronsInstallOnlyArmsTheNamedEntries(t *testing.T) {
 
 	var err error
 	captureStdout(t, func() {
-		err = runCronsInstall([]string{"--repo", repo, "--only", "nope", "--no-timer", "-o", "pretty"})
+		err = runIn(t, repo, runCronsInstall, "--only", "nope", "--no-timer", "-o", "pretty")
 	})
 	if err == nil || !strings.Contains(err.Error(), "crons install") {
 		t.Fatalf("an unknown --only name did not fail the install: %v", err)
@@ -163,7 +163,7 @@ func TestCronsInstallFollowLeavesTheScheduleOnTheCheckout(t *testing.T) {
 	repo := cronsTestGitRepo(t, cronsMinutelyRepo)
 
 	out := captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--follow", "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--follow", "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -185,7 +185,7 @@ func TestCronsSetAndResetRoundTripAnOverride(t *testing.T) {
 	cronsFakeProver(t)
 	repo := cronsTestGitRepo(t, cronsTwoSidedRepo)
 	captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -239,7 +239,7 @@ func TestCronsShowMarksAnOverrideTheRepoHasMovedUnder(t *testing.T) {
 	cronsFakeProver(t)
 	repo := cronsTestGitRepo(t, cronsMinutelyRepo)
 	captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--follow", "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--follow", "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -273,7 +273,7 @@ func TestCronsShowMarksAnOverrideTheRepoHasMovedUnder(t *testing.T) {
 	}
 
 	captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--follow", "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--follow", "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -300,7 +300,7 @@ func TestCronsInstallWarnsAndShowMarksACatchUpAboveTheCeiling(t *testing.T) {
 `)
 
 	install := captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})
@@ -323,7 +323,7 @@ func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
 	cronsFakeProver(t)
 	repo := cronsTestGitRepo(t, cronsTwoSidedRepo)
 	captureStdout(t, func() {
-		if err := runCronsInstall([]string{"--repo", repo, "--follow", "--no-timer", "-o", "pretty"}); err != nil {
+		if err := runIn(t, repo, runCronsInstall, "--follow", "--no-timer", "-o", "pretty"); err != nil {
 			t.Fatalf("crons install: %v", err)
 		}
 	})

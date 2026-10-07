@@ -20,7 +20,17 @@ var cmdSparkwing = Command{
 programs in a repo's .sparkwing/ directory, triggered by git hooks,
 webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
-for agent-facing discovery.`,
+for agent-facing discovery.
+
+Three flags go before any verb:
+  -C DIR          run as if started in DIR (the .sparkwing search starts there)
+  --profile NAME  select a profile; the verb must accept --profile
+  -o FORMAT       pretty | json | plain, for verbs that print a document
+
+Without --profile, verbs that read runs fall back to SPARKWING_PROFILE, then
+the project's defaults.profile. Verbs that change state elsewhere (secrets,
+crons, runs cancel, cluster, and similar) act locally unless --profile names
+the controller.`,
 	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "serve", "doctor", "cloud", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
@@ -29,6 +39,7 @@ for agent-facing discovery.`,
 		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name fictional-release -o json"},
 		{"Bootstrap + scaffold your first pipeline in a new repository", "sparkwing pipeline new --name release"},
 		{"Start the local dashboard", "sparkwing serve start"},
+		{"List another checkout's pipelines", "sparkwing -C ~/code/other pipeline list"},
 	},
 }
 
@@ -54,7 +65,7 @@ for event records and dump paths.`,
 var cmdDaemonEvents = Command{
 	Path: "sparkwing daemon events", Synopsis: "Read retained admission events without starting the daemon",
 	Description: "Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.",
-	Flags:       []FlagSpec{{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect", Group: "Input"}, {Name: "run", Argument: "ID", Desc: "Filter by run ID", Group: "Input"}, {Name: "since", Argument: "DURATION", Desc: "Lookback duration", Group: "Input"}, {Name: "kind", Argument: "KIND", Desc: "Record kind (repeatable)", Group: "Input"}, {Name: "incarnation", Argument: "N", Desc: "Daemon incarnation", Group: "Input"}, {Name: "limit", Argument: "N", Desc: "Maximum records (default 50; 0 for all)", Group: "Input"}, {Name: "offset", Argument: "N", Desc: "Matching records to skip from newest", Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
+	Flags:       []FlagSpec{{Name: "run", Argument: "ID", Desc: "Filter by run ID", Group: "Input"}, {Name: "since", Argument: "DURATION", Desc: "Lookback duration", Group: "Input"}, {Name: "kind", Argument: "KIND", Desc: "Record kind (repeatable)", Group: "Input"}, {Name: "incarnation", Argument: "N", Desc: "Daemon incarnation", Group: "Input"}, {Name: "limit", Argument: "N", Desc: "Maximum records (default 50; 0 for all)", Group: "Input"}, {Name: "offset", Argument: "N", Desc: "Matching records to skip from newest", Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
 	GroupOrder:  []string{"Input", "Output", "Other"},
 	Examples:    []Example{{"Events for one run", "sparkwing daemon events --run abc -o json"}},
 }
@@ -62,7 +73,7 @@ var cmdDaemonEvents = Command{
 var cmdDaemonExplain = Command{
 	Path: "sparkwing daemon explain", Synopsis: "Explain one run's admission history from retained events",
 	Description: "Explains a run's admission history in sentences, including descendant node slots and attached children, without starting the daemon. Unreadable records are skipped and counted on stderr. JSON output retains the structured records.",
-	Flags:       []FlagSpec{{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect", Group: "Input"}, {Name: "run", Argument: "ID", Desc: "Run ID to explain", Required: true, Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
+	Flags:       []FlagSpec{{Name: "run", Argument: "ID", Desc: "Run ID to explain", Required: true, Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
 	GroupOrder:  []string{"Input", "Output", "Other"},
 	Examples:    []Example{{"Explain a run", "sparkwing daemon explain --run abc"}},
 }
@@ -79,7 +90,6 @@ daemon is a no-op and exits zero.
 A run still holding admission finishes against the store it already opened.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing home whose daemon should stop", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
@@ -97,12 +107,11 @@ first stop or verify those runs, then pass --yes. Recovery holds the
 daemon election lock, moves state.json to a state.json.corrupt-<time> forensic
 copy, and never discards readable state.`,
 	Flags: []FlagSpec{
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing home whose unreadable daemon state should be preserved", Group: "Input"},
 		{Name: "yes", Desc: "Confirm every run described by the unreadable state has stopped", Required: true, Group: "Safety"},
 	},
 	GroupOrder: []string{"Input", "Safety", "Other"},
 	Examples: []Example{
-		{"Recover only after verifying the described runs stopped", "sparkwing daemon recover-state --home /path/to/home --yes"},
+		{"Recover only after verifying the described runs stopped", "SPARKWING_HOME=/path/to/home sparkwing daemon recover-state --yes"},
 	},
 }
 
@@ -134,7 +143,6 @@ artifact_store_error reports failure to open the configured cache. The daemon
 continues serving with artifact routes disabled.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
@@ -151,7 +159,6 @@ match. Existing holders reconnect and reattach through durable leases. If no
 daemon is running, nothing is started.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
 		{Name: "force", Desc: "Replace the daemon even when it already serves this build", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Input", "Behavior", "Output", "Other"},
@@ -182,7 +189,6 @@ pipelines (head -n1 yields the most-likely next command).`,
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "for-agent", Desc: "Emit current discovery context for one agent wake (no ANSI, no extras)", Group: "Output"},
 		{Name: "first-time", Desc: "Print the post-install onboarding card (used by install.sh; re-runnable any time)", Group: "Output"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -669,7 +675,6 @@ This is the same output as 'sparkwing queue'.`,
 
 var queueListingFlags = []FlagSpec{
 	{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
-	{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	{Name: "profile", Argument: "NAME", Desc: "Inspect this profile's controller instead of the local daemon", Group: "System"},
 }
 
@@ -706,7 +711,6 @@ and 4 when the daemon's socket cannot be reached at all.`,
 		{Name: "run", Argument: "ID", Desc: "Run id to re-rank", Required: true, Group: "Identity"},
 		{Name: "set", Argument: "VALUE", Desc: "New priority: an integer, front, or back", Required: true, Group: "Identity"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	GroupOrder: []string{"Identity", "Output", "System", "Other"},
 	Examples: []Example{
@@ -1088,7 +1092,6 @@ When other cached entries came from the same checkout, each is listed
 with the inputs that differ from the current key. That is the direct
 answer to why a rebuild happened.`,
 	Flags: []FlagSpec{
-		{Name: "dir", Argument: "PATH", Desc: "Pipeline module directory", Default: "./.sparkwing", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
@@ -1407,7 +1410,6 @@ metadata, and prints a grouped aligned table.
 --all includes entries marked 'hidden: true'. By default they're
 omitted.`,
 	Flags: []FlagSpec{
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "all", Desc: "Include entries marked hidden", Group: "Output"},
 	},
@@ -1431,7 +1433,6 @@ hidden flag shouldn't surprise you.
 --secrets compiles the pipeline and prints each declared secret, its
 source binding, and its resolution status instead of the metadata.`,
 	Flags: []FlagSpec{
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
 		{Name: "secrets", Desc: "Print the pipeline's declared secrets with provenance instead of its metadata", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -1455,7 +1456,6 @@ in prose so direct hits surface first.
 -o json emits {name, kind, group, ..., score} records sorted by
 score descending; agents should prefer -o json for consumption.`,
 	Flags: []FlagSpec{
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "query", Argument: "TEXT", Desc: "Search query (one or more tokens, all must hit some field)", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
@@ -1494,11 +1494,10 @@ Generated actions print placeholder output. Replace them with the work the
 pipeline should perform. Use 'sparkwing docs read --guide authoring' for
 pipeline authoring guidance and 'sparkwing examples' for complete examples.
 
---sw-cd/-C selects another repository. --hidden hides the entry from default
+'sparkwing -C DIR pipeline new' selects another repository. --hidden hides the entry from default
 listings. --short sets its description.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
 		{Name: "template", Argument: "SHAPE", Desc: "DAG to scaffold: minimal (1 node) | build-test-deploy (3) | ci-pr-check (3) | release (3) | scheduled-report (5)", Default: "minimal", Group: "Scaffold"},
 		{Name: "on", Argument: "EVENT", Desc: "Trigger(s) to declare: pull_request | push | schedule | pre_commit | pre_push | post_commit | manual (repeatable or comma-separated)", Default: "the shape's own", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
@@ -1609,7 +1608,6 @@ override with --dir.`,
 		{Name: "rules", Desc: "Print each rule's charter (what it forbids and why) and exit", Group: "Target"},
 		{Name: "dir", Argument: "DIR", Desc: "Directory of pipeline source to scan (default: <.sparkwing>/jobs)", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Target", "Output", "System", "Other"},
 	Examples: []Example{
@@ -1732,8 +1730,8 @@ A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 is refused with the reason instead of ignored; run those in
 the foreground.
 
-PIPELINE resolves against the checkout you are standing in (or
---sw-cd PATH) first, then the repo registry, and the chosen
+PIPELINE resolves against the checkout you are standing in (or the
+one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
 GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
@@ -1755,7 +1753,7 @@ is running and exits after five idle minutes; see
 		{"Capture the id for scripting", "RUN=$(sparkwing run build --sw-detached --sw-output plain)"},
 		{"Compile the pipeline from another ref", "sparkwing run fictional-build --sw-detached --sw-pipeline-ref main"},
 		{"Deduplicate a detached retry", "sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging"},
-		{"Detach a pipeline from another checkout", "sparkwing run lint --sw-detached --sw-cd ~/code/other-project"},
+		{"Detach a pipeline from another checkout", "sparkwing -C ~/code/other-project run lint --sw-detached"},
 		{"Retry a failed run", "sparkwing runs retry --run run-fictional --failed"},
 		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
 	},
@@ -1835,7 +1833,6 @@ application/json. --allow-remote widens the Host check only.`,
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
-		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
@@ -1846,7 +1843,7 @@ application/json. --allow-remote widens the Host check only.`,
 	Examples: []Example{
 		{"Start with defaults", "sparkwing serve start"},
 		{"Use an alternate port", "sparkwing serve start --addr 127.0.0.1:5000"},
-		{"Isolate state under a scratch dir", "sparkwing serve start --home " + helpExampleScratchDir("sparkwing-x")},
+		{"Isolate state under a scratch dir", "SPARKWING_HOME=" + helpExampleScratchDir("sparkwing-x") + " sparkwing serve start"},
 		{"Tail CI runs from S3 (no SQLite)", "sparkwing serve start --profile ci-smoke --no-local-store --read-only"},
 		{"Serve a LAN bind under a browser-facing name", "sparkwing serve start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343"},
 	},
@@ -1862,7 +1859,6 @@ identity checks immediately before signaling. Unknown ownership is refused.
 An absent service succeeds.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Stop the dashboard", "sparkwing serve stop"},
@@ -1882,7 +1878,6 @@ var cmdDashboardLogs = Command{
 	Synopsis:    "Read a bounded dashboard log tail",
 	Description: "Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 skips history. --follow waits for appended lines until interrupted; log rotation requires restarting the command. Lines larger than 16 KiB are marked truncated. A requested history exceeding the byte window reports an error. Follow retains incomplete lines until a newline arrives.",
 	Flags: []FlagSpec{
-		{Name: "home", Argument: "DIR", Desc: "State directory"},
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Output format"},
 		{Name: "limit", Argument: "N", Default: "40", Desc: "Last N lines; 0 skips history"},
 		{Name: "follow", Desc: "Follow appended lines until interrupted"},
@@ -1899,7 +1894,6 @@ or failed readiness exits 2. Matching hashes establish build equality;
 missing artifact evidence is unknown.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Check liveness", "sparkwing serve status"},
@@ -1973,7 +1967,6 @@ alongside the error.`,
 	Flags: []FlagSpec{
 		{Name: "dry-run", Desc: "Report what would be repaired without changing anything", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "timeout", Argument: "DURATION", Desc: "Budget for the daemon and local-state checks; each takes a slice of it", Default: "10s", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
@@ -2428,7 +2421,6 @@ reason, in place of a kind:page record.`,
 		{Name: "sparkline", Argument: "N", Desc: "Sparkline length when --by-pipeline is set", Default: "30", Group: "Output"},
 		{Name: "style", Argument: "STYLE", Desc: "Sparkline glyph style: ascii|block|dot", Default: "ascii", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2485,7 +2477,6 @@ while returning zero. For a blocking wait, use 'runs wait'.`,
 		{Name: "steps", Desc: "Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too.", Group: "Output"},
 		{Name: "exit-zero", Desc: "Return exit code 0 even when the run failed/cancelled", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2538,7 +2529,6 @@ part of the stored log, and JSON output omits it.`,
 		{Name: "follow", Short: "f", Desc: "Tail the log(s) until the run terminates", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (omit for local-only reads)", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2566,7 +2556,6 @@ or the controller a --profile names.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2592,7 +2581,6 @@ systemic failure surfaces as one row with a count.`,
 		{Name: "group-by", Argument: "KEY", Desc: "Cluster by: step | node", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2630,7 +2618,6 @@ pinned rows, samples, and demand floors.`,
 		{Name: "yes", Desc: "Confirm --reset --all", Group: "Recovery"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "Recovery", "System", "Other"},
 	Examples: []Example{
@@ -2652,7 +2639,6 @@ tails for new runs, reprinting whenever a newer run ID appears.`,
 		{Name: "watch", Short: "w", Desc: "Tail for new runs", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2671,7 +2657,6 @@ the profile's controller.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Root run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2690,7 +2675,6 @@ instead of the summary 'status' command renders.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -2718,7 +2702,6 @@ controller's receipt endpoint and uses the controller's configured rate.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json (default)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2745,7 +2728,6 @@ Use 'runs find --wait' to find the run before waiting for its outcome.`,
 		{Name: "poll", Argument: "DURATION", Desc: "Poll interval", Default: "3s", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to poll the local SQLite store.", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2785,7 +2767,6 @@ infrastructure error.`,
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (JSON strings with -o json)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to search the local SQLite store.", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2828,7 +2809,6 @@ Exit code 0 even when there are no matches.`,
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2847,7 +2827,6 @@ and approval state together. Use --output json for structured output.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2870,7 +2849,6 @@ emits start/end offsets in milliseconds per row.`,
 		{Name: "width", Argument: "N", Desc: "Bar width in characters", Default: "60", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2913,8 +2891,6 @@ only when at least one id failed.`,
 		{Name: "failed", Desc: "Rerun from failed: reuse passed nodes, re-execute only failed/unreached", ConflictsWith: []string{"all"}, Group: "Input"},
 		{Name: "all", Desc: "Rerun all: re-execute every node from scratch", ConflictsWith: []string{"failed"}, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
-		{Name: "home", Argument: "PATH", Desc: "Sparkwing home holding local runs (default: $SPARKWING_HOME or ~/.sparkwing)", ConflictsWith: []string{"profile"}, Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -2950,7 +2926,6 @@ Rarely needed by hand: 'sparkwing run --sw-detached' does this
 before it acknowledges a run.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
-		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "idle", Argument: "DUR", Desc: "Exit after this long with no work (default 5m)", Group: "System"},
 		{Name: "claim-lease", Argument: "DUR", Desc: "Lease stamped on each claimed run, renewed while it executes (default 3m)", Group: "System"},
 	},
@@ -2967,7 +2942,6 @@ var cmdJobsConsumerStatus = Command{
 when no consumer is running, so it composes in shell conditions.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
-		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Check for a resident consumer", "sparkwing runs consumer status"},
@@ -2984,7 +2958,6 @@ comes back, which the next 'sparkwing run --sw-detached' arranges.
 To cancel a queued run instead, use 'sparkwing runs cancel'.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
-		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Stop the resident consumer", "sparkwing runs consumer stop"},
@@ -3009,8 +2982,6 @@ lease root, and the daemon logs the parent resolution.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing home for local daemon and queued-run storage (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -3047,8 +3018,6 @@ running; cancel the run and retry it instead.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id owning the job", Group: "Input"},
 		{Name: "node", Argument: "NODE_ID", Desc: "Job id to bounce", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing home holding the run (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -3072,7 +3041,6 @@ Use --dry-run first to confirm the matching runs.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; use --run - to read ids from stdin)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
 		{Name: "dry-run", Desc: "List matching runs without deleting", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --profile prod"},
@@ -3118,14 +3086,13 @@ storage. --fleet processes registered repositories and distinguishes installed
 gates, gates that could not execute, and repositories declaring no blocking
 gate.`,
 	Flags: []FlagSpec{
-		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Install into every registered repo instead of one", Group: "Input"},
 		{Name: "no-prove", Desc: "Claim core.hooksPath without running the gate first", Group: "Behavior"},
 		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: local-only)", Group: "Storage"},
 	},
 	Examples: []Example{
 		{"Install in the current repo", "sparkwing pipeline hooks install"},
-		{"Install in a different repo", "sparkwing pipeline hooks install --repo /path/to/repo"},
+		{"Install in a different repo", "sparkwing -C /path/to/repo pipeline hooks install"},
 		{"Arm every registered repo", "sparkwing pipeline hooks install --fleet"},
 		{"Pin the gate's runs to one store", "sparkwing pipeline hooks install --profile bucket"},
 	},
@@ -3172,7 +3139,6 @@ Exits nonzero unless every applicable repository refused the test commit
 through its own gate. Repositories without a pre-commit trigger are excluded.
 This command verifies pre-commit hooks.`,
 	Flags: []FlagSpec{
-		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Fire the gate in every registered repo instead of one", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
@@ -3188,9 +3154,7 @@ var cmdHooksUninstall = Command{
 	Synopsis: "Remove sparkwing-managed git hooks",
 	Description: `Deletes every file under .git/hooks/ that carries the "Installed by sparkwing"
 marker. Hand-written hooks are left alone.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
-	},
+	Flags: []FlagSpec{},
 	Examples: []Example{
 		{"Uninstall in the current repo", "sparkwing pipeline hooks uninstall"},
 	},
@@ -3204,7 +3168,6 @@ invokes. Declared hooks that are missing, shadowed, or borrowed are named with
 the command that repairs them.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints hook names.", Group: "Output"},
-		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 	},
 	Examples: []Example{
 		{"Show hook status", "sparkwing pipeline hooks status"},
@@ -3384,7 +3347,6 @@ an older entry is not reported.`,
 		{Name: "quiet", Short: "q", Desc: "Print only trigger ids, newline-separated", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw triggers array", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -3404,7 +3366,6 @@ json emits the raw response.`,
 		{Name: "id", Argument: "TRIGGER_ID", Desc: "Trigger / run identifier (the value 'pipeline trigger' prints)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw response", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -3863,7 +3824,6 @@ library with its declared constraint and the resolved tag
 (found via the module proxy). Use --no-resolve to skip the
 proxy calls when offline.`,
 	Flags: []FlagSpec{
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "no-resolve", Desc: "Skip module-proxy lookups; print declared versions only", Group: "Input"},
 	},
@@ -3910,7 +3870,6 @@ var cmdSparksResolve = Command{
 module overlay used for pipeline builds. Prints 'up-to-date' when the
 overlay already matches. The repository's module file stays unchanged.`,
 	Flags: []FlagSpec{
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "quiet", Short: "q", Desc: "Suppress the 'up-to-date' message", Group: "Output"},
 	},
 	Examples: []Example{
@@ -3933,7 +3892,6 @@ one library still, pin its "version:" field in
 .sparkwing/sparkwing.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Refused; update re-resolves every declared library", Group: "Input"},
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
@@ -3951,7 +3909,6 @@ a duplicate (same source or same name).`,
 		{Name: "source", Argument: "PATH", Desc: "Go module path", Required: true, Group: "Input"},
 		{Name: "version", Argument: "VER", Desc: "Declared version ('latest', exact tag, or semver range)", Group: "Input"},
 		{Name: "name", Argument: "NAME", Desc: "Short library name (default: last path segment of --source)", Group: "Input"},
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
@@ -3966,7 +3923,6 @@ var cmdSparksRemove = Command{
 	Description: `Removes the entry matching NAME (or matching its source path).`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Library name or source path to remove", Required: true, Group: "Input"},
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
@@ -3982,7 +3938,6 @@ var cmdSparksWarmup = Command{
 binary cache. Subsequent runs with matching build inputs can reuse it.
 Warmup uses the same compilation path and cache key as 'sparkwing run'.`,
 	Flags: []FlagSpec{
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "clear-cache", Desc: "Delete the local pipeline binary cache before compiling", Group: "Input"},
 	},
 	Examples: []Example{
@@ -4016,7 +3971,6 @@ packages[] row as its package name.`,
 	Flags: []FlagSpec{
 		{Name: "library", Argument: "MODULE", Desc: "Spark library module path (default: github.com/sparkwing-dev/sparks-core)", Group: "Input"},
 		{Name: "path", Argument: "DIR", Desc: "Read a library checkout on disk instead of downloading it", Group: "Input"},
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
@@ -4048,7 +4002,6 @@ module replacement.
 			RequiredHint: "`sparkwing pipeline sparks catalog` names every module the library offers",
 			Group:        "Input",
 		},
-		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
@@ -4075,7 +4028,6 @@ or was already resolved (409).`,
 		{Name: "node", Argument: "ID", Desc: "Node ID of the approval gate", Required: true, Group: "Target"},
 		{Name: "comment", Argument: "STR", Desc: "Optional note recorded on the approval", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
@@ -4095,7 +4047,6 @@ their ContinueOnError / Optional settings.`,
 		{Name: "node", Argument: "ID", Desc: "Node ID of the approval gate", Required: true, Group: "Target"},
 		{Name: "comment", Argument: "STR", Desc: "Optional note recorded on the approval", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
@@ -4123,7 +4074,6 @@ run, both pending and resolved.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Restrict to one run's approvals", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -4158,7 +4108,6 @@ implies step-scope and limits to the matching step.`,
 		{Name: "steps", Desc: "Include per-step annotations", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -4181,7 +4130,6 @@ preserved as the dashboard renders them.`,
 		{Name: "step", Argument: "STEP_ID", Desc: "Step identifier (annotates the step instead of the node)", Group: "Input"},
 		{Name: "message", Short: "m", Argument: "TEXT", Desc: "Annotation text", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -4367,7 +4315,6 @@ at the clone; uncommitted edits are a warning, since the pushed commit is what
 runs. Re-running the push is the explicit update, and it moves the pin.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Arm every registered repo instead of one", Group: "Input"},
 		{Name: "only", Argument: "NAMES", Desc: "Arm only these pipelines or pipeline/name entries (comma-separated or repeatable)", Group: "Filter"},
 		{Name: "follow", Desc: "Arm without pinning, so every fire compiles the checkout", Group: "Behavior"},
@@ -4378,7 +4325,7 @@ runs. Re-running the push is the explicit update, and it moves the pin.`,
 	GroupOrder: []string{"Input", "Filter", "Behavior", "Output"},
 	Examples: []Example{
 		{"Arm the current repo", "sparkwing crons install"},
-		{"Arm a different repo", "sparkwing crons install --repo /path/to/repo"},
+		{"Arm a different repo", "sparkwing -C /path/to/repo crons install"},
 		{"Arm two entries only", "sparkwing crons install --only nightly,sweep/quick"},
 		{"Arm without pinning", "sparkwing crons install --follow"},
 		{"Arm every registered repo", "sparkwing crons install --fleet"},
@@ -4400,7 +4347,6 @@ too: the timer exists to serve armed schedules and nothing else.
 naming the repo by its git origin.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Disarm every schedule this home holds", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},

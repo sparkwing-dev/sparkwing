@@ -20,7 +20,6 @@ import (
 
 func runDashboardLogs(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardLogs.Path, flag.ContinueOnError)
-	home := fs.String("home", "", "state directory")
 	output := fs.StringP("output", "o", "", "pretty|json|plain")
 	limit := fs.Int("limit", 40, "last lines; 0 skips history")
 	follow := fs.Bool("follow", false, "follow appended lines until interrupted")
@@ -37,7 +36,7 @@ func runDashboardLogs(args []string) error {
 	if *limit < 0 {
 		return errors.New("--limit must be nonnegative")
 	}
-	dp, err := resolveDashboardPaths(*home)
+	dp, err := resolveDashboardPaths("")
 	if err != nil {
 		return err
 	}

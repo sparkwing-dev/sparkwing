@@ -138,7 +138,7 @@ days a year that have no single answer:
 
 ```sh
 sparkwing crons install                     # the enclosing repo
-sparkwing crons install --repo /path/to/repo
+sparkwing -C /path/to/repo crons install
 sparkwing crons install --only nightly,sweep/quick
 sparkwing crons install --fleet             # every registered repo
 ```
@@ -437,7 +437,7 @@ verified push can arm them again.
 For a repository without the App connection, an operator can push entries:
 
 ```bash
-sparkwing crons install --profile prod --repo ~/code/my-app
+sparkwing -C ~/code/my-app crons install --profile prod
 ```
 
 The push reads the repository's controller entries, resolves the checkout's
@@ -503,7 +503,7 @@ sparkwing crons show --profile prod my-org/my-app/nightly
 sparkwing crons status --profile prod
 sparkwing crons pause --profile prod my-org/my-app/nightly
 sparkwing crons run --profile prod my-org/my-app/nightly
-sparkwing crons uninstall --profile prod --repo ~/code/my-app
+sparkwing -C ~/code/my-app crons uninstall --profile prod
 ```
 
 `crons status --profile` reports the controller's loop in place of an OS

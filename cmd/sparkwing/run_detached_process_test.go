@@ -317,7 +317,7 @@ func (e *submitTestEnv) mustRun(args ...string) string {
 // detachArgs spells one detached launch: every sparkwing flag follows the
 // pipeline name, and SPARKWING_HOME in the test environment selects the home.
 func (e *submitTestEnv) detachArgs(pipeline string, extra ...string) []string {
-	args := []string{"run", pipeline, "--sw-detached", "--sw-cd", e.repoDir}
+	args := []string{"-C", e.repoDir, "run", pipeline, "--sw-detached"}
 	return append(args, extra...)
 }
 
@@ -608,7 +608,7 @@ func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e.mustRun("runs", "consumer", "start", "--home", e.home)
+	e.mustRun("runs", "consumer", "start")
 
 	waitUntil(t, "the restarted consumer to execute the queued run", 60*time.Second, func() bool {
 		run, err := st.GetRun(ctx, recovered)
@@ -630,17 +630,17 @@ func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
 	}
 	e := newSubmitTestEnv(t)
 
-	if out, err := e.run("runs", "consumer", "status", "--home", e.home); err == nil {
+	if out, err := e.run("runs", "consumer", "status"); err == nil {
 		t.Fatalf("status exited 0 with no consumer running:\n%s", out)
 	}
 
-	e.mustRun("runs", "consumer", "start", "--home", e.home)
-	out := e.mustRun("runs", "consumer", "status", "--home", e.home)
+	e.mustRun("runs", "consumer", "start")
+	out := e.mustRun("runs", "consumer", "status")
 	if records := decodeOutputRecords(t, []byte(out)); len(records) != 1 || records[0]["service"] != "consumer" || records[0]["state"] != "running" {
 		t.Fatalf("status did not report a running consumer:\n%s", out)
 	}
 
-	out = e.mustRun("runs", "consumer", "stop", "--home", e.home)
+	out = e.mustRun("runs", "consumer", "stop")
 	if !strings.Contains(out, "stopped") {
 		t.Fatalf("stop did not report stopping:\n%s", out)
 	}
@@ -671,7 +671,7 @@ func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T)
 		}
 	}
 
-	out := e.mustRun("runs", "cancel", "--run", "run-target", "--home", e.home)
+	out := e.mustRun("runs", "cancel", "--run", "run-target")
 	if !strings.Contains(out, "cancelled before dispatch") {
 		t.Fatalf("cancel did not report cancelling a queued run:\n%s", out)
 	}
@@ -959,7 +959,7 @@ func TestRunDetached_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 		t.Fatalf("first submission is pipeline %q", first.Pipeline)
 	}
 
-	out, errOut, rerr := e.runStdout("run", "beta", "--sw-detached", "--sw-cd", other,
+	out, errOut, rerr := e.runStdout("-C", other, "run", "beta", "--sw-detached",
 		"--sw-output", "json", "--sw-idempotency-key", "shared-key")
 	if rerr != nil {
 		t.Fatalf("submitting beta failed: %v\nstdout:\n%s\nstderr:\n%s", rerr, out, errOut)
@@ -1092,7 +1092,7 @@ func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	})
 	waitForFixtureHold(t, holdStarted)
 
-	e.mustRun("runs", "consumer", "stop", "--home", e.home)
+	e.mustRun("runs", "consumer", "stop")
 
 	st := e.store()
 	waitUntil(t, "the interrupted run's trigger to leave the claimed state", 30*time.Second, func() bool {
@@ -1150,7 +1150,7 @@ func TestRun_RefusesADetachedOnlyFlagWithoutDetached(t *testing.T) {
 		"--sw-idempotency-key", "--sw-request-id",
 		"--sw-consumer-idle", "--sw-consumer-claim-lease", "--sw-output",
 	} {
-		out, err := e.run("run", "fixture", "--sw-cd", e.repoDir, flag, "value")
+		out, err := e.run("-C", e.repoDir, "run", "fixture", flag, "value")
 		if err == nil {
 			t.Errorf("%s was accepted without --sw-detached:\n%s", flag, out)
 			continue

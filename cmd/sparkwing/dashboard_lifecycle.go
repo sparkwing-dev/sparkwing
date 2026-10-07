@@ -29,7 +29,6 @@ func dashboardFlags(command Command, args []string, start bool) (dashboardOption
 	o := dashboardOptions{Addr: "127.0.0.1:4343"}
 	fs := flag.NewFlagSet(command.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	fs.StringVar(&o.Home, "home", "", "state directory")
 	if start {
 		fs.StringVar(&o.Addr, "addr", o.Addr, "bind address")
 		fs.StringVar(&o.LogStore, "log-store", "", "log backend URL")

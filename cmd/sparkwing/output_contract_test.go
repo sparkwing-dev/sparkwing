@@ -177,7 +177,7 @@ func TestRootOutputNeverReachesThePipeline(t *testing.T) {
 		{"-o", "json", "run", "pipeline"},
 		{"--output=json", "pipeline", "run", "pipeline"},
 	} {
-		arguments, err := moveRootOutput(verb)
+		arguments, err := moveRootFlags(verb)
 		if err == nil {
 			t.Fatalf("%q: root output survived as %q; want a refusal", verb, arguments)
 		}
@@ -188,7 +188,7 @@ func TestRootOutputNeverReachesThePipeline(t *testing.T) {
 }
 
 func TestRootOutputStillReachesRunHelp(t *testing.T) {
-	arguments, err := moveRootOutput([]string{"-o", "json", "run", "--help"})
+	arguments, err := moveRootFlags([]string{"-o", "json", "run", "--help"})
 	if err != nil {
 		t.Fatalf("help: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestRootOutputStillReachesRunHelp(t *testing.T) {
 }
 
 func TestRootOutputStillMovesForOtherVerbs(t *testing.T) {
-	arguments, err := moveRootOutput([]string{"-o", "json", "runs", "list"})
+	arguments, err := moveRootFlags([]string{"-o", "json", "runs", "list"})
 	if err != nil {
 		t.Fatalf("runs list: %v", err)
 	}

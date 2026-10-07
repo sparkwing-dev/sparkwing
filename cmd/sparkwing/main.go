@@ -143,22 +143,15 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	projectStart := flags.changeDir
-	if projectStart == "" {
-		if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
-			projectStart = cwd
-		}
+	projectStart := ""
+	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
+		projectStart = cwd
 	}
 	if err := projectconfig.CheckLegacy(projectStart); err != nil {
 		return err
 	}
 
-	var dir string
-	if flags.changeDir != "" {
-		dir, err = findSparkwingDirFrom(flags.changeDir)
-	} else {
-		dir, err = findSparkwingDir()
-	}
+	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
 	}
@@ -372,7 +365,7 @@ func removeEnv(env []string, key string) []string {
 }
 
 func runSparkwing(args []string) error {
-	args, err := moveRootOutput(args)
+	args, err := moveRootFlags(args)
 	if err != nil {
 		return err
 	}

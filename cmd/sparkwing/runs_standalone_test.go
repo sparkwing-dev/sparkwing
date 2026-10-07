@@ -70,7 +70,8 @@ func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
 func TestRunsCancel_StandaloneRunRefusesWithoutACommand(t *testing.T) {
 	paths := standaloneHome(t)
 	out := captureStdout(t, func() {
-		err := runRunsCancel(context.Background(), []string{"--run", "run-alone", "--home", paths.Root})
+		t.Setenv("SPARKWING_HOME", paths.Root)
+		err := runRunsCancel(context.Background(), []string{"--run", "run-alone"})
 		if err == nil {
 			t.Fatal("expected cancel to fail for a standalone run")
 		}

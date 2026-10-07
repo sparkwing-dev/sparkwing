@@ -88,8 +88,8 @@ A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 is refused with the reason instead of ignored; run those in
 the foreground.
 
-PIPELINE resolves against the checkout you are standing in (or
---sw-cd PATH) first, then the repo registry, and the chosen
+PIPELINE resolves against the checkout you are standing in (or the
+one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
 GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
@@ -106,7 +106,6 @@ is running and exits after five idle minutes; see
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd PATH` | Run as if started in PATH |
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
 | `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
 | `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
@@ -156,7 +155,7 @@ sparkwing run fictional-build --sw-detached --sw-pipeline-ref main
 sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging
 
 # Detach a pipeline from another checkout
-sparkwing run lint --sw-detached --sw-cd ~/code/other-project
+sparkwing -C ~/code/other-project run lint --sw-detached
 
 # Retry a failed run
 sparkwing runs retry --run run-fictional --failed

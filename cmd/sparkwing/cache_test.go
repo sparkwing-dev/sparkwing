@@ -13,7 +13,12 @@ import (
 
 func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, ".sparkwing")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +27,7 @@ func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCacheExplain([]string{"--dir", dir, "-o", "json"})
+		runErr = runCacheExplain([]string{"-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache explain: %v", runErr)

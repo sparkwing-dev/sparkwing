@@ -24,7 +24,7 @@ func TestConfigureInitNamesAnUngatedCheckout(t *testing.T) {
 	if !strings.Contains(out, "GIT HOOKS") {
 		t.Fatalf("no hook verdict in:\n%s", out)
 	}
-	if !strings.Contains(out, "fix: sparkwing pipeline hooks install --repo /repo") {
+	if !strings.Contains(out, "fix: sparkwing -C /repo pipeline hooks install") {
 		t.Fatalf("no repair command in:\n%s", out)
 	}
 }
@@ -121,7 +121,7 @@ func TestConfigureInitSurveysTheCheckoutItStandsIn(t *testing.T) {
 	if gates.Gated() {
 		t.Fatalf("a checkout with no installed hooks reported as gated: %+v", gates)
 	}
-	if !strings.Contains(gates.Remedy(), "sparkwing pipeline hooks install") {
+	if !strings.Contains(gates.Remedy(), "pipeline hooks install") {
 		t.Fatalf("remedy = %q", gates.Remedy())
 	}
 }

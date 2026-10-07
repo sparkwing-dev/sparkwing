@@ -41,6 +41,16 @@ webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.
 
+Three flags go before any verb:
+  -C DIR          run as if started in DIR (the .sparkwing search starts there)
+  --profile NAME  select a profile; the verb must accept --profile
+  -o FORMAT       pretty | json | plain, for verbs that print a document
+
+Without --profile, verbs that read runs fall back to SPARKWING_PROFILE, then
+the project's defaults.profile. Verbs that change state elsewhere (secrets,
+crons, runs cancel, cluster, and similar) act locally unless --profile names
+the controller.
+
 ### Examples
 
 ```sh
@@ -61,4 +71,7 @@ sparkwing pipeline new --name release
 
 # Start the local dashboard
 sparkwing serve start
+
+# List another checkout's pipelines
+sparkwing -C ~/code/other pipeline list
 ```

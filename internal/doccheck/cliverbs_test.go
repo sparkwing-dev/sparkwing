@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -156,5 +157,15 @@ func TestCheckCLIVerbs_PassesAndSkipsExemptDocs(t *testing.T) {
 	writeDoc(t, content, "cli-cluster.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing also-made-up\n```\n")
 	if !checkCLIVerbs(content, root) {
 		t.Fatal("expected pass: real commands resolve, generated docs are skipped")
+	}
+}
+
+func TestParseInvocation_SkipsRootFlags(t *testing.T) {
+	inv, ok := parseInvocation("x.md", 1, "sparkwing -C ~/repo --profile prod pipeline list --all")
+	if !ok {
+		t.Fatal("not recognized as an invocation")
+	}
+	if got := strings.Join(inv.tokens, " "); got != "pipeline list --all" {
+		t.Errorf("tokens = %q, want the verb path after the root flags", got)
 	}
 }

@@ -33,7 +33,6 @@ func runQueue(args []string) error {
 func runQueueList(cmd Command, args []string) error {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -56,7 +55,7 @@ func runQueueList(cmd Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, Version: Version})
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: "", Version: Version})
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
 			if rerr := renderUnreachableDaemon(os.Stdout, format, err); rerr != nil {

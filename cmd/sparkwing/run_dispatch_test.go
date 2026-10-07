@@ -93,7 +93,8 @@ func TestDispatchFleetMissingConfigNamesSetupCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
+	t.Chdir(repo)
+	err := dispatchRun([]string{"missing", "--sw-fleet"})
 	if err == nil || !strings.Contains(err.Error(), "sparkwing fleet init") {
 		t.Fatalf("missing config error = %v", err)
 	}
@@ -116,7 +117,8 @@ func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
+	t.Chdir(repo)
+	err := dispatchRun([]string{"missing", "--sw-fleet"})
 	if err == nil || !strings.Contains(err.Error(), "no enrolled helpers") {
 		t.Fatalf("empty config error = %v", err)
 	}
@@ -200,8 +202,8 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 		t.Run(unknown, func(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", "")
 			t.Setenv("XDG_CONFIG_HOME", "")
-			missing := filepath.Join(t.TempDir(), "missing")
-			err := dispatchRun([]string{"fictional", "--sw-cd", missing, unknown})
+			t.Chdir(t.TempDir())
+			err := dispatchRun([]string{"fictional", unknown})
 			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unknown runner flag %q", unknown)) {
 				t.Errorf("dispatch error = %v, want unknown runner flag %q", err, unknown)
 			}
@@ -213,9 +215,10 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 }
 
 func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing")
-	err := dispatchRun([]string{"fictional", "--sw-cd", missing, "--", "--sw-profile", "fictional"})
-	if err == nil || !strings.Contains(err.Error(), missing) {
+	empty := t.TempDir()
+	t.Chdir(empty)
+	err := dispatchRun([]string{"fictional", "--", "--sw-profile", "fictional"})
+	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/main.go found from "+empty) {
 		t.Fatalf("dispatch error = %v, want pipeline directory lookup", err)
 	}
 }
@@ -259,7 +262,8 @@ func main() {
 	ensureRunDaemonFn = func() {}
 	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
 	want := []string{"fictional", "--sw-profile", "fictional", "--sw-mystery=value", "--", "literal"}
-	arguments := append([]string{"fictional", "--sw-no-update", "--sw-cd", repository, "--"}, want[1:]...)
+	t.Chdir(repository)
+	arguments := append([]string{"fictional", "--sw-no-update", "--"}, want[1:]...)
 	if err := dispatchRun(arguments); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +329,8 @@ func main() {
 	ensureRunDaemonFn = func() {}
 	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
 
-	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-cd", repository, "--sw-workers", "3"}); err != nil {
+	t.Chdir(repository)
+	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-workers", "3"}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(environmentFile)

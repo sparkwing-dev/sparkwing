@@ -58,14 +58,18 @@ func TestOutputContractTerminal(t *testing.T) {
 			}
 			defer slave.Close()
 			args := append([]string{}, tc.args...)
+			home := ""
 			if strings.HasPrefix(tc.name, "serve-running") {
 				dp, _, _ := dashboardSleepingRecord(t)
-				args = append(args, "--home", dp.home)
+				home = dp.home
 			}
 			if mode != "" {
 				args = append(args, "--output", mode)
 			}
 			cmd := outputContractCommand(t, args...)
+			if home != "" {
+				cmd.Env = setEnv(cmd.Env, "SPARKWING_HOME", home)
+			}
 			cmd.Env = setEnv(cmd.Env, "NO_COLOR", "")
 			cmd.Env = setEnv(cmd.Env, "CLICOLOR_FORCE", "1")
 			cmd.Stdout = slave

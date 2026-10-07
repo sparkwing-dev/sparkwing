@@ -246,7 +246,7 @@ If the repository already sets its own `core.hooksPath` pointing somewhere
 else, install leaves it alone -- that setting was deliberate -- and warns
 without publishing dormant candidate hooks. Clear it with
 `git -C <repo> config --unset core.hooksPath` and re-run
-`sparkwing pipeline hooks install --repo <repo>`.
+`sparkwing -C <repo> pipeline hooks install`.
 
 Claiming `core.hooksPath` is also what would stop a global hook firing if
 nothing in `.git/hooks` hands off to it, so install refuses the claim while
@@ -309,7 +309,7 @@ repository's own override first -- install treats a repository-scoped
 
 ```bash
 git -C <repo> config --unset core.hooksPath
-sparkwing pipeline hooks install --repo <repo>
+sparkwing -C <repo> pipeline hooks install
 ```
 
 `sparkwing doctor` reports the ungated ones too, including on a run that finds

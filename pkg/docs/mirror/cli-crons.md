@@ -139,7 +139,6 @@ runs. Re-running the push is the explicit update, and it moves the pin.
 | Flag | Description |
 |---|---|
 | `--profile NAME` | Profile name; omit for this host |
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Arm every registered repo instead of one |
 | `--only NAMES` | Arm only these pipelines or pipeline/name entries (comma-separated or repeatable) |
 | `--follow` | Arm without pinning, so every fire compiles the checkout |
@@ -153,7 +152,7 @@ runs. Re-running the push is the explicit update, and it moves the pin.
 sparkwing crons install
 
 # Arm a different repo
-sparkwing crons install --repo /path/to/repo
+sparkwing -C /path/to/repo crons install
 
 # Arm two entries only
 sparkwing crons install --only nightly,sweep/quick
@@ -504,7 +503,6 @@ naming the repo by its git origin.
 | Flag | Description |
 |---|---|
 | `--profile NAME` | Profile name; omit for this host |
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Disarm every schedule this home holds |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 

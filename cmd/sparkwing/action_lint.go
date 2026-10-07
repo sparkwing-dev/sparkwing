@@ -17,7 +17,6 @@ type pipelineLintArgs struct {
 	output   string
 	pipeline string
 	dir      string
-	chdir    string
 	all      bool
 	rules    bool
 }
@@ -68,14 +67,6 @@ func parsePipelineLintArgs(args []string) (pipelineLintArgs, bool, error) {
 			parsed.dir = v
 		case strings.HasPrefix(tok, "--dir="):
 			parsed.dir = strings.TrimPrefix(tok, "--dir=")
-		case tok == "-C", tok == "--sw-cd":
-			v, err := valueFor()
-			if err != nil {
-				return parsed, false, err
-			}
-			parsed.chdir = v
-		case strings.HasPrefix(tok, "--sw-cd="):
-			parsed.chdir = strings.TrimPrefix(tok, "--sw-cd=")
 		default:
 			return parsed, false, fmt.Errorf("lint: unknown flag %q (see `sparkwing pipeline lint --help`)", tok)
 		}
@@ -105,10 +96,6 @@ func runPipelineLint(args []string) error {
 	if !parsed.all && parsed.pipeline == "" {
 		parsed.all = true
 	}
-	if err := applyChdir(parsed.chdir); err != nil {
-		return err
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err

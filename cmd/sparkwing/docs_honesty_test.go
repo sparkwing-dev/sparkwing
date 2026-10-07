@@ -193,7 +193,7 @@ func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 func invocationCount(units []string) int {
 	n := 0
 	for _, unit := range units {
-		if docCommand.MatchString(unit) {
+		if docCommand.MatchString(stripRootFlags(unit)) {
 			n++
 		}
 	}
@@ -215,7 +215,7 @@ func undispatched(units []string, dispatch map[string]docDispatch) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, unit := range units {
-		m := docCommand.FindStringSubmatch(unit)
+		m := docCommand.FindStringSubmatch(stripRootFlags(unit))
 		if m == nil {
 			continue
 		}
@@ -359,4 +359,13 @@ func TestHonestyCheckUsesCurrentCommandGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+var rootFlagPrefix = regexp.MustCompile(`^sparkwing((?:\s+(?:-C|--profile|-o|--output)(?:=|\s+)\S+)+)`)
+
+func stripRootFlags(unit string) string {
+	if m := rootFlagPrefix.FindStringSubmatchIndex(unit); m != nil {
+		return "sparkwing" + unit[m[3]:]
+	}
+	return unit
 }

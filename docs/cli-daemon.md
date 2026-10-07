@@ -49,7 +49,6 @@ Reads the size-capped journal in the daemon directory. Lists the newest 50 match
 
 | Flag | Description |
 |---|---|
-| `--home DIR` | Sparkwing home to inspect |
 | `--run ID` | Filter by run ID |
 | `--since DURATION` | Lookback duration |
 | `--kind KIND` | Record kind (repeatable) |
@@ -75,7 +74,6 @@ Explains a run's admission history in sentences, including descendant node slots
 
 | Flag | Description |
 |---|---|
-| `--home DIR` | Sparkwing home to inspect |
 | `--run ID` | Run ID to explain (required) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 
@@ -100,14 +98,13 @@ copy, and never discards readable state.
 
 | Flag | Description |
 |---|---|
-| `--home DIR` | Sparkwing home whose unreadable daemon state should be preserved |
 | `--yes` | Confirm every run described by the unreadable state has stopped (required) |
 
 ### Examples
 
 ```sh
 # Recover only after verifying the described runs stopped
-sparkwing daemon recover-state --home /path/to/home --yes
+SPARKWING_HOME=/path/to/home sparkwing daemon recover-state --yes
 ```
 
 ## `sparkwing daemon restart`
@@ -124,7 +121,6 @@ daemon is running, nothing is started.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--home DIR` | Sparkwing state directory |
 | `--force` | Replace the daemon even when it already serves this build |
 
 ### Examples
@@ -173,7 +169,6 @@ continues serving with artifact routes disabled.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--home DIR` | Sparkwing state directory |
 
 ### Examples
 
@@ -199,7 +194,6 @@ A run still holding admission finishes against the store it already opened.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--home DIR` | Sparkwing home whose daemon should stop |
 
 ### Examples
 

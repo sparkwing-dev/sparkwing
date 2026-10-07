@@ -18,7 +18,6 @@ import (
 
 func runHooksFire(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksFire.Path, flag.ContinueOnError)
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "fire the gate in every registered repo")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdHooksFire, fs, args); err != nil {
@@ -26,9 +25,6 @@ func runHooksFire(args []string) error {
 			return nil
 		}
 		return err
-	}
-	if *fleet && *repo != "" {
-		return errors.New("hooks fire: --fleet fires in every registered repo; drop --repo or drop --fleet")
 	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdHooksFire.Path)
 	if err != nil {
@@ -49,7 +45,7 @@ func runHooksFire(args []string) error {
 			results = append(results, githooks.Fire(runGit, root, declared))
 		}
 	} else {
-		repoRoot, _, err := resolveHooksRepo(*repo)
+		repoRoot, _, err := resolveHooksRepo()
 		if err != nil {
 			return fmt.Errorf("hooks fire: %w", err)
 		}
@@ -122,9 +118,9 @@ func renderHooksFire(w io.Writer, results []githooks.FireResult, format string) 
 func fireRemedy(r githooks.FireResult) string {
 	switch r.Verdict {
 	case githooks.FireBorrowed:
-		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
+		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	case githooks.FireAccepted, githooks.FireUnprovable:
-		return fmt.Sprintf("sparkwing pipeline hooks install --repo %s", r.Repo)
+		return fmt.Sprintf("sparkwing -C %s pipeline hooks install", r.Repo)
 	default:
 		return ""
 	}

@@ -330,9 +330,8 @@ type cacheExplainPrev struct {
 
 func runCacheExplain(args []string) error {
 	fs := flag.NewFlagSet(cmdCacheExplain.Path, flag.ContinueOnError)
-	var output, dir string
+	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	fs.StringVar(&dir, "dir", "", "Pipeline module directory (default: ./.sparkwing)")
 	if err := parseAndCheck(cmdCacheExplain, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -345,9 +344,7 @@ func runCacheExplain(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0))
 	}
-	if dir == "" {
-		dir = defaultSparkwingDir()
-	}
+	dir := defaultSparkwingDir()
 
 	key, parts, err := bincache.ExplainCacheKey(dir)
 	if err != nil {
