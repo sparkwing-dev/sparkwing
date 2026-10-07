@@ -451,9 +451,13 @@ func mirrorEnv(bareRepo string) []string {
 		"HOME=" + os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
 		"GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https",
 	}
-	for _, k := range []string{"PATH", "TMPDIR", "GIT_SSL_CAINFO", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"} {
-		if v, ok := os.LookupEnv(k); ok {
-			env = append(env, k+"="+v)
+	passThrough := map[string]bool{
+		"PATH": true, "TMPDIR": true, "GIT_SSL_CAINFO": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
+		"HTTPS_PROXY": true, "https_proxy": true, "NO_PROXY": true, "no_proxy": true,
+	}
+	for _, kv := range os.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok && passThrough[k] {
+			env = append(env, kv)
 		}
 	}
 	return env
