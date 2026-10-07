@@ -126,7 +126,7 @@ func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 	rec.Event, rec.Msg = m.Mask(rec.Event), m.Mask(rec.Msg)
 	rec.Attrs = m.MaskAttrs(rec.Attrs)
 	if patterns := m.Values(); len(patterns) > 0 && rec.Attrs != nil {
-		rec.Attrs, _ = numbersEqualTo(rec.Attrs, v.matcher(patterns)).(map[string]any)
+		rec.Attrs, _ = maskNumbers(rec.Attrs, v.matcher(patterns), m).(map[string]any)
 	}
 	return rec
 }
@@ -170,22 +170,28 @@ func (nm numberMatcher) matches(n json.Number) bool {
 	return ok && slices.ContainsFunc(nm.numeric, func(p *big.Rat) bool { return p.Cmp(r) == 0 })
 }
 
-func numbersEqualTo(v any, nm numberMatcher) any {
+// safety: a forwarded record's number is also masked as text, as a string
+// is, so a value inside its digits is hidden just as it was before records
+// were decoded with exact numbers.
+func maskNumbers(v any, nm numberMatcher, m *Masker) any {
 	switch t := v.(type) {
 	case json.Number:
 		if nm.matches(t) {
 			return maskedValue
 		}
+		if masked := m.Mask(string(t)); masked != string(t) {
+			return masked
+		}
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, e := range t {
-			out[k] = numbersEqualTo(e, nm)
+			out[k] = maskNumbers(e, nm, m)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, e := range t {
-			out[i] = numbersEqualTo(e, nm)
+			out[i] = maskNumbers(e, nm, m)
 		}
 		return out
 	}

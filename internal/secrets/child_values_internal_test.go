@@ -112,7 +112,7 @@ func TestChildValuesMaskRecordMasksANumberEqualToAValue(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		value, number string
-		masked        bool
+		masked        any
 	}{
 		{"123456", "123456", true},
 		{"123456", "123456.0", true},
@@ -123,11 +123,18 @@ func TestChildValuesMaskRecordMasksANumberEqualToAValue(t *testing.T) {
 		{"1e401", "1e401", true},
 		{"1e999999999", "1e999999999", true},
 		{"1e401", "1E401", false},
+		{"1234", "12345", "***5"},
+		{"1234", "1.2345e4", false},
 	} {
 		got := knownValues(tc.value).MaskRecord(rec(tc.number))
 		want := any(json.Number(tc.number))
-		if tc.masked {
-			want = "***"
+		switch m := tc.masked.(type) {
+		case bool:
+			if m {
+				want = "***"
+			}
+		case string:
+			want = m
 		}
 		if got.Attrs["pin"] != want || got.Attrs["list"].([]any)[0] != want || got.Attrs["n"] != json.Number("7") {
 			t.Errorf("value %q, number %s: attrs = %#v", tc.value, tc.number, got.Attrs)
