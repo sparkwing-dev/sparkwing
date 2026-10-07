@@ -23,7 +23,7 @@ unlock.
 ### Added
 
 - **sdk + runner:** The node protocol between the engine and a pipeline process is a versioned contract, `docs/node-protocol.md`
-  It names the environment a node process reads, every node-facing route with its request and response, the describe and plan documents (`docs/schemas/describe.schema.json`) and the log record (`docs/schemas/log-record.schema.json`), and marks which parts the engine-hosted model still needs. Node requests carry `Sparkwing-Node-Protocol: 1`; the local loopback controller and the execution broker log one warning per listener for a request that names another version or none, and serve it. The broker's allowlist is now one route table, and it refuses paths outside that table that it forwarded before, which no upstream route served.
+  It names the environment a node process reads, every node-facing route with its request and response, the describe and plan documents (`docs/schemas/describe.schema.json`) and the log record (`docs/schemas/log-record.schema.json`), and marks which parts the engine-hosted model still needs. Node requests carry `Sparkwing-Node-Protocol: 1`; the local loopback controller and the execution broker log one warning per listener for a request that names another version or none, and serve it. The broker's allowlist is now one route table, and it refuses paths outside that table that it forwarded before, which no upstream route served. An empty plan's `plan --json` and `--explain` document writes `"nodes": []` rather than `null`.
 
 - **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
   It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.

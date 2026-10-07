@@ -3195,6 +3195,8 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		ClaimWaitMS:    p.ClaimWaitValue().Milliseconds(),
 		Requires:       slices.Clone(meta.PipelineRequires),
 		Secrets:        meta.Secrets,
+		// safety: an empty plan still writes "nodes": [], the shape every SDK and reader expects.
+		Nodes: []snapshotNode{},
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
 		snap.PlanConc = &snapshotConc{

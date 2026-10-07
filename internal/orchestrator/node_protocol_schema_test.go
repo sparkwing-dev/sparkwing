@@ -338,6 +338,21 @@ func TestDescribeAndPlanOutputMatchTheSchema(t *testing.T) {
 		t.Errorf("plan --json output does not match docs/schemas/describe.schema.json: %s", strings.Join(errs, "; "))
 	}
 
+	empty, err := marshalPlanSnapshot(sparkwing.NewPlan(), sparkwing.RunContext{Pipeline: "demo", RunID: "run-2"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emptyDoc map[string]any
+	if err := json.Unmarshal(empty, &emptyDoc); err != nil {
+		t.Fatal(err)
+	}
+	if nodes, ok := emptyDoc["nodes"].([]any); !ok || len(nodes) != 0 {
+		t.Errorf("an empty plan writes nodes as %v, want []", emptyDoc["nodes"])
+	}
+	if errs := s.validate(s.def(t, "plan"), emptyDoc, "plan"); len(errs) > 0 {
+		t.Errorf("an empty plan does not match the schema: %s", strings.Join(errs, "; "))
+	}
+
 	bad := map[string]any{"pipeline": "demo", "run_id": "r", "nodes": []any{map[string]any{"id": "n", "deps": nil, "retries": 2}}}
 	if errs := s.validate(s.def(t, "plan"), bad, "plan"); len(errs) == 0 {
 		t.Error("the plan schema accepted an undeclared node field; additionalProperties is not enforced")
