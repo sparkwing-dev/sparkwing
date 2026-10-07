@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -81,5 +82,47 @@ func TestHostedCheck_RefusesPlanLevelConcurrency(t *testing.T) {
 				t.Fatalf("err = %v, want a refusal", err)
 			}
 		})
+	}
+}
+
+type cancellingRunner struct{ cancel context.CancelFunc }
+
+func (r cancellingRunner) RunNode(context.Context, runner.Request) runner.Result {
+	r.cancel()
+	return runner.Result{Outcome: sparkwing.Cancelled}
+}
+
+func TestHostedFinalize_CancellationFinishesEveryNodeRow(t *testing.T) {
+	st, err := teststore.Open(newInternalPaths(t).StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	const runID = "run-cancel"
+	if err := st.CreateRun(t.Context(), store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	snap := planSnapshot{Nodes: []snapshotNode{{ID: "a"}, {ID: "b", Deps: []string{"a"}}}}
+	if err := hostedAdmit(t.Context(), st, runID, snap); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cfg := hostedRun{Logger: slog.New(slog.DiscardHandler)}
+
+	_, results := hostedSchedule(ctx, st, cancellingRunner{cancel: cancel}, cfg, runID, snap)
+	hostedFinalize(ctx, st, cfg.Logger, runID, snap, results)
+
+	for _, id := range []string{"a", "b"} {
+		row, err := st.GetNode(t.Context(), runID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !runner.NodeTerminal(row) || row.Outcome != string(sparkwing.Cancelled) {
+			t.Errorf("node %s row status=%q outcome=%q, want done/cancelled", id, row.Status, row.Outcome)
+		}
+		if got := results[id].Outcome; got != sparkwing.Cancelled {
+			t.Errorf("node %s result = %q, want cancelled", id, got)
+		}
 	}
 }

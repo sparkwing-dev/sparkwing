@@ -89,6 +89,7 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 		})
 		res.Order, res.Nodes = hostedSchedule(ctx, st, lr, cfg, runID, snap)
 	}
+	hostedFinalize(ctx, st, cfg.Logger, runID, snap, res.Nodes)
 
 	status, msg := "success", ""
 	for id, r := range res.Nodes {
@@ -98,6 +99,9 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 	}
 	if err != nil {
 		status, msg = "failed", err.Error()
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		status, msg = "cancelled", cause.Error()
 	}
 	if ferr := st.FinishRun(context.WithoutCancel(ctx), runID, status, msg); ferr != nil && err == nil {
 		err = ferr
@@ -262,6 +266,11 @@ func hostedSchedule(ctx context.Context, st *store.Store, lr runner.Runner, cfg 
 			if started[n.ID] {
 				continue
 			}
+			if ctx.Err() != nil {
+				started[n.ID], progressed = true, true
+				results[n.ID] = runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+				continue
+			}
 			ready, blocked := true, ""
 			for _, d := range n.Deps {
 				r, finished := results[d]
@@ -311,6 +320,29 @@ func hostedSchedule(ctx context.Context, st *store.Store, lr runner.Runner, cfg 
 			running--
 			results[d.id] = d.res
 		}
+	}
+}
+
+// safety: the local runner leaves a cancelled node's row to dispatcher
+// teardown, and the spike is that dispatcher, so no row outlives the run unfinished.
+func hostedFinalize(ctx context.Context, st *store.Store, logger *slog.Logger, runID string, snap planSnapshot, results map[string]runner.Result) {
+	outcome, reason := sparkwing.Failed, "the node ended without a terminal record"
+	if ctx.Err() != nil {
+		outcome, reason = sparkwing.Cancelled, "ctx-cancelled"
+	}
+	finishCtx := context.WithoutCancel(ctx)
+	for _, n := range snap.Nodes {
+		row, err := st.GetNode(finishCtx, runID, n.ID)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && runner.NodeTerminal(row)) {
+			continue
+		}
+		if err == nil {
+			err = st.FinishNode(finishCtx, runID, n.ID, string(outcome), reason, nil)
+		}
+		if err != nil {
+			logger.Warn("hosted run: finalize node", "node", n.ID, "err", err)
+		}
+		results[n.ID] = runner.Result{Outcome: outcome, Err: errors.New(reason)}
 	}
 }
 
