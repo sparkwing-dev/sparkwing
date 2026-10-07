@@ -261,3 +261,13 @@ func scanNodeBounce(rs rowScanner) (*NodeBounce, error) {
 func isTerminalRunStatus(status string) bool {
 	return status == "success" || status == runStatusFailed || status == runStatusCancelled
 }
+
+// safety: bounce requests were written without their team before v92, so every
+// one carries the default team; the scoped readers and the per-team sequence
+// would miss a non-default team's open requests and reuse their seq.
+func backfillNodeBounceTeams(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx, `UPDATE node_bounces
+   SET team = (SELECT runs.team FROM runs WHERE runs.id = node_bounces.run_id)
+ WHERE EXISTS (SELECT 1 FROM runs WHERE runs.id = node_bounces.run_id AND runs.team <> node_bounces.team)`)
+	return err
+}

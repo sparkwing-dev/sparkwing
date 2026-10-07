@@ -128,3 +128,13 @@ together.
 **Why:** a deploy role that trusts `ref:refs/heads/main` relies on branch
 protection deciding what runs on `main`; a shared cache let a branch's run put
 code into a later `main` run.
+
+## Node bounce requests move to their run's team
+
+- **Before:** a bounce request was recorded without its team, so every row
+  carried the default team whatever team its run belonged to.
+- **After:** schema 92 moves each existing request into the team of the run it
+  names, and new requests record their run's team. A team's open requests stay
+  visible to its runners, and its next request continues the node's sequence.
+- **Upgrade:** nothing to do; the controller applies schema 92 on start. An
+  older binary keeps reading the upgraded database.

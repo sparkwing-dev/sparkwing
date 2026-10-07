@@ -51,6 +51,7 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+- **Node bounces:** Schema 92 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
 - **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
 - **Child runs:** A controller-dispatched node's child run checks its ancestry in the claim's team, and the run profile fold reads node samples in the run's team, rather than in the default team.
 - **Dashboard build:** Update `sharp` to 0.35.5 so `pnpm audit` passes GHSA-wq5f-xc86-pv6w; the static dashboard export never runs it at serve time.
