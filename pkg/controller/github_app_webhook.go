@@ -982,9 +982,6 @@ func (s *Server) startGitHubAppRun(
 	ctx := r.Context()
 	pipeline, in := plan.pipeline, plan.intake
 	replayKey := githubAppReplayKey(tenant.Team(), pipeline, body)
-	if existing, err := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); err == nil && existing != nil {
-		return githubAppRun{Pipeline: pipeline, RunID: existing.ID, Status: "duplicate"}, nil
-	}
 	runID := newRunID()
 	triggerEnv := map[string]string{"GITHUB_DELIVERY": delivery}
 	for k, v := range in.env {
