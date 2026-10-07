@@ -21,7 +21,7 @@ import (
 func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
-		if err := f.st.FinishNode(ctx, f.runA, "n1", "success", "", nil); err != nil {
+		if err := f.teamA.FinishNodeWithOutputRef(ctx, f.runA, "n1", "success", "", nil, store.FailureUnknown, nil); err != nil {
 			t.Fatal(err)
 		}
 		claimSeq := f.claimRun(f.runnerB, "run-by-b", "")

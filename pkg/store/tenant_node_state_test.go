@@ -379,3 +379,29 @@ func TestTenantExecutionAttemptsStayInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.FinishNodeExecutionAttempt: %v", err)
 	}
 }
+
+// The store-level finish acts on the default team, so a node of another
+// team is refused before its output is stored, and stays as it was.
+func TestStoreFinishRefusesAnotherTeamsNode(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	err := st.FinishNodeWithReason(ctx, "run-a", "build", "success", "", []byte(`{"ok":true}`), store.FailureUnknown, nil)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("FinishNodeWithReason on acme's node = %v, want ErrNotFound", err)
+	}
+	n, err := acme.GetNode(ctx, "run-a", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Status != "running" || n.OutputRef != nil {
+		t.Fatalf("acme's node = status %q output %+v; want it running with no output", n.Status, n.OutputRef)
+	}
+	if err := acme.FinishNodeWithOutputRef(ctx, "run-a", "missing", "success", "", nil, store.FailureUnknown, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("finishing a missing node = %v, want ErrNotFound", err)
+	}
+}

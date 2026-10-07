@@ -4944,6 +4944,12 @@ func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 // bytes are written to the store's own output directory, so only a store
 // with one ([Store.OutputDir]) accepts them.
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	// safety: the output is written into the node's own team and the finish
+	// below is the default team's, so a node of another team is refused before
+	// its bytes are stored and charged.
+	if _, err := s.defaultTenant().GetNode(ctx, runID, nodeID); err != nil {
+		return err
+	}
 	ref, err := s.writeLocalOutput(ctx, runID, nodeID, output)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrOutputNotStored, err)
@@ -4984,7 +4990,7 @@ func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg 
 	var generation, consumed int64
 	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return notFound("node", runID+"/"+nodeID)
 	}
 	if err != nil {
 		return err
