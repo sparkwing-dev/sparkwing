@@ -220,8 +220,8 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 	}
 }
 
-func TestRunRunnerCLI_RefusesAMalformedJobCeiling(t *testing.T) {
-	for _, flag := range []string{"--cpu-ceiling=eight", "--memory-ceiling=lots"} {
+func TestRunRunnerCLI_RefusesAJobBoundEveryClaimWouldReject(t *testing.T) {
+	for _, flag := range []string{"--cpu-ceiling=eight", "--memory-ceiling=lots", "--deadline=30s"} {
 		err := runRunnerCLI([]string{"--controller=http://controller", "--metrics-addr=", flag}, "")
 		name := strings.SplitN(flag, "=", 2)[0]
 		if err == nil || !strings.Contains(err.Error(), name) {

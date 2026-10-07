@@ -516,6 +516,11 @@ func runRunnerCLI(args []string, version string) error {
 	if *deadline < 0 {
 		return errors.New("--deadline must not be negative; pass 0 for the 6h default")
 	}
+	if *deadline > 0 {
+		if _, err := k8srunner.ParseJobDeadline(deadline.String()); err != nil {
+			return fmt.Errorf("--deadline: %w", err)
+		}
+	}
 	if _, err := k8srunner.ParseCPUCeiling(*cpuCeiling); err != nil {
 		return fmt.Errorf("--cpu-ceiling: %w", err)
 	}
