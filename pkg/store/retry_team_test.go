@@ -91,7 +91,7 @@ func TestManualRetryPreservesOnlyItsTeamsGithubRepositoryID(t *testing.T) {
 			if _, err := runretry.Create(ctx, st, acme, source.ID, "retry", false, now); err != nil {
 				t.Fatal(err)
 			}
-			trig, err := st.GetTrigger(ctx, "retry")
+			trig, err := acme.GetTrigger(ctx, "retry")
 			if err != nil {
 				t.Fatal(err)
 			}

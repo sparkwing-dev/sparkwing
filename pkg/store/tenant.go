@@ -187,12 +187,13 @@ func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, 
 	return o.s.countRuns(ctx, allTeams(), f)
 }
 
-// RunTeam reports which team owns runID, for a sweep that found the id
-// across teams and has to act on it through that team's handle.
-// [ErrNotFound] when no run carries the id.
+// RunTeam reports which team owns runID, a run or the trigger that becomes
+// it, for a sweep that found the id across teams and has to act on it
+// through that team's handle. [ErrNotFound] when neither carries the id.
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
 	var team string
-	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
+	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?
+UNION ALL SELECT team FROM triggers WHERE id = ? LIMIT 1`, runID, runID).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", notFound("run", runID)
 	}

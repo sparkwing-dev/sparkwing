@@ -152,7 +152,7 @@ func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus stri
 		return
 	}
 	if s.githubApp != nil {
-		trigger, err := s.store.GetTrigger(ctx, runID)
+		trigger, err := s.triggerAcrossTeams(ctx, runID)
 		if err == nil && trigger.TriggerEnv[envGitHubAppInstallation] != "" {
 			if update, ok := s.githubAppCheckUpdate(ctx, trigger, runStatus); ok {
 				s.githubApp.checks.enqueue(s.logger, update)
@@ -185,7 +185,7 @@ func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string
 	if reporter == nil {
 		return nil, githubCommitStatus{}, false
 	}
-	trigger, err := s.store.GetTrigger(ctx, runID)
+	trigger, err := s.triggerAcrossTeams(ctx, runID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, githubCommitStatus{}, false
 	}

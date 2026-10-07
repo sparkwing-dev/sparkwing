@@ -38,7 +38,7 @@ func Create(ctx context.Context, st *store.Store, team *store.Tenant, sourceID, 
 		}
 		env[retryprovenance.PipelineRevisionKey] = revision
 	}
-	trigger, err := st.GetTrigger(ctx, sourceID)
+	trigger, err := team.GetTrigger(ctx, sourceID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Created{}, err
 	}

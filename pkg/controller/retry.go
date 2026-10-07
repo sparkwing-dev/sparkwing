@@ -47,7 +47,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(source.TriggerSource, "pipeline-working-tree@") {
-		trigger, triggerErr := s.store.GetTrigger(r.Context(), srcID)
+		trigger, triggerErr := tenant.GetTrigger(r.Context(), srcID)
 		if triggerErr != nil && !errors.Is(triggerErr, store.ErrNotFound) {
 			s.writeInternalError(w, r, "read retry source trigger", triggerErr)
 			return

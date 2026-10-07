@@ -127,7 +127,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "oidc token: read run", err)
 		return
 	}
-	trig, err := s.store.GetTrigger(r.Context(), runID)
+	trig, err := tn.GetTrigger(r.Context(), runID)
 	if errors.Is(err, store.ErrNotFound) {
 		trig = nil
 	} else if err != nil {

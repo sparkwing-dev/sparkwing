@@ -115,13 +115,13 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.HasScope(ScopeAdmin) {
 		return true
 	}
-	trigger, err := s.store.GetTrigger(r.Context(), runID)
-	if err != nil || trigger == nil {
+	tenant, err := s.tenantFor(r)
+	if err != nil {
 		http.Error(w, "resolve claimed run source", http.StatusForbidden)
 		return false
 	}
-	tenant, err := s.tenantFor(r)
-	if err != nil {
+	trigger, err := tenant.GetTrigger(r.Context(), runID)
+	if err != nil || trigger == nil {
 		http.Error(w, "resolve claimed run source", http.StatusForbidden)
 		return false
 	}

@@ -232,3 +232,63 @@ func TestTenantRunControlStaysInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.GetRun after delete = %v, want ErrNotFound", err)
 	}
 }
+
+// A trigger belongs to its team: another team's handle reads it as missing,
+// cannot finish, beat, release or requeue its claim, and finds none of its
+// children.
+func TestTenantTriggersStayInTheirTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	now := time.Now()
+	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "trig-a", Pipeline: "deploy", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := acme.CreateTrigger(ctx, store.Trigger{
+		ID: "child-a", Pipeline: "sub", ParentRunID: "trig-a", ParentNodeID: "build", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := globex.GetTrigger(ctx, "trig-a"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.GetTrigger = %v, want ErrNotFound", err)
+	}
+	if _, err := globex.TriggerClaimant(ctx, "trig-a"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.TriggerClaimant = %v, want ErrNotFound", err)
+	}
+	if _, err := globex.TriggerClaimGeneration(ctx, "trig-a"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.TriggerClaimGeneration = %v, want ErrNotFound", err)
+	}
+	if _, err := globex.HeartbeatTrigger(ctx, "trig-a", time.Minute); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.HeartbeatTrigger = %v, want ErrNotFound", err)
+	}
+	if err := globex.FinishTrigger(ctx, "trig-a"); err != nil {
+		t.Fatalf("globex.FinishTrigger: %v", err)
+	}
+	for name, end := range map[string]func() (bool, error){
+		"FinishTriggerAtGeneration": func() (bool, error) { return globex.FinishTriggerAtGeneration(ctx, "trig-a", 0) },
+		"ReleaseClaimAtGeneration":  func() (bool, error) { return globex.ReleaseClaimAtGeneration(ctx, "trig-a", 0) },
+		"RequeueUnstartedClaim":     func() (bool, error) { return globex.RequeueUnstartedClaim(ctx, "trig-a") },
+	} {
+		if ended, err := end(); err != nil || ended {
+			t.Errorf("globex.%s = %v, %v, want nothing ended", name, ended, err)
+		}
+	}
+	if id, err := globex.FindSpawnedChildTriggerID(ctx, "trig-a", "build", "sub"); err != nil || id != "" {
+		t.Fatalf("globex.FindSpawnedChildTriggerID = %q, %v, want none", id, err)
+	}
+	if kids, err := globex.ListSpawnedChildrenByRun(ctx, "trig-a"); err != nil || len(kids) != 0 {
+		t.Fatalf("globex.ListSpawnedChildrenByRun = %v, %v, want none", kids, err)
+	}
+	if ids, err := globex.ListPendingTriggersForParent(ctx, "trig-a"); err != nil || len(ids) != 0 {
+		t.Fatalf("globex.ListPendingTriggersForParent = %v, %v, want none", ids, err)
+	}
+	trig, err := acme.GetTrigger(ctx, "trig-a")
+	if err != nil || trig.Status != "pending" {
+		t.Fatalf("acme.GetTrigger = %+v, %v, want the pending trigger", trig, err)
+	}
+	if id, err := acme.FindSpawnedChildTriggerID(ctx, "trig-a", "build", "sub"); err != nil || id != "child-a" {
+		t.Fatalf("acme.FindSpawnedChildTriggerID = %q, %v, want child-a", id, err)
+	}
+}

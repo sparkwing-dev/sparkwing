@@ -137,7 +137,11 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 // the trigger rather than taken from the body, which keeps the two rows agreeing
 // on one story. Nothing is granted on either value.
 func (s *Server) bindRunRepoToTrigger(w http.ResponseWriter, r *http.Request, run *store.Run) bool {
-	trig, err := s.store.GetTrigger(r.Context(), run.ID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return false
+	}
+	trig, err := tenant.GetTrigger(r.Context(), run.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err)
 		return false
@@ -450,7 +454,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		}
 		steps, _ := tenant.ListNodeSteps(r.Context(), runID)
 		approvals, _ := tenant.ListApprovalsForRun(r.Context(), runID)
-		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
+		spawned, _ := tenant.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
 		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run, s.secretValuesAllowed), "nodes": decorated})
 		return
@@ -1200,7 +1204,11 @@ func (s *Server) claimedTrigger(next http.Handler) http.Handler {
 			return
 		}
 		id := r.PathValue("id")
-		holder, err := s.store.TriggerClaimant(r.Context(), id)
+		tenant, ok := s.requestTenant(w, r)
+		if !ok {
+			return
+		}
+		holder, err := tenant.TriggerClaimant(r.Context(), id)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -1229,8 +1237,12 @@ func (s *Server) claimedTrigger(next http.Handler) http.Handler {
 }
 
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
-	cancelled, err := s.store.HeartbeatTrigger(r.Context(), id, 0)
+	cancelled, err := tenant.HeartbeatTrigger(r.Context(), id, 0)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1251,7 +1263,7 @@ func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if err := s.store.FinishTrigger(r.Context(), id); err != nil {
+	if err := tenant.FinishTrigger(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)
 			return
@@ -1259,7 +1271,7 @@ func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if trig, err := s.store.GetTrigger(r.Context(), id); err == nil && trig.Status == "failed" {
+	if trig, err := tenant.GetTrigger(r.Context(), id); err == nil && trig.Status == "failed" {
 		if run, err := tenant.GetRun(r.Context(), id); err == nil {
 			s.logger.Warn("trigger failed", "trigger_id", id, "pipeline", trig.Pipeline, "err", run.Error)
 		}
@@ -1325,7 +1337,7 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusOK, map[string]string{"run_id": ""})
 		return
 	}
-	id, err := s.store.FindSpawnedChildTriggerID(r.Context(), parentRunID, parentNodeID, pipeline)
+	id, err := tenant.FindSpawnedChildTriggerID(r.Context(), parentRunID, parentNodeID, pipeline)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1334,12 +1346,16 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleListPendingTriggersForParent(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	parent := r.PathValue("id")
 	if parent == "" {
 		writeError(w, http.StatusBadRequest, errors.New("parent run id is required"))
 		return
 	}
-	ids, err := s.store.ListPendingTriggersForParent(r.Context(), parent)
+	ids, err := tenant.ListPendingTriggersForParent(r.Context(), parent)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1388,8 +1404,12 @@ func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
-	tr, err := s.store.GetTrigger(r.Context(), id)
+	tr, err := tenant.GetTrigger(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)

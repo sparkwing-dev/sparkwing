@@ -85,7 +85,11 @@ func (s *Server) handleEnqueueChildRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	parent, err := s.store.GetTrigger(r.Context(), tok.RunID)
+	var parent *store.Trigger
+	tenant, err := s.tenantForTeam(r.Context(), tok.Team)
+	if err == nil {
+		parent, err = tenant.GetTrigger(r.Context(), tok.RunID)
+	}
 	if err != nil || store.NormalizeTeam(parent.Team) != tok.Team {
 		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
 		return

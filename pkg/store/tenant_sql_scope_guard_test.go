@@ -298,7 +298,6 @@ var unportedSQL = []string{
 	"(*Store).CountActiveRunners",
 	"(*Store).CountNodesByQueueState",
 	"(*Store).CountPendingNodes",
-	"(*Store).CountPendingTriggers",
 	"(*Store).CountUsers",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
@@ -307,32 +306,21 @@ var unportedSQL = []string{
 	"(*Store).CreditLedgerTotals",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
-	"(*Store).FindSpawnedChildTriggerID",
-	"(*Store).FindTriggerByIdempotencyKey",
-	"(*Store).FindTriggerByWebhookReplay",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).finishNode",
-	"(*Store).FinishTrigger",
-	"(*Store).FinishTriggerAtGeneration",
-	"(*Store).GetTrigger",
-	"(*Store).HeartbeatTrigger",
 	"(*Store).ListCreditCharges",
 	"(*Store).ListCreditGrants",
 	"(*Store).ListEgressUsage",
 	"(*Store).ListLegacyAgentClaims",
 	"(*Store).ListNodeBounces",
 	"(*Store).ListNodeMetricsPage",
-	"(*Store).ListPendingTriggersForParent",
-	"(*Store).ListSpawnedChildrenByRun",
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
 	"(*Store).NodeSettlement",
 	"(*Store).PendingNodeBounce",
 	"(*Store).RecordEgressUsage",
-	"(*Store).ReleaseClaimAtGeneration",
 	"(*Store).RequestNodeBounce",
-	"(*Store).RequeueUnstartedClaim",
 	"(*Store).ResetNodeForAutoRetry",
 	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
@@ -344,8 +332,6 @@ var unportedSQL = []string{
 	"(*Store).StorageUsageFor",
 	"(*Store).TokenMetered",
 	"(*Store).TopStorageTeams",
-	"(*Store).TriggerClaimGeneration",
-	"(*Store).TriggerClaimant",
 	"(*Store).VerifyUser",
 	"(*Store).acknowledgeTriggerExecutionStart",
 	"(*Store).cancelMeteredNode",
@@ -377,7 +363,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 85
+const unportedSQLSize = 71
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

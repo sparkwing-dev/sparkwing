@@ -200,3 +200,17 @@ func (s *Server) runTeam(r *http.Request) (store.Team, error) {
 	}
 	return t.Team(), nil
 }
+
+// safety: a sweep or a status report names a run id with no request behind it,
+// so the trigger is read through the team that owns the id rather than any team.
+func (s *Server) triggerAcrossTeams(ctx context.Context, id string) (*store.Trigger, error) {
+	team, err := s.store.AsOperator().RunTeam(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := s.tenantForTeam(ctx, team)
+	if err != nil {
+		return nil, err
+	}
+	return tenant.GetTrigger(ctx, id)
+}

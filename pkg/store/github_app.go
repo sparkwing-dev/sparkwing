@@ -641,7 +641,7 @@ func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha 
 	}
 	out := make([]*Trigger, 0, len(ids))
 	for _, id := range ids {
-		trig, err := t.s.GetTrigger(ctx, id)
+		trig, err := t.GetTrigger(ctx, id)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}

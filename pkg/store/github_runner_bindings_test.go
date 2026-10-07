@@ -227,7 +227,7 @@ func TestGitHubRunnerScopeLeavesATriggerNamingAnotherRepositoryInItsEnv(t *testi
 	if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("claim = %+v, %v; want nothing", tr, err)
 	}
-	got, err := st.GetTrigger(context.Background(), "run-forged-env")
+	got, err := acme.GetTrigger(context.Background(), "run-forged-env")
 	if err != nil || got.Status != "pending" {
 		t.Fatalf("trigger = %+v, %v; want it left pending", got, err)
 	}

@@ -126,7 +126,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if code := f.call("POST", "/api/v1/runs/run-parent/children", work, map[string]any{"ordinal": 0, "pipeline": "deploy"}, &out); code != http.StatusAccepted || out.RunID != childID {
 		t.Fatalf("retried enqueue = %d %s, want %s", code, out.RunID, childID)
 	}
-	child, err := f.store.GetTrigger(context.Background(), childID)
+	child, err := f.teamOf(olga).GetTrigger(context.Background(), childID)
 	if err != nil || child.GitSHA != headSHA || child.ParentRunID != "run-parent" || child.ParentNodeID != "a" {
 		t.Fatalf("child trigger = %+v %v", child, err)
 	}
@@ -744,4 +744,17 @@ func (f *appFixture) teamOf(u signedIn) *store.Tenant {
 		f.t.Fatal(err)
 	}
 	return tn
+}
+
+func (f *appFixture) trigger(id string) (*store.Trigger, error) {
+	f.t.Helper()
+	team, err := f.store.AsOperator().RunTeam(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	tn, err := f.store.ForTeam(context.Background(), team)
+	if err != nil {
+		return nil, err
+	}
+	return tn.GetTrigger(context.Background(), id)
 }

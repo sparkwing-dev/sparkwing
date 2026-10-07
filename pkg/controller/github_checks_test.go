@@ -385,7 +385,7 @@ func TestGitHubAppCheckRunRerequestedRerunsItsPipeline(t *testing.T) {
 	if code != http.StatusAccepted || len(ids) != 1 {
 		t.Fatalf("rerequested = %d %v, want one run", code, out)
 	}
-	trig, err := f.store.GetTrigger(context.Background(), ids[0])
+	trig, err := f.trigger(ids[0])
 	if err != nil {
 		t.Fatal(err)
 	}

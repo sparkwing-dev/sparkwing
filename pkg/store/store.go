@@ -6632,10 +6632,15 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 // with the zero identity -- nobody holds it -- and a trigger that does
 // not exist comes back ErrNotFound.
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
+	return s.defaultTenant().TriggerClaimant(ctx, triggerID)
+}
+
+// TriggerClaimant is [Store.TriggerClaimant] confined to t's team.
+func (t *Tenant) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
 	var claimant ClaimIdentity
-	err := s.queryRow(ctx,
-		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`,
-		triggerID).Scan(&claimant.Principal, &claimant.TokenPrefix)
+	err := t.s.queryRow(ctx,
+		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE team = ? AND id = ?`,
+		string(t.team), triggerID).Scan(&claimant.Principal, &claimant.TokenPrefix)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimIdentity{}, ErrNotFound
 	}
@@ -7443,20 +7448,7 @@ func isUniqueViolation(err error) bool {
 // submission of one pipeline with another pipeline's run would mean the
 // requested pipeline never runs at all.
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error) {
-	if key == "" || pipeline == "" {
-		return nil, notFound("trigger for idempotency key", key)
-	}
-	var id string
-	err := s.queryRow(ctx,
-		`SELECT id FROM triggers WHERE pipeline = ? AND idempotency_key = ?`,
-		pipeline, key).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("trigger for idempotency key", key)
-		}
-		return nil, err
-	}
-	return s.GetTrigger(ctx, id)
+	return s.defaultTenant().FindTriggerByIdempotencyKey(ctx, pipeline, key)
 }
 
 // FindTriggerByWebhookReplay returns the trigger a refused webhook
@@ -7467,23 +7459,7 @@ func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key s
 // delivery produced rather than a bare refusal; a redelivery from the
 // provider is then answered with that run's id instead of a dead end.
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
-	if replayKey == "" && delivery == "" {
-		return nil, notFound("trigger for webhook delivery", delivery)
-	}
-	var id string
-	err := s.queryRow(ctx,
-		`SELECT id FROM triggers
-		  WHERE (webhook_replay_key != '' AND webhook_replay_key = ?)
-		     OR (webhook_delivery != '' AND webhook_delivery = ?)
-		  ORDER BY created_at LIMIT 1`,
-		replayKey, delivery).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("trigger for webhook delivery", delivery)
-		}
-		return nil, err
-	}
-	return s.GetTrigger(ctx, id)
+	return s.defaultTenant().FindTriggerByWebhookReplay(ctx, replayKey, delivery)
 }
 
 // FinishTriggerAtGeneration closes a trigger only while seq is still
@@ -7496,21 +7472,31 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 // caller that sees false knows its work was superseded and that the
 // current claim owns the outcome.
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return s.endTriggerClaim(ctx, id, false,
+	return s.defaultTenant().FinishTriggerAtGeneration(ctx, id, seq)
+}
+
+// FinishTriggerAtGeneration is [Store.FinishTriggerAtGeneration] confined to t's team.
+func (t *Tenant) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	return t.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers SET status = CASE WHEN EXISTS
-		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+		   (SELECT 1 FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id AND runs.status = 'failed')
 		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
-		  WHERE id = ? AND claim_seq = ?`, id, seq)
+		  WHERE team = ? AND id = ? AND claim_seq = ?`, string(t.team), id, seq)
 }
 
 // safety: a refused write rolls the settlement back with it, so a superseded caller cannot settle a
 // claim it no longer holds.
-func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
-	tx, err := s.beginTx(ctx)
+// safety: a trigger of another team reads as missing before its credits are
+// settled, so ending a foreign claim settles nothing and changes nothing.
+func (t *Tenant) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if owned, err := rowPresentTx(ctx, tx, `SELECT 1 FROM triggers WHERE team = ? AND id = ?`, string(t.team), id); err != nil || !owned {
+		return false, err
+	}
 	if err := settleTriggerCreditsTx(ctx, tx, id, time.Now(), refundAll); err != nil {
 		return false, err
 	}
@@ -7533,7 +7519,15 @@ func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, 
 // not. A re-dispatch inherits the previous attempt's terminal run row, so a run
 // that ended before this claim began says nothing about the dispatch holding it.
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
-	return s.endTriggerClaim(ctx, id, false,
+	var team string
+	err := s.queryRow(ctx, `SELECT team FROM triggers WHERE id = ?`, id).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return (&Tenant{s: s, team: Team(team)}).endTriggerClaim(ctx, id, false,
 		`UPDATE triggers SET status = CASE WHEN EXISTS
 		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
 		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
@@ -7641,13 +7635,18 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // no row at all reads as not started, which is also what an unclaimed
 // trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	return s.endTriggerClaim(ctx, id, true,
+	return s.defaultTenant().RequeueUnstartedClaim(ctx, id)
+}
+
+// RequeueUnstartedClaim is [Store.RequeueUnstartedClaim] confined to t's team.
+func (t *Tenant) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
+	return t.endTriggerClaim(ctx, id, true,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
-		  WHERE id = ? AND status = ?
-		    AND COALESCE((SELECT status FROM runs WHERE runs.id = triggers.id), ?) = ?`,
-		triggerStatusPending, id, triggerStatusClaimed, runStatusPending, runStatusPending)
+		  WHERE team = ? AND id = ? AND status = ?
+		    AND COALESCE((SELECT status FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), ?) = ?`,
+		triggerStatusPending, string(t.team), id, triggerStatusClaimed, runStatusPending, runStatusPending)
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending
@@ -7658,21 +7657,31 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 // a lease. The generation guard keeps a shutting-down consumer from
 // yanking a claim another consumer has already taken.
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return s.endTriggerClaim(ctx, id, false,
+	return s.defaultTenant().ReleaseClaimAtGeneration(ctx, id, seq)
+}
+
+// ReleaseClaimAtGeneration is [Store.ReleaseClaimAtGeneration] confined to t's team.
+func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	return t.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
-		  WHERE id = ? AND claim_seq = ? AND status = ?`,
-		triggerStatusPending, id, seq, triggerStatusClaimed)
+		  WHERE team = ? AND id = ? AND claim_seq = ? AND status = ?`,
+		triggerStatusPending, string(t.team), id, seq, triggerStatusClaimed)
 }
 
 // TriggerClaimGeneration returns a trigger's current claim generation,
 // so a dispatch can tell whether it still owns the claim it started
 // under before it writes anything terminal.
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
+	return s.defaultTenant().TriggerClaimGeneration(ctx, id)
+}
+
+// TriggerClaimGeneration is [Store.TriggerClaimGeneration] confined to t's team.
+func (t *Tenant) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
 	var seq int64
-	if err := s.queryRow(ctx,
-		`SELECT claim_seq FROM triggers WHERE id = ?`, id).Scan(&seq); err != nil {
+	if err := t.s.queryRow(ctx,
+		`SELECT claim_seq FROM triggers WHERE team = ? AND id = ?`, string(t.team), id).Scan(&seq); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -7771,11 +7780,16 @@ type SpawnedChild struct {
 // + pipeline so the caller can attribute the spawn back to its node.
 // Ordered by parent_node_id, created_at so callers can stream-bucket.
 func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListSpawnedChildrenByRun(ctx, runID)
+}
+
+// ListSpawnedChildrenByRun is [Store.ListSpawnedChildrenByRun] confined to t's team.
+func (t *Tenant) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
+	rows, err := t.s.query(ctx, `
 SELECT parent_node_id, pipeline, id
 FROM triggers
-WHERE parent_run_id = ? AND parent_node_id != ''
-ORDER BY parent_node_id, created_at`, runID)
+WHERE team = ? AND parent_run_id = ? AND parent_node_id != ''
+ORDER BY parent_node_id, created_at`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -8003,23 +8017,28 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 // extending its lease. It returns whether cancel was requested.
 // ErrNotFound when not claimed.
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
+	return s.defaultTenant().HeartbeatTrigger(ctx, id, lease)
+}
+
+// HeartbeatTrigger is [Store.HeartbeatTrigger] confined to t's team.
+func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var team, principal, tokenPrefix string
+	var principal, tokenPrefix string
 	var reservedAt, claimSeq int64
 	var oldLease, cancelNS sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		`SELECT team, credit_reserved_at, lease_expires_at, cancel_requested_at,
+		`SELECT credit_reserved_at, lease_expires_at, cancel_requested_at,
 		        claim_principal, claim_token_prefix, claim_seq
-		   FROM triggers WHERE id = ? AND status = ?`+tx.forUpdate(),
-		id, triggerStatusClaimed).Scan(&team, &reservedAt, &oldLease, &cancelNS,
+		   FROM triggers WHERE team = ? AND id = ? AND status = ?`+tx.forUpdate(),
+		string(t.team), id, triggerStatusClaimed).Scan(&reservedAt, &oldLease, &cancelNS,
 		&principal, &tokenPrefix, &claimSeq)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, fenced := TriggerClaimFenceFromContext(ctx); fenced {
@@ -8038,7 +8057,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
 		// safety: exhaustion finishes the run under the ledger, so the run
 		// row is locked first, in the order lockTeamRunRowTx names.
-		if err := lockRunRow(ctx, tx, id); err != nil {
+		if _, err := lockTeamRunRowTx(ctx, tx, t.team, id); err != nil {
 			return false, err
 		}
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
@@ -8051,18 +8070,18 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 		return false, ErrLockHeld
 	}
 	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
-		if err := settleTriggerWindowTx(ctx, tx, Team(team), id, reservedAt, now.UnixNano(), false, false); err != nil {
+		if err := settleTriggerWindowTx(ctx, tx, t.team, id, reservedAt, now.UnixNano(), false, false); err != nil {
 			if errors.Is(err, ErrInsufficientCredits) {
 				if _, stopErr := tx.ExecContext(ctx,
 					`UPDATE triggers SET status = ?, lease_expires_at = NULL, credit_reserved_at = 0,
 					        credit_paid_seconds = 0, credit_paid_amount_micro = 0, credit_reservation_id = '',
 					        cancel_requested_at = COALESCE(cancel_requested_at, ?)
 					  WHERE id = ? AND team = ? AND status = ?`,
-					triggerStatusFailed, now.UnixNano(), id, team, triggerStatusClaimed); stopErr != nil {
+					triggerStatusFailed, now.UnixNano(), id, string(t.team), triggerStatusClaimed); stopErr != nil {
 					return false, stopErr
 				}
 				if _, stopErr := tx.ExecContext(ctx, finishRunStmt,
-					runStatusFailed, "trigger credits exhausted", now.UnixNano(), id, team); stopErr != nil {
+					runStatusFailed, "trigger credits exhausted", now.UnixNano(), id, string(t.team)); stopErr != nil {
 					return false, stopErr
 				}
 				if commitErr := tx.Commit(); commitErr != nil {
@@ -8073,8 +8092,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = ?`,
-		now.Add(lease).UnixNano(), id, triggerStatusClaimed); err != nil {
+		`UPDATE triggers SET lease_expires_at = ? WHERE team = ? AND id = ? AND status = ?`,
+		now.Add(lease).UnixNano(), string(t.team), id, triggerStatusClaimed); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -8183,10 +8202,15 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 // FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
+	return s.defaultTenant().FinishTrigger(ctx, id)
+}
+
+// FinishTrigger is [Store.FinishTrigger] confined to t's team.
+func (t *Tenant) FinishTrigger(ctx context.Context, id string) error {
 	query := `UPDATE triggers SET status = CASE WHEN EXISTS
-	   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
-	   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL WHERE id = ?`
-	args := []any{id}
+	   (SELECT 1 FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id AND runs.status = 'failed')
+	   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL WHERE team = ? AND id = ?`
+	args := []any{string(t.team), id}
 	_, fenced := TriggerClaimFenceFromContext(ctx)
 	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
 		query += ` AND claim_principal = ? AND claim_token_prefix = ? AND claim_seq = ?
@@ -8194,7 +8218,7 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 			fence.ClaimGeneration, triggerStatusDone, triggerStatusFailed, triggerStatusClaimed, time.Now().UnixNano())
 	}
-	finished, err := s.endTriggerClaim(ctx, id, false, query, args...)
+	finished, err := t.endTriggerClaim(ctx, id, false, query, args...)
 	if err != nil || !fenced || finished {
 		return err
 	}
@@ -8543,19 +8567,24 @@ UPDATE nodes
 // that started it -- without the filter, two parallel local runs
 // would steal each other's children. Empty list when no candidates.
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
+	return s.defaultTenant().ListPendingTriggersForParent(ctx, parentRunID)
+}
+
+// ListPendingTriggersForParent is [Store.ListPendingTriggersForParent] confined to t's team.
+func (t *Tenant) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
 	now := time.Now()
-	if err := s.expirePendingAgentLossRetries(ctx, now); err != nil {
+	if err := t.s.expirePendingAgentLossRetries(ctx, now); err != nil {
 		return nil, err
 	}
-	rows, err := s.query(ctx, `
+	rows, err := t.s.query(ctx, `
 SELECT id FROM triggers
- WHERE status = ? AND parent_run_id = ? AND available_at <= ?
+ WHERE team = ? AND status = ? AND parent_run_id = ? AND available_at <= ?
 	AND NOT EXISTS (
 	    SELECT 1 FROM agent_loss_retries alr
-	    JOIN runs source_run ON source_run.id = alr.source_run_id
-	    WHERE alr.run_id = triggers.id
+	    JOIN runs source_run ON source_run.team = alr.team AND source_run.id = alr.source_run_id
+	    WHERE alr.team = triggers.team AND alr.run_id = triggers.id
 	      AND source_run.status NOT IN ('success','failed','cancelled'))
-	ORDER BY created_at ASC`, triggerStatusPending, parentRunID, now.UnixNano())
+	ORDER BY created_at ASC`, string(t.team), triggerStatusPending, parentRunID, now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -8573,13 +8602,7 @@ SELECT id FROM triggers
 
 // CountPendingTriggers returns how many triggers are waiting to be claimed.
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error) {
-	var n int
-	if err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM triggers WHERE status = ?`,
-		triggerStatusPending).Scan(&n); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return s.defaultTenant().CountPendingTriggers(ctx)
 }
 
 // ClaimSpecificTrigger flips a known pending trigger to 'claimed'
@@ -8706,66 +8729,76 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 
 // GetTrigger fetches a single trigger by ID.
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
-	var t Trigger
+	return s.defaultTenant().GetTrigger(ctx, id)
+}
+
+// GetTrigger is [Store.GetTrigger] confined to t's team.
+func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
+	var tr Trigger
 	var argsJSON, envJSON []byte
 	var createdNS int64
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
 	var fullInt, repoInheritedInt int
-	err := s.queryRow(
+	err := t.s.queryRow(
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
        idempotency_key, claim_seq, webhook_delivery, team,
-       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
-  FROM triggers WHERE id = ?`, id,
-	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
-		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.GithubRepoID, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team, &t.Error)
+       COALESCE((SELECT error FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), '')
+  FROM triggers WHERE team = ? AND id = ?`, string(t.team), id,
+	).Scan(&tr.ID, &tr.Pipeline, &argsJSON, &tr.TriggerSource, &tr.TriggerUser,
+		&envJSON, &tr.GitBranch, &tr.GitSHA, &tr.Status, &createdNS, &claimedNS, &leaseNS,
+		&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &tr.GithubRepoID, &repoInheritedInt, &tr.RetryOf, &tr.RetrySource, &tr.ParentNodeID, &parent, &fullInt,
+		&tr.IdempotencyKey, &tr.ClaimSeq, &tr.WebhookDelivery, &tr.Team, &tr.Error)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("trigger", id)
 		}
 		return nil, err
 	}
-	t.CreatedAt = time.Unix(0, createdNS)
+	tr.CreatedAt = time.Unix(0, createdNS)
 	if claimedNS.Valid {
 		ct := time.Unix(0, claimedNS.Int64)
-		t.ClaimedAt = &ct
+		tr.ClaimedAt = &ct
 	}
 	if leaseNS.Valid {
 		lt := time.Unix(0, leaseNS.Int64)
-		t.LeaseExpiresAt = &lt
+		tr.LeaseExpiresAt = &lt
 	}
 	if parent.Valid {
-		t.ParentRunID = parent.String
+		tr.ParentRunID = parent.String
 	}
-	t.Full = fullInt != 0
-	t.RepoInherited = repoInheritedInt != 0
+	tr.Full = fullInt != 0
+	tr.RepoInherited = repoInheritedInt != 0
 	if len(argsJSON) > 0 {
-		_ = json.Unmarshal(argsJSON, &t.Args)
+		_ = json.Unmarshal(argsJSON, &tr.Args)
 	}
 	if len(envJSON) > 0 {
-		_ = json.Unmarshal(envJSON, &t.TriggerEnv)
+		_ = json.Unmarshal(envJSON, &tr.TriggerEnv)
 	}
-	return &t, nil
+	return &tr, nil
 }
 
 // FindSpawnedChildTriggerID returns the most-recent child trigger
 // for (parentRunID, parentNodeID, pipeline), or "".
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
+	return s.defaultTenant().FindSpawnedChildTriggerID(ctx, parentRunID, parentNodeID, pipeline)
+}
+
+// FindSpawnedChildTriggerID is [Store.FindSpawnedChildTriggerID] confined to t's team.
+func (t *Tenant) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
 	if parentRunID == "" || parentNodeID == "" || pipeline == "" {
 		return "", nil
 	}
 	var id string
-	err := s.queryRow(
+	err := t.s.queryRow(
 		ctx, `
 SELECT id FROM triggers
- WHERE parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
+ WHERE team = ? AND parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
  ORDER BY created_at DESC
- LIMIT 1`, parentRunID, parentNodeID, pipeline,
+ LIMIT 1`, string(t.team), parentRunID, parentNodeID, pipeline,
 	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

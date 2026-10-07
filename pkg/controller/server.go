@@ -1581,7 +1581,7 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 // queue after a claim. A runner that claimed the trigger between the reap and
 // this read owns the run too, and requiring the queued state would fail it.
 func (s *Server) triggerAwaitsClaimant(ctx context.Context, id string) bool {
-	trig, err := s.store.GetTrigger(ctx, id)
+	trig, err := s.triggerAcrossTeams(ctx, id)
 	if err != nil {
 		return false
 	}

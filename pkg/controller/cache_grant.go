@@ -167,7 +167,11 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 // carries, so they come from the run's trigger and never from the caller. A
 // run with no trigger writes under a scope no branch's run reads.
 func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID string) (*authwire.CacheScope, error) {
-	trigger, err := s.store.GetTrigger(ctx, runID)
+	var trigger *store.Trigger
+	tenant, err := s.tenantForTeam(ctx, team)
+	if err == nil {
+		trigger, err = tenant.GetTrigger(ctx, runID)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return &authwire.CacheScope{Refs: []string{"manual:"}}, nil
 	}
@@ -219,7 +223,11 @@ func (s *Server) vouchedRoot(ctx context.Context, trigger *store.Trigger) (*stor
 		if parent == "" {
 			break
 		}
-		next, err := s.store.GetTrigger(ctx, parent)
+		var next *store.Trigger
+		tenant, err := s.tenantForTeam(ctx, trigger.Team)
+		if err == nil {
+			next, err = tenant.GetTrigger(ctx, parent)
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, false, nil
 		}
