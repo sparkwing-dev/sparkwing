@@ -1,4 +1,4 @@
-package sparkwing
+package depcache
 
 import (
 	"context"
@@ -13,17 +13,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
 // safety: a client-side skip, not the server's cap. It saves uploading an
 // archive the cache service would refuse, and the service's own
 // --max-cache-archive-bytes is the bound that actually holds; an operator who
 // lowers that will see refusals here rather than skips.
-var remoteDepCacheMaxBytes = int64(500 << 20)
+var remoteMaxBytes = int64(500 << 20)
 
-const depCacheHTTPTimeout = 10 * time.Minute
+const httpTimeout = 10 * time.Minute
 
-type depCacheBackend interface {
+type backend interface {
 	label() string
 	exists(ctx context.Context, key string) (bool, error)
 
@@ -32,28 +33,28 @@ type depCacheBackend interface {
 	store(ctx context.Context, key, dir string) (int64, error)
 }
 
-func selectDepCacheBackend() depCacheBackend {
+func selectBackend() backend {
 	if url := strings.TrimRight(os.Getenv("SPARKWING_CACHE_URL"), "/"); url != "" {
-		return &remoteDepCache{baseURL: url, token: depCacheToken()}
+		return &remoteBackend{baseURL: url, token: cacheToken()}
 	}
 	if url := strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/"); url != "" {
-		return &remoteDepCache{baseURL: url, token: depCacheToken()}
+		return &remoteBackend{baseURL: url, token: cacheToken()}
 	}
-	return &localDepCache{}
+	return &localBackend{}
 }
 
-func depCacheToken() string {
+func cacheToken() string {
 	if t := authwire.CacheBearerFromEnv(); t != "" {
 		return t
 	}
 	return os.Getenv("SPARKWING_AGENT_TOKEN")
 }
 
-type localDepCache struct{}
+type localBackend struct{}
 
-func (l *localDepCache) label() string { return "local" }
+func (l *localBackend) label() string { return "local" }
 
-func (l *localDepCache) archivePath(key string) (string, error) {
+func (l *localBackend) archivePath(key string) (string, error) {
 	p, err := paths.DefaultPaths()
 	if err != nil {
 		return "", err
@@ -61,7 +62,7 @@ func (l *localDepCache) archivePath(key string) (string, error) {
 	return filepath.Join(p.Root, "depcache", key+".tar.gz"), nil
 }
 
-func (l *localDepCache) exists(_ context.Context, key string) (bool, error) {
+func (l *localBackend) exists(_ context.Context, key string) (bool, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return false, err
@@ -75,7 +76,7 @@ func (l *localDepCache) exists(_ context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-func (l *localDepCache) fetch(_ context.Context, key, dir string) (int64, error) {
+func (l *localBackend) fetch(_ context.Context, key, dir string) (int64, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return 0, err
@@ -89,13 +90,13 @@ func (l *localDepCache) fetch(_ context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	if err := extractDepCacheArchiveStaged(f, dir); err != nil {
+	if err := extractArchiveStaged(f, dir); err != nil {
 		return 0, err
 	}
 	return fi.Size(), nil
 }
 
-func (l *localDepCache) store(_ context.Context, key, dir string) (int64, error) {
+func (l *localBackend) store(_ context.Context, key, dir string) (int64, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return 0, err
@@ -112,7 +113,7 @@ func (l *localDepCache) store(_ context.Context, key, dir string) (int64, error)
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if err := writeDepCacheArchive(tmp, dir); err != nil {
+	if err := writeArchive(tmp, dir); err != nil {
 		tmp.Close()
 		return 0, err
 	}
@@ -129,18 +130,18 @@ func (l *localDepCache) store(_ context.Context, key, dir string) (int64, error)
 	return size, nil
 }
 
-type remoteDepCache struct {
+type remoteBackend struct {
 	baseURL string
 	token   string
 }
 
-func (r *remoteDepCache) label() string { return "cluster" }
+func (r *remoteBackend) label() string { return "cluster" }
 
-func (r *remoteDepCache) client() *http.Client {
-	return &http.Client{Timeout: depCacheHTTPTimeout}
+func (r *remoteBackend) client() *http.Client {
+	return &http.Client{Timeout: httpTimeout}
 }
 
-func (r *remoteDepCache) newRequest(ctx context.Context, method, key string, body io.Reader) (*http.Request, error) {
+func (r *remoteBackend) newRequest(ctx context.Context, method, key string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, r.baseURL+"/cache/"+key, body)
 	if err != nil {
 		return nil, err
@@ -151,7 +152,7 @@ func (r *remoteDepCache) newRequest(ctx context.Context, method, key string, bod
 	return req, nil
 }
 
-func (r *remoteDepCache) exists(ctx context.Context, key string) (bool, error) {
+func (r *remoteBackend) exists(ctx context.Context, key string) (bool, error) {
 	req, err := r.newRequest(ctx, http.MethodHead, key, nil)
 	if err != nil {
 		return false, err
@@ -172,7 +173,7 @@ func (r *remoteDepCache) exists(ctx context.Context, key string) (bool, error) {
 	}
 }
 
-func (r *remoteDepCache) fetch(ctx context.Context, key, dir string) (int64, error) {
+func (r *remoteBackend) fetch(ctx context.Context, key, dir string) (int64, error) {
 	req, err := r.newRequest(ctx, http.MethodGet, key, nil)
 	if err != nil {
 		return 0, err
@@ -187,13 +188,13 @@ func (r *remoteDepCache) fetch(ctx context.Context, key, dir string) (int64, err
 		return 0, fmt.Errorf("GET /cache/%s: %s", key, resp.Status)
 	}
 	counted := &countingReader{r: resp.Body}
-	if err := extractDepCacheArchiveStaged(counted, dir); err != nil {
+	if err := extractArchiveStaged(counted, dir); err != nil {
 		return 0, err
 	}
 	return counted.n, nil
 }
 
-func (r *remoteDepCache) store(ctx context.Context, key, dir string) (int64, error) {
+func (r *remoteBackend) store(ctx context.Context, key, dir string) (int64, error) {
 	// safety: the service bounds PUT bodies; archiving to a temp file
 	// first makes oversize a cheap client-side skip, not a mid-flight
 	// failure.
@@ -204,7 +205,7 @@ func (r *remoteDepCache) store(ctx context.Context, key, dir string) (int64, err
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if err := writeDepCacheArchive(tmp, dir); err != nil {
+	if err := writeArchive(tmp, dir); err != nil {
 		tmp.Close()
 		return 0, err
 	}
@@ -215,10 +216,10 @@ func (r *remoteDepCache) store(ctx context.Context, key, dir string) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	if size > remoteDepCacheMaxBytes {
+	if size > remoteMaxBytes {
 		return 0, fmt.Errorf("archive is %s, over the %s this client uploads; not uploading. "+
 			"The cache service's own limit is --max-cache-archive-bytes",
-			humanBytes(size), humanBytes(remoteDepCacheMaxBytes))
+			tarsafe.HumanBytes(size), tarsafe.HumanBytes(remoteMaxBytes))
 	}
 
 	f, err := os.Open(tmpPath)

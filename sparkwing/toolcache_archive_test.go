@@ -2,34 +2,12 @@ package sparkwing
 
 import (
 	"archive/tar"
+	"compress/gzip"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 )
-
-func TestExtractLintCacheBoundsDecompression(t *testing.T) {
-	orig := maxExtractBytes
-	maxExtractBytes = 1 << 10
-	defer func() { maxExtractBytes = orig }()
-
-	workdir := t.TempDir()
-	archive := filepath.Join(t.TempDir(), "bomb.tar.gz")
-	big := make([]byte, 64<<10)
-	writeRawDepArchive(t, archive, []*tar.Header{
-		{Name: lintCacheManifestName, Typeflag: tar.TypeReg, Mode: 0o600, Size: int64(len(workdir))},
-		{Name: "cache/big", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(big))},
-	}, map[string][]byte{lintCacheManifestName: []byte(workdir), "cache/big": big})
-
-	rf, err := os.Open(archive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rf.Close()
-	if err := extractLintCacheArchive(rf, t.TempDir(), workdir); err == nil {
-		t.Fatal("oversized lint cache archive extracted past the cap")
-	}
-}
 
 func TestExtractLintCacheRejectsEscapingEntry(t *testing.T) {
 	base := t.TempDir()
@@ -39,7 +17,7 @@ func TestExtractLintCacheRejectsEscapingEntry(t *testing.T) {
 	}
 	workdir := t.TempDir()
 	archive := filepath.Join(t.TempDir(), "escape.tar.gz")
-	writeRawDepArchive(t, archive, []*tar.Header{
+	writeRawArchive(t, archive, []*tar.Header{
 		{Name: lintCacheManifestName, Typeflag: tar.TypeReg, Mode: 0o600, Size: int64(len(workdir))},
 		{Name: "cache/../escape", Typeflag: tar.TypeReg, Mode: 0o644, Size: 5},
 	}, map[string][]byte{lintCacheManifestName: []byte(workdir), "cache/../escape": []byte("PWNED")})
@@ -76,7 +54,7 @@ func lintArchive(t *testing.T, workdir string, entries []*tar.Header, bodies map
 		all[k] = v
 	}
 	path := filepath.Join(t.TempDir(), "lint.tar.gz")
-	writeRawDepArchive(t, path, hdrs, all)
+	writeRawArchive(t, path, hdrs, all)
 	return path
 }
 
@@ -99,54 +77,6 @@ func TestExtractClampsWideDirectoryModes(t *testing.T) {
 			t.Fatalf("dir mode = %o, want 755", got)
 		}
 	})
-
-	t.Run("dep cache", func(t *testing.T) {
-		dest := filepath.Join(t.TempDir(), "depcache")
-		archive := filepath.Join(t.TempDir(), "wide.tar.gz")
-		writeRawDepArchive(t, archive, []*tar.Header{
-			{Name: "wide", Typeflag: tar.TypeDir, Mode: 0o777},
-		}, nil)
-		rf, err := os.Open(archive)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rf.Close()
-		if err := extractDepCacheArchive(rf, dest); err != nil {
-			t.Fatalf("extract: %v", err)
-		}
-		if got := dirPerm(t, filepath.Join(dest, "wide")); got != 0o755 {
-			t.Fatalf("dir mode = %o, want 755", got)
-		}
-	})
-}
-
-func TestExtractCreatesImplicitParentsAtStandardMode(t *testing.T) {
-	base := t.TempDir()
-	reference := filepath.Join(base, "reference")
-	if err := os.Mkdir(reference, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	want := dirPerm(t, reference)
-
-	dest := filepath.Join(base, "depcache")
-	archive := filepath.Join(t.TempDir(), "implicit.tar.gz")
-	writeRawDepArchive(t, archive, []*tar.Header{
-		{Name: "pkg/mod/foo.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2},
-	}, map[string][]byte{"pkg/mod/foo.txt": []byte("ok")})
-
-	rf, err := os.Open(archive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rf.Close()
-	if err := extractDepCacheArchive(rf, dest); err != nil {
-		t.Fatalf("extract: %v", err)
-	}
-	for _, rel := range []string{"pkg", "pkg/mod"} {
-		if got := dirPerm(t, filepath.Join(dest, filepath.FromSlash(rel))); got != want {
-			t.Errorf("%s mode = %o, want %o", rel, got, want)
-		}
-	}
 }
 
 func TestRestoreLintCacheStagedKeepsPreviousCacheOnReject(t *testing.T) {
@@ -215,5 +145,32 @@ func TestRestoreLintCacheStagedReplacesCache(t *testing.T) {
 	}
 	if perm := dirPerm(t, dest); perm != 0o700 {
 		t.Errorf("cache dir mode = %o, want 700", perm)
+	}
+}
+
+func writeRawArchive(t *testing.T, path string, entries []*tar.Header, bodies map[string][]byte) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range entries {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if b, ok := bodies[h.Name]; ok {
+			if _, err := tw.Write(b); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

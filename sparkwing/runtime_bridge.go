@@ -1,6 +1,10 @@
 package sparkwing
 
-import "context"
+import (
+	"context"
+
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+)
 
 type runtimePlumbingKeys struct {
 	DryRun            any
@@ -28,6 +32,7 @@ type runtimePlumbingFns struct {
 	WorkStepFn         func(s *WorkStep) func(ctx context.Context) (any, error)
 	WorkStepMarkDone   func(s *WorkStep, out any)
 	SpawnSpecMarkDone  func(s *SpawnSpec, out any)
+	NodeDirCaches      func(n *JobNode) []depcache.Spec
 }
 
 // RuntimePlumbing exposes context keys and runtime-mutator function
@@ -68,5 +73,6 @@ var RuntimePlumbing = struct {
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
 		SpawnSpecMarkDone:  (*SpawnSpec).markDone,
+		NodeDirCaches:      dirCacheSpecs,
 	},
 }

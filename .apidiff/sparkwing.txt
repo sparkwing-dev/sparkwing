@@ -689,6 +689,7 @@ var RuntimePlumbing = struct {
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
 		SpawnSpecMarkDone:  (*SpawnSpec).markDone,
+		NodeDirCaches:      dirCacheSpecs,
 	},
 }
 const Satisfied Outcome = "satisfied"
@@ -900,7 +901,6 @@ func (p argSetPredicate) String() string
 func (p argUnsetPredicate) Eval(ctx PredicateContext) bool
 func (p argUnsetPredicate) String() string
 func (c *countReader) Read(p []byte) (int, error)
-func (c *countingReader) Read(p []byte) (int, error)
 func (e *envResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (k groupKind) String() string

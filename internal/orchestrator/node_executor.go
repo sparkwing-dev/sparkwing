@@ -424,6 +424,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		noteEvent(ctx, r.backends.State, runID, node.ID(), "artifacts_staged", payload)
 	}
 
+	dirCaches := restoreDirCaches(nodeCtx, node)
 	for i, hook := range node.BeforeRunHooks() {
 		sparkwing.Debug(nodeCtx, "hook: BeforeRun[%d] firing", i)
 		if err := callBeforeRun(nodeCtx, hook); err != nil {
@@ -700,6 +701,7 @@ done:
 		sparkwing.Debug(nodeCtx, "hook: AfterRun[%d] firing (err=%v)", i, lastErr)
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
+	saveDirCaches(nodeCtx, dirCaches, lastErr)
 	if err := flushNodeLogExecutionAttempt(nlog); err != nil && lastErr == nil && nodeLogFatal(nlog) == nil {
 		lastErr = err
 	}

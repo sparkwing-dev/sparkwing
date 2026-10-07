@@ -1,4 +1,4 @@
-package sparkwing
+package depcache
 
 import (
 	"archive/tar"
@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
-func writeDepCacheArchive(w io.Writer, dir string) error {
+func writeArchive(w io.Writer, dir string) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 
@@ -69,7 +71,7 @@ func writeDepCacheArchive(w io.Writer, dir string) error {
 	return gz.Close()
 }
 
-func extractDepCacheArchive(r io.Reader, dir string) error {
+func extractArchive(r io.Reader, dir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("gzip: %w", err)
@@ -79,11 +81,11 @@ func extractDepCacheArchive(r io.Reader, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return extractTarInRoot(tar.NewReader(gz), dir, tarExtractPolicy{allowSymlinks: true})
+	return tarsafe.ExtractInRoot(tar.NewReader(gz), dir, tarsafe.Policy{AllowSymlinks: true})
 }
 
-func extractDepCacheArchiveStaged(r io.Reader, dir string) error {
-	return extractIntoDirStaged(dir, ".depcache-restore-*", func(stage string) error {
-		return extractDepCacheArchive(r, stage)
+func extractArchiveStaged(r io.Reader, dir string) error {
+	return tarsafe.ExtractIntoDirStaged(dir, ".depcache-restore-*", func(stage string) error {
+		return extractArchive(r, stage)
 	})
 }

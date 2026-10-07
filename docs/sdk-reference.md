@@ -803,7 +803,7 @@ type JobNode struct {
 - `func (n *JobNode) ApprovalConfig() *ApprovalConfig` -- ApprovalConfig returns the per-node approval configuration, or nil for non-approval nodes.
 - `func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode` -- BeforeRun registers a hook to run once before the node's Run method on the first attempt.
 - `func (n *JobNode) BeforeRunHooks() []BeforeRunFn`
-- `func (n *JobNode) CacheDir(caches ...DirCache) *JobNode` -- CacheDir registers dependency-directory caches on the node: each declared directory is restored from the cache before the node's Run (on an exact key hit) and saved back after a successful Run whose restore missed.
+- `func (n *JobNode) CacheDir(caches ...DirCache) *JobNode` -- CacheDir registers dependency-directory caches on the node: the engine restores each declared directory from the cache before the node's BeforeRun hooks and Run (on an exact key hit) and saves it back after a successful Run and its AfterRun hooks when the restore missed.
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) ConcurrencyCost() int` -- ConcurrencyCost returns the admission cost declared via JobNode.Concurrency, or 0 when the node has no membership.
 - `func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the group the node joined via JobNode.Concurrency, or nil when the node declared no membership.
@@ -2097,6 +2097,7 @@ var RuntimePlumbing = struct {
         WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
         WorkStepMarkDone:   (*WorkStep).markDone,
         SpawnSpecMarkDone:  (*SpawnSpec).markDone,
+        NodeDirCaches:      dirCacheSpecs,
     },
 }
 ```
