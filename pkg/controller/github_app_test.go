@@ -870,7 +870,7 @@ func TestGitHubAppUninstallUnbinds(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
-	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7}}, ""); code != http.StatusOK {
+	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, ""); code != http.StatusOK {
 		t.Fatalf("uninstall = %d", code)
 	}
 	if ids := f.installations(olga); len(ids) != 0 {
@@ -1453,6 +1453,70 @@ func TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents(t *testing.T) {
 	}
 	if n := len(f.triggers(olga.team)); n != 3 {
 		t.Fatalf("branch filters started %d runs, want 3", n)
+	}
+}
+
+// GitHub signs only the body, so a captured body re-sent under another
+// X-GitHub-Event must not be read as that event.
+func TestGitHubAppSignedBodyKeepsItsEvent(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "refs/heads/main", headSHA)
+	if code := f.subscribe(olga, "acme/widgets", "teardown", map[string]any{"push": true, "branch_delete": true}); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	repoDeleted := map[string]any{
+		"action":       "deleted",
+		"installation": map[string]any{"id": 7},
+		"repository":   map[string]any{"id": 702, "full_name": "acme/plans"},
+	}
+	if code, out := f.deliver("repository", repoDeleted, ""); code != http.StatusOK {
+		t.Fatalf("repository deleted = %d %v", code, out)
+	}
+	if code, out := f.deliver("installation", repoDeleted, ""); code != http.StatusConflict {
+		t.Fatalf("repository body re-sent as installation = %d %v, want 409", code, out)
+	}
+	if ids := f.installations(olga); len(ids) != 1 {
+		t.Fatalf("installations after a re-sent repository body = %v", ids)
+	}
+	createBody := map[string]any{
+		"ref": "feature-y", "ref_type": "branch", "master_branch": "main", "description": nil, "pusher_type": "user",
+		"installation": map[string]any{"id": 7},
+		"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
+		"sender":       map[string]any{"login": "olga"},
+	}
+	if _, out := f.deliver("create", createBody, ""); out["status"] != "ignored" {
+		t.Fatalf("create without a create subscription = %v", out)
+	}
+	if code, out := f.deliver("delete", createBody, ""); code != http.StatusConflict {
+		t.Fatalf("create body re-sent as delete = %d %v, want 409", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("re-sent bodies started %d runs", n)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after refused re-sends = %v", out)
+	}
+}
+
+// Only installation events carry the full installation object, so its App id
+// tells an installation event from another App's body.
+func TestGitHubAppInstallationEventNamesThisApp(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, appID := range []any{nil, githubapptest.AppID + 1} {
+		inst := map[string]any{"id": 7}
+		if appID != nil {
+			inst["app_id"] = appID
+		}
+		if _, out := f.deliver("installation", map[string]any{"action": "deleted", "installation": inst}, ""); out["status"] != "ignored" {
+			t.Fatalf("uninstall naming app %v = %v, want ignored", appID, out)
+		}
+	}
+	if ids := f.installations(olga); len(ids) != 1 {
+		t.Fatalf("installations after foreign uninstalls = %v", ids)
 	}
 }
 
