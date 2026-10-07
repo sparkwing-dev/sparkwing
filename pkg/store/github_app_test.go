@@ -300,6 +300,27 @@ func TestGitHubAppDeliveryIsRememberedAcrossTeams(t *testing.T) {
 	}
 }
 
+func TestGitHubAppDeliveryKeepsItsFirstEvent(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	for _, tc := range []struct {
+		event string
+		want  bool
+	}{{"repository", true}, {"repository", true}, {"installation", false}} {
+		if same, err := st.BindGitHubAppDeliveryEvent(ctx, "digest-1", tc.event, "d-1", now); err != nil || same != tc.want {
+			t.Fatalf("bind as %s = %v, %v; want %v", tc.event, same, err, tc.want)
+		}
+	}
+	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
+		t.Fatalf("a bound delivery reads as processed: %v, %v", seen, err)
+	}
+	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
+	if same, err := st.BindGitHubAppDeliveryEvent(ctx, "digest-1", "installation", "d-1", later); err != nil || !same {
+		t.Fatalf("a binding past its retention was kept without any run starting: %v, %v", same, err)
+	}
+}
+
 func TestGitHubCheckRunIsRecordedOnce(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

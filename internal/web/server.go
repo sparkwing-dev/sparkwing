@@ -207,7 +207,7 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
-	srv.Handler = guardUnauthenticatedLoopback(opts, serveAddr, srv.Handler)
+	srv.Handler = guardUnauthenticated(opts, serveAddr, srv.Handler)
 	trusted := &http.Server{
 		Addr:         opts.TrustedProxyAddr,
 		Handler:      ratelimit.TrustedListener(srv.Handler),
@@ -420,15 +420,19 @@ func validateAuthOptions(opts HandlerOptions) error {
 	return nil
 }
 
-// safety: without sign-in a loopback listener has no credential of its own, so
-// a page on another site that rebinds its name to 127.0.0.1 would read the
-// dashboard and drive the controller token behind it; the guard admits only
-// loopback or allow-listed hosts and refuses cross-site writes.
-func guardUnauthenticatedLoopback(opts HandlerOptions, addr string, next http.Handler) http.Handler {
-	if opts.RequireLogin || !loopbackBind(addr) {
+// safety: without sign-in a page on another site, rebound to 127.0.0.1 or reaching a remote listener through a
+// visitor's browser, would drive the controller token behind the dashboard. Loopback admits only listed hosts; a
+// non-loopback listener answers names nobody listed, so it refuses only the cross-site writes.
+func guardUnauthenticated(opts HandlerOptions, addr string, next http.Handler) http.Handler {
+	switch {
+	case opts.RequireLogin:
 		return next
+	case loopbackBind(addr):
+		return originguard.Guard(next, originguard.NewPolicy(addr, false, opts.AllowOrigins))
+	case opts.AllowUnauthenticatedRemote:
+		return originguard.RefuseCrossSiteWrites(next)
 	}
-	return originguard.Guard(next, originguard.NewPolicy(addr, false, opts.AllowOrigins))
+	return next
 }
 
 // safety: an unauthenticated dashboard that holds a service bearer hands the

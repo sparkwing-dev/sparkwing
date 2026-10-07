@@ -421,6 +421,7 @@ controller:
     repository: ${image_prefix}sparkwing-controller
     tag: $image_tag
     pullPolicy: $image_pull_policy
+  allowOpenBootstrap: true
   githubWebhookSecret:
     name: sparkwing-webhook
   secretsKey:

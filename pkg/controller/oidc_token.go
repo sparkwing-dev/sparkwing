@@ -169,6 +169,7 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 		c.Pipeline = trig.Pipeline
 		branch, sha = trig.GitBranch, trig.GitSHA
 		owner, repo, repoURL = trig.GithubOwner, trig.GithubRepo, trig.RepoURL
+		c.RepositoryID = trig.GithubRepoID
 		c.Trigger = oidcTriggerKind(trig)
 	}
 	switch {

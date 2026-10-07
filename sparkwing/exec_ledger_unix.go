@@ -50,7 +50,7 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, _ ste
 			SessionID:   leader.SessionID,
 			LeaderBirth: leader.BirthToken,
 		},
-		Command: display,
+		Command: sessionledger.MaskCommand(ctx, display),
 	})
 	if err != nil {
 		slog.Default().Debug("step session not recorded", "err", err)

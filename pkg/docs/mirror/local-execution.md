@@ -388,7 +388,8 @@ whose node is gone: `sparkwing run` before it dispatches, the admission
 daemon when a run's connection drops without a clean finish, and
 `sparkwing doctor`, which lists what it ended under `stray step sessions`
 and only reports under `--dry-run`. Each session ended this way appends a
-`stray_session_reaped` event to its node. The sweep is keyed on the
+`stray_session_reaped` event to its node, carrying the step's command line
+with the run's secret values masked as they were when the step started. The sweep is keyed on the
 session and the node's process incarnation, never on a process name, so
 a live run's work is never touched and a reused pid is never signalled.
 Steps do not get to daemonize by accident: a process that leaves its step

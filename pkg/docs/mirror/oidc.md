@@ -1,6 +1,6 @@
 # OIDC tokens for cloud roles
 
-A controller with a signing key is an OpenID Connect issuer. A run asks it for a short-lived ID token that names the run's team, pipeline, trigger and ref, and exchanges that token with AWS, Google Cloud, Azure or Vault for credentials. No cloud key is stored in Sparkwing secrets, and a cloud role trusts only the pipelines its trust policy names.
+A controller with a signing key is an OpenID Connect issuer. A run asks it for a short-lived ID token that names the run's team, repository, pipeline, trigger and ref, and exchanges that token with AWS, Google Cloud, Azure or Vault for credentials. No cloud key is stored in Sparkwing secrets, and a cloud role trusts only the pipelines its trust policy names.
 
 The model matches GitHub Actions' `id-token: write`: the cloud provider fetches the controller's public keys over HTTPS and checks each token's signature, audience, expiry and subject before it hands out credentials.
 
@@ -70,24 +70,26 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 ### Subject format
 
 ```
-team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
+team:<team>:repository_id:<repository_id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
 ```
 
-For example, a push to `main` delivered by the GitHub webhook and executed by a team runner:
+`<repository_id>` is GitHub's numeric repository id, which survives a rename or a transfer. Read it with `gh api repos/<owner>/<name> --jq .id`. It is set when a GitHub App delivery started the run, and for a retry or a child run that inherits that repository. It is empty for every other run, including runs started by a per-pipeline legacy webhook, the CLI, the API and a schedule. Two repositories that reach one pipeline through legacy webhooks therefore share the empty segment; move them to the GitHub App before a trust policy relies on the subject to tell them apart.
+
+For example, a push to `main` of repository `123456789` delivered by the GitHub App and executed by a team runner:
 
 ```
-team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main
+team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main
 ```
 
-A tag push keeps `trigger:push` and uses its tag ref, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3`. A policy for a protected branch should match `refs/heads/<branch>` explicitly.
+A tag push keeps `trigger:push` and uses its tag ref, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3`. A policy for a protected branch should match `refs/heads/<branch>` explicitly.
 
 The same pipeline run for pull request 42, even one opened from a branch named `main`:
 
 ```
-team:acme:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/42/head
+team:acme:repository_id:123456789:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/42/head
 ```
 
-The format is stable. Segments run from the coarsest to the finest, so a trust condition that ends in `*` narrows by prefix. `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (422), so a submitted value cannot forge a later segment or match as a wildcard.
+The format is stable. Segments run from the coarsest to the finest: a team holds repositories and a repository declares pipelines, so a trust condition that ends in `*` narrows by prefix, and `team:acme:repository_id:123456789:*` admits every pipeline of one repository. A pipeline name is not unique across repositories: a team that subscribes `deploy` on two repositories gets two subjects that differ only in `repository_id`. `<repository_id>` is empty when no GitHub App delivery names the repository, which leaves `repository_id::` in the subject, and `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (422), so a submitted value cannot forge a later segment or match as a wildcard.
 
 ### What each value proves
 
@@ -100,7 +102,7 @@ The controller vouches for the team: it comes from the claimed run's row. The ot
   - `manual`: every other start, including the CLI, the dashboard, the API and a retry. Its `pipeline`, `ref`, `sha` and `repository` are whatever the submitter sent.
 - `runner_kind` names the credential that holds the claim: `runner` for a runner token, `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
 
-A deploy role should therefore require `trigger:push` on a protected branch and `runner:runner`, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`, where branch protection decides what reaches `main`. The cache service keeps to the same line: a run writes cache, binary and artifact entries only under its own repository and ref, and a run whose ref and commit its submitter chose writes under a ref of its own, so neither a pull request's run nor a manual run naming `main` can replace what a `main` push restores. Scheduled runs that follow the branch tip, and retries or children of a push that keep its commit, still write under the real ref, so they warm the caches a push reads. A self-hosted runner's machine is a different matter: whoever runs code on it can change what the next run there finds. `trigger:cron` means "launched by a schedule that any editor can create", so reserve it for roles an editor may use anyway. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
+A deploy role should therefore require one repository, `trigger:push` on a protected branch, and `runner:runner`, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. Branch protection on that repository then decides what reaches `main`; the protection of another repository that subscribes the same pipeline name does not matter, because its runs carry a different `repository_id`. A policy that leaves the repository open, such as `team:acme:repository_id:*:pipeline:deploy:...`, accepts a push to `main` of any repository the team subscribes, and so trusts the weakest branch protection among them. The cache service keeps to the same line: a run writes cache, binary and artifact entries only under its own repository and ref, and a run whose ref and commit its submitter chose writes under a ref of its own, so neither a pull request's run nor a manual run naming `main` can replace what a `main` push restores. Scheduled runs that follow the branch tip, and retries or children of a push that keep its commit, still write under the real ref, so they warm the caches a push reads. A self-hosted runner's machine is a different matter: whoever runs code on it can change what the next run there finds. `trigger:cron` means "launched by a schedule that any editor can create", so reserve it for roles an editor may use anyway. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
 
 A GitHub Actions job holding a claim can request a token too, with `runner:github-actions`. Such a job's credential is bound to its own repository's push, so its `ref` and `sha` are the push's. GitHub's own ID token proves the same repository facts with GitHub as the issuer; use Sparkwing's when the trust policy should name the Sparkwing team and pipeline.
 
@@ -183,13 +185,13 @@ Trust policy for the role:
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {"api.sparkwing.dev:aud": "sts.amazonaws.com"},
-      "StringLike": {"api.sparkwing.dev:sub": "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"}
+      "StringLike": {"api.sparkwing.dev:sub": "team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"}
     }
   }]
 }
 ```
 
-AWS evaluates only `aud` and `sub` from a generic OIDC provider and ignores the custom claims, which is why the subject carries every value a trust policy needs. Use `*` at the end to admit several refs, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/release-*`. A `*` in the trigger segment also admits `manual` and `cron` runs.
+AWS evaluates only `aud` and `sub` from a generic OIDC provider and ignores the custom claims, which is why the subject carries every value a trust policy needs. Use `*` at the end to admit several refs, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/release-*`. A `*` in the trigger segment also admits `manual` and `cron` runs, and a `*` in the repository segment admits every repository of the team.
 
 ## Google Cloud
 
@@ -199,14 +201,14 @@ gcloud iam workload-identity-pools providers create-oidc api-sparkwing-dev \
   --location=global --workload-identity-pool=sparkwing \
   --issuer-uri=https://api.sparkwing.dev \
   --allowed-audiences=sparkwing-gcp \
-  --attribute-mapping='google.subject=assertion.run_id,attribute.team=assertion.team,attribute.pipeline=assertion.pipeline,attribute.trigger=assertion.trigger,attribute.runner_kind=assertion.runner_kind,attribute.ref=assertion.ref' \
-  --attribute-condition="assertion.team == 'acme' && assertion.runner_kind == 'runner' && assertion.trigger == 'push' && assertion.ref == 'refs/heads/main'"
+  --attribute-mapping='google.subject=assertion.run_id,attribute.team=assertion.team,attribute.pipeline=assertion.pipeline,attribute.trigger=assertion.trigger,attribute.runner_kind=assertion.runner_kind,attribute.ref=assertion.ref,attribute.repository=assertion.repository' \
+  --attribute-condition="assertion.team == 'acme' && assertion.repository == 'github.com/acme/api' && assertion.runner_kind == 'runner' && assertion.trigger == 'push' && assertion.ref == 'refs/heads/main'"
 gcloud iam service-accounts add-iam-policy-binding deploy@my-project.iam.gserviceaccount.com \
   --role=roles/iam.workloadIdentityUser \
   --member='principalSet://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sparkwing/attribute.pipeline/deploy'
 ```
 
-`google.subject` is limited to 127 bytes, which a long subject can pass, so the mapping above uses the run id and conditions on the individual claims instead. Request tokens with `sparkwing.OIDCToken(ctx, "sparkwing-gcp")`, and write a credential configuration with `gcloud iam workload-identity-pools create-cred-config ... --credential-source-file=<token file>`.
+`google.subject` is limited to 127 bytes, which a long subject can pass, so the mapping above uses the run id and conditions on the individual claims instead. Condition on `repository` as well as `pipeline`, because a pipeline name is not unique across a team's repositories. A `trigger` of `push` always carries the repository from the signed delivery. Request tokens with `sparkwing.OIDCToken(ctx, "sparkwing-gcp")`, and write a credential configuration with `gcloud iam workload-identity-pools create-cred-config ... --credential-source-file=<token file>`.
 
 ## Azure
 
@@ -216,7 +218,7 @@ Entra matches the subject exactly, so each federated credential names one subjec
 az ad app federated-credential create --id <app-object-id> --parameters '{
   "name": "sparkwing-deploy-main",
   "issuer": "https://api.sparkwing.dev",
-  "subject": "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main",
+  "subject": "team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 ```
@@ -231,7 +233,7 @@ vault write auth/jwt/config oidc_discovery_url=https://api.sparkwing.dev bound_i
 vault write auth/jwt/role/deploy role_type=jwt user_claim=sub \
   bound_audiences=vault \
   bound_claims_type=glob \
-  bound_claims='{"team":"acme","pipeline":"deploy","trigger":"push","runner_kind":"runner","ref":"refs/heads/main"}' \
+  bound_claims='{"team":"acme","repository":"github.com/acme/api","pipeline":"deploy","trigger":"push","runner_kind":"runner","ref":"refs/heads/main"}' \
   token_policies=deploy token_ttl=10m
 ```
 

@@ -144,7 +144,7 @@ spec:
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
             {{- end }}
-            {{- if .Values.controller.requireAuth }}
+            {{- if and .Values.controller.requireAuth (or .Values.controller.bootstrapAdminToken.name (ne .Values.controller.allowOpenBootstrap true)) }}
             - "--require-auth"
             {{- end }}
             {{- /*

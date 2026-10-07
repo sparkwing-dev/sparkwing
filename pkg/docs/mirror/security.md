@@ -72,6 +72,19 @@ and storage credentials, and controlled volume mounts. A multi-team license
 does not configure those protections or isolate pipeline code from a shared
 host's OS permissions.
 
+**A warm runner's pool token belongs to an operator-only team.** A warm
+runner claims triggers with its pool token, and only for that token's team,
+then runs that team's pipeline code in its own pod or in Jobs it creates. That
+code can read whatever the runner holds: the pool token itself, a GitHub token
+the runner carries for private modules, the service account it creates Jobs
+with, and the cloud role attached to that account, which the cloud's identity
+webhook still injects into Jobs that disable the Kubernetes token. Creating a
+Job in the runner's namespace can mount any Secret there. Every member of the
+pool token's team therefore has operator authority over that namespace and
+role, so put nobody but operators in it. Customer pipelines belong on runners
+whose token's team they own, launched through controller dispatch, which gives
+each Job a claim token for its own work and no Kubernetes API token.
+
 **Cache and source sharing have their own provenance requirements.** A source
 URL and a cache grant alone do not establish that every Git object in a shared
 mirror is public. Assess imported and seeded objects separately from
@@ -124,6 +137,21 @@ fields have narrower permissions, such as dispatch environment snapshots.
 Give this scope to someone who may read the team's history. An operator's
 `admin` authority is separate from this team-scoped read permission.
 
+**Accepted trust facts.** Each of these follows from the model above and is
+not a defect. A team editor can read masked secret values: it can mint a
+runner token, start a run, claim it and read the run's secrets, because it
+already chooses the code that run executes. The operator's launcher token
+receives claim tokens for every team's ready nodes, so whoever holds it reaches
+every team's run secrets, source tokens and cache grants; keep it
+operator-only. Which secrets a run may read through a claim token is declared
+by that run's own plan, so the boundary is the secret's pipeline or shared
+scope, not the declaration. The masker covers step output that goes through
+the exec helper and the node log; anything else a pipeline process prints to
+its own stdout reaches the operator's container logs unmasked. `docker run -e
+K=V`, which the SDK's docker and services helpers use, puts the value on the
+docker CLI's command line, which every account on a
+shared self-hosted host can read in the process table.
+
 **The laptop dashboard admits the account that started it.** `sparkwing
 serve start` mounts the controller API and the dashboard on one listener
 and requires the token in `serve-token` under the Sparkwing home, a `0600`
@@ -150,6 +178,29 @@ kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
 scope is the superset.
+
+### Request audit log
+
+The controller writes one slog record per request. A read is an `http` record
+carrying the request id, method, route pattern, status and duration. A write
+is an `audit` record that adds `ts`, `client_ip`, `client_class`,
+`principal_kind`, `principal_id` (an account id or a token prefix, never an
+email or a token) and `team`. These also get an `audit` record:
+
+- reads of secrets, tokens and operator routes (`/api/v1/secrets`,
+  `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
+  `/api/v1/operator/...`);
+- every `401` and `403`, whatever the method. A refused bearer shaped like a
+  Sparkwing token adds `attempted_prefix`, the prefix that names the token
+  without granting it.
+
+Identity changes name their target: `member_id`, `invitation_id`,
+`token_prefix`, `secret_name` and `role`. A target taken from the request is
+recorded only in the shape the store uses: a token as its prefix, even when a
+whole bearer was sent, an id only when it looks like one the store mints, and a
+role only when it is a valid role. A secret name is recorded once the secret
+was found or written. No record carries the raw path, query, body, headers or a
+credential.
 
 ## Login and hashing budgets
 
@@ -298,6 +349,12 @@ principal that owns that run and two tenants submitting the same body get
 a run each. A GitHub redelivery is deduped regardless: the store holds
 one trigger per delivery id and one per body digest, so a retried
 delivery answers `409` naming the original run whatever this window says.
+The body digest is also kept for 90 days apart from the run, so a
+signed push or pull request delivered again after its run was deleted
+answers `409` with no run id instead of starting the commit again. Past
+those 90 days a legacy webhook delivery is accepted again; GitHub App
+deliveries carry an event time and are refused once it is that old (see
+[GitHub App](github-app.md)).
 
 Deduplication runs before the shed and the cap, so a redelivery is
 answered with its original run rather than a refusal, and retrying one
@@ -943,9 +1000,12 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   example `printf 'swu_%s' "$(openssl rand -hex 24)"` -- because a
   bearer lookup selects on that prefix. The chart mounts it from
   `controller.bootstrapAdminToken.name` as a file, renders the flag, and
-  renders `--require-auth` from `controller.requireAuth`. Without it,
-  minting the first token needs the controller open, so enable auth by
-  creating an admin token through that window and restarting.
+  renders `--require-auth` from `controller.requireAuth`, which defaults
+  to `true`. Without a bootstrap token the render refuses unless
+  `controller.allowOpenBootstrap=true`, which drops `--require-auth` so
+  the first token can be minted through the open window and auth enabled
+  by a restart. Anything that reaches the Service during that window can
+  mint an admin token, so keep it closed to everything but the operator.
 - **Know what the bootstrap flag treats as an empty table.** It writes
   when no token *authenticates*: every row is revoked, expired, or the
   table is empty. That is what recovers a cluster whose only credential

@@ -410,9 +410,16 @@ repository, and a grant opens the team's whole tree.
   included: every mirror is the operator's, because only the operator token
   and such a grant register one. Any other team's grant reads only an `https`
   repository registered under the name `repo-<sha256 of the URL>`, the name
-  runners already derive, so it never reads a mirror cloned through the
-  cache's SSH key. Private repositories of other teams reach their runners
-  through the GitHub App's per-run tokens instead.
+  runners already derive, and reads it from a separate public mirror under
+  `<data-dir>/repos/public/`. The cache clones and fetches that mirror with
+  none of its own credentials (no Git config, `.netrc`, askpass or SSH key,
+  https only), and never seeds it, so another team sees only what origin
+  serves anyone: not the operator's seeds or working-tree snapshots, and not
+  a repository the cache could reach only with a credential it inherited. A
+  public mirror stops gaining commits once its origin turns private. It costs
+  a second copy of a repository both the operator and other teams read.
+  Private repositories of other teams reach their runners through the GitHub
+  App's per-run tokens instead.
 - `/git/register` accepts the operator token and a grant for the operator's
   own team, which is how the operator's runners register a repository on its
   first run as they did with the operator token. It refuses any other team's
@@ -615,6 +622,7 @@ under the named cache.
 | Path | Contents |
 |------|----------|
 | `/data/repos/` | Bare git repositories (named by content hash) |
+| `/data/repos/public/` | Credential-free copies other teams' grants read |
 | `/data/archives/` | Cached repo tarballs |
 | `/data/uploads/` | Uploaded code tarballs |
 | `/data/artifacts/` | Job output artifacts |

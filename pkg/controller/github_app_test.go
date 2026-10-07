@@ -870,7 +870,7 @@ func TestGitHubAppUninstallUnbinds(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
-	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7}}, ""); code != http.StatusOK {
+	if code, _ := f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, ""); code != http.StatusOK {
 		t.Fatalf("uninstall = %d", code)
 	}
 	if ids := f.installations(olga); len(ids) != 0 {
@@ -1456,6 +1456,70 @@ func TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents(t *testing.T) {
 	}
 }
 
+// GitHub signs only the body, so a captured body re-sent under another
+// X-GitHub-Event must not be read as that event.
+func TestGitHubAppSignedBodyKeepsItsEvent(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "refs/heads/main", headSHA)
+	if code := f.subscribe(olga, "acme/widgets", "teardown", map[string]any{"push": true, "branch_delete": true}); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	repoDeleted := map[string]any{
+		"action":       "deleted",
+		"installation": map[string]any{"id": 7},
+		"repository":   map[string]any{"id": 702, "full_name": "acme/plans"},
+	}
+	if code, out := f.deliver("repository", repoDeleted, ""); code != http.StatusOK {
+		t.Fatalf("repository deleted = %d %v", code, out)
+	}
+	if code, out := f.deliver("installation", repoDeleted, ""); code != http.StatusConflict {
+		t.Fatalf("repository body re-sent as installation = %d %v, want 409", code, out)
+	}
+	if ids := f.installations(olga); len(ids) != 1 {
+		t.Fatalf("installations after a re-sent repository body = %v", ids)
+	}
+	createBody := map[string]any{
+		"ref": "feature-y", "ref_type": "branch", "master_branch": "main", "description": nil, "pusher_type": "user",
+		"installation": map[string]any{"id": 7},
+		"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix(), "default_branch": "main"},
+		"sender":       map[string]any{"login": "olga"},
+	}
+	if _, out := f.deliver("create", createBody, ""); out["status"] != "ignored" {
+		t.Fatalf("create without a create subscription = %v", out)
+	}
+	if code, out := f.deliver("delete", createBody, ""); code != http.StatusConflict {
+		t.Fatalf("create body re-sent as delete = %d %v, want 409", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("re-sent bodies started %d runs", n)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after refused re-sends = %v", out)
+	}
+}
+
+// Only installation events carry the full installation object, so its App id
+// tells an installation event from another App's body.
+func TestGitHubAppInstallationEventNamesThisApp(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, appID := range []any{nil, githubapptest.AppID + 1} {
+		inst := map[string]any{"id": 7}
+		if appID != nil {
+			inst["app_id"] = appID
+		}
+		if _, out := f.deliver("installation", map[string]any{"action": "deleted", "installation": inst}, ""); out["status"] != "ignored" {
+			t.Fatalf("uninstall naming app %v = %v, want ignored", appID, out)
+		}
+	}
+	if ids := f.installations(olga); len(ids) != 1 {
+		t.Fatalf("installations after foreign uninstalls = %v", ids)
+	}
+}
+
 // GitHub's delete payload names the deleted ref and the repository, and has
 // no master_branch, so the run starts at the repository's default branch.
 func TestGitHubAppBranchDeleteRunsOnGitHubsPayload(t *testing.T) {
@@ -1488,5 +1552,33 @@ func TestGitHubAppBranchDeleteRunsOnGitHubsPayload(t *testing.T) {
 	}
 	if tr := got[0]; tr.Pipeline != "teardown" || tr.GitBranch != "trunk" || tr.GitSHA != headSHA || tr.TriggerEnv["GITHUB_REF"] != "refs/heads/feature-x" {
 		t.Fatalf("branch_delete trigger = branch %q sha %q env %v", tr.GitBranch, tr.GitSHA, tr.TriggerEnv)
+	}
+}
+
+// An event older than the delivery digest's retention is refused outright:
+// its digest may be gone, and GitHub never redelivers anything that old.
+func TestGitHubAppEventOlderThanTheReplayWindowIsRefused(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "deploy", nil)
+	if _, err := f.store.DB().Exec(`UPDATE github_app_installations SET created_at = ? WHERE installation_id = 7`,
+		time.Now().Add(-2*store.GitHubAppDeliveryRetention).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	stale := pushedAt(pushPayload(7, 701, "acme/widgets", headSHA), time.Now().Add(-store.GitHubAppDeliveryRetention-time.Hour))
+	code, out := f.deliver("push", stale, "")
+	if code != http.StatusConflict {
+		t.Fatalf("push older than the replay window = %d %v, want 409", code, out)
+	}
+	if !strings.Contains(f.logs.String(), "older than the replay window") {
+		t.Fatalf("refusal left no log line:\n%s", f.logs.String())
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("a stale push started %d runs", n)
+	}
+	recent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("4", 40)), time.Now().Add(-store.GitHubAppDeliveryRetention+time.Hour))
+	if _, out := f.deliver("push", recent, ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a push inside the window = %v, want dispatched", out)
 	}
 }

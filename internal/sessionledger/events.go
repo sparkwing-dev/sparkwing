@@ -27,6 +27,25 @@ type EventPayload struct {
 	Error     string    `json:"error,omitempty"`
 }
 
+type commandMaskKey struct{}
+
+// WithCommandMask makes [MaskCommand] pass a step's command line through
+// mask, the run's secret masker, before a ledger record stores it. A sweep
+// later copies that line into an [EventKind] event, long after the masker is
+// gone.
+func WithCommandMask(ctx context.Context, mask func(string) string) context.Context {
+	return context.WithValue(ctx, commandMaskKey{}, mask)
+}
+
+// MaskCommand returns command with the context's secrets hidden, or
+// unchanged when the context carries no mask.
+func MaskCommand(ctx context.Context, command string) string {
+	if mask, ok := ctx.Value(commandMaskKey{}).(func(string) string); ok && mask != nil {
+		return mask(command)
+	}
+	return command
+}
+
 // RecordOutcomes appends one event per reaped or failed outcome. Live
 // records are not events: nothing happened to them. Append failures are
 // returned together so a caller can log them without losing the sweep.

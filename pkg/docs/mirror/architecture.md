@@ -322,8 +322,15 @@ The Helm chart for the cluster topology lives in this repo under
 `charts/sparkwing-full`:
 
 ```bash
-helm install sparkwing ./charts/sparkwing-full -n sparkwing --create-namespace
+helm install sparkwing ./charts/sparkwing-full -n sparkwing --create-namespace \
+    --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin
 ```
+
+The render refuses without a first admin token Secret, or an explicit
+`controller.allowOpenBootstrap=true` that serves the controller
+unauthenticated until a token exists; the
+[chart README](../charts/sparkwing-full/README.md) lists the other required
+values.
 
 Then add a profile pointing at the controller's URL:
 

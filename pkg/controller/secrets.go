@@ -85,6 +85,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	s.logger.Info("secret written", "name", req.Name, "principal", principal,
 		"pipeline", req.Pipeline, "encrypted", s.secretsCipher != nil, "masked", masked, "shared", req.Shared)
 	w.WriteHeader(http.StatusNoContent)
@@ -103,6 +104,7 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", sec.Name)
 	if p, authed := PrincipalFromContext(r.Context()); authed && sec.Masked && !maskedValueReadable(p) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "write_only",
@@ -129,9 +131,9 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// safety: a masked value leaves the controller only for the operator's admin
-// bearer or a runner's claim-bound read; a session holds no run and would only
-// display it, and a team owner manages the row without reading it back.
+// safety: a masked value leaves the controller only for the operator's admin bearer or a runner's claim-bound read;
+// a session holds no run and would only display it. An editor can still read one through a runner token it mints and a
+// run it claims, which is accepted: that editor already chooses the code a run executes, and that code reads the value.
 func maskedValueReadable(p *Principal) bool {
 	if p.session != "" {
 		return false
@@ -310,6 +312,7 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	noteAuditTarget(r.Context(), "secret_name", name)
 	w.WriteHeader(http.StatusNoContent)
 }
 

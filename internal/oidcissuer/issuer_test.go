@@ -38,7 +38,8 @@ func rsaPEM(t *testing.T, bits int, pkcs8 bool) []byte {
 func runClaims() oidcissuer.Claims {
 	return oidcissuer.Claims{
 		Audience: "sts.amazonaws.com", Team: "acme", Pipeline: "deploy", Trigger: "push",
-		RunnerKind: "runner", Ref: "refs/heads/main", SHA: "abc123", Repository: "github.com/acme/api", RunID: "run-1",
+		RunnerKind: "runner", Ref: "refs/heads/main", SHA: "abc123", Repository: "github.com/acme/api",
+		RepositoryID: 123456789, RunID: "run-1",
 	}
 }
 
@@ -60,13 +61,18 @@ func TestSubjectFormatIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"; sub != want {
+	if want := "team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"; sub != want {
 		t.Fatalf("sub = %q, want %q", sub, want)
 	}
 	c := runClaims()
 	c.Ref = ""
 	if sub, err := c.Subject(); err != nil || !strings.HasSuffix(sub, ":ref:") {
 		t.Fatalf("no ref: sub = %q, err = %v; want a subject ending in :ref:", sub, err)
+	}
+	c = runClaims()
+	c.RepositoryID = 0
+	if sub, err := c.Subject(); err != nil || !strings.HasPrefix(sub, "team:acme:repository_id::pipeline:") {
+		t.Fatalf("no repository id: sub = %q, err = %v; want an empty repository_id segment", sub, err)
 	}
 }
 

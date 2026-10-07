@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -277,29 +278,51 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, maxBufferedBodyBytes))
-	if err != nil {
-		http.Error(w, fmt.Sprintf("reading upstream: %v", err), http.StatusBadGateway)
-		return
+	immutable := isImmutable(remotePath)
+	if proxyShouldRewrite(reg, immutable) {
+		if _, ok := proxyBaseForRequest(r); !ok {
+			http.Error(w, proxyHostError, http.StatusBadRequest)
+			return
+		}
 	}
 
-	immutable := isImmutable(remotePath)
-	stored, served := body, body
-	perRequest := false
-	if proxyShouldRewrite(reg, immutable) && len(body) > 0 {
-		if proxyPublicBase != "" {
-			stored = proxyRewriteBody(body, reg, proxyPublicBase)
-			served = stored
-		} else {
-			base, ok := proxyBaseForRequest(r)
-			if !ok {
-				http.Error(w, proxyHostError, http.StatusBadRequest)
-				return
-			}
-			// safety: the cached copy stays unrewritten so a forged Host cannot reach another client.
-			served = proxyRewriteBody(body, reg, base)
-			perRequest = true
+	bodyPath := filepath.Join(proxyDir, reg.Name, key+".body")
+	metaPath := filepath.Join(proxyDir, reg.Name, key+".meta")
+	// perf: staging on disk bounds memory for distinct misses as well as mutable rewrites.
+	staged, err := os.CreateTemp(filepath.Dir(bodyPath), key+"-*.tmp")
+	if err != nil {
+		// safety: a read-only or missing cache directory must not prevent a healthy download.
+		staged, err = os.CreateTemp("", "sparkwing-proxy-*.tmp")
+	}
+	if err != nil {
+		http.Error(w, "prepare upstream download", http.StatusBadGateway)
+		return
+	}
+	tmpBody := staged.Name()
+	defer func() {
+		if err := os.Remove(tmpBody); err != nil && !os.IsNotExist(err) {
+			log.Printf("warning: proxy staging cleanup: %v", err)
 		}
+	}()
+	src := http.MaxBytesReader(nil, resp.Body, maxBufferedBodyBytes)
+	if proxyShouldRewrite(reg, immutable) && proxyPublicBase != "" {
+		old, replacement := proxyRewriteRule(reg, proxyPublicBase)
+		// perf: the rewrite emits one write per matched URL, so a bounded buffer keeps
+		// URL-dense metadata from costing a syscall per match without growing with the body.
+		buffered := bufio.NewWriterSize(staged, 64<<10)
+		err = proxyStreamReplace(buffered, src, old, replacement)
+		if flushErr := buffered.Flush(); err == nil {
+			err = flushErr
+		}
+	} else {
+		_, err = io.Copy(staged, src)
+	}
+	info, statErr := staged.Stat()
+	closeErr := staged.Close()
+	if err != nil || statErr != nil || closeErr != nil {
+		log.Printf("warning: proxy upstream staging: read=%v stat=%v close=%v", err, statErr, closeErr)
+		http.Error(w, "reading upstream failed", http.StatusBadGateway)
+		return
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -307,39 +330,36 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		contentType = "application/octet-stream"
 	}
 
-	bodyPath := filepath.Join(proxyDir, reg.Name, key+".body")
-	metaPath := filepath.Join(proxyDir, reg.Name, key+".meta")
-
 	meta := proxyMeta{
 		Path:        remotePath,
 		ContentType: contentType,
 		CachedAt:    time.Now().Unix(),
-		Size:        int64(len(stored)),
+		Size:        info.Size(),
 		Immutable:   immutable,
 		StatusCode:  resp.StatusCode,
 	}
 	metaJSON, _ := json.Marshal(meta)
 
-	tmpBody := bodyPath + ".tmp"
-	if err := os.WriteFile(tmpBody, stored, 0o644); err != nil {
-		log.Printf("warning: proxy cache write error: %v", err)
+	servedPath := tmpBody
+	if err := os.Rename(tmpBody, bodyPath); err != nil {
+		log.Printf("warning: proxy cache rename: %v", err)
 	} else {
-		if err := os.Rename(tmpBody, bodyPath); err != nil {
-			log.Printf("warning: proxy cache rename: %v", err)
-		}
+		servedPath = bodyPath
 		if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
 			log.Printf("warning: proxy cache meta write: %v", err)
+			if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: proxy cache meta cleanup: %v", err)
+			}
+		} else {
+			noteProxyStored(meta.Size + int64(len(metaJSON)))
 		}
-		noteProxyStored(int64(len(stored) + len(metaJSON)))
 	}
 
 	// #nosec G706 -- %q escapes control characters in the caller-supplied path
-	log.Printf("proxy: MISS %s/%q (%d bytes, immutable=%v)", reg.Name, truncatePath(remotePath), len(stored), immutable)
-
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("X-Proxy-Cache", "MISS")
-	proxySetCacheability(w, meta, perRequest)
-	w.Write(served)
+	log.Printf("proxy: MISS %s/%q (%d bytes, immutable=%v)", reg.Name, truncatePath(remotePath), meta.Size, immutable)
+	if !proxyWriteCachedBody(w, r, reg.Name, meta, servedPath, "MISS") {
+		http.Error(w, "read staged upstream download", http.StatusBadGateway)
+	}
 }
 
 func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key string) bool {
@@ -378,16 +398,16 @@ func proxyWriteCachedBody(w http.ResponseWriter, r *http.Request, registry strin
 			http.Error(w, proxyHostError, http.StatusBadRequest)
 			return true
 		}
-		// perf: HEAD answers from the metadata alone, so a large mutable entry is never opened or read.
-		if r.Method != http.MethodHead {
-			// #nosec G703 -- the path is a registry name from the hard-coded table plus a sha256 cache key
-			f, err := os.Open(bodyPath)
-			if err != nil {
-				return false
-			}
-			defer f.Close()
-			src = f
+	}
+	// perf: HEAD answers from metadata without opening or reading a large entry.
+	if r.Method != http.MethodHead {
+		// #nosec G703 -- the path is a registry name from the hard-coded table plus a sha256 cache key
+		f, err := os.Open(bodyPath)
+		if err != nil {
+			return false
 		}
+		defer f.Close()
+		src = f
 	}
 
 	w.Header().Set("Content-Type", meta.ContentType)
@@ -400,8 +420,8 @@ func proxyWriteCachedBody(w http.ResponseWriter, r *http.Request, registry strin
 			w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 			return true
 		}
-		// #nosec G703 -- the path is a registry name from the hard-coded table plus a sha256 cache key
-		http.ServeFile(w, r, bodyPath)
+		// safety: registry paths ending in index.html name content, not a directory redirect.
+		http.ServeContent(w, r, "", time.Unix(meta.CachedAt, 0), src)
 		return true
 	}
 	if src == nil {

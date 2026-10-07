@@ -2,8 +2,12 @@ package cluster
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
+	"io"
+	"net"
 	"net/http"
+	"net/http/cgi"
 	"net/http/httptest"
 	neturl "net/url"
 	"os"
@@ -39,13 +43,44 @@ func countPaths(h http.Handler, n *atomic.Int32, subs ...string) http.Handler {
 
 func httpsOrigin(t *testing.T, root string) {
 	t.Helper()
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	body := "[url \"file://" + root + "/\"]\n\tinsteadOf = https://git.example.invalid/\n" +
-		"[protocol \"file\"]\n\tallow = always\n"
-	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+	// safety: other teams read a mirror the cache clones with no git config, so the origin must answer
+	// anonymous https; git reaches it as git.example.com, a name its certificate holds, through a proxy.
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	backend := &cgi.Handler{
+		Path: gitBin, Args: []string{"http-backend"},
+		Env: []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"},
+	}
+	origin := httptest.NewTLSServer(backend)
+	t.Cleanup(origin.Close)
+	ca := filepath.Join(t.TempDir(), "origin-ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: origin.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream, err := net.Dial("tcp", origin.Listener.Addr().String())
+		if r.Method != http.MethodConnect || err != nil {
+			http.Error(w, "CONNECT to the origin only", http.StatusBadGateway)
+			return
+		}
+		client, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			_ = upstream.Close()
+			return
+		}
+		_, _ = io.WriteString(client, "HTTP/1.1 200 Connection established\r\n\r\n")
+		go func() { _, _ = io.Copy(upstream, client); _ = upstream.Close() }()
+		_, _ = io.Copy(client, upstream)
+		_ = client.Close()
+	}))
+	t.Cleanup(proxy.Close)
+	t.Setenv("GIT_SSL_CAINFO", ca)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("https_proxy", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
 }
 
 func gitOnlyPath(t *testing.T) {
@@ -89,7 +124,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	origins := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "ran")
 	sha := makePrivateOrigin(t, filepath.Join(origins, "acme", "app.git"), marker)
-	const repoURL = "https://git.example.invalid/acme/app.git"
+	const repoURL = "https://git.example.com/acme/app.git"
 	httpsOrigin(t, origins)
 
 	var cacheGit atomic.Int32
@@ -171,7 +206,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	}
 	proxied.Store(0)
 
-	allow, err := sourceurl.ParseRepoAllowlist([]string{"git.example.invalid/acme/*"})
+	allow, err := sourceurl.ParseRepoAllowlist([]string{"git.example.com/acme/*"})
 	if err != nil {
 		t.Fatal(err)
 	}
