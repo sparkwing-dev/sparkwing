@@ -264,11 +264,16 @@ func (s *Server) vouchedRoot(ctx context.Context, trigger *store.Trigger) (*stor
 	return root, held, nil
 }
 
-// safety: the one repository the trigger names, however it names it, with the port kept,
-// because a port names another server; the OIDC subject drops it, so this cannot reuse that.
+// safety: the one repository the trigger names, with the port and the path's case kept,
+// because either can name another repository; the OIDC subject drops the port, so this
+// cannot reuse that. Names other than the clone URL are GitHub's, which folds case.
 func cacheRepository(trigger *store.Trigger) string {
 	repo, err := sourceurl.TriggerRepository(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
 		trigger.GithubOwner, trigger.GithubRepo)
+	if err != nil || trigger.RepoURL == "" {
+		return repo
+	}
+	repo, err = sourceurl.CaseIdentity(trigger.RepoURL)
 	if err != nil {
 		return ""
 	}

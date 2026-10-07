@@ -13,7 +13,14 @@ import (
 // trailing ".git" or slash, so every spelling of one repository -- https,
 // scp-like ssh and ssh:// -- reads the same: "github.com/acme/app". A port is
 // kept as part of the host because it names a different server.
-func Identity(raw string) (string, error) {
+func Identity(raw string) (string, error) { return identity(raw, true) }
+
+// CaseIdentity is [Identity] with the path's case kept, except on github.com,
+// whose owner and repository names are case-insensitive. Another host may
+// serve acme/App and acme/app as two repositories.
+func CaseIdentity(raw string) (string, error) { return identity(raw, false) }
+
+func identity(raw string, foldPath bool) (string, error) {
 	validated, err := ValidateCloneURL(raw)
 	if err != nil {
 		return "", err
@@ -34,7 +41,10 @@ func Identity(raw string) (string, error) {
 		host, repoPath = u.Host, u.Path
 	}
 	host = strings.TrimRight(strings.ToLower(host), ".")
-	repoPath = strings.ToLower(strings.Trim(repoPath, "/"))
+	repoPath = strings.Trim(repoPath, "/")
+	if foldPath || host == "github.com" {
+		repoPath = strings.ToLower(repoPath)
+	}
 	repoPath = strings.Trim(strings.TrimSuffix(repoPath, ".git"), "/")
 	if repoPath == "" || strings.Contains(repoPath, "//") || hasDotSegment(repoPath) {
 		return "", fmt.Errorf("repo URL path %q does not name a repository", repoPath)

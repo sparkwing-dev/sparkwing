@@ -395,7 +395,9 @@ repository, and a grant opens the team's whole tree.
   `scopes/<hash>/`, a hash of its run's repository and own ref, and reads its
   own ref, its pull request's base, the default branch, and then the unscoped
   entries written before grants carried a repository and ref. The controller
-  reads those from the run's trigger. A run whose ref and commit its submitter
+  reads those from the run's trigger. The repository keeps its port and its
+  path's case, since either can name another repository on a self-hosted Git
+  server; only the host's case is folded, and on github.com the path's too. A run whose ref and commit its submitter
   chose (CLI, API and dashboard starts, and their retries and children) writes
   under a ref of its own; signed webhook runs, schedules that follow a branch
   tip, and their retries and children with the same ref and commit write under

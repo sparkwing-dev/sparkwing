@@ -174,6 +174,37 @@ func TestCacheGrantKeepsTheRepositoryPort(t *testing.T) {
 	}
 }
 
+// A host other than github.com may serve acme/App and acme/app as two
+// repositories, so path case splits the cache scope there; GitHub folds it.
+func TestCacheGrantKeepsTheRepositoryPathCase(t *testing.T) {
+	s, _, _ := downloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopeOf := func(id, url string) string {
+		t.Helper()
+		if err := team.CreateTrigger(t.Context(), store.Trigger{ID: id, Pipeline: "demo", CreatedAt: time.Now(), RepoURL: url, GitBranch: "main"}); err != nil {
+			t.Fatal(err)
+		}
+		scope, err := s.cacheGrantScope(t.Context(), "team-a", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scope.Repo
+	}
+	upper, lower := scopeOf("case-upper", "ssh://git@git.example.com/acme/App.git"), scopeOf("case-lower", "ssh://git@git.example.com/acme/app.git")
+	if upper == lower || upper == "" {
+		t.Fatalf("acme/App and acme/app share the cache scope %q", upper)
+	}
+	if got := scopeOf("case-host", "https://GIT.example.com/acme/App"); got != upper {
+		t.Fatalf("host case split the scope: %q vs %q", got, upper)
+	}
+	if a, b := scopeOf("gh-upper", "https://github.com/Acme/App.git"), scopeOf("gh-lower", "git@github.com:acme/app.git"); a != b || a != "github.com/acme/app" {
+		t.Fatalf("GitHub spellings of one repository = %q and %q", a, b)
+	}
+}
+
 // A retry_of names a signed push, but the lineage vouches only for the
 // repository that push ran: a run naming another repository writes beside its
 // ref, whatever ref and commit it claims.
