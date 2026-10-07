@@ -149,11 +149,11 @@ func runOpsDoctor(args []string) error {
 			return diagnoseErr
 		}
 		return errors.Join(
-			opsview.RenderDoctor(os.Stdout, report, format, opsLegacyWarningLine(len(report.LiveLegacyHolders))),
+			opsview.RenderDoctor(os.Stdout, report, format),
 			diagnoseErr,
 		)
 	}
-	return opsview.RenderDoctor(os.Stdout, report, format, opsLegacyWarningLine(len(report.LiveLegacyHolders)))
+	return opsview.RenderDoctor(os.Stdout, report, format)
 }
 
 func runOpsVersion(args []string) error {
@@ -169,17 +169,4 @@ func runOpsVersion(args []string) error {
 	}
 	fmt.Fprintln(os.Stdout, v)
 	return nil
-}
-
-func opsLegacyWarningLine(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	noun := "pipeline"
-	if n != 1 {
-		noun = "pipelines"
-	}
-	return fmt.Sprintf(
-		"%d legacy-pinned %s running outside daemon admission -- bump their sparkwing pins",
-		n, noun)
 }

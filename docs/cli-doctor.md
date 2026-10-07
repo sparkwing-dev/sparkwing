@@ -12,10 +12,9 @@ Inspects local state and repairs entries whose owners have stopped.
 --dry-run reports proposed repairs. The command preserves live processes,
 active daemon state, and cluster-scoped records.
 
-Repairs cover home permissions, abandoned local run records, abandoned
-box-slot locks, ended local concurrency records, and orphaned run directories.
-Run-record repair requires a reachable daemon so held runs remain protected.
-A held box-slot lock is reported with guidance to update the pipeline SDK.
+Repairs cover home permissions, abandoned local run records, ended local
+concurrency records, and orphaned run directories. Run-record repair requires
+a reachable daemon so held runs remain protected.
 
 Run-directory removal requires a local store with recorded runs and profiles
 that all use that store. Directories written within the grace period remain.

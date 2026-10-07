@@ -1781,9 +1781,6 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		return skew
 	}
 	if current <= expectedSchemaVersion {
-		if err := bridgeLegacyFleetSQLite(ctx, tx, current, listed); err != nil {
-			return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
-		}
 		if err := bridgeMainLineageTenantKey(ctx, tx, current, false); err != nil {
 			return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 		}
@@ -1911,9 +1908,6 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if current > expectedSchemaVersion {
 		return tx.Commit()
 	}
-	if err := bridgeLegacyFleetPostgres(ctx, tx, current, listed); err != nil {
-		return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
-	}
 	if err := bridgeMainLineageTenantKey(ctx, tx, current, true); err != nil {
 		return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 	}
@@ -1961,9 +1955,9 @@ var migrationRequirements = map[int][]string{
 	26: {"unique-token-prefix"},
 	27: {"inherited-holder-marker"},
 	30: {
-		executorEnrollmentRequirement,
-		executorOfferRequirement,
-		agentLossRequirement,
+		"executor-enrollment-v1",
+		"executor-offer-arbitration-v1",
+		"agent-loss-attempt-fencing-v1",
 	},
 	31: {assistedExecutionPolicyRequirement},
 	33: {cronScheduleNameRequirement},

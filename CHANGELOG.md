@@ -120,6 +120,9 @@ unlock.
   controller mints one. See
   [Cache grants need a claim and a scope](docs/migrations/_unreleased.md#cache-grants-need-a-claim-and-a-scope).
 
+- **cli (Breaking):** `sparkwing doctor` and `sparkwing queue` no longer look for box-slot locks from pipelines pinned before v0.16
+  Nothing has taken a box slot since v0.16, and a binary that old refuses the current store. `doctor -o json` drops `legacy_box_slot_files_removed` and `live_legacy_holders`, `-o plain` drops their rows, and the legacy-pinned warning is gone. See [migration guide](docs/migrations/_unreleased.md#doctor-no-longer-reports-box-slot-locks).
+
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no

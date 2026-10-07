@@ -261,6 +261,18 @@ needs changing.
 **Why:** the grant is the cache's only team boundary, and a grant that named
 neither the claim nor the repository it was minted for outlived both.
 
+## doctor no longer reports box-slot locks
+
+- **Before:** `sparkwing doctor` read `$SPARKWING_HOME/box-slots`, reported a
+  live holder as a pipeline pinned before v0.16, and purged idle lock files.
+  `sparkwing queue` printed the same warning.
+- **After:** neither command reads the directory. `doctor -o json` no longer
+  carries `legacy_box_slot_files_removed` or `live_legacy_holders`, and
+  `-o plain` no longer prints those two rows.
+- **Upgrade:** scripts that read either field drop it. A leftover
+  `$SPARKWING_HOME/box-slots` directory holds only lock files and can be
+  deleted with `rm -r "${SPARKWING_HOME:-$HOME/.sparkwing}/box-slots"`.
+
 ## Unimplemented backend types are removed
 
 Code that imports `TypeGCS`, `TypeAzureBlob` or `TypeMySQL` from

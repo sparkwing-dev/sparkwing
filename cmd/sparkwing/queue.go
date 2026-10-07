@@ -57,21 +57,17 @@ func runQueueList(cmd Command, args []string) error {
 	defer cancel()
 
 	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, Version: Version})
-	legacy, _ := liveLegacyBoxSlots(*home)
-
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
 			if rerr := renderUnreachableDaemon(os.Stdout, format, err); rerr != nil {
 				return rerr
 			}
-			warnLegacy(os.Stderr, len(legacy))
 			return exitError(4, fmt.Errorf("%s: %w", cmd.Path, err))
 		}
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
 				return rerr
 			}
-			warnLegacy(os.Stderr, len(legacy))
 			return nil
 		}
 		return fmt.Errorf("%s: %w", cmd.Path, err)
@@ -79,7 +75,6 @@ func runQueueList(cmd Command, args []string) error {
 	if rerr := renderLocalQueue(os.Stdout, qs, format); rerr != nil {
 		return rerr
 	}
-	warnLegacy(os.Stderr, len(legacy))
 	return nil
 }
 
@@ -123,12 +118,6 @@ func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wing
 		return wingwire.QueueState{}, fmt.Errorf("decode queue state: %w", err)
 	}
 	return qs, nil
-}
-
-func warnLegacy(w io.Writer, n int) {
-	if line := legacyWarningLine(n); line != "" {
-		fmt.Fprintf(w, "warning: %s\n", line)
-	}
 }
 
 func renderNoDaemon(w io.Writer, format string) error {
