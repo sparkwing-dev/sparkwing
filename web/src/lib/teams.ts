@@ -393,7 +393,7 @@ export function runnerConnectCommand(
     /^[A-Za-z0-9._:/@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
   const dir = '"$HOME/.config/sparkwing/runner-credentials"';
   return [
-    `(umask 077 && mkdir -p ${dir} && printf '%s' ${quoted(minted.token)} > ${dir}/agent-token) &&`,
+    `(umask 077; mkdir -p ${dir}; rm -f ${dir}/agent-token; printf '%s' ${quoted(minted.token)} > ${dir}/agent-token) &&`,
     `sparkwing-runner runner --credentials-dir ${dir}`,
     `--controller ${controllerURLPlaceholder}`,
     ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),

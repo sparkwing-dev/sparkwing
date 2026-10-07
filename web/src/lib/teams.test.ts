@@ -395,7 +395,7 @@ describe("runnerConnectCommand", () => {
     const dir = '"$HOME/.config/sparkwing/runner-credentials"';
     assert.equal(
       cmd,
-      `(umask 077 && mkdir -p ${dir} && printf '%s' swr_secret > ${dir}/agent-token) && sparkwing-runner runner --credentials-dir ${dir} --controller ${teams.controllerURLPlaceholder} --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix 'Korey'\\''s laptop'`,
+      `(umask 077; mkdir -p ${dir}; rm -f ${dir}/agent-token; printf '%s' swr_secret > ${dir}/agent-token) && sparkwing-runner runner --credentials-dir ${dir} --controller ${teams.controllerURLPlaceholder} --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix 'Korey'\\''s laptop'`,
     );
   });
 });

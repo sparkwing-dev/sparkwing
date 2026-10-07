@@ -568,7 +568,8 @@ machine's own git config and credentials. The dashboard's machines page asks
 which repositories the machine may build and prints this command:
 
 ```bash
-(umask 077 && mkdir -p "$HOME/.config/sparkwing/runner-credentials" &&
+(umask 077; mkdir -p "$HOME/.config/sparkwing/runner-credentials"
+  rm -f "$HOME/.config/sparkwing/runner-credentials/agent-token"
   printf '%s' swr_... > "$HOME/.config/sparkwing/runner-credentials/agent-token") &&
 sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials" \
   --controller https://sparkwing.example.com --logs https://logs.example.com \
