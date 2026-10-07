@@ -34,10 +34,14 @@ type Config struct {
 
 	Version string
 
-	RegisterMetrics func(metric.Meter)
+	// Prometheus installs a meter provider whose instruments Telemetry.PromHandler
+	// serves. A service that mounts no /metrics for it leaves this false.
+	Prometheus bool
 }
 
 type Telemetry struct {
+	// PromHandler serves the meter provider's instruments; it is nil unless
+	// Config.Prometheus was set.
 	PromHandler http.Handler
 
 	shutdowns []func(context.Context) error
@@ -94,19 +98,21 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		res = resource.Default()
 	}
 
-	registry := promclient.NewRegistry()
-	promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
-	if err != nil {
-		return nil, fmt.Errorf("otel prometheus exporter: %w", err)
+	if cfg.Prometheus {
+		registry := promclient.NewRegistry()
+		promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
+		if err != nil {
+			return nil, fmt.Errorf("otel prometheus exporter: %w", err)
+		}
+		t.PromHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+		mp := sdkmetric.NewMeterProvider(
+			sdkmetric.WithResource(res),
+			sdkmetric.WithReader(promExporter),
+		)
+		otel.SetMeterProvider(mp)
+		t.shutdowns = append(t.shutdowns, mp.Shutdown)
+		log.Printf("otel: metrics enabled (prometheus /metrics)")
 	}
-	t.PromHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
-
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(promExporter),
-	)
-	otel.SetMeterProvider(mp)
-	t.shutdowns = append(t.shutdowns, mp.Shutdown)
 
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") != "" {
 		traceCtx, traceCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -157,12 +163,6 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
-
-	if cfg.RegisterMetrics != nil {
-		cfg.RegisterMetrics(otel.Meter(cfg.ServiceName))
-	}
-
-	log.Printf("otel: metrics enabled (prometheus /metrics)")
 
 	return t, nil
 }

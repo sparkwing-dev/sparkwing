@@ -301,3 +301,37 @@ func ContextFromEnv(ctx context.Context) context.Context {
 	carrier := propagation.MapCarrier{"traceparent": tp}
 	return propagation.TraceContext{}.Extract(ctx, carrier)
 }
+
+func TestInitServesMetricsOnlyWhenAsked(t *testing.T) {
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"} {
+		t.Setenv(key, "")
+	}
+	old := slog.Default()
+	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+
+	plain, err := Init(t.Context(), Config{ServiceName: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = plain.Shutdown(context.Background()) })
+	if plain.PromHandler != nil || otel.GetMeterProvider() != meter {
+		t.Fatal("a service that serves no /metrics got a Prometheus meter provider")
+	}
+
+	served, err := Init(t.Context(), Config{ServiceName: "served", Prometheus: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = served.Shutdown(context.Background()) })
+	counter, err := Meter("served").Int64Counter("otelutil_test_hits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Add(t.Context(), 1)
+	rec := httptest.NewRecorder()
+	served.PromHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "otelutil_test_hits") {
+		t.Fatalf("/metrics does not serve the meter's instruments:\n%s", rec.Body.String())
+	}
+}
