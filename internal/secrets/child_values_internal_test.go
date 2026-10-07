@@ -142,6 +142,23 @@ func TestChildValuesMaskRecordMasksANumberEqualToAValue(t *testing.T) {
 	}
 }
 
+func TestParseNumberReadsOnlyJSONNumbers(t *testing.T) {
+	for _, s := range []string{"1p10000000", "0x1p10000000", "0x10", "1_000", "+1", " 1", "01", "1.", ".5", "Inf"} {
+		if _, ok := parseNumber(s); ok {
+			t.Errorf("parseNumber(%q) parsed a spelling JSON never produces", s)
+		}
+	}
+	for _, s := range []string{"0", "-12", "1.5", "1.23456e5", "1E-3", "2e+10"} {
+		if _, ok := parseNumber(s); !ok {
+			t.Errorf("parseNumber(%q) refused a JSON number", s)
+		}
+	}
+	got := knownValues("1p10000000").MaskRecord(sparkwing.LogRecord{Attrs: map[string]any{"a": json.Number("1p10000000")}})
+	if got.Attrs["a"] != "***" {
+		t.Fatalf("attrs = %#v, want the registered spelling masked by text", got.Attrs)
+	}
+}
+
 func TestChildValuesMaskRecordMatchesAVeryLongNumberByTextOnly(t *testing.T) {
 	long := "0." + strings.Repeat("7", 1_048_000)
 	if _, ok := parseNumber(long); ok {

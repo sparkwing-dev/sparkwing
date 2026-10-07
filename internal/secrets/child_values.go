@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -206,8 +207,12 @@ const (
 	maxNumberText     = 128
 )
 
+// safety: big.Rat also reads hex, binary exponents and underscores, which
+// slip past the exponent bound, so only JSON's own number spelling is parsed.
+var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
+
 func parseNumber(s string) (*big.Rat, bool) {
-	if len(s) > maxNumberText {
+	if len(s) > maxNumberText || !jsonNumber.MatchString(s) {
 		return nil, false
 	}
 	if i := strings.IndexAny(s, "eE"); i >= 0 {
