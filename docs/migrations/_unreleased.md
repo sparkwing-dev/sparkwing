@@ -483,3 +483,12 @@ review as the route table moves to one declared list.
 - **Operator steps:** generate a seed with `openssl rand -base64 32`, store it
   as `SPARKWING_UPDATE_SIGNING_KEY`, and print its public key with
   `SPARKWING_RELEASE_SIGNING_KEY=<seed> go run ./cmd/verify-release --public-key`.
+
+## Storage and store names that moved
+
+- **Before:** `storeurl.OpenS3`, `storeurl.SDKMaxAttempts` and
+  `storeurl.SDKMaxBackoff` lived in `pkg/storage/storeurl`.
+- **After:** they are `Open`, `SDKMaxAttempts` and `SDKMaxBackoff` in
+  `pkg/storage/s3`, beside `ParseURL` and `NewClient`. Behaviour is unchanged.
+- **Author steps:** replace `storeurl.OpenS3(ctx, raw)` with `s3.Open(ctx, raw)`
+  from `github.com/sparkwing-dev/sparkwing/pkg/storage/s3`.

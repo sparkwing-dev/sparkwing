@@ -21,7 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 )
 
 func main() {
@@ -371,7 +371,7 @@ func envTruthy(name string) bool {
 }
 
 func openArchive(ctx context.Context, raw string) (*teamblob.Store, error) {
-	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	client, bucket, prefix, err := s3store.Open(ctx, raw)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,7 @@
 // that count from.
 //
 // Requests go through the client the caller hands in. Built by
-// storeurl.OpenS3, that client caps the SDK's own retries and spends a
+// pkg/storage/s3.Open, that client caps the SDK's own retries and spends a
 // process-wide request budget on each attempt, so nothing here retries
 // on its own: a failing bucket costs at most the SDK's capped attempts
 // per call, never a loop.

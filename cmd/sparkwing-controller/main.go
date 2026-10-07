@@ -570,7 +570,7 @@ func run(args []string) error {
 		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
 		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
 		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
-		client, _, _, err := storeurl.OpenS3(ctx, rawStore)
+		client, _, _, err := s3store.Open(ctx, rawStore)
 		if err != nil {
 			return fmt.Errorf("download signer S3: %w", err)
 		}
@@ -579,7 +579,7 @@ func run(args []string) error {
 		}
 	}
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
-		client, bucket, prefix, err := storeurl.OpenS3(ctx, *cacheBlobStore)
+		client, bucket, prefix, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
@@ -905,7 +905,7 @@ func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Dur
 	if raw == "" {
 		return nil, nil
 	}
-	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	client, bucket, prefix, err := s3store.Open(ctx, raw)
 	if err != nil {
 		return nil, err
 	}

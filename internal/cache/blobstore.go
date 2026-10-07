@@ -19,7 +19,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 )
 
 // safety: git mirrors, workspace uploads, archives and the registry proxy stay on the
@@ -29,7 +29,7 @@ var blobStore *teamblob.Store
 // hack: an indirection so a test hands New a store over an in-memory
 // bucket instead of the AWS default chain.
 var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, error) {
-	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	client, bucket, prefix, err := s3store.Open(ctx, raw)
 	if err != nil {
 		return nil, err
 	}

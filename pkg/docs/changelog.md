@@ -35,6 +35,9 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
+- **storage (Breaking):** `storeurl.OpenS3`, `storeurl.SDKMaxAttempts` and `storeurl.SDKMaxBackoff` move to `pkg/storage/s3` as `Open`, `SDKMaxAttempts` and `SDKMaxBackoff`
+  `pkg/storage/s3` also gains `ParseURL` and `NewClient`, the one S3 client constructor. `sparkwing-logs` and `sparkwing-cache` no longer link `storeurl`, which took the controller client, the cron scheduler and the toolchain fetcher with it. See the [migration guide](docs/migrations/_unreleased.md#storage-and-store-names-that-moved).
+
 - **runner:** A run's trigger claim gets one heartbeat, from the process that claimed it
   The runner's trigger loop and the `handle-trigger` child it starts each posted `/api/v1/triggers/{id}/heartbeat`, every 3 and 5 seconds. The child now heartbeats only when its parent passes `--heartbeat`, as `sparkwing cluster worker` does; the trigger loop, which holds the claim, stays the only one beating for the runs it starts. An older pipeline binary under a newer runner still beats as before.
 
