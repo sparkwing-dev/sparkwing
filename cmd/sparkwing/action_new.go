@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -439,7 +440,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			fmt.Printf("    %s\n", color.Dim(hint))
 		}
 	}
-	tidied, err := tidySkeleton(sparkwingDir)
+	tidied, err := tidySkeleton(context.Background(), sparkwingDir)
 	if err != nil {
 		return err
 	}

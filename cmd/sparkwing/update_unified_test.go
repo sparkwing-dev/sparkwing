@@ -632,7 +632,7 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	dir := sdkUpdateFixture(t, "")
 	bin := t.TempDir()
 	log := filepath.Join(bin, "go-argv")
-	script := "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$PWD\" \"$GOTOOLCHAIN\" \"$*\" >> '" + log + "'\n" +
+	script := "#!/bin/sh\nif [ \"$1\" = env ]; then printf 'go1.26.6+auto\\ngo1.26.6\\noff\\n'; exit 0; fi\nprintf '%s|%s|%s\\n' \"$PWD\" \"$GOTOOLCHAIN\" \"$*\" >> '" + log + "'\n" +
 		"case \"$1\" in\nget) printf 'module fixture\\n\\ngo 1.26.0\\n\\nrequire " + sdkModulePath + " v0.49.0\\n' > go.mod;;\nmod) printf 'tidy diagnostic\\n'; printf 'fixture sum\\n' > go.sum;;\n*) exit 91;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -684,7 +684,7 @@ func TestUnifiedSDKPartialFailureHasNoSuccessReceipt(t *testing.T) {
 	updateMetadataFixture(t)
 	dir := sdkUpdateFixture(t, "")
 	bin := t.TempDir()
-	script := "#!/bin/sh\nif [ \"$1\" = get ]; then printf 'module fixture\\n\\ngo 1.26.0\\n\\nrequire " + sdkModulePath + " v0.49.0\\n' > go.mod; exit 0; fi\nexit 17\n"
+	script := "#!/bin/sh\nif [ \"$1\" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi\nif [ \"$1\" = get ]; then printf 'module fixture\\n\\ngo 1.26.0\\n\\nrequire " + sdkModulePath + " v0.49.0\\n' > go.mod; exit 0; fi\nexit 17\n"
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

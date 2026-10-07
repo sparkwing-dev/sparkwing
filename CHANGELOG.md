@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
+  It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
+
 - **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
   It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
 
@@ -51,6 +54,10 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+
+- **cli:** Build the pipeline module with the Go version its `go.mod` requires when a fixed `GOTOOLCHAIN` pins an older version
+  Resolution and compilation select the required toolchain; pipeline steps retain the original pin. `GOTOOLCHAIN=local` errors name the running version, required floor, setting source, and fix, including when a dependency raises the requirement. These errors no longer suggest `--sw-no-update`.
+
 - **Dashboard build:** Update `sharp` to 0.35.5 so `pnpm audit` passes GHSA-wq5f-xc86-pv6w; the static dashboard export never runs it at serve time.
 
 - **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt

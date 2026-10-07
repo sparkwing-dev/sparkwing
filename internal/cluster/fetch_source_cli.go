@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -202,11 +203,23 @@ func privateModuleEnv(base, ids []string, token string) []string {
 }
 
 func goModDownload(ctx context.Context, dir string, env []string) error {
+	if filepath.Base(dir) == ".sparkwing" {
+		var err error
+		env, err = gotoolchain.BuildEnv(ctx, dir, env, "")
+		if err != nil {
+			return err
+		}
+	}
 	cmd := exec.CommandContext(ctx, "go", "mod", "download")
 	cmd.Dir, cmd.Env = dir, env
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = os.Stderr, &stderr
 	if err := cmd.Run(); err != nil {
+		if filepath.Base(dir) == ".sparkwing" {
+			if explanation := gotoolchain.ExplainOutput(ctx, stderr.String(), env); explanation != nil {
+				return explanation
+			}
+		}
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil

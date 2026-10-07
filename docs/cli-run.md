@@ -11,6 +11,11 @@ Invoke a pipeline
 Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline.
 
+Pipeline-module builds honor the highest go directive in go.mod and an active
+resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
+for the build only. GOTOOLCHAIN=local refuses with installation or unpinning
+guidance. Pipeline steps retain the original environment.
+
 Runner options use the --sw- prefix. Unknown --sw- options fail before
 execution setup. Other arguments pass to the pipeline. Put -- before
 pipeline arguments that resemble runner options; every argument after the

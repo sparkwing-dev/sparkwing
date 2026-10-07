@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
@@ -638,6 +640,15 @@ func (lb *lockedBuffer) Bytes() []byte {
 var pipelineBuildFlags = []string{"-trimpath", "-ldflags", "-s -w"}
 
 func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
+	return compilePipeline(ctx, sparkwingDir, dest, pipelineBuildFlags)
+}
+
+// CompileUncachedPipeline preserves debug symbols for execution without the binary cache.
+func CompileUncachedPipeline(ctx context.Context, sparkwingDir, dest string) error {
+	return compilePipeline(ctx, sparkwingDir, dest, nil)
+}
+
+func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []string) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
@@ -648,8 +659,12 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 		return err
 	}
 
-	args := append([]string{"build"}, pipelineBuildFlags...)
-	env := os.Environ()
+	args := append([]string{"build"}, flags...)
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
+	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, nil, EffectiveOverlay(sparkwingDir))
+	if err != nil {
+		return err
+	}
 	overlay := overlayModfilePath(sparkwingDir)
 	work, workPresent := goWorkInScope(sparkwingDir)
 	switch {
@@ -684,12 +699,15 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = env
-	if err := runToolchain(ctx, cmd); err != nil {
+	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
+		}
+		if explanation := gotoolchain.ExplainOutput(ctx, captured.String(), env); explanation != nil {
+			return &CompileError{Output: []byte(explanation.Error()), Err: explanation}
 		}
 		return &CompileError{Output: captured.Bytes(), Err: err}
 	}
@@ -1152,4 +1170,13 @@ func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summar
 	}
 
 	return targets, b.String(), nil
+}
+
+// EffectiveOverlay returns the overlay used when building the pipeline module.
+func EffectiveOverlay(dir string) string {
+	work, present := goWorkInScope(dir)
+	if present && goWorkCovers(work, dir) {
+		return ""
+	}
+	return overlayModfilePath(dir)
 }
