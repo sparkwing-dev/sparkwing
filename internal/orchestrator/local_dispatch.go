@@ -65,5 +65,5 @@ func startRunLoopback(ctx context.Context, opts *Options, backends Backends, log
 	if local, ok := backends.State.(localState); ok {
 		return startLoopbackController(ctx, local.st, opts.ArtifactStore, opts.RunID, logger)
 	}
-	return startLoopbackShim(backends.State, backends.Concurrency, opts.ArtifactStore, opts.RunID, logger)
+	return startLoopbackShim(backends.State, backends.Concurrency, opts.RunID, logger)
 }

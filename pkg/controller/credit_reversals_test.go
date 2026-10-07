@@ -98,11 +98,6 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 		path := strings.ReplaceAll(m[2], "{id}", "rx")
 		path = regexp.MustCompile(`\{[^}]+\}`).ReplaceAllString(path, "x")
 		path = strings.TrimSuffix(path, "...")
-		// safety: the artifact route is registered only on a server given an
-		// artifact store, which this fixture is not.
-		if strings.HasPrefix(m[2], "/api/v1/artifacts/") {
-			continue
-		}
 		code := f.call(m[1], path, grant, map[string]any{}, nil)
 		if code != http.StatusForbidden && code != http.StatusUnauthorized {
 			t.Errorf("%s with a credits.grant token = %d, want 401 or 403", route, code)

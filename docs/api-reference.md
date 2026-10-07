@@ -15,7 +15,6 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/agents/{name}` | `admin` |
 | `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `GET` | `/api/v1/artifacts/{key}` | `runs.read` |
 | `GET` | `/api/v1/auth/bootstrap-needed` | `public` |
 | `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |

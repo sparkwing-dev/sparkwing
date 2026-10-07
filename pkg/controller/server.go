@@ -319,10 +319,9 @@ func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
 	return s
 }
 
-// WithArtifactStore enables in-process artifact serving at
-// /api/v1/artifacts/{key}. The route is registered only when this
-// option is set (laptop mode). Cluster mode serves artifacts from a
-// dedicated process and leaves this nil.
+// WithArtifactStore names the artifact store the bucket ceiling measures
+// when no bucket usage store is set (laptop mode). Cluster mode leaves it
+// nil.
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 	s.artifactStore = a
 	return s
@@ -1103,10 +1102,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetApproval)))
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
-
-	if s.artifactStore != nil {
-		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, s.metered(egress.ClassArtifact, http.HandlerFunc(s.handleArtifactGet))))
-	}
 
 	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
 	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))

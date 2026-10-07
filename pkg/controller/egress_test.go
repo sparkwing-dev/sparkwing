@@ -1,7 +1,6 @@
 package controller_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -9,13 +8,11 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -30,7 +27,7 @@ type egressFixture struct {
 	reader     string
 }
 
-func newEgressFixture(t *testing.T, cfg egress.Config, art storage.ArtifactStore) egressFixture {
+func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -59,9 +56,6 @@ func newEgressFixture(t *testing.T, cfg egress.Config, art storage.ArtifactStore
 
 	meter := egress.New(cfg)
 	ctrl := controller.New(st, nil).EnableAuthFromStore().WithEgressMeter(meter)
-	if art != nil {
-		ctrl = ctrl.WithArtifactStore(art)
-	}
 	srv := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(srv.Close)
 	return egressFixture{
@@ -111,18 +105,6 @@ func (f egressFixture) get(t *testing.T, path, token string) fetched {
 	return f.fetch(t, http.MethodGet, path, token)
 }
 
-// safety: a download the budget cuts is aborted, which spending the budget
-// expects, so neither the request nor the read has to succeed.
-func (f egressFixture) spend(t *testing.T, path, token string) {
-	t.Helper()
-	resp, err := http.DefaultClient.Do(f.request(t, http.MethodGet, path, token))
-	if err != nil {
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
-}
-
 func seedLiveLog(t *testing.T, f egressFixture, runID, nodeID, text string) {
 	t.Helper()
 	ctx := context.Background()
@@ -169,8 +151,7 @@ func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	art := &fakeArtifactStore{objects: map[string][]byte{"runs/r1/k": []byte("payload")}}
-	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4}, art)
+	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4})
 	seedLiveLog(t, f, "r1", "n1", "hello\n")
 
 	// safety: a runner reads a node's logs on its claim scope, which is the
@@ -181,19 +162,14 @@ func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 		t.Fatalf("runner log read = %d, body %q", runnerLogs.status, runnerLogs.body)
 	}
 
-	artifact := f.get(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.reader)
-	if artifact.status != http.StatusOK || string(artifact.body) != "payload" {
-		t.Fatalf("CLI artifact fetch = %d, body %q", artifact.status, artifact.body)
-	}
-
 	logs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.reader)
 	if logs.status != http.StatusOK || !strings.Contains(string(logs.body), "hello") {
 		t.Fatalf("CLI log read = %d, body %q", logs.status, logs.body)
 	}
 
 	state := f.meter.State()
-	if state.GlobalMonthBytes < int64(len(runnerLogs.body)+len(artifact.body)+len(logs.body)) {
-		t.Errorf("metered %d bytes, want at least the three bodies", state.GlobalMonthBytes)
+	if state.GlobalMonthBytes < int64(len(runnerLogs.body)+len(logs.body)) {
+		t.Errorf("metered %d bytes, want at least the two bodies", state.GlobalMonthBytes)
 	}
 	if len(state.Top) != 2 {
 		t.Errorf("top consumers = %+v, want the runner and the CLI counted apart", state.Top)
@@ -201,12 +177,10 @@ func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 }
 
 func TestDownloadRoutesRefuseARequestWithoutABearer(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": []byte("payload")}}
-	f := newEgressFixture(t, egress.Config{}, art)
+	f := newEgressFixture(t, egress.Config{})
 	seedLiveLog(t, f, "r1", "n1", "hello\n")
 
 	for _, path := range []string{
-		"/api/v1/artifacts/k",
 		"/api/v1/runs/r1/nodes/n1/logs",
 		"/api/v1/runs/r1/nodes/n1/logs/stream",
 	} {
@@ -220,17 +194,17 @@ func TestDownloadRoutesRefuseARequestWithoutABearer(t *testing.T) {
 }
 
 func TestHeadRequestsChargeNothingAndHoldNoSlot(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 1<<20)}}
-	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 1 << 20, MaxDownloadsPerPrincipal: 1}, art)
+	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 4 << 10, MaxDownloadsPerPrincipal: 1})
+	seedLiveLog(t, f, "r1", "n1", strings.Repeat("x", 1<<10)+"\n")
 
 	for range 8 {
-		if got := f.fetch(t, http.MethodHead, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusOK {
+		if got := f.fetch(t, http.MethodHead, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken).status; got != http.StatusOK {
 			t.Fatalf("HEAD = %d, want 200", got)
 		}
 	}
 
 	// safety: net/http discards a HEAD body, so eight of them over a
-	// 1 MiB object once latched the daily alarm with nothing on the wire.
+	// 1 KiB log once latched a 4 KiB daily alarm with nothing on the wire.
 	state := f.meter.State()
 	if state.GlobalDayBytes != 0 {
 		t.Fatalf("eight HEADs charged %d bytes, want 0", state.GlobalDayBytes)
@@ -240,50 +214,17 @@ func TestHeadRequestsChargeNothingAndHoldNoSlot(t *testing.T) {
 	}
 }
 
-// safety: this holds one Get open until released, which is how a test
-// gets two downloads in flight against a concurrency cap of one.
-type blockingArtifactStore struct {
-	payload []byte
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-// safety: only the first Get blocks. A later one must answer, or a test
-// that expects a second caller to be admitted waits on a store that never
-// returns instead of on the slot it is measuring.
-func (b *blockingArtifactStore) Get(_ context.Context, _ string) (io.ReadCloser, error) {
-	first := false
-	b.once.Do(func() {
-		first = true
-		close(b.started)
-	})
-	if first {
-		<-b.release
-	}
-	return io.NopCloser(bytes.NewReader(b.payload)), nil
-}
-func (b *blockingArtifactStore) Put(context.Context, string, io.Reader) error   { return nil }
-func (b *blockingArtifactStore) Has(context.Context, string) (bool, error)      { return false, nil }
-func (b *blockingArtifactStore) Delete(context.Context, string) error           { return nil }
-func (b *blockingArtifactStore) List(context.Context, string) ([]string, error) { return nil, nil }
-
 func TestConcurrentDownloadsAreCappedPerPrincipal(t *testing.T) {
-	art := &blockingArtifactStore{
-		payload: []byte("payload"),
-		started: make(chan struct{}),
-		release: make(chan struct{}),
+	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1})
+	seedLiveLog(t, f, "r1", "n1", "hello\n")
+
+	// safety: a log read finishes before a second request can overlap it, so
+	// the first download's slot is taken on the meter directly.
+	release, err := f.meter.Open(egress.TeamPrincipal(string(store.DefaultTeam), "root"), egress.SlotDownload)
+	if err != nil {
+		t.Fatalf("hold the principal's download slot: %v", err)
 	}
-	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1}, art)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		f.spend(t, "/api/v1/artifacts/k", f.adminToken)
-	}()
-	<-art.started
-
-	refused := f.get(t, "/api/v1/artifacts/k", f.adminToken)
+	refused := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken)
 	if refused.status != http.StatusTooManyRequests {
 		t.Fatalf("a second simultaneous download = %d, want 429", refused.status)
 	}
@@ -301,18 +242,17 @@ func TestConcurrentDownloadsAreCappedPerPrincipal(t *testing.T) {
 		t.Errorf("error member %q does not carry the reason", refusal.Error)
 	}
 
-	close(art.release)
-	<-done
-
-	// safety: the slot is released when the response ends, so the next
-	// download is admitted.
-	if got := f.get(t, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusOK {
+	release()
+	if got := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken).status; got != http.StatusOK {
 		t.Fatalf("a download after the first finished = %d, want 200", got)
+	}
+	if got := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken).status; got != http.StatusOK {
+		t.Fatalf("a download after the second finished = %d, want 200; the route kept its slot", got)
 	}
 }
 
 func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
-	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 1}, nil)
+	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 1})
 	seedLiveLog(t, f, "r1", "n1", "hello\n")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -364,8 +304,9 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 }
 
 func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
-	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 60}, art)
+	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 60})
+	seedLiveLog(t, f, "r1", "n1", strings.Repeat("x", 100)+"\n")
+	before0 := f.meter.State().GlobalMonthBytes
 
 	var health struct {
 		Status   string         `json:"status"`
@@ -380,7 +321,10 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 		t.Fatalf("health egress = %+v, want no alarm", health.Egress)
 	}
 
-	f.spend(t, "/api/v1/artifacts/k", f.adminToken)
+	read := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken)
+	if read.status != http.StatusOK {
+		t.Fatalf("log read = %d, want 200", read.status)
+	}
 
 	after := f.get(t, "/api/v1/health", "")
 	if err := json.Unmarshal(after.body, &health); err != nil {
@@ -413,13 +357,13 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	if !top.Enabled || !top.Egress.Alarm {
 		t.Fatalf("view = %+v, want an enabled meter with the alarm up", top)
 	}
-	if len(top.Egress.Top) != 1 || top.Egress.Top[0].Principal != "default/root" || top.Egress.Top[0].MonthBytes != 100 {
-		t.Fatalf("top consumers = %+v, want default/root at 100 bytes", top.Egress.Top)
+	if len(top.Egress.Top) != 1 || top.Egress.Top[0].Principal != "default/root" || top.Egress.Top[0].MonthBytes != before0+int64(len(read.body)) {
+		t.Fatalf("top consumers = %+v, want default/root at the %d bytes it read", top.Egress.Top, len(read.body))
 	}
 }
 
 func TestTheTopConsumersViewIsAdminOnly(t *testing.T) {
-	f := newEgressFixture(t, egress.Config{}, nil)
+	f := newEgressFixture(t, egress.Config{})
 	if got := f.get(t, "/api/v1/egress", f.runner).status; got != http.StatusForbidden {
 		t.Fatalf("a runner reading the egress view = %d, want 403", got)
 	}
@@ -469,29 +413,16 @@ func TestTheGitcacheProxyIsByteMeteredButHoldsNoSlot(t *testing.T) {
 // safety: the pod header is the caller's to write, so a slot keyed on it
 // let one bearer open as many downloads as it invented pod names.
 func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
-	art := &blockingArtifactStore{
-		payload: []byte("payload"),
-		started: make(chan struct{}),
-		release: make(chan struct{}),
+	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1})
+	seedLiveLog(t, f, "r1", "n1", "hello\n")
+	release, err := f.meter.Open(egress.TeamPrincipal(string(store.DefaultTeam), "root"), egress.SlotDownload)
+	if err != nil {
+		t.Fatalf("hold the principal's download slot: %v", err)
 	}
-	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1}, art)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		req := f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken)
-		req.Header.Set(store.RunnerIdentityHeader, "pod-a")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		_, _ = io.Copy(io.Discard, resp.Body)
-	}()
-	<-art.started
+	defer release()
 
 	for _, header := range []string{store.RunnerIdentityHeader, store.ClaimHolderHeader} {
-		req := f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken)
+		req := f.request(t, http.MethodGet, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken)
 		req.Header.Set(header, "pod-b")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -502,7 +433,4 @@ func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 			t.Errorf("a second download naming %s pod-b = %d, want 429 from the principal's one slot", header, resp.StatusCode)
 		}
 	}
-
-	close(art.release)
-	<-done
 }

@@ -245,3 +245,19 @@ takes the node's claim token or `runs.state` rather than `runs.read`, and its
 
 **Why:** an unused stream that a claim token could hold open for half an hour
 was attack surface with no caller.
+
+## The controller artifact route is removed
+
+**Before:** a controller or local daemon given an artifact store served
+`GET /api/v1/artifacts/{key}` to a `runs.read` caller, run keys to the run's
+team and content-addressed keys to the operator.
+
+**After:** the route answers 404. Nothing Sparkwing ships called it.
+
+**Upgrade:** a script that read artifacts this way reads the artifact store
+its profile names directly, the local directory or the bucket. On a cluster
+with direct data storage, `POST /api/v1/data/download` returns a signed URL
+for an `artifacts/...` key.
+
+**Why:** a second read path into the shared artifact store needed its own
+team check and its own egress accounting, and served no caller.

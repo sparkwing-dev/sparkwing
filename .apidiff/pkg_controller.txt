@@ -234,7 +234,6 @@ func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
-func (l *Loopback) WithArtifactStore(a storage.ArtifactStore) *Loopback
 func (l *Loopback) WithConcurrency(c LoopbackConcurrency) *Loopback
 type LoopbackConcurrency interface {
 	State(ctx context.Context, key string) (*store.ConcurrencyState, error)

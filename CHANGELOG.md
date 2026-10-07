@@ -108,6 +108,10 @@ unlock.
   learns its outcome from `GET /api/v1/concurrency/{key}/resolve`, which they already poll. Removing it drops a
   30-minute stream a claim token could hold open. See
   [The concurrency notify stream is removed](docs/migrations/_unreleased.md#the-concurrency-notify-stream-is-removed).
+- **controller (Breaking):** Remove the controller's artifact read route
+  `GET /api/v1/artifacts/{key}` answers 404 on the controller, the local daemon and the loopback. No CLI, SDK or
+  dashboard code read it; nodes stage artifacts through the cache's `/bin` routes or the direct data store.
+  See [The controller artifact route is removed](docs/migrations/_unreleased.md#the-controller-artifact-route-is-removed).
 - **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
   `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
   `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
