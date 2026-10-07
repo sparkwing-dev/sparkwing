@@ -23,6 +23,5 @@ type Logs = storage.LogStore
 // spec in ~/.config/sparkwing/config.yaml; every implementation in
 // pkg/storage/* satisfies this interface.
 //
-// Implementations today: sqlite. Recognized but not implemented in
-// this build: postgres, mysql, controller.
+// Implementations: sqlite, postgres, s3 and controller.
 type State = storage.StateStore

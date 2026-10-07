@@ -95,6 +95,8 @@ unlock.
 ### Removed
 - **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
+- **backends:** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
+  No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes.
 
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence

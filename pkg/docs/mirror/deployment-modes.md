@@ -94,10 +94,9 @@ one, so `sparkwing.RunAndAwait` refuses with a not-supported error
 naming Postgres rather than waiting on a run that nothing starts. Run
 pipelines that spawn other pipelines on Postgres or a controller.
 
-S3 is the object store that enforces these preconditions today. The
-`gcs` and `azure-blob` state types are recognized in configuration
-but not yet implemented. Some S3-compatible gateways accept the
-precondition headers and silently ignore them; a runner probes the
+S3 is the object store that enforces these preconditions. Some
+S3-compatible gateways accept the precondition headers and silently
+ignore them; a runner probes the
 endpoint once and, when it finds the guarantee missing, falls back to
 last-write-wins -- cache reservation degrades to "every runner
 computes and uploads to the same content-addressed key" (safe by

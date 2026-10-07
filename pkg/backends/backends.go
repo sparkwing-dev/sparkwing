@@ -97,13 +97,10 @@ type Spec struct {
 const (
 	TypeFilesystem = "filesystem"
 	TypeS3         = "s3"
-	TypeGCS        = "gcs"
-	TypeAzureBlob  = "azure-blob"
 	TypeController = "controller"
 	TypeStdout     = "stdout"
 	TypeSQLite     = "sqlite"
 	TypePostgres   = "postgres"
-	TypeMySQL      = "mysql"
 	TypeEnv        = "env"  // env vars; valid only on the secrets surface
 	TypeNone       = "none" // explicit "no backend"; valid only on the secrets surface
 )
@@ -172,7 +169,7 @@ func (s *Spec) ValidateFields(surface string) error {
 	switch s.Type {
 	case "":
 		return fmt.Errorf("%s backend: type is required", surface)
-	case TypeS3, TypeGCS, TypeAzureBlob:
+	case TypeS3:
 		if s.Bucket == "" {
 			return fmt.Errorf("%s backend type=%s requires bucket", surface, s.Type)
 		}
@@ -180,7 +177,7 @@ func (s *Spec) ValidateFields(surface string) error {
 		if s.Path == "" {
 			return fmt.Errorf("%s backend type=filesystem requires path", surface)
 		}
-	case TypePostgres, TypeMySQL:
+	case TypePostgres:
 		if s.URL == "" && s.URLSource == "" {
 			return fmt.Errorf("%s backend type=%s requires url or url_source", surface, s.Type)
 		}
@@ -195,9 +192,7 @@ func (s *Spec) ValidateFields(surface string) error {
 // safety: these are the logs surfaces that write one object per append,
 // so they are the only ones the batching keys reach.
 var objectStoreLogSurfaces = map[string]bool{
-	TypeS3:        true,
-	TypeGCS:       true,
-	TypeAzureBlob: true,
+	TypeS3: true,
 }
 
 // safety: a batching key reads as tuning wherever it is written, so one
@@ -226,7 +221,7 @@ func (s *Spec) validateLogBatching(surface string) error {
 			return fmt.Errorf("%s backend: %s applies only to the logs surface", surface, key)
 		}
 		if !objectStoreLogSurfaces[s.Type] {
-			return fmt.Errorf("logs backend: %s applies only to an object-store logs surface (s3, gcs, azure-blob), not type=%s", key, s.Type)
+			return fmt.Errorf("logs backend: %s applies only to an object-store logs surface (s3), not type=%s", key, s.Type)
 		}
 	}
 	return nil
