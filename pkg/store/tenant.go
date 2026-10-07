@@ -278,7 +278,6 @@ var tenantTables = []string{
 	"github_app_triggers",
 	"github_runner_bindings",
 	"github_runner_credentials",
-	"github_webhook_bindings",
 	"invitations",
 	"memberships",
 	"node_bounces",

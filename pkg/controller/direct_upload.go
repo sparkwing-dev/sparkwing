@@ -99,7 +99,7 @@ const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 // under its own ref and reads its own, its pull request's base, then the
 // default branch, and other callers use only the unscoped objects.
 func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (repo, write string, read []string, err error) {
-	if grant.Claim == nil || grant.Claim.Kind != authwire.CacheClaimToken {
+	if grant.Claim.Kind != authwire.CacheClaimToken {
 		return "", "", []string{""}, nil
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(grant.Team))
@@ -161,7 +161,7 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		return directCaller{}, false
 	}
 	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
-	if err != nil || grant.Claim == nil {
+	if err != nil {
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}

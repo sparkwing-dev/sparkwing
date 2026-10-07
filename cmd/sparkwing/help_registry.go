@@ -196,14 +196,14 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Inspect controller health, executors, admission, users, tokens, images,
-and webhooks. Select the controller with --profile NAME.
+	Description: `Inspect controller health, executors, admission, users, tokens and
+images. Select the controller with --profile NAME.
 Configure profiles with 'sparkwing configure profiles'.
 
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -1286,8 +1286,8 @@ pipelines this repo defines. 'new' scaffolds a fresh pipeline
 (auto-bootstraps .sparkwing/ on first use). 'run' invokes one
 (positional name; same as 'sparkwing run <name>'). 'hooks' wires
 pipelines to git pre-commit / pre-push / post-commit.
-'sparks' manages reusable spark libraries declared in
-.sparkwing/sparks.yaml.
+'sparks' manages reusable spark libraries declared in the
+sparks: block of .sparkwing/sparkwing.yaml.
 
 The discovery verbs (list / describe / discover / templates)
 support -o json so an agent can parse output directly rather
@@ -3543,19 +3543,19 @@ var cmdHealth = Command{
 	Synopsis: "Connectivity + fleet + queue health check against a remote cluster",
 	Description: `Answers "is this cluster alive?" in one command. Runs the
 connectivity / auth probes from 'profiles test' plus cluster-
-state probes that hit /api/v1/agents, /api/v1/pool,
-/api/v1/triggers (status=claimed), and /api/v1/runs?since=24h.
+state probes that hit /api/v1/agents, /api/v1/triggers
+(status=claimed), and /api/v1/runs?since=24h.
 
 Sections:
 
   CONNECTIVITY  controller / auth / logs / gitcache
-  FLEET         agents (connected vs stale) + warm-runner pool
+  FLEET         agents (connected vs stale)
   QUEUE         stuck triggers + recent-run success rate
 
 Exit 0 when every probe is ok or warn; exit 1 when any probe
 fails (auth reject, controller down, HTTP 5xx). Warnings are
-informational -- low success rate, empty pool, stale agents --
-and don't change the exit code so scripts can still condition
+informational -- low success rate, stale agents -- and don't
+change the exit code so scripts can still condition
 on "is the cluster reachable at all?".`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -3565,132 +3565,6 @@ on "is the cluster reachable at all?".`,
 	Examples: []Example{
 		{"Quick-check prod", "sparkwing cluster status --profile prod"},
 		{"Structured output for a status dashboard", "sparkwing cluster status --profile prod -o json"},
-	},
-}
-
-var cmdWebhooks = Command{
-	Path:     "sparkwing cluster webhooks",
-	Synopsis: "Connect, inspect, and replay GitHub webhooks",
-	Description: `Manage GitHub webhooks through the installed 'gh' command and its
-credentials. 'connect' registers a repository against a pipeline on both
-sides and 'disconnect' removes it; the deliveries view joins delivery
-records with Sparkwing triggers and run outcomes.`,
-	SubcommandOrder: []string{"connect", "disconnect", "list", "deliveries", "replay"},
-	Examples: []Example{
-		{"Connect a repository to a pipeline", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
-	},
-}
-
-var cmdWebhooksConnect = Command{
-	Path:     "sparkwing cluster webhooks connect",
-	Synopsis: "Connect a GitHub repository to a pipeline",
-	Description: `Registers both sides of a webhook in one command. It generates a
-signing secret, stores the binding on the controller, creates or
-updates the repository's webhook through 'gh' so it posts to the
-controller's delivery URL for this pipeline, and asks GitHub for a
-ping so the answer the controller gave is part of the output.
-
-The secret is never printed and never passed in a command line; the
-controller stores it and verifies every delivery's HMAC against it.
-Re-running the command rotates the secret on both sides.
-
-The delivery URL comes from the controller: its --external-url when
-it announces one, and otherwise the URL this command reached it at.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the deliveries fire", Required: true, Group: "Input"},
-		{Name: "events", Argument: "LIST", Desc: "Comma-separated GitHub events", Default: defaultWebhookEvents, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller that stores the binding)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Connect push and pull-request triggers", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
-		{"Connect pushes only", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push"},
-	},
-}
-
-var cmdWebhooksDisconnect = Command{
-	Path:     "sparkwing cluster webhooks disconnect",
-	Synopsis: "Remove a repository's webhook and its controller binding",
-	Description: `Removes the binding the controller verifies deliveries against, then
-deletes the webhook on GitHub through 'gh'. The controller answers with
-the webhook it was bound to, so a repository connected to two
-controllers under the same pipeline name loses only this one. A webhook
-written by hand is matched by its pipeline path instead, and every
-deleted hook is printed with its URL.
-
-Either side already being absent is reported rather than failing, so a
-half-finished connect is cleaned up by running this once.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the webhook fires", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller holding the binding)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Disconnect a repository", "sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build"},
-	},
-}
-
-var cmdWebhooksList = Command{
-	Path:     "sparkwing cluster webhooks list",
-	Synopsis: "List GitHub hooks configured on a repo",
-	Description: `Calls 'gh api /repos/OWNER/NAME/hooks' and prints id, derived
-pipeline, active flag, last-delivery status, and URL.
-
-The PIPELINE column is parsed from the hook URL path
-(/webhooks/github/<pipeline>). Hooks posting to the older
-unscoped /webhooks/github endpoint render as "(unscoped)"
-so operators can spot them for cleanup. Non-sparkwing hooks
-render as "(non-sparkwing)".`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-	},
-}
-
-var cmdWebhooksDeliveries = Command{
-	Path:     "sparkwing cluster webhooks deliveries",
-	Synopsis: "List recent deliveries for a hook, joined with trigger state",
-	Description: `Fetches recent deliveries via 'gh api' and, for each one,
-looks up the matching sparkwing trigger by GITHUB_DELIVERY env
-stamp. Surfaces TRIGGER_ID + RUN_STATUS columns so operators
-see GitHub-side status alongside the run it produced.
-
---since filters deliveries client-side (GitHub's API does not
-take a time filter). Default: 24h.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "hook", Argument: "N", Desc: "GitHub hook id from 'webhooks list'", Required: true, Group: "Input"},
-		{Name: "since", Argument: "DURATION", Desc: "Only deliveries newer than this", Default: "24h", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
-	},
-}
-
-var cmdWebhooksReplay = Command{
-	Path:     "sparkwing cluster webhooks replay",
-	Synopsis: "Queue a redelivery of a specific delivery UUID",
-	Description: `Requests another attempt for the selected GitHub webhook delivery.
-Read the hook's deliveries to inspect the resulting attempt.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "hook", Argument: "N", Desc: "GitHub hook id", Required: true, Group: "Input"},
-		{Name: "delivery", Argument: "UUID", Desc: "Delivery GUID to redeliver", Required: true, Group: "Input"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --delivery 00000000-0000-4000-8000-000000000001"},
 	},
 }
 
@@ -4002,18 +3876,18 @@ profile's controller, which needs an admin-scoped token.`,
 
 var cmdSparks = Command{
 	Path:     "sparkwing pipeline sparks",
-	Synopsis: "Manage sparks libraries declared in .sparkwing/sparks.yaml",
+	Synopsis: "Manage sparks libraries declared in .sparkwing/sparkwing.yaml",
 	Description: `Sparks libraries are Go modules that add opinionated helpers
 (Docker builds, GitOps deploys, ECR auth, language-specific
 checks) on top of the unopinionated SDK. Consumers declare
-which libraries they want live-tracked in
-.sparkwing/sparks.yaml; the resolver writes an overlay modfile
+which libraries they want live-tracked in the sparks: block
+of .sparkwing/sparkwing.yaml; the resolver writes an overlay modfile
 at .sparkwing/.resolved.mod that the compile step uses via
 'go build -modfile='. The consumer's tracked go.mod is
 never modified.
 
 See docs/sparks.md for the full spec (spark.json schema,
-sparks.yaml shape, resolution rules, warmup).`,
+sparks: block shape, resolution rules, warmup).`,
 	SubcommandOrder: []string{"catalog", "list", "lint", "resolve", "update", "add", "remove", "warmup", "inflate"},
 	Examples: []Example{
 		{"See what a library offers", "sparkwing pipeline sparks catalog"},
@@ -4027,7 +3901,7 @@ sparks.yaml shape, resolution rules, warmup).`,
 var cmdSparksList = Command{
 	Path:     "sparkwing pipeline sparks list",
 	Synopsis: "Show declared sparks libraries and their resolved versions",
-	Description: `Reads .sparkwing/sparks.yaml and prints one row per declared
+	Description: `Reads the sparks: block and prints one row per declared
 library with its declared constraint and the resolved tag
 (found via the module proxy). Use --no-resolve to skip the
 proxy calls when offline.`,
@@ -4112,8 +3986,8 @@ one library still, pin its "version:" field in
 
 var cmdSparksAdd = Command{
 	Path:     "sparkwing pipeline sparks add",
-	Synopsis: "Add a library to sparks.yaml",
-	Description: `Appends a new entry to .sparkwing/sparks.yaml. Defaults the
+	Synopsis: "Add a library to the sparks: block",
+	Description: `Appends an entry to the sparks: block. Defaults the
 version to 'latest' when --version is omitted. Refuses to add
 a duplicate (same source or same name).`,
 	Flags: []FlagSpec{
@@ -4131,7 +4005,7 @@ a duplicate (same source or same name).`,
 
 var cmdSparksRemove = Command{
 	Path:        "sparkwing pipeline sparks remove",
-	Synopsis:    "Remove a library from sparks.yaml",
+	Synopsis:    "Remove a library from the sparks: block",
 	Description: `Removes the entry matching NAME (or matching its source path).`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Library name or source path to remove", Required: true, Group: "Input"},
@@ -4175,7 +4049,7 @@ those are import packages rather than modules; inflate that
 library by its own module path.
 
 Without --library the catalog reads sparks-core. A library the
-repo declares in .sparkwing/sparks.yaml is read at the version
+repo declares in its sparks: block is read at the version
 declared there; any other resolves to latest. --path reads a
 checkout on disk and never touches the network.
 

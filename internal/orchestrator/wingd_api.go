@@ -89,7 +89,6 @@ var apiReadRoutes = []string{
 	"GET /api/v1/concurrency/{key}/state",
 	"GET /api/v1/concurrency/{key}/holder",
 	"GET /api/v1/object-store/breaker",
-	"GET /api/v1/egress",
 	"GET /api/v1/pipelines/{name}/latest",
 	"GET /api/v1/pipelines/{name}/profile",
 	"GET /api/v1/crons",
@@ -99,15 +98,12 @@ var apiReadRoutes = []string{
 	"GET /api/v1/credits/payments/{reference}",
 }
 
-// safety: these routes hold a response open past any request bound: the event
-// stream, the gitcache handlers that reset their own deadline through
-// http.ResponseController, and an artifact body. A context deadline here
-// truncates each into a clean EOF the client reads as completion.
+// safety: these routes hold a response open past any request bound: the live
+// log stream and the gitcache handlers that reset their own deadline through
+// http.ResponseController. A context deadline here truncates each into a clean
+// EOF the client reads as completion.
 var apiStreamRoutes = []string{
-	"GET /api/v1/concurrency/{key}/notify",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream",
-	"GET /api/v1/artifacts/{key}",
-	"POST /api/v1/gitcache/seed",
 	"POST /api/v1/gitcache/git/register",
 	"GET /api/v1/gitcache/git/{path...}",
 	"POST /api/v1/gitcache/git/{path...}",
@@ -151,7 +147,7 @@ func newWingdAPI(runs *HeldRunStore, artifact storage.ArtifactStore, logger *slo
 		secrets:        ring,
 		logger:         logger,
 		requestTimeout: APIRequestTimeout,
-		probe:          controller.New(nil, logger).WithArtifactStore(artifact),
+		probe:          controller.New(nil, logger),
 		outputKey:      newWingdOutputKey(),
 	}
 }

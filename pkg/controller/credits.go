@@ -240,14 +240,6 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 	s.writeCreditState(w, r, tenant)
 }
 
-func (s *Server) handleTeamCreditsShow(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
-	}
-	s.writeCreditState(w, r, tenant)
-}
-
 // safety: An unregistered team must read as not found, never as an empty operator balance.
 func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
 	t, err := s.tenantForTeam(r.Context(), store.Team(slug))

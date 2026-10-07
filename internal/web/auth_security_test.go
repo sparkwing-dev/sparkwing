@@ -489,7 +489,7 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 		ControllerURL: controller.URL,
 		RequireLogin:  true,
 	}, authTestBundle)
-	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
+	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/git/register?name=widgets&repo=https://git.example.com/acme/widgets.git", nil)
 	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
 	req.Header.Set("Proxy-Authorization", "Bearer proxy-secret")
 	req.Header.Set(csrfHeaderName, "browser-token")
@@ -499,7 +499,7 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("machine proxy status = %d, want 204", rec.Code)
 	}
-	if path != "/api/v1/gitcache/seed" || authorization != "Bearer swr_0123456789abcdef" || proxyAuthorization != "" || cookie != "" || csrf != "" {
+	if path != "/api/v1/gitcache/git/register" || authorization != "Bearer swr_0123456789abcdef" || proxyAuthorization != "" || cookie != "" || csrf != "" {
 		t.Fatalf("machine proxy boundary = path %q Authorization %q Proxy-Authorization %q Cookie %q CSRF %q", path, authorization, proxyAuthorization, cookie, csrf)
 	}
 }
@@ -771,7 +771,7 @@ func TestGitcacheMachineProxyRejectsARequestWithNoBearer(t *testing.T) {
 		"", "Basic dXNlcjpwYXNz", "Bearer", "Bearer   ",
 		"Bearer x", "Bearer swr_short", "Bearer nope_0123456789abcdef",
 	} {
-		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
+		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/git/register?name=widgets&repo=https://git.example.com/acme/widgets.git", nil)
 		if authorization != "" {
 			req.Header.Set("Authorization", authorization)
 		}

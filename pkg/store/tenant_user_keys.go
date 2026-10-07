@@ -17,10 +17,6 @@ var teamScopedUserKeys = []teamScopedKey{
 		key:   []string{"team", "name", "pipeline"},
 	},
 	{
-		table: "github_webhook_bindings",
-		key:   []string{"team", "pipeline", "repo"},
-	},
-	{
 		table: "pipeline_profiles",
 		key:   []string{"team", "pipeline", "node_id"},
 	},

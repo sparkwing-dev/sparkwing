@@ -263,8 +263,7 @@ UPDATE free_slots SET event_bytes = CASE WHEN event_bytes + ? > 0 THEN event_byt
 	return err
 }
 
-// GrantFreeSlot gives team a free-tier slot whether or not one is free. It
-// is how an operator admits a team while the tier is full.
+// GrantFreeSlot gives team a free-tier slot whether or not one is free.
 func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error) {
 	team = NormalizeTeam(team)
 	if err := ValidateSlug(string(team)); err != nil {

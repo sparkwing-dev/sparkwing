@@ -50,8 +50,8 @@ type Options struct {
 	// /api/v1/capabilities. Empty when LogStore is nil.
 	LogStoreLabel string
 
-	// ArtifactStore, when non-nil, exposes /api/v1/artifacts/{key}
-	// and feeds the capabilities endpoint.
+	// ArtifactStore, when non-nil, feeds the capabilities endpoint and
+	// the bucket ceiling's measurement.
 	ArtifactStore      storage.ArtifactStore
 	ArtifactStoreLabel string
 

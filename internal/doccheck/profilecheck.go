@@ -28,7 +28,7 @@ func checkProfileConfigs(contentDir string) bool {
 		if topLevelPipelinesRE.MatchString(b.body) {
 			continue
 		}
-		if strings.Contains(b.file, "/migrations/") || strings.Contains(b.file, "/proposals/") {
+		if strings.Contains(b.file, "/migrations/") {
 			continue
 		}
 		checked++

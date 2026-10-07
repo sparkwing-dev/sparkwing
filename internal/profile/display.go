@@ -17,7 +17,7 @@ func SpecString(s *backends.Spec) string {
 			return "sqlite:" + s.Path
 		}
 		return "sqlite"
-	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
+	case backends.TypeS3:
 		out := s.Type + "://" + s.Bucket
 		if s.Prefix != "" {
 			out += "/" + s.Prefix
@@ -27,7 +27,7 @@ func SpecString(s *backends.Spec) string {
 		return "filesystem:" + s.Path
 	case backends.TypeController:
 		return "controller://" + s.Controller
-	case backends.TypePostgres, backends.TypeMySQL:
+	case backends.TypePostgres:
 		if s.URLSource != "" {
 			return s.Type + ":" + s.URLSource
 		}

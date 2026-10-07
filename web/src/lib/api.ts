@@ -140,10 +140,6 @@ export function authFetch(
     .finally(() => clearTimeout(timeout));
 }
 
-export function getControllerUrl(): string {
-  return API_URL;
-}
-
 export interface Run {
   id: string;
   pipeline: string;
@@ -391,18 +387,6 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
     }
   }
   return body;
-}
-
-export async function getRunLogs(runID: string): Promise<string> {
-  const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs?format=ndjson`,
-    {
-      cache: "no-store",
-      headers: { Accept: "application/x-ndjson" },
-    },
-  );
-  if (!res.ok) return "";
-  return res.text();
 }
 
 export async function getNodeLogs(
@@ -703,43 +687,6 @@ export async function getTrends(opts?: {
   return res.json();
 }
 
-export interface LogSearchResult {
-  run_id: string;
-  node_id: string;
-  line: number;
-  content: string;
-}
-
-export interface LogSearchResponse {
-  query: string;
-  results: LogSearchResult[];
-  total: number;
-  truncated?: boolean;
-  reason?: string;
-}
-
-export function getLogsUrl(): string {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_LOGS_URL || API_URL;
-  }
-  return process.env.SPARKWING_LOGS_URL || "";
-}
-
-export async function searchLogs(
-  query: string,
-  opts?: { runID?: string; nodeID?: string; limit?: number },
-): Promise<LogSearchResponse> {
-  const logsUrl = getLogsUrl();
-  const params = new URLSearchParams({ q: query });
-  if (opts?.runID) params.set("run_id", opts.runID);
-  if (opts?.nodeID) params.set("node_id", opts.nodeID);
-  if (opts?.limit) params.set("limit", String(opts.limit));
-  const url = `${logsUrl}/api/v1/logs/search?${params}`;
-  const res = await authFetch(url, { cache: "no-store" }).catch(() => null);
-  if (!res || !res.ok) return { query, results: [], total: 0 };
-  return res.json();
-}
-
 export interface MetricPoint {
   ts: string;
   cpu_millicores: number;
@@ -776,8 +723,6 @@ export async function getNodeMetrics(
   }
 }
 
-export type JobMetrics = NodeMetrics;
-
 export async function retryRun(
   runID: string,
   opts?: { full?: boolean },
@@ -788,147 +733,6 @@ export async function retryRun(
   }).catch(() => null);
   if (!res || !res.ok) return null;
   return res.json();
-}
-
-export interface Job {
-  id: string;
-  pipeline: string;
-  status: string;
-  repo_url?: string;
-  branch?: string;
-  prefer?: string;
-  require?: string;
-  env?: Record<string, string>;
-  parent_id?: string;
-  commit?: string;
-  repo_name?: string;
-  agent_id?: string;
-  github_owner?: string;
-  github_repo?: string;
-  github_sha?: string;
-  logs_url?: string;
-  created_at: string;
-  claimed_at?: string;
-  last_heartbeat?: string;
-  retried_as?: string;
-  retry_of?: string;
-  status_detail?: string;
-  result?: {
-    success: boolean;
-    duration: number;
-    logs?: string;
-    failure_reason?: string;
-    exit_code?: number;
-    pipeline_result?: {
-      pipeline: string;
-      jobs: {
-        name: string;
-        duration: number;
-        status: string;
-        parallel?: boolean;
-        rollback?: boolean;
-        logs?: string;
-        steps?: {
-          name: string;
-          duration: number;
-          status: string;
-          logs?: string;
-        }[];
-      }[];
-      posts?: { condition: string; name: string; duration: number }[];
-      total: number;
-      failed_job?: string;
-    };
-  };
-}
-
-export interface JobsPage {
-  jobs: Job[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export async function getJobs(): Promise<Job[]> {
-  const runs = await getRuns({ limit: 50 });
-  return runs.map((r) => ({
-    id: r.id,
-    pipeline: r.pipeline,
-    status: mapRunStatusToJobStatus(r.status),
-    created_at: r.started_at,
-    result: r.finished_at
-      ? {
-          success: r.status === "success",
-          duration: runDurationMs(r) * 1_000_000,
-        }
-      : undefined,
-  }));
-}
-
-function mapRunStatusToJobStatus(status: string): string {
-  if (status === "success") return "complete";
-  if (status === "failed") return "failed";
-  if (status === "cancelled") return "cancelled";
-  return "running";
-}
-
-export async function getJobsPaginated(
-  limit = 50,
-  offset = 0,
-): Promise<JobsPage> {
-  const jobs = await getJobs();
-  return { jobs, total: jobs.length, limit, offset };
-}
-
-export async function getJob(): Promise<Job | null> {
-  return null;
-}
-
-export async function getJobMetrics(_jobId?: string): Promise<NodeMetrics> {
-  void _jobId;
-  return { points: [] };
-}
-
-export async function triggerJob(
-  pipeline: string,
-  opts?: {
-    prefer?: string;
-    require?: string;
-    env?: Record<string, string>;
-    args?: Record<string, string>;
-    git?: TriggerGit;
-  },
-): Promise<Job> {
-  const res = await triggerRun(pipeline, opts?.args, opts?.git);
-  return {
-    id: res?.run_id || "",
-    pipeline,
-    status: "running",
-    created_at: new Date().toISOString(),
-  };
-}
-
-export async function cancelJob(jobId: string): Promise<void> {
-  return cancelRun(jobId);
-}
-
-export async function retryJob(jobId: string): Promise<Job | null> {
-  const run = await retryRun(jobId);
-  if (!run) return null;
-  return {
-    id: run.id,
-    pipeline: run.pipeline,
-    status: mapRunStatusToJobStatus(run.status),
-    created_at: run.started_at,
-  };
-}
-
-export async function getBreakpointStatus(): Promise<{ status: string }> {
-  return { status: "" };
-}
-
-export async function continueBreakpoint(): Promise<void> {
-  throw new Error("breakpoints not implemented");
 }
 
 export interface PauseState {

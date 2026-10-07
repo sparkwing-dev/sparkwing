@@ -18,6 +18,7 @@ spec:
         {{- include "sparkwing-full.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 8 }}
     spec:
       serviceAccountName: {{ include "sparkwing-full.serviceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -67,13 +68,6 @@ spec:
           command: ["/usr/local/bin/sparkwing-controller"]
           args:
             - {{ printf "--addr=0.0.0.0:%d" (int .Values.controller.port) | quote }}
-            {{- if .Values.controller.pool.enabled }}
-            - "--pool"
-            {{- if .Values.controller.pool.namespace }}
-            - {{ printf "--pool-namespace=%s" .Values.controller.pool.namespace | quote }}
-            {{- end }}
-            - {{ printf "--warmer-service-account=%s" (include "sparkwing-full.warmerServiceAccountName" .) | quote }}
-            {{- end }}
             {{- /*
               Announced so a client with no logs: surface of its own -- a
               laptop running `sparkwing run --profile prod` -- posts node
@@ -165,30 +159,12 @@ spec:
           env:
             - name: SPARKWING_HOME
               value: /data
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
             {{- if .Values.controller.databaseSecret.name }}
             - name: SPARKWING_PG_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.controller.databaseSecret.name | quote }}
                   key: {{ .Values.controller.databaseSecret.key | quote }}
-            {{- end }}
-            {{- if .Values.controller.githubWebhookSecret.name }}
-            - name: GITHUB_WEBHOOK_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.githubWebhookSecret.name | quote }}
-                  key: {{ .Values.controller.githubWebhookSecret.key | quote }}
-            {{- end }}
-            {{- if .Values.controller.githubStatusToken.name }}
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.githubStatusToken.name | quote }}
-                  key: {{ .Values.controller.githubStatusToken.key | quote }}
             {{- end }}
             {{- if .Values.controller.dashboardURL }}
             - name: SPARKWING_DASHBOARD_URL

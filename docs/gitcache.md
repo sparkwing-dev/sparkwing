@@ -2,7 +2,7 @@
 
 sparkwing-cache is sparkwing's in-cluster git cache, blob store, and
 package proxy. It mirrors repositories from GitHub, serves git clones over
-HTTP, stores SHA-scoped Git bundles and legacy code uploads, caches package
+HTTP, stores pipeline binaries and dependency archives, caches package
 registry responses, fetches a commit it lacks on demand, and keeps mirrors
 that were used recently warm.
 
@@ -16,10 +16,10 @@ the cache's bare repos would drift from upstream.
                    ┌─────────────┐
                    │   GitHub    │
                    └──────┬──────┘
-                          │ fetch (background, every 30s)
+                          │ fetch (on a clone, or keep-warm)
                    ┌──────▼──────┐
- sparkwing CLI ────────►│   cache     │◄──── runner (clone + pkg proxy)
- (eager refresh)   │  (read-only │
+                   │   cache     │◄──── runner (clone + blobs + pkg proxy)
+                   │  (read-only │
                    │   + blobs   │
                    │   + proxy)  │
                    └─────────────┘
@@ -27,13 +27,14 @@ the cache's bare repos would drift from upstream.
  runner ──── push gitops ────► GitHub (direct, via GITHUB_TOKEN PAT)
 ```
 
-**Reads** (clone, fetch, file, archive) go through the cache - fast,
-in-cluster, no GitHub rate limits.
+**Reads** (clone, fetch) go through the cache - fast, in-cluster, no
+GitHub rate limits.
 
 **Writes** (gitops deploy push) go directly to GitHub via HTTPS + PAT.
 
 Binary and artifact uploads use the controller's [direct data routes](data-uploads.md)
-when it announces an S3 data store. An older controller keeps the cache path.
+when it announces an S3 data store. Without one they go to the cache's `/bin`
+route.
 Runners have `GITHUB_TOKEN` from the `github-config` k8s secret.
 
 ## Repo Registration
@@ -59,8 +60,8 @@ env:
 On startup, the cache registers the name-to-URL mappings and eagerly
 clones each repo (best-effort). If a startup clone fails (e.g. no SSH
 access), that repo falls back to being cloned on-demand when first
-requested or seeded manually. If the PVC is nuked, repos are re-cloned
-automatically on next startup or access.
+requested. If the PVC is nuked, repos are re-cloned automatically on next
+startup or access.
 
 ### Manual registration
 
@@ -70,27 +71,14 @@ curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
 ```
 
 Registration restores the mirror's `origin` URL from the validated repository
-URL, including mirrors created by an earlier seed without an origin. A failed
+URL, including mirrors an earlier release seeded without an origin. A failed
 origin configuration returns an error instead of reporting a usable mirror.
 
-### Seeding (no SSH required)
-
-A new seeded mirror records the repository URL as its origin so later refreshes
-can fetch published commits when upstream access is available.
-
-If the cache doesn't have SSH access, seed from a machine that does:
-
-```bash
-git clone --bare git@github.com:user/repo.git /tmp/repo-seed
-cd /tmp/repo-seed
-sha=$(git rev-parse HEAD)
-git update-ref "refs/sparkwing-seed/$sha" "$sha"
-git bundle create /tmp/repo.bundle "refs/sparkwing-seed/$sha"
-git update-ref -d "refs/sparkwing-seed/$sha"
-curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
-  "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git&sha=$sha" \
-  --data-binary @/tmp/repo.bundle
-```
+The cache fills a mirror only from origin. A cache that cannot reach a
+repository needs a credential for it, such as the SSH key in the `ssh-key`
+secret; there is no way to push objects into a mirror. A runner started
+without `--gitcache` fetches each run's source from origin itself, with the
+credential the controller releases for the run.
 
 ## Cloud cache paths
 
@@ -137,7 +125,8 @@ A commit origin does not have on any branch costs one fetch and then the
 same `not our ref` refusal git has always sent. Known limit: a want for a
 fork or pull-request head that origin keeps on a non-head ref is in that
 class, since the mirror fetches `refs/heads/*` only. Such a checkout
-pays a fetch and is still refused; seed it with `POST /sync/seed`.
+pays a fetch and is still refused; a runner that fetches from origin
+directly, started without `--gitcache`, builds it.
 
 A failed fetch is not fatal to a clone: the cache logs it and serves the
 refs it has, so a broken SSH key degrades freshness rather than stopping
@@ -153,8 +142,7 @@ the mirrors a request touched in the last hour on that cadence, leaving
 every other mirror alone: a repository nobody is building costs origin
 nothing, which is what matters on a hosted cache holding many customers'
 repositories. It buys an active repository a warm mirror, so a clone
-skips its own fetch and ancestor negotiation for incremental uploads
-succeeds more often.
+skips its own fetch.
 
 Correctness never depends on it. A fetch that fails backs off from the
 interval and doubles to ten minutes, so a repository whose credentials
@@ -168,56 +156,30 @@ avoided egress cost.
 
 ### Fetch freshness throttle
 
-`/archive`, `/file`, `/tree-hash`, `/branch-contains`, and
-`/sync/negotiate` used to run their own `git fetch` on **every** request,
-so a webhook burst multiplied GitHub traffic without making anything
-fresher.
+A successful fetch (from the keep-warm pass or from a clone reading
+`info/refs`) marks the repo fresh for `FETCH_FRESH_WINDOW` (default 10s),
+and clones inside that window serve straight from the mirror. Ten seconds
+is therefore the worst-case staleness a checkout can see and the most
+origin traffic one repository can be made to spend. Cloning a repo that is
+not cached yet is not throttled by the freshness window; the clone cooldown
+bounds a clone that keeps failing (below).
 
-Now a successful fetch (from the keep-warm pass, from a request, from a
-clone reading `info/refs`, or from `/git/refresh`) marks the repo fresh
-for `FETCH_FRESH_WINDOW` (default 10s), and requests inside that window
-serve straight from the mirror. The same window bounds the clone path, so
-ten seconds is also the worst-case staleness a checkout can see and the
-most origin traffic one repository can be made to spend.
+### Clone cooldown
 
-`POST /git/refresh` **is not throttled**. It exists to close the
-`git push && sparkwing pipeline trigger` race, so it always performs a
-real fetch. Use it (as the CLI does) whenever a caller needs a just-pushed
-SHA immediately. Cloning a repo that is not cached yet is not throttled by
-the freshness window; the reclone cooldown bounds a clone that keeps
-failing (below).
-
-### Recovery reclone circuit breaker
-
-When `/archive` cannot fetch a repo, it can recover by deleting the mirror
-and cloning it again. That is the right move for a corrupted mirror and
-the wrong move for a fetch that will keep failing -- a conflicting local
-ref after an upstream branch rename (local `foo` vs remote `foo/bar`), for
-example, made every archive request re-download the entire repository.
-
-A reclone is now allowed at most once per `RECLONE_COOLDOWN` (default
-1h) per repo. Inside the cooldown, a failed fetch returns `502` with the
-underlying git error, the remaining cooldown, and a pointer to the fix.
-Each reclone logs loudly with the `recovery reclone:` prefix and the repo
-hash, and increments the `sparkwing.gitcache.recovery_reclones` counter.
-
-The same cooldown bounds cloning a mirror that is missing, on `/archive`
-and on the `/git/<name>` path a runner clones through. A reclone deletes
-the mirror before it clones, so a reclone whose own clone fails leaves no
-mirror at all, and without the bound every later request re-downloaded the
-whole repository. A repo whose mirror is absent is still cloned once; a
-second attempt inside `RECLONE_COOLDOWN` that still finds no mirror is
-refused, naming the remaining cooldown and the error the last attempt hit.
-A successful fetch or clone clears the record, and so does re-registering
+A registered repository whose mirror is missing is cloned on the
+`/git/<name>` path a runner clones through. A clone that keeps failing
+would otherwise re-download the whole repository on every request, so a
+repo whose mirror is absent is cloned once; a second attempt inside
+`RECLONE_COOLDOWN` (default 1h) that still finds no mirror is refused,
+naming the remaining cooldown and the error the last attempt hit. A
+successful fetch or clone clears the record, and so does re-registering
 the repo, which is the deliberate way out.
 
 Health problems to expect from `GET /health`:
 
 | Problem text | What it means |
 |--------------|---------------|
-| `repo <hash>: recovery reclone ran N times in 24h -- persistent fetch failure; ...` | The mirror keeps failing to fetch and reclones are papering over it. Read the `recovery reclone:` log line for the git error, fix the cause (often a conflicting ref -- `git remote prune origin`, or delete the conflicting ref inside `/data/repos/<hash>.git`), then let the background loop resume. |
-| `repo <hash>: <friendly fetch error>` | The last fetch of this mirror failed (SSH, DNS, timeout, fork exhaustion), so clones are being served older refs. |
-| `repo <hash>: clone failed: ...` / `auto-clone failed: ...` | A mirror that was missing could not be cloned. The repo is on the clone cooldown until it expires or the repo is re-registered; seeding via `POST /sync/seed` also works when upstream is unreachable. |
+| `gitcache: background fetch failing` | A fetch or clone failed in the last ten minutes, or the keep-warm pass is failing for every mirror. The cache log names the repository hash and the git error. A clone that failed puts the repo on the clone cooldown until it expires or the repo is re-registered. |
 
 An operator who wants the old per-request behavior back can set
 `FETCH_FRESH_WINDOW` and/or `RECLONE_COOLDOWN` to a negative duration
@@ -285,18 +247,14 @@ DAG, which is the other per-run egress bill worth reading twice.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` triggers by commit
 SHA: the CLI sends the branch + SHA to the controller, and the runner
-clones that SHA from the cache. To close the
-`git push && sparkwing pipeline trigger` race -- where the cache hasn't yet
-mirrored the just-pushed commit -- the CLI fires a best-effort eager
-refresh of the repo (`POST /git/refresh`) before it creates the trigger,
-falling back to a SHA-scoped bundle seed (`POST /sync/seed`) if the
-refresh fails; the runner also retries on a stale SHA.
+clones that SHA from the cache. The CLI refuses a commit no remote branch
+carries ("push your commit"). The cache refreshes the mirror when the
+runner's clone reads `info/refs`, so a trigger fired seconds after
+`git push` checks out that push without the CLI touching the cache.
 
 ```
-sparkwing CLI -> cache POST /git/refresh     (eager mirror of the pushed SHA)
-  (on failure) -> cache POST /sync/seed      (bundle the SHA from the local checkout)
 sparkwing CLI -> controller /api/v1/triggers (branch + SHA)
-runner        -> cache /git/<name>           (clone at SHA)
+runner        -> cache /git/<name>           (refresh if stale, clone at SHA)
 ```
 
 With `--working-tree`, the CLI captures tracked changes plus untracked
@@ -317,11 +275,7 @@ still answers with the snapshot SHA.
 Each Cloud snapshot has a unique S3 key bound to one run. The controller's
 hourly storage pass removes an orphan 24 hours after commit, or a bound
 snapshot 24 hours after the run finishes. A retry uploads a new object. This
-source path does not use cache workspace refs.
-
-The cache also exposes tarball-upload and ancestor-negotiation endpoints
-(`/upload`, `/uploads/<id>`, `/sync/negotiate`) for code-sync flows; see
-the API table below.
+source path does not touch the cache.
 
 ## GitOps Deployment Flow
 
@@ -342,10 +296,8 @@ authenticate the push. The PAT needs write access to the gitops repo.
 The cache is exposed externally via ingress at your dashboard host's
 `cache-` subdomain. Every route except `/health`, `/metrics`, `/stats`, and the
 package proxy under `/proxy/` requires a bearer token, on reads as well as
-writes: the git protocol and registration routes (`/git/...`), the source read
-routes (`/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/repos`),
-`/artifacts/...`, and the blob and sync routes (`/bin/...`, `/cache/...`,
-`/upload`, `/uploads/...`, `/sync/negotiate`, `/sync/seed`). The package proxy
+writes: the git protocol and registration routes (`/git/...`), the blob routes
+(`/bin/...`, `/cache/...`), and the admin routes (`/admin/...`). The package proxy
 stays open because Go, npm, and pip fetch through it without a credential;
 it serves upstream registry bytes, not repository content. The controller's
 `/api/v1/gitcache/git/...` proxy requires admin scope and permits upload-pack
@@ -377,9 +329,13 @@ for a live claim on the run: a claim token's grant lasts five minutes and its
 pod renews it, and a runner token must send its exact node or trigger claim
 fence, whose grant lasts six hours. A runner token with no fence gets
 `403 claim_required`. Either grant ends sooner if the requesting credential
-expires first. The cache
+expires first. Every grant names the claim that asked for it and the run's
+repository and refs. The cache
 verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
-without calling the controller and confines the request to that team. The
+without calling the controller and confines the request to that team and
+repository, and it refuses with 401 a grant that names no claim or no
+repository scope, which a controller from before scoped grants minted and
+which opened the team's whole tree. The
 grant key is a secret of its own: the cache refuses to start when it equals
 the cache's operator token, and it is never a runner's token, because pipeline
 code can read that token. A multi-team controller configured with the internal
@@ -387,9 +343,11 @@ cache (`--cache-url`) refuses to start without a grant key or
 with one equal to `SPARKWING_CACHE_TOKEN`. A single-team controller starts
 either way: without a key it answers the route with 404, and with the operator
 token as its key it answers 503. A cache without a grant key accepts no grants. A GitHub Actions runner credential gets 403: it is confined to one
-repository, and a grant opens the team's whole tree.
+repository, and a grant also reads what every repository of the team shares:
+content-addressed artifacts and the entries written before grants carried a
+scope.
 
-- `/bin/...`, `/cache/...` and `/artifacts/...` read and write the team's own
+- `/bin/...` and `/cache/...` read and write the team's own
   tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
   see or replace each other's bytes. Within that tree a grant writes only under
   `scopes/<hash>/`, a hash of its run's repository and own ref, and reads its
@@ -402,9 +360,8 @@ repository, and a grant opens the team's whole tree.
   chose (CLI, API and dashboard starts, and their retries and children) writes
   under a ref of its own; signed webhook runs, schedules that follow a branch
   tip, and their retries and children with the same ref and commit write under
-  the real ref. A grant minted by an older controller carries
-  none and keeps reading and writing the unscoped entries until it expires. A team's bins count toward the store
-  ceiling.
+  the real ref. No grant writes the unscoped entries. A team's bins count
+  toward the store ceiling.
 - `/git/<name>/...` with a grant for the operator's own team (`default`, a
   slug no other team can take) reads any registered mirror, SSH origins
   included: every mirror is the operator's, because only the operator token
@@ -413,9 +370,9 @@ repository, and a grant opens the team's whole tree.
   runners already derive, and reads it from a separate public mirror under
   `<data-dir>/repos/public/`. The cache clones and fetches that mirror with
   none of its own credentials (no Git config, `.netrc`, askpass or SSH key,
-  https only), and never seeds it, so another team sees only what origin
-  serves anyone: not the operator's seeds or working-tree snapshots, and not
-  a repository the cache could reach only with a credential it inherited. A
+  https only), so another team sees only what origin serves anyone: not
+  what an earlier release seeded into the operator's mirror, and not a
+  repository the cache could reach only with a credential it inherited. A
   public mirror stops gaining commits once its origin turns private. It costs
   a second copy of a repository both the operator and other teams read.
   Private repositories of other teams reach their runners through the GitHub
@@ -426,18 +383,16 @@ repository, and a grant opens the team's whole tree.
   grant with 403, because a registration clones onto the cache volume with the
   cache's own credentials; such a runner asks anyway and fetches from a mirror
   already registered. The mirrors count toward the store ceiling.
-- Every other route (`/sync/...`, `/git/refresh`, `/archive`, `/file`,
-  `/tree-hash`, `/branch-contains`, `/repos`, `/upload`, `/uploads/...`,
-  `/admin/...`) refuses a grant with 401.
+- The `/admin/...` routes refuse a grant with 401.
 
 The operator token keeps its unscoped access, and a cache started with
 `--allow-unauthenticated` accepts no grants because it has no key to verify
 them with.
 
-Every response carries `X-Content-Type-Options: nosniff`, and artifact
-downloads carry `Content-Type: application/octet-stream` with
-`Content-Disposition: attachment`, so a stored HTML or SVG artifact cannot
-execute in a browser on the cache's origin.
+Every response carries `X-Content-Type-Options: nosniff`, and blob
+downloads carry `Content-Type: application/octet-stream` or
+`application/gzip`, so a stored HTML or SVG body cannot execute in a browser
+on the cache's origin.
 
 A cache published outside the cluster starts with `--disable-proxy` and
 `--metrics-addr`. The first drops `/proxy/` and `/stats`; the second moves
@@ -479,37 +434,6 @@ bearer.
 | GET | `/git/<name>/info/refs?service=git-upload-pack` | Clone/fetch discovery (auth required) |
 | POST | `/git/<name>/git-upload-pack` | Clone/fetch data (auth required) |
 | POST | `/git/<name>/git-receive-pack` | **Returns 403** (read-only) |
-| POST | `/git/refresh?name=X` (or `?repo=Y`) | Synchronous fetch of one bare repo (auth required) |
-
-### Archives & Files
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/archive?repo=X&branch=Y` | Download repo as tar.gz (auth required) |
-| GET | `/file?repo=X&branch=Y&path=Z` | Get a single file (auth required) |
-| GET | `/tree-hash?repo=X&branch=Y&path=Z` | Content-addressable hash (auth required) |
-| GET | `/branch-contains?repo=X&branch=Y&commit=Z` | Check if commit is on branch (auth required) |
-
-### Uploads (Code Sync)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/upload` | Upload a tarball (auth required) |
-| POST | `/upload?repo=X&base=Y` | Incremental upload on base commit |
-| GET | `/uploads/<id>` | Download uploaded tarball (auth required) |
-| POST | `/sync/negotiate` | Find common ancestor (auth required) |
-| POST | `/sync/seed?repo=X&sha=Y[&workspace=1]` | Seed repo from a SHA-scoped git bundle; workspace mode caps retained refs at 128 and archives refs past `WORKSPACE_SEED_MAX_AGE` (auth required) |
-
-### Artifacts
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/artifacts/<jobID>?path=X` | Upload artifact (auth required) |
-| GET | `/artifacts/<jobID>` | List artifacts (auth required) |
-| GET | `/artifacts/<jobID>?glob=X` | Download matching artifacts as an attachment (auth required) |
-
-`<jobID>` must be one path segment of 1-128 alphanumeric, dash, underscore, or
-dot characters. Anything else is rejected with 400 before a path is built.
 
 ### Binary & Dependency Cache
 
@@ -565,7 +489,6 @@ binary names and storage paths keep their existing format.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (`{"status":"ok"}`) |
-| GET | `/repos` | List registered repos (auth required) |
 
 ## Deployment
 
@@ -588,8 +511,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
 | `FETCH_INTERVAL` | Cadence of the keep-warm pass over mirrors a request touched in the last hour (default: `0`, the pass is off) |
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
-| `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
-| `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
+| `RECLONE_COOLDOWN` | Minimum gap between clone-if-missing attempts for one repo (default: `1h`; negative disables) |
 | `SPARKWING_METRICS_ADDR` | Bind address for `/metrics` and `/stats`, off the main listener (default: empty, both on the main listener) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
@@ -623,10 +545,8 @@ under the named cache.
 |------|----------|
 | `/data/repos/` | Bare git repositories (named by content hash) |
 | `/data/repos/public/` | Credential-free copies other teams' grants read |
-| `/data/archives/` | Cached repo tarballs |
-| `/data/uploads/` | Uploaded code tarballs |
-| `/data/artifacts/` | Job output artifacts |
 | `/data/bins/` | Compiled pipeline binary cache |
 | `/data/cache/` | Dependency-archive cache (gems, node_modules, etc.) |
+| `/data/teams/` | Each team's binary and dependency-archive trees, written through grants |
 | `/data/proxy/` | Package-registry proxy cache (npm, PyPI, Go, etc.) |
 | `/data/repo-names.json` | Friendly name → URL registry |

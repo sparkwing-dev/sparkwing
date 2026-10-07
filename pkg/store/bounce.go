@@ -262,7 +262,7 @@ func isTerminalRunStatus(status string) bool {
 	return status == "success" || status == runStatusFailed || status == runStatusCancelled
 }
 
-// safety: bounce requests were written without their team before v92, so every
+// safety: bounce requests were written without their team before v93, so every
 // one carries the default team; the scoped readers and the per-team sequence
 // would miss a non-default team's open requests and reuse their seq.
 func backfillNodeBounceTeams(ctx context.Context, tx *storeTx) error {

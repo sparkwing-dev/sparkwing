@@ -91,7 +91,7 @@ func TestLoopbackContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 	backend := s3state.New(art, s3state.WithFlushInterval(10*time.Millisecond))
 	t.Cleanup(func() { _ = backend.Close() })
 
-	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, art)
+	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil)
 	runContractSurface(t, c, "s3")
 
 	if err := backend.Close(); err != nil {
@@ -177,7 +177,7 @@ func TestLoopbackGetNodeUsesCanonicalPublicProjection(t *testing.T) {
 	if err := backend.CreateNode(ctx, *node); err != nil {
 		t.Fatal(err)
 	}
-	_, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, art)
+	_, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil)
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/runs/"+contractRunID+"/nodes/build", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -214,11 +214,10 @@ func TestLoopbackGetNodeUsesCanonicalPublicProjection(t *testing.T) {
 	}
 }
 
-func newLoopbackClient(t *testing.T, state controller.LoopbackState, runID string, conc controller.LoopbackConcurrency, art storage.ArtifactStore) (*client.Client, *httptest.Server) {
+func newLoopbackClient(t *testing.T, state controller.LoopbackState, runID string, conc controller.LoopbackConcurrency) (*client.Client, *httptest.Server) {
 	t.Helper()
 	lb := controller.NewLoopback(state, runID, loopbackToken, quietLogger()).
-		WithConcurrency(conc).
-		WithArtifactStore(art)
+		WithConcurrency(conc)
 	srv := httptest.NewServer(lb.Handler())
 	t.Cleanup(srv.Close)
 	return client.NewWithToken(srv.URL, nil, loopbackToken), srv
@@ -492,7 +491,7 @@ func TestLoopback_RefusesMutationsAimedAtAnotherRun(t *testing.T) {
 		t.Fatalf("seed victim node: %v", err)
 	}
 
-	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, art)
+	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil)
 	if err := c.CreateRun(ctx, store.Run{ID: contractRunID, Pipeline: "mine", Status: "running"}); err != nil {
 		t.Fatalf("CreateRun for the loopback's own run: %v", err)
 	}
@@ -584,7 +583,7 @@ func TestLoopback_PlainBackendErrorIs500(t *testing.T) {
 	t.Parallel()
 	backend := s3state.New(newMemArt())
 	t.Cleanup(func() { _ = backend.Close() })
-	_, srv := newLoopbackClient(t, brokenState{s3Adapter{Backend: backend}}, contractRunID, nil, nil)
+	_, srv := newLoopbackClient(t, brokenState{s3Adapter{Backend: backend}}, contractRunID, nil)
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/runs/whatever", nil)
 	req.Header.Set("Authorization", "Bearer "+loopbackToken)
@@ -606,7 +605,7 @@ func TestLoopback_RejectsAnyOtherBearer(t *testing.T) {
 	t.Parallel()
 	backend := s3state.New(newMemArt())
 	t.Cleanup(func() { _ = backend.Close() })
-	_, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, nil)
+	_, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil)
 
 	for name, token := range map[string]string{
 		"no token":    "",
@@ -641,7 +640,7 @@ func TestLoopback_ConcurrentNodeWritesSerializeOnOneRun(t *testing.T) {
 	art := newMemArt()
 	backend := s3state.New(art, s3state.WithFlushInterval(5*time.Millisecond))
 	t.Cleanup(func() { _ = backend.Close() })
-	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, "run-parallel", nil, art)
+	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, "run-parallel", nil)
 
 	ctx := context.Background()
 	const runID = "run-parallel"

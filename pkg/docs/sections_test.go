@@ -96,7 +96,7 @@ func TestNonCurrentDocsNeverOutrankReference(t *testing.T) {
 		}
 		var current bool
 		for _, h := range hits {
-			if !strings.HasPrefix(h.Slug, "proposals/") && !strings.HasPrefix(h.Slug, "migrations/") {
+			if !strings.HasPrefix(h.Slug, "migrations/") {
 				current = true
 				break
 			}
@@ -104,7 +104,7 @@ func TestNonCurrentDocsNeverOutrankReference(t *testing.T) {
 		if !current {
 			continue
 		}
-		if strings.HasPrefix(hits[0].Slug, "proposals/") || strings.HasPrefix(hits[0].Slug, "migrations/") {
+		if strings.HasPrefix(hits[0].Slug, "migrations/") {
 			t.Errorf("SearchSections(%q) ranked %q first while a reference section also matched",
 				q, hits[0].Slug)
 		}

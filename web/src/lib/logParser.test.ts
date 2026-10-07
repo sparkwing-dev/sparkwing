@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   stripAnsi,
   parseLogLines,
-  parseLogSections,
   hasStepBanners,
   type StepSection,
   type LogSection,
@@ -388,7 +387,7 @@ describe("parseLogLines", () => {
   });
 });
 
-describe("parseLogSections", () => {
+describe("parseLogLines on CLI output", () => {
   it("works with real CLI output string", () => {
     const raw = [
       `${cyan}────────────── STEP: init ──────────────${reset}`,
@@ -426,7 +425,7 @@ describe("parseLogSections", () => {
       "                       1.862s",
     ].join("\n");
 
-    const result = parseLogSections(raw);
+    const result = parseLogLines(raw.split("\n"));
 
     const steps = result.sections.filter(
       (s) => s.type === "step",

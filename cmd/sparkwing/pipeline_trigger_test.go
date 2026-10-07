@@ -27,11 +27,7 @@ type triggerSpy struct {
 	mu              sync.Mutex
 	reqs            []string
 	bodies          [][]byte
-	failRefresh     bool
-	failSeed        bool
-	seedBodyBytes   int
-	seedRepoValues  []string
-	seedSHAValues   []string
+	failUpload      bool
 	sourceKey       string
 	sourceBytes     []byte
 	sourceCommitted bool
@@ -76,7 +72,7 @@ func (s *triggerSpy) handler() http.Handler {
 			s.mu.Lock()
 			s.sourceKey = req.Key
 			s.mu.Unlock()
-			if s.failSeed {
+			if s.failUpload {
 				http.Error(w, "upload refused", http.StatusBadGateway)
 				return
 			}
@@ -92,26 +88,6 @@ func (s *triggerSpy) handler() http.Handler {
 			s.sourceCommitted = len(s.sourceBytes) > 0
 			s.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gitcache/refresh":
-			if s.failRefresh {
-				http.Error(w, "refresh failed", http.StatusBadGateway)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"ok":true}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gitcache/seed":
-			body, _ := io.ReadAll(r.Body)
-			s.mu.Lock()
-			s.seedBodyBytes += len(body)
-			s.seedRepoValues = append(s.seedRepoValues, r.URL.Query().Get("repo"))
-			s.seedSHAValues = append(s.seedSHAValues, r.URL.Query().Get("sha"))
-			s.mu.Unlock()
-			if s.failSeed {
-				http.Error(w, "seed failed", http.StatusBadGateway)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers":
 			body := make([]byte, r.ContentLength)
 			_, _ = r.Body.Read(body)
@@ -252,7 +228,6 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 		case r == "POST /api/v1/triggers":
 			sawTrigger = true
 		case r == "GET /api/v1/services":
-		case r == "POST /api/v1/gitcache/refresh":
 		case strings.HasPrefix(r, "GET /api/v1/runs"):
 			t.Fatalf("detach should not follow the run; got %v", reqs)
 		}
@@ -383,7 +358,7 @@ func TestPipelineTrigger_WorkingTreeUploadsBeforeAdmissionWithoutOrigin(t *testi
 
 func TestPipelineTrigger_WorkingTreeUploadFailureDoesNotAdmitTrigger(t *testing.T) {
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	spy := &triggerSpy{failSeed: true}
+	spy := &triggerSpy{failUpload: true}
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
@@ -397,7 +372,7 @@ func TestPipelineTrigger_WorkingTreeUploadFailureDoesNotAdmitTrigger(t *testing.
 		}
 	})
 	if slices.Contains(spy.requests(), "POST /api/v1/triggers") {
-		t.Fatalf("failed seed admitted trigger: %v", spy.requests())
+		t.Fatalf("failed upload admitted trigger: %v", spy.requests())
 	}
 }
 

@@ -58,7 +58,7 @@ rebuild) or pre-compiled base images avoid it.
 
 ## Caching layers -- what each one does
 
-Sparkwing has four caching layers. Each addresses a different failure mode:
+Sparkwing has three caching layers. Each addresses a different failure mode:
 
 ### 1. Docker layer cache (biggest win: ~99% speedup)
 
@@ -92,21 +92,7 @@ not from skipping downloads.
 **Breaks when:** the base image's runtime version changes (Ruby 3.3 → 3.2
 compiled extensions are incompatible), or build cache is pruned.
 
-### 3. Warm PVC pool (multiplier for cache mounts)
-
-The controller pre-warms PVCs with Docker image layers. The DinD sidecar
-on each runner pod mounts a warm PVC at `/var/lib/docker`. Since the warmer
-is additive (never wipes the PVC), BuildKit cache mounts from previous job
-runs persist on the PVC.
-
-This means cache mounts survive across pipeline runs -- not just within a
-single build session. The first build on a PVC is cold; every subsequent
-build benefits from warm mounts.
-
-**Breaks when:** the PVC is recycled (new PVC from the pool), or the warmer
-is run with a destructive reset (it currently doesn't -- see `warmer.go`).
-
-### 4. Dependency proxy (reliability + bandwidth, modest speed)
+### 3. Dependency proxy (reliability + bandwidth, modest speed)
 
 sparkwing-cache includes a package proxy that caches npm, pip, gem, Go
 module, and Alpine package downloads in-cluster. Runners fetch packages
@@ -194,8 +180,7 @@ when invoking the Docker build from your pipeline.
 These were all investigated and benchmarked. The savings are real but small
 because **builds are CPU-bound, not network-bound**.
 
-- **Base image pull time** -- only ~2s on fast networks. The warm PVC pool
-  already pre-pulls common images.
+- **Base image pull time** -- only ~2s on fast networks.
 - **Package download caching (proxy/mounts)** -- saves 2–7s on a 105s build.
   Downloads are ~15% of total time; compilation is ~72%. The proxy's value
   is reliability (builds work when registries are down) and bandwidth

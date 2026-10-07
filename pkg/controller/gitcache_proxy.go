@@ -20,43 +20,6 @@ var (
 	gitcacheRepoName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
-func (s *Server) handleGitcacheRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	repoURL, ok := validateGitcacheRepoURL(w, r)
-	if !ok {
-		return
-	}
-	s.proxyGitcache(w, r, "/git/refresh", repoURL, "", false, nil)
-}
-
-func (s *Server) handleGitcacheSeed(w http.ResponseWriter, r *http.Request) {
-	extendGitcacheStreamDeadline(w, r)
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	repoURL, ok := validateGitcacheRepoURL(w, r)
-	if !ok {
-		return
-	}
-	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
-	if !gitObjectSHA.MatchString(sha) {
-		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
-		return
-	}
-	workspace := r.URL.Query().Get("workspace")
-	if workspace != "" && workspace != "1" {
-		http.Error(w, "workspace query param must be 1 when set", http.StatusBadRequest)
-		return
-	}
-	body := http.MaxBytesReader(w, r.Body, 500<<20)
-	defer func() { _ = body.Close() }()
-	s.proxyGitcache(w, r, "/sync/seed", repoURL, sha, workspace == "1", body)
-}
-
 func (s *Server) handleGitcacheRegister(w http.ResponseWriter, r *http.Request) {
 	extendGitcacheStreamDeadline(w, r)
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
@@ -103,10 +66,8 @@ func (s *Server) handleGitcacheGit(w http.ResponseWriter, r *http.Request) {
 // safety: serving a cache entry hands out repository access under a credential
 // the controller holds, and every team shares a mirror named for its URL, so
 // only the operator's team reaches it, and only for the claimed run's own
-// source or a repository the operator connected to that run's pipeline. The
-// operator's team already gets a grant that registers and reads any mirror,
-// so its run's own source fields open nothing that grant does not; another
-// team's delivery proves only that it knows a secret it chose.
+// source. The operator's team already gets a grant that registers and reads
+// any mirror, so its run's own source fields open nothing that grant does not.
 func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Request, name, repoURL string) bool {
 	runID := r.PathValue("id")
 	if runID == "" {
@@ -137,24 +98,7 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 		(repoURL == "" || repoURL == source) {
 		return true
 	}
-	if trigger.WebhookDelivery != "" {
-		bindings, err := tenant.ListGitHubWebhookBindings(r.Context(), trigger.Pipeline)
-		if err != nil {
-			s.logger.Error("gitcache proxy: list webhook bindings", "run_id", runID, "err", err)
-			http.Error(w, "resolve claimed run source", http.StatusForbidden)
-			return false
-		}
-		for _, binding := range bindings {
-			expectedURL, verr := sourceurl.ValidateCloneURL(bincache.RepoURLFromGitHub(binding.Repo))
-			if verr != nil || sourceurl.ClaimedRepoNameFromURL(expectedURL) != name {
-				continue
-			}
-			if repoURL == "" || repoURL == expectedURL {
-				return true
-			}
-		}
-	}
-	http.Error(w, "cache repository is neither the claimed run's source nor connected to its pipeline", http.StatusForbidden)
+	http.Error(w, "cache repository is not the claimed run's source", http.StatusForbidden)
 	return false
 }
 
@@ -170,18 +114,6 @@ func validateGitcacheRepoURL(w http.ResponseWriter, r *http.Request) (string, bo
 		return "", false
 	}
 	return validated, true
-}
-
-func (s *Server) proxyGitcache(w http.ResponseWriter, r *http.Request, path, repoURL, sha string, workspace bool, body io.Reader) {
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	if sha != "" {
-		q.Set("sha", sha)
-	}
-	if workspace {
-		q.Set("workspace", "1")
-	}
-	s.proxyGitcacheRequest(w, r, http.MethodPost, path, q.Encode(), body)
 }
 
 func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, method, path, rawQuery string, body io.Reader) {

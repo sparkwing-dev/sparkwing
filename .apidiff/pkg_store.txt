@@ -798,7 +798,6 @@ var ErrFingerprintMismatch = errors.New("store: the fingerprint is not the host 
 var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or join the waitlist")
 var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git credentials", MaxGitCredentialsPerTeam)
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
-var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
 var ErrIdentityAlreadyLinked = errors.New("store: that sign-in is already linked to this account")
@@ -1162,16 +1161,6 @@ type GitHubRunnerScope struct {
 	Push GitHubRunnerPush
 }
 func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool)
-type GitHubWebhookBinding struct {
-	Team      Team
-	Pipeline  string
-	Repo      string
-	Secret    string
-	Events    []string
-	HookID    int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
 type Identity struct {
 	Provider string
 	Subject  string
@@ -1536,7 +1525,6 @@ type NodeUsage struct {
 	Wall        time.Duration
 }
 func NormalizeEmail(raw string) string
-func NormalizeGitHubWebhookRepo(repo string) string
 func NormalizeTeam(team Team) Team
 const OnLimitCancelOthers = "cancel_others"
 const OnLimitCoalesce = "coalesce"
@@ -1554,7 +1542,6 @@ func (o *Operator) CreateTeam(ctx context.Context, team Team) error
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
 func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error)
-func (o *Operator) ListGitHubWebhookBindingsAcrossTeams(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
@@ -2265,7 +2252,6 @@ func (s *Store) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
-func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
@@ -2291,7 +2277,6 @@ func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID st
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
-func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error
@@ -2314,7 +2299,6 @@ func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approva
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
-func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
@@ -2360,7 +2344,6 @@ func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUs
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
-func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (s *Store) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
@@ -2432,7 +2415,6 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
 func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
-func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error)
 func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error)
@@ -2696,7 +2678,6 @@ func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
-func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteRun(ctx context.Context, runID string) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
@@ -2721,7 +2702,6 @@ func (t *Tenant) GetActiveDebugPause(ctx context.Context, runID, nodeID string) 
 func (t *Tenant) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
 func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
-func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
 func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (t *Tenant) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
@@ -2766,7 +2746,6 @@ func (t *Tenant) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
 func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugPause, err error)
 func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error)
-func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (t *Tenant) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error)
@@ -2802,7 +2781,6 @@ func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
-func (t *Tenant) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,

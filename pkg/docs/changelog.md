@@ -6,7 +6,7 @@ Versioning](https://semver.org/spec/v2.0.0.html). The release pipeline refuses t
 new version without a matching entry below.
 
 Entries name the affected surface. A `(Breaking)` marker links to the release's
-migration guide. See [Changelog style](docs/changelog-style.md) for authoring rules.
+migration guide. See [Changelog style](CHANGELOG-STYLE.md) for authoring rules.
 
 ## Pre-1.0 caveat
 
@@ -31,7 +31,7 @@ unlock.
 ### Changed
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
-  service writes `/cache`, `/bin` and `/artifacts` entries only under the run's own ref. It reads the run's own
+  service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own
   ref, then its pull request's base, then the default branch, then entries written before this release. A
   branch's run therefore no longer replaces or deletes what its base branch's runs restore, and a run of
   another repository in the team no longer reads it. A run whose ref and commit its submitter chose (the CLI,
@@ -51,7 +51,7 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
-- **Node bounces:** Schema 92 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
+- **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
 - **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
 - **Child runs:** A controller-dispatched node's child run checks its ancestry in the claim's team, and the run profile fold reads node samples in the run's team, rather than in the default team.
 - **Dashboard build:** Update `sharp` to 0.35.5 so `pnpm audit` passes GHSA-wq5f-xc86-pv6w; the static dashboard export never runs it at serve time.
@@ -94,6 +94,54 @@ unlock.
 - **Scaffolding:** Align source-build fallback and Kubernetes fixture SDK pins with v0.66.5
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
+
+### Removed
+- **controller + charts (Breaking):** Remove the warm-PVC pool
+  The controller no longer creates, warms or hands out Docker-cache PVCs, and no longer serves `GET /api/v1/pool` or
+  `POST /api/v1/pool/{checkout,return,heartbeat}`. Nothing Sparkwing ships mounted a pool PVC, so the pool held
+  Kubernetes PVC and pod create rights and ran privileged warmer pods for no consumer. `sparkwing-controller` drops
+  `--pool`, `--pool-namespace`, `--warmer-service-account` and `--kubeconfig`, so a controller started with any of
+  them exits with an unknown-flag error, and it no longer links a Kubernetes client. `sparkwing-full` drops
+  `controller.pool.*` and `rbac.*`, renders no Role, ClusterRole or warmer ServiceAccount for the controller, and
+  stops mounting an API token in its pod. `sparkwing cluster status` drops its `pool` probe, and the
+  `sparkwing.pool.*` metrics are gone. See
+  [The warm-PVC pool is removed](docs/migrations/_unreleased.md#the-warm-pvc-pool-is-removed).
+- **controller (Breaking):** Remove the concurrency waiter event stream
+  `GET /api/v1/concurrency/{key}/notify` answers 404. The SDK, the CLI and the dashboard never opened it; a waiter
+  learns its outcome from `GET /api/v1/concurrency/{key}/resolve`, which they already poll. Removing it drops a
+  30-minute stream a claim token could hold open. See
+  [The concurrency notify stream is removed](docs/migrations/_unreleased.md#the-concurrency-notify-stream-is-removed).
+- **controller (Breaking):** Remove the controller's artifact read route
+  `GET /api/v1/artifacts/{key}` answers 404 on the controller, the local daemon and the loopback. No CLI, SDK or
+  dashboard code read it; nodes stage artifacts through the cache's `/bin` routes or the direct data store.
+  See [The controller artifact route is removed](docs/migrations/_unreleased.md#the-controller-artifact-route-is-removed).
+- **controller + cache (Breaking):** Remove four operator routes nothing called
+  The controller no longer serves `GET /api/v1/egress`, `GET /api/v1/credits/teams/{team}` or
+  `PUT /api/v1/storage/teams/{team}/free-slot`, and `sparkwing-cache` no longer serves `GET /repos`. Neither the CLI,
+  the dashboard nor `sparkwing-ops` called them. `pkg/controller.StorageTierResponse` is gone. See
+  [Four operator routes are removed](docs/migrations/_unreleased.md#four-operator-routes-are-removed).
+- **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
+  `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/_unreleased.md#per-pipeline-github-webhooks-are-removed).
+  The `sparkwing-full` chart refuses to render while `controller.githubWebhookSecret.name` or `controller.githubStatusToken.name` is still set, naming the value and the migration guide section, so a `helm upgrade --reuse-values` that carries them fails at render time instead of leaving deliveries to 404.
+- **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
+  Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
+- **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
+  No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes. See [migration guide](docs/migrations/_unreleased.md#unimplemented-backend-types-are-removed).
+- **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
+  `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
+  `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
+  longer serves `POST /api/v1/gitcache/refresh` or `POST /api/v1/gitcache/seed`. Nothing Sparkwing ships called
+  them: runners clone through `/git/<name>`, which refreshes a stale mirror itself, `--working-tree` uploads to
+  the direct data store, and artifacts use content-addressed `/bin` keys. The cache fills a mirror only from
+  origin. `--max-artifact-bytes` and `--workspace-seed-max-age` are gone, so a cache started with either exits
+  with an unknown-flag error, and the runner-bundle chart drops `cache.limits.maxArtifactBytes`. The
+  `sparkwing.gitcache.archives_served`, `files_served` and `recovery_reclones` metrics are gone. See
+  [Legacy cache routes are removed](docs/migrations/_unreleased.md#legacy-cache-routes-are-removed).
+- **cache + controller (Breaking):** Refuse cache grants that name no claim or no repository scope
+  Such a grant, minted by a controller from before grants carried a scope, opened its team's whole cache tree
+  on its signature alone until it expired. The cache and the controller's data routes now answer it 401, and no
+  controller mints one. See
+  [Cache grants need a claim and a scope](docs/migrations/_unreleased.md#cache-grants-need-a-claim-and-a-scope).
 
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
@@ -150,6 +198,9 @@ unlock.
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
+
+- **docs:** Remove embedded pages that described unshipped work: the MCP server page and the `proposals/` design notes
+  `sparkwing docs read --topic mcp` and `--topic proposals/...` now report an unknown topic. The SDK extraction roadmap leaves `versioning`, the maintainer release recipe leaves `getting-started`, the cron field reference moves from `scheduling` into `crons`, and `sparkwing pipeline sparks --help` names the `sparks:` block of `.sparkwing/sparkwing.yaml` instead of the `sparks.yaml` file the loader rejects.
 
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.

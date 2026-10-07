@@ -86,9 +86,6 @@ type dataDownloadRequest struct {
 }
 
 func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingTrigger bool) (bool, error) {
-	if grant.Claim == nil {
-		return false, errors.New("cache grant has no claim")
-	}
 	if c := grant.Claim; c.Kind == authwire.CacheClaimToken {
 		tok, err := s.store.CheckClaimSensitive(ctx, store.ClaimToken{
 			Team: store.Team(grant.Team), RunID: grant.Run,
@@ -148,10 +145,6 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, err)
-			return "", nil, false
-		}
-		if grant.Claim == nil {
-			writeError(w, http.StatusForbidden, errors.New("cache grant has no claim"))
 			return "", nil, false
 		}
 		if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {

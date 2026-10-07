@@ -23,6 +23,12 @@ const (
 	cacheGrantKey      = "cache-grant-key"
 )
 
+func mintTestCacheGrant(team, run string) (string, error) {
+	return authwire.MintClaimCacheGrant(cacheGrantKey, team, run, time.Now(), time.Hour,
+		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: "agent:runner", TokenPrefix: "swr_test"},
+		&authwire.CacheScope{Repo: "github.com/acme/app", Refs: []string{"refs/heads/main"}})
+}
+
 func newGrantingController(t *testing.T, teams map[string]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -33,7 +39,7 @@ func newGrantingController(t *testing.T, teams map[string]string) *httptest.Serv
 			http.Error(w, "no team", http.StatusForbidden)
 			return
 		}
-		grant, err := authwire.MintCacheGrant(cacheGrantKey, team, r.PathValue("id"), time.Now(), time.Hour)
+		grant, err := mintTestCacheGrant(team, r.PathValue("id"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
