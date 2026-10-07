@@ -427,7 +427,7 @@ func directLocalGitEnv(fetchEnv []string) []string {
 // GITHUB_REPOSITORY and github_owner/github_repo. They must all name one
 // repository (sourceurl.TriggerRepository), so the cache path and the direct
 // path fetch the same one and differ only in the form their transport needs:
-// the git cache names a GitHub repository by the ssh form its webhook binding
+// the git cache names a GitHub repository by the ssh form a GitHub-sourced run
 // registers, and a direct fetch uses the recorded clone URL, else the GitHub
 // name's https form, fitted by DirectFetchURL to the identities this process
 // holds. An empty result means the trigger names no repository.

@@ -1148,7 +1148,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 91
+const expectedSchemaVersion = 92
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -1945,6 +1945,10 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	return backfillRunAnnotationRollup(ctx, storeExecer{s: s})
 }
 
+// safety: the GitHub App is the only signed GitHub trigger, so the per-pipeline webhook secrets go with
+// their table; an older binary that still serves that route then fails its lookup rather than verifying.
+const dropGitHubWebhookBindings = `DROP TABLE IF EXISTS github_webhook_bindings`
+
 // safety: a version absent from this map must leave an older binary reading and
 // writing the migrated database; a version present here does not, so its names are
 // stamped and that binary refuses the store rather than corrupting it. Nothing below
@@ -2117,8 +2121,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 36:
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodePlacementCols)
 	case 37:
-		_, err := tx.ExecContext(ctx, githubWebhookBindingsTableSQLite)
-		return err
+		// safety: v37 created the per-pipeline webhook bindings that v92 drops, so a database
+		// that never held them skips straight past it.
+		return nil
 	case 38:
 		return applyStorageMigrationSQLite(ctx, tx)
 	case 39:
@@ -2264,6 +2269,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, githubAppDeliveriesReceivedIndex)
+		return err
+	case 92:
+		_, err := tx.ExecContext(ctx, dropGitHubWebhookBindings)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2589,8 +2597,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 36:
 		return addColumnsTx(ctx, tx, "nodes", nodePlacementColsPostgres)
 	case 37:
-		_, err := tx.ExecContext(ctx, githubWebhookBindingsTablePostgres)
-		return err
+		// safety: v37 created the per-pipeline webhook bindings that v92 drops, so a database
+		// that never held them skips straight past it.
+		return nil
 	case 38:
 		return applyStorageMigrationPostgres(ctx, tx)
 	case 39:
@@ -2734,6 +2743,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		_, err := tx.ExecContext(ctx, githubAppDeliveriesReceivedIndex)
+		return err
+	case 92:
+		_, err := tx.ExecContext(ctx, dropGitHubWebhookBindings)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -7149,7 +7161,7 @@ type Trigger struct {
 	// captured one delivery could re-send it under an id of their own.
 	//
 	// The store writes this field and never reads it back: it exists for
-	// the unique constraint, and [Store.FindTriggerByWebhookReplay]
+	// the unique constraint, and [Tenant.FindTriggerByWebhookReplay]
 	// resolves a collision to the trigger that won it.
 	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
 	// Team owns the trigger and the run it becomes. A claim and a read
@@ -7341,33 +7353,6 @@ func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key s
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("trigger for idempotency key", key)
-		}
-		return nil, err
-	}
-	return s.GetTrigger(ctx, id)
-}
-
-// FindTriggerByWebhookReplay returns the trigger a refused webhook
-// delivery collided with: the one holding replayKey, or failing that the
-// one holding delivery. It reports ErrNotFound when neither is stored.
-//
-// The caller is answering a duplicate, so it needs the run the first
-// delivery produced rather than a bare refusal; a redelivery from the
-// provider is then answered with that run's id instead of a dead end.
-func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
-	if replayKey == "" && delivery == "" {
-		return nil, notFound("trigger for webhook delivery", delivery)
-	}
-	var id string
-	err := s.queryRow(ctx,
-		`SELECT id FROM triggers
-		  WHERE (webhook_replay_key != '' AND webhook_replay_key = ?)
-		     OR (webhook_delivery != '' AND webhook_delivery = ?)
-		  ORDER BY created_at LIMIT 1`,
-		replayKey, delivery).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("trigger for webhook delivery", delivery)
 		}
 		return nil, err
 	}

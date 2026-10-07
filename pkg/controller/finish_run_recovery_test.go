@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -23,7 +21,7 @@ func TestFinishRunRetryReportsCommittedOutcomeWithoutRefolding(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = st.Close() })
-			if err := st.CreateTrigger(t.Context(), store.Trigger{ID: "run", Pipeline: "profile", TriggerSource: "github", Repo: "example/project", GithubOwner: "example", GithubRepo: "project", TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRHeadSHA: strings.Repeat("1", 40)}, CreatedAt: time.Now()}); err != nil {
+			if err := st.CreateTrigger(t.Context(), store.Trigger{ID: "run", Pipeline: "profile", TriggerSource: "github", Repo: "example/project", GithubOwner: "example", GithubRepo: "project", GithubRepoID: 701, TriggerEnv: map[string]string{envGitHubAppInstallation: "7", sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRHeadSHA: strings.Repeat("1", 40)}, CreatedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "profile", Status: "running", StartedAt: time.Now()}); err != nil {
@@ -61,37 +59,17 @@ func TestFinishRunRetryReportsCommittedOutcomeWithoutRefolding(t *testing.T) {
 			} else if won, err := st.FinishRunIfActive(t.Context(), "run", "success", ""); err != nil || !won {
 				t.Fatalf("commit boundary won=%t error=%v", won, err)
 			}
-			posted := make(chan string, 1)
-			github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var body struct{ State string }
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Error(err)
-				}
-				posted <- body.State
-				w.WriteHeader(http.StatusCreated)
-			}))
-			t.Cleanup(github.Close)
-			s.githubCommitStatuses = newGitHubCommitStatusReporter("test-token", "", github.URL, github.Client())
-			t.Cleanup(s.githubCommitStatuses.stop)
-			waiting, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			t.Cleanup(cancel)
+			github := attachAppChecks(t, s, "")
 			s.reportGitHubRunState(t.Context(), "run", "pending")
-			select {
-			case status := <-posted:
-				if status != "pending" {
-					t.Fatalf("initial status=%q; want pending", status)
-				}
-			case <-waiting.Done():
-				t.Fatal("reporter did not register the accepted run")
+			drainChecks(t, s)
+			if calls := github.CheckRunCalls(); len(calls) != 1 || calls[0].Status != "queued" {
+				t.Fatalf("check run writes = %+v, want one queued create", calls)
 			}
 			finish("failed", http.StatusBadRequest)
-			select {
-			case status := <-posted:
-				if status != "success" {
-					t.Fatalf("reported %q; want committed success", status)
-				}
-			case <-waiting.Done():
-				t.Fatal("retry did not recover commit-status reporting")
+			drainChecks(t, s)
+			calls := github.CheckRunCalls()
+			if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "success" {
+				t.Fatalf("check run writes = %+v, want the committed success", calls)
 			}
 			for _, node := range []string{"", "build"} {
 				profile, err := st.GetPipelineProfile(t.Context(), "profile", node)

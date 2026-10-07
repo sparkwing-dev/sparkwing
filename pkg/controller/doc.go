@@ -24,7 +24,7 @@
 // chainable options: [Server.WithDispatcher] (default
 // [NoopDispatcher]), [Server.WithAuthenticator] (default no auth),
 // [Server.WithQueueTimeout], [Server.WithSecretsCipher] (any
-// [Cipher] implementation), [Server.WithGitHubWebhookSecret], and
+// [Cipher] implementation), [Server.WithGitHubApp], and
 // the mode-specific options above. Call [Server.Handler] to get the
 // routed `http.Handler` to wire into a server.
 //

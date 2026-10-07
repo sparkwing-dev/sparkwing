@@ -196,14 +196,14 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Inspect controller health, executors, admission, users, tokens, images,
-and webhooks. Select the controller with --profile NAME.
+	Description: `Inspect controller health, executors, admission, users, tokens and
+images. Select the controller with --profile NAME.
 Configure profiles with 'sparkwing configure profiles'.
 
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -3565,132 +3565,6 @@ on "is the cluster reachable at all?".`,
 	Examples: []Example{
 		{"Quick-check prod", "sparkwing cluster status --profile prod"},
 		{"Structured output for a status dashboard", "sparkwing cluster status --profile prod -o json"},
-	},
-}
-
-var cmdWebhooks = Command{
-	Path:     "sparkwing cluster webhooks",
-	Synopsis: "Connect, inspect, and replay GitHub webhooks",
-	Description: `Manage GitHub webhooks through the installed 'gh' command and its
-credentials. 'connect' registers a repository against a pipeline on both
-sides and 'disconnect' removes it; the deliveries view joins delivery
-records with Sparkwing triggers and run outcomes.`,
-	SubcommandOrder: []string{"connect", "disconnect", "list", "deliveries", "replay"},
-	Examples: []Example{
-		{"Connect a repository to a pipeline", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
-	},
-}
-
-var cmdWebhooksConnect = Command{
-	Path:     "sparkwing cluster webhooks connect",
-	Synopsis: "Connect a GitHub repository to a pipeline",
-	Description: `Registers both sides of a webhook in one command. It generates a
-signing secret, stores the binding on the controller, creates or
-updates the repository's webhook through 'gh' so it posts to the
-controller's delivery URL for this pipeline, and asks GitHub for a
-ping so the answer the controller gave is part of the output.
-
-The secret is never printed and never passed in a command line; the
-controller stores it and verifies every delivery's HMAC against it.
-Re-running the command rotates the secret on both sides.
-
-The delivery URL comes from the controller: its --external-url when
-it announces one, and otherwise the URL this command reached it at.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the deliveries fire", Required: true, Group: "Input"},
-		{Name: "events", Argument: "LIST", Desc: "Comma-separated GitHub events", Default: defaultWebhookEvents, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller that stores the binding)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Connect push and pull-request triggers", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
-		{"Connect pushes only", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push"},
-	},
-}
-
-var cmdWebhooksDisconnect = Command{
-	Path:     "sparkwing cluster webhooks disconnect",
-	Synopsis: "Remove a repository's webhook and its controller binding",
-	Description: `Removes the binding the controller verifies deliveries against, then
-deletes the webhook on GitHub through 'gh'. The controller answers with
-the webhook it was bound to, so a repository connected to two
-controllers under the same pipeline name loses only this one. A webhook
-written by hand is matched by its pipeline path instead, and every
-deleted hook is printed with its URL.
-
-Either side already being absent is reported rather than failing, so a
-half-finished connect is cleaned up by running this once.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the webhook fires", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller holding the binding)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Disconnect a repository", "sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build"},
-	},
-}
-
-var cmdWebhooksList = Command{
-	Path:     "sparkwing cluster webhooks list",
-	Synopsis: "List GitHub hooks configured on a repo",
-	Description: `Calls 'gh api /repos/OWNER/NAME/hooks' and prints id, derived
-pipeline, active flag, last-delivery status, and URL.
-
-The PIPELINE column is parsed from the hook URL path
-(/webhooks/github/<pipeline>). Hooks posting to the older
-unscoped /webhooks/github endpoint render as "(unscoped)"
-so operators can spot them for cleanup. Non-sparkwing hooks
-render as "(non-sparkwing)".`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-	},
-}
-
-var cmdWebhooksDeliveries = Command{
-	Path:     "sparkwing cluster webhooks deliveries",
-	Synopsis: "List recent deliveries for a hook, joined with trigger state",
-	Description: `Fetches recent deliveries via 'gh api' and, for each one,
-looks up the matching sparkwing trigger by GITHUB_DELIVERY env
-stamp. Surfaces TRIGGER_ID + RUN_STATUS columns so operators
-see GitHub-side status alongside the run it produced.
-
---since filters deliveries client-side (GitHub's API does not
-take a time filter). Default: 24h.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "hook", Argument: "N", Desc: "GitHub hook id from 'webhooks list'", Required: true, Group: "Input"},
-		{Name: "since", Argument: "DURATION", Desc: "Only deliveries newer than this", Default: "24h", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
-	},
-}
-
-var cmdWebhooksReplay = Command{
-	Path:     "sparkwing cluster webhooks replay",
-	Synopsis: "Queue a redelivery of a specific delivery UUID",
-	Description: `Requests another attempt for the selected GitHub webhook delivery.
-Read the hook's deliveries to inspect the resulting attempt.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "hook", Argument: "N", Desc: "GitHub hook id", Required: true, Group: "Input"},
-		{Name: "delivery", Argument: "UUID", Desc: "Delivery GUID to redeliver", Required: true, Group: "Input"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --delivery 00000000-0000-4000-8000-000000000001"},
 	},
 }
 

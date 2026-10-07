@@ -57,10 +57,6 @@ type Server struct {
 	idlePollsEnforced bool
 	lastClaimAward    atomic.Int64
 
-	githubWebhookSecret  string
-	githubWebhook        GitHubWebhookConfig
-	githubCommitStatuses *githubCommitStatusReporter
-
 	queueTimeout    time.Duration
 	attentionCursor [2]string
 	attentionPassAt time.Time
@@ -1240,11 +1236,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
-	// safety: nothing proves a team controls the repository it would bind, and a
-	// binding lets its secret sign for that repository, so binding is the operator's.
-	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook)))
-	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook)))
-
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its operator token and the logs
@@ -1270,7 +1261,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.Handle("POST /api/v1/auth/oauth/google/exchange", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange))))
 	router.Handle("POST /api/v1/auth/oauth/github/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubStart)))
 	router.Handle("POST /api/v1/auth/oauth/github/exchange", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange))))
-	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
 	router.Handle("POST /api/v1/runners/github/exchange", noStore(http.HandlerFunc(s.handleGitHubRunnerExchange)))
@@ -1478,10 +1468,10 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 				s.logger.Warn("controller HTTP shutdown incomplete", "addr", l.Addr, "err", err)
 			}
 		}
-		s.drainGitHubCommitStatuses()
+		s.drainGitHubChecks(ctx)
 		return nil
 	case err := <-errCh:
-		s.drainGitHubCommitStatuses()
+		s.drainGitHubChecks(ctx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -1489,28 +1479,55 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 }
 
-// safety: the queue holds the terminal status a finished run has no other
+// safety: the queue holds the terminal check run a finished run has no other
 // producer for, so its drain owns a budget rather than inheriting whatever
 // the listener's shutdown left of one.
-func (s *Server) drainGitHubCommitStatuses() {
-	ctx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
+func (s *Server) drainGitHubChecks(parent context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), controllerShutdownBudget)
 	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {
-		s.logger.Warn("github commit status shutdown incomplete", "err", err)
+		s.logger.Warn("github check run shutdown incomplete", "err", err)
 	}
 }
 
 // Shutdown drains server-owned background work until ctx expires. ServeWith
 // calls Shutdown automatically; callers serving Handler directly must call it.
 func (s *Server) Shutdown(ctx context.Context) error {
-	var errs []error
-	if s.githubCommitStatuses != nil {
-		errs = append(errs, s.githubCommitStatuses.shutdown(ctx))
+	if s.githubApp == nil {
+		return nil
 	}
-	if s.githubApp != nil {
-		errs = append(errs, s.githubApp.checks.shutdown(ctx))
+	return s.githubApp.checks.shutdown(ctx)
+}
+
+// WithExternalURL declares the base URL this controller answers on from
+// outside the cluster. Signed filesystem output URLs use that address.
+// Empty uses the address each request arrived at.
+func (s *Server) WithExternalURL(rawURL string) *Server {
+	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	return s
+}
+
+func (s *Server) externalBaseURL(r *http.Request) string {
+	base := s.externalURL
+	if base == "" {
+		base = requestBaseURL(r)
 	}
-	return errors.Join(errs...)
+	return base
+}
+
+// safety: a controller behind TLS termination sees a plain listener, so the
+// forwarded scheme is the only thing that tells the caller's URL from the hop's.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded != "" {
+		if proto, _, _ := strings.Cut(forwarded, ","); proto != "" {
+			scheme = strings.TrimSpace(proto)
+		}
+	}
+	return scheme + "://" + r.Host
 }
 
 // safety: a run-level heartbeat this old means no orchestrator is driving the
