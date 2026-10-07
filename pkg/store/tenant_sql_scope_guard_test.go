@@ -300,6 +300,58 @@ var reviewedUnscopedSQL = map[string]string{
 		"before it serves",
 	"(*Store).RecordEgressUsage": "the controller persists the deployment's egress meter for every principal it counted; " +
 		"each principal names its own team",
+	"(*Store).selectTokensByPrefix": "authenticates a presented token by its prefix before its team is known; a token " +
+		"prefix is unique across teams and the row it returns carries its team",
+	"selectTokensByPrefixTx": "reads the credential the operator's rotate names by its prefix, which is unique across " +
+		"teams, and returns the row with its team",
+	"(*Store).rotateToken": "the operator rotates one credential named by its prefix, which is unique across teams; the " +
+		"replacement is minted into the old token's own team",
+	"(*Store).RevokeToken": "the operator revokes one credential named by its prefix, which is unique across teams; the " +
+		"admin scope is the deployment operator's and no team membership grants it",
+	"(*Store).ListTokens": "the operator's credential listing spans every team and returns each token's team; the admin " +
+		"scope is the deployment operator's and no team membership grants it",
+	"(*Store).SetTokenMetered": "the operator marks one credential as metered by its prefix, which is unique across teams; " +
+		"the admin scope is the deployment operator's",
+	"(*Store).TokenMetered": "reads whether one credential pays credits by its prefix, which is unique across teams, so " +
+		"the answer is that credential's own",
+	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
+		"the answer is that credential's own",
+	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
+		"exists in any team, because an install with any credential already has an operator path",
+	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
+		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
+		"a backfill would read every quota as unlimited",
+	"(*Store).storageQuotaRow": "storage quotas are keyed by the charged principal, team:<slug> for every team but the " +
+		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
+		"a backfill would read every quota as unlimited",
+	"storageQuotaForTx": "storage quotas are keyed by the charged principal, team:<slug> for every team but the default, " +
+		"so the principal names the team; no writer sets their team column yet, and scoping these reads before a " +
+		"backfill would read every quota as unlimited",
+	"(*Store).StorageUsageFor": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
+		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
+		"a backfill would read every quota as unlimited",
+	"(*Store).StorageRetainedBytes": "storage usage rows are keyed by the charged principal, team:<slug> for every team " +
+		"but the default, so the principal names the team; no writer sets their team column yet, and scoping these " +
+		"reads before a backfill would read every quota as unlimited",
+	"(*Store).SetStorageQuota": "the operator sets a quota by principal; storage quotas are keyed by the charged " +
+		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
+		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
+	"(*Store).SetStorageAllowance": "the operator sets an allowance by principal; storage quotas are keyed by the charged " +
+		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
+		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
+	"(*Store).createAgentLossRetryTx": "the expired-claim reaper files a lost node's retry for the source run its own scan " +
+		"selected by global id; the retry's trigger and run take the source run's team",
+	"(*Store).mergeAgentLossRetryTx": "the expired-claim reaper folds another lost node into the retry it already filed " +
+		"for the same source run, named by global id",
+	"snapshotAgentLossRetryNodesTx": "copies one source run's nodes onto the retry the reaper filed for it, by global id, " +
+		"and also runs as the v31 schema step before the team column exists",
+	"persistAgentLossRetryNodeSourceTx": "writes one source node's snapshot for the retry the reaper filed, by global id, " +
+		"and also runs as the v31 schema step before the team column exists",
+	"loadAgentLossRetryNodeSourceTx": "reads the snapshot a retry was filed with by the retry's global id, on the reaper's " +
+		"path and in the v31 schema step that predates the team column",
+	"(*Store).requiredAgentLossRetryNodeSourceTx": "the deny-all markers a pre-snapshot retry carries were written before " +
+		"the team column, so scoping this read to a team would let a legacy retry run unrefused; the retry id is global " +
+		"and its node read follows",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -309,48 +361,19 @@ var unportedSQL = []string{
 	"(*Store).CountUsers",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
-	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
 	"(*Store).ListLegacyAgentClaims",
-	"(*Store).ListTokens",
 	"(*Store).ListUsers",
-	"(*Store).NodeSettlement",
-	"(*Store).RevokeToken",
-	"(*Store).SetStorageAllowance",
-	"(*Store).SetStorageQuota",
-	"(*Store).SetTokenMetered",
-	"(*Store).StorageRetainedBytes",
-	"(*Store).StorageUsageFor",
-	"(*Store).TokenMetered",
 	"(*Store).VerifyUser",
-	"(*Store).cancelMeteredNode",
-	"(*Store).chargeNodeTx",
-	"(*Store).chargeStorageTx",
-	"(*Store).createAgentLossRetryTx",
 	"(*Store).lookupUser",
-	"(*Store).mergeAgentLossRetryTx",
 	"(*Store).mintCSRFKey",
-	"(*Store).requiredAgentLossRetryNodeSourceTx",
-	"(*Store).reserveNodeCreditsTx",
-	"(*Store).rotateToken",
-	"(*Store).selectTokensByPrefix",
-	"(*Store).storageQuotaRow",
-	"clearCreditExhaustionAnchorTx",
-	"creditExhaustionAnchorTx",
 	"livePrefixesForPrincipal",
-	"loadAgentLossRetryNodeSourceTx",
-	"persistAgentLossRetryNodeSourceTx",
-	"selectTokensByPrefixTx",
-	"snapshotAgentLossRetryNodesTx",
-	"stampCreditExhaustionAnchorTx",
-	"storageQuotaForTx",
-	"tokenMeteredTx",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 41
+const unportedSQLSize = 12
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

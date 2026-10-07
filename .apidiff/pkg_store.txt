@@ -2790,6 +2790,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) MintGitHubRunnerCredential(
 	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)
+func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)

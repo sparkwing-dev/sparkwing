@@ -2045,8 +2045,8 @@ func (s *Store) reserveNodeCreditsTx(
 	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?, credit_billing_from = ?
-		  WHERE run_id = ? AND node_id = ?`,
-		through, class.Cores, billingFrom, runID, nodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ?`,
+		through, class.Cores, billingFrom, string(team), runID, nodeID)
 	return err
 }
 
@@ -2122,11 +2122,15 @@ func (s *Store) chargeNodeTx(
 	var anchor, class, billingFrom int64
 	var startedAt sql.NullInt64
 	var failureReason string
-	err := tx.QueryRowContext(ctx,
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return out, err
+	}
+	err = tx.QueryRowContext(ctx,
 		`SELECT credit_charged_through, credit_cpu_class, execution_started_at,
 		        credit_billing_from, failure_reason FROM nodes
-		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class, &startedAt, &billingFrom, &failureReason)
+		  WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(team), runID, nodeID).Scan(&anchor, &class, &startedAt, &billingFrom, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, notFound("node", runID+"/"+nodeID)
 	}
@@ -2145,10 +2149,6 @@ func (s *Store) chargeNodeTx(
 		return out, err
 	}
 	maxCharge, err := creditSettingTx(ctx, tx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
-	if err != nil {
-		return out, err
-	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
 	if err != nil {
 		return out, err
 	}
@@ -2183,8 +2183,8 @@ func (s *Store) chargeNodeTx(
 		through = nowNS + MinBillableSeconds*int64(time.Second)
 		_, err := tx.ExecContext(ctx,
 			`UPDATE nodes SET credit_billing_from = ?, credit_charged_through = ?
-			  WHERE run_id = ? AND node_id = ?`,
-			nowNS, through, runID, nodeID)
+			  WHERE team = ? AND run_id = ? AND node_id = ?`,
+			nowNS, through, string(team), runID, nodeID)
 		return out, err
 	case billingFrom == 0 || (!startedAt.Valid && platformSetupFailures[failureReason]):
 		if final && anchor != 0 {
@@ -2208,8 +2208,8 @@ func (s *Store) chargeNodeTx(
 	}
 	if through != anchor {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-			through, runID, nodeID); err != nil {
+			`UPDATE nodes SET credit_charged_through = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+			through, string(team), runID, nodeID); err != nil {
 			return out, err
 		}
 	}
@@ -2451,8 +2451,8 @@ func settleCreditExhaustionTx(
 func creditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExhaustion) (int64, error) {
 	var stamped int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT credit_exhausted_anchor FROM nodes WHERE run_id = ? AND node_id = ?`,
-		e.RunID, e.NodeID).Scan(&stamped); err != nil {
+		`SELECT credit_exhausted_anchor FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(e.Team), e.RunID, e.NodeID).Scan(&stamped); err != nil {
 		return 0, err
 	}
 	if stamped != 0 {
@@ -2465,16 +2465,16 @@ func stampCreditExhaustionAnchorTx(
 	ctx context.Context, tx *storeTx, e creditExhaustion, at int64,
 ) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
-		at, e.RunID, e.NodeID)
+		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		at, string(e.Team), e.RunID, e.NodeID)
 	return err
 }
 
 func clearCreditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExhaustion) error {
 	_, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET credit_exhausted_anchor = 0
-		  WHERE run_id = ? AND node_id = ? AND credit_exhausted_anchor != 0`,
-		e.RunID, e.NodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND credit_exhausted_anchor != 0`,
+		string(e.Team), e.RunID, e.NodeID)
 	return err
 }
 
@@ -2652,6 +2652,10 @@ func (s *Store) cancelMeteredNode(
 	if err != nil {
 		return err
 	}
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
 	stoppedAt := settlement.settledAt.UnixNano()
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
    SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
@@ -2660,19 +2664,19 @@ func (s *Store) cancelMeteredNode(
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        ready_at = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
- WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-		message, reason, stoppedAt, runID, nodeID); err != nil {
+ WHERE team = ? AND run_id = ? AND node_id = ? AND `+nodeNotDone,
+		message, reason, stoppedAt, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		`DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
    SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
        failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
- WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		stoppedAt, reason, runID, nodeID); err != nil {
+ WHERE team = ? AND run_id = ? AND node_id = ? AND finished_at IS NULL`,
+		stoppedAt, reason, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	return tx.Commit()

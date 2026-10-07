@@ -9120,15 +9120,20 @@ type NodeSettlement struct {
 // The claim recorded there names the credential the ledger priced the work
 // against, so a finish posted by another principal settles the same way.
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
+	return s.defaultTenant().NodeSettlement(ctx, runID, nodeID)
+}
+
+// NodeSettlement is [Store.NodeSettlement] confined to t's team.
+func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
 	var out NodeSettlement
 	var startedAt, finishedAt sql.NullInt64
 	var chargedThrough int64
 	var metered sql.NullBool
-	err := s.queryRow(ctx,
+	err := t.s.queryRow(ctx,
 		`SELECT started_at, finished_at, claim_token_prefix, credit_charged_through,
-                        (SELECT metered FROM tokens WHERE prefix = nodes.claim_token_prefix)
-                   FROM nodes WHERE run_id = ? AND node_id = ?`,
-		runID, nodeID,
+                        (SELECT metered FROM tokens WHERE tokens.team = nodes.team AND prefix = nodes.claim_token_prefix)
+                   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(t.team), runID, nodeID,
 	).Scan(&startedAt, &finishedAt, &out.ClaimTokenPrefix, &chargedThrough, &metered)
 	if err != nil {
 		return out, err

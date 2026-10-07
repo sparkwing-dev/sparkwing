@@ -698,7 +698,11 @@ func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
 }
 
 func (s *Server) nodeSettlement(r *http.Request, runID, nodeID string) (store.NodeSettlement, error) {
-	settlement, err := s.store.NodeSettlement(r.Context(), runID, nodeID)
+	var settlement store.NodeSettlement
+	tenant, err := s.tenantFor(r)
+	if err == nil {
+		settlement, err = tenant.NodeSettlement(r.Context(), runID, nodeID)
+	}
 	if err != nil {
 		s.logger.Warn("reading a node's settlement failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
