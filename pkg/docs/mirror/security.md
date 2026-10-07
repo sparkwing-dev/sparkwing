@@ -146,8 +146,13 @@ every team's run secrets, source tokens and cache grants; keep it
 operator-only. Which secrets a run may read through a claim token is declared
 by that run's own plan, so the boundary is the secret's pipeline or shared
 scope, not the declaration. The masker covers step output that goes through
-the exec helper and the node log; anything else a pipeline process prints to
-its own stdout reaches the operator's container logs unmasked. `docker run -e
+the exec helper and the node log, and the process that starts a pipeline
+process masks that process's raw stdout and stderr line by line with every
+value it registered: output printed without the SDK, from a child process that
+inherits its stdio, and the runtime's report of an unrecovered panic. On
+Windows only the pipeline process's own masking applies. Masking matches the
+literal value and its common encodings, so a transformed secret still prints
+in the clear. `docker run -e
 K=V`, which the SDK's docker and services helpers use, puts the value on the
 docker CLI's command line, which every account on a
 shared self-hosted host can read in the process table.

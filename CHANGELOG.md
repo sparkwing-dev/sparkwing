@@ -93,6 +93,14 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Security
+- **orchestrator:** Mask a pipeline process's raw stdout and stderr in the process that starts it
+  The claim launcher, the remote runner and the local runner now read the pipeline process's output through
+  pipes and mask each line with every value that process registered, which it hands over on an inherited
+  descriptor before the value can be printed. Output that bypasses the SDK, a child process inheriting its stdio,
+  and the runtime's report of an unrecovered panic no longer reach container logs or run logs with a secret in
+  the clear. An unterminated progress line now appears once its newline or the process's exit arrives. Windows
+  keeps only the pipeline process's own masking, and a pipeline built against an earlier SDK hands over no values.
+
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no
   claim, which the cache honored after the token's member was removed and after the run finished. Sparkwing's
