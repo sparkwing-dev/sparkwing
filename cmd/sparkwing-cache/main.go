@@ -55,7 +55,7 @@ func run(args []string) error {
 	fs.BoolVar(&cfg.TrustForwardedHost, "trust-forwarded-host",
 		cfg.TrustForwardedHost,
 		"honor X-Forwarded-Host and X-Forwarded-Proto when rewriting registry bodies from the request, taking the right-most element of each. Only safe when a reverse proxy is the only route to this port, and inert when --public-url is set.")
-	openCredentials := credentials.Bind(fs,
+	credentialsDir := fs.String(credentials.FlagName, "",
 		"directory holding the cache's secrets, one file each: "+authwire.CacheTokenCredential+", the bearer token the git and "+
 			"blob endpoints require unless --allow-unauthenticated is set, and "+authwire.CacheGrantKeyCredential+", the key that "+
 			"verifies cache grants, the one the controller signs them with. No runner holds the key, and it must differ "+
@@ -123,7 +123,7 @@ func run(args []string) error {
 		}
 		return err
 	}
-	creds, err := openCredentials()
+	creds, err := credentials.Open(*credentialsDir)
 	if err != nil {
 		return err
 	}

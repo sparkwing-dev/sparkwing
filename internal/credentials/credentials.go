@@ -16,8 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	flag "github.com/spf13/pflag"
 )
 
 // FlagName is the flag every service names its credentials directory with.
@@ -27,13 +25,6 @@ const FlagName = "credentials-dir"
 // credentials.
 type Dir struct {
 	path string
-}
-
-// Bind registers --credentials-dir on fs and returns the function that
-// opens the directory it names once fs is parsed.
-func Bind(fs *flag.FlagSet, usage string) func() (Dir, error) {
-	path := fs.String(FlagName, "", usage)
-	return func() (Dir, error) { return Open(*path) }
 }
 
 // Open returns the credentials directory at path. An empty path holds no
