@@ -16,79 +16,55 @@ func knownValues(values ...string) *ChildValues {
 	return v
 }
 
-func TestLineWriterMasksASecretAcrossALongLinesChunkBoundary(t *testing.T) {
-	const secret = "chunk-boundary-secret-91d2"
-	filler := strings.Repeat("x", maxMaskedLine)
+// safety: an 8-byte piece already narrows a secret, so none may reach the output.
+func assertNoFragment(t *testing.T, out, secret string) {
+	t.Helper()
+	for n := 8; n <= len(secret); n++ {
+		for i := 0; i+n <= len(secret); i++ {
+			if strings.Contains(out, secret[i:i+n]) {
+				t.Fatalf("output holds %q, a piece of the secret", secret[i:i+n])
+			}
+		}
+	}
+}
+
+func TestLineWriterTruncatesALongLineWithoutLeakingASecret(t *testing.T) {
+	const secret = "fixture-secret-7c41e9fixture"
 	for name, writes := range map[string][]string{
-		"split between writes": {filler + secret[:6], secret[6:] + " tail"},
-		"whole inside the cut": {filler + secret + "yy", " tail"},
+		"secret ending at the limit": {strings.Repeat("x", maxMaskedLine-len(secret)) + secret + strings.Repeat("y", 64) + "\n"},
+		"secret straddling the cut":  {strings.Repeat("x", maxMaskedLine-5) + secret[:12], secret[12:] + "\n"},
+		"secret ending the buffer":   {strings.Repeat("x", maxMaskedLine-3) + secret, "rest\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			v := knownValues(secret)
+			v := knownValues(secret, "fixture")
 			var out bytes.Buffer
 			w := v.Writer(&out)
-			for _, p := range writes {
+			for _, p := range append(writes, "next line\n") {
 				if _, err := w.Write([]byte(p)); err != nil {
 					t.Fatal(err)
 				}
 			}
 			v.Close()
 			got := out.String()
-			if strings.Contains(got, secret[:6]) || strings.Contains(got, secret[6:]) {
-				t.Fatalf("a piece of the secret reached the destination: ...%q", got[max(0, len(got)-80):])
-			}
-			if !strings.HasSuffix(got, "*** tail") && !strings.HasSuffix(got, "***yy tail") {
-				t.Fatalf("tail = %q, want the secret masked in place", got[max(0, len(got)-80):])
-			}
-			if strings.Count(got, "x") != maxMaskedLine {
-				t.Fatalf("got %d filler bytes, want %d", strings.Count(got, "x"), maxMaskedLine)
+			assertNoFragment(t, got, secret)
+			if !strings.Contains(got, " bytes]\nnext line\n") || strings.Count(got, "[truncated ") != 1 {
+				t.Fatalf("tail = %q, want one truncation marker then the next line", got[max(0, len(got)-60):])
 			}
 		})
 	}
 }
 
-func TestLineWriterKeepsAMatchWholeInsideALongRunOfAnOverlappingValue(t *testing.T) {
-	const secret = "fixture-secret-7c41e9a"
-	pad := strings.Repeat("a", (maxMaskedLine+2-len(secret))/2)
-	v := knownValues("aaaa", secret)
-	var out bytes.Buffer
-	w := v.Writer(&out)
-	if _, err := w.Write([]byte(pad + secret + pad + "aa")); err != nil {
-		t.Fatal(err)
-	}
-	v.Close()
-	if strings.Contains(out.String(), "fixture") {
-		t.Fatal("part of the secret reached the destination")
-	}
-}
-
-func TestLineWriterKeepsASecretWholeAcrossConsecutiveFlushes(t *testing.T) {
+func TestLineWriterMasksAnUnterminatedTailAtClose(t *testing.T) {
 	const secret = "fixture-secret-7c41e9"
-	filler := strings.Repeat("x", maxMaskedLine)
 	v := knownValues(secret)
 	var out bytes.Buffer
 	w := v.Writer(&out)
-	cuts := []int{3, 9, 15, 20}
-	prev := 0
-	for _, c := range cuts {
-		if _, err := w.Write([]byte(secret[prev:] + filler + secret[:c])); err != nil {
-			t.Fatal(err)
-		}
-		prev = c
-	}
-	if _, err := w.Write([]byte(secret[prev:] + "\n")); err != nil {
+	if _, err := w.Write([]byte("a " + secret + "\nb " + secret)); err != nil {
 		t.Fatal(err)
 	}
 	v.Close()
-	got := out.String()
-	if strings.Contains(got, "fixture") || strings.Contains(got, "7c41e9") {
-		t.Fatal("part of the secret reached the destination")
-	}
-	if n := strings.Count(got, "***"); n != len(cuts)+1 {
-		t.Fatalf("masked %d secrets, want %d", n, len(cuts)+1)
-	}
-	if want := len(cuts)*len(filler) + (len(cuts)+1)*len("***") + 1; len(got) != want {
-		t.Fatalf("got %d bytes, want %d", len(got), want)
+	if got := out.String(); got != "a ***\nb ***" {
+		t.Fatalf("output = %q", got)
 	}
 }
 

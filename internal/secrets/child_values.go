@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -111,6 +110,20 @@ func (v *ChildValues) MaskJSON(doc []byte) []byte {
 	return v.synced().MaskJSON(doc)
 }
 
+// MaskTruncated masks s, the start of a line that goes on, and drops its last
+// characters, which could begin a value the rest of the line completes. It
+// returns what remains and how many bytes of s it dropped.
+func (v *ChildValues) MaskTruncated(s string) (string, int) {
+	m := v.synced()
+	drop := 0
+	for _, p := range m.Values() {
+		drop = max(drop, len(p)-1)
+	}
+	masked := m.Mask(s)
+	drop = min(drop, len(masked))
+	return masked[:len(masked)-drop], min(drop, len(s))
+}
+
 func (v *ChildValues) synced() *Masker {
 	v.mu.Lock()
 	// safety: the child writes a value here before Register returns, so any
@@ -170,16 +183,18 @@ func (v *ChildValues) Close() {
 	}
 }
 
-// perf: a line longer than this is written in pieces rather than held whole.
+// perf: an unterminated line longer than this is truncated rather than held whole.
 const maxMaskedLine = 1 << 20
 
 // LineWriter masks a child's output a line at a time.
 type LineWriter struct {
-	v   *ChildValues
-	dst io.Writer
-	mu  sync.Mutex
-	buf []byte
-	err error
+	v       *ChildValues
+	dst     io.Writer
+	mu      sync.Mutex
+	buf     []byte
+	cutting bool
+	dropped int
+	err     error
 }
 
 // Write never fails, so a destination that refuses output never blocks the
@@ -187,52 +202,50 @@ type LineWriter struct {
 func (w *LineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.buf = append(w.buf, p...)
-	start := 0
-	for {
-		i := bytes.IndexByte(w.buf[start:], '\n')
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
 		if i < 0 {
+			w.take(p)
 			break
 		}
-		w.emit(w.buf[start : start+i+1])
-		start += i + 1
+		w.take(p[:i])
+		w.endLine("\n")
+		p = p[i+1:]
 	}
-	w.buf = append(w.buf[:0], w.buf[start:]...)
-	if len(w.buf) > maxMaskedLine {
-		cut := safeCut(string(w.buf), w.v.synced().Values())
-		w.emit(w.buf[:cut])
-		w.buf = append(w.buf[:0], w.buf[cut:]...)
-	}
-	return len(p), nil
+	return n, nil
 }
 
-// safety: a value can only cross the split if the bytes before it end with a
-// proper prefix of that value, so keeping the longest such suffix keeps every
-// crossing value whole, and that suffix is shorter than the longest value.
-func safeCut(s string, patterns []string) int {
-	keep := 0
-	for _, p := range patterns {
-		for k := min(len(p)-1, len(s)); k > keep; k-- {
-			if strings.HasSuffix(s, p[:k]) {
-				keep = k
-				break
-			}
-		}
+func (w *LineWriter) take(p []byte) {
+	if w.cutting {
+		w.dropped += len(p)
+		return
 	}
-	return len(s) - keep
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > maxMaskedLine {
+		kept, dropped := w.v.MaskTruncated(string(w.buf))
+		w.write(kept)
+		w.buf, w.cutting, w.dropped = w.buf[:0], true, dropped
+	}
+}
+
+func (w *LineWriter) endLine(end string) {
+	if w.cutting {
+		w.write(fmt.Sprintf(" [truncated %d bytes]%s", w.dropped, end))
+	} else if len(w.buf) > 0 || end != "" {
+		w.write(w.v.Mask(string(w.buf)) + end)
+	}
+	w.buf, w.cutting, w.dropped = w.buf[:0], false, 0
 }
 
 func (w *LineWriter) flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if len(w.buf) > 0 {
-		w.emit(w.buf)
-		w.buf = nil
-	}
+	w.endLine("")
 }
 
-func (w *LineWriter) emit(line []byte) {
+func (w *LineWriter) write(s string) {
 	if w.err == nil {
-		_, w.err = io.WriteString(w.dst, w.v.Mask(string(line)))
+		_, w.err = io.WriteString(w.dst, s)
 	}
 }
