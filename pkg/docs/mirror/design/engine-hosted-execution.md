@@ -67,11 +67,16 @@ flowchart LR
 
 ## Process model
 
-The engine starts one SDK process per node attempt. That process is
-long-lived for the attempt: it answers one `run_node`, or a sequence of
-`run_step` requests, plus any `call` requests the host sends for that node.
-Plan evaluation before dispatch runs in its own short process, which also
-answers closures the host evaluates before any node starts.
+The wire contract is the node protocol specification
+(`docs/node-protocol.md` and its JSON Schemas). This page decides how the
+engine uses it.
+
+The engine starts one SDK process per node attempt with the single argument
+`--sw-node-protocol`. That process is long-lived for the attempt: it answers
+a `plan` request, then one `run_node` or a sequence of `run_step` requests,
+plus any `eval` requests the host sends for that node's closures. Plan
+evaluation before dispatch runs in its own short process, which also answers
+closures the host evaluates before any node starts.
 
 One process per attempt is the choice because:
 
@@ -93,41 +98,52 @@ node, and it does not map onto pods.
 
 ### Framing
 
-- The host writes one JSON request per line to the process's stdin.
-- The process writes one JSON object per line to stdout. A line with a
-  numeric `id` answers the request with that id; every other line is a log
-  record with the engine's log record fields.
+- The host writes one JSON request per line to the process's stdin:
+  `{"id": "<id>", "op": "<op>", ...fields}`.
+- The process writes one JSON object per line to stdout. A line with
+  `reply` answers the request with that id, as
+  `{"reply": "<id>", "ok": true, "result": ...}` or
+  `{"reply": "<id>", "ok": false, "error": {"message": "..."}}`; every other
+  line is a log record with the engine's log record fields.
 - stderr lines become warn-level text records, as they do for Go nodes.
-- End of stdin means the host is gone; the SDK exits. This replaces the
-  inherited liveness descriptor the Go path uses.
+- The host sends one request at a time, except `eval` for a closure of the
+  running node.
+- End of stdin means no further requests; the SDK finishes the current one
+  and exits. This replaces the inherited liveness descriptor the Go path
+  uses.
 
 ```text
--> {"id":1,"method":"run_node","params":{"pipeline":"ship","run_id":"r1","args":{},"node":"build"}}
+-> {"id":"1","op":"plan","pipeline":"ship","args":{},"run":{"run_id":"r1","pipeline":"ship"}}
+<- {"reply":"1","ok":true,"result":{"protocol":"1","pipeline":"ship","run_id":"r1","nodes":[...]}}
+-> {"id":"2","op":"run_node","node":"build","attempt":1,"options":{"dry_run":false}}
 <- {"ts":"2026-01-02T03:04:05Z","level":"info","node":"build","msg":"compiling"}
-<- {"id":1,"result":{"outcome":"success","output":{"digest":"sha-1"}}}
+<- {"reply":"2","ok":true,"result":{"outcome":"success","output":{"digest":"sha-1"}}}
 ```
 
-| Method | Params | Result |
+| `op` | Fields | Result |
 |---|---|---|
 | `describe` | none | the describe document |
-| `plan` | `pipeline`, `run_id`, `args` | the plan document |
-| `run_node` | run params, `node` | `outcome`, optional `output`, optional `error` |
-| `run_step` | run params, `node`, `step` | `outcome`, optional `error` |
-| `call` | run params, `closure` | `value` |
-| `shutdown` | none | null; the process exits |
+| `plan` | `pipeline`, `args`, `run` | the plan document |
+| `run_node` | `node`, `attempt`, `options` | `outcome`, optional `output`, optional `error` |
+| `run_step` | `node`, `step`, `options` | `outcome`, optional `error` |
+| `eval` | `closure`, optional `input` | `value` |
 
-A body that throws is a `failed` outcome, not a protocol error. Protocol
-errors carry a code (`unknown_method`, `unknown_node`, `unknown_closure`,
-`bad_request`, and similar) and fail the node with a reason that names the
-SDK, so an author sees "this SDK does not support X" rather than a crash.
+`run_node` names no pipeline or args, so each node process answers `plan`
+first, and the SDK runs bodies from that plan. A body that throws is a
+`failed` outcome in an `ok` reply. A failed reply means the SDK could not
+answer at all, such as an unknown op, node or closure; the host fails the
+node with that message and the SDK's protocol version, so an author sees
+"this SDK does not support X" rather than a crash.
 
 ### Closures by id
 
-The plan document names every closure a node has, with an id the SDK
-assigns, such as `deploy/skip_if`. The host decides when a closure runs
-and sends `call` with that id. The SDK looks the closure up in the plan it
-built for the same run and args. A closure id the SDK does not know is a
-protocol error, never a skipped check.
+The plan document lists every closure a node or step has under `closures`,
+with ids the SDK assigns, such as `deploy/skip_if/0`. Ids are opaque to the
+host. The host decides when a closure runs and sends `eval` with that id;
+the SDK looks the closure up in the plan it built in the same process. An
+id the SDK does not know is a failed reply, never a skipped check. The host
+bounds each closure's time, and a `skip_if` that fails or overruns
+evaluates to don't-skip.
 
 ```mermaid
 sequenceDiagram
@@ -136,14 +152,16 @@ sequenceDiagram
   participant N as Node process
   H->>P: describe
   P-->>H: protocol, pipelines, args
-  H->>P: plan (pipeline, run_id, args)
-  P-->>H: nodes, needs, envelope, steps, closure ids
+  H->>P: plan (pipeline, args, run)
+  P-->>H: nodes, deps, modifiers, steps, closure ids
   Note over H: snapshot, admit, restore caches, stage artifacts, check memo
-  H->>N: spawn with node environment
-  H->>N: call deploy/skip_if
+  H->>N: spawn with --sw-node-protocol and the node environment
+  H->>N: plan (same pipeline, args, run)
+  N-->>H: plan document, compared with the snapshot
+  H->>N: eval deploy/skip_if/0
   N-->>H: value false
   H->>N: run_node deploy
-  N->>H: GET /node/v1/secrets/name, GET /node/v1/outputs/build
+  N->>H: GET /node/v1/secrets/name, GET /node/v1/nodes/build/output
   N-->>H: log records on stdout
   N-->>H: outcome success, output
   Note over H: save caches, publish artifacts, record output, schedule dependents
@@ -152,46 +170,48 @@ sequenceDiagram
 
 ## What describe and the plan document carry
 
-`--describe` stays static: no run context, no args. It gains a `protocol`
-field and an `sdk` object so the host can choose the path before anything
-runs. The plan document is per run and comes back from the `plan` request.
+`--describe` stays static: no run context, no args. It wraps the pipeline
+array in an object with a `protocol` string, so the host can choose the path
+before anything runs. The plan document is per run and comes back from the
+`plan` request.
 
 ```json
 {
-  "protocol": 1,
-  "sdk": {"language": "typescript", "version": "0.1.0"},
+  "protocol": "1",
   "pipelines": [{"name": "ship", "short": "Build and deploy", "args": []}]
 }
 ```
 
 ```json
 {
+  "protocol": "1",
   "pipeline": "ship",
+  "run_id": "r1",
   "nodes": [
-    {"id": "build", "needs": [], "retry": {"attempts": 2, "backoff_ms": 1000}, "timeout_ms": 600000},
-    {"id": "deploy", "needs": ["build"],
-     "steps": [{"id": "apply", "needs": []}],
-     "closures": {"skip_if": "deploy/skip_if"}}
+    {"id": "build", "deps": [], "modifiers": {"retry": 2, "retry_backoff_ms": 1000, "timeout_ms": 600000}},
+    {"id": "deploy", "deps": ["build"], "modifiers": {"has_skip_if": true},
+     "work": {"steps": [{"id": "apply"}]},
+     "closures": {"skip_if": ["deploy/skip_if/0"]}}
   ]
 }
 ```
 
-The Go plan snapshot already carries most of the envelope (`deps`,
-`optional_deps`, retry, timeouts, labels, concurrency, resources, memo flag,
-steps with their needs). The hosted path still needs these in the plan
-document:
+The Go plan snapshot that `plan --json` writes already carries the edges and
+most of the envelope: `deps`, `optional_deps`, retry, timeouts, placement
+labels, concurrency, resources, the memo flag, approvals, OnFailure, steps
+with their needs, and a per-node `spec_hash`. The hosted path still needs:
 
-- the protocol version and SDK identity in describe;
+- the `protocol` field on describe and on the plan;
 - cache directories as data: name, path or resolver, key files;
-- memo key inputs as data: file globs, environment names, constants;
+- memo key inputs as data: file globs, environment names, constants, or a
+  key closure;
 - closure ids for each closure, where the snapshot has only `has_skip_if`
   and similar flags;
-- step ids with finally, optional and continue-on-error flags, and a closure
-  id for a step's skip predicate;
-- generator closure ids for nodes expanded at run time;
-- approval and OnFailure configuration in a form the host can act on
-  without reconstructing Go values;
-- a stable node hash the host compares across processes.
+- step continue-on-error and optional flags, and step closure ids;
+- generator closure ids for nodes expanded at run time, which the snapshot
+  marks only as `dynamic`;
+- plan evaluation that takes its run context in the request instead of
+  reading a run row through a controller.
 
 ## Pinned Go pipelines during the migration
 
@@ -201,23 +221,24 @@ The host negotiates by reading describe before every run:
 flowchart TD
   D[run binary --describe] --> Q{describe shape}
   Q -->|JSON array: Go SDK without protocol| IP[in-process path: exec the binary as today]
-  Q -->|object with protocol in the host's range| HP[hosted path]
-  Q -->|object with protocol outside the range| ERR[refuse the run, name the SDK version to install]
+  Q -->|object with a protocol the host speaks| HP[hosted path]
+  Q -->|object with a protocol the host does not speak| ERR[refuse the run, name the versions the host speaks]
 ```
 
 - A Go binary built against any released SDK prints a JSON array. The host
-  treats that as protocol 0 and runs it exactly as today, with the
+  treats that as the in-process model and runs it exactly as today, with the
   orchestrator inside the binary.
 - The CLI and runner learn to read both shapes before any SDK prints the
   object form, because an older CLI that meets the object form cannot list
   the binary's pipelines.
-- The Go SDK moves to the hosted path by answering `serve` and printing the
-  object form. Its in-process path remains until every engine that customers
-  run can host it, and its removal is a separate breaking release.
-- The host supports a range of protocol versions. A minor addition, such as a
-  new closure kind, is a capability the SDK lists in describe; a missing
-  capability makes the host refuse the feature for that pipeline with a
-  clear reason rather than guess.
+- The Go SDK moves to the hosted path by answering `--sw-node-protocol` and
+  printing the object form. Its in-process path remains until every engine
+  that customers run can host it, and its removal is a separate breaking
+  release.
+- The host keeps serving every protocol version it has shipped, because
+  pinned binaries outlive engine upgrades. Node routes carry the
+  `Sparkwing-Node-Protocol` header, and a host answers a version it does not
+  speak with HTTP 426 and the versions it does.
 
 ## Changes by component
 
@@ -225,9 +246,9 @@ flowchart TD
 |---|---|---|
 | CLI `run` | builds the binary, passes run options as `SPARKWING_*` variables, execs `<binary> <pipeline>` | builds the SDK entry, runs the host in-process or through the admission daemon, keeps step windows, dry-run, only and no-cache as host state |
 | CLI `pipeline describe`, `plan`, `explain` | asks the binary for its own help and plan text | renders describe and the plan document |
-| Local runner | starts `<binary> run-node --coordinated` and supervises it | starts `<entry> serve`, sends requests, reads results from stdout instead of re-reading the node row |
+| Local runner | starts `<binary> run-node --coordinated` and supervises it | starts `<entry> --sw-node-protocol`, sends requests, reads results from stdout instead of re-reading the node row |
 | Runner and trigger loop | execs `<binary> handle-trigger`, and the binary dispatches | dispatches in the engine from the plan document; nodes still run the SDK entry |
-| Launcher and Kubernetes jobs | job args `run-node <run> <node>`, claim fence in the pod environment | job args `serve`; the executor holds the claim, and the pod gets only the node environment |
+| Launcher and Kubernetes jobs | job args `run-node <run> <node>`, claim fence in the pod environment | job args `--sw-node-protocol`; the executor holds the claim, and the pod gets only the node environment |
 | Admission daemon | leases taken by the binary's dispatcher | leases taken by the host per node |
 
 The node environment shrinks to what an SDK reads: run and node ids, the
@@ -256,19 +277,22 @@ carries a CLI flag into the binary today becomes host state.
    `plan --json`, writes node rows and schedules the DAG itself, starting
    each node through the local runner as `run-node`. A test runs a two-node
    plan with one dependency and a dependency failure. No command reaches it.
-2. **Smallest first step: plan without a controller.** Let `plan --json`
-   take its run context on stdin instead of reading a run row through the
-   controller, and have the spike use it. This is additive, needs no new
-   variable, and makes plan evaluation a pure stdio exchange.
-3. **Hosted local runs for protocol 1 entries.** The CLI recognises the
+2. **Smallest first step: plan without a controller.** Let the Go binary
+   answer the protocol's `describe` and `plan` requests under
+   `--sw-node-protocol`, with the run context in the request instead of a
+   run row read through the controller, and have the spike use it. This is
+   additive, needs no new variable, and makes plan evaluation a pure stdio
+   exchange.
+3. **Hosted local runs for protocol 1 entries.** The CLI recognizes the
    object describe form and runs the host locally: scheduling, retries,
    timeouts, log forwarding, and the secrets and outputs routes on loopback.
    The TypeScript SDK runs end to end here.
 4. **Envelope moves.** Memo, dependency caches, artifacts, steps and closure
    calls run host-side for hosted entries, from the plan document.
-5. **Go SDK on the protocol.** The Go SDK answers `serve` and prints the
-   object form. Runners, the launcher and Kubernetes jobs use the hosted
-   path for protocol 1 binaries and the in-process path for older ones.
+5. **Go SDK on the protocol.** The Go SDK runs nodes under
+   `--sw-node-protocol` and prints the object form from `--describe`.
+   Runners, the launcher and Kubernetes jobs use the hosted path for
+   protocol 1 binaries and the in-process path for older ones.
 6. **In-process removal.** A breaking release removes the in-process path
    once supported engines all host protocol 1.
 
@@ -290,10 +314,15 @@ carries a CLI flag into the binary today becomes host state.
 
 ## Open questions
 
-- Whether the node routes are served on loopback HTTP with a bearer, or on
-  a unix socket. A URL is simpler across languages.
-- Whether a node's output travels only in the `run_node` result, or also
-  through `PUT /node/v1/outputs` for nodes that publish before they finish.
-  One writer is simpler; the TypeScript prototype has both.
-- Whether concurrent `call` requests during a running body are allowed. The
-  TypeScript prototype answers requests one at a time.
+- Whether each node process must answer `plan` before `run_node`. This page
+  assumes it does, because `run_node` names no pipeline or args. The
+  alternative is to carry pipeline, args and run in every `run_node`.
+- Whether a failed reply carries a machine-readable code next to its
+  message, so the host can tell "unknown op" (an old SDK) from "unknown
+  node" (plan drift) without matching text.
+- Where a node reads another node's output under `/node/v1/`. This page
+  assumes `/node/v1/nodes/{other}/output`, answering the same signed grant as
+  the run-scoped route.
+- Whether describe names the SDK's language and version, which would let the
+  host's refusal name the package to upgrade. The describe schema allows no
+  field for it.
