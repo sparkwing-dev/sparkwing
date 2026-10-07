@@ -486,3 +486,17 @@ Every verb the CLI dispatches is now a registered command, so `--help`,
   invoked by the same name. OS timers installed by `crons install` need
   nothing. A host that runs the tick from its own scheduler keeps calling
   `sparkwing crons tick`.
+
+## cluster gc, examples scaffold and retired-flag pointers are removed
+
+| Before | After |
+|---|---|
+| `sparkwing cluster gc [--root DIR] [--profile P]` | none; `sparkwing-runner runner` sweeps its warm root when it starts |
+| `sparkwing examples scaffold --name EXAMPLE` | `sparkwing examples --name EXAMPLE --body`, then save the body under `.sparkwing/jobs/` |
+| `--on P`, `--sw-on P` | `--profile P` |
+| `sparkwing run X --sw-profile P` | `sparkwing pipeline trigger X --profile P` |
+| `--sw-target T` | `--target T` |
+| `sparkwing run X --sw-isolated-home DIR` | `SPARKWING_HOME=DIR sparkwing run X` |
+
+The retired spellings still fail; the error now says the flag is unknown
+instead of naming its replacement.

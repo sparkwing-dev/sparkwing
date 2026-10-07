@@ -22,7 +22,6 @@ local dashboard with 'sparkwing serve'.
 - `agents` -- Inspect the controller's fleet view
 - `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
-- `gc` -- Sweep stale warm-PVC state
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
 - `limits` -- Read and set the compute guards
@@ -162,39 +161,6 @@ command narrows to one namespace.
 ```sh
 # Who holds and who's queued
 sparkwing cluster concurrency --namespace deploy-prod --profile prod
-```
-
-## `sparkwing cluster gc`
-
-Sweep stale warm-PVC state
-
-Operator-facing manual invocation of the warm-PVC sweep.
-Normally fires at 'sparkwing cluster worker' startup; exposed as a subcommand
-so operators can trigger it against a running pod via kubectl
-exec during incident response.
-
-When --profile is omitted, the run-directory sweep is skipped; the
-mtime-based git/ and tmp/ sweeps still run and free disk. Supply
---profile to enable the full sweep.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--root DIR` | Warm-PVC root (default: $SPARKWING_HOME resolution) |
-| `--profile NAME` | Profile name; without it run-dir sweep is skipped |
-
-### Examples
-
-```sh
-# mtime-only sweep in-pod (no controller)
-sparkwing cluster gc
-
-# Full sweep against prod controller
-sparkwing cluster gc --profile prod
-
-# Target a specific warm root
-sparkwing cluster gc --root /var/lib/sparkwing --profile prod
 ```
 
 ## `sparkwing cluster image`

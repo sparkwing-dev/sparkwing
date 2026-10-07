@@ -173,26 +173,13 @@ func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
+func TestParseRunFlags_RetiredSwProfileIsUnknown(t *testing.T) {
 	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "fictional-remote"})
 	if flags.profile != "" {
 		t.Errorf("--sw-profile should not set profile; got %q", flags.profile)
 	}
-	if err := checkRetiredWhereFlags(passthroughArgs, nil); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
-		t.Errorf("checkRetiredWhereFlags: want --sw-profile pointer, got %v", err)
-	}
-}
-
-func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
-	args := []string{"--name", "x", "--on", "pull_request"}
-	if err := checkRetiredWhereFlags(args, map[string]bool{"on": true}); err != nil {
-		t.Errorf("a command declaring --on still hit the retired-flag guard: %v", err)
-	}
-	if err := checkRetiredWhereFlags(args, map[string]bool{"name": true}); err == nil {
-		t.Error("--on passed the guard on a command that does not declare it")
-	}
-	if err := checkRetiredWhereFlags([]string{"--on=fictional-production"}, nil); err == nil {
-		t.Error("--on=value form escaped the guard")
+	if flags.unknownRunnerFlag != "--sw-profile" {
+		t.Errorf("--sw-profile should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
 	}
 }
 
@@ -222,31 +209,6 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 				t.Error("rejected runner flag changed the environment")
 			}
 		})
-	}
-}
-
-func TestRetiredIsolatedHomeNamesItsReplacement(t *testing.T) {
-	err := checkRetiredWhereFlags([]string{"--sw-isolated-home", "/tmp/gate"}, nil)
-	if err == nil {
-		t.Fatal("--sw-isolated-home passed the retired-flag guard")
-	}
-	for _, want := range []string{"admission daemon", "SPARKWING_HOME"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("retired-flag error = %q, want it to name %q", err, want)
-		}
-	}
-	if strings.Contains(err.Error(), "See http") {
-		t.Errorf("retired-flag error = %q, want no migration URL while the guide is unreleased", err)
-	}
-	if err := checkRetiredWhereFlags([]string{"--sw-isolated-home=/tmp/gate"}, nil); err == nil {
-		t.Error("--sw-isolated-home=value form escaped the guard")
-	}
-}
-
-func TestDispatchRun_RetiredRunnerFlagKeepsMigrationHint(t *testing.T) {
-	err := dispatchRun([]string{"fictional", "--sw-profile", "fictional"})
-	if err == nil || !strings.Contains(err.Error(), "--profile") || strings.Contains(err.Error(), "unknown runner flag") {
-		t.Fatalf("dispatch error = %v, want retired profile flag migration", err)
 	}
 }
 

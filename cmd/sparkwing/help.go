@@ -163,9 +163,6 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 			return fmt.Errorf("%s: %w", cmd.Path, err)
 		}
 	}
-	if err := checkRetiredWhereFlags(args, cmd.declaredFlags()); err != nil {
-		return err
-	}
 	return validateFlagDeps(cmd, fs)
 }
 

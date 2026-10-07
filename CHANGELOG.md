@@ -104,6 +104,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Remove `cluster gc`, the hidden `examples scaffold`, and the refusals for flags retired in v0.5.0
+  `sparkwing cluster gc` swept a warm root its help said the cut `cluster worker` maintained; `sparkwing-runner runner` still sweeps its own root at startup. `examples scaffold` rendered a registry example into a repo; read one with `sparkwing examples --name NAME --body`. `--on`, `--sw-on`, `--sw-profile`, `--sw-target` and `--sw-isolated-home` no longer print a migration pointer: `run` refuses the `--sw-` ones as unknown runner flags and every other verb refuses them as unknown flags. See [migration guide](docs/migrations/_unreleased.md#cluster-gc-examples-scaffold-and-retired-flag-pointers-are-removed).
+
 - **cli (Breaking):** Remove the CLI's unlisted verb spellings, `run config`, and `pipeline publish`
   The alias spellings `configure profiles ls/rm/delete/dup`, `secrets rm/remove`, `pipeline sparks ls/rm`, `configure xrepo ls/rm` and `runs consumer kill` are gone; use the listed verb. `sparkwing run <pipeline> config` becomes `sparkwing pipeline describe --name <pipeline> --secrets`. The unlisted `sparkwing pipeline publish` upload verb and the CLI's `run-node` case are gone. The nine `_complete-*` helpers become one hidden `__complete KIND`, so an installed completion script must be regenerated with `sparkwing completion --shell <shell>`. `crons tick` is now hidden from help and the command index and still runs under the same name. See [migration guide](docs/migrations/_unreleased.md#cli-aliases-and-internal-verbs).
 

@@ -117,13 +117,6 @@ func dispatchRun(args []string) error {
 	}
 	var err error
 
-	runnerArgs := passthrough
-	if separator := slices.Index(runnerArgs, "--"); separator >= 0 {
-		runnerArgs = runnerArgs[:separator]
-	}
-	if err := checkRetiredWhereFlags(runnerArgs, nil); err != nil {
-		return err
-	}
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
 	}
@@ -508,8 +501,6 @@ func runCluster(args []string) error {
 		return runRunners(args[1:])
 	case "worker":
 		return runWorker(args[1:])
-	case "gc":
-		return runGC(args[1:])
 	case "users":
 		return runUsers(args[1:])
 	case "tokens":
@@ -591,9 +582,6 @@ func runJobs(args []string) error {
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -693,9 +681,6 @@ func runJobs(args []string) error {
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
 		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -746,9 +731,6 @@ func runJobs(args []string) error {
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
 		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
 		noEvents := fs.Bool("no-events", false, "show node output only")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -789,9 +771,6 @@ func runJobs(args []string) error {
 		runID := fs.String("run", "", "run identifier")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
 		if err := parseAndCheck(cmdJobsErrors, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil

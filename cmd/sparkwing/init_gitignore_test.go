@@ -61,7 +61,7 @@ func TestExistingScaffoldUpdatesLocalIgnoreAndWarnsAboutExternalSymlink(t *testi
 	if err := os.WriteFile(ignore, []byte("go.sum\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runExampleScaffold([]string{"--name", "lint-test-go"}); err != nil {
+	if err := runPipelineNew([]string{"--name", "middle", "--template", "minimal"}); err != nil {
 		t.Fatal(err)
 	}
 	checkPipelineBinaryIgnored(t, repo)

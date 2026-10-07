@@ -14,7 +14,6 @@ import (
 // the runs family is a judgement call: many verbs resolve a storage profile from the working
 // directory, and most are not worth re-anchoring.
 var chdirCommands = []string{
-	"sparkwing examples scaffold",
 	"sparkwing info",
 	"sparkwing pipeline describe",
 	"sparkwing pipeline discover",

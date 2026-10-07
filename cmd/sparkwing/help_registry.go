@@ -203,7 +203,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "users", "tokens", "limits", "image", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -1574,23 +1574,6 @@ errors.`,
 	},
 }
 
-var cmdExampleScaffold = Command{
-	Path:     "sparkwing examples scaffold",
-	Synopsis: "Materialize an example into a repo (verification path)",
-	Hidden:   true,
-	Description: `Renders one example's source into the target repo, the way
-'pipeline new' renders a shape. Used by the template-verify pipeline to
-prove every example still compiles, lints, and explains (and that the
-runnable-tier ones run).
-
-To start a pipeline use 'sparkwing pipeline new --template <shape>'.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "EXAMPLE", Desc: "Example to materialize", Required: true, Group: "Target"},
-		{Name: "param", Argument: "K=V", Desc: "Example parameter (repeatable)", Group: "Target"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "System"},
-	},
-}
-
 var cmdPipelineLint = Command{
 	Path:     "sparkwing pipeline lint",
 	Synopsis: "Check pipeline source for idiomatic anti-patterns (enforced gate)",
@@ -1942,28 +1925,6 @@ or against a local 'sparkwing serve start' via --profile local.`,
 	Examples: []Example{
 		{"Run against a named profile", "sparkwing cluster worker --profile local"},
 		{"Faster polling for tight dev loops", "sparkwing cluster worker --profile local --poll 250ms"},
-	},
-}
-
-var cmdGC = Command{
-	Path:     "sparkwing cluster gc",
-	Synopsis: "Sweep stale warm-PVC state",
-	Description: `Operator-facing manual invocation of the warm-PVC sweep.
-Normally fires at 'sparkwing cluster worker' startup; exposed as a subcommand
-so operators can trigger it against a running pod via kubectl
-exec during incident response.
-
-When --profile is omitted, the run-directory sweep is skipped; the
-mtime-based git/ and tmp/ sweeps still run and free disk. Supply
---profile to enable the full sweep.`,
-	Flags: []FlagSpec{
-		{Name: "root", Argument: "DIR", Desc: "Warm-PVC root (default: $SPARKWING_HOME resolution)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; without it run-dir sweep is skipped", Group: "System"},
-	},
-	Examples: []Example{
-		{"mtime-only sweep in-pod (no controller)", "sparkwing cluster gc"},
-		{"Full sweep against prod controller", "sparkwing cluster gc --profile prod"},
-		{"Target a specific warm root", "sparkwing cluster gc --root /var/lib/sparkwing --profile prod"},
 	},
 }
 
