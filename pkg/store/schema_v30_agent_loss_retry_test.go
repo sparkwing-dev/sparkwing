@@ -1364,7 +1364,15 @@ func claimRetryNode(t *testing.T, s *store.Store, runID string, identity store.C
 
 func ackNodeAttempt(t *testing.T, s *store.Store, n *store.Node, identity store.ClaimIdentity, ordinal int) {
 	t.Helper()
-	if err := s.AcknowledgeNodeExecutionStart(context.Background(), n.RunID, n.NodeID, identity, store.ExecutionStart{
+	team, err := s.AsOperator().RunTeam(context.Background(), n.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn, err := s.ForTeam(context.Background(), team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.AcknowledgeNodeExecutionStart(context.Background(), n.RunID, n.NodeID, identity, store.ExecutionStart{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID:   n.ReservationID,
 		ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: ordinal,

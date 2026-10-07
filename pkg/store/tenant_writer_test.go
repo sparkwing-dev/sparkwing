@@ -356,7 +356,7 @@ func TestTriggerHolderMutatesItsOwnTeamsRun(t *testing.T) {
 	if err := acme.StartNode(fenced, "run-acme", "build"); err != nil {
 		t.Fatalf("StartNode: %v", err)
 	}
-	if err := st.AcknowledgeNodeExecutionStart(fenced, "run-acme", "build", runner, store.ExecutionStart{
+	if err := acme.AcknowledgeNodeExecutionStart(fenced, "run-acme", "build", runner, store.ExecutionStart{
 		ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1,
 	}); err != nil {
 		t.Fatalf("AcknowledgeNodeExecutionStart: %v", err)

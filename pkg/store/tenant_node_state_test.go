@@ -345,3 +345,37 @@ func TestTenantBouncesAndMetricsStayInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.ListNodeMetricsPage = %v, %v, want the one sample", got, err)
 	}
 }
+
+// An execution attempt belongs to its run's team: another team's handle
+// can neither open nor close one on the node.
+func TestTenantExecutionAttemptsStayInTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	start := store.ExecutionStart{ExecutorKind: store.ExecutorKindLocal, ExecutorID: "laptop", AttemptOrdinal: 1}
+	if err := globex.AcknowledgeNodeExecutionStart(ctx, "run-a", "build", store.ClaimIdentity{}, start); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.AcknowledgeNodeExecutionStart = %v, want ErrNotFound", err)
+	}
+	if err := acme.AcknowledgeNodeExecutionStart(ctx, "run-a", "build", store.ClaimIdentity{}, start); err != nil {
+		t.Fatalf("acme.AcknowledgeNodeExecutionStart: %v", err)
+	}
+	finish := store.ExecutionAttemptFinish{ExecutorKind: store.ExecutorKindLocal, AttemptOrdinal: 1, Outcome: "success"}
+	if err := globex.FinishNodeExecutionAttempt(ctx, "run-a", "build", store.ClaimIdentity{}, finish); err == nil {
+		t.Fatal("globex.FinishNodeExecutionAttempt closed acme's attempt")
+	}
+	n, err := acme.GetNode(ctx, "run-a", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.ExecutionAttempts) != 1 || n.ExecutionAttempts[0].FinishedAt != nil {
+		t.Fatalf("attempts = %+v, want acme's one open attempt", n.ExecutionAttempts)
+	}
+	if err := acme.FinishNodeExecutionAttempt(ctx, "run-a", "build", store.ClaimIdentity{}, finish); err != nil {
+		t.Fatalf("acme.FinishNodeExecutionAttempt: %v", err)
+	}
+}

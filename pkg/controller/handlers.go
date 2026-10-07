@@ -2109,6 +2109,10 @@ var errLocalExecutionUnsupported = errors.New(
 	"local execution attempts are accepted only by a host's own admission daemon")
 
 func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	var body store.ExecutionStart
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -2129,7 +2133,7 @@ func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *h
 		return
 	}
 	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), runID, nodeID, claimIdentity(r), body)
+	err := tenant.AcknowledgeNodeExecutionStart(r.Context(), runID, nodeID, claimIdentity(r), body)
 	if errors.Is(err, store.ErrInvalidInput) {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -2146,6 +2150,10 @@ func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *h
 }
 
 func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	var body store.ExecutionAttemptFinish
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -2165,7 +2173,7 @@ func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, errors.New("invalid execution-attempt outcome or failure_reason"))
 		return
 	}
-	err := s.store.FinishNodeExecutionAttempt(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body)
+	err := tenant.FinishNodeExecutionAttempt(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body)
 	if errors.Is(err, store.ErrLockHeld) {
 		writeError(w, http.StatusConflict, err)
 		return

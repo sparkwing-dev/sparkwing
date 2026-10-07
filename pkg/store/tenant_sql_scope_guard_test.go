@@ -306,7 +306,6 @@ var reviewedUnscopedSQL = map[string]string{
 // its entries and lowers unportedSQLSize in the same commit, so an entry
 // cannot be added without a reviewer seeing the number move.
 var unportedSQL = []string{
-	"(*Store).AcknowledgeNodeExecutionStart",
 	"(*Store).CountUsers",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
@@ -314,7 +313,6 @@ var unportedSQL = []string{
 	"(*Store).CreateUser",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
-	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).finishNode",
 	"(*Store).ListLegacyAgentClaims",
 	"(*Store).ListTokens",
@@ -331,13 +329,10 @@ var unportedSQL = []string{
 	"(*Store).StorageUsageFor",
 	"(*Store).TokenMetered",
 	"(*Store).VerifyUser",
-	"(*Store).acknowledgeTriggerExecutionStart",
 	"(*Store).cancelMeteredNode",
 	"(*Store).chargeNodeTx",
 	"(*Store).chargeStorageTx",
 	"(*Store).createAgentLossRetryTx",
-	"(*Store).finishLocalNodeExecutionAttempt",
-	"(*Store).finishTriggerExecutionAttempt",
 	"(*Store).lookupUser",
 	"(*Store).markNodeReady",
 	"(*Store).mergeAgentLossRetryTx",
@@ -346,7 +341,6 @@ var unportedSQL = []string{
 	"(*Store).reserveNodeCreditsTx",
 	"(*Store).rotateToken",
 	"(*Store).selectTokensByPrefix",
-	"(*Store).startLocalNodeExecutionAttempt",
 	"(*Store).storageQuotaRow",
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
@@ -361,7 +355,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 52
+const unportedSQLSize = 46
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
