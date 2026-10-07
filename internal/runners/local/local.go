@@ -524,11 +524,11 @@ func (r *Runner) tokenDied(req runner.Request, err error) bool {
 	return true
 }
 
-// safety: a whole-line record is masked field by field, since masking its
-// text could hit a key; anything else is masked as the text it is.
+// safety: a whole-line JSON document is masked value by value, since masking
+// its text could hit a key; anything else is masked as the text it is.
 type outputMasker interface {
 	Mask(string) string
-	MaskTruncated(string) (string, int)
+	MaskJSON([]byte) []byte
 	MaskRecord(sparkwing.LogRecord) sparkwing.LogRecord
 }
 
@@ -546,7 +546,8 @@ func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger
 		// that happened to parse would report a record the node never
 		// emitted.
 		if !truncated {
-			if rec, ok := wholeLineRecord(line); ok {
+			rec, isRecord, isJSON := wholeLineRecord(line)
+			if isRecord {
 				if rec.TS.IsZero() {
 					rec.TS = time.Now()
 				}
@@ -554,6 +555,11 @@ func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger
 					rec.JobID = req.NodeID
 				}
 				req.Delegate.Emit(mask.MaskRecord(rec))
+				return
+			}
+			if isJSON {
+				// safety: value masking leaves keys alone, and a key can hold a value too.
+				req.Delegate.Emit(rawLineRecord(req.NodeID, mask.Mask(string(mask.MaskJSON(line))), false))
 				return
 			}
 		}
@@ -564,20 +570,27 @@ func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger
 	}
 }
 
-func wholeLineRecord(line []byte) (sparkwing.LogRecord, bool) {
-	var rec sparkwing.LogRecord
+// safety: numbers keep their exact text, so an integer past 2^53 is forwarded
+// as written rather than rounded through float64.
+func wholeLineRecord(line []byte) (rec sparkwing.LogRecord, isRecord, isJSON bool) {
+	var doc json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(line))
-	if dec.Decode(&rec) != nil {
-		return rec, false
+	if dec.Decode(&doc) != nil {
+		return rec, false, false
 	}
-	_, err := dec.Token()
-	return rec, errors.Is(err, io.EOF)
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return rec, false, false
+	}
+	dec = json.NewDecoder(bytes.NewReader(doc))
+	dec.UseNumber()
+	return rec, dec.Decode(&rec) == nil, true
 }
 
+// safety: any part of an overlong line could end inside a value whose rest
+// the masker never sees with it, so none of the line is forwarded.
 func maskLine(mask outputMasker, line string, truncated bool) string {
 	if truncated {
-		kept, _ := mask.MaskTruncated(line)
-		return kept
+		return ""
 	}
 	return mask.Mask(line)
 }
@@ -589,7 +602,7 @@ func forwardStderr(errOut io.Reader, req runner.Request, mask outputMasker) {
 	}
 	_ = forwardLines(errOut, func(line []byte, truncated bool) {
 		text := maskLine(mask, strings.TrimRight(string(line), "\r"), truncated)
-		if strings.TrimSpace(text) == "" {
+		if strings.TrimSpace(text) == "" && !truncated {
 			return
 		}
 		req.Delegate.Emit(rawLineRecord(req.NodeID, text, truncated))
@@ -604,7 +617,7 @@ func rawLineRecord(nodeID, text string, truncated bool) sparkwing.LogRecord {
 		Msg:   text,
 	}
 	if truncated {
-		rec.Msg += truncationMarker
+		rec.Msg = droppedLineMarker
 		rec.Attrs = map[string]any{"truncated": true, "limit_bytes": maxLogLineBytes}
 	}
 	return rec
@@ -663,7 +676,7 @@ const maxLogLineBytes = 1 << 20
 
 const lineReadBufferBytes = 64 * 1024
 
-const truncationMarker = " …[truncated: line exceeded the 1MiB forwarding limit]"
+const droppedLineMarker = "[line over 1 MiB dropped]"
 
 func failedResult(err error) runner.Result {
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}

@@ -105,18 +105,11 @@ func (v *ChildValues) Mask(s string) string {
 	return v.synced().Mask(s)
 }
 
-// MaskTruncated masks s, the start of a line that goes on, and drops its last
-// characters, which could begin a value the rest of the line completes. It
-// returns what remains and how many bytes of s it dropped.
-func (v *ChildValues) MaskTruncated(s string) (string, int) {
-	m := v.synced()
-	drop := 0
-	for _, p := range m.Values() {
-		drop = max(drop, len(p)-1)
-	}
-	masked := m.Mask(s)
-	drop = min(drop, len(masked))
-	return masked[:len(masked)-drop], min(drop, len(s))
+// MaskJSON masks every string value of a JSON document, keeping its keys,
+// structure and numbers, with every value the child registered before it
+// wrote the document.
+func (v *ChildValues) MaskJSON(doc []byte) []byte {
+	return v.synced().MaskJSON(doc)
 }
 
 // MaskRecord masks every string field of a decoded log record and its

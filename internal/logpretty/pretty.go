@@ -2,6 +2,7 @@ package logpretty
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -181,12 +182,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		return
 	case "node_end":
 		outcome, _ := rec.Attrs["outcome"].(string)
-		durMS, _ := rec.Attrs["duration_ms"].(int64)
-		if durMS == 0 {
-			if v, ok := rec.Attrs["duration_ms"].(float64); ok {
-				durMS = int64(v)
-			}
-		}
+		durMS, _ := asMillis(rec.Attrs["duration_ms"])
 		icon, code := outcomeIcon(outcome)
 		head := p.color(icon, code)
 		name := p.color(rec.JobID, nodeHue)
@@ -1187,6 +1183,12 @@ func asMillis(v any) (int64, bool) {
 		return int64(n), true
 	case int:
 		return int64(n), true
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i, true
+		}
+		f, err := n.Float64()
+		return int64(f), err == nil
 	}
 	return 0, false
 }

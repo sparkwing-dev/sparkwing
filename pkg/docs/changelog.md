@@ -98,7 +98,8 @@ unlock.
   pipes and mask each line with every value that process registered, which it hands over on an inherited
   descriptor before the value can be printed. Output that bypasses the SDK, a child process inheriting its stdio,
   and the runtime's report of an unrecovered panic no longer reach container logs or run logs with a secret in
-  the clear. An unterminated progress line now appears once its newline or the process's exit arrives. Windows
+  the clear. An unterminated progress line now appears once its newline or the process's exit arrives, and a
+  line longer than 1 MiB is replaced by a `[line over 1 MiB dropped]` marker instead of being truncated. Windows
   keeps only the pipeline process's own masking, and a pipeline built against an earlier SDK hands over no values.
 
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence

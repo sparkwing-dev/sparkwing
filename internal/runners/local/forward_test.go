@@ -2,6 +2,7 @@ package local
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,7 +20,7 @@ type maskerOutput struct{ m *secrets.Masker }
 
 func (o maskerOutput) Mask(s string) string { return o.m.Mask(s) }
 
-func (o maskerOutput) MaskTruncated(s string) (string, int) { return o.m.Mask(s), 0 }
+func (o maskerOutput) MaskJSON(doc []byte) []byte { return o.m.MaskJSON(doc) }
 
 func (o maskerOutput) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 	rec.Step, rec.Msg = o.m.Mask(rec.Step), o.m.Mask(rec.Msg)
@@ -156,15 +157,15 @@ func TestForwardRecords_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	if len(got) != 201 {
 		t.Fatalf("got %d records, want 201 (the oversized line plus 200 after it)", len(got))
 	}
-	if got[0].Level != "warn" || !strings.Contains(got[0].Msg, "truncated") {
-		t.Errorf("record 0 = %+v, want a truncated warn record", got[0])
+	if got[0].Level != "warn" || got[0].Msg != droppedLineMarker {
+		t.Errorf("record 0 = %+v, want the dropped-line marker as a warn record", got[0])
 	}
 	if got[200].Msg != "after-199" {
 		t.Errorf("last record = %+v, want after-199", got[200])
 	}
 }
 
-func TestForwardRecords_OversizedFinalLineIsTruncatedNotDropped(t *testing.T) {
+func TestForwardRecords_OversizedFinalLineIsReplacedByAMarker(t *testing.T) {
 	line := strings.Repeat("y", 1_100_000)
 	cap := &captureLogger{}
 	forwardRecords(strings.NewReader(line+"\n"), runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
@@ -173,12 +174,8 @@ func TestForwardRecords_OversizedFinalLineIsTruncatedNotDropped(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d records, want 1", len(got))
 	}
-	if got[0].Level != "warn" {
-		t.Errorf("level = %q, want warn", got[0].Level)
-	}
-	kept := strings.TrimSuffix(got[0].Msg, truncationMarker)
-	if len(kept) != maxLogLineBytes {
-		t.Errorf("kept %d bytes, want the %d-byte cap", len(kept), maxLogLineBytes)
+	if got[0].Level != "warn" || got[0].Msg != droppedLineMarker {
+		t.Errorf("record = %q at %q, want the dropped-line marker at warn", got[0].Msg[:min(len(got[0].Msg), 40)], got[0].Level)
 	}
 	if got[0].Attrs["truncated"] != true {
 		t.Errorf("Attrs = %v, want truncated:true", got[0].Attrs)
@@ -208,8 +205,8 @@ func TestForwardStderr_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d records, want 2", len(got))
 	}
-	if got[1].Msg != "recovered" {
-		t.Errorf("second record = %+v, want the line after the oversized one", got[1])
+	if got[0].Msg != droppedLineMarker || got[1].Msg != "recovered" {
+		t.Errorf("records = %q, %q; want the marker then the line after the oversized one", got[0].Msg[:min(len(got[0].Msg), 40)], got[1].Msg)
 	}
 }
 
@@ -270,7 +267,7 @@ func TestForwardRecordsMasksRecordsByFieldAndEverythingElseAsText(t *testing.T) 
 	if len(got) != 4 {
 		t.Fatalf("got %d records, want 4: %+v", len(got), got)
 	}
-	if r := got[0]; r.Msg != "token *** sent" || r.Step != "***" || r.Attrs["msg"] != "***" || r.Attrs["count"] != 42.0 {
+	if r := got[0]; r.Msg != "token *** sent" || r.Step != "***" || r.Attrs["msg"] != "***" || r.Attrs["count"] != json.Number("42") {
 		t.Errorf("record = %+v, want its keys kept and its string values masked", r)
 	}
 	for i, want := range map[int]string{
@@ -292,5 +289,31 @@ func TestForwardRecordsKeepsAStepDurationForThePrettyRenderer(t *testing.T) {
 	pr.Flush()
 	if !strings.Contains(buf.String(), "(1.5s)") {
 		t.Fatalf("rendered %q, want the step duration (1.5s)", buf.String())
+	}
+}
+
+func TestForwardRecordsMasksNonRecordJSONByValueAndKeepsNumbersExact(t *testing.T) {
+	m := secrets.NewMasker()
+	m.Register("pässwörd")
+	cap := &captureLogger{}
+	lines := strings.Join([]string{
+		`{"msg":false,"password":"pässwörd","sequence":9007199254740993}`,
+		`{"msg":false,"password":"p\u00e4ssw\u00f6rd"}`,
+		`{"msg":"x","attrs":{"sequence":9007199254740993}}`,
+	}, "\n") + "\n"
+	forwardRecords(strings.NewReader(lines), runner.Request{NodeID: "build", Delegate: cap}, maskerOutput{m: m}, slog.Default())
+
+	got := cap.records()
+	if len(got) != 3 {
+		t.Fatalf("got %d records, want 3: %+v", len(got), got)
+	}
+	if got[0].Msg != `{"msg":false,"password":"***","sequence":9007199254740993}` {
+		t.Errorf("line 0 forwarded as %s", got[0].Msg)
+	}
+	if got[1].Msg != `{"msg":false,"password":"***"}` {
+		t.Errorf("line 1 forwarded as %s", got[1].Msg)
+	}
+	if n, ok := got[2].Attrs["sequence"].(json.Number); !ok || n.String() != "9007199254740993" {
+		t.Errorf("sequence = %#v, want the exact integer", got[2].Attrs["sequence"])
 	}
 }

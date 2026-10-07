@@ -90,6 +90,19 @@ func TestChildValuesMaskRecordMasksEveryStringField(t *testing.T) {
 	}
 }
 
+func TestChildValuesMaskJSONKeepsNumbersExact(t *testing.T) {
+	v := knownValues("pässwörd")
+	for _, doc := range []string{
+		`{"attrs":{"sequence":9007199254740993},"password":"pässwörd"}`,
+		`{"attrs":{"sequence":9007199254740993},"password":"p\u00e4ssw\u00f6rd"}`,
+	} {
+		got := string(v.MaskJSON([]byte(doc)))
+		if got != `{"attrs":{"sequence":9007199254740993},"password":"***"}` {
+			t.Errorf("MaskJSON(%s) = %s", doc, got)
+		}
+	}
+}
+
 func TestRegisterSharesAValueEqualToAnEarlierValuesEncoding(t *testing.T) {
 	var shared bytes.Buffer
 	shareMu.Lock()
