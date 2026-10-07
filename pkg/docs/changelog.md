@@ -25,7 +25,7 @@ unlock.
   It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
 
 - **controller:** A saved card may name its setup's completion time, and an older setup no longer replaces a newer card
-  `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before the card on file, so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
+  `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
 - **store (Breaking):** `Store.SettleCardPayment` returns the matched early fraud warning

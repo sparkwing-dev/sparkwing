@@ -564,6 +564,31 @@ func TestASetupCompletedBeforeTheCardOnFileIsRefused(t *testing.T) {
 	}
 }
 
+// A card saved without a completion time, as every save before ordering was,
+// carries its receipt time, so a newer setup that completed before that
+// delayed receipt is still saved.
+func TestASetupAfterAnUnorderedSaveIsNotStale(t *testing.T) {
+	s := storetest.Open(t)
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	ctx := context.Background()
+	if err := acme.SaveCard(ctx, store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_a", Fingerprint: "fp_a", Last4: "0000",
+	}, "billing", now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("delayed unordered save: %v", err)
+	}
+	if err := acme.SaveCard(ctx, store.Card{
+		Customer: "cus_1", PaymentMethod: "pm_b", Fingerprint: "fp_b", Last4: "1111", AddedAt: now.Add(2 * time.Minute),
+	}, "billing", now.Add(4*time.Minute)); err != nil {
+		t.Fatalf("newer ordered setup after an unordered save = %v, want it saved", err)
+	}
+	standing, err := acme.SpendStanding(ctx, now.Add(4*time.Minute))
+	if err != nil || standing.Card.PaymentMethod != "pm_b" {
+		t.Fatalf("card = %+v, %v; want pm_b", standing.Card, err)
+	}
+}
+
 // A prepaid purchase whose payment drew a warning is refused at the ledger.
 func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 	s := storetest.Open(t)

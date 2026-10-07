@@ -4392,9 +4392,11 @@ paths:
         controller opened for `team`. It replaces any card on file, records a
         `card.added` business event, and makes a charge that failed on the old
         card due again at once. While the team is trusted, its usage is billed
-        to this card. With `completed_at`, a setup that completed before the
-        card on file is refused with 409 `stale_card_setup` and changes
-        nothing; a repeat of the same completion time is saved again.
+        to this card. With `completed_at`, a setup that completed before a
+        card on file that was also saved with `completed_at` is refused with
+        409 `stale_card_setup` and changes nothing; a repeat of the same
+        completion time is saved again. A card saved without it never makes a
+        later save stale.
       requestBody:
         required: true
         content:

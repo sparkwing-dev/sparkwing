@@ -286,8 +286,8 @@ type Card struct {
 	Brand         string
 	Last4         string
 	// AddedAt is when the card was added. Given to SaveCard, it is when the
-	// owner completed the setup, and a setup completed before the card on
-	// file is refused with ErrStaleCardSetup.
+	// owner completed the setup, to the second, and a setup completed before
+	// a card on file saved the same way is refused with ErrStaleCardSetup.
 	AddedAt time.Time
 }
 
@@ -511,12 +511,20 @@ func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Ti
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return err
 	}
+	// hack: with no column for it, a completion time is stored in whole seconds
+	// and a receipt time never is, so a card saved without one, including every
+	// save from before ordering, never makes a later ordered save look stale.
 	addedAt, newerThan := now.UnixNano(), int64(math.MaxInt64)
+	if addedAt%int64(time.Second) == 0 {
+		addedAt++
+	}
 	if !c.AddedAt.IsZero() {
-		addedAt, newerThan = c.AddedAt.UnixNano(), c.AddedAt.UnixNano()
+		addedAt = c.AddedAt.Unix() * int64(time.Second)
+		newerThan = addedAt
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ? WHERE name = ? AND card_added_at <= ?`,
+	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
+	    WHERE name = ? AND (card_added_at % 1000000000 <> 0 OR card_added_at <= ?)`,
 		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(t.team), newerThan)
 	if err != nil {
 		return err
