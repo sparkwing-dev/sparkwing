@@ -2155,7 +2155,6 @@ func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []M
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
 func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
 func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
-func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error)
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
@@ -2421,7 +2420,6 @@ func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimId
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
 func (s *Store) PreviewExecutorEligibility(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) ([]ExecutorEligibilityPreview, error)
 func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error)
-func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)

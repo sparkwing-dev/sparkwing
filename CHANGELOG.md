@@ -119,6 +119,7 @@ unlock.
 - **Runner tokens:** Recheck the minter's role inside the mint, so a removal or demotion that commits during a mint request leaves no live runner token.
 - **Token mints:** Make CLI and runner token mints wait on an in-flight account deletion on PostgreSQL, so a mint racing the deletion cannot leave a live token.
 - **Compute limits:** Record a claim's compute-limit refusal only on a run of the claimant's team; `Store.OldestWaitingReadyNodeForPrincipal` moves to `Tenant`.
+- **Store tenant scoping:** Scope every store statement on a tenant table, and each of its subqueries, to one team, or record why it crosses teams; node reads take their output and pipeline from the node's own team. `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim`, which nothing called, are removed; `Tenant.ActiveExecutorActivity` remains.
 - **Live logs:** Read only bytes appended since the previous poll when streaming a node log, instead of rereading every attributed file each 200 ms.
 - **Log reads:** Serve node logs and their head, tail, range and grep filters from the files incrementally instead of buffering every attempt file in memory; a read that fails after the response starts now aborts the connection.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.

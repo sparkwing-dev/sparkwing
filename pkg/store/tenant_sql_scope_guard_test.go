@@ -255,6 +255,30 @@ var reviewedUnscopedSQL = map[string]string{
 		"node's own run and plan",
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
+	"(*Store).TriggerClaimFenceIsLive": "matches the trigger's live claim against the exact claimant credential and " +
+		"generation, and a token prefix is unique across teams",
+	"(*Store).NodeClaimFenceIsLive": "matches the node's live claim against the exact holder, credential, reservation and " +
+		"generation, and a token prefix is unique across teams",
+	"(*Store).NodeExecutionAttemptIsLive": "matches the node's live claim and open attempt against the exact holder, " +
+		"credential and generation, and a token prefix is unique across teams",
+	"(*Store).NodeExecutionAttemptBelongsToLiveClaim": "matches the node's live claim and its attempt against the exact " +
+		"holder, credential and generation, and a token prefix is unique across teams",
+	"(*Store).TriggerExecutionAttemptIsLive": "matches the trigger's live claim and open attempt against the exact " +
+		"claimant credential and generation, and a token prefix is unique across teams",
+	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim": "matches the trigger's live claim and its attempt against the " +
+		"exact claimant credential and generation, and a token prefix is unique across teams",
+	"(*Store).PrincipalHoldsNodeClaim": "matches the node's live claim against the exact claimant credential, and a token " +
+		"prefix is unique across teams",
+	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
+		"a token prefix is unique across teams",
+	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
+		"token prefix is unique across teams",
+	"(*Store).PrincipalHoldsProfileClaim": "matches a live claim of the exact claimant credential on the pipeline's runs " +
+		"or triggers; a token prefix is unique across teams and a claim only reaches its own team's work",
+	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +
+		"answer scoped to the asker is no answer; a token prefix is unique across teams",
+	"(*Store).ClaimedRunsFor": "asks which teams' runs the exact claimant credential holds live work in, so an answer " +
+		"scoped to the asker is no answer; a token prefix is unique across teams",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -262,7 +286,6 @@ var reviewedUnscopedSQL = map[string]string{
 // cannot be added without a reviewer seeing the number move.
 var unportedSQL = []string{
 	"(*Store).AcknowledgeNodeExecutionStart",
-	"(*Store).ActiveExecutorActivity",
 	"(*Store).AddNodeMetricSample",
 	"(*Store).AddNodeUsage",
 	"(*Store).AppendEventOnce",
@@ -323,18 +346,8 @@ var unportedSQL = []string{
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
-	"(*Store).NodeClaimFenceIsLive",
-	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
-	"(*Store).NodeExecutionAttemptIsLive",
 	"(*Store).NodeSettlement",
 	"(*Store).PendingNodeBounce",
-	"(*Store).ClaimedRunFor",
-	"(*Store).ClaimedRunsFor",
-	"(*Store).PrincipalHoldsNodeClaim",
-	"(*Store).PrincipalHoldsPipelineClaim",
-	"(*Store).PrincipalHoldsProfileClaim",
-	"(*Store).PrincipalHoldsRunClaim",
-	"(*Store).PrincipalHoldsTriggerClaim",
 	"(*Store).RecordEgressUsage",
 	"(*Store).ReleaseClaimAtGeneration",
 	"(*Store).ReleaseDebugPause",
@@ -364,11 +377,8 @@ var unportedSQL = []string{
 	"(*Store).TopStorageTeams",
 	"(*Store).TouchNodeHeartbeat",
 	"(*Store).TouchRunHeartbeat",
-	"(*Store).TriggerClaimFenceIsLive",
 	"(*Store).TriggerClaimGeneration",
 	"(*Store).TriggerClaimant",
-	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim",
-	"(*Store).TriggerExecutionAttemptIsLive",
 	"(*Store).UpdateNodeActivity",
 	"(*Store).UpdateNodeDeps",
 	"(*Store).VerifyUser",
@@ -410,7 +420,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 146
+const unportedSQLSize = 132
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

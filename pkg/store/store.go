@@ -6611,28 +6611,6 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 	return held > 0, nil
 }
 
-// PrincipalHoldsPipelineClaim reports whether claimant holds an
-// unexpired claim on any node of any run of the named pipeline, whatever
-// repository the run declares. A write that names a profile key uses
-// PrincipalHoldsProfileClaim, which accepts the trigger claim as well.
-// An unbound claimant holds nothing.
-func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	var held int
-	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE run_id IN (SELECT id FROM runs WHERE pipeline = ?)
-		    AND claim_principal = ? AND claim_token_prefix = ?
-		    AND `+nodeClaimLiveSQL(""),
-		pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
-	if err != nil {
-		return false, err
-	}
-	return held > 0, nil
-}
-
 // PrincipalHoldsProfileClaim reports whether claimant may write the
 // capacity profile stored under key. The proof is a live claim on a node
 // of a run of that pipeline, or on that run's trigger. The repository
