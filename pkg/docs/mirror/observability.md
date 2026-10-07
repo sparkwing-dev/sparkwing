@@ -237,6 +237,32 @@ A dedicated node process samples its observed process tree every 2 seconds
 and takes a final reading before execution returns. Samples are stored and
 charted in the dashboard. No cluster metrics-server is involved.
 
+A sample delivery failure leaves execution and retries unchanged. Sampling
+continues with a five-second timeout per write; the next recorded interval
+spans any missed intervals to preserve CPU time. At node finish, losses of at
+most 1% of attempted interval and command samples produce a `metrics_partial`
+run event with the counts, without a warning or excluding capacity learning.
+Larger losses produce one node log warning and a `resource_samples_incomplete`
+run event, and the executor makes one bounded, best-effort partial-marker write
+independent of execution cancellation. Partial measurements are lower bounds:
+capacity learning can raise a profile from them, but cannot lower any resource
+dimension or evict an older observation unless the partial measurement raises
+one dimension. Partial measurements never count toward graduation, so they
+cannot end the measuring safety margin. A partial contended run can raise the
+demand floor without decaying it. Exact exit CPU time and maximum memory remain
+trustworthy. A backend that refuses the partial marker gets the exclusion
+marker instead.
+
+Some samples exist to exclude a measurement: the marker for an unowned node or
+an unrecorded attempt, the parent marker before a spawn (the parent's
+measurement includes child work), and interval samples flagged invalid. When
+one of those is lost, the executor writes an exclusion marker at finish
+regardless of the loss ratio. Markers carry no reading and may exceed the
+per-node sample cap by a small headroom, so a measurement that filled the cap
+can still be labeled. Reaching the sample cap is not a delivery failure. Exact exit accounting is recorded separately, and billing
+uses claim duration and class rates rather than resource samples. Learned
+profiles can influence the resource class reserved for future claims.
+
 ### What's measured
 
 - **CPU**: millicores from the change in cumulative CPU time divided by the

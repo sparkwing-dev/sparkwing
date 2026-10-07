@@ -96,6 +96,16 @@ SELECT team, id, 'a', ?, ?, 1, 0 FROM runs WHERE id = 'run-1'`)
 	if err := st.AddNodeMetricSample(ctx, "run-1", "a", next(store.MaxNodeMetricSamples)); !errors.Is(err, store.ErrNodeMetricLimit) {
 		t.Fatalf("a sample past the cap = %v, want ErrNodeMetricLimit", err)
 	}
+	for i := range store.MaxNodeMetricMarkers {
+		marker := store.MetricSample{Kind: store.MetricPartial, TS: base.Add(time.Duration(store.MaxNodeMetricSamples+1+i) * time.Second)}
+		if err := st.AddNodeMetricSample(ctx, "run-1", "a", marker); err != nil {
+			t.Fatalf("marker %d past the cap: %v", i, err)
+		}
+	}
+	overflow := store.MetricSample{Kind: store.MetricUnknown, TS: base.Add(time.Duration(store.MaxNodeMetricSamples+1+store.MaxNodeMetricMarkers) * time.Second)}
+	if err := st.AddNodeMetricSample(ctx, "run-1", "a", overflow); !errors.Is(err, store.ErrNodeMetricLimit) {
+		t.Fatalf("a marker past the marker headroom = %v, want ErrNodeMetricLimit", err)
+	}
 
 	first, err := st.ListNodeMetricsPage(ctx, "run-1", "a", time.Time{}, 3)
 	if err != nil || len(first) != 3 || first[0].CPUMillicores != 0 || first[2].CPUMillicores != 2 {
@@ -106,7 +116,7 @@ SELECT team, id, 'a', ?, ?, 1, 0 FROM runs WHERE id = 'run-1'`)
 		t.Fatalf("second page = %+v, %v", second, err)
 	}
 	all, err := st.ListNodeMetrics(ctx, "run-1", "a")
-	if err != nil || len(all) != store.MaxNodeMetricSamples {
+	if err != nil || len(all) != store.MaxNodeMetricSamples+store.MaxNodeMetricMarkers {
 		t.Fatalf("every sample = %d, %v", len(all), err)
 	}
 }

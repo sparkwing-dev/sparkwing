@@ -55,6 +55,9 @@ unlock.
 
 ### Fixed
 
+- **runner:** Lost resource samples no longer fail or retry successful work or block spawned children
+  Capacity learning tolerates losses up to 1%; larger losses produce one warning and can only raise the resource profile. Exact exit accounting remains usable.
+
 - **cli:** Build the pipeline module with the Go version its `go.mod` requires when a fixed `GOTOOLCHAIN` pins an older version
   Resolution and compilation select the required toolchain; pipeline steps retain the original pin. `GOTOOLCHAIN=local` errors name the running version, required floor, setting source, and fix, including when a dependency raises the requirement. These errors no longer suggest `--sw-no-update`.
 

@@ -66,6 +66,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	var cpuIntegral int64
 	var peakNodeMemory int64
 	runValid := true
+	runPartial := false
 	// safety: a short, failed or retried run is simply not measured, which is
 	// routine; only a reading outside the arithmetic range is worth a warning.
 	outOfRange := false
@@ -106,9 +107,11 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		var observedCores float64
 		hasNodeCPU := false
 		unknown := false
+		partial := false
 		var peakMem int64
 		nodeIntervals := map[int64]intervalTotal{}
 		for _, s := range samples {
+			partial = partial || s.Kind == store.MetricPartial
 			if s.Kind == store.MetricUnknown {
 				unknown, runValid = true, false
 			}
@@ -147,10 +150,12 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			runValid = false
 			continue
 		}
+		runPartial = runPartial || partial
 		if unknown || contended {
 			continue
 		}
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
+			Partial:         partial,
 			Duration:        occupancy,
 			PeakCores:       peakCores,
 			SustainedCores:  math.Min(sustainedNodeCores(samples, meanCores), peakCores),
@@ -190,12 +195,14 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			CPUMeasured:      true,
 			PlanHash:         planHash,
 			Contended:        true,
+			Partial:          runPartial,
 			FloorCores:       floorCores,
 			FloorMemoryBytes: floorMem,
 		})
 		return
 	}
 	_ = st.RecordProfileObservation(ctx, pipeline, "", store.ProfileObservation{
+		Partial:         runPartial,
 		Duration:        runDur,
 		PeakCores:       runPeakCores,
 		SustainedCores:  runSustainedCores,

@@ -25,7 +25,7 @@ func (c rejectUnknownMetric) AddNodeMetricSample(ctx context.Context, run, node 
 	return c.Client.AddNodeMetricSample(ctx, run, node, s)
 }
 
-func TestS3CoordinatedExecutionRequiresUnknownAccounting(t *testing.T) {
+func TestS3CoordinatedExecutionToleratesLostUnknownAccounting(t *testing.T) {
 	for _, reject := range []bool{false, true} {
 		t.Run(map[bool]string{false: "accepted", true: "rejected"}[reject], func(t *testing.T) {
 			ctx := withProcessNode(withLocalExecution(t.Context()), "run", "build")
@@ -56,12 +56,7 @@ func TestS3CoordinatedExecutionRequiresUnknownAccounting(t *testing.T) {
 			bodies := 0
 			node := sparkwing.Job(sparkwing.NewPlan(), "build", func(context.Context) error { bodies++; return nil })
 			result := NewNodeExecutor(backends).executeCoordinated(ctx, runner.Request{RunID: "run", NodeID: "build", Node: node})
-			if reject {
-				if result.Err == nil || bodies != 0 {
-					t.Fatalf("rejected marker execution=%+v bodies=%d", result, bodies)
-				}
-				return
-			}
+
 			if result.Err != nil || !result.Outcome.OK() || bodies != 1 {
 				t.Fatalf("execution=%+v bodies=%d", result, bodies)
 			}
@@ -100,7 +95,7 @@ func TestS3CoordinatedExecutionRequiresUnknownAccounting(t *testing.T) {
 					}
 				}
 			}
-			if !unknown {
+			if !reject && !unknown {
 				t.Fatal("unattributed execution has no archived unknown marker")
 			}
 			restored := s3state.New(art)
