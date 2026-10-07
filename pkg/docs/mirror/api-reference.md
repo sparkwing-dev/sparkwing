@@ -273,8 +273,6 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/users` | `admin` |
 | `POST` | `/api/v1/users` | `admin` |
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
-| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
-| `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
 | `POST` | `/internal/downloads/charge` | `public` |
 | `POST` | `/internal/egress/totals` | `public` |
 | `POST` | `/internal/storage/commit` | `public` |
@@ -282,7 +280,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
-| `POST` | `/webhooks/github/{pipeline}` | `public` |
 
 ## Logs service
 

@@ -264,11 +264,6 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
-		Pipeline: "build", Repo: "acme/widgets", Secret: "hook-secret",
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.CreateTrigger(ctx, store.Trigger{
 		ID: "run-remote", Pipeline: "build", Status: "running", CreatedAt: now,
 		Repo: "acme/widgets", RepoURL: repoURL, WebhookDelivery: "delivery-1",
@@ -347,7 +342,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		}
 	}
 	for name, path := range map[string]string{
-		"same-basename repository nobody connected": base + "/register?name=" +
+		"same-basename repository of another owner": base + "/register?name=" +
 			sourceurl.ClaimedRepoNameFromURL("git@github.com:other/widgets.git") +
 			"&repo=git@github.com:other/widgets.git",
 		"foreign cache name": base + "/other/info/refs?service=git-upload-pack",
@@ -461,11 +456,10 @@ func TestGitcacheProxy_AllowsSlowWorkspaceUploadBeyondDefaultDeadline(t *testing
 	}
 }
 
-// A signed delivery proves only that the sender knows the binding's secret,
-// and a team chose its own secret, so a team's binding for a repository opens
-// none of the operator's mirror of it: the mirror's name is the URL's digest,
-// the same for every team.
-func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
+// A run of a team other than the operator's opens none of the operator's
+// mirrors, even of the repository the run names: the mirror's name is the
+// URL's digest, the same for every team.
+func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	repoURL := "git@github.com:victim/app.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
@@ -493,11 +487,6 @@ func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
 	runner, _, err := tenant.CreateToken(ctx, "attacker-runner", store.TokenKindRunner,
 		[]string{controller.ScopeNodesClaim}, 0, now)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
-		Pipeline: "build", Repo: "victim/app", Secret: "attacker-chosen",
-	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
@@ -536,7 +525,7 @@ func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("a team-bound run reading the shared mirror = %d, want 403", resp.StatusCode)
+		t.Fatalf("another team's run reading the shared mirror = %d, want 403", resp.StatusCode)
 	}
 	if len(cacheRequests) != 0 {
 		t.Fatalf("cache requests = %v, want none", cacheRequests)

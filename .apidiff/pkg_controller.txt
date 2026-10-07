@@ -154,44 +154,6 @@ type GitCredentialResponse struct {
 }
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
-type GitHubWebhookBinding struct {
-	Repos  []string
-	Secret string
-}
-type GitHubWebhookBindingCounts struct {
-	Pipelines   int
-	Repos       int
-	DenyAll     int
-	RepoSecrets int
-}
-type GitHubWebhookBindingRequest struct {
-	Pipeline string
-	Repo     string
-	Secret   string
-	Events   []string
-	HookID   int64
-}
-type GitHubWebhookBindingResponse struct {
-	Pipeline    string
-	Repo        string
-	Events      []string
-	HookID      int64
-	DeliveryURL string
-	CreatedAt   int64
-	UpdatedAt   int64
-}
-type GitHubWebhookConfig struct {
-	Pipelines   map[string]GitHubWebhookBinding
-	RepoSecrets map[string]string
-}
-func (c GitHubWebhookConfig) BindingCounts() GitHubWebhookBindingCounts
-type GitHubWebhookDisconnectResponse struct {
-	Pipeline    string
-	Repo        string
-	Removed     bool
-	DeliveryURL string
-	HookID      int64
-}
 const IdleClaimPollJitterFactor = 1.25
 type LegacyCipher interface {
 	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
@@ -282,7 +244,6 @@ type ObjectStoreBreakerResponse struct {
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
-func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 const PaymentWarnedCode = "payment_warned"
 type PoolConfig struct {
 	Client kubernetes.Interface
@@ -384,11 +345,8 @@ func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithFreeTier(src FreeTierSource) *Server
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
-func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
-func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
-func (s *Server) WithGitHubWebhookSecret(secret string) *Server
 func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
 func (s *Server) WithIdleClaimPollEnforced(on bool) *Server

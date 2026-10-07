@@ -204,7 +204,7 @@ func TestCLITokenMintUsesCommittedMembershipAuthority(t *testing.T) {
 			rawLicense, key := multiTeamLicense(t)
 			opts := fixtureOpts{license: rawLicense, key: key}
 			if dialect == "postgres" {
-				opts.store = openPostgresBindingStore(t)
+				opts.store = openPostgresStore(t)
 			}
 			f := newIdentityFixtureWith(t, opts)
 			owner, editor, reader := teamOf(f)

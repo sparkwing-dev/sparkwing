@@ -527,22 +527,27 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 	f := newOIDCFixture(t)
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-pr", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
-		GithubOwner: "acme", GithubRepo: "api",
+		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 42,
 		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "7"},
 	})
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-push", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
-		GithubOwner: "acme", GithubRepo: "api",
+		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 42,
 		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
 	})
 	f.run(t, f.acme, store.Trigger{ID: "run-no-event", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main"})
+	f.run(t, f.acme, store.Trigger{
+		ID: "run-push-no-repo-id", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
+		GithubOwner: "acme", GithubRepo: "api",
+		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+	})
 	for _, tc := range []struct{ id, event, branch, ref string }{
 		{"run-release", "release", "v1", "refs/tags/v1"},
 		{"run-create", "create", "topic", "refs/heads/topic"},
 		{"run-delete", "delete", "main", "refs/heads/topic"},
 	} {
 		f.run(t, f.acme, store.Trigger{
-			ID: tc.id, Pipeline: "deploy", TriggerSource: "github", GitBranch: tc.branch,
+			ID: tc.id, Pipeline: "deploy", TriggerSource: "github", GitBranch: tc.branch, GithubRepoID: 42,
 			TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: tc.event, "GITHUB_REF": tc.ref},
 		})
 	}
@@ -550,12 +555,13 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
 	c := client.NewWithToken(srv.URL, nil, raw)
 	for _, tc := range []struct{ run, sub, ref string }{
-		{"run-pr", "team:acme:repository_id::pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/7/head", "refs/pull/7/head"},
-		{"run-push", "team:acme:repository_id::pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+		{"run-pr", "team:acme:repository_id:42:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/7/head", "refs/pull/7/head"},
+		{"run-push", "team:acme:repository_id:42:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main", "refs/heads/main"},
 		{"run-no-event", "team:acme:repository_id::pipeline:deploy:trigger:manual:runner:runner:ref:refs/heads/main", "refs/heads/main"},
-		{"run-release", "team:acme:repository_id::pipeline:deploy:trigger:release:runner:runner:ref:refs/tags/v1", "refs/tags/v1"},
-		{"run-create", "team:acme:repository_id::pipeline:deploy:trigger:create:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
-		{"run-delete", "team:acme:repository_id::pipeline:deploy:trigger:delete:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
+		{"run-push-no-repo-id", "team:acme:repository_id::pipeline:deploy:trigger:manual:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+		{"run-release", "team:acme:repository_id:42:pipeline:deploy:trigger:release:runner:runner:ref:refs/tags/v1", "refs/tags/v1"},
+		{"run-create", "team:acme:repository_id:42:pipeline:deploy:trigger:create:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
+		{"run-delete", "team:acme:repository_id:42:pipeline:deploy:trigger:delete:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
 	} {
 		if _, err := c.ClaimSpecificTrigger(ctx, tc.run, time.Minute); err != nil {
 			t.Fatalf("%s: ClaimSpecificTrigger: %v", tc.run, err)
@@ -579,7 +585,7 @@ func TestOIDCTokenTagPushNamesTagRef(t *testing.T) {
 	f := newOIDCFixture(t)
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-tag", Pipeline: "deploy", TriggerSource: "github", GitSHA: "0123456789abcdef0123456789abcdef01234567",
-		GithubOwner: "acme", GithubRepo: "api",
+		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 42,
 		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push", "GITHUB_REF": "refs/tags/v1.2.3", "GITHUB_REF_TYPE": "tag", "GITHUB_TAG": "v1.2.3"},
 	})
 	raw := f.runner(t, f.acme, "agent:acme")
@@ -596,7 +602,7 @@ func TestOIDCTokenTagPushNamesTagRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Sub != "team:acme:repository_id::pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3" || claims.Ref != "refs/tags/v1.2.3" {
+	if claims.Sub != "team:acme:repository_id:42:pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3" || claims.Ref != "refs/tags/v1.2.3" {
 		t.Fatalf("tag sub/ref = %q/%q", claims.Sub, claims.Ref)
 	}
 }
