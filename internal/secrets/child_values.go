@@ -124,37 +124,54 @@ func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 	rec.Level, rec.JobID, rec.Step = m.Mask(rec.Level), m.Mask(rec.JobID), m.Mask(rec.Step)
 	rec.Event, rec.Msg = m.Mask(rec.Event), m.Mask(rec.Msg)
 	rec.Attrs = m.MaskAttrs(rec.Attrs)
-	var numeric []*big.Rat
-	for _, p := range m.Values() {
-		if r, ok := parseNumber(p); ok {
-			numeric = append(numeric, r)
-		}
-	}
-	if len(numeric) > 0 && rec.Attrs != nil {
-		rec.Attrs, _ = numbersEqualTo(rec.Attrs, numeric).(map[string]any)
+	if patterns := m.Values(); len(patterns) > 0 && rec.Attrs != nil {
+		rec.Attrs, _ = numbersEqualTo(rec.Attrs, newNumberMatcher(patterns)).(map[string]any)
 	}
 	return rec
 }
 
-// safety: a record's numbers stay as written except one numerically equal to
-// a registered value, so a numeric secret masks itself in any spelling and no
-// other number.
-func numbersEqualTo(v any, values []*big.Rat) any {
+// safety: a record's numbers stay as written except one equal to a registered
+// value: numerically when both parse, so any spelling matches, and by exact
+// text when the exponent guard refuses either side.
+type numberMatcher struct {
+	text    []string
+	numeric []*big.Rat
+}
+
+func newNumberMatcher(patterns []string) numberMatcher {
+	nm := numberMatcher{text: patterns}
+	for _, p := range patterns {
+		if r, ok := parseNumber(p); ok {
+			nm.numeric = append(nm.numeric, r)
+		}
+	}
+	return nm
+}
+
+func (nm numberMatcher) matches(n json.Number) bool {
+	if slices.Contains(nm.text, string(n)) {
+		return true
+	}
+	r, ok := parseNumber(string(n))
+	return ok && slices.ContainsFunc(nm.numeric, func(p *big.Rat) bool { return p.Cmp(r) == 0 })
+}
+
+func numbersEqualTo(v any, nm numberMatcher) any {
 	switch t := v.(type) {
 	case json.Number:
-		if r, ok := parseNumber(string(t)); ok && slices.ContainsFunc(values, func(p *big.Rat) bool { return p.Cmp(r) == 0 }) {
+		if nm.matches(t) {
 			return maskedValue
 		}
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, e := range t {
-			out[k] = numbersEqualTo(e, values)
+			out[k] = numbersEqualTo(e, nm)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, e := range t {
-			out[i] = numbersEqualTo(e, values)
+			out[i] = numbersEqualTo(e, nm)
 		}
 		return out
 	}

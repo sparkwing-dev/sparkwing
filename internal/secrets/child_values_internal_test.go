@@ -120,6 +120,9 @@ func TestChildValuesMaskRecordMasksANumberEqualToAValue(t *testing.T) {
 		{"header\n123456\nfooter", "123456", true},
 		{"1234567", "123456", false},
 		{"123456", "1e999999999", false},
+		{"1e401", "1e401", true},
+		{"1e999999999", "1e999999999", true},
+		{"1e401", "1E401", false},
 	} {
 		got := knownValues(tc.value).MaskRecord(rec(tc.number))
 		want := any(json.Number(tc.number))
