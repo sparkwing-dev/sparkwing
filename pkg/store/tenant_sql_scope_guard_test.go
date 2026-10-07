@@ -403,11 +403,18 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		if len(tables) == 0 {
 			continue
 		}
-		if statementCarriesTeam(stmt.text) {
+		unscoped := unscopedSubqueries(stmt.text)
+		if statementCarriesTeam(stmt.text) && len(unscoped) == 0 {
 			continue
 		}
 		if exemptFromScope(stmt.key) {
 			seen[stmt.key] = true
+			continue
+		}
+		if len(unscoped) > 0 {
+			t.Errorf("%s: statement in %s has a subquery touching %s with no team predicate of its own.\n"+
+				"Scope the subquery, or add %q to reviewedUnscopedSQL with the reason it crosses teams.\n\t%s",
+				stmt.pos, stmt.key, strings.Join(tenantTablesTouchedBy(unscoped[0]), ", "), stmt.key, collapse(unscoped[0]))
 			continue
 		}
 		t.Errorf("%s: statement in %s touches %s with no team predicate.\n"+
@@ -507,10 +514,17 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"conflict guard with team", `INSERT INTO secrets (team, name) VALUES (?,?) ON CONFLICT (name) DO UPDATE SET v = 1 WHERE secrets.team = excluded.team`, true},
 		{"postgres placeholder", `SELECT id FROM runs WHERE team = $1`, true},
 		{"operator table", `SELECT value FROM sparkwing_meta WHERE key = ?`, true},
+		{"unscoped subquery under a scoped statement", `INSERT INTO nodes (team, run_id, x) VALUES (?, ?, (SELECT x FROM runs WHERE id = ?))`, false},
+		{"scoped subquery", `INSERT INTO nodes (team, run_id, x) VALUES (?, ?, (SELECT x FROM runs WHERE team = ? AND id = ?))`, true},
+		{"unscoped exists", `SELECT id FROM nodes WHERE team = ? AND EXISTS (SELECT 1 FROM runs r WHERE r.id = nodes.run_id)`, false},
+		{"unscoped nested subquery", `SELECT id FROM nodes WHERE team = ? AND run_id IN (SELECT id FROM runs WHERE team = ? AND retry_of IN (SELECT id FROM runs WHERE id = ?))`, false},
+		{"subquery deriving the team", `INSERT INTO nodes (team, run_id) VALUES ((SELECT team FROM runs WHERE id = ?), ?)`, true},
+		{"parenthesis in a literal", `SELECT id FROM runs WHERE team = ? AND note = '(' AND id IN (SELECT run_id FROM nodes WHERE team = ?)`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			unscoped := len(tenantTablesTouchedBy(c.sql)) > 0 && !statementCarriesTeam(c.sql)
+			unscoped := len(tenantTablesTouchedBy(c.sql)) > 0 &&
+				(!statementCarriesTeam(c.sql) || len(unscopedSubqueries(c.sql)) > 0)
 			if unscoped == c.scope {
 				t.Errorf("sql %q: guard says scoped=%v, want %v", c.sql, !unscoped, c.scope)
 			}
@@ -539,7 +553,8 @@ func tenantTablesTouchedBy(sql string) []string {
 
 // safety: reads one statement's text, so a statement joining two tenant
 // tables passes on a single predicate; this is the guard's floor, not a
-// proof that every table in the statement is scoped.
+// proof that every table in the statement is scoped. A subquery is judged
+// on its own by unscopedSubqueries.
 func statementCarriesTeam(sql string) bool {
 	if cols := insertColumnsRe.FindStringSubmatch(sql); cols != nil {
 		if !slices.ContainsFunc(strings.Split(cols[1], ","), func(c string) bool {
@@ -562,6 +577,61 @@ func statementCarriesTeam(sql string) bool {
 		return true
 	}
 	return teamPredicateRe.MatchString(sql)
+}
+
+// safety: an outer predicate says nothing about a subquery reading another tenant table by a bare id, so
+// each parenthesized SELECT is judged on its own text. One selecting only the team column is exempt: asking
+// which team owns an id is how a write takes its row's team.
+func unscopedSubqueries(sql string) []string {
+	var out []string
+	for _, sub := range subqueryTexts(sql) {
+		if len(tenantTablesTouchedBy(sub)) == 0 || teamPredicateRe.MatchString(sub) || teamDerivationRe.MatchString(sub) {
+			continue
+		}
+		out = append(out, sub)
+	}
+	return out
+}
+
+var teamDerivationRe = regexp.MustCompile(`(?is)^\s*SELECT\s+(?:[a-z_][a-z0-9_]*\.)?team\s+FROM\b`)
+
+var subqueryStartRe = regexp.MustCompile(`(?is)^\s*(?:SELECT|WITH)\b`)
+
+// safety: skips quoted literals, because a parenthesis inside a string is
+// not one of the statement's and would misalign every span after it.
+func subqueryTexts(sql string) []string {
+	type span struct{ from, to int }
+	var open []int
+	var spans []span
+	inQuote := false
+	for i := 0; i < len(sql); i++ {
+		switch c := sql[i]; {
+		case c == '\'':
+			inQuote = !inQuote
+		case inQuote:
+		case c == '(':
+			open = append(open, i)
+		case c == ')' && len(open) > 0:
+			from := open[len(open)-1] + 1
+			open = open[:len(open)-1]
+			if subqueryStartRe.MatchString(sql[from:i]) {
+				spans = append(spans, span{from, i})
+			}
+		}
+	}
+	out := make([]string, 0, len(spans))
+	for _, sp := range spans {
+		own := []byte(sql[sp.from:sp.to])
+		for _, inner := range spans {
+			if inner.from > sp.from && inner.to < sp.to {
+				for j := inner.from - sp.from; j < inner.to-sp.from; j++ {
+					own[j] = ' '
+				}
+			}
+		}
+		out = append(out, string(own))
+	}
+	return out
 }
 
 // safety: substitutes the package-level constants holding statement
