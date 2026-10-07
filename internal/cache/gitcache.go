@@ -569,26 +569,6 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 	writeJSONBody(w, r, resp)
 }
 
-func handleRepos(w http.ResponseWriter, r *http.Request) {
-	entries, _ := os.ReadDir(repoDir)
-	type repoInfo struct {
-		Hash string `json:"hash"`
-		Size int64  `json:"size_bytes"`
-	}
-	var repos []repoInfo
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".git") {
-			info, _ := e.Info()
-			repos = append(repos, repoInfo{
-				Hash: strings.TrimSuffix(e.Name(), ".git"),
-				Size: info.Size(),
-			})
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, repos)
-}
-
 func sshHint(output string) string {
 	if strings.Contains(output, "Permission denied") || strings.Contains(output, "Host key verification failed") {
 		return "hint: SSH key rejected -- run: sparkwing cluster update-ssh-key --name <cluster> --github-ssh-key ~/.ssh/<your-key>"

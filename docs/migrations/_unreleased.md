@@ -141,7 +141,7 @@ All of them took the cache's operator token or `admin`, except
 `/artifacts/<job>`, which also took a run's cache grant.
 
 **After:** those routes answer 404. The cache keeps `/git/register`,
-`/git/<name>/...`, `/bin/...`, `/cache/...`, `/repos`, `/admin/teams/{team}`,
+`/git/<name>/...`, `/bin/...`, `/cache/...`, `/admin/teams/{team}`,
 `/admin/store-ceiling/...`, `/health`, `/metrics`, `/stats` and `/proxy/...`.
 The controller keeps `POST /api/v1/gitcache/git/register` and the clone proxies.
 
@@ -261,3 +261,25 @@ for an `artifacts/...` key.
 
 **Why:** a second read path into the shared artifact store needed its own
 team check and its own egress accounting, and served no caller.
+
+## Four operator routes are removed
+
+**Before:** an `admin` token could read the controller's egress meter with its
+top consumers (`GET /api/v1/egress`), read a named team's credit balance
+(`GET /api/v1/credits/teams/{team}`), and give a team a free-tier slot past
+`--free-team-slots` (`PUT /api/v1/storage/teams/{team}/free-slot`). The cache's
+operator token could list its mirror files with `GET /repos`.
+
+**After:** all four answer 404.
+
+**What replaces each:**
+
+| Removed | Use instead |
+|---|---|
+| `GET /api/v1/egress` | `sparkwing_egress_day_bytes` and `sparkwing_egress_daily_alarm` on `/metrics`; `/api/v1/health` reports the alarm. Per-principal totals are no longer served. |
+| `GET /api/v1/credits/teams/{team}` | The operator console's `GET /api/v1/operator/teams/{team}`, or `GET /api/v1/credits` with the team's own credential. |
+| `PUT /api/v1/storage/teams/{team}/free-slot` | Raise `--free-team-slots` so the team takes a slot with its first byte. |
+| cache `GET /repos` | List `<data-dir>/repos/` on the cache volume. |
+
+**Why:** each was a privileged route with no caller, and each needed its own
+review as the route table moves to one declared list.

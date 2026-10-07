@@ -741,8 +741,8 @@ the published images are known bad.
 
 `sparkwing-cache` requires a bearer token (`--api-token`, falling back to
 `$SPARKWING_API_TOKEN`) on every route that touches repository content: git
-clone and registration, the repo listing, the binary and dependency-archive
-blob routes, and the admin routes. The cache serves no source archives, single
+clone and registration, the binary and dependency-archive blob routes, and
+the admin routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
 refuses to start without one unless the operator passes
 `--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which

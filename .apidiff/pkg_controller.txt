@@ -430,11 +430,6 @@ const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
-type StorageTierResponse struct {
-	Team           string
-	Tier           storagequota.Tier
-	AllowanceBytes int64
-}
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
 	LogsURL   string

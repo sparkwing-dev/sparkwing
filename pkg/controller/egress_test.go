@@ -303,10 +303,9 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	}
 }
 
-func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
+func TestHealthReportsTheAlarmWithoutUsage(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 60})
 	seedLiveLog(t, f, "r1", "n1", strings.Repeat("x", 100)+"\n")
-	before0 := f.meter.State().GlobalMonthBytes
 
 	var health struct {
 		Status   string         `json:"status"`
@@ -341,31 +340,6 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	}
 	if len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached" {
 		t.Errorf("public health exposed egress usage in problems: %v", health.Problems)
-	}
-
-	view := f.get(t, "/api/v1/egress", f.adminToken)
-	if view.status != http.StatusOK {
-		t.Fatalf("GET /api/v1/egress = %d, want 200", view.status)
-	}
-	var top struct {
-		Enabled bool         `json:"enabled"`
-		Egress  egress.State `json:"egress"`
-	}
-	if err := json.Unmarshal(view.body, &top); err != nil {
-		t.Fatalf("decode the top-consumers view: %v -- raw %q", err, view.body)
-	}
-	if !top.Enabled || !top.Egress.Alarm {
-		t.Fatalf("view = %+v, want an enabled meter with the alarm up", top)
-	}
-	if len(top.Egress.Top) != 1 || top.Egress.Top[0].Principal != "default/root" || top.Egress.Top[0].MonthBytes != before0+int64(len(read.body)) {
-		t.Fatalf("top consumers = %+v, want default/root at the %d bytes it read", top.Egress.Top, len(read.body))
-	}
-}
-
-func TestTheTopConsumersViewIsAdminOnly(t *testing.T) {
-	f := newEgressFixture(t, egress.Config{})
-	if got := f.get(t, "/api/v1/egress", f.runner).status; got != http.StatusForbidden {
-		t.Fatalf("a runner reading the egress view = %d, want 403", got)
 	}
 }
 

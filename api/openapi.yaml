@@ -4608,37 +4608,6 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/teams/{team}/free-slot:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    put:
-      x-sparkwing-scope: admin
-      tags: [storage]
-      summary: Grant a team a free-tier slot.
-      description: |
-        Admits a team without credits to the free tier whether or not a slot
-        is left, which is how an operator admits a team once every one of
-        `--free-team-slots` is taken. The slot lasts until the team is
-        deleted. The answer is the team's tier and the allowance its
-        per-store shares are cut from.
-      responses:
-        "200":
-          description: The team's storage tier.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/controller.StorageTierResponse
-                properties:
-                  team: {type: string}
-                  tier: {type: string, enum: [funded, free, none]}
-                  allowance_bytes: {type: integer, format: int64}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
   /api/v1/storage/settings:
     put:
       x-sparkwing-scope: admin
@@ -4701,28 +4670,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/UsageMetrics"}
         "400": {description: weeks is outside 1 to 104.}
-
-  /api/v1/egress:
-    get:
-      x-sparkwing-scope: admin
-      tags: [cluster]
-      summary: Read the controller's egress budgets and top consumers.
-      description: |
-        Reports the per-principal monthly download budget, the global daily
-        alarm threshold, what the process has sent today and this month,
-        whether the alarm is up, and the principals that have downloaded the
-        most this month. Changes nothing.
-      responses:
-        "200":
-          description: The egress meter as it stands.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: "none"
-                properties:
-                  enabled: {type: boolean}
-                  egress: {type: object}
 
   /api/v1/compute-limits:
     get:
@@ -5295,19 +5242,6 @@ paths:
         schema: {type: string}
     get:
       x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
-  /api/v1/credits/teams/{team}:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: admin
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:

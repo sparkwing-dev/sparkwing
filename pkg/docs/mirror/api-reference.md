@@ -47,7 +47,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/credits/reversals` | `credits.grant` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
 | `PUT` | `/api/v1/credits/settings` | `admin` |
-| `GET` | `/api/v1/credits/teams/{team}` | `admin` |
 | `GET` | `/api/v1/credits/units` | `credits.grant` |
 | `POST` | `/api/v1/credits/warnings` | `credits.grant` |
 | `GET` | `/api/v1/crons` | `runs.read` |
@@ -64,7 +63,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/data/commit` | `public` |
 | `POST` | `/api/v1/data/download` | `public` |
 | `POST` | `/api/v1/data/upload` | `public` |
-| `GET` | `/api/v1/egress` | `admin` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
@@ -199,7 +197,6 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
-| `PUT` | `/api/v1/storage/teams/{team}/free-slot` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/billing` | `runs.read` |

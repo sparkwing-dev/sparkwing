@@ -409,7 +409,6 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 		{method: http.MethodGet, path: "/bin/deadbeef-cafebabe", guarded: true},
 		{method: http.MethodPut, path: "/bin/deadbeef-cafebabe", guarded: true},
 		{method: http.MethodPut, path: "/cache/lint", guarded: true},
-		{method: http.MethodGet, path: "/repos", guarded: true},
 		{method: http.MethodGet, path: "/cache/lint", guarded: true},
 		{method: http.MethodPost, path: "/admin/store-ceiling/thaw", guarded: true},
 		{method: http.MethodPost, path: "/admin/store-ceiling/measure", guarded: true},
@@ -541,7 +540,7 @@ func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
 func TestEveryResponseCarriesNosniff(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 
-	for _, path := range []string{"/health", "/repos", "/metrics"} {
+	for _, path := range []string{"/health", "/bin/deadbeef-cafebabe", "/metrics"} {
 		resp, err := srv.Client().Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)

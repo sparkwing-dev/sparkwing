@@ -112,6 +112,11 @@ unlock.
   `GET /api/v1/artifacts/{key}` answers 404 on the controller, the local daemon and the loopback. No CLI, SDK or
   dashboard code read it; nodes stage artifacts through the cache's `/bin` routes or the direct data store.
   See [The controller artifact route is removed](docs/migrations/_unreleased.md#the-controller-artifact-route-is-removed).
+- **controller + cache (Breaking):** Remove four operator routes nothing called
+  The controller no longer serves `GET /api/v1/egress`, `GET /api/v1/credits/teams/{team}` or
+  `PUT /api/v1/storage/teams/{team}/free-slot`, and `sparkwing-cache` no longer serves `GET /repos`. Neither the CLI,
+  the dashboard nor `sparkwing-ops` called them. `pkg/controller.StorageTierResponse` is gone. See
+  [Four operator routes are removed](docs/migrations/_unreleased.md#four-operator-routes-are-removed).
 - **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
   `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
   `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
