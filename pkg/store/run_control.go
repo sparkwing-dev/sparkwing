@@ -233,16 +233,12 @@ func (s *Store) timeOutControllerApprovals(ctx context.Context, now time.Time) (
 
 // safety: a run with no controller planning node reports handled false and
 // writes nothing, so a run a trigger holder drives keeps the cooperative cancel.
-func (s *Store) requestControllerRunCancel(ctx context.Context, runID string, now time.Time) (handled bool, err error) {
+func (s *Store) requestControllerRunCancel(ctx context.Context, team Team, runID string, now time.Time) (handled bool, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	team, found, err := runOwnerTx(ctx, tx, runID)
-	if err != nil || !found {
-		return false, err
-	}
 	var one int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?`,
 		string(team), runID, PlanNodeID, nodeKindPlan).Scan(&one)

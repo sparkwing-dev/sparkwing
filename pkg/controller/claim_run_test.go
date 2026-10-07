@@ -82,7 +82,7 @@ func TestClaimRun_PodRoutesServeOnlyTheirOwnClaim(t *testing.T) {
 			t.Errorf("POST %s with a plan claim = %d, want refused", path, code)
 		}
 	}
-	if err := f.store.RequestCancel(context.Background(), "run-pod"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(context.Background(), "run-pod"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("POST", "/api/v1/runs/run-pod/nodes/plan/heartbeat", plan, map[string]int{}, &beat); code != http.StatusOK || !beat.Cancel {
@@ -252,7 +252,7 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	if released != 1 {
 		t.Fatalf("recorded %d secret releases, want 1: %+v", released, events)
 	}
-	if err := f.store.RequestCancel(context.Background(), "run-sec"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(context.Background(), "run-sec"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, nil); code != http.StatusForbidden {
@@ -353,7 +353,7 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 			t.Fatalf("team %s holds %d slots of deploy, want %d", team, held, want)
 		}
 	}
-	if err := f.store.RequestCancel(ctx, "run-slot"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(ctx, "run-slot"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", wk, body("run-slot", "a", "queue", 0), nil); code != http.StatusForbidden {
@@ -735,4 +735,13 @@ func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
 	if code := f.call("POST", base+"/acquire", wk, plain, nil); code != http.StatusOK {
 		t.Errorf("its own plain acquire = %d, want 200", code)
 	}
+}
+
+func (f *appFixture) teamOf(u signedIn) *store.Tenant {
+	f.t.Helper()
+	tn, err := f.store.ForTeam(context.Background(), store.Team(u.team))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return tn
 }

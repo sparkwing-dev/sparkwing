@@ -25,7 +25,7 @@ func TestManualRetryStaysInTheSourceRunsTeam(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runretry.Create(ctx, st, "run-src", "run-retry", false, now); err != nil {
+	if _, err := runretry.Create(ctx, st, acme, "run-src", "run-retry", false, now); err != nil {
 		t.Fatalf("runretry.Create: %v", err)
 	}
 	if got := storedTeam(t, st, `SELECT team FROM triggers WHERE id = ?`, "run-retry"); got != "acme" {
@@ -88,7 +88,7 @@ func TestManualRetryPreservesOnlyItsTeamsGithubRepositoryID(t *testing.T) {
 			if _, err := tenantFor(t, st, "unrelated").GetRun(ctx, source.ID); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("unrelated tenant read source: %v", err)
 			}
-			if _, err := runretry.Create(ctx, st, source.ID, "retry", false, now); err != nil {
+			if _, err := runretry.Create(ctx, st, acme, source.ID, "retry", false, now); err != nil {
 				t.Fatal(err)
 			}
 			trig, err := st.GetTrigger(ctx, "retry")

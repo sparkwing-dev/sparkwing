@@ -292,7 +292,6 @@ var unportedSQL = []string{
 	"(*Store).AcknowledgeNodeExecutionStart",
 	"(*Store).AddNodeMetricSample",
 	"(*Store).CacheExcludedCounts",
-	"(*Store).CancelPendingTrigger",
 	"(*Store).ComputeAlarmState",
 	"(*Store).ComputeUsage",
 	"(*Store).ConsumeNodeBounce",
@@ -306,7 +305,6 @@ var unportedSQL = []string{
 	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
 	"(*Store).CreditLedgerTotals",
-	"(*Store).DeleteRun",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
 	"(*Store).FindSpawnedChildTriggerID",
@@ -314,11 +312,8 @@ var unportedSQL = []string{
 	"(*Store).FindTriggerByWebhookReplay",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).finishNode",
-	"(*Store).FinishRunAtGeneration",
-	"(*Store).FinishRunsIfActive",
 	"(*Store).FinishTrigger",
 	"(*Store).FinishTriggerAtGeneration",
-	"(*Store).GetRun",
 	"(*Store).GetTrigger",
 	"(*Store).HeartbeatTrigger",
 	"(*Store).ListCreditCharges",
@@ -336,15 +331,12 @@ var unportedSQL = []string{
 	"(*Store).PendingNodeBounce",
 	"(*Store).RecordEgressUsage",
 	"(*Store).ReleaseClaimAtGeneration",
-	"(*Store).RequestCancel",
 	"(*Store).RequestNodeBounce",
 	"(*Store).RequeueUnstartedClaim",
 	"(*Store).ResetNodeForAutoRetry",
 	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
-	"(*Store).RunExceedsWallClock",
 	"(*Store).SetNodeArtifactManifestCharged",
-	"(*Store).SetRetriedAs",
 	"(*Store).SetStorageAllowance",
 	"(*Store).SetStorageQuota",
 	"(*Store).SetTokenMetered",
@@ -352,7 +344,6 @@ var unportedSQL = []string{
 	"(*Store).StorageUsageFor",
 	"(*Store).TokenMetered",
 	"(*Store).TopStorageTeams",
-	"(*Store).TouchRunHeartbeat",
 	"(*Store).TriggerClaimGeneration",
 	"(*Store).TriggerClaimant",
 	"(*Store).VerifyUser",
@@ -378,8 +369,6 @@ var unportedSQL = []string{
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
 	"persistAgentLossRetryNodeSourceTx",
-	"runElapsedSecondsTx",
-	"runPrincipalTx",
 	"selectTokensByPrefixTx",
 	"snapshotAgentLossRetryNodesTx",
 	"stampCreditExhaustionAnchorTx",
@@ -388,7 +377,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 96
+const unportedSQLSize = 85
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

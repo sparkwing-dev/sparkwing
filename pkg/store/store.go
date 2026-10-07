@@ -4084,28 +4084,11 @@ func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg str
 	return s.defaultTenant().FinishRunIfActive(ctx, runID, status, errMsg)
 }
 
-// FinishRunsIfActive atomically finalizes the named non-terminal runs. A
+// FinishRunsIfActive atomically finalizes the named non-terminal default-team runs. A
 // failure rolls back every member, so one shared lease cannot be partly
 // cancelled.
 func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
-	if !isTerminalRunStatus(status) {
-		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
-	}
-	if len(runIDs) == 0 {
-		return nil
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UnixNano()
-	for _, runID := range runIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return s.defaultTenant().FinishRunsIfActive(ctx, runIDs, status, errMsg)
 }
 
 // TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
@@ -4114,20 +4097,7 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 // (laptop closed, network gone, process killed) and flip it to
 // failed instead of leaving status='running' forever.
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunHeartbeatFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
-		time.Now().UnixNano(), runID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.defaultTenant().TouchRunHeartbeat(ctx, runID)
 }
 
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
@@ -4191,8 +4161,13 @@ ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
 
 // SetRetriedAs stores the reverse retry pointer on runID. Idempotent.
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
-	_, err := s.exec(ctx,
-		`UPDATE runs SET retried_as = ? WHERE id = ?`, newID, runID)
+	return s.defaultTenant().SetRetriedAs(ctx, runID, newID)
+}
+
+// SetRetriedAs is [Store.SetRetriedAs] confined to t's team.
+func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
+	_, err := t.s.exec(ctx,
+		`UPDATE runs SET retried_as = ? WHERE team = ? AND id = ?`, newID, string(t.team), runID)
 	return err
 }
 
@@ -4200,22 +4175,9 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 // has to reach each of them and scanRun together or the scan misaligns.
 const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
 
-// GetRun fetches a single run by ID.
+// GetRun fetches a single default-team run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
-	row := s.queryRow(ctx, `
-SELECT `+runColumns+`
-  FROM runs WHERE id = ?`, runID)
-	run, err := scanRun(row)
-	if errors.Is(err, ErrNotFound) {
-		return nil, notFound("run", runID)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := s.loadAgentLossRetry(ctx, DefaultTeam, run); err != nil {
-		return nil, err
-	}
-	return run, nil
+	return s.defaultTenant().GetRun(ctx, runID)
 }
 
 // RunFilter narrows ListRuns results; zero value matches everything.
@@ -4484,7 +4446,12 @@ SELECT ` + runColumns + `
 // the trigger row in that case (orphaned: child run is gone, edge
 // remains visible) so parent DAGs stay stable.
 func (s *Store) DeleteRun(ctx context.Context, runID string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().DeleteRun(ctx, runID)
+}
+
+// DeleteRun is [Store.DeleteRun] confined to t's team.
+func (t *Tenant) DeleteRun(ctx context.Context, runID string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -4492,18 +4459,28 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, runID); err != nil {
+	var owned int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE team = ? AND id = ?
+UNION ALL SELECT 1 FROM triggers WHERE team = ? AND id = ? LIMIT 1`,
+		string(t.team), runID, string(t.team), runID).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("run", runID)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE team = ? AND id = ?`, string(t.team), runID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM triggers WHERE id = ? AND parent_node_id = ''`, runID); err != nil {
+		`DELETE FROM triggers WHERE team = ? AND id = ? AND parent_node_id = ''`, string(t.team), runID); err != nil {
 		return err
 	}
 	// safety: concurrency_cache carries no foreign key, so a memo
 	// entry left here keeps pointing at output this delete removes,
 	// and every later hit on that key fails to fetch it.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM concurrency_cache WHERE origin_run_id = ?`, runID); err != nil {
+		`DELETE FROM concurrency_cache WHERE team = ? AND origin_run_id = ?`, string(t.team), runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4514,7 +4491,7 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 // including on failure, so callers can purge their log files and cache blobs.
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error) {
 	rows, err := s.query(ctx,
-		`SELECT id FROM runs
+		`SELECT id, team FROM runs
 		   WHERE COALESCE(finished_at, started_at) < ?
 		     AND `+runTerminalIn,
 		cutoff.UnixNano())
@@ -4522,19 +4499,21 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 		return nil, err
 	}
 	var ids []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
+		teams[id] = Team(team)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	var deleted []string
 	for _, id := range ids {
-		if err := s.DeleteRun(ctx, id); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).DeleteRun(ctx, id); err != nil {
 			return deleted, err
 		}
 		deleted = append(deleted, id)
@@ -7577,10 +7556,15 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 // is producing. Reports false without writing when the generation has
 // moved on.
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
+	return s.defaultTenant().FinishRunAtGeneration(ctx, runID, seq, status, errMsg)
+}
+
+// FinishRunAtGeneration is [Store.FinishRunAtGeneration] confined to t's team.
+func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
 	if !isTerminalRunStatus(status) {
 		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -7590,10 +7574,9 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 	// run write. Read them apart and a re-claim lands between the two, which
 	// is the one interleaving this fence exists to refuse.
 	var current int64
-	var team string
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT claim_seq, team FROM triggers WHERE id = ?`+tx.forUpdate(), runID).
-		Scan(&current, &team); {
+		`SELECT claim_seq FROM triggers WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), runID).
+		Scan(&current); {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
@@ -7602,7 +7585,7 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 		return false, nil
 	}
 
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, Team(team)); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7710,8 +7693,13 @@ func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, e
 // one of the two sees a row affected; a cancel that loses reports false
 // and the caller escalates to cancelling the now-running run.
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
+	return s.defaultTenant().CancelPendingTrigger(ctx, id)
+}
+
+// CancelPendingTrigger is [Store.CancelPendingTrigger] confined to t's team.
+func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
 	now := time.Now()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -7720,8 +7708,8 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers
 		    SET status = ?, cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		  WHERE id = ? AND status = ?`,
-		triggerStatusDone, now.UnixNano(), id, triggerStatusPending)
+		  WHERE team = ? AND id = ? AND status = ?`,
+		triggerStatusDone, now.UnixNano(), string(t.team), id, triggerStatusPending)
 	if err != nil {
 		return false, err
 	}
@@ -7735,9 +7723,9 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE runs
 		    SET status = ?, finished_at = ?, error = ?
-		  WHERE id = ? AND status = ?`,
+		  WHERE team = ? AND id = ? AND status = ?`,
 		runStatusCancelled, now.UnixNano(),
-		"cancelled before dispatch", id, runStatusPending); err != nil {
+		"cancelled before dispatch", string(t.team), id, runStatusPending); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -8102,10 +8090,15 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 // two statements leaves the flag on a claimed trigger, which is the
 // cooperative path again.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
-	if handled, err := s.requestControllerRunCancel(ctx, id, time.Now()); handled || err != nil {
+	return s.defaultTenant().RequestCancel(ctx, id)
+}
+
+// RequestCancel is [Store.RequestCancel] confined to t's team.
+func (t *Tenant) RequestCancel(ctx context.Context, id string) error {
+	if handled, err := t.s.requestControllerRunCancel(ctx, t.team, id, time.Now()); handled || err != nil {
 		return err
 	}
-	cancelled, err := s.CancelPendingTrigger(ctx, id)
+	cancelled, err := t.CancelPendingTrigger(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -8113,11 +8106,11 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 		return nil
 	}
 	now := time.Now().UnixNano()
-	res, err := s.exec(ctx,
+	res, err := t.s.exec(ctx,
 		`UPDATE triggers
 		    SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		  WHERE id = ?`,
-		now, id)
+		  WHERE team = ? AND id = ?`,
+		now, string(t.team), id)
 	if err != nil {
 		return err
 	}

@@ -241,7 +241,7 @@ func TestEnqueueChildRun_RoutesAChildByItsRepository(t *testing.T) {
 		t.Fatalf("the opted-out child got a planning node: %v", err)
 	}
 	requireTriggerStatus(t, st, "child-other", "pending")
-	if run, err := st.GetRun(ctx, "child-other"); err != nil || run.ParentRunID != "run-parent" {
+	if run, err := alpha.GetRun(ctx, "child-other"); err != nil || run.ParentRunID != "run-parent" {
 		t.Fatalf("the opted-out child's run = %+v, %v", run, err)
 	}
 	for id, want := range map[string]bool{"child-probe": true, "run-parent": false} {

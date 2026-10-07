@@ -276,7 +276,7 @@ func TestCacheGrantRetryOfAPullRequestKeepsItsScope(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runretry.Create(t.Context(), s.store, pr.ID, "pr-retry", false, time.Now()); err != nil {
+	if _, err := runretry.Create(t.Context(), s.store, team, pr.ID, "pr-retry", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	source, err := s.cacheGrantScope(t.Context(), "team-a", pr.ID)

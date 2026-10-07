@@ -23,10 +23,11 @@ type Created struct {
 	StartedAt     time.Time
 }
 
-// Create persists a manual retry using the same trigger and pending-run shape
-// for controller-backed and local queued execution.
-func Create(ctx context.Context, st *store.Store, sourceID, newID string, full bool, now time.Time) (Created, error) {
-	src, err := st.GetRun(ctx, sourceID)
+// Create persists a manual retry of one of team's runs using the same
+// trigger and pending-run shape for controller-backed and local queued
+// execution.
+func Create(ctx context.Context, st *store.Store, team *store.Tenant, sourceID, newID string, full bool, now time.Time) (Created, error) {
+	src, err := team.GetRun(ctx, sourceID)
 	if err != nil {
 		return Created{}, err
 	}
@@ -94,7 +95,7 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 		}
 		return Created{}, fmt.Errorf("persist the retry and its run: %w", err)
 	}
-	if err := st.SetRetriedAs(ctx, sourceID, newID); err != nil {
+	if err := team.SetRetriedAs(ctx, sourceID, newID); err != nil {
 		slog.Default().Warn("could not link the source run to its retry", "run_id", sourceID, "retry_id", newID, "error", err)
 	}
 

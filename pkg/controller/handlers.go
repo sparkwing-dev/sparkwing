@@ -542,6 +542,10 @@ func splitCSV(s string) []string {
 }
 
 func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	var body store.Node
 	if err := decodeJSON(r, &body); err != nil {
@@ -554,7 +558,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.holdsLiveTriggerClaim(r.Context(), runID) {
-		if run, err := s.store.GetRun(r.Context(), runID); err == nil && run.FinishedAt != nil {
+		if run, err := tenant.GetRun(r.Context(), runID); err == nil && run.FinishedAt != nil {
 			writeError(w, http.StatusConflict, finishedRunConflict(runID, run, body.NodeID))
 			return
 		}
@@ -1242,6 +1246,10 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
 	if err := s.store.FinishTrigger(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
@@ -1252,7 +1260,7 @@ func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if trig, err := s.store.GetTrigger(r.Context(), id); err == nil && trig.Status == "failed" {
-		if run, err := s.store.GetRun(r.Context(), id); err == nil {
+		if run, err := tenant.GetRun(r.Context(), id); err == nil {
 			s.logger.Warn("trigger failed", "trigger_id", id, "pipeline", trig.Pipeline, "err", run.Error)
 		}
 	}
@@ -1394,8 +1402,12 @@ func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
-	if err := s.store.RequestCancel(r.Context(), id); err != nil {
+	if err := tenant.RequestCancel(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -1407,8 +1419,16 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
-	if err := s.store.DeleteRun(r.Context(), id); err != nil {
+	if err := tenant.DeleteRun(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2049,8 +2069,10 @@ func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
 	s.recordQueueActivity(time.Now())
 	pipeline := ""
-	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
-		pipeline = run.Pipeline
+	if tenant, err := s.tenantFor(r); err == nil {
+		if run, err := tenant.GetRun(r.Context(), n.RunID); err == nil && run != nil {
+			pipeline = run.Pipeline
+		}
 	}
 	observeNodeClaim(pipeline)
 	observeClaimWait(n)

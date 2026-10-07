@@ -413,7 +413,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		}
 	}
 	if limits.RunSeconds > 0 {
-		elapsed, err := runElapsedSecondsTx(ctx, tx, runID, now)
+		elapsed, err := runElapsedSecondsTx(ctx, tx, team, runID, now)
 		if err != nil {
 			return err
 		}
@@ -442,9 +442,9 @@ func globalRunnerRefusal(ctx context.Context, q rowQuerier, limit int64) error {
 	return nil
 }
 
-func runElapsedSecondsTx(ctx context.Context, tx *storeTx, runID string, now time.Time) (int64, error) {
+func runElapsedSecondsTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) (int64, error) {
 	var started int64
-	err := tx.QueryRowContext(ctx, `SELECT started_at FROM runs WHERE id = ?`, runID).Scan(&started)
+	err := tx.QueryRowContext(ctx, `SELECT started_at FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&started)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -477,7 +477,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, no
 	if err != nil || present {
 		return err
 	}
-	principal, err := runPrincipalTx(ctx, tx, runID)
+	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return err
 	}
@@ -530,7 +530,7 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID, pr
 		if owner != team {
 			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, runID)
 		}
-		createdBy, err := runPrincipalTx(ctx, tx, runID)
+		createdBy, err := runPrincipalTx(ctx, tx, team, runID)
 		if err != nil || createdBy != "" || principal == "" {
 			return err
 		}
@@ -602,10 +602,10 @@ func rowPresentTx(ctx context.Context, q rowQuerier, query string, args ...any) 
 	return true, nil
 }
 
-func runPrincipalTx(ctx context.Context, tx *storeTx, runID string) (string, error) {
+func runPrincipalTx(ctx context.Context, tx *storeTx, team Team, runID string) (string, error) {
 	var principal string
 	err := tx.QueryRowContext(ctx,
-		`SELECT created_principal FROM runs WHERE id = ?`, runID).Scan(&principal)
+		`SELECT created_principal FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&principal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -641,7 +641,12 @@ func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 // wall-clock guard, which is what the heartbeat path reads to decide that a
 // node must stop. It reports false when no guard is set.
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
-	ceiling, err := s.creditSetting(ctx, computeLimitKey(ComputeLimitRunSeconds), 0)
+	return s.defaultTenant().RunExceedsWallClock(ctx, runID, now)
+}
+
+// RunExceedsWallClock is [Store.RunExceedsWallClock] confined to t's team.
+func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
+	ceiling, err := t.s.creditSetting(ctx, computeLimitKey(ComputeLimitRunSeconds), 0)
 	if err != nil {
 		return 0, false, err
 	}
@@ -649,7 +654,7 @@ func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.
 		return 0, false, nil
 	}
 	var started int64
-	err = s.queryRow(ctx, `SELECT started_at FROM runs WHERE id = ?`, runID).Scan(&started)
+	err = t.s.queryRow(ctx, `SELECT started_at FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&started)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}

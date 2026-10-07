@@ -14,7 +14,7 @@ func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := r.PathValue("id")
-	run, err := s.store.GetRun(r.Context(), runID)
+	run, err := tenant.GetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)

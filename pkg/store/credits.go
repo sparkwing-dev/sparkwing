@@ -1821,7 +1821,7 @@ func reserveTriggerCreditsTx(
 	if err := refuseAboveHeadroomTx(ctx, tx, team, required, now, triggerID, ""); err != nil {
 		return err
 	}
-	principal, err := runPrincipalTx(ctx, tx, triggerID)
+	principal, err := runPrincipalTx(ctx, tx, team, triggerID)
 	if err != nil {
 		return err
 	}
@@ -2046,7 +2046,7 @@ func (s *Store) reserveNodeCreditsTx(
 		unpriced.RunID, unpriced.NodeID = runID, nodeID
 		return unpriced
 	}
-	principal, err := runPrincipalTx(ctx, tx, runID)
+	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return err
 	}
@@ -2184,11 +2184,11 @@ func (s *Store) chargeNodeTx(
 	if err != nil {
 		return out, err
 	}
-	principal, err := runPrincipalTx(ctx, tx, runID)
+	team, err := creditTeamForRunTx(ctx, tx, runID)
 	if err != nil {
 		return out, err
 	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
+	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return out, err
 	}
