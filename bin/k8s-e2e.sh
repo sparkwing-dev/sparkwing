@@ -617,6 +617,7 @@ fixture_sha="$(kube --namespace "$namespace" exec "deployment/$cache_deployment"
 trigger_body() {
   jq -nc --arg pipeline "$1" --arg sha "$fixture_sha" '{
     pipeline:$pipeline,
+    trigger:{source:"manual"},
     git:{branch:"main", sha:$sha, repo:"sparkwing-k8s/e2e", github_owner:"sparkwing-k8s", github_repo:"e2e"}
   }'
 }
