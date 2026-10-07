@@ -38,7 +38,7 @@ nothing; every other install sets one value on upgrade.
   `requireAuth: true` without a bootstrap token, which crash-looped a fresh
   install, now fail at render time instead.
 
-The OIDC subject gains a repository segment, so every cloud trust policy that matches `sub` must be rewritten before the controller is upgraded, or the roles it guards refuse Sparkwing tokens. Nothing else in this release needs a change.
+The OIDC subject gains a repository segment, so every cloud trust policy that matches `sub` must be rewritten before the controller is upgraded, or the roles it guards refuse Sparkwing tokens.
 
 ## OIDC subject names the repository
 
