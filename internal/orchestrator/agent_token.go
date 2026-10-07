@@ -1,6 +1,9 @@
 package orchestrator
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 const agentTokenEnv = "SPARKWING_AGENT_TOKEN"
 
@@ -12,7 +15,9 @@ var agentToken string
 func takeAgentToken() string {
 	if tok, ok := os.LookupEnv(agentTokenEnv); ok {
 		agentToken = tok
-		_ = os.Unsetenv(agentTokenEnv)
+		if err := os.Unsetenv(agentTokenEnv); err != nil {
+			panic(fmt.Sprintf("remove %s from the environment: %v", agentTokenEnv, err))
+		}
 	}
 	return agentToken
 }
