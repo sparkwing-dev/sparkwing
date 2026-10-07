@@ -69,16 +69,6 @@ Kinds:
 | `SPARKWING_LOGS_URL` | [architecture](architecture.md) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 | `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_DEPENDENCY_PROXY_URL` | [gitcache](gitcache.md) |
-| `SPARKWING_IMAGE_PULL_POLICY` | [gitcache](gitcache.md) |
-| `SPARKWING_K8S_CPU_CEILING` | [local-execution](local-execution.md) |
-| `SPARKWING_K8S_MEMORY_CEILING` | [local-execution](local-execution.md) |
-| `SPARKWING_K8S_JOB_DEADLINE` | [local-execution](local-execution.md) |
-| `SPARKWING_LOCAL_RESERVE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_RUNNER_SA` | [local-execution](local-execution.md) |
-| `SPARKWING_RUNNER_TEAM_NODES` | [deployment](deployment.md) |
-| `SPARKWING_TEAM` | [github-actions-runners](github-actions-runners.md) |
-| `SPARKWING_WARM_MODULES` | [self-hosting](self-hosting.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
 

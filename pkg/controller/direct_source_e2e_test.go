@@ -207,11 +207,19 @@ func (e *directSourceE2E) trigger(pipeline string) string {
 func (e *directSourceE2E) startRunner(name, command string) {
 	t := e.t
 	t.Logf("%s: %s", name, redactToken(command))
-	cmd := exec.CommandContext(e.ctx, "sh", "-c", "exec env "+command)
-	cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		"PATH="+e.binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"SPARKWING_HOME="+filepath.Join(t.TempDir(), ".sparkwing"),
+		"HOME="+t.TempDir(),
 	)
+	setup, run, _ := strings.Cut(command, " && ")
+	prepare := exec.CommandContext(e.ctx, "sh", "-c", setup)
+	prepare.Env = env
+	if out, err := prepare.CombinedOutput(); err != nil {
+		t.Fatalf("%s token setup: %v\n%s", name, err, out)
+	}
+	cmd := exec.CommandContext(e.ctx, "sh", "-c", "exec "+run)
+	cmd.Env = env
 	logPath := filepath.Join(e.logDir, t.Name()+"-"+name+".log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
@@ -281,11 +289,11 @@ func runStatus(f *identityFixture, who signedIn, id string) string {
 }
 
 func redactToken(cmd string) string {
-	name, rest, ok := strings.Cut(cmd, " ")
-	if !ok || !strings.HasPrefix(name, "SPARKWING_AGENT_TOKEN=") {
+	_, run, ok := strings.Cut(cmd, " && ")
+	if !ok {
 		return cmd
 	}
-	return "SPARKWING_AGENT_TOKEN=<redacted> " + rest
+	return "<token setup> && " + run
 }
 
 func envOr(name, fallback string) string {

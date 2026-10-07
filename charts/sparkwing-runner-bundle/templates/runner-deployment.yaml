@@ -1,6 +1,11 @@
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 {{- $goCache := .Values.runner.goCache.persistence.enabled -}}
+{{- $agentToken := and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key -}}
+{{- $gitcache := .Values.runner.gitcacheUrl -}}
+{{- if .Values.cache.enabled -}}
+{{- $gitcache = printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
+{{- end -}}
 {{- $goCacheMounts := list (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gocache" "subPath" "gocache") (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gomodcache" "subPath" "gomodcache") -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -91,11 +96,14 @@ spec:
             {{- if .Values.logs.enabled }}
             - {{ printf "--logs=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.logs.fullname" .) .Release.Namespace | quote }}
             {{- end }}
-            {{- if .Values.cache.enabled }}
-            - {{ printf "--gitcache=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
-            {{- if not .Values.cache.dependencyProxy.enabled }}
+            {{- with $gitcache }}
+            - {{ printf "--gitcache=%s" . | quote }}
+            {{- end }}
+            {{- if and .Values.cache.enabled (not .Values.cache.dependencyProxy.enabled) }}
             - --dependency-proxy=off
             {{- end }}
+            {{- if $agentToken }}
+            - --credentials-dir=/etc/sparkwing/credentials
             {{- end }}
             - {{ printf "--max-concurrent=%d" (int .Values.runner.maxConcurrent) | quote }}
             - {{ printf "--poll=%s" .Values.runner.pollInterval | quote }}
@@ -124,6 +132,12 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- with .Values.runner.jobCeiling.cpu }}
+            - {{ printf "--cpu-ceiling=%v" . | quote }}
+            {{- end }}
+            {{- with .Values.runner.jobCeiling.memory }}
+            - {{ printf "--memory-ceiling=%v" . | quote }}
+            {{- end }}
             {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
             - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}
             {{- end }}
@@ -144,29 +158,15 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
-            {{- with .Values.runner.jobCeiling.cpu }}
-            - name: SPARKWING_K8S_CPU_CEILING
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.runner.jobCeiling.memory }}
-            - name: SPARKWING_K8S_MEMORY_CEILING
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if .Values.cache.enabled }}
+            {{- with $gitcache }}
+            {{- /* The SDK's clone and dependency-cache helpers in each node read it. */}}
             - name: SPARKWING_GITCACHE_URL
-              value: {{ printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
+              value: {{ . | quote }}
             {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
-            - name: SPARKWING_AGENT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.tokenSecret.name | quote }}
-                  key: {{ .Values.controller.tokenSecret.key | quote }}
-            {{- end }}
             {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
             {{- . | nindent 12 }}
             {{- end }}
@@ -180,6 +180,11 @@ spec:
               mountPath: /tmp
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
+            {{- if $agentToken }}
+            - name: credentials
+              mountPath: /etc/sparkwing/credentials
+              readOnly: true
+            {{- end }}
             {{- if $goCache }}
             {{- toYaml $goCacheMounts | nindent 12 }}
             {{- end }}
@@ -191,6 +196,17 @@ spec:
           emptyDir: {}
         - name: sparkwing-home
           emptyDir: {}
+        {{- if $agentToken }}
+        - name: credentials
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ .Values.controller.tokenSecret.name | quote }}
+                  items:
+                    - key: {{ .Values.controller.tokenSecret.key | quote }}
+                      path: agent-token
+        {{- end }}
         {{- if $goCache }}
         - name: go-cache
           persistentVolumeClaim:

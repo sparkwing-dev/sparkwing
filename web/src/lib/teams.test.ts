@@ -388,13 +388,14 @@ describe("runnerConnectCommand", () => {
     );
   });
 
-  it("falls back to the runner command with the token in the environment", () => {
+  it("falls back to the runner command with the token in its credentials directory", () => {
     const cmd = teams.runnerConnectCommand(minted, "Korey's laptop", [
       "github.com/acme/*",
     ]);
+    const dir = '"$HOME/.config/sparkwing/runner-credentials"';
     assert.equal(
       cmd,
-      `SPARKWING_AGENT_TOKEN=swr_secret sparkwing-runner runner --controller ${teams.controllerURLPlaceholder} --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix 'Korey'\\''s laptop'`,
+      `(umask 077 && mkdir -p ${dir} && printf '%s' swr_secret > ${dir}/agent-token) && sparkwing-runner runner --credentials-dir ${dir} --controller ${teams.controllerURLPlaceholder} --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix 'Korey'\\''s laptop'`,
     );
   });
 });

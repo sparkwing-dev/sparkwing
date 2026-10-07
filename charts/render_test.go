@@ -1356,12 +1356,12 @@ func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	rendered := renderRunner(t,
-		"cache.enabled=false",
-		"runner.extraEnv[0].name=SPARKWING_GITCACHE_URL",
-		"runner.extraEnv[0].value=https://gitcache.example.com")
+	rendered := renderRunner(t, "cache.enabled=false", "runner.gitcacheUrl=https://gitcache.example.com")
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--gitcache=https://gitcache.example.com") {
+		t.Errorf("runner args = %v, want --gitcache naming the external gitcache", args)
+	}
 	if got := runnerEnv(t, rendered)["SPARKWING_GITCACHE_URL"]; got != "https://gitcache.example.com" {
-		t.Errorf("SPARKWING_GITCACHE_URL = %q, want external gitcache URL", got)
+		t.Errorf("SPARKWING_GITCACHE_URL = %q, want the same gitcache for the nodes' SDK helpers", got)
 	}
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--also-claim-triggers") {
 		t.Errorf("runner args = %v, want trigger claiming preserved", args)
@@ -2709,10 +2709,10 @@ func TestRunnerCarriesNoJobCeilingByDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	env := runnerEnv(t, renderRunner(t))
-	for _, name := range []string{"SPARKWING_K8S_CPU_CEILING", "SPARKWING_K8S_MEMORY_CEILING"} {
-		if _, ok := env[name]; ok {
-			t.Errorf("default install sets %s; the ceiling is opt-in", name)
+	args := runnerContainer(t, renderRunner(t)).Args
+	for _, name := range []string{"--cpu-ceiling=", "--memory-ceiling="} {
+		if arg, ok := hasFlag(args, name); ok {
+			t.Errorf("default install passes %s; the ceiling is opt-in", arg)
 		}
 	}
 }
@@ -2721,9 +2721,9 @@ func TestRunnerCarriesTheConfiguredJobCeiling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	env := runnerEnv(t, renderRunner(t, "runner.jobCeiling.cpu=8", "runner.jobCeiling.memory=16Gi"))
-	if env["SPARKWING_K8S_CPU_CEILING"] != "8" || env["SPARKWING_K8S_MEMORY_CEILING"] != "16Gi" {
-		t.Errorf("runner env = %v, want the configured job ceiling", env)
+	args := runnerContainer(t, renderRunner(t, "runner.jobCeiling.cpu=8", "runner.jobCeiling.memory=16Gi")).Args
+	if !containsArg(args, "--cpu-ceiling=8") || !containsArg(args, "--memory-ceiling=16Gi") {
+		t.Errorf("runner args = %v, want the configured job ceiling", args)
 	}
 }
 
@@ -2734,8 +2734,8 @@ func TestFullChartCarriesTheJobCeiling(t *testing.T) {
 	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
 		"sparkwing-runner-bundle.controller.tokenSecret.name=tok",
 		"sparkwing-runner-bundle.runner.jobCeiling.cpu=8")
-	if !strings.Contains(rendered, "SPARKWING_K8S_CPU_CEILING") {
-		t.Error("flagship chart carries no job ceiling env; the vendored sub-chart may be stale")
+	if !strings.Contains(rendered, "--cpu-ceiling=8") {
+		t.Error("flagship chart carries no job ceiling flag; the vendored sub-chart may be stale")
 	}
 }
 

@@ -231,15 +231,14 @@ Details worth knowing:
 **Opting out.** Set `cache.dependencyProxy.enabled=false` in the chart:
 the env is not emitted and the runner is started with
 `--dependency-proxy=off` so the pods it spawns skip the wiring too. On
-the runner binary directly, `--dependency-proxy=off` (or
-`SPARKWING_DEPENDENCY_PROXY_URL=off`); pass a URL instead to point at
+the runner binary directly, `--dependency-proxy=off`; pass a URL instead to point at
 some other pull-through mirror. Overriding a single ecosystem is a
 `runner.extraEnv` entry with the same name -- a name you set there
 suppresses the chart's default rather than colliding with it.
 
 **Image pulls.** Runner pods are created with
-`imagePullPolicy: IfNotPresent`; `--image-pull-policy` (or
-`SPARKWING_IMAGE_PULL_POLICY`) accepts `Always`, `IfNotPresent`, or
+`imagePullPolicy: IfNotPresent`; `--trigger-runner-image-pull-policy`
+accepts `Always`, `IfNotPresent`, or
 `Never`. `Always` re-downloads the runner image on every node in the
 DAG, which is the other per-run egress bill worth reading twice.
 

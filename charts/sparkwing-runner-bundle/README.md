@@ -147,7 +147,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
 | `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. A metered token's pool needs `k8s` or `warm`; the controller refuses its `inprocess` trigger claims. | `inprocess` |
 | `runner.triggerRunner.labels` | Static capabilities every trigger-spawned Kubernetes Job advertises. | `[]` |
-| `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
+| `runner.extraEnv` | Extra runner environment. | `[]` |
+| `runner.gitcacheUrl` | External gitcache passed as `--gitcache` when `cache.enabled=false`. | `""` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at startup. Empty warms the SDK at the runner image's version. | `[]` |
 | `runner.goCache.persistence.enabled` | Mount a PVC over `GOCACHE` and `GOMODCACHE` so the caches outlive the pod. | `false` |
@@ -204,7 +205,8 @@ release before enabling it.
 
 ## Auth
 
-The runner reads its bearer token from `controller.tokenSecret` and uses it
+The runner reads its bearer token from `controller.tokenSecret`, which the
+chart projects as the file `agent-token` under `--credentials-dir`, and uses it
 for controller claims and writes to the logs service. Mint it with
 `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
 `logs.write`: enough to claim triggers and nodes, drive the runs it claimed
@@ -242,8 +244,7 @@ open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
 Service read, forge, and delete every run's logs, which is again a bootstrap
 setting to turn back off with the token upgrade.
 
-With `cache.enabled=false` and no `SPARKWING_GITCACHE_URL` in
-`runner.extraEnv`, runners fetch each run's source straight from its host.
+With `cache.enabled=false` and no `runner.gitcacheUrl`, runners fetch each run's source straight from its host.
 The controller releases the credential for each run: the team's GitHub App
 token when an installation covers the repository, else the git credential
 the team stored for the host. A run with neither fails with a message naming
@@ -386,8 +387,8 @@ Runner pods rolling-update one at a time; in-flight claims on the
 rolled pod time out and re-queue. Cache + logs use `Recreate`
 because of their RWO PVCs -- expect ~30s of downtime per upgrade.
 For zero-downtime cache, run a separate cache deployment with
-`cache.enabled=false` here and point runners at it via your own
-`SPARKWING_GITCACHE_URL` env override.
+`cache.enabled=false` here and point runners at it with
+`runner.gitcacheUrl`.
 
 ## Uninstall
 

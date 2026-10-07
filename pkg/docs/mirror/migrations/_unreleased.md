@@ -155,16 +155,14 @@ ran it.
       --trigger-runner-sa=SA --trigger-runner-image-pull-secret=SECRET
   ```
 
-  `--trigger-sources`, `--token`, `--metrics-addr` and `--dependency-proxy`
-  carry over; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
+  `--trigger-sources`, `--metrics-addr` and `--dependency-proxy` carry over,
+  and `--token` becomes the file `agent-token` under `--credentials-dir`; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
   and `--runner-logs-url` gain the `--trigger-runner-` prefix, and
   `--artifact-store` becomes `--trigger-artifact-store`. Drop
   `--claim-nodes=false` to let the same pod also run nodes. The worker's
   `--log-store` has no runner equivalent: the runner streams logs to `--logs`.
   `--k8s-cpu-ceiling`, `--k8s-memory-ceiling` and `--k8s-job-deadline` become
-  `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING` and
-  `SPARKWING_K8S_JOB_DEADLINE` in the runner pod's environment, which each
-  trigger's child inherits.
+  `--cpu-ceiling`, `--memory-ceiling` and `--deadline`.
 - **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
   for a profile, is unchanged.
 
@@ -293,6 +291,64 @@ ran it.
   directory it reads the same `cache-token` and `cache-grant-key` file names,
   so one projected Secret volume will serve both. `SPARKWING_S3_ENDPOINT`,
   `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
+
+## sparkwing-runner reads flags and a credentials directory
+
+- **Before:** `sparkwing-runner runner` and `sparkwing-runner launch` took
+  their bearer from `SPARKWING_AGENT_TOKEN` or `--token`, and `runner` seeded
+  most flags from `SPARKWING_*` variables. The Kubernetes Job ceilings,
+  deadline and team-node switch existed only as `SPARKWING_K8S_CPU_CEILING`,
+  `SPARKWING_K8S_MEMORY_CEILING`, `SPARKWING_K8S_JOB_DEADLINE` and
+  `SPARKWING_RUNNER_TEAM_NODES` on the runner pod, which each trigger's
+  `handle-trigger` child inherited and read.
+- **After:** both commands read their bearer from the file `agent-token` under
+  `--credentials-dir`; `--token` is gone, because a flag value shows in
+  `/proc/<pid>/cmdline`. The runner takes `--cpu-ceiling`, `--memory-ceiling`,
+  `--deadline` and `--team-nodes`, the launcher's names, validates them at
+  startup, and hands them to each trigger as `handle-trigger` flags.
+  `handle-trigger` no longer reads those four variables, nor
+  `SPARKWING_RUNNER_SA`, `SPARKWING_IMAGE_PULL_POLICY` and
+  `SPARKWING_DEPENDENCY_PROXY_URL`, which the runner already passed as flags.
+  `POD_NAME`, `POD_NAMESPACE`, `KUBECONFIG` and the GitHub Actions variables
+  are still read, because other tools define them. The token a Job or a
+  trigger child receives from Sparkwing still crosses in
+  `SPARKWING_AGENT_TOKEN`; that is Sparkwing's own protocol, not a setting.
+- **Operator steps:** the `sparkwing-runner-bundle` chart projects
+  `controller.tokenSecret` as `agent-token` and passes
+  `runner.jobCeiling` as flags; upgrading needs no value changes. An external
+  gitcache moves from a `SPARKWING_GITCACHE_URL` entry in `runner.extraEnv` to
+  `runner.gitcacheUrl`. In a manifest of your own, mount the token Secret as a
+  file and move each variable to its flag:
+
+  | Variable or flag | Use instead |
+  |---|---|
+  | `SPARKWING_AGENT_TOKEN`, `--token` | the file `agent-token` under `--credentials-dir` |
+  | `SPARKWING_K8S_CPU_CEILING` | `sparkwing-runner runner --cpu-ceiling` |
+  | `SPARKWING_K8S_MEMORY_CEILING` | `--memory-ceiling` |
+  | `SPARKWING_K8S_JOB_DEADLINE` | `--deadline` |
+  | `SPARKWING_RUNNER_TEAM_NODES` | `--team-nodes` |
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_LOGS_URL` | `--logs` |
+  | `SPARKWING_GITCACHE_URL` | `--gitcache` |
+  | `SPARKWING_RUNNER_SA` | `--trigger-runner-sa` |
+  | `SPARKWING_CACHE_URL` | `--trigger-artifact-store` |
+  | `SPARKWING_DEPENDENCY_PROXY_URL` | `--dependency-proxy` |
+  | `SPARKWING_IMAGE_PULL_POLICY` | `--trigger-runner-image-pull-policy` |
+  | `SPARKWING_WARM_MODULES` | `--warm-modules` |
+  | `SPARKWING_LOCAL_RESERVE` | `--local-reserve` |
+  | `SPARKWING_TEAM` | `--team` |
+
+  A machine connected from the dashboard runs the new command the machines
+  page prints, which writes the token to
+  `$HOME/.config/sparkwing/runner-credentials/agent-token` with mode `0600`
+  before it starts the runner.
+- **Edge cases:** `--team-nodes` reaches a trigger as
+  `handle-trigger --runner-team-nodes`, which a pipeline built from an SDK
+  older than v0.66.0 rejects; the runner passes it only when set. A pipeline
+  built from an SDK older than this release still reads the four Job
+  variables if they remain in the runner pod's environment, so delete them
+  rather than leaving them beside the flags. `sparkwing-runner agent`, which
+  reads `config.yaml`, is unchanged.
 
 ## Flag-mirror environment variables are no longer read
 
