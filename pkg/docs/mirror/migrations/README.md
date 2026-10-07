@@ -8,7 +8,7 @@ that file to `vX.Y.Z.md` when it cuts the tag, writes a fresh
 `_unreleased.md`, and adds the row below. Adopters jumping multiple
 versions follow the guides in ascending version order.
 
-Format conventions live in [../changelog-style.md](../changelog-style.md).
+Format conventions live in `CHANGELOG-STYLE.md` at the repository root.
 
 ## Releases
 

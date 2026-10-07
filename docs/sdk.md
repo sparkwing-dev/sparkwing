@@ -807,8 +807,7 @@ screen.
 
 Each pipeline declares exactly one Inputs type. Field tags drive CLI
 parsing, `--help`, schema introspection (`sparkwing pipeline describe
---name X -o json`), shell completion, dashboard run-form, and MCP
-tool definitions.
+--name X -o json`), shell completion, and the dashboard run form.
 
 ```
 `flag:"name"`            // Required on every input field. Uses dash-case.

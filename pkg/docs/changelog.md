@@ -6,7 +6,7 @@ Versioning](https://semver.org/spec/v2.0.0.html). The release pipeline refuses t
 new version without a matching entry below.
 
 Entries name the affected surface. A `(Breaking)` marker links to the release's
-migration guide. See [Changelog style](docs/changelog-style.md) for authoring rules.
+migration guide. See [Changelog style](CHANGELOG-STYLE.md) for authoring rules.
 
 ## Pre-1.0 caveat
 
@@ -96,6 +96,10 @@ unlock.
 - **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
   `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/_unreleased.md#per-pipeline-github-webhooks-are-removed).
   The `sparkwing-full` chart refuses to render while `controller.githubWebhookSecret.name` or `controller.githubStatusToken.name` is still set, naming the value and the migration guide section, so a `helm upgrade --reuse-values` that carries them fails at render time instead of leaving deliveries to 404.
+- **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
+  Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
+- **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
+  No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes. See [migration guide](docs/migrations/_unreleased.md#unimplemented-backend-types-are-removed).
 - **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
   `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
   `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
@@ -166,6 +170,9 @@ unlock.
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
+
+- **docs:** Remove embedded pages that described unshipped work: the MCP server page and the `proposals/` design notes
+  `sparkwing docs read --topic mcp` and `--topic proposals/...` now report an unknown topic. The SDK extraction roadmap leaves `versioning`, the maintainer release recipe leaves `getting-started`, the cron field reference moves from `scheduling` into `crons`, and `sparkwing pipeline sparks --help` names the `sparks:` block of `.sparkwing/sparkwing.yaml` instead of the `sparks.yaml` file the loader rejects.
 
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
