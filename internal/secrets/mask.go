@@ -77,6 +77,9 @@ func (m *Masker) Register(value string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !slices.Contains(m.values, value) {
+		shareRegistered(value)
+	}
 	values := []string{value}
 	if strings.Contains(value, "\n") {
 		for _, line := range strings.Split(value, "\n") {

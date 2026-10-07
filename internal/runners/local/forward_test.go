@@ -12,6 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+func unmasked(s string) string { return s }
+
 type captureLogger struct {
 	mu   sync.Mutex
 	recs []sparkwing.LogRecord
@@ -39,7 +41,7 @@ func TestForwardRecords_ReplaysNDJSONAsRecords(t *testing.T) {
 	stdout := strings.NewReader(`{"level":"info","msg":"compiling","event":"step_start"}` + "\n" +
 		`{"level":"error","msg":"boom"}` + "\n")
 	cap := &captureLogger{}
-	forwardRecords(stdout, runner.Request{NodeID: "build", Delegate: cap}, slog.Default())
+	forwardRecords(stdout, runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
 
 	got := cap.records()
 	if len(got) != 2 {
@@ -67,7 +69,7 @@ func TestForwardRecords_UndecodableLineIsForwardedAsWarn(t *testing.T) {
 		`{"level":"info","msg":"done"}` + "\n" +
 		"{not json at all\n")
 	cap := &captureLogger{}
-	forwardRecords(stdout, runner.Request{NodeID: "build", Delegate: cap}, slog.Default())
+	forwardRecords(stdout, runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
 
 	got := cap.records()
 	if len(got) != 3 {
@@ -89,7 +91,7 @@ func TestForwardRecords_SkipsBlankLinesAndPreservesGivenTimestamps(t *testing.T)
 	stdout := strings.NewReader("\n   \n" +
 		`{"ts":"2026-08-24T12:00:00Z","level":"info","msg":"kept"}` + "\n")
 	cap := &captureLogger{}
-	forwardRecords(stdout, runner.Request{NodeID: "build", Delegate: cap}, slog.Default())
+	forwardRecords(stdout, runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
 
 	got := cap.records()
 	if len(got) != 1 {
@@ -103,7 +105,7 @@ func TestForwardRecords_SkipsBlankLinesAndPreservesGivenTimestamps(t *testing.T)
 func TestForwardStderr_EveryLineIsAWarning(t *testing.T) {
 	cap := &captureLogger{}
 	forwardStderr(strings.NewReader("warning: deprecated flag\n\nlink error\n"),
-		runner.Request{NodeID: "build", Delegate: cap})
+		runner.Request{NodeID: "build", Delegate: cap}, unmasked)
 
 	got := cap.records()
 	if len(got) != 2 {
@@ -120,8 +122,8 @@ func TestForwardStderr_EveryLineIsAWarning(t *testing.T) {
 }
 
 func TestForward_NilDelegateDrainsWithoutPanicking(t *testing.T) {
-	forwardRecords(strings.NewReader("{\"msg\":\"x\"}\n"), runner.Request{NodeID: "b"}, slog.Default())
-	forwardStderr(strings.NewReader("x\n"), runner.Request{NodeID: "b"})
+	forwardRecords(strings.NewReader("{\"msg\":\"x\"}\n"), runner.Request{NodeID: "b"}, unmasked, slog.Default())
+	forwardStderr(strings.NewReader("x\n"), runner.Request{NodeID: "b"}, unmasked)
 }
 
 func TestForwardRecords_OversizedLineDoesNotStopTheStream(t *testing.T) {
@@ -133,7 +135,7 @@ func TestForwardRecords_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	}
 
 	cap := &captureLogger{}
-	forwardRecords(strings.NewReader(b.String()), runner.Request{NodeID: "build", Delegate: cap}, slog.Default())
+	forwardRecords(strings.NewReader(b.String()), runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
 
 	got := cap.records()
 	if len(got) != 201 {
@@ -150,7 +152,7 @@ func TestForwardRecords_OversizedLineDoesNotStopTheStream(t *testing.T) {
 func TestForwardRecords_OversizedFinalLineIsTruncatedNotDropped(t *testing.T) {
 	line := strings.Repeat("y", 1_100_000)
 	cap := &captureLogger{}
-	forwardRecords(strings.NewReader(line+"\n"), runner.Request{NodeID: "build", Delegate: cap}, slog.Default())
+	forwardRecords(strings.NewReader(line+"\n"), runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
 
 	got := cap.records()
 	if len(got) != 1 {
@@ -171,7 +173,7 @@ func TestForwardRecords_OversizedFinalLineIsTruncatedNotDropped(t *testing.T) {
 func TestForwardRecords_TruncatedLineIsNotParsedAsJSON(t *testing.T) {
 	huge := `{"level":"info","msg":"` + strings.Repeat("z", 2<<20) + `"}`
 	cap := &captureLogger{}
-	forwardRecords(strings.NewReader(huge+"\n"), runner.Request{NodeID: "build", Delegate: cap}, slog.Default())
+	forwardRecords(strings.NewReader(huge+"\n"), runner.Request{NodeID: "build", Delegate: cap}, unmasked, slog.Default())
 
 	got := cap.records()
 	if len(got) != 1 {
@@ -185,7 +187,7 @@ func TestForwardRecords_TruncatedLineIsNotParsedAsJSON(t *testing.T) {
 func TestForwardStderr_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	body := strings.Repeat("e", 2<<20) + "\nrecovered\n"
 	cap := &captureLogger{}
-	forwardStderr(strings.NewReader(body), runner.Request{NodeID: "build", Delegate: cap})
+	forwardStderr(strings.NewReader(body), runner.Request{NodeID: "build", Delegate: cap}, unmasked)
 
 	got := cap.records()
 	if len(got) != 2 {

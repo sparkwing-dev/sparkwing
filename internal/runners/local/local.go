@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -168,6 +169,12 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 	cmd.ExtraFiles = []*os.File{livenessR}
+	values, err := secrets.ShareWithChild(cmd)
+	if err != nil {
+		closeAll(stdout, stdoutW, stderr, stderrW, livenessR, livenessW)
+		return failedResult(fmt.Errorf("local runner: %w", err)), false
+	}
+	defer values.Close()
 
 	// safety: the dispatcher holds only the write end. Its close -- deliberate
 	// here, or by the kernel when the dispatcher dies -- is the EOF the
@@ -186,8 +193,8 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 
 	var forwarders sync.WaitGroup
 	forwarders.Add(2)
-	go func() { defer forwarders.Done(); forwardRecords(stdout, req, r.cfg.Logger) }()
-	go func() { defer forwarders.Done(); forwardStderr(stderr, req) }()
+	go func() { defer forwarders.Done(); forwardRecords(stdout, req, values.Mask, r.cfg.Logger) }()
+	go func() { defer forwarders.Done(); forwardStderr(stderr, req, values.Mask) }()
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 		fmt.Sprintf("running, pid %d", group.ID()))
@@ -517,12 +524,13 @@ func (r *Runner) tokenDied(req runner.Request, err error) bool {
 	return true
 }
 
-func forwardRecords(out io.Reader, req runner.Request, logger *slog.Logger) {
+func forwardRecords(out io.Reader, req runner.Request, mask func(string) string, logger *slog.Logger) {
 	if req.Delegate == nil {
 		_, _ = io.Copy(io.Discard, out)
 		return
 	}
 	err := forwardLines(out, func(line []byte, truncated bool) {
+		line = []byte(mask(string(line)))
 		if len(bytes.TrimSpace(line)) == 0 {
 			return
 		}
@@ -550,13 +558,13 @@ func forwardRecords(out io.Reader, req runner.Request, logger *slog.Logger) {
 	}
 }
 
-func forwardStderr(errOut io.Reader, req runner.Request) {
+func forwardStderr(errOut io.Reader, req runner.Request, mask func(string) string) {
 	if req.Delegate == nil {
 		_, _ = io.Copy(io.Discard, errOut)
 		return
 	}
 	_ = forwardLines(errOut, func(line []byte, truncated bool) {
-		text := strings.TrimRight(string(line), "\r")
+		text := mask(strings.TrimRight(string(line), "\r"))
 		if strings.TrimSpace(text) == "" {
 			return
 		}
