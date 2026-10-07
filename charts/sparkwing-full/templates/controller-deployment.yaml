@@ -176,20 +176,6 @@ spec:
                   name: {{ .Values.controller.databaseSecret.name | quote }}
                   key: {{ .Values.controller.databaseSecret.key | quote }}
             {{- end }}
-            {{- if .Values.controller.githubWebhookSecret.name }}
-            - name: GITHUB_WEBHOOK_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.githubWebhookSecret.name | quote }}
-                  key: {{ .Values.controller.githubWebhookSecret.key | quote }}
-            {{- end }}
-            {{- if .Values.controller.githubStatusToken.name }}
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.githubStatusToken.name | quote }}
-                  key: {{ .Values.controller.githubStatusToken.key | quote }}
-            {{- end }}
             {{- if .Values.controller.dashboardURL }}
             - name: SPARKWING_DASHBOARD_URL
               value: {{ .Values.controller.dashboardURL | quote }}
