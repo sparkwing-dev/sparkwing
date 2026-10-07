@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func TestFormatScopes(t *testing.T) {
@@ -29,10 +31,10 @@ func TestFormatScopes(t *testing.T) {
 	}
 }
 
-func fixedTokens() []tokenListItem {
+func fixedTokens() []client.TokenInfo {
 	last := int64(1714867200)
 	revoked := int64(1714953600)
-	return []tokenListItem{
+	return []client.TokenInfo{
 		{
 			Prefix:     "swu_abcd",
 			Kind:       "runner",

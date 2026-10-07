@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **client:** `pkg/controller/client` gains the token, user and compute-limit admin calls
+  `CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`, `CreateUser`, `ListUsers`, `DeleteUser`, `ComputeLimits` and `SetComputeLimits` wrap the existing `/api/v1/tokens`, `/api/v1/users` and `/api/v1/compute-limits` routes. `sparkwing cluster tokens`, `users`, `limits`, `runners add/remove` and `cloud connect/disconnect` now use them, so those commands retry a shed request, escape query and path values, and report errors in the client's form.
+
 - **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
   It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
 

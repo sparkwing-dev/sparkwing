@@ -33,6 +33,7 @@ func TestUsersAddReadsPasswordLine(t *testing.T) {
 				received = body.Password
 				calls++
 				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
 				w.Write([]byte("{}"))
 			}))
 			defer srv.Close()
