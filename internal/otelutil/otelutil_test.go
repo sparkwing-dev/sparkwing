@@ -14,11 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel/propagation"
-
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
@@ -94,41 +91,6 @@ func TestStampSpan_SkipsEmptyAttrs(t *testing.T) {
 	ctx, span := tp.Tracer("test").Start(context.Background(), "unit")
 	defer span.End()
 	StampSpan(ctx, SpanAttrs{RunID: "only-this"})
-}
-
-func TestTraceParentEnv_EmptyWithoutSpan(t *testing.T) {
-	if got := TraceParentEnv(context.Background()); got != "" {
-		t.Errorf("expected empty with no span, got %q", got)
-	}
-}
-
-func TestTraceParentEnv_WithSpan(t *testing.T) {
-	tp := sdktrace.NewTracerProvider()
-	defer tp.Shutdown(context.Background())
-	ctx, span := tp.Tracer("test").Start(context.Background(), "unit")
-	defer span.End()
-
-	env := TraceParentEnv(ctx)
-	const prefix = "TRACEPARENT="
-	if env == "" || len(env) <= len(prefix) || env[:len(prefix)] != prefix {
-		t.Fatalf("unexpected env var: %q", env)
-	}
-
-	t.Setenv("TRACEPARENT", env[len(prefix):])
-	extracted := ContextFromEnv(context.Background())
-	want := span.SpanContext().TraceID().String()
-	got := spanTraceIDString(extracted)
-	if got != want {
-		t.Errorf("round-trip trace id mismatch: got %q want %q", got, want)
-	}
-}
-
-func spanTraceIDString(ctx context.Context) string {
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.HasTraceID() {
-		return ""
-	}
-	return sc.TraceID().String()
 }
 
 func containsAll(haystack string, needles ...string) bool {
@@ -291,15 +253,6 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("logging after Init did not return")
 	}
-}
-
-func ContextFromEnv(ctx context.Context) context.Context {
-	tp := os.Getenv("TRACEPARENT")
-	if tp == "" {
-		return ctx
-	}
-	carrier := propagation.MapCarrier{"traceparent": tp}
-	return propagation.TraceContext{}.Extract(ctx, carrier)
 }
 
 func TestInitServesMetricsOnlyWhenAsked(t *testing.T) {

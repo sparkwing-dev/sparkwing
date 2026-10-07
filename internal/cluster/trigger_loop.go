@@ -372,7 +372,7 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	env := append(triggerChildEnv(ctx, os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
+	env := append(triggerChildEnv(os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
 	cmd.Env = orchestrator.PipelineSourceEnvironment(env, trigger.TriggerEnv[orchestrator.PipelineRevKey])
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
