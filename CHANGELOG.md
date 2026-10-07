@@ -116,6 +116,9 @@ unlock.
 
 ### Removed
 
+- **store (Breaking):** Remove `Store.ChargeNodeCredits`
+  Nothing in the engine called it; a node's renewal, finish and launch settlement bill through the same charge inside their own transactions. A Go program that billed a node directly calls `FinalizeNodeCredits` to settle it.
+
 - **release (Breaking):** Remove `cmd/sign-manifest`
   Release assets are signed by `cmd/verify-release`, and nothing invoked the older helper. Generate a signing seed with `openssl rand -base64 32`, and print its public key with `SPARKWING_RELEASE_SIGNING_KEY=<seed> go run ./cmd/verify-release --public-key`. See the [migration guide](docs/migrations/_unreleased.md#cmdsign-manifest-is-removed).
 

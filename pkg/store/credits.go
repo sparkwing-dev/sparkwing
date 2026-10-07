@@ -2114,15 +2114,6 @@ type creditChargeTxResult struct {
 	settledAt time.Time
 }
 
-// ChargeNodeCredits bills the seconds this node has run since its previous
-// charge and reports whether the balance can still pay for it. Charging is
-// idempotent within a second: a second call in the same second advances
-// nothing and writes no row. A node still inside its claim reservation is
-// charged nothing, because the reservation already paid for those seconds.
-func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
-	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, false)
-}
-
 // FinalizeNodeCredits settles a metered node when it stops running: it bills
 // the tail since the last charge and releases the node's charge window so a
 // later attempt starts its own. A node that finishes inside its reservation

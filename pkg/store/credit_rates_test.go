@@ -250,7 +250,7 @@ func TestHeartbeatChargesAtTheNodesCPUClass(t *testing.T) {
 		}
 		start := time.Now()
 		rewindChargeWindow(t, s, tc.runID, "build", start)
-		res, err := s.ChargeNodeCredits(ctx, tc.runID, "build", claimant.TokenPrefix, start.Add(10*time.Second))
+		res, err := store.ChargeNodeCreditsForTest(ctx, s, tc.runID, "build", claimant.TokenPrefix, start.Add(10*time.Second))
 		if err != nil {
 			t.Fatalf("charge %s: %v", tc.runID, err)
 		}
@@ -358,7 +358,7 @@ func TestARateTableChangeLeavesWrittenChargesAlone(t *testing.T) {
 	}
 	start := time.Now()
 	rewindChargeWindow(t, s, "run-repriced", "build", start)
-	first, err := s.ChargeNodeCredits(ctx, "run-repriced", "build", claimant.TokenPrefix, start.Add(10*time.Second))
+	first, err := store.ChargeNodeCreditsForTest(ctx, s, "run-repriced", "build", claimant.TokenPrefix, start.Add(10*time.Second))
 	if err != nil || first.Charge == nil {
 		t.Fatalf("first charge: %+v %v", first.Charge, err)
 	}
@@ -370,7 +370,7 @@ func TestARateTableChangeLeavesWrittenChargesAlone(t *testing.T) {
 	if err := s.SetCreditRateTable(ctx, doubled); err != nil {
 		t.Fatalf("reprice: %v", err)
 	}
-	second, err := s.ChargeNodeCredits(ctx, "run-repriced", "build", claimant.TokenPrefix, start.Add(20*time.Second))
+	second, err := store.ChargeNodeCreditsForTest(ctx, s, "run-repriced", "build", claimant.TokenPrefix, start.Add(20*time.Second))
 	if err != nil || second.Charge == nil {
 		t.Fatalf("second charge: %+v %v", second.Charge, err)
 	}
