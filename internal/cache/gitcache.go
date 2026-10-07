@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"log"
@@ -1257,7 +1258,37 @@ func (w *binUploadWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+type digestCheckedBody struct {
+	io.ReadCloser
+	want string
+	sum  hash.Hash
+}
+
+var errArtifactDigest = errors.New("artifact body does not match the sha-256 its key names")
+
+func (b *digestCheckedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.sum.Write(p[:n])
+	if errors.Is(err, io.EOF) && hex.EncodeToString(b.sum.Sum(nil)) != b.want {
+		return n, errArtifactDigest
+	}
+	return n, err
+}
+
 func handleBin(w http.ResponseWriter, r *http.Request) {
+	if key := strings.TrimPrefix(r.URL.Path, "/bin/"); validArtifactBinKey.MatchString(key) {
+		// safety: an artifact key names its own sha-256, which every reader checks, so the
+		// team shares one copy across refs, as the direct path does; the cache refuses bytes
+		// that are not the named content, and a grant may not delete what other refs read.
+		c := callerFrom(r)
+		if r.Method == http.MethodDelete && c.team != "" {
+			http.Error(w, "content-addressed artifacts are immutable", http.StatusForbidden)
+			return
+		}
+		c.scopes = nil
+		r = r.WithContext(context.WithValue(r.Context(), cacheCallerKey{}, c))
+		r.Body = &digestCheckedBody{ReadCloser: r.Body, want: key[strings.LastIndexByte(key, '/')+1:], sum: sha256.New()}
+	}
 	if blobStore != nil {
 		serveBinBlob(w, r)
 		return

@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -84,6 +86,42 @@ func TestGrantsScopeBlobsToTheRunsRepositoryAndRef(t *testing.T) {
 			}
 			if _, body := send(t, srv, http.MethodGet, "/cache/before-scopes", main, ""); body != "legacy bytes" {
 				t.Errorf("feature's write replaced the unscoped entry main reads: %q", body)
+			}
+		})
+	}
+}
+
+// An artifact key names its own content and every reader checks it, so a
+// memoized or retried node on another ref reads what a feature ref stored.
+// The cache keeps that shared copy honest: it refuses bytes that are not the
+// named content and refuses a grant's delete.
+func TestContentAddressedArtifactsAreSharedAcrossRefs(t *testing.T) {
+	const token = "operator-token"
+	servers := map[string]func(t *testing.T) *httptest.Server{
+		"volume": func(t *testing.T) *httptest.Server { return newBudgetedServer(t, token, egress.Config{}) },
+		"bucket": func(t *testing.T) *httptest.Server { srv, _ := newBlobServer(t, token); return srv },
+	}
+	sum := sha256.Sum256([]byte("manifest"))
+	key := "/bin/artifacts/manifests/" + hex.EncodeToString(sum[:])
+	for name, open := range servers {
+		t.Run(name, func(t *testing.T) {
+			srv := open(t)
+			feature := scopedGrant(t, token, "github.com/acme/app", "refs/heads/feature", "refs/heads/main")
+			main := scopedGrant(t, token, "github.com/acme/app", "refs/heads/main")
+			if code, body := send(t, srv, http.MethodPut, key, feature, "manifest"); code != http.StatusCreated {
+				t.Fatalf("feature PUT = %d: %s", code, body)
+			}
+			if code, body := send(t, srv, http.MethodGet, key, main, ""); code != http.StatusOK || body != "manifest" {
+				t.Fatalf("main reading the feature ref's artifact = %d %q", code, body)
+			}
+			if code, body := send(t, srv, http.MethodPut, key, feature, "forged"); code != http.StatusBadRequest {
+				t.Fatalf("PUT of bytes the key does not name = %d: %s", code, body)
+			}
+			if code, _ := send(t, srv, http.MethodDelete, key, feature, ""); code != http.StatusForbidden {
+				t.Fatalf("a grant deleting a shared artifact = %d, want 403", code)
+			}
+			if code, body := send(t, srv, http.MethodGet, key, main, ""); code != http.StatusOK || body != "manifest" {
+				t.Fatalf("artifact after a refused forge and delete = %d %q", code, body)
 			}
 		})
 	}

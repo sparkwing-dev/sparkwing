@@ -27,7 +27,9 @@ to a commit that is not on the branch.
 
 **What you see:** the first run on a new branch restores its base branch's
 cache as before. A branch's writes stay on that branch, so a sibling branch or
-another repository of the team no longer finds them and rebuilds. Entries from
+another repository of the team no longer finds them and rebuilds. Artifacts a
+node hands to later nodes are content-addressed and stay shared by the team,
+so a memoized or retried node still stages them on any ref. Entries from
 before the upgrade stay readable by every run until a run writes the same key
 under its own ref. A grant minted by an older controller keeps the old
 team-wide behavior until it expires, so upgrade the controller and the cache

@@ -29,7 +29,9 @@ unlock.
   another repository in the team no longer reads it. A run whose ref and commit its submitter chose (the CLI,
   the API, the dashboard, and retries or children of such a run) writes beside its ref's entries rather than
   over them; signed webhook runs, schedules that follow a branch tip, and retries or children of those that keep
-  the same ref and commit write under the real ref. Nothing to configure; caches written on one branch are no longer visible to
+  the same ref and commit write under the real ref. Content-addressed `artifacts/` keys stay team-wide, so a
+  memoized node's outputs still stage on another ref; the cache refuses bytes that do not match the key's digest
+  and refuses a grant's delete of one. Nothing to configure; caches written on one branch are no longer visible to
   other branches except through that order. See
   [Cache entries follow the repository and ref](docs/migrations/_unreleased.md#cache-entries-follow-the-repository-and-ref).
 

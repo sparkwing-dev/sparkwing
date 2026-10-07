@@ -21,8 +21,8 @@ not found. See [Teams and sign-in](auth.md#teams-and-sign-in).
 Within a team, scopes and member roles decide which operations a caller may
 perform. Repository and environment names do not create separate tenant
 boundaries inside that team. Repository and git ref do bound a run's cache
-writes: a run's cache, binary and artifact entries are written under its own
-repository and ref, as [Cache service](#cache-service) describes.
+writes: a run's cache and binary entries are written under its own repository
+and ref, as [Cache service](#cache-service) describes.
 
 **Operators and service credentials have separate authority.** `admin` is
 deployment authority. Service scopes such as `credits.grant`, `claims.launch`,
@@ -730,6 +730,16 @@ naming `main` from the CLI, API or dashboard, writes under a ref of its own and
 never over what `main`'s pushes restore. Entries a
 run writes under its own ref are still restored by that ref's later runs, so
 whoever can push a branch can poison that branch's cache.
+
+Content-addressed artifact keys (`artifacts/blobs/<sha256>` and
+`artifacts/manifests/<sha256>`) are the exception: they are shared by the
+whole team, as the controller's direct uploads already store them, so a
+memoized or retried node on another ref can stage what a feature ref
+produced. The cache refuses an upload whose bytes do not hash to the key,
+refuses a grant's delete of one, and every reader checks the digest again, so
+a branch can add artifacts but cannot change the bytes another run stages.
+Which manifest a node stages is decided by the controller's run and memo
+records, not by the cache.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's

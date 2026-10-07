@@ -536,8 +536,11 @@ the digest under its own key.
 The binary route also accepts `artifacts/blobs/<digest>` and
 `artifacts/manifests/<digest>` keys from the HTTP artifact-store adapter.
 The digest is exactly 64 lowercase hexadecimal characters. Each key stays in
-the caller's team namespace and is stored as `artifacts-blobs-<digest>` or
-`artifacts-manifests-<digest>` on both filesystem and S3 backends. Compiled
+the caller's team namespace, outside any repository and ref scope, and is
+stored as `artifacts-blobs-<digest>` or `artifacts-manifests-<digest>` on both
+filesystem and S3 backends. An upload whose bytes do not hash to the digest
+gets 400, and a grant's DELETE gets 403, because other refs stage the same
+copy. Compiled
 binary names and storage paths keep their existing format.
 
 ### Package Registry Proxy
