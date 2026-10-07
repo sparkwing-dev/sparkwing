@@ -452,9 +452,21 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 				n.Deps = []string{}
 			}
 		}
-		steps, _ := tenant.ListNodeSteps(r.Context(), runID)
-		approvals, _ := tenant.ListApprovalsForRun(r.Context(), runID)
-		spawned, _ := tenant.ListSpawnedChildrenByRun(r.Context(), runID)
+		steps, err := tenant.ListNodeSteps(r.Context(), runID)
+		if err != nil {
+			s.writeInternalError(w, r, "run steps", err)
+			return
+		}
+		approvals, err := tenant.ListApprovalsForRun(r.Context(), runID)
+		if err != nil {
+			s.writeInternalError(w, r, "run approvals", err)
+			return
+		}
+		spawned, err := tenant.ListSpawnedChildrenByRun(r.Context(), runID)
+		if err != nil {
+			s.writeInternalError(w, r, "run children", err)
+			return
+		}
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
 		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run, s.secretValuesAllowed), "nodes": decorated})
 		return

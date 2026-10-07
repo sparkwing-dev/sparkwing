@@ -8801,10 +8801,14 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	tr.Full = fullInt != 0
 	tr.RepoInherited = repoInheritedInt != 0
 	if len(argsJSON) > 0 {
-		_ = json.Unmarshal(argsJSON, &tr.Args)
+		if err := json.Unmarshal(argsJSON, &tr.Args); err != nil {
+			tr.Args = nil
+		}
 	}
 	if len(envJSON) > 0 {
-		_ = json.Unmarshal(envJSON, &tr.TriggerEnv)
+		if err := json.Unmarshal(envJSON, &tr.TriggerEnv); err != nil {
+			tr.TriggerEnv = nil
+		}
 	}
 	return &tr, nil
 }

@@ -23,13 +23,13 @@ func tenantFor(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	return tn
 }
 
-func runTeam(t *testing.T, st *store.Store, runID string) *store.Tenant {
+func runTeam(ctx context.Context, t *testing.T, st *store.Store, runID string) *store.Tenant {
 	t.Helper()
-	team, err := st.AsOperator().RunTeam(context.Background(), runID)
+	team, err := st.AsOperator().RunTeam(ctx, runID)
 	if err != nil {
 		t.Fatalf("RunTeam(%s): %v", runID, err)
 	}
-	tn, err := st.ForTeam(context.Background(), team)
+	tn, err := st.ForTeam(ctx, team)
 	if err != nil {
 		t.Fatal(err)
 	}
