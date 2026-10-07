@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -144,23 +145,57 @@ func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token 
 // safety: a node needing behavior the spike does not host is refused before
 // any row is written, so a plan never half-runs.
 func hostedAdmit(ctx context.Context, st *store.Store, runID string, snap planSnapshot) error {
-	ids := make(map[string]bool, len(snap.Nodes))
+	if err := hostedCheck(snap); err != nil {
+		return err
+	}
 	for _, n := range snap.Nodes {
-		ids[n.ID] = true
+		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: n.ID, Status: "pending", Deps: n.Deps, RequestedSlots: 1}); err != nil {
+			return fmt.Errorf("hosted run: create node %s: %w", n.ID, err)
+		}
+	}
+	return nil
+}
+
+func hostedCheck(snap planSnapshot) error {
+	deps := make(map[string][]string, len(snap.Nodes))
+	for _, n := range snap.Nodes {
+		if _, dup := deps[n.ID]; dup {
+			return fmt.Errorf("hosted run: the plan holds node %s twice", n.ID)
+		}
+		deps[n.ID] = n.Deps
 	}
 	for _, n := range snap.Nodes {
 		if why := hostedUnsupported(n); why != "" {
 			return fmt.Errorf("hosted run: node %s %s, which the hosted spike does not run", n.ID, why)
 		}
 		for _, d := range n.Deps {
-			if !ids[d] {
+			if _, ok := deps[d]; !ok {
 				return fmt.Errorf("hosted run: node %s needs %s, which the plan does not hold", n.ID, d)
 			}
 		}
 	}
+	const visiting, visited = 1, 2
+	state := make(map[string]int, len(deps))
+	var visit func(id string, path []string) error
+	visit = func(id string, path []string) error {
+		switch state[id] {
+		case visited:
+			return nil
+		case visiting:
+			return fmt.Errorf("hosted run: the plan has a dependency cycle %s", strings.Join(append(path, id), " -> "))
+		}
+		state[id] = visiting
+		for _, d := range deps[id] {
+			if err := visit(d, append(path, id)); err != nil {
+				return err
+			}
+		}
+		state[id] = visited
+		return nil
+	}
 	for _, n := range snap.Nodes {
-		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: n.ID, Status: "pending", Deps: n.Deps, RequestedSlots: 1}); err != nil {
-			return fmt.Errorf("hosted run: create node %s: %w", n.ID, err)
+		if err := visit(n.ID, nil); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -249,6 +284,18 @@ func hostedSchedule(ctx context.Context, st *store.Store, lr runner.Runner, cfg 
 			}(n.ID)
 		}
 		if running == 0 && !progressed {
+			// safety: admission refuses cycles, so a node left unstarted here means
+			// the scheduler is wrong; it fails rather than reading as a success.
+			for _, n := range snap.Nodes {
+				if started[n.ID] {
+					continue
+				}
+				err := fmt.Errorf("hosted run: node %s never became ready", n.ID)
+				if ferr := st.FinishNode(context.WithoutCancel(ctx), runID, n.ID, string(sparkwing.Failed), err.Error(), nil); ferr != nil {
+					cfg.Logger.Warn("hosted run: record stalled node", "node", n.ID, "err", ferr)
+				}
+				results[n.ID] = runner.Result{Outcome: sparkwing.Failed, Err: err}
+			}
 			return order, results
 		}
 		if running > 0 && !progressed {
