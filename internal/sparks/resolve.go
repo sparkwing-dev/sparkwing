@@ -1,6 +1,7 @@
 package sparks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
@@ -31,6 +34,9 @@ type Resolver struct {
 	HTTPClient *http.Client
 
 	GoBin string
+
+	// Dir is the pipeline module go list runs in; when set, go list gets that module's build env.
+	Dir string
 }
 
 func Resolve(ctx context.Context, m *Manifest) (map[string]string, error) {
@@ -203,11 +209,24 @@ func (r *Resolver) resolveViaGoList(ctx context.Context, lib Library) (string, e
 	if isRangePrefix(query) && !strings.EqualFold(query, "latest") {
 		query = "latest"
 	}
+	env := os.Environ()
+	if r.Dir != "" {
+		var err error
+		if env, err = gotoolchain.BuildEnv(ctx, r.Dir, nil, ""); err != nil {
+			return "", err
+		}
+	}
 	cmd := exec.CommandContext(ctx, bin, "list", "-m", "-json", lib.Source+"@"+query)
-	cmd.Env = os.Environ()
+	cmd.Env = env
+	cmd.Dir = r.Dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("go list -m %s@%s: %w", lib.Source, query, err)
+		if explanation := gotoolchain.ExplainOutput(ctx, stderr.String(), env); explanation != nil {
+			return "", explanation
+		}
+		return "", fmt.Errorf("go list -m %s@%s: %w: %s", lib.Source, query, err, stderr.String())
 	}
 	var info struct {
 		Version string `json:"Version"`

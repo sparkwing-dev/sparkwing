@@ -64,8 +64,22 @@ func probeBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, slice)
 }
 
+// DoctorGoToolchain describes the Go toolchain available to the current pipeline module.
+type DoctorGoToolchain struct {
+	Current  string `json:"current"`
+	Setting  string `json:"gotoolchain"`
+	Source   string `json:"source"`
+	Floor    string `json:"floor"`
+	Module   string `json:"module"`
+	Override string `json:"override,omitempty"`
+	Verdict  string `json:"verdict"`
+	Error    string `json:"error,omitempty"`
+}
+
 type DoctorReport struct {
 	DryRun bool `json:"dry_run"`
+
+	GoToolchain *DoctorGoToolchain `json:"go_toolchain,omitempty"`
 
 	PermissionRepairs []fssecure.Change `json:"permission_repairs,omitempty"`
 
@@ -286,7 +300,8 @@ type DoctorLegacyHolder struct {
 }
 
 func (r DoctorReport) Clean() bool {
-	return !r.Daemon.Blind() &&
+	return (r.GoToolchain == nil || r.GoToolchain.Error == "") &&
+		!r.Daemon.Blind() &&
 		!r.Daemon.APIUnserved() &&
 		len(r.PermissionRepairs) == 0 &&
 		!r.PermissionAuditUnverified &&
@@ -1500,6 +1515,15 @@ func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error 
 }
 
 func renderDoctorPlain(w io.Writer, r DoctorReport) error {
+	if g := r.GoToolchain; g != nil {
+		fmt.Fprintf(w, "go_version\t%s\nGOTOOLCHAIN\t%s\ngo_toolchain_source\t%s\ngo_floor\t%s\ngo_floor_module\t%s\ngo_toolchain_verdict\t%s\n", g.Current, g.Setting, g.Source, g.Floor, g.Module, g.Verdict)
+		if g.Override != "" {
+			fmt.Fprintf(w, "go_toolchain_build\t%s\n", g.Override)
+		}
+		if g.Error != "" {
+			fmt.Fprintf(w, "go_toolchain_error\t%s\n", g.Error)
+		}
+	}
 	fmt.Fprintf(w, "daemon\t%s\n", r.Daemon.State)
 	wedged := 0
 	if r.Daemon.Wedged {
@@ -1581,7 +1605,18 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	return nil
 }
 
+func renderDoctorGoToolchain(w io.Writer, r DoctorReport) {
+	if g := r.GoToolchain; g != nil {
+		fmt.Fprintf(w, "Go toolchain: %s; GOTOOLCHAIN=%s (set in %s); .sparkwing floor go %s\n", g.Current, g.Setting, g.Source, g.Floor)
+		fmt.Fprintf(w, "  %s\n", g.Verdict)
+		if g.Error != "" {
+			fmt.Fprintf(w, "  %s\n", g.Error)
+		}
+	}
+}
+
 func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
+	renderDoctorGoToolchain(w, r)
 	verb, would := "removed", ""
 	if r.DryRun {
 		verb, would = "found", " (dry run: nothing changed)"

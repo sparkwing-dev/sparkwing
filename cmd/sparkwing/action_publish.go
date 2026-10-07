@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -64,9 +67,10 @@ func runPipelinePublish(args []string) error {
 		return err
 	}
 
+	ctx := gotoolchain.WithSession(context.Background(), nil, nil)
 	results := make([]publishedBinary, 0, len(platformsList))
 	for _, p := range platformsList {
-		row, err := compileAndPublishOne(context.Background(), dir, p, store, storeLocation)
+		row, err := compileAndPublishOne(ctx, dir, p, store, storeLocation)
 		if err != nil {
 			return fmt.Errorf("publish %s: %w", p.label(), err)
 		}
@@ -118,7 +122,7 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 		return publishedBinary{}, fmt.Errorf("cache entry: %w", err)
 	}
 	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		return compileForPlatform(sparkwingDir, tempPath, p)
+		return compileForPlatform(ctx, sparkwingDir, tempPath, p)
 	})
 	if err != nil {
 		return publishedBinary{}, fmt.Errorf("compile: %w", err)
@@ -142,7 +146,16 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 	}, nil
 }
 
-func compileForPlatform(sparkwingDir, dest string, p platform) error {
+func compileForPlatform(ctx context.Context, sparkwingDir, dest string, p platform) error {
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
+	overlay := overlayModfilePath(sparkwingDir)
+	if _, present := goWorkInScope(sparkwingDir); present {
+		overlay = ""
+	}
+	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, nil, overlay)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -158,12 +171,16 @@ func compileForPlatform(sparkwingDir, dest string, p platform) error {
 		}
 	}
 	args = append(args, "-o", dest, ".")
-	cmd := exec.Command("go", args...)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = sparkwingDir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "GOOS="+p.OS, "GOARCH="+p.Arch)
+	var captured bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
+	cmd.Stderr = cmd.Stdout
+	cmd.Env = append(env, "GOOS="+p.OS, "GOARCH="+p.Arch)
 	if err := cmd.Run(); err != nil {
+		if explanation := gotoolchain.ExplainOutput(ctx, captured.String(), env); explanation != nil {
+			return explanation
+		}
 		return fmt.Errorf("go build %s/%s: %w", p.OS, p.Arch, err)
 	}
 	return nil

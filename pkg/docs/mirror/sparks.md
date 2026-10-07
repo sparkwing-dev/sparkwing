@@ -290,6 +290,27 @@ populated the module cache. See
 [offline after the first build](getting-started.md#offline-after-the-first-build)
 for the whole boundary.
 
+### Go toolchain floor
+
+Sparkwing builds `.sparkwing/` with the highest `go` directive in its
+`go.mod` and the resolved overlay when one is active. A directive such as
+`go 1.26` selects `go1.26.0` as its floor. The `toolchain` line does not
+raise this floor.
+
+Go's automatic switching settings (`auto`, `path`, and named toolchains
+with `+auto` or `+path`) keep their native behavior. If a fixed
+`GOTOOLCHAIN=go1.26.6` falls below `go 1.26.8`, sparkwing selects
+`go1.26.8` for resolution and compilation and prints one notice. The pipeline
+binary and its steps inherit the user's original toolchain setting.
+
+`GOTOOLCHAIN=local` prevents a download. When the installed Go falls below
+the floor, sparkwing names the required version, running version, and where
+the setting came from. Install the required Go or newer; to permit a
+download, unset the environment variable or remove the saved pin with
+`go env -u GOTOOLCHAIN`. `sparkwing doctor` reports the same project check.
+A dependency requiring newer Go receives this guidance too; skipping sparks
+updates with `--sw-no-update` does not fix an insufficient toolchain.
+
 ### Ghost pin guidance
 
 A `sparks:` overlay MASKS a stale or ghost version in `go.mod` at
