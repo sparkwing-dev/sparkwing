@@ -236,7 +236,13 @@ func (s *Server) noteComputeLimitBlocked(
 	if err != nil {
 		return
 	}
-	wrote, err := s.store.AppendEventOnce(ctx, runID, nodeID, store.EventKindComputeLimitBlocked, payload)
+	tenant, err := s.tenantFor(r)
+	if err != nil {
+		s.logger.Warn("recording a compute-limit refusal failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return
+	}
+	wrote, err := tenant.AppendEventOnce(ctx, runID, nodeID, store.EventKindComputeLimitBlocked, payload)
 	if err != nil {
 		s.logger.Warn("recording a compute-limit refusal failed",
 			"run_id", runID, "node_id", nodeID, "err", err)

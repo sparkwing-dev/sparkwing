@@ -146,7 +146,7 @@ func (s *Store) releaseLaunchClaim(ctx context.Context, team Team, launcher Clai
  WHERE team = ? AND run_id = ? AND node_id = ?`, CapacityWaitDetail, retryAt, retryAt, string(team), j.RunID, j.NodeID); err != nil {
 		return false, err
 	}
-	if _, err := appendEventTx(ctx, tx, j.RunID, j.NodeID, "capacity_wait",
+	if _, err := appendEventTx(ctx, tx, team, j.RunID, j.NodeID, "capacity_wait",
 		map[string]string{"reason": "its Job could not be scheduled"}, now); err != nil {
 		return false, err
 	}

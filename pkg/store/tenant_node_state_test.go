@@ -167,3 +167,29 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 		t.Fatalf("acme.ListNodeSteps = %v, %v, want compile and test", steps, err)
 	}
 }
+
+// A run's events belong to its team: another team's handle neither lists
+// them nor appends a once-only event onto the run.
+func TestTenantEventsStayInTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+
+	if _, err := globex.AppendEventOnce(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex.AppendEventOnce = %v, want ErrNotFound", err)
+	}
+	if wrote, err := acme.AppendEventOnce(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); err != nil || !wrote {
+		t.Fatalf("acme.AppendEventOnce = %v, %v, want written", wrote, err)
+	}
+	if wrote, err := acme.AppendEventOnce(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); err != nil || wrote {
+		t.Fatalf("second acme.AppendEventOnce = %v, %v, want skipped", wrote, err)
+	}
+	if events, err := globex.ListEventsAfter(ctx, "run-a", 0, 10); err != nil || len(events) != 0 {
+		t.Fatalf("globex.ListEventsAfter = %v, %v, want none", events, err)
+	}
+	if events, err := acme.ListEventsAfter(ctx, "run-a", 0, 10); err != nil || len(events) != 1 {
+		t.Fatalf("acme.ListEventsAfter = %v, %v, want the one event", events, err)
+	}
+}

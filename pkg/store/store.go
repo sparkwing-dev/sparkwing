@@ -5881,7 +5881,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		return notFound("node", runID+"/"+nodeID)
 	}
 	if !opened {
-		if _, err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
+		if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
 			"deadline":               offerStart.Add(nodeClaimOfferWindow),
 			"priority_target":        target,
 			"hard_capabilities":      summary.HardCapabilities,
@@ -6483,7 +6483,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 	// one the plan declared itself earns an event on every claim.
 	if candidate.decision.reason == PlacementFallback ||
 		(candidate.decision.reason == PlacementPreferred && candidate.decision.nodeOwned) {
-		if _, err := appendEventTx(ctx, tx, candidate.runID, candidate.nodeID, "node_placed", nodePlacementEvent{
+		if _, err := appendRunEventTx(ctx, tx, candidate.runID, candidate.nodeID, "node_placed", nodePlacementEvent{
 			HolderID: holderID, Reason: candidate.decision.reason,
 			Prefers: placement.prefersFor(candidate.prefers),
 		}, now); err != nil {
@@ -6888,16 +6888,21 @@ type Event struct {
 // ListEventsAfter returns events with seq > afterSeq, ascending.
 // Pass 0 for full backlog; empty slice when there's nothing new.
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
+	return s.defaultTenant().ListEventsAfter(ctx, runID, afterSeq, limit)
+}
+
+// ListEventsAfter is [Store.ListEventsAfter] confined to t's team.
+func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
 	if limit <= 0 {
 		limit = 500
 	}
 	limit = min(limit, MaxRunListLimit)
-	rows, err := s.query(ctx, `
+	rows, err := t.s.query(ctx, `
 SELECT run_id, seq, node_id, kind, ts, payload
   FROM events
- WHERE run_id = ? AND seq > ?
+ WHERE team = ? AND run_id = ? AND seq > ?
  ORDER BY seq ASC
- LIMIT ?`, runID, afterSeq, limit)
+ LIMIT ?`, string(t.team), runID, afterSeq, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -6953,7 +6958,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		return 0, err
 	}
 
-	seq, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
+	seq, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
 	if err != nil {
 		return 0, err
 	}
@@ -6963,7 +6968,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 	return seq, nil
 }
 
-func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
+func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
 	var raw []byte
 	var err error
 	switch value := payload.(type) {
@@ -6977,34 +6982,44 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 	if err != nil {
 		return 0, err
 	}
-	if err := lockEventSequenceTx(ctx, tx, runID); err != nil {
+	if err := lockEventSequenceTx(ctx, tx, team, runID); err != nil {
 		return 0, err
 	}
 	var seq int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?`, runID).Scan(&seq); err != nil {
+		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE team = ? AND run_id = ?`, string(team), runID).Scan(&seq); err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
+VALUES (?,?,?,?,?,?,?)`, string(team), runID, seq, nodeID, kind, at.UnixNano(), raw)
 	if err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx,
-		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE id = ?`,
-		eventBytes(kind, raw), runID)
+		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE team = ? AND id = ?`,
+		eventBytes(kind, raw), string(team), runID)
 	return seq, err
+}
+
+// safety: a caller without a tenant handle appends into its run's own team, the team the run's
+// other rows were written into.
+func appendRunEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return 0, err
+	}
+	return appendEventTx(ctx, tx, team, runID, nodeID, kind, payload, at)
 }
 
 // safety: an append bumps the run row's event counters, so it takes the run's
 // row lock before the event-sequence lock, the order a claim round takes
 // them in; the other order deadlocks the two on PostgreSQL.
-func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
+func lockEventSequenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if tx.dialect != DialectPostgres {
 		return nil
 	}
-	if err := lockRunRow(ctx, tx, runID); err != nil {
+	if _, err := lockTeamRunRowTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)

@@ -86,11 +86,11 @@ func (s *Store) expirePendingAgentLossRetriesTx(ctx context.Context, tx *storeTx
 		payload, _ := json.Marshal(map[string]any{
 			"retry_run_id": item.runID, "deadline_at": time.Unix(0, item.deadline),
 		})
-		if _, err := appendEventTx(ctx, tx, item.runID, "", "agent_loss_retry_deadline_exceeded", payload, now); err != nil {
+		if _, err := appendRunEventTx(ctx, tx, item.runID, "", "agent_loss_retry_deadline_exceeded", payload, now); err != nil {
 			return err
 		}
 		for _, nodeID := range item.causes {
-			if _, err := appendEventTx(ctx, tx, item.sourceRunID, nodeID, "agent_loss_retry_deadline_exceeded", payload, now); err != nil {
+			if _, err := appendRunEventTx(ctx, tx, item.sourceRunID, nodeID, "agent_loss_retry_deadline_exceeded", payload, now); err != nil {
 				return err
 			}
 		}
@@ -263,7 +263,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 			event["execution_started"] = item.started
 			event["invocations"] = item.invocations
 			payload, _ := json.Marshal(event)
-			if _, err := appendEventTx(ctx, tx, runID, item.nodeID, "agent_lease_lost", payload, now); err != nil {
+			if _, err := appendRunEventTx(ctx, tx, runID, item.nodeID, "agent_lease_lost", payload, now); err != nil {
 				return nil, err
 			}
 			recovered = append(recovered, AgentLossRecovery{
@@ -294,7 +294,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 								"retry_run_id": retryID, "available_at": time.Unix(0, availableAt),
 								"retry_count": retryCount, "invocations": recovered[i].Invocations,
 							})
-							if _, err := appendEventTx(ctx, tx, runID, recovered[i].NodeID, kind, payload, now); err != nil {
+							if _, err := appendRunEventTx(ctx, tx, runID, recovered[i].NodeID, kind, payload, now); err != nil {
 								return nil, err
 							}
 						}
@@ -318,7 +318,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 				payload, _ := json.Marshal(map[string]any{
 					"reason": reason, "execution_started": item.started, "invocations": item.invocations,
 				})
-				if _, err := appendEventTx(ctx, tx, runID, item.nodeID, kind, payload, now); err != nil {
+				if _, err := appendRunEventTx(ctx, tx, runID, item.nodeID, kind, payload, now); err != nil {
 					return nil, err
 				}
 			}
@@ -332,7 +332,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 				payload, _ := json.Marshal(map[string]any{
 					"reason": reason, "execution_started": item.started, "invocations": item.invocations,
 				})
-				if _, err := appendEventTx(ctx, tx, runID, item.nodeID, kind, payload, now); err != nil {
+				if _, err := appendRunEventTx(ctx, tx, runID, item.nodeID, kind, payload, now); err != nil {
 					return nil, err
 				}
 			}

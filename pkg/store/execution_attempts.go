@@ -263,7 +263,7 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	event["attempt"] = start.AttemptOrdinal
 	event["claim_generation"] = generation
 	payload, _ := json.Marshal(event)
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -398,7 +398,7 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
 	event["attempt"] = ordinal
 	event["claim_generation"] = fence.ClaimGeneration
 	payload, _ := json.Marshal(event)
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -465,7 +465,7 @@ func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID st
 		"attempt": finish.AttemptOrdinal, "claim_generation": finish.ClaimGeneration,
 		"outcome": finish.Outcome, "failure_reason": finish.FailureReason,
 	})
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, time.Unix(0, now)); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, time.Unix(0, now)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -527,7 +527,7 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 		"attempt": finish.AttemptOrdinal, "claim_generation": fence.ClaimGeneration,
 		"outcome": finish.Outcome, "failure_reason": finish.FailureReason,
 	})
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -641,7 +641,7 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
 	event := executionAttributionEventFields(ExecutorKindLocal, executorID, executorLocationLocal)
 	event["attempt"] = ordinal
 	event["claim_generation"] = generation
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", event, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", event, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -707,7 +707,7 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 		"attempt": finish.AttemptOrdinal, "outcome": finish.Outcome,
 		"failure_reason": finish.FailureReason,
 	}
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", event, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", event, now); err != nil {
 		return err
 	}
 	return tx.Commit()

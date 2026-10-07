@@ -279,6 +279,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"answer scoped to the asker is no answer; a token prefix is unique across teams",
 	"(*Store).ClaimedRunsFor": "asks which teams' runs the exact claimant credential holds live work in, so an answer " +
 		"scoped to the asker is no answer; a token prefix is unique across teams",
+	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
+		"selected, in the order the claim path names, and read nothing back",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -287,7 +289,6 @@ var reviewedUnscopedSQL = map[string]string{
 var unportedSQL = []string{
 	"(*Store).AcknowledgeNodeExecutionStart",
 	"(*Store).AddNodeMetricSample",
-	"(*Store).AppendEventOnce",
 	"(*Store).CacheExcludedCounts",
 	"(*Store).CancelPendingTrigger",
 	"(*Store).ComputeAlarmState",
@@ -321,7 +322,6 @@ var unportedSQL = []string{
 	"(*Store).ListCreditCharges",
 	"(*Store).ListCreditGrants",
 	"(*Store).ListEgressUsage",
-	"(*Store).ListEventsAfter",
 	"(*Store).ListLegacyAgentClaims",
 	"(*Store).ListNodeBounces",
 	"(*Store).ListNodeMetricsPage",
@@ -359,7 +359,6 @@ var unportedSQL = []string{
 	"(*Store).chargeNodeTx",
 	"(*Store).chargeStorageTx",
 	"(*Store).createAgentLossRetryTx",
-	"(*Store).eventKindPresent",
 	"(*Store).finishLocalNodeExecutionAttempt",
 	"(*Store).finishTriggerExecutionAttempt",
 	"(*Store).lookupUser",
@@ -372,12 +371,10 @@ var unportedSQL = []string{
 	"(*Store).selectTokensByPrefix",
 	"(*Store).startLocalNodeExecutionAttempt",
 	"(*Store).storageQuotaRow",
-	"appendEventTx",
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
-	"lockRunRow",
 	"persistAgentLossRetryNodeSourceTx",
 	"runElapsedSecondsTx",
 	"runPrincipalTx",
@@ -389,7 +386,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 101
+const unportedSQLSize = 96
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

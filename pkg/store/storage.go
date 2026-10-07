@@ -814,7 +814,7 @@ func (s *Store) AppendEventCharged(
 	if err := s.chargeStorageTx(ctx, tx, principal, runID, size, 0, time.Now().UTC()); err != nil {
 		return 0, err
 	}
-	seq, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
+	seq, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
 	if err != nil {
 		return 0, err
 	}

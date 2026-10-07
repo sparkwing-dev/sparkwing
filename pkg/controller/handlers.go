@@ -2680,6 +2680,10 @@ func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	var afterSeq int64
 	if v := r.URL.Query().Get("after"); v != "" {
@@ -2699,7 +2703,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = min(n, store.MaxRunListLimit)
 	}
-	events, err := s.store.ListEventsAfter(r.Context(), runID, afterSeq, limit)
+	events, err := tenant.ListEventsAfter(r.Context(), runID, afterSeq, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

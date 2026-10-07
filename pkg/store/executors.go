@@ -1349,7 +1349,7 @@ UPDATE nodes
 		event["avoid_until"] = n.AvoidUntil
 	}
 	payload, _ := json.Marshal(event)
-	if _, err := appendEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
 		return nil, err
 	}
 	return &n.Node, nil

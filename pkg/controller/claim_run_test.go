@@ -235,7 +235,11 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN", work, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("a secret read naming no run = %d, want 403", code)
 	}
-	events, err := f.store.ListEventsAfter(context.Background(), "run-sec", 0, 100)
+	secTeam, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := secTeam.ListEventsAfter(context.Background(), "run-sec", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

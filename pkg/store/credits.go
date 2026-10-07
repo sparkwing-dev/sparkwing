@@ -2576,32 +2576,41 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 	return nil
 }
 
-// AppendEventOnce writes an event unless the run or node already carries one
-// of that kind, which keeps a condition a poller re-observes every half
-// second to one row. It reports whether it wrote.
-func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
+// AppendEventOnce writes an event on a default-team run unless the run or
+// node already carries one of that kind, which keeps a condition a poller
+// re-observes every half second to one row. It reports whether it wrote.
+func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error) {
+	return s.defaultTenant().AppendEventOnce(ctx, runID, nodeID, kind, payload)
+}
+
+// AppendEventOnce is [Store.AppendEventOnce] on one of t's runs. A run of
+// another team reads as [ErrNotFound].
+func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
 	// safety: the common call finds the event already there, so the read comes
 	// before the transaction rather than inside one opened twice a second.
-	present, err := s.eventKindPresent(ctx, runID, nodeID, kind)
+	present, err := t.eventKindPresent(ctx, runID, nodeID, kind)
 	if err != nil || present {
 		return false, err
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+		return false, err
+	}
 	var existing int
 	err = tx.QueryRowContext(ctx,
-		`SELECT 1 FROM events WHERE run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
-		runID, nodeID, kind).Scan(&existing)
+		`SELECT 1 FROM events WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
+		string(t.team), runID, nodeID, kind).Scan(&existing)
 	if err == nil {
 		return false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now()); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, time.Now()); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2610,11 +2619,11 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 	return true, nil
 }
 
-func (s *Store) eventKindPresent(ctx context.Context, runID, nodeID, kind string) (bool, error) {
+func (t *Tenant) eventKindPresent(ctx context.Context, runID, nodeID, kind string) (bool, error) {
 	var existing int
-	err := s.queryRow(ctx,
-		`SELECT 1 FROM events WHERE run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
-		runID, nodeID, kind).Scan(&existing)
+	err := t.s.queryRow(ctx,
+		`SELECT 1 FROM events WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
+		string(t.team), runID, nodeID, kind).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -2636,7 +2645,7 @@ func (s *Store) CancelNodeForExhaustedCredits(
 // class the credit rate table prices, and records an event naming both sizes.
 // A claim the ledger cannot price would otherwise be retried by every poller
 // forever, so the run is told why instead of waiting on a node nobody may take.
-func (s *Store) FailNodeForUnpricedClass(
+func (t *Tenant) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
 ) error {
 	payload, err := json.Marshal(map[string]int64{
@@ -2645,11 +2654,11 @@ func (s *Store) FailNodeForUnpricedClass(
 	if err != nil {
 		return err
 	}
-	if _, err := s.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
+	if _, err := t.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
 		EventKindCreditsUnpriced, payload); err != nil {
 		return err
 	}
-	return s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
+	return t.s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
 		FailureUnpricedCPUClass, refusal.Error(), now)
 }
 

@@ -580,7 +580,11 @@ func TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent(t *testing.T) {
 		t.Fatalf("the refusal names %s/%s", unpriced.RunID, unpriced.NodeID)
 	}
 
-	if err := s.FailNodeForUnpricedClass(ctx, unpriced, time.Now()); err != nil {
+	team, err := s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := team.FailNodeForUnpricedClass(ctx, unpriced, time.Now()); err != nil {
 		t.Fatalf("fail the node: %v", err)
 	}
 	node, err := s.GetNode(ctx, "run-unpriced", "build")

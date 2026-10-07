@@ -580,7 +580,11 @@ func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, r *http.Reques
 		// safety: every poller would otherwise retry this node forever, so the
 		// run is failed with the reason rather than left waiting on a claim the
 		// ledger cannot price.
-		if failErr := s.store.FailNodeForUnpricedClass(r.Context(), unpriced, time.Now()); failErr != nil {
+		tenant, failErr := s.tenantFor(r)
+		if failErr == nil {
+			failErr = tenant.FailNodeForUnpricedClass(r.Context(), unpriced, time.Now())
+		}
+		if failErr != nil {
 			s.logger.Warn("failing a node the rate table cannot price",
 				"run_id", unpriced.RunID, "node_id", unpriced.NodeID, "err", failErr)
 		}
@@ -609,7 +613,13 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 	if err != nil {
 		return
 	}
-	wrote, err := s.store.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsBlocked, payload)
+	tenant, err := s.tenantFor(r)
+	if err != nil {
+		s.logger.Warn("recording a credit-blocked claim failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return
+	}
+	wrote, err := tenant.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsBlocked, payload)
 	if err != nil {
 		s.logger.Warn("recording a credit-blocked claim failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
@@ -707,7 +717,11 @@ func (s *Server) cancelForExhaustedCredits(
 	if err != nil {
 		payload = nil
 	}
-	if _, err := s.store.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsExhausted, payload); err != nil {
+	tenant, err := s.tenantFor(r)
+	if err == nil {
+		_, err = tenant.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsExhausted, payload)
+	}
+	if err != nil {
 		s.logger.Warn("recording an exhausted-credit cancellation failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
 	}

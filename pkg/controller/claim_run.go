@@ -32,7 +32,11 @@ func (s *Server) handleClaimHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	beat, err := s.store.HeartbeatClaim(r.Context(), tok, time.Duration(req.LeaseSecs)*time.Second, time.Now())
 	if beat.Charge.Cancel {
-		if _, aerr := s.store.AppendEventOnce(r.Context(), tok.RunID, tok.NodeID, store.EventKindCreditsExhausted, nil); aerr != nil {
+		tenant, aerr := s.tenantForTeam(r.Context(), tok.Team)
+		if aerr == nil {
+			_, aerr = tenant.AppendEventOnce(r.Context(), tok.RunID, tok.NodeID, store.EventKindCreditsExhausted, nil)
+		}
+		if aerr != nil {
 			s.logger.Warn("recording an exhausted-credit cancellation failed", "run_id", tok.RunID, "err", aerr)
 		}
 		if cerr := s.store.RequestCancel(r.Context(), tok.RunID); cerr != nil {
