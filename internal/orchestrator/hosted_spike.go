@@ -38,7 +38,7 @@ type hostedRunResult struct {
 	Nodes map[string]runner.Result
 }
 
-func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
+func runHosted(ctx context.Context, cfg hostedRun) (res hostedRunResult, err error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -63,9 +63,31 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: cfg.Pipeline, Status: "running", StartedAt: now, CreatedAt: now}); err != nil {
 		return hostedRunResult{}, fmt.Errorf("hosted run: create run: %w", err)
 	}
+	res = hostedRunResult{RunID: runID, Nodes: map[string]runner.Result{}}
+	var snap planSnapshot
+	// safety: registered before every later defer, so it runs after the heartbeat
+	// and controller stop, and no return after CreateRun leaves the row running.
+	defer func() {
+		hostedFinalize(ctx, st, cfg.Logger, runID, snap, res.Nodes)
+		status, msg := "success", ""
+		for id, r := range res.Nodes {
+			if r.Outcome != sparkwing.Success {
+				status, msg = "failed", fmt.Sprintf("node %s: %s", id, r.Outcome)
+			}
+		}
+		if err != nil {
+			status, msg = "failed", err.Error()
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			status, msg = "cancelled", cause.Error()
+		}
+		if ferr := st.FinishRun(context.WithoutCancel(ctx), runID, status, msg); ferr != nil && err == nil {
+			err = ferr
+		}
+	}()
 	wedge, err := storeWedgeBudget()
 	if err != nil {
-		return hostedRunResult{}, err
+		return res, err
 	}
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
@@ -76,16 +98,16 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 	defer func() { stopHeartbeat(); <-hbDone }()
 	art, err := localArtifactStore(cfg.Paths)
 	if err != nil {
-		return hostedRunResult{}, err
+		return res, err
 	}
 	loopback, err := startLoopbackController(ctx, st, art, runID, cfg.Logger)
 	if err != nil {
-		return hostedRunResult{}, err
+		return res, err
 	}
 	defer loopback.Close() //nolint:contextcheck // Close revokes the run token after ctx may have ended.
 
-	res := hostedRunResult{RunID: runID, Nodes: map[string]runner.Result{}}
-	snap, raw, err := hostedPlan(ctx, cfg, runID, loopback.url, loopback.token)
+	var raw []byte
+	snap, raw, err = hostedPlan(ctx, cfg, runID, loopback.url, loopback.token)
 	if err == nil {
 		err = hostedAdmit(ctx, st, runID, snap)
 	}
@@ -104,23 +126,6 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 			Logger:        cfg.Logger,
 		})
 		res.Order, res.Nodes = hostedSchedule(ctx, st, lr, cfg, runID, snap)
-	}
-	hostedFinalize(ctx, st, cfg.Logger, runID, snap, res.Nodes)
-
-	status, msg := "success", ""
-	for id, r := range res.Nodes {
-		if r.Outcome != sparkwing.Success {
-			status, msg = "failed", fmt.Sprintf("node %s: %s", id, r.Outcome)
-		}
-	}
-	if err != nil {
-		status, msg = "failed", err.Error()
-	}
-	if cause := context.Cause(ctx); cause != nil {
-		status, msg = "cancelled", cause.Error()
-	}
-	if ferr := st.FinishRun(context.WithoutCancel(ctx), runID, status, msg); ferr != nil && err == nil {
-		err = ferr
 	}
 	return res, err
 }

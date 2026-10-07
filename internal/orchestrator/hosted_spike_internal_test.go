@@ -174,3 +174,29 @@ func TestHostedCheck_RefusesAdmissionSettingsItDoesNotAdmit(t *testing.T) {
 		})
 	}
 }
+
+func TestRunHosted_ASetupFailureAfterTheRunRowFinishesIt(t *testing.T) {
+	t.Setenv(StoreWedgeBudgetEnvVar, "not-a-duration")
+	paths := newInternalPaths(t)
+	res, err := runHosted(t.Context(), hostedRun{
+		Describe: []byte(`[{"name":"p","args":[]}]`),
+		Pipeline: "p",
+		Paths:    paths,
+		Logger:   slog.New(slog.DiscardHandler),
+	})
+	if err == nil || res.RunID == "" {
+		t.Fatalf("res=%+v err=%v, want a setup failure after the run row exists", res, err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	run, err := st.GetRun(t.Context(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" || run.FinishedAt == nil {
+		t.Errorf("run row status=%q finished=%v, want failed and finished", run.Status, run.FinishedAt)
+	}
+}
