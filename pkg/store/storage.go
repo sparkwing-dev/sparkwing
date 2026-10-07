@@ -846,9 +846,6 @@ func (t *Tenant) SetNodeArtifactManifestCharged(
 	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
-	if err := t.s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
-		return err
-	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
 		manifestDigest, string(t.team), runID, nodeID)
@@ -856,6 +853,16 @@ func (t *Tenant) SetNodeArtifactManifestCharged(
 		return err
 	}
 	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
+		return err
+	}
+	// safety: the object is charged only once the node is proven to be this
+	// team's, so a foreign or missing node rolls back without spending quota.
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return notFound("node", runID+"/"+nodeID)
+	}
+	if err := t.s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit()
