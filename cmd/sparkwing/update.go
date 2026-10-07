@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
@@ -394,19 +394,17 @@ func updateSDK(version string) (updateReceipt, error) {
 	}
 	target := sdkModulePath + "@" + resolved
 	fmt.Fprintf(os.Stderr, "bumping pipeline SDK to %s\n", resolved)
-	cmd := exec.Command("go", "get", target)
-	cmd.Dir = dir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return result, fmt.Errorf("go get failed; SDK files may have changed: %w", err)
+	// safety: module downloads must not inherit the metadata lookup's three-second budget.
+	buildCtx := gotoolchain.WithSession(context.WithoutCancel(ctx), nil, nil)
+	if out, err := runGoModCmd(buildCtx, dir, "get", target); err != nil {
+		return result, fmt.Errorf("go get failed; SDK files may have changed: %w: %s", err, out)
+	} else if out != "" {
+		fmt.Fprintln(os.Stderr, out)
 	}
-	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir = dir
-	tidy.Stdout = os.Stderr
-	tidy.Stderr = os.Stderr
-	if err := tidy.Run(); err != nil {
-		return result, fmt.Errorf("go mod tidy failed after go get; SDK files may have changed: %w", err)
+	if out, err := runGoModCmd(buildCtx, dir, "mod", "tidy"); err != nil {
+		return result, fmt.Errorf("go mod tidy failed after go get; SDK files may have changed: %w: %s", err, out)
+	} else if out != "" {
+		fmt.Fprintln(os.Stderr, out)
 	}
 	after, err := readSDKUpdateIdentity(dir)
 	if err != nil {

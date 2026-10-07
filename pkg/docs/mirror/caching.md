@@ -243,7 +243,7 @@ DWARF and takes roughly 30% off the binary and a third off its link
 time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive. A
 debugger still attaches, without variable names or line numbers, and a
 core dump cannot be symbolised. Set `SPARKWING_NO_BINCACHE=1` to run the
-pipeline through `go run .` when you need those.
+pipeline from a temporary build with debug symbols when you need those.
 
 ### Bounding the cache
 
@@ -312,7 +312,9 @@ them with the inputs that changed since, which is the direct answer to
 why the last run recompiled.
 
 To skip the binary cache entirely for one invocation, set
-`SPARKWING_NO_BINCACHE=1`; sparkwing falls back to `go run .`.
+`SPARKWING_NO_BINCACHE=1`; sparkwing builds a temporary binary with debug
+symbols, then runs it with your original environment. The Go toolchain floor
+adjustment applies only while building.
 
 ### The shared artifact store
 

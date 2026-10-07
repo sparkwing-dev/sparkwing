@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
+  It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
+
 - **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
   It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
 
@@ -54,6 +57,10 @@ unlock.
 - **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
 - **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
 - **Child runs:** A controller-dispatched node's child run checks its ancestry in the claim's team, and the run profile fold reads node samples in the run's team, rather than in the default team.
+
+- **cli:** Build the pipeline module with the Go version its `go.mod` requires when a fixed `GOTOOLCHAIN` pins an older version
+  Resolution and compilation select the required toolchain; pipeline steps retain the original pin. `GOTOOLCHAIN=local` errors name the running version, required floor, setting source, and fix, including when a dependency raises the requirement. These errors no longer suggest `--sw-no-update`.
+
 - **Dashboard build:** Update `sharp` to 0.35.5 so `pnpm audit` passes GHSA-wq5f-xc86-pv6w; the static dashboard export never runs it at serve time.
 
 - **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt

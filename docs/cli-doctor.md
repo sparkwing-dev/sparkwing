@@ -29,6 +29,11 @@ The report includes daemon reachability, repeated admission rejections,
 version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
 
+In a project, the Go toolchain finding reports the running Go version,
+GOTOOLCHAIN and its source, and the .sparkwing module's Go floor. It identifies
+fixed pins sparkwing will raise for builds and a blocking GOTOOLCHAIN=local,
+with the installation or unpinning command needed to proceed.
+
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.
 
