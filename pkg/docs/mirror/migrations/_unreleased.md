@@ -465,3 +465,19 @@ review as the route table moves to one declared list.
   visible to its runners, and its next request continues the node's sequence.
 - **Upgrade:** nothing to do; the controller applies schema 93 on start. An
   older binary keeps reading the upgraded database.
+
+## Store methods removed or moved to Tenant
+
+- **Before:** `pkg/store` exported `Store.ActiveExecutorActivity`,
+  `Store.PrincipalHoldsPipelineClaim` and `Store.FailNodeForUnpricedClass`.
+- **After:** the first two are gone, and the third is a method of `Tenant`.
+  Many other `Store` methods now act on the default team only; their `Tenant`
+  methods of the same name serve every team.
+- **Upgrade:** code embedding `pkg/store` replaces
+  `st.ActiveExecutorActivity(ctx, now)` with
+  `team.ActiveExecutorActivity(ctx, now)` on the handle from
+  `st.ForTeam(ctx, slug)`, replaces `st.PrincipalHoldsPipelineClaim` with
+  `st.PrincipalHoldsProfileClaim` or `st.PrincipalHoldsRunClaim`, and calls
+  `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
+  writes runs, nodes or triggers of a team other than the default goes
+  through that team's handle.
