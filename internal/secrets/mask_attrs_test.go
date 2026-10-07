@@ -331,3 +331,14 @@ func TestMaskJSONConcurrentRegistrationKeepsRegisteredSecretHidden(t *testing.T)
 	})
 	wg.Wait()
 }
+
+func TestMaskAttrsMasksADecodedNumberHoldingAValue(t *testing.T) {
+	m := newTestMasker("12345678")
+	got := m.MaskAttrs(map[string]any{"pin": json.Number("12345678"), "n": json.Number("7")})
+	if got["pin"] != maskedValue || got["n"] != json.Number("7") {
+		t.Fatalf("MaskAttrs = %#v", got)
+	}
+	if out := string(m.MaskJSON([]byte("12345678"))); out != `"***"` {
+		t.Fatalf("MaskJSON of a bare number = %s", out)
+	}
+}

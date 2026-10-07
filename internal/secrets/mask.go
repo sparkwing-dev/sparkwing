@@ -274,7 +274,11 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 	}
 	switch t := v.(type) {
 	case json.Number:
-		return t, false
+		// safety: a number is one token, so one holding a value is replaced whole.
+		if m.Mask(string(t)) == string(t) {
+			return t, false
+		}
+		return maskedValue, true
 	case string:
 		masked := m.Mask(t)
 		return masked, masked != t
@@ -371,7 +375,7 @@ func (m *Masker) maskJSON(v any, depth int) (any, bool) {
 		return v, false
 	}
 	switch decoded.(type) {
-	case map[string]any, []any, string:
+	case map[string]any, []any, string, json.Number:
 		return m.maskValue(decoded, depth)
 	default:
 		return v, false
