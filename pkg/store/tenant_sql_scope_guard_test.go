@@ -216,6 +216,45 @@ var reviewedUnscopedSQL = map[string]string{
 		"with their teams, and frees each in that team",
 	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
 		"team's runs",
+	"(*Store).prepareNextExecutorClaim": "reads the candidate nodes the claim scan's runtime predicate already scoped to " +
+		"the claimant's one team",
+	"(*Store).loadExecutorPreparePlans": "reads the run rows of candidates the claim scan already scoped to the claimant's " +
+		"team, and returns each run's team",
+	"(*Store).loadExecutorPrepareProfiles": "the team predicate is built at run time, one per profile identity, from the " +
+		"team each candidate's run row carries",
+	"(*Store).rejectUnattestedExecutorOffer": "reads the node an offer names after assertClaimantOwnsNode proved it in the " +
+		"claimant's team",
+	"(*Store).recordExecutorOfferAt": "records an offer on a node assertClaimantOwnsNode proved in the claimant's team; " +
+		"the offer row takes the run's team, and the conflict checks span teams because an executor's slots and " +
+		"reservations are the deployment's",
+	"claimedExecutorOffer":     "reads the node an offer names after assertClaimantOwnsNode proved it in the claimant's team",
+	"nodeExecutorOfferCountTx": "counts the offers on one node the offer path already proved in the claimant's team",
+	"(*Store).awardBestExecutorOffer": "awards a node the offer path or a team-bounded finalize route named by global id; " +
+		"every offer on it was recorded after assertClaimantOwnsNode, and the winner's other offers are keyed by its " +
+		"own credential",
+	"(*Store).expireNodeExecutorOffersTx": "expires lapsed offers on the one node an award names by global id",
+	"(*Store).expireConflictingExecutorOffersTx": "expires lapsed offers that hold the same executor slot or reservation, " +
+		"which are the deployment's and shared by every team's offers",
+	"(*Store).finalizeExecutorClaimRoundAt": "closes the offer round of a node named by global id under the team boundary " +
+		"of the finalize route or by the local fleet's own coordinator",
+	"(*Store).claimReadyNodeForExecutorTx": "claims a node the claim scan's runtime predicate selected in the claimant's " +
+		"team; the slot and budget counts span teams because an executor's capacity is the deployment's",
+	"(*Store).executorEligibility": "counts an executor's live claims in every team, because its capacity is the " +
+		"deployment's and every team's claims use it",
+	"(*Store).executorEligibilityTx": "counts an executor's live claims in every team, because its capacity is the " +
+		"deployment's and every team's claims use it",
+	"(*Store).loadExecutorUsage": "loads every executor's live claim usage across teams, because executor capacity is the " +
+		"deployment's",
+	"loadExecutorUsageTx": "loads every executor's live claim usage across teams, because executor capacity is the " +
+		"deployment's",
+	"(*Store).schedulingSummaryTx": "reads the node and run a claim, offer or award names by global id, and returns the " +
+		"run's team for the checks that follow",
+	"(*Store).ValidateExecutorClaimReservation": "matches the node's live claim against the exact claimant credential and " +
+		"reservation, and a token prefix is unique across teams",
+	"(*Store).buildNodeExecutionPolicyTx": "builds the execution policy of the node a scoped claim just awarded, from that " +
+		"node's own run and plan",
+	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
+		"run's team",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -332,54 +371,34 @@ var unportedSQL = []string{
 	"(*Store).TriggerExecutionAttemptIsLive",
 	"(*Store).UpdateNodeActivity",
 	"(*Store).UpdateNodeDeps",
-	"(*Store).ValidateExecutorClaimReservation",
 	"(*Store).VerifyUser",
 	"(*Store).WriteNodeDispatch",
 	"(*Store).acknowledgeTriggerExecutionStart",
 	"(*Store).assertNodeMutationFenceTx",
-	"(*Store).awardBestExecutorOffer",
-	"(*Store).buildNodeExecutionPolicyTx",
 	"(*Store).cancelMeteredNode",
 	"(*Store).chargeNodeTx",
 	"(*Store).chargeStorageTx",
-	"(*Store).claimReadyNodeForExecutorTx",
 	"(*Store).createAgentLossRetryTx",
 	"(*Store).eventKindPresent",
-	"(*Store).executorEligibility",
-	"(*Store).executorEligibilityTx",
-	"(*Store).expireConflictingExecutorOffersTx",
-	"(*Store).expireNodeExecutorOffersTx",
-	"(*Store).finalizeExecutorClaimRoundAt",
 	"(*Store).finishLocalNodeExecutionAttempt",
 	"(*Store).finishTriggerExecutionAttempt",
-	"(*Store).loadExecutorPreparePlans",
-	"(*Store).loadExecutorPrepareProfiles",
-	"(*Store).loadExecutorUsage",
 	"(*Store).lookupUser",
 	"(*Store).markNodeReady",
 	"(*Store).mergeAgentLossRetryTx",
 	"(*Store).mintCSRFKey",
-	"(*Store).prepareNextExecutorClaim",
-	"(*Store).recordExecutorOfferAt",
-	"(*Store).rejectUnattestedExecutorOffer",
 	"(*Store).requiredAgentLossRetryNodeSourceTx",
 	"(*Store).reserveNodeCreditsTx",
 	"(*Store).rotateToken",
-	"(*Store).schedulingSummaryTx",
 	"(*Store).selectTokensByPrefix",
 	"(*Store).startLocalNodeExecutionAttempt",
 	"(*Store).storageQuotaRow",
 	"appendEventTx",
 	"appendRunAnnotation",
-	"claimedExecutorOffer",
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
-	"loadExecutorUsageTx",
 	"lockRunRow",
-	"nodeChargeTx",
-	"nodeExecutorOfferCountTx",
 	"persistAgentLossRetryNodeSourceTx",
 	"runElapsedSecondsTx",
 	"runPrincipalTx",
@@ -391,7 +410,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 166
+const unportedSQLSize = 146
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
