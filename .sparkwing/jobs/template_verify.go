@@ -306,11 +306,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 
-	newArgs := []string{"examples", "scaffold", "-C", scratch, "--name", m.Name}
-	for _, p := range sortedParamFlags(m.VerifyParams) {
-		newArgs = append(newArgs, "--param", p)
-	}
-	if _, err := sparkwing.Exec(ctx, bin, newArgs...).Run(); err != nil {
+	if err := scaffoldExample(ctx, bin, scratch, m); err != nil {
 		return out, fmt.Errorf("%s: scaffold: %w", m.Name, err)
 	}
 
@@ -327,7 +323,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
 		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "lint", "-C", scratch, "--all").Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--all").Run(); err != nil {
 		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
 	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "explain", "--name", m.Name).Dir(scratch).Run(); err != nil {
@@ -425,13 +421,33 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 	})
 }
 
-func sortedParamFlags(params map[string]string) []string {
-	out := make([]string, 0, len(params))
-	for k, v := range params {
-		out = append(out, k+"="+v)
+// safety: `pipeline new` builds the repository the example has to compile in;
+// the example rendered with its verify parameters then replaces the job file.
+func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest) error {
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--name", m.Name, "--template", "minimal").Run(); err != nil {
+		return err
 	}
-	sort.Strings(out)
-	return out
+	params := make(map[string]string, len(m.VerifyParams)+1)
+	for k, v := range m.VerifyParams {
+		params[k] = v
+	}
+	for _, p := range m.Parameters {
+		if p.Name == "pipeline-name" {
+			params["pipeline-name"] = m.Name
+		}
+	}
+	body, err := templates.Render(m.Name, params)
+	if err != nil {
+		return err
+	}
+	jobs, err := filepath.Glob(filepath.Join(scratch, ".sparkwing", "jobs", "*.go"))
+	if err != nil {
+		return err
+	}
+	if len(jobs) != 1 {
+		return fmt.Errorf("pipeline new wrote %d job files, want 1", len(jobs))
+	}
+	return os.WriteFile(jobs[0], []byte(body), 0o644)
 }
 
 func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[string]string) error {
