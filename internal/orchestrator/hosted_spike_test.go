@@ -67,6 +67,15 @@ func engineSchedulesNodesTheBinaryRuns(t *testing.T, bin, mod string) {
 	if err != nil || run.Status != "success" {
 		t.Fatalf("run row = %+v (err %v), want success", run, err)
 	}
+	if len(run.PlanSnapshot) == 0 || run.LastHeartbeatAt == nil {
+		t.Errorf("run row has snapshot %d bytes, heartbeat %v; the dispatcher records both", len(run.PlanSnapshot), run.LastHeartbeatAt)
+	}
+	for _, id := range res.Order {
+		n, err := st.GetNode(t.Context(), res.RunID, id)
+		if err != nil || n.CPUNanos <= 0 || n.MaxRSSBytes <= 0 {
+			t.Errorf("node %s usage = %+v (err %v), want the process's measurement", id, n, err)
+		}
+	}
 }
 
 func failedDependencySkipsItsDependent(t *testing.T, bin, mod string) {

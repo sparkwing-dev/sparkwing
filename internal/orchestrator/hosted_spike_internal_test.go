@@ -126,3 +126,33 @@ func TestHostedFinalize_CancellationFinishesEveryNodeRow(t *testing.T) {
 		}
 	}
 }
+
+type usageRunner struct{}
+
+func (usageRunner) RunNode(context.Context, runner.Request) runner.Result {
+	return runner.Result{Outcome: sparkwing.Success, Usage: &runner.ResourceUsage{CPUTime: 3e9, MaxRSSBytes: 64 << 20, Wall: 4e9}}
+}
+
+func TestHostedRunNode_RecordsTheNodeProcessUsage(t *testing.T) {
+	st, err := teststore.Open(newInternalPaths(t).StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	const runID = "run-usage"
+	if err := st.CreateRun(t.Context(), store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	snap := planSnapshot{Nodes: []snapshotNode{{ID: "a"}}}
+	if err := hostedAdmit(t.Context(), st, runID, snap); err != nil {
+		t.Fatal(err)
+	}
+	hostedRunNode(t.Context(), st, usageRunner{}, hostedRun{}, runID, "a")
+	row, err := st.GetNode(t.Context(), runID, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.CPUNanos != 3e9 || row.MaxRSSBytes != 64<<20 {
+		t.Errorf("row usage cpu=%d rss=%d, want the runner's measurement", row.CPUNanos, row.MaxRSSBytes)
+	}
+}

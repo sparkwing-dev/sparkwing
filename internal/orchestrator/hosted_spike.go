@@ -63,6 +63,17 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: cfg.Pipeline, Status: "running", StartedAt: now, CreatedAt: now}); err != nil {
 		return hostedRunResult{}, fmt.Errorf("hosted run: create run: %w", err)
 	}
+	wedge, err := storeWedgeBudget()
+	if err != nil {
+		return hostedRunResult{}, err
+	}
+	hbCtx, stopHeartbeat := context.WithCancel(ctx)
+	hbDone := make(chan struct{})
+	go func() {
+		defer close(hbDone)
+		runRunHeartbeatLoop(hbCtx, 30*time.Second, localState{st: st}, runID, wedge)
+	}()
+	defer func() { stopHeartbeat(); <-hbDone }()
 	art, err := localArtifactStore(cfg.Paths)
 	if err != nil {
 		return hostedRunResult{}, err
@@ -74,9 +85,14 @@ func runHosted(ctx context.Context, cfg hostedRun) (hostedRunResult, error) {
 	defer loopback.Close() //nolint:contextcheck // Close revokes the run token after ctx may have ended.
 
 	res := hostedRunResult{RunID: runID, Nodes: map[string]runner.Result{}}
-	snap, err := hostedPlan(ctx, cfg, runID, loopback.url, loopback.token)
+	snap, raw, err := hostedPlan(ctx, cfg, runID, loopback.url, loopback.token)
 	if err == nil {
 		err = hostedAdmit(ctx, st, runID, snap)
+	}
+	if err == nil {
+		if perr := st.UpdatePlanSnapshot(ctx, runID, raw); perr != nil {
+			err = fmt.Errorf("hosted run: persist plan snapshot: %w", perr)
+		}
 	}
 	if err == nil {
 		lr := localrunner.New(client.NewWithToken(loopback.url, nil, loopback.token), localrunner.Config{
@@ -124,7 +140,7 @@ func hostedDescribes(doc []byte, pipeline string) error {
 
 // safety: describe carries no nodes, so the binary evaluates the plan for the
 // run row the engine already wrote.
-func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token string) (planSnapshot, error) {
+func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token string) (planSnapshot, []byte, error) {
 	var snap planSnapshot
 	cmd := exec.CommandContext(ctx, cfg.Binary, "plan", "--json")
 	cmd.Dir = cfg.WorkDir
@@ -138,12 +154,12 @@ func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token 
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return snap, fmt.Errorf("hosted run: plan --json: %w: %s", err, bytes.TrimSpace(stderr.Bytes()))
+		return snap, nil, fmt.Errorf("hosted run: plan --json: %w: %s", err, bytes.TrimSpace(stderr.Bytes()))
 	}
 	if err := json.Unmarshal(out, &snap); err != nil {
-		return snap, fmt.Errorf("hosted run: plan document: %w", err)
+		return snap, nil, fmt.Errorf("hosted run: plan document: %w", err)
 	}
-	return snap, nil
+	return snap, out, nil
 }
 
 // safety: a node needing behavior the spike does not host is refused before
@@ -351,6 +367,7 @@ func hostedRunNode(ctx context.Context, st *store.Store, lr runner.Runner, cfg h
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("hosted run: start node %s: %w", nodeID, err)}
 	}
 	res := lr.RunNode(ctx, runner.Request{RunID: runID, NodeID: nodeID, Pipeline: cfg.Pipeline, Delegate: cfg.Delegate})
+	recordNodeUsage(ctx, Backends{State: localState{st: st}, LocalCoordination: true}, runID, nodeID, res.Usage)
 	if res.Outcome == "" {
 		res.Outcome = sparkwing.Failed
 		res.Err = errors.Join(res.Err, fmt.Errorf("hosted run: node %s reported no outcome", nodeID))
