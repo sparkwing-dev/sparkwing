@@ -313,7 +313,7 @@ either service at an S3-compatible store.
 | Service | Flag | Environment | Keys |
 |---|---|---|---|
 | `sparkwing-cache` | `--blob-store s3://bucket/cache` | `SPARKWING_CACHE_BLOB_STORE` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
-| `sparkwing-logs` | `--archive-store s3://bucket/logs` | `SPARKWING_LOGS_ARCHIVE_STORE` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
+| `sparkwing-logs` | `--archive-store s3://bucket/logs` | none | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
 
 **The cache** moves its binary, dependency-archive and artifact stores to the
 bucket. Git mirrors, workspace uploads and the registry proxy stay on
@@ -330,7 +330,7 @@ byte.
 the bucket. An append still lands in a file that grows in place and a follower
 still tails that file, so streaming is exactly what it is without a bucket and
 a running node costs the bucket nothing. A run nobody has written for
-`--archive-idle` (`SPARKWING_LOGS_ARCHIVE_IDLE`, 10 minutes by default) is uploaded as one object per node log
+`--archive-idle` (10 minutes by default) is uploaded as one object per node log
 plus two small index objects and leaves the volume; a read or an append of an
 archived run restores it first. `--retention` then deletes archived runs by the
 day of their last write: each pass is one listing of the day index while

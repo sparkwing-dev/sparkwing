@@ -104,6 +104,9 @@ unlock.
 
 ### Removed
 
+- **logs (Breaking):** `sparkwing-logs` no longer reads environment variables in place of its flags
+  `SPARKWING_CONTROLLER_URL`, `SPARKWING_REQUIRE_AUTH`, `SPARKWING_LOGS_ARCHIVE_STORE`, `SPARKWING_LOGS_ARCHIVE_IDLE`, the fifteen `SPARKWING_LOGS_*` limit variables and the three `SPARKWING_LOGS_EGRESS_*` budgets are ignored; pass `--controller`, `--require-auth`, `--archive-store`, `--archive-idle`, the matching limit flag or `--egress-*` instead. A malformed flag value stops the service at startup naming the flag. The chart already passed flags. See [migration guide](docs/migrations/_unreleased.md#sparkwing-logs-reads-flags-only).
+
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
 

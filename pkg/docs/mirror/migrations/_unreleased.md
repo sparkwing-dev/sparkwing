@@ -168,6 +168,51 @@ ran it.
 - **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
   for a profile, is unchanged.
 
+## sparkwing-logs reads flags only
+
+- **Before:** every `sparkwing-logs` flag took its default from an
+  environment variable of the same meaning: `SPARKWING_CONTROLLER_URL`,
+  `SPARKWING_REQUIRE_AUTH`, `SPARKWING_LOGS_ARCHIVE_STORE`,
+  `SPARKWING_LOGS_ARCHIVE_IDLE`, the `SPARKWING_LOGS_*` limits, and
+  `SPARKWING_LOGS_EGRESS_*`.
+- **After:** the service reads none of them. A variable left in the pod's
+  environment is ignored, so the setting it carried falls back to the flag's
+  default. A malformed flag value stops the service at startup with an error
+  naming the flag.
+- **Operator steps:** the `sparkwing-runner-bundle` chart already passes flags
+  and needs nothing. In a manifest of your own, move each variable to its flag:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_REQUIRE_AUTH` | `--require-auth` |
+  | `SPARKWING_LOGS_ARCHIVE_STORE` | `--archive-store` |
+  | `SPARKWING_LOGS_ARCHIVE_IDLE` | `--archive-idle` |
+  | `SPARKWING_LOGS_MAX_NODE_BYTES` | `--max-node-bytes` |
+  | `SPARKWING_LOGS_MAX_RUN_BYTES` | `--max-run-bytes` |
+  | `SPARKWING_LOGS_MAX_INFLIGHT_BYTES` | `--max-inflight-bytes` |
+  | `SPARKWING_LOGS_MIN_FREE_BYTES` | `--min-free-bytes` |
+  | `SPARKWING_LOGS_RETENTION` | `--retention` |
+  | `SPARKWING_LOGS_SWEEP_INTERVAL` | `--sweep-interval` |
+  | `SPARKWING_LOGS_SEARCH_MAX_BYTES` | `--search-max-bytes` |
+  | `SPARKWING_LOGS_SEARCH_TIMEOUT` | `--search-timeout` |
+  | `SPARKWING_LOGS_MAX_LINE_BYTES` | `--max-line-bytes` |
+  | `SPARKWING_LOGS_BINARY_RATIO` | `--binary-ratio` |
+  | `SPARKWING_LOGS_MAX_STORE_BYTES` | `--max-store-bytes` |
+  | `SPARKWING_LOGS_MAX_STORE_OBJECTS` | `--max-store-objects` |
+  | `SPARKWING_LOGS_WARN_STORE_BYTES` | `--warn-store-bytes` |
+  | `SPARKWING_LOGS_WARN_STORE_OBJECTS` | `--warn-store-objects` |
+  | `SPARKWING_LOGS_STORE_RECONCILE` | `--store-reconcile` |
+  | `SPARKWING_LOGS_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+  | `SPARKWING_LOGS_EGRESS_MAX_DOWNLOADS` | `--egress-max-downloads` |
+  | `SPARKWING_LOGS_EGRESS_MAX_LOG_STREAMS` | `--egress-max-log-streams` |
+
+- **Edge cases:** `SPARKWING_REQUIRE_AUTH` also accepted `yes` and `on`;
+  `--require-auth` is a boolean flag, so pass it bare. A retention set through
+  `SPARKWING_LOGS_RETENTION` used to count as named and kept an archived
+  service off its 90-day default; only `--retention` counts now.
+  `SPARKWING_S3_ENDPOINT` is still read, because it has no flag yet.
+
 ## Flag-mirror environment variables are no longer read
 
 Each of these variables only supplied a flag's default. Neither chart sets

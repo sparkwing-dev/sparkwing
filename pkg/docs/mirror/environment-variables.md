@@ -76,27 +76,6 @@ Kinds:
 | `SPARKWING_CACHE_WARN_STORE_OBJECTS` | [caching](caching.md) |
 | `SPARKWING_METRICS_ADDR` | [gitcache](gitcache.md), [observability](observability.md) |
 
-## Configuration: `sparkwing-logs`
-
-| Variable | Described in |
-|---|---|
-| `SPARKWING_LOGS_ARCHIVE_IDLE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_LOGS_BINARY_RATIO` | [security](security.md) |
-| `SPARKWING_LOGS_MAX_INFLIGHT_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_MAX_LINE_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_MAX_NODE_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_MAX_RUN_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_MAX_STORE_BYTES` | [observability](observability.md), [security](security.md) |
-| `SPARKWING_LOGS_MAX_STORE_OBJECTS` | [security](security.md) |
-| `SPARKWING_LOGS_MIN_FREE_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_RETENTION` | [security](security.md) |
-| `SPARKWING_LOGS_SEARCH_MAX_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_SEARCH_TIMEOUT` | [security](security.md) |
-| `SPARKWING_LOGS_STORE_RECONCILE` | [security](security.md) |
-| `SPARKWING_LOGS_SWEEP_INTERVAL` | [security](security.md) |
-| `SPARKWING_LOGS_WARN_STORE_BYTES` | [security](security.md) |
-| `SPARKWING_LOGS_WARN_STORE_OBJECTS` | [security](security.md) |
-
 ## Configuration: `sparkwing-runner` and the Jobs it starts
 
 | Variable | Described in |
