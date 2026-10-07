@@ -64,6 +64,11 @@ type wingdAPI struct {
 // to milliseconds against a four-second foreign write. An allow-list, not
 // every GET, because several GET routes write.
 var apiReadRoutes = []string{
+	"GET /api/v1/runs/{id}/logs",
+	"GET /api/v1/runs/{id}/logs/search",
+	"GET /api/v1/runs/{id}/logs/{node}",
+	"GET /api/v1/runs/{id}/logs/{node}/completeness",
+	"GET /api/v1/runs/grep",
 	"GET /api/v1/runs",
 	"GET /api/v1/runs/{id}/pending-triggers",
 	"GET /api/v1/runs/{id}",
@@ -104,6 +109,8 @@ var apiReadRoutes = []string{
 // EOF the client reads as completion.
 var apiStreamRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream",
+	"GET /api/v1/runs/{id}/logs/{node}/stream",
+	"GET /api/v1/runs/{id}/events/stream",
 	"POST /api/v1/gitcache/git/register",
 	"GET /api/v1/gitcache/git/{path...}",
 	"POST /api/v1/gitcache/git/{path...}",

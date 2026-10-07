@@ -20,6 +20,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
 | `GET` | `/api/v1/capabilities` | `public` |
+| `GET` | `/api/v1/capacity/profiles` | `runs.read` |
+| `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
 | `GET` | `/api/v1/compute-limits` | `runs.read` |
 | `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
@@ -98,6 +100,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.state` |
+| `GET` | `/api/v1/runs/grep` | `logs.read` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
 | `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
@@ -114,6 +117,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
+| `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/git-credential` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
@@ -121,6 +125,11 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/{node}/completeness` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/{node}/stream` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |

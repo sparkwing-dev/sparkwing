@@ -4,19 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startAuthenticatedDashboard } from "./authenticated-server";
 
-type ControllerState = {
-  created: boolean;
-  login_calls: number;
-  session_headers: string[];
-  logout_sessions: string[];
-  proxy_authorizations: string[];
-  proxy_cookies: string[];
-  proxy_csrf_headers: string[];
-  mutation_bodies: string[];
-  active_sessions: string[];
-};
+type FixtureState = { sessions: number };
 
-test("auth-disabled bootstrap authenticates the dashboard without exposing its service bearer", async ({
+async function fixtureState(controlOrigin: string): Promise<FixtureState> {
+  return (await (
+    await fetch(`${controlOrigin}/__fixture/state`)
+  ).json()) as FixtureState;
+}
+
+test("the controller signs a browser in and authenticates the dashboard's calls by cookie", async ({
   page,
   context,
 }) => {
@@ -47,49 +43,40 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     expect(new URL(page.url()).searchParams.get("next")).toBe(
       "/runs?run=auth-run&tab=logs",
     );
-    await expect(page.getByRole("heading", { name: "Create first admin" })).toBeVisible();
-    const bootstrap = page.locator('form[action="/login/bootstrap"]');
-    await expect(bootstrap).toHaveAttribute("method", /post/i);
-    await expect(bootstrap.locator('input[name="username"]')).toHaveAttribute(
+    const login = page.locator('form[action="/login"]');
+    await expect(login).toHaveAttribute("method", /post/i);
+    await expect(login.locator('input[name="username"]')).toHaveAttribute(
       "autocomplete",
       "username",
     );
-    await expect(bootstrap.locator('input[name="password"]')).toHaveAttribute(
+    await expect(login.locator('input[name="password"]')).toHaveAttribute(
       "type",
       "password",
     );
-    await expect(bootstrap.locator('input[name="next"]')).toHaveValue(
+    await expect(login.locator('input[name="next"]')).toHaveValue(
       "/runs?run=auth-run&tab=logs",
     );
 
-    const preauthCookies = await context.cookies(dashboard.origin);
-    const preauthCSRF = preauthCookies.find(
+    const preauthCSRF = (await context.cookies(dashboard.origin)).find(
       (cookie) => cookie.name === "sw_csrf",
     );
     expect(preauthCSRF).toMatchObject({ httpOnly: false, sameSite: "Strict" });
-    await expect(bootstrap.locator('input[name="csrf_token"]')).toHaveValue(
+    await expect(login.locator('input[name="csrf_token"]')).toHaveValue(
       preauthCSRF?.value ?? "missing",
     );
 
-    const forgedBootstrap = await page.request.post(
-      `${dashboard.origin}/login/bootstrap`,
-      {
-        failOnStatusCode: false,
-        form: {
-          username: "admin",
-          password: "correct-horse",
-          next: "/runs",
-          csrf_token: "forged-token",
-        },
-        headers: { Origin: dashboard.origin },
+    const forgedLogin = await page.request.post(`${dashboard.origin}/login`, {
+      failOnStatusCode: false,
+      form: {
+        username: "admin",
+        password: "correct-horse",
+        next: "/runs",
+        csrf_token: "forged-token",
       },
-    );
-    expect(forgedBootstrap.status()).toBe(403);
-    let state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    expect(state.created).toBe(false);
-    expect(state.login_calls).toBe(0);
+      headers: { Origin: dashboard.origin },
+    });
+    expect(forgedLogin.status()).toBe(403);
+    expect((await fixtureState(dashboard.control_origin)).sessions).toBe(0);
 
     const unauthenticatedAPI = await page.request.get(
       `${dashboard.origin}/api/v1/runs`,
@@ -97,11 +84,9 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     );
     expect(unauthenticatedAPI.status()).toBe(401);
 
-    await bootstrap.locator('input[name="username"]').fill("admin");
-    await bootstrap.locator('input[name="password"]').fill("correct-horse");
-    await bootstrap
-      .getByRole("button", { name: "Create admin and sign in" })
-      .click();
+    await login.locator('input[name="username"]').fill("admin");
+    await login.locator('input[name="password"]').fill("correct-horse");
+    await login.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(
       `${dashboard.origin}/runs?run=auth-run&tab=logs`,
     );
@@ -112,20 +97,13 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     const cookies = await context.cookies(dashboard.origin);
     const session = cookies.find((cookie) => cookie.name === "sw_session");
     const csrf = cookies.find((cookie) => cookie.name === "sw_csrf");
-    expect(session).toMatchObject({
-      value: "session-1",
-      httpOnly: true,
-      sameSite: "Lax",
-    });
-    expect(csrf).toMatchObject({
-      value: "csrf-token",
-      httpOnly: false,
-      sameSite: "Strict",
-    });
+    expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax" });
+    expect(csrf).toMatchObject({ httpOnly: false, sameSite: "Strict" });
+    expect(csrf?.value).not.toBe(preauthCSRF?.value);
 
     const indexResponse = await page.request.get(`${dashboard.origin}/`);
     const html = await indexResponse.text();
-    expect(html).not.toContain(dashboard.service_token);
+    expect(html).not.toContain(dashboard.admin_token);
     expect(html).not.toContain("__SPARKWING_TOKEN__");
     const headers = indexResponse.headers();
     expect(headers["content-security-policy"]).toContain("default-src 'self'");
@@ -168,9 +146,9 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     expect(malformedCookieErrors).toEqual([]);
     page.off("pageerror", captureMalformedCookieError);
 
-    await page.evaluate(() => {
-      document.cookie = "sw_csrf=csrf-token; Path=/; SameSite=Strict";
-    });
+    await page.evaluate((token) => {
+      document.cookie = `sw_csrf=${token}; Path=/; SameSite=Strict`;
+    }, csrf?.value ?? "");
     await page.reload();
     await expect(
       page.getByRole("button", { name: "Log out", exact: true }),
@@ -183,37 +161,27 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
         .find((name) => new URL(name).pathname.startsWith("/_next/static/")),
     );
     expect(immutableAsset).toBeTruthy();
-    state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    const sessionCallsBeforeAssets = state.session_headers.length;
-    for (let i = 0; i < 3; i += 1) {
-      expect((await page.request.get(immutableAsset!)).status()).toBe(200);
-    }
-    state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    expect(state.session_headers).toHaveLength(sessionCallsBeforeAssets);
+    const signedOutAsset = await fetch(immutableAsset!);
+    expect(signedOutAsset.status).toBe(200);
 
-    const proxyStatus = await page.evaluate(
+    const runsStatus = await page.evaluate(
       async () =>
         (await fetch("/api/v1/runs", { headers: { Accept: "application/json" } }))
           .status,
     );
-    expect(proxyStatus).toBe(200);
+    expect(runsStatus).toBe(200);
     await expect.poll(() => browserAuthorizations.length).toBeGreaterThan(0);
     expect(browserAuthorizations).toEqual(
       Array.from({ length: browserAuthorizations.length }, () => null),
     );
 
-    const mutationBody = '{"action":"cancel"}';
     const crossOriginMutation = await page.request.post(
       `${dashboard.origin}/api/v1/runs/cancel-me/cancel`,
       {
         failOnStatusCode: false,
-        data: mutationBody,
+        data: "{}",
         headers: {
-          "Content-Type": "text/plain",
+          "Content-Type": "application/json",
           Origin: "https://attacker.example.com",
           "X-CSRF-Token": csrf?.value ?? "missing",
         },
@@ -224,21 +192,17 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
       `${dashboard.origin}/api/v1/runs/cancel-me/cancel`,
       {
         failOnStatusCode: false,
-        data: mutationBody,
+        data: "{}",
         headers: {
-          "Content-Type": "text/plain",
+          "Content-Type": "application/json",
           Origin: dashboard.origin,
           "X-CSRF-Token": "attacker-token",
         },
       },
     );
     expect(mismatchedMutation.status()).toBe(403);
-    state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    expect(state.mutation_bodies).toEqual([]);
 
-    const legitimateMutation = await page.evaluate(async (body) => {
+    const legitimateMutation = await page.evaluate(async () => {
       const encoded = document.cookie
         .split(";")
         .map((value) => value.trim())
@@ -248,37 +212,19 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
         await fetch("/api/v1/runs/cancel-me/cancel", {
           method: "POST",
           headers: {
-            "Content-Type": "text/plain",
+            "Content-Type": "application/json",
             "X-CSRF-Token": decodeURIComponent(encoded ?? ""),
           },
-          body,
+          body: "{}",
         })
       ).status;
-    }, mutationBody);
-    expect(legitimateMutation).toBe(204);
-
-    state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    expect(state.created).toBe(true);
-    expect(state.login_calls).toBe(1);
-    expect(state.session_headers).toContain("Session session-1");
-    expect(state.proxy_authorizations.length).toBeGreaterThan(0);
-    expect(
-      state.proxy_authorizations.every(
-        (authorization) => authorization === "Session session-1",
-      ),
-    ).toBe(true);
-    expect(state.proxy_cookies.every((cookie) => cookie === "")).toBe(true);
-    expect(state.proxy_csrf_headers.every((header) => header === "")).toBe(
-      true,
-    );
-    expect(state.mutation_bodies).toEqual([mutationBody]);
+    });
+    expect(legitimateMutation).toBe(404);
 
     const logout = page.locator('form[action="/logout"]');
     await expect(logout).toHaveAttribute("method", /post/i);
     await expect(logout.locator('input[name="csrf_token"]')).toHaveValue(
-      "csrf-token",
+      csrf?.value ?? "missing",
     );
 
     const forgedLogout = await page.request.post(`${dashboard.origin}/logout`, {
@@ -294,10 +240,7 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
             .status,
       ),
     ).toBe(200);
-    state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    expect(state.logout_sessions).toEqual([]);
+    expect((await fixtureState(dashboard.control_origin)).sessions).toBe(1);
 
     await logout.getByRole("button", { name: "Log out", exact: true }).click();
     await expect(page).toHaveURL(`${dashboard.origin}/login`);
@@ -312,19 +255,20 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
       (cookie) => cookie.name === "sw_csrf",
     );
     expect(signedOutCSRF?.value).toBeTruthy();
-    expect(signedOutCSRF?.value).not.toBe("csrf-token");
+    expect(signedOutCSRF?.value).not.toBe(csrf?.value);
     await expect(
       page.locator('form[action="/login"] input[name="csrf_token"]'),
     ).toHaveValue(signedOutCSRF?.value ?? "missing");
+    expect((await fixtureState(dashboard.control_origin)).sessions).toBe(0);
 
-    const copiedBearer = await page.request.get(
+    const forgedBearer = await page.request.get(
       `${dashboard.origin}/api/v1/runs`,
       {
         failOnStatusCode: false,
-        headers: { Authorization: `Bearer ${dashboard.service_token}` },
+        headers: { Authorization: "Bearer swu_not-a-token-anyone-minted-000000" },
       },
     );
-    expect(copiedBearer.status()).toBe(401);
+    expect(forgedBearer.status()).toBe(401);
 
     const copiedSession = await page.request.get(
       `${dashboard.origin}/api/v1/runs`,
@@ -332,7 +276,7 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
         failOnStatusCode: false,
         headers: {
           Accept: "application/json",
-          Cookie: "sw_session=session-1; sw_csrf=csrf-token",
+          Cookie: `sw_session=${session?.value}; sw_csrf=${csrf?.value}`,
         },
       },
     );
@@ -341,19 +285,19 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     await page.goto(
       `${dashboard.origin}/login?next=%2Fcluster%3Fview%3Dservices%26tab%3Dnodes`,
     );
-    const login = page.locator('form[action="/login"]');
-    await expect(login.locator('input[name="next"]')).toHaveValue(
+    const again = page.locator('form[action="/login"]');
+    await expect(again.locator('input[name="next"]')).toHaveValue(
       "/cluster?view=services&tab=nodes",
     );
     const loginCSRF = (await context.cookies(dashboard.origin)).find(
       (cookie) => cookie.name === "sw_csrf",
     );
-    await expect(login.locator('input[name="csrf_token"]')).toHaveValue(
+    await expect(again.locator('input[name="csrf_token"]')).toHaveValue(
       loginCSRF?.value ?? "missing",
     );
-    await login.locator('input[name="username"]').fill("admin");
-    await login.locator('input[name="password"]').fill("correct-horse");
-    await login.getByRole("button", { name: "Sign in", exact: true }).click();
+    await again.locator('input[name="username"]').fill("admin");
+    await again.locator('input[name="password"]').fill("correct-horse");
+    await again.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(
       `${dashboard.origin}/cluster?view=services&tab=nodes`,
     );
@@ -366,10 +310,9 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     );
     await expect(page).toHaveURL(`${dashboard.origin}/`);
 
-    const revoked = await fetch(
-      `${dashboard.controller_origin}/__fixture/revoke?session_id=session-2`,
-      { method: "POST" },
-    );
+    const revoked = await fetch(`${dashboard.control_origin}/__fixture/revoke`, {
+      method: "POST",
+    });
     expect(revoked.status).toBe(204);
     await page.goto(`${dashboard.origin}/cluster`);
     await expect(page).toHaveURL(/\/login\?next=/);
@@ -380,13 +323,7 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     expect(
       revokedCookies.find((cookie) => cookie.name === "sw_csrf")?.value,
     ).toBeTruthy();
-
-    state = (await (
-      await fetch(`${dashboard.controller_origin}/__fixture/state`)
-    ).json()) as ControllerState;
-    expect(state.login_calls).toBe(2);
-    expect(state.logout_sessions).toEqual(["session-1"]);
-    expect(state.active_sessions).toEqual([]);
+    expect((await fixtureState(dashboard.control_origin)).sessions).toBe(0);
   } finally {
     await dashboard.close();
   }

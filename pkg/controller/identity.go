@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -89,11 +90,15 @@ type capabilitiesAuth struct {
 }
 
 type capabilitiesResp struct {
-	Teams     capabilitiesTeams      `json:"teams"`
-	Billing   capabilitiesBilling    `json:"billing"`
-	Auth      capabilitiesAuth       `json:"auth"`
-	Claims    capabilitiesClaims     `json:"claims"`
-	GitHubApp *capabilitiesGitHubApp `json:"github_app,omitempty"`
+	Mode      string                       `json:"mode,omitempty"`
+	Storage   *backend.CapabilitiesStorage `json:"storage,omitempty"`
+	Features  []string                     `json:"features,omitempty"`
+	ReadOnly  bool                         `json:"read_only,omitempty"`
+	Teams     capabilitiesTeams            `json:"teams"`
+	Billing   capabilitiesBilling          `json:"billing"`
+	Auth      capabilitiesAuth             `json:"auth"`
+	Claims    capabilitiesClaims           `json:"claims"`
+	GitHubApp *capabilitiesGitHubApp       `json:"github_app,omitempty"`
 }
 
 type capabilitiesBilling struct {
@@ -114,6 +119,10 @@ type capabilitiesClaims struct {
 // whether teams exist, which providers to offer and which claim fields this controller reads.
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	var resp capabilitiesResp
+	if d := s.dashboard; d != nil && d.Capabilities.Mode != "" {
+		storage := d.Capabilities.Storage
+		resp.Mode, resp.Storage, resp.Features, resp.ReadOnly = d.Capabilities.Mode, &storage, d.Capabilities.Features, d.Capabilities.ReadOnly
+	}
 	resp.Teams.Enabled = s.MultiTeam()
 	resp.Billing.Enabled = s.Metering()
 	resp.Auth.Providers = s.signInProviders()

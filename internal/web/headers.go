@@ -16,18 +16,6 @@ type cspNonceCtxKey struct{}
 
 type requestTLSCtxKey struct{}
 
-// SecurityHeadersMiddleware wraps next with the dashboard's response
-// security headers, for callers that mount their own routes beside the
-// handler HandlerFromOptions builds. Pass the same options the handler
-// got so the TLS-dependent headers agree.
-func SecurityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Handler {
-	return securityHeadersMiddleware(opts, next)
-}
-
-func securityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Handler {
-	return SecurityHeaders(opts.HSTS, next)
-}
-
 // SecurityHeaders wraps next with the dashboard's response security headers:
 // a nonce-based Content-Security-Policy, framing and sniffing refusals, and
 // Strict-Transport-Security once the request shows TLS evidence. hsts asserts
@@ -56,7 +44,6 @@ func SecurityHeaders(hsts bool, next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), cspNonceCtxKey{}, nonce)
 		ctx = context.WithValue(ctx, requestTLSCtxKey{}, overTLS)
-		ctx = context.WithValue(ctx, clientIPCtxKey{}, ratelimit.ClientIP(r))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -111,29 +98,4 @@ func newCSPNonce() string {
 func cspNonceFrom(ctx context.Context) string {
 	nonce, _ := ctx.Value(cspNonceCtxKey{}).(string)
 	return nonce
-}
-
-type clientIPCtxKey struct{}
-
-var controllerTransport = ControllerTransport(http.DefaultTransport)
-
-// ControllerTransport sends the address of the browser being served as
-// X-Real-IP, replacing any the caller set, so the controller's trusted
-// listener keys that browser's budgets and audit records on it. Wrap only
-// the transport of a controller client: no other service reads the header.
-func ControllerTransport(base http.RoundTripper) http.RoundTripper {
-	return relayTransport{base: base}
-}
-
-type relayTransport struct{ base http.RoundTripper }
-
-func (t relayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clientIP, _ := req.Context().Value(clientIPCtxKey{}).(string)
-	req = req.Clone(req.Context())
-	if clientIP == "" {
-		req.Header.Del("X-Real-IP")
-	} else {
-		req.Header.Set("X-Real-IP", clientIP)
-	}
-	return t.base.RoundTrip(req)
 }

@@ -34,7 +34,7 @@ second command tags and pushes. The tag push starts the hosted release below.
 ### Release build and publication
 
 The hosted release builds the dashboard once and shares it with six target
-jobs. Each target compiles its supported commands in one Go cache; all 28
+jobs. Each target compiles its supported commands in one Go cache; all 24
 binary outputs remain available. Linux image packaging copies those same
 executables through the Dockerfiles' `release` stage. The default Dockerfile
 target still builds from source.

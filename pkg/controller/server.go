@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -149,7 +150,9 @@ type Server struct {
 	checkout  *billingCheckout
 	operators atomic.Pointer[map[string]bool]
 
-	dashboard *Dashboard
+	dashboard         *Dashboard
+	forwardedLogsOnce sync.Once
+	forwardedLogs     storage.LogStore
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -959,6 +962,15 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeLiveLog)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/logs", requireScope(ScopeLogsRead, s.dashboardRead(web.RunLogsHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/logs/search", requireScope(ScopeLogsRead, s.dashboardRead(web.RunLogsSearchHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", requireScope(ScopeLogsRead, s.dashboardRead(web.NodeLogsHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", requireScope(ScopeLogsRead, s.dashboardRead(web.NodeLogStreamHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", requireScope(ScopeLogsRead, s.dashboardRead(web.NodeLogCompletenessHandler)))
+	mux.Handle("GET /api/v1/runs/grep", requireScope(ScopeLogsRead, s.dashboardRead(web.RunsGrepHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/events/stream", requireScope(ScopeRunsRead, s.dashboardRead(web.EventsStreamHandler)))
+	mux.Handle("GET /api/v1/capacity/profiles", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityProfilesHandler)))
+	mux.Handle("GET /api/v1/capacity/profiles/explain", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityExplainHandler)))
 	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
@@ -1766,6 +1778,12 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// safety: a stream sets its own write deadline through http.ResponseController, which reaches the connection only
+// through Unwrap; without it the listener's WriteTimeout ends every stream.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 type flushingStatusRecorder struct {

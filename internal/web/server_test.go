@@ -2,19 +2,19 @@ package web_test
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -73,71 +73,22 @@ func fixtureShell() fs.FS {
 
 func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-	addr := ln.Addr().String()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	var serveErr error
-	go func() {
-		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{Bundle: fixtureShell(), Listener: ln})
-		close(done)
-	}()
-	var stopOnce sync.Once
-	var stopErr error
-	stopReported := false
+	b := backend.NewStoreBackend(st, paths, nil)
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/runs/{id}/logs", web.RunLogsHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", web.NodeLogsHandler(b))
+	mux.Handle("/", web.Pages(fixtureShell()))
+	srv := httptest.NewServer(web.SecurityHeaders(false, mux))
 	stop := func() {
-		stopOnce.Do(func() {
-			cancel()
-			timer := time.NewTimer(10 * time.Second)
-			defer timer.Stop()
-			select {
-			case <-done:
-			case <-timer.C:
-				stopErr = fmt.Errorf("web server did not stop within 10s")
-			}
-		})
-		if stopErr != nil && !stopReported {
-			stopReported = true
-			t.Errorf("stop web server: %v", stopErr)
-		}
+		srv.Close()
+		_ = st.Close()
 	}
 	t.Cleanup(stop)
-
-	base := fmt.Sprintf("http://%s", addr)
-	// safety: a -race build of this package needs seconds to open its store,
-	// so the wait is sized for that, not for the tenth of a second an
-	// uninstrumented one takes.
-	client := &http.Client{Timeout: time.Second}
-	retry := time.NewTicker(25 * time.Millisecond)
-	defer retry.Stop()
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
-	for {
-		select {
-		case <-done:
-			t.Fatalf("web server exited before readiness: %v", serveErr)
-		default:
-		}
-		if resp, err := client.Get(base + "/api/health"); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return base, stop
-			}
-		}
-		select {
-		case <-done:
-			t.Fatalf("web server exited before readiness: %v", serveErr)
-		case <-retry.C:
-		case <-deadline.C:
-			stop()
-			t.Fatal("web server did not become ready")
-		}
-	}
+	return srv.URL, stop
 }
 
 func TestAPI_Logs(t *testing.T) {
@@ -186,11 +137,6 @@ func TestAPI_StaticIndexServed(t *testing.T) {
 	}
 	if strings.Contains(string(body), "__SPARKWING_TOKEN__") {
 		t.Fatalf("index carries a runtime bearer slot: %s", string(body))
-	}
-
-	config := mustGetText(t, base+"/sparkwing-runtime.js")
-	if !strings.Contains(config, `window.__SPARKWING_REQUIRE_LOGIN__="false";`) {
-		t.Fatalf("runtime config missing its login mode: %s", config)
 	}
 }
 

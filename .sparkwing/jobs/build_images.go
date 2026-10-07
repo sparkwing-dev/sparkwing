@@ -34,7 +34,6 @@ type buildImageSpec struct {
 
 var buildImagesComponents = []buildImageSpec{
 	{name: "sparkwing-controller"},
-	{name: "sparkwing-web"},
 	{name: "sparkwing-logs"},
 	{name: "sparkwing-cache"},
 	{name: "sparkwing-runner", dockerfile: "build/Dockerfile.runner"},
@@ -45,7 +44,7 @@ func (BuildImages) ShortHelp() string {
 }
 
 func (BuildImages) Help() string {
-	return "Builds sparkwing-controller, sparkwing-web, sparkwing-logs and sparkwing-cache from build/Dockerfile.binary, and sparkwing-runner from build/Dockerfile.runner (it needs git plus a netrc-seeding entrypoint wrapper). By default produces single-arch images in the local daemon. With --registry --push, builds multi-arch (amd64 + arm64) and pushes directly to the configured registry; the caller must be logged in. Prints a final RELEASE_IMAGES line that cross-process consumers parse for the image refs."
+	return "Builds sparkwing-controller, sparkwing-logs and sparkwing-cache from build/Dockerfile.binary, and sparkwing-runner from build/Dockerfile.runner (it needs git plus a netrc-seeding entrypoint wrapper). By default produces single-arch images in the local daemon. With --registry --push, builds multi-arch (amd64 + arm64) and pushes directly to the configured registry; the caller must be logged in. Prints a final RELEASE_IMAGES line that cross-process consumers parse for the image refs."
 }
 
 func (BuildImages) Examples() []sparkwing.Example {

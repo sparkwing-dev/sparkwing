@@ -106,37 +106,41 @@ func (s *Server) handleStreamNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprintln(out, ": open"); err != nil {
+	if err := streamLiveLog(r.Context(), s.liveLogs, out, runID, nodeID, since); err != nil {
 		return
 	}
+}
+
+func streamLiveLog(ctx context.Context, l *liveLogs, out liveLogSink, runID, nodeID string, since int64) error {
+	if _, err := fmt.Fprintln(out, ": open"); err != nil {
+		return err
+	}
 	if err := out.Flush(); err != nil {
-		return
+		return err
 	}
 
 	lastWrite := time.Now()
 	var partial string
 	for {
-		if r.Context().Err() != nil {
-			return
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		// safety: the wait is sliced so a silent node still reaches the
 		// keepalive below; an idle stream with no bytes is one an
 		// intermediary closes.
-		waitCtx, cancel := context.WithTimeout(r.Context(), liveLogWaitSlice)
+		waitCtx, cancel := context.WithTimeout(ctx, liveLogWaitSlice)
 		want := since
-		chunk, ok := s.liveLogs.Wait(waitCtx, runID, nodeID, want)
+		chunk, ok := l.Wait(waitCtx, runID, nodeID, want)
 		cancel()
 		if !ok {
-			if r.Context().Err() == nil {
-				if err := emitLiveLogSSE(out, since, liveLogReleasedMarker); err != nil {
-					return
-				}
+			if ctx.Err() == nil {
+				return emitLiveLogSSE(out, since, liveLogReleasedMarker)
 			}
-			return
+			return nil
 		}
 		if chunk.Start > want {
 			if err := emitLiveLogSSE(out, chunk.Start, liveLogGapMarker(chunk.Start-want)); err != nil {
-				return
+				return err
 			}
 			partial = ""
 		}
@@ -146,30 +150,27 @@ func (s *Server) handleStreamNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		partial = rest
 		for _, line := range lines {
 			if err := writeLiveLogSSE(out, since, line); err != nil {
-				return
+				return err
 			}
 		}
 		if len(lines) > 0 {
 			if err := out.Flush(); err != nil {
-				return
+				return err
 			}
 			lastWrite = time.Now()
 		}
 		if chunk.Done {
 			if _, err := fmt.Fprint(out, "event: stream_end\ndata: {}\n\n"); err != nil {
-				return
+				return err
 			}
-			if err := out.Flush(); err != nil {
-				return
-			}
-			return
+			return out.Flush()
 		}
 		if time.Since(lastWrite) >= liveLogKeepalive {
 			if _, err := fmt.Fprintln(out, ": keepalive"); err != nil {
-				return
+				return err
 			}
 			if err := out.Flush(); err != nil {
-				return
+				return err
 			}
 			lastWrite = time.Now()
 		}

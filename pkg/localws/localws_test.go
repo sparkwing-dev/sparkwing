@@ -57,6 +57,22 @@ func TestRun_LogStore_EndToEnd(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
+	paths := orchestrator.PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// safety: a log read is answered only for a run this store records, because the team boundary checks the run.
+	if err := seed.CreateRun(context.Background(), store.Run{ID: "run1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	addr := startLocalws(t, Options{
 		Home:          home,
 		LogStore:      ls,

@@ -1,4 +1,4 @@
-package logs
+package logs_test
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -65,7 +67,7 @@ func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.
 	controllerServer := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	defer controllerServer.Close()
 	root := t.TempDir()
-	server, err := New(root, nil)
+	server, err := logs.New(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,16 +81,16 @@ func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.
 		}
 	})
 	var once sync.Once
-	server.diskSpace = func(string) (uint64, uint64, bool) {
+	server.SetDiskSpace(func(string) (uint64, uint64, bool) {
 		once.Do(func() {
 			close(validated)
 			<-resume
 		})
 		return 1 << 40, 1 << 40, true
-	}
+	})
 	logsHTTP := httptest.NewServer(server.WithControllerAuth(controllerServer.URL, 0).Handler())
 	defer logsHTTP.Close()
-	logClient := NewClientWithToken(logsHTTP.URL, nil, raw)
+	logClient := logs.NewClientWithToken(logsHTTP.URL, nil, raw)
 	appendDone := make(chan error, 1)
 	go func() { appendDone <- logClient.Append(firstCtx, first.RunID, first.NodeID, []byte("late-a\n")) }()
 	<-validated
@@ -130,7 +132,7 @@ func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.
 		t.Fatal(err)
 	}
 
-	firstPath := filepath.Join(root, "runs", nodeAttemptPath(first.RunID, first.NodeID, first.ClaimGeneration, 1))
+	firstPath := filepath.Join(root, "runs", logs.NodeAttemptPath(first.RunID, first.NodeID, first.ClaimGeneration, 1))
 	firstBytes, err := os.ReadFile(firstPath)
 	if err != nil {
 		t.Fatal(err)
@@ -209,23 +211,23 @@ func TestTriggerGenerationSubstreamCannotContaminateReplacementAfterValidation(t
 	controllerServer := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	defer controllerServer.Close()
 	root := t.TempDir()
-	server, err := New(root, nil)
+	server, err := logs.New(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	validated := make(chan struct{})
 	resume := make(chan struct{})
 	var secondOnce sync.Once
-	server.diskSpace = func(string) (uint64, uint64, bool) {
+	server.SetDiskSpace(func(string) (uint64, uint64, bool) {
 		secondOnce.Do(func() {
 			close(validated)
 			<-resume
 		})
 		return 1 << 40, 1 << 40, true
-	}
+	})
 	logsHTTP := httptest.NewServer(server.WithControllerAuth(controllerServer.URL, 0).Handler())
 	defer logsHTTP.Close()
-	logClient := NewClientWithToken(logsHTTP.URL, nil, raw)
+	logClient := logs.NewClientWithToken(logsHTTP.URL, nil, raw)
 	firstCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: first.ClaimSeq})
 	appendDone := make(chan error, 1)
 	go func() { appendDone <- logClient.Append(firstCtx, "run", "_compile", []byte("late-first\n")) }()
@@ -295,7 +297,7 @@ func TestAppendRejectsMixedTriggerAndNodeAttemptIdentity(t *testing.T) {
 	controllerServer := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	defer controllerServer.Close()
 	root := t.TempDir()
-	server, err := New(root, nil)
+	server, err := logs.New(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +320,7 @@ func TestAppendRejectsMixedTriggerAndNodeAttemptIdentity(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("mixed identity status = %d, want 400", resp.StatusCode)
 	}
-	if _, err := os.Stat(filepath.Join(root, "runs", nodeAttemptPath("run", "build", 99, 1))); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "runs", logs.NodeAttemptPath("run", "build", 99, 1))); !os.IsNotExist(err) {
 		t.Fatalf("forged attempt stream exists: %v", err)
 	}
 }

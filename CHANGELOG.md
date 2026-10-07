@@ -58,6 +58,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Server-sent event streams outlive the listener's 30-second write timeout
+  The request log's response writer now exposes the connection to `http.ResponseController`, so a live log stream extends its own write deadline instead of ending 30 seconds after it opened.
+
 - **cli:** Build the pipeline module with the Go version its `go.mod` requires when a fixed `GOTOOLCHAIN` pins an older version
   Resolution and compilation select the required toolchain; pipeline steps retain the original pin. `GOTOOLCHAIN=local` errors name the running version, required floor, setting source, and fix, including when a dependency raises the requirement. These errors no longer suggest `--sw-no-update`.
 
@@ -103,6 +106,9 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+
+- **web + helm chart (Breaking):** `sparkwing-web` and its image are gone; the controller serves the dashboard
+  The controller serves the dashboard pages, browser sign-in, session cookies and the log, event and capacity reads on its own listener. Point the console host at the controller Service and delete the web Deployment. The web flags map as follows: `--require-login` follows the controller's own authentication, `--hsts` and `--trusted-proxy-addr` are controller flags, `SPARKWING_WEB_INSECURE_COOKIES` and `--allow-insecure-cookies-remote` become the controller's `--insecure-cookies`, and `--controller`, `--logs`, `--token`, `--allow-unauthenticated-remote`, `--allow-origin` and the `--*-spec` and `--profile` flags have no replacement. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
 
 - **controller (Breaking):** The JSON halves of the browser sign-in and connect flows are gone; the controller's browser surface runs those flows itself
   `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`, `POST /api/v1/me/identities/{provider}/link` and `/link/complete`, `POST /api/v1/team/github-app/connect`, `/connect/available`, `/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and `GET /api/v1/auth/bootstrap-needed` answer 404. The dashboard's `/login`, `/auth/{provider}/...` and `/github/app/...` pages on the controller replace them. `POST /api/v1/auth/login`, `GET /api/v1/auth/session` and `POST /api/v1/auth/logout` remain for API clients.

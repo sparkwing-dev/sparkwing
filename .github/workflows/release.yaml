@@ -274,7 +274,6 @@ jobs:
             sparkwing-runner
             sparkwing-cache
             sparkwing-logs
-            sparkwing-web
           )
           for binary in "${binaries[@]}"; do
             digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"

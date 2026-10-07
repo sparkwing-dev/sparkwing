@@ -49,6 +49,8 @@ servers:
     description: Default laptop-mode `sparkwing serve start` bind address.
 
 tags:
+  - name: dashboard
+    description: The dashboard's log, event and capacity reads, served beside the API on the same listener.
   - name: runs
     description: Run lifecycle and read paths.
   - name: nodes
@@ -4726,6 +4728,17 @@ paths:
                 type: object
                 required: [teams, billing, auth, claims]
                 properties:
+                  mode: {type: string, description: "The dashboard's mode, such as cluster or local. Absent from a controller serving no dashboard."}
+                  storage:
+                    x-sparkwing-go-type: internal/backend.CapabilitiesStorage
+                    type: object
+                    description: Which surface holds artifacts, logs and runs. Absent from a controller serving no dashboard.
+                    properties:
+                      artifacts: {type: string}
+                      logs: {type: string}
+                      runs: {type: string}
+                  features: {type: array, items: {type: string}, description: The dashboard features this deployment serves.}
+                  read_only: {type: boolean, description: True when the dashboard refuses writes.}
                   teams:
                     x-sparkwing-go-type: pkg/controller.capabilitiesTeams
                     type: object
@@ -7235,6 +7248,138 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "413": {description: "Past the output or run limit, or past the team's storage share."}
         "429": {description: The team holds too many uncommitted uploads.}
+
+  /api/v1/capacity/profiles:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [dashboard]
+      summary: Read every pipeline's learned capacity profile.
+      description: >-
+        A host's own dashboard reads the profiles its runs store learned. A cluster controller keeps no machine-wide profiles and answers 501.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/capacity/profiles/explain:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [dashboard]
+      summary: Explain how one pipeline's charge was resolved.
+      description: >-
+        Takes `pipeline` as a query value; an unknown pipeline answers 404. A cluster controller answers 501.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/grep:
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Search the logs of the caller's team's runs.
+      description: >-
+        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/events/stream:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [dashboard]
+      summary: Stream a run's events as server-sent events.
+      description: >-
+        Resumes after the `Last-Event-ID` header. The stream ends with a `stream_end` event once the run is terminal and no events remain.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Read every node log of a run.
+      description: >-
+        Renders each record as plain text, ANSI text or raw NDJSON by the `format` query value or the Accept header. Reads through the logs service with the caller's own credential when one is configured.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/search:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Search one run's node logs.
+      description: >-
+        Takes `q` and an optional `limit` of at most 5000 matches.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/{node}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: node
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Read one node's log.
+      description: >-
+        Renders by the `format` query value or the Accept header, as the whole-run read does.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/{node}/completeness:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: node
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Report whether a node's log is whole.
+      description: >-
+        Answers the verdict the logs surface's seals support, or `unknown` when it keeps none.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/{node}/stream:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: node
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Stream one node's log as server-sent events.
+      description: >-
+        Streams the durable log when the logs surface has a live read, and the controller's in-memory live buffer otherwise; with neither it answers 501.
+      responses:
+        default: {description: Undescribed.}
 
 components:
   securitySchemes:

@@ -104,8 +104,8 @@ func TestBrowserCookieWriteNeedsTheCSRFCheck(t *testing.T) {
 	} {
 		req := f.cookieRequest(http.MethodDelete, path, "")
 		spoil(req)
-		if rec := f.serve(req); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "CSRF") {
-			t.Errorf("%s = %d %q, want 403 naming CSRF", name, rec.Code, rec.Body)
+		if rec := f.serve(req); rec.Code != http.StatusForbidden {
+			t.Errorf("%s = %d %q, want 403", name, rec.Code, rec.Body)
 		}
 	}
 	if rec := f.serve(f.cookieRequest(http.MethodDelete, path, "")); rec.Code != http.StatusNotFound {

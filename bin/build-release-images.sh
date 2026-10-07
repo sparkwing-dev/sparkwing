@@ -9,7 +9,7 @@ description="$(jq -r '.repository.description // ""' "$event")"
 license="$(jq -r '.repository.license.spdx_id // ""' "$event")"
 created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p image-platform-digests
-for binary in sparkwing-controller sparkwing-runner sparkwing-cache sparkwing-logs sparkwing-web; do
+for binary in sparkwing-controller sparkwing-runner sparkwing-cache sparkwing-logs; do
   recipe=build/Dockerfile.binary
   if [ "$binary" = sparkwing-runner ]; then recipe=build/Dockerfile.runner; fi
   image="ghcr.io/sparkwing-dev/$binary"

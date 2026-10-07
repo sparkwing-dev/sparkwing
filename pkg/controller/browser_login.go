@@ -2,14 +2,11 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"html/template"
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -280,28 +277,6 @@ func (s *Server) formCSRF(next http.HandlerFunc) http.Handler {
 }
 
 const maxFormBody = 64 << 10
-
-// safety: a browser loading this script holds nothing it could replay; the page reaches the API on its own origin
-// with its session cookie, so no credential rides this payload.
-func (s *Server) handleRuntimeConfig(w http.ResponseWriter, _ *http.Request) {
-	body := "window.__SPARKWING_VERSION__=" + jsStringLiteral(s.dashboard.Version) + ";\n" +
-		"window.__SPARKWING_REQUIRE_LOGIN__=" + jsStringLiteral(strconv.FormatBool(!s.dashboard.Local)) + ";\n"
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, body)
-}
-
-// safety: encoding/json escapes <, > and &, so the literal cannot close a
-// script element; the two JavaScript line terminators are escaped here.
-func jsStringLiteral(v string) string {
-	encoded, err := json.Marshal(v)
-	if err != nil {
-		return `""`
-	}
-	literal := string(encoded)
-	literal = strings.ReplaceAll(literal, " ", ` `)
-	return strings.ReplaceAll(literal, " ", ` `)
-}
 
 func (s *Server) signedInBrowser(ctx context.Context, r *http.Request) (*browserSession, error) {
 	raw := sessionCookie(r, s.cookiesSecure())
