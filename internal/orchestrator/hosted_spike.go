@@ -183,6 +183,9 @@ func hostedCheck(snap planSnapshot) error {
 	if snap.PlanConc != nil || len(snap.PlanConcs) > 0 {
 		return errors.New("hosted run: the pipeline joins a plan-level concurrency group, which the hosted spike does not acquire")
 	}
+	if snap.Priority != 0 || snap.AdmissionClass != "" || snap.ClaimWaitMS != 0 || snap.Resources != nil {
+		return errors.New("hosted run: the pipeline sets admission priority, class, claim wait or resources, which the hosted spike does not admit")
+	}
 	deps := make(map[string][]string, len(snap.Nodes))
 	for _, n := range snap.Nodes {
 		if _, dup := deps[n.ID]; dup {
@@ -261,6 +264,8 @@ func hostedUnsupported(n snapshotNode) string {
 		return "runs inline"
 	case len(m.RunsOn) > 0 || len(m.Prefers) > 0 || len(m.WhenRunner) > 0:
 		return "has a runner placement condition"
+	case m.ResCores > 0 || m.ResMemoryBytes > 0:
+		return "reserves resources"
 	}
 	return ""
 }

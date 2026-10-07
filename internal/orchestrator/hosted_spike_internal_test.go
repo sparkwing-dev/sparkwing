@@ -156,3 +156,21 @@ func TestHostedRunNode_RecordsTheNodeProcessUsage(t *testing.T) {
 		t.Errorf("row usage cpu=%d rss=%d, want the runner's measurement", row.CPUNanos, row.MaxRSSBytes)
 	}
 }
+
+func TestHostedCheck_RefusesAdmissionSettingsItDoesNotAdmit(t *testing.T) {
+	for name, snap := range map[string]planSnapshot{
+		"priority":        {Priority: 5, Nodes: []snapshotNode{{ID: "a"}}},
+		"admission_class": {AdmissionClass: "batch", Nodes: []snapshotNode{{ID: "a"}}},
+		"claim_wait":      {ClaimWaitMS: 1000, Nodes: []snapshotNode{{ID: "a"}}},
+		"plan_resources":  {Resources: &snapshotResources{}, Nodes: []snapshotNode{{ID: "a"}}},
+		"node_cores":      {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{ResCores: 2}}}},
+		"node_memory":     {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{ResMemoryBytes: 1 << 30}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := hostedCheck(snap)
+			if err == nil || !strings.Contains(err.Error(), "does not") {
+				t.Fatalf("err = %v, want a refusal", err)
+			}
+		})
+	}
+}
