@@ -71,6 +71,13 @@ const ComputeLimitRetryAfterSeconds = 5
 const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
+type Dashboard struct {
+	Local bool
+
+	HSTS bool
+
+	InsecureCookies bool
+}
 type DataDownloadResponse struct {
 	URL     string
 	SHA256  string
@@ -324,6 +331,7 @@ func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
+func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type proxyRoute struct {
@@ -14,55 +14,55 @@ type proxyRoute struct {
 
 // safety: only routes the dashboard calls are forwarded, so its bearer cannot be borrowed for other routes.
 var proxyRoutes = []proxyRoute{
-	{"GET /api/v1/runs", controller.ScopeRunsRead},
-	{"GET /api/v1/runs/{id}", controller.ScopeRunsRead},
-	{"GET /api/v1/runs/{id}/attempts", controller.ScopeRunsRead},
-	{"GET /api/v1/runs/{id}/events", controller.ScopeRunsRead},
-	{"GET /api/v1/runs/{id}/paused", controller.ScopeRunsRead},
-	{"GET /api/v1/runs/{id}/approvals/{nodeID}", controller.ScopeRunsRead},
-	{"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", controller.ScopeRunsRead},
-	{"GET /api/v1/approvals/pending", controller.ScopeRunsRead},
-	{"GET /api/v1/agents", controller.ScopeRunsRead},
-	{"GET /api/v1/queue/state", controller.ScopeRunsRead},
-	{"GET /api/v1/trends", controller.ScopeRunsRead},
-	{"GET /api/v1/pipelines", controller.ScopeRunsRead},
-	{"POST /api/v1/triggers", controller.ScopeRunsWrite},
-	{"POST /api/v1/runs/{id}/cancel", controller.ScopeRunsControl},
-	{"POST /api/v1/runs/{id}/retry", controller.ScopeRunsControl},
-	{"POST /api/v1/runs/{id}/nodes/{nodeID}/release", controller.ScopeRunsControl},
-	{"POST /api/v1/runs/{id}/approvals/{nodeID}", controller.ScopeApprovalsWrite},
-	{"GET /api/v1/crons", controller.ScopeRunsRead},
-	{"GET /api/v1/crons/{id}", controller.ScopeRunsRead},
-	{"PUT /api/v1/crons/repos", controller.ScopeRunsControl},
-	{"DELETE /api/v1/crons/repos", controller.ScopeRunsControl},
-	{"POST /api/v1/crons/{id}/pause", controller.ScopeRunsControl},
-	{"POST /api/v1/crons/{id}/resume", controller.ScopeRunsControl},
-	{"POST /api/v1/crons/{id}/run", controller.ScopeRunsControl},
-	{"POST /api/v1/crons/{id}/disarm", controller.ScopeRunsControl},
-	{"PUT /api/v1/crons/{id}/override", controller.ScopeRunsControl},
-	{"DELETE /api/v1/crons/{id}/override", controller.ScopeRunsControl},
-	{"DELETE /api/v1/runs/{id}", controller.ScopeAdmin},
-	{"GET /api/v1/team/github-app", controller.ScopeRunsRead},
-	{"DELETE /api/v1/team/github-app/installations/{installation_id}", controller.ScopeTeamAdmin},
-	{"GET /api/v1/team/github-app/installations/{installation_id}/repositories", controller.ScopeRunsRead},
-	{"GET /api/v1/team/github-app/triggers", controller.ScopeRunsRead},
-	{"PUT /api/v1/team/github-app/triggers", controller.ScopeTeamAdmin},
-	{"DELETE /api/v1/team/github-app/triggers", controller.ScopeTeamAdmin},
-	{"GET /api/v1/team/github-app/extra-repos", controller.ScopeRunsRead},
-	{"PUT /api/v1/team/github-app/extra-repos", controller.ScopeTeamAdmin},
-	{"GET /api/v1/team/billing", controller.ScopeRunsRead},
-	{"POST /api/v1/team/billing/checkout", controller.ScopeTeamAdmin},
-	{"GET /api/v1/team/git-credentials", controller.ScopeRunsRead},
-	{"POST /api/v1/team/git-credentials", controller.ScopeTeamAdmin},
-	{"POST /api/v1/team/git-credentials/{host}/confirm", controller.ScopeTeamAdmin},
-	{"DELETE /api/v1/team/git-credentials/{host}", controller.ScopeTeamAdmin},
-	{"GET /api/v1/team/git-credentials/releases", controller.ScopeTeamAdmin},
-	{"PUT /api/v1/team/runner-tokens/{prefix}/git-credentials", controller.ScopeTeamAdmin},
+	{"GET /api/v1/runs", store.ScopeRunsRead},
+	{"GET /api/v1/runs/{id}", store.ScopeRunsRead},
+	{"GET /api/v1/runs/{id}/attempts", store.ScopeRunsRead},
+	{"GET /api/v1/runs/{id}/events", store.ScopeRunsRead},
+	{"GET /api/v1/runs/{id}/paused", store.ScopeRunsRead},
+	{"GET /api/v1/runs/{id}/approvals/{nodeID}", store.ScopeRunsRead},
+	{"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", store.ScopeRunsRead},
+	{"GET /api/v1/approvals/pending", store.ScopeRunsRead},
+	{"GET /api/v1/agents", store.ScopeRunsRead},
+	{"GET /api/v1/queue/state", store.ScopeRunsRead},
+	{"GET /api/v1/trends", store.ScopeRunsRead},
+	{"GET /api/v1/pipelines", store.ScopeRunsRead},
+	{"POST /api/v1/triggers", store.ScopeRunsWrite},
+	{"POST /api/v1/runs/{id}/cancel", store.ScopeRunsControl},
+	{"POST /api/v1/runs/{id}/retry", store.ScopeRunsControl},
+	{"POST /api/v1/runs/{id}/nodes/{nodeID}/release", store.ScopeRunsControl},
+	{"POST /api/v1/runs/{id}/approvals/{nodeID}", store.ScopeApprovalsWrite},
+	{"GET /api/v1/crons", store.ScopeRunsRead},
+	{"GET /api/v1/crons/{id}", store.ScopeRunsRead},
+	{"PUT /api/v1/crons/repos", store.ScopeRunsControl},
+	{"DELETE /api/v1/crons/repos", store.ScopeRunsControl},
+	{"POST /api/v1/crons/{id}/pause", store.ScopeRunsControl},
+	{"POST /api/v1/crons/{id}/resume", store.ScopeRunsControl},
+	{"POST /api/v1/crons/{id}/run", store.ScopeRunsControl},
+	{"POST /api/v1/crons/{id}/disarm", store.ScopeRunsControl},
+	{"PUT /api/v1/crons/{id}/override", store.ScopeRunsControl},
+	{"DELETE /api/v1/crons/{id}/override", store.ScopeRunsControl},
+	{"DELETE /api/v1/runs/{id}", store.OperatorScope},
+	{"GET /api/v1/team/github-app", store.ScopeRunsRead},
+	{"DELETE /api/v1/team/github-app/installations/{installation_id}", store.ScopeTeamAdmin},
+	{"GET /api/v1/team/github-app/installations/{installation_id}/repositories", store.ScopeRunsRead},
+	{"GET /api/v1/team/github-app/triggers", store.ScopeRunsRead},
+	{"PUT /api/v1/team/github-app/triggers", store.ScopeTeamAdmin},
+	{"DELETE /api/v1/team/github-app/triggers", store.ScopeTeamAdmin},
+	{"GET /api/v1/team/github-app/extra-repos", store.ScopeRunsRead},
+	{"PUT /api/v1/team/github-app/extra-repos", store.ScopeTeamAdmin},
+	{"GET /api/v1/team/billing", store.ScopeRunsRead},
+	{"POST /api/v1/team/billing/checkout", store.ScopeTeamAdmin},
+	{"GET /api/v1/team/git-credentials", store.ScopeRunsRead},
+	{"POST /api/v1/team/git-credentials", store.ScopeTeamAdmin},
+	{"POST /api/v1/team/git-credentials/{host}/confirm", store.ScopeTeamAdmin},
+	{"DELETE /api/v1/team/git-credentials/{host}", store.ScopeTeamAdmin},
+	{"GET /api/v1/team/git-credentials/releases", store.ScopeTeamAdmin},
+	{"PUT /api/v1/team/runner-tokens/{prefix}/git-credentials", store.ScopeTeamAdmin},
 	// safety: no single-secret read is proxied, so a browser never reaches a
 	// value route; the list returns variable values and no secret's.
-	{"GET /api/v1/secrets", controller.ScopeRunsRead},
-	{"POST /api/v1/secrets", controller.ScopeTeamAdmin},
-	{"DELETE /api/v1/secrets/{name}", controller.ScopeTeamAdmin},
+	{"GET /api/v1/secrets", store.ScopeRunsRead},
+	{"POST /api/v1/secrets", store.ScopeTeamAdmin},
+	{"DELETE /api/v1/secrets/{name}", store.ScopeTeamAdmin},
 }
 
 // safety: a membership role, which the controller resolves on every request for the
@@ -109,10 +109,10 @@ var operatorProxyRoutes = []proxyRoute{
 // safety: the dashboard reads logs on behalf of a browser session, so the logs bearer
 // never carries a delete or an append off the browser-facing listener.
 var logsProxyRoutes = []proxyRoute{
-	{"GET /api/v1/logs/search", controller.ScopeLogsRead},
-	{"GET /api/v1/logs/{runID}", controller.ScopeLogsRead},
-	{"GET /api/v1/logs/{runID}/{nodeID}", controller.ScopeLogsRead},
-	{"GET /api/v1/logs/{runID}/{nodeID}/stream", controller.ScopeLogsRead},
+	{"GET /api/v1/logs/search", store.ScopeLogsRead},
+	{"GET /api/v1/logs/{runID}", store.ScopeLogsRead},
+	{"GET /api/v1/logs/{runID}/{nodeID}", store.ScopeLogsRead},
+	{"GET /api/v1/logs/{runID}/{nodeID}/stream", store.ScopeLogsRead},
 }
 
 func proxyAllowList(proxy http.Handler) http.Handler {
@@ -149,7 +149,7 @@ func requireSessionScope(scope string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if slices.Contains(principal.Scopes, controller.ScopeAdmin) ||
+		if slices.Contains(principal.Scopes, store.OperatorScope) ||
 			slices.Contains(principal.Scopes, scope) {
 			next.ServeHTTP(w, r)
 			return

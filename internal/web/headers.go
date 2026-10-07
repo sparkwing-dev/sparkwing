@@ -25,9 +25,23 @@ func SecurityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Hand
 }
 
 func securityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Handler {
+	return SecurityHeaders(opts.HSTS, next)
+}
+
+// SecurityHeaders wraps next with the dashboard's response security headers:
+// a nonce-based Content-Security-Policy, framing and sniffing refusals, and
+// Strict-Transport-Security once the request shows TLS evidence. hsts asserts
+// that evidence for a process serving plaintext behind a TLS terminator. A
+// request an outer SecurityHeaders already stamped passes through unchanged,
+// so the nonce the page carries is the one its header names.
+func SecurityHeaders(hsts bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cspNonceFrom(r.Context()) != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		nonce := newCSPNonce()
-		overTLS := requestOverTLS(r, opts)
+		overTLS := hsts || r.TLS != nil || forwardedHTTPS(r)
 		h := w.Header()
 		h.Set("Content-Security-Policy", contentSecurityPolicy(nonce))
 		h.Set("X-Frame-Options", "DENY")
@@ -47,10 +61,6 @@ func securityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Hand
 	})
 }
 
-func requestOverTLS(r *http.Request, opts HandlerOptions) bool {
-	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r)
-}
-
 func forwardedHTTPS(r *http.Request) bool {
 	if !ratelimit.FromTrustedListener(r) {
 		return false
@@ -60,6 +70,12 @@ func forwardedHTTPS(r *http.Request) bool {
 		proto = proto[:comma]
 	}
 	return strings.EqualFold(strings.TrimSpace(proto), "https")
+}
+
+// RequestOverTLS reports whether the request SecurityHeaders stamped reached
+// the dashboard over TLS, by the evidence that middleware weighed.
+func RequestOverTLS(ctx context.Context) bool {
+	return requestOverTLSFrom(ctx)
 }
 
 func requestOverTLSFrom(ctx context.Context) bool {

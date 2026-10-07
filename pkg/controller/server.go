@@ -148,6 +148,8 @@ type Server struct {
 	githubApp *githubAppState
 	checkout  *billingCheckout
 	operators atomic.Pointer[map[string]bool]
+
+	dashboard *Dashboard
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -885,7 +887,11 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //   - When the Authenticator is disabled, middleware + requireScope are
 //     pass-through.
 func (s *Server) Handler() http.Handler {
-	return s.handler(s.handleFinishRun)
+	api := s.handler(s.handleFinishRun)
+	if s.dashboard == nil {
+		return api
+	}
+	return s.browserHandler(api)
 }
 
 // DaemonHandler leaves profile recording to the host orchestrator. Clients
@@ -1286,6 +1292,13 @@ func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handl
 	return noStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if raw, route := claimRouteFor(mux, r); route != nil {
 			s.serveClaim(w, r, raw, route, next)
+			return
+		}
+		if sess := browserSessionFrom(r.Context()); sess != nil {
+			observeRequestPrincipal(sess.principal.Kind)
+			ctx := contextWithPrincipal(r.Context(), sess.principal)
+			stampPrincipal(ctx, sess.principal)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 		// safety: a session is resolved even while bearer auth is off, because

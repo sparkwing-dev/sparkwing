@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **controller:** `Server.WithDashboard` attaches a browser surface: session cookies authenticate the page's own API calls
+  A `__Host-sw_session` cookie authenticates a request that carries no `Authorization` header, and a cookie-authenticated write must pass the same-origin check and present the session's CSRF token in `X-CSRF-Token`, matching the `__Host-sw_csrf` cookie. Bearer, claim-token and `Session` requests are unchanged. Responses carry the dashboard's security headers.
+
 - **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
   It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
 

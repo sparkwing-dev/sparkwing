@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const proxyTestCSRF = "session-token"
@@ -66,7 +66,7 @@ func TestProxyAllowList_SessionCannotReachUnproxiedControllerRoutes(t *testing.T
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
-	handler, reached := proxyTestDashboard(t, []string{controller.ScopeAdmin})
+	handler, reached := proxyTestDashboard(t, []string{store.OperatorScope})
 	for _, test := range []struct {
 		method string
 		path   string
@@ -107,57 +107,57 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{"reader reads runs", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/runs", http.StatusNoContent},
-		{"reader reads compute queue", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/queue/state", http.StatusNoContent},
+		{"reader reads runs", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/runs", http.StatusNoContent},
+		{"reader reads compute queue", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/queue/state", http.StatusNoContent},
 		{"scopeless session cannot read compute queue", nil, http.MethodGet, "/api/v1/queue/state", http.StatusForbidden},
-		{"reader cannot cancel", []string{controller.ScopeRunsRead}, http.MethodPost, "/api/v1/runs/r1/cancel", http.StatusForbidden},
-		{"operator cancels", []string{controller.ScopeRunsControl}, http.MethodPost, "/api/v1/runs/r1/cancel", http.StatusNoContent},
-		{"operator cannot delete", []string{controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/runs/r1", http.StatusForbidden},
-		{"admin deletes", []string{controller.ScopeAdmin}, http.MethodDelete, "/api/v1/runs/r1", http.StatusNoContent},
-		{"reader cannot approve", []string{controller.ScopeRunsRead}, http.MethodPost, "/api/v1/runs/r1/approvals/gate", http.StatusForbidden},
-		{"approver approves", []string{controller.ScopeApprovalsWrite}, http.MethodPost, "/api/v1/runs/r1/approvals/gate", http.StatusNoContent},
+		{"reader cannot cancel", []string{store.ScopeRunsRead}, http.MethodPost, "/api/v1/runs/r1/cancel", http.StatusForbidden},
+		{"operator cancels", []string{store.ScopeRunsControl}, http.MethodPost, "/api/v1/runs/r1/cancel", http.StatusNoContent},
+		{"operator cannot delete", []string{store.ScopeRunsControl}, http.MethodDelete, "/api/v1/runs/r1", http.StatusForbidden},
+		{"admin deletes", []string{store.OperatorScope}, http.MethodDelete, "/api/v1/runs/r1", http.StatusNoContent},
+		{"reader cannot approve", []string{store.ScopeRunsRead}, http.MethodPost, "/api/v1/runs/r1/approvals/gate", http.StatusForbidden},
+		{"approver approves", []string{store.ScopeApprovalsWrite}, http.MethodPost, "/api/v1/runs/r1/approvals/gate", http.StatusNoContent},
 		{"scopeless session reads nothing", nil, http.MethodGet, "/api/v1/runs", http.StatusForbidden},
-		{"reader reads crons", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/crons", http.StatusNoContent},
-		{"reader reads one cron", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/crons/crn_1", http.StatusNoContent},
-		{"reader cannot pause a cron", []string{controller.ScopeRunsRead}, http.MethodPost, "/api/v1/crons/crn_1/pause", http.StatusForbidden},
-		{"reader cannot push crons", []string{controller.ScopeRunsRead}, http.MethodPut, "/api/v1/crons/repos", http.StatusForbidden},
-		{"operator pushes crons", []string{controller.ScopeRunsControl}, http.MethodPut, "/api/v1/crons/repos", http.StatusNoContent},
-		{"operator runs a cron", []string{controller.ScopeRunsControl}, http.MethodPost, "/api/v1/crons/crn_1/run", http.StatusNoContent},
-		{"operator clears an override", []string{controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/crons/crn_1/override", http.StatusNoContent},
+		{"reader reads crons", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/crons", http.StatusNoContent},
+		{"reader reads one cron", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/crons/crn_1", http.StatusNoContent},
+		{"reader cannot pause a cron", []string{store.ScopeRunsRead}, http.MethodPost, "/api/v1/crons/crn_1/pause", http.StatusForbidden},
+		{"reader cannot push crons", []string{store.ScopeRunsRead}, http.MethodPut, "/api/v1/crons/repos", http.StatusForbidden},
+		{"operator pushes crons", []string{store.ScopeRunsControl}, http.MethodPut, "/api/v1/crons/repos", http.StatusNoContent},
+		{"operator runs a cron", []string{store.ScopeRunsControl}, http.MethodPost, "/api/v1/crons/crn_1/run", http.StatusNoContent},
+		{"operator clears an override", []string{store.ScopeRunsControl}, http.MethodDelete, "/api/v1/crons/crn_1/override", http.StatusNoContent},
 		{"scopeless session reads no crons", nil, http.MethodGet, "/api/v1/crons", http.StatusForbidden},
-		{"reader searches logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusNoContent},
-		{"reader reads run logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1", http.StatusNoContent},
-		{"reader streams node logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1/n1/stream", http.StatusNoContent},
-		{"run reader cannot read logs", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusForbidden},
+		{"reader searches logs", []string{store.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusNoContent},
+		{"reader reads run logs", []string{store.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1", http.StatusNoContent},
+		{"reader streams node logs", []string{store.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1/n1/stream", http.StatusNoContent},
+		{"run reader cannot read logs", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusForbidden},
 		{"scopeless session reads no logs", nil, http.MethodGet, "/api/v1/logs/r1/n1", http.StatusForbidden},
-		{"reader reads github app", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app", http.StatusNoContent},
-		{"reader reads installation repositories", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app/installations/42/repositories", http.StatusNoContent},
-		{"reader reads subscriptions", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app/triggers", http.StatusNoContent},
-		{"editor cannot subscribe", []string{controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsControl}, http.MethodPut, "/api/v1/team/github-app/triggers", http.StatusForbidden},
-		{"editor cannot unsubscribe", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/team/github-app/triggers", http.StatusForbidden},
-		{"editor cannot disconnect", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/team/github-app/installations/42", http.StatusForbidden},
-		{"owner subscribes", []string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, http.MethodPut, "/api/v1/team/github-app/triggers", http.StatusNoContent},
-		{"owner disconnects", []string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/team/github-app/installations/42", http.StatusNoContent},
+		{"reader reads github app", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app", http.StatusNoContent},
+		{"reader reads installation repositories", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app/installations/42/repositories", http.StatusNoContent},
+		{"reader reads subscriptions", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app/triggers", http.StatusNoContent},
+		{"editor cannot subscribe", []string{store.ScopeRunsRead, store.ScopeRunsWrite, store.ScopeRunsControl}, http.MethodPut, "/api/v1/team/github-app/triggers", http.StatusForbidden},
+		{"editor cannot unsubscribe", []string{store.ScopeRunsRead, store.ScopeRunsControl}, http.MethodDelete, "/api/v1/team/github-app/triggers", http.StatusForbidden},
+		{"editor cannot disconnect", []string{store.ScopeRunsRead, store.ScopeRunsControl}, http.MethodDelete, "/api/v1/team/github-app/installations/42", http.StatusForbidden},
+		{"owner subscribes", []string{store.ScopeRunsRead, store.ScopeTeamAdmin}, http.MethodPut, "/api/v1/team/github-app/triggers", http.StatusNoContent},
+		{"owner disconnects", []string{store.ScopeRunsRead, store.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/team/github-app/installations/42", http.StatusNoContent},
 		{"scopeless session reads no github app", nil, http.MethodGet, "/api/v1/team/github-app", http.StatusForbidden},
-		{"reader lists secrets", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/secrets", http.StatusNoContent},
+		{"reader lists secrets", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/secrets", http.StatusNoContent},
 		{"scopeless session lists no secrets", nil, http.MethodGet, "/api/v1/secrets", http.StatusForbidden},
-		{"editor cannot write a secret", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodPost, "/api/v1/secrets", http.StatusForbidden},
-		{"editor cannot delete a secret", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusForbidden},
-		{"owner writes a secret", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
-		{"owner deletes a secret", []string{controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusNoContent},
-		{"operator writes a secret", []string{controller.ScopeAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
-		{"reader reads billing", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/billing", http.StatusNoContent},
-		{"editor cannot check out", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodPost, "/api/v1/team/billing/checkout", http.StatusForbidden},
-		{"owner checks out", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/billing/checkout", http.StatusNoContent},
-		{"reader lists git credentials", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/git-credentials", http.StatusNoContent},
-		{"editor cannot store a git credential", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodPost, "/api/v1/team/git-credentials", http.StatusForbidden},
-		{"owner stores a git credential", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/git-credentials", http.StatusNoContent},
-		{"owner confirms a git credential", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/git-credentials/github.com/confirm", http.StatusNoContent},
-		{"owner deletes a git credential", []string{controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/team/git-credentials/github.com", http.StatusNoContent},
-		{"reader cannot list credential releases", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/git-credentials/releases", http.StatusForbidden},
-		{"owner lists credential releases", []string{controller.ScopeTeamAdmin}, http.MethodGet, "/api/v1/team/git-credentials/releases", http.StatusNoContent},
-		{"editor cannot opt a machine in", []string{controller.ScopeRunsRead, controller.ScopeRunsWrite}, http.MethodPut, "/api/v1/team/runner-tokens/swr_ab12/git-credentials", http.StatusForbidden},
-		{"owner opts a machine in", []string{controller.ScopeTeamAdmin}, http.MethodPut, "/api/v1/team/runner-tokens/swr_ab12/git-credentials", http.StatusNoContent},
+		{"editor cannot write a secret", []string{store.ScopeRunsRead, store.ScopeRunsControl}, http.MethodPost, "/api/v1/secrets", http.StatusForbidden},
+		{"editor cannot delete a secret", []string{store.ScopeRunsRead, store.ScopeRunsControl}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusForbidden},
+		{"owner writes a secret", []string{store.ScopeTeamAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
+		{"owner deletes a secret", []string{store.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusNoContent},
+		{"operator writes a secret", []string{store.OperatorScope}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
+		{"reader reads billing", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/team/billing", http.StatusNoContent},
+		{"editor cannot check out", []string{store.ScopeRunsRead, store.ScopeRunsControl}, http.MethodPost, "/api/v1/team/billing/checkout", http.StatusForbidden},
+		{"owner checks out", []string{store.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/billing/checkout", http.StatusNoContent},
+		{"reader lists git credentials", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/team/git-credentials", http.StatusNoContent},
+		{"editor cannot store a git credential", []string{store.ScopeRunsRead, store.ScopeRunsControl}, http.MethodPost, "/api/v1/team/git-credentials", http.StatusForbidden},
+		{"owner stores a git credential", []string{store.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/git-credentials", http.StatusNoContent},
+		{"owner confirms a git credential", []string{store.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/git-credentials/github.com/confirm", http.StatusNoContent},
+		{"owner deletes a git credential", []string{store.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/team/git-credentials/github.com", http.StatusNoContent},
+		{"reader cannot list credential releases", []string{store.ScopeRunsRead}, http.MethodGet, "/api/v1/team/git-credentials/releases", http.StatusForbidden},
+		{"owner lists credential releases", []string{store.ScopeTeamAdmin}, http.MethodGet, "/api/v1/team/git-credentials/releases", http.StatusNoContent},
+		{"editor cannot opt a machine in", []string{store.ScopeRunsRead, store.ScopeRunsWrite}, http.MethodPut, "/api/v1/team/runner-tokens/swr_ab12/git-credentials", http.StatusForbidden},
+		{"owner opts a machine in", []string{store.ScopeTeamAdmin}, http.MethodPut, "/api/v1/team/runner-tokens/swr_ab12/git-credentials", http.StatusNoContent},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -184,7 +184,7 @@ func TestProxy_SecretsResponsesAreNoStore(t *testing.T) {
 	} {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {
 			t.Parallel()
-			handler, _ := proxyTestDashboard(t, []string{controller.ScopeTeamAdmin, controller.ScopeRunsRead})
+			handler, _ := proxyTestDashboard(t, []string{store.ScopeTeamAdmin, store.ScopeRunsRead})
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, proxyTestRequest(test.method, test.path))
 			if rec.Code != http.StatusNoContent {
@@ -239,31 +239,31 @@ func TestLogsProxyRoutes_ScopesMatchLogsRegistrations(t *testing.T) {
 func controllerRouteScopes(t *testing.T) map[string][]string {
 	t.Helper()
 	return routeScopes(t, "../../pkg/controller/server.go", map[string]string{
-		"ScopeRunsRead":       controller.ScopeRunsRead,
-		"ScopeRunsWrite":      controller.ScopeRunsWrite,
-		"ScopeRunsControl":    controller.ScopeRunsControl,
-		"ScopeNodesClaim":     controller.ScopeNodesClaim,
-		"ScopeLogsRead":       controller.ScopeLogsRead,
-		"ScopeLogsWrite":      controller.ScopeLogsWrite,
-		"ScopeTriggersRead":   controller.ScopeTriggersRead,
-		"ScopeTriggersClaim":  controller.ScopeTriggersClaim,
-		"ScopeRunsState":      controller.ScopeRunsState,
-		"ScopeSecretsRead":    controller.ScopeSecretsRead,
-		"ScopeApprovalsWrite": controller.ScopeApprovalsWrite,
-		"ScopeTeamAdmin":      controller.ScopeTeamAdmin,
-		"ScopeAdmin":          controller.ScopeAdmin,
-		"ScopeCreditsGrant":   controller.ScopeCreditsGrant,
-		"ScopeClaimsLaunch":   controller.ScopeClaimsLaunch,
+		"ScopeRunsRead":       store.ScopeRunsRead,
+		"ScopeRunsWrite":      store.ScopeRunsWrite,
+		"ScopeRunsControl":    store.ScopeRunsControl,
+		"ScopeNodesClaim":     "nodes.claim",
+		"ScopeLogsRead":       store.ScopeLogsRead,
+		"ScopeLogsWrite":      "logs.write",
+		"ScopeTriggersRead":   store.ScopeTriggersRead,
+		"ScopeTriggersClaim":  "triggers.claim",
+		"ScopeRunsState":      "runs.state",
+		"ScopeSecretsRead":    "secrets.read",
+		"ScopeApprovalsWrite": store.ScopeApprovalsWrite,
+		"ScopeTeamAdmin":      store.ScopeTeamAdmin,
+		"ScopeAdmin":          store.OperatorScope,
+		"ScopeCreditsGrant":   "credits.grant",
+		"ScopeClaimsLaunch":   store.LaunchScope,
 	})
 }
 
 func logsRouteScopes(t *testing.T) map[string][]string {
 	t.Helper()
 	return routeScopes(t, "../../pkg/logs/server.go", map[string]string{
-		"scopeLogsRead":   controller.ScopeLogsRead,
-		"scopeLogsWrite":  controller.ScopeLogsWrite,
-		"scopeAdmin":      controller.ScopeAdmin,
-		"scopeLogsDelete": controller.ScopeLogsDelete,
+		"scopeLogsRead":   store.ScopeLogsRead,
+		"scopeLogsWrite":  "logs.write",
+		"scopeAdmin":      store.OperatorScope,
+		"scopeLogsDelete": store.LogsDeleteScope,
 		"scopeLogsClaim":  "logs.claim",
 	})
 }

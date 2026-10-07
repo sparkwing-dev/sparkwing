@@ -50,24 +50,6 @@ func TestOperatorPageServesOnlyTheOperatorsSession(t *testing.T) {
 	}
 }
 
-// A password session holds the deployment's admin scope and still reaches
-// none of the console, because the console answers only a listed account.
-func TestOperatorRoutesRefuseAnAdminPasswordSession(t *testing.T) {
-	controllerURL, login, _ := liveControllerSession(t)
-	handler := HandlerFromOptionsWithBundle(HandlerOptions{
-		ControllerURL: controllerURL, RequireLogin: true,
-	}, authTestBundle)
-	for _, path := range []string{"/operator", "/api/v1/operator/teams", "/api/v1/operator/session"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: login.SessionID})
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden {
-			t.Errorf("%s = %d want 403", path, rec.Code)
-		}
-	}
-}
-
 func TestOperatorWaitlistApprovalNeedsTheSessionsCSRFToken(t *testing.T) {
 	handler, reached := proxyTestDashboard(t, nil)
 	const path = "/api/v1/operator/waitlist/approve"

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -25,7 +24,7 @@ func identityDashboard(t *testing.T, principal string) (http.Handler, func() []s
 		if r.URL.Path == "/api/v1/auth/session" {
 			_ = json.NewEncoder(w).Encode(sessionResp{
 				Principal: principal,
-				Scopes:    []string{controller.ScopeLogsRead, controller.ScopeRunsRead},
+				Scopes:    []string{store.ScopeLogsRead, store.ScopeRunsRead},
 				CSRFToken: proxyTestCSRF,
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			})

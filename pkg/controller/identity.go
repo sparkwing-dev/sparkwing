@@ -147,15 +147,20 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, raw string
 // safety: an account's scopes come from its membership as it stands now, so a demotion or removal
 // takes effect on the next request rather than at session expiry.
 func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time) (*Principal, error) {
+	p, _, err := s.lookupSession(ctx, raw, now)
+	return p, err
+}
+
+func (s *Server) lookupSession(ctx context.Context, raw string, now time.Time) (*Principal, *store.Session, error) {
 	sess, err := s.store.LookupSessionAndRenew(ctx, raw, now, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if s.sessionExpired(sess.CreatedAt, now) {
 		if err := s.store.DeleteSession(raw); err != nil {
 			s.logger.Warn("deleting an expired session failed", "error", err.Error())
 		}
-		return nil, errSessionLifetimeExceeded
+		return nil, nil, errSessionLifetimeExceeded
 	}
 	p := &Principal{
 		Name: sess.Principal, Kind: store.TokenKindUser, Team: sess.Team,
@@ -163,21 +168,21 @@ func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time
 	}
 	if sess.AccountID == "" {
 		p.Scopes = sess.Scopes
-		return p, nil
+		return p, sess, nil
 	}
 	// safety: an account exists only under a multi-team license, so a session it opened stops
 	// authenticating the moment the license is gone or expires, not only new sign-ins.
 	if !s.MultiTeam() {
-		return nil, errAccountSessionsDisabled
+		return nil, nil, errAccountSessionsDisabled
 	}
 	p.AccountID = sess.AccountID
 	role, err := s.memberRole(ctx, sess.Team, sess.AccountID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.Role = string(role)
 	p.Scopes = ScopesForRole(role)
-	return p, nil
+	return p, sess, nil
 }
 
 // safety: a missing team or membership answers the empty role, which carries no scope.
