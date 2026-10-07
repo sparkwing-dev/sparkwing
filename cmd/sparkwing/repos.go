@@ -18,6 +18,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -268,6 +269,7 @@ func runReposUpdate(args []string) error {
 	// The first Ctrl-C ends the walk and lets the repo in flight restore
 	// its module files; the second one, with the handler gone, kills.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
 	defer stop()
 	go func() {
 		<-ctx.Done()
@@ -511,11 +513,12 @@ func (execOps) Restore(sparkwingDir string, raw []byte) error {
 
 func (o execOps) Bump(sparkwingDir, version string) error {
 	target := "github.com/sparkwing-dev/sparkwing@" + version
-	if out, err := runGoModCmd(o.context(), sparkwingDir, "get", target); err != nil {
-		return fmt.Errorf("go get %s: %v: %s", target, err, out)
+	ctx := gotoolchain.WithSession(o.context(), nil, nil)
+	if out, err := runGoModCmd(ctx, sparkwingDir, "get", target); err != nil {
+		return fmt.Errorf("go get %s: %w: %s", target, err, out)
 	}
-	if out, err := runGoModCmd(o.context(), sparkwingDir, "mod", "tidy"); err != nil {
-		return fmt.Errorf("go mod tidy: %v: %s", err, out)
+	if out, err := runGoModCmd(ctx, sparkwingDir, "mod", "tidy"); err != nil {
+		return fmt.Errorf("go mod tidy: %w: %s", err, out)
 	}
 	return nil
 }
@@ -560,13 +563,23 @@ type modSnapshot struct {
 }
 
 func runGoModCmd(ctx context.Context, dir string, args ...string) (string, error) {
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
+	env, err := gotoolchain.BuildEnv(ctx, dir, nil, "")
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err = cmd.Run()
+	if err != nil {
+		if explanation := gotoolchain.ExplainOutput(ctx, out.String(), env); explanation != nil {
+			return "", explanation
+		}
+	}
 	return strings.TrimSpace(out.String()), err
 }
 

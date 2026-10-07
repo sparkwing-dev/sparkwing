@@ -1684,6 +1684,11 @@ var cmdRun = Command{
 	Description: `Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline.
 
+Pipeline-module builds honor the highest go directive in go.mod and an active
+resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
+for the build only. GOTOOLCHAIN=local refuses with installation or unpinning
+guidance. Pipeline steps retain the original environment.
+
 Runner options use the --sw- prefix. Unknown --sw- options fail before
 execution setup. Other arguments pass to the pipeline. Put -- before
 pipeline arguments that resemble runner options; every argument after the
@@ -1998,6 +2003,11 @@ following them. Windows access permissions are reported as unverified.
 The report includes daemon reachability, repeated admission rejections,
 version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
+
+In a project, the Go toolchain finding reports the running Go version,
+GOTOOLCHAIN and its source, and the .sparkwing module's Go floor. It identifies
+fixed pins sparkwing will raise for builds and a blocking GOTOOLCHAIN=local,
+with the installation or unpinning command needed to proceed.
 
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.
