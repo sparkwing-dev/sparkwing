@@ -424,7 +424,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 	}
 	count := func(t *testing.T, s *store.Store, query string, args ...any) int {
 		var n int
-		if err := s.DB().QueryRow(query, args...).Scan(&n); err != nil {
+		if err := s.DB().QueryRow(storetest.Rebind(s, query), args...).Scan(&n); err != nil {
 			t.Fatalf("%s: %v", query, err)
 		}
 		return n
