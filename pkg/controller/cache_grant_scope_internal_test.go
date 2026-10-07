@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +204,15 @@ func TestCacheGrantKeepsTheRepositoryPathCase(t *testing.T) {
 	}
 	if a, b := scopeOf("gh-upper", "https://github.com/Acme/App.git"), scopeOf("gh-lower", "git@github.com:acme/app.git"); a != b || a != "github.com/acme/app" {
 		t.Fatalf("GitHub spellings of one repository = %q and %q", a, b)
+	}
+	for i, pair := range [][2]string{
+		{"https://github.com:443/Acme/App.git", "https://github.com:443/acme/app.git"},
+		{"ssh://git@ssh.github.com:443/Acme/App.git", "ssh://git@ssh.github.com:443/acme/app.git"},
+	} {
+		a, b := scopeOf("gh-alias-upper-"+strconv.Itoa(i), pair[0]), scopeOf("gh-alias-lower-"+strconv.Itoa(i), pair[1])
+		if a != b || !strings.Contains(a, ":443/") {
+			t.Fatalf("GitHub spellings %q and %q = %q and %q, want one scope keeping the port", pair[0], pair[1], a, b)
+		}
 	}
 }
 

@@ -20,6 +20,10 @@ func Identity(raw string) (string, error) { return identity(raw, true) }
 // serve acme/App and acme/app as two repositories.
 func CaseIdentity(raw string) (string, error) { return identity(raw, false) }
 
+// safety: GitHub serves its repositories at these hosts, on any port, and matches owner and
+// repository names without regard to case, so folding a path here never merges two repositories.
+var caseInsensitiveHosts = map[string]bool{"github.com": true, "ssh.github.com": true}
+
 func identity(raw string, foldPath bool) (string, error) {
 	validated, err := ValidateCloneURL(raw)
 	if err != nil {
@@ -42,7 +46,7 @@ func identity(raw string, foldPath bool) (string, error) {
 	}
 	host = strings.TrimRight(strings.ToLower(host), ".")
 	repoPath = strings.Trim(repoPath, "/")
-	if foldPath || host == "github.com" {
+	if foldPath || caseInsensitiveHosts[(&url.URL{Host: host}).Hostname()] {
 		repoPath = strings.ToLower(repoPath)
 	}
 	repoPath = strings.Trim(strings.TrimSuffix(repoPath, ".git"), "/")
