@@ -230,8 +230,8 @@ unlock.
 
 ### Docs
 
-- **docs:** [Environment variables](docs/environment-variables.md) lists every `SPARKWING_*` variable the code reads, as configuration, runtime, plumbing, test or undecided, with the page that describes each
-  The docs contract test now fails when a variable is missing from that page or the page lists one nothing reads.
+- **docs:** [Environment variables](docs/environment-variables.md) lists every variable the code reads, as configuration, runtime, plumbing, test, other tools or undecided, with the page that describes each
+  The docs contract test now fails when a variable is missing from that page or the page lists one nothing reads. It follows reads through an injected `os.Getenv`, scans of an environment slice and names without the `SPARKWING_` prefix, which added the object-store budgets, the controller's egress budgets, the GitHub App secrets, `SPARKWING_SUBMIT_ENV_ALLOW`, `CACHE_POD_URL` and the names other tools define.
 
 - **security:** Record the accepted trust facts: editors can read masked secrets through a runner token they mint, the launcher token reaches every team's claim tokens, a run's plan declares its own secrets, pipeline stdout outside the exec helper is unmasked in container logs, and `docker -e K=V` is visible in a shared host's process table
 

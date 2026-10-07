@@ -1,9 +1,10 @@
 # Environment variables
 
-Every `SPARKWING_*` variable the code reads, what kind it is, and where it is
-described. The docs contract test walks the source for environment reads and
-fails when a variable is missing from this page, or when this page names a
-variable nothing reads.
+Every environment variable the code reads, what kind it is, and where it is
+described. The docs contract test walks the source for environment reads,
+including reads through an injected `os.Getenv` and scans of an environment
+slice, and fails when a variable is missing from this page, or when this page
+names a variable nothing reads.
 
 Kinds:
 
@@ -17,6 +18,8 @@ Kinds:
   side may be built from an older SDK, so it stays an environment variable
   rather than a flag. Do not set it.
 - **test**: only the test suites set it.
+- **other tools**: a name another tool defines, which Sparkwing reads as that
+  tool documents it.
 - **undecided**: an operator knob without a page yet; each one waits on a
   decision to document it or remove it.
 
@@ -59,15 +62,41 @@ Kinds:
 | `SPARKWING_REQUIRE_AUTH` | [security](security.md) |
 | `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
+| `CACHE_POD_URL` | [gitcache](gitcache.md) |
+| `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
+| `SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` | [observability](observability.md) |
+| `SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS` | [observability](observability.md) |
+| `SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS` | [observability](observability.md) |
+| `SPARKWING_GITHUB_APP_PRIVATE_KEY` | [github-app](github-app.md) |
+| `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` | [github-app](github-app.md) |
+| `SPARKWING_GITHUB_APP_WEBHOOK_SECRET` | [github-app](github-app.md) |
+| `SPARKWING_OBJECT_STORE_PUT_PER_MINUTE` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_PUT_PER_DAY` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_GET_PER_MINUTE` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_GET_PER_DAY` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_LIST_PER_MINUTE` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_LIST_PER_DAY` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_DELETE_PER_MINUTE` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_DELETE_PER_DAY` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_BREAKER` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_TRIP_RESET` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | [observability](observability.md) |
+| `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | [observability](observability.md) |
 
-## Configuration: `sparkwing-runner` and the Jobs it starts
+## Runtime: the Jobs and children a runner starts
+
+Sparkwing sets these for a Job, a trigger's `handle-trigger` child or a node
+process; the runner itself reads its settings from flags. The `sparkwing` CLI
+also reads the URLs as a fallback for its own `--controller` and `--logs`.
 
 | Variable | Described in |
 |---|---|
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_LOGS_URL` | [architecture](architecture.md) |
-| `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 | `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
@@ -90,7 +119,6 @@ Kinds:
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-fleet](cli-fleet.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
 | `SPARKWING_LOGS_DROP_POLICY` | [observability](observability.md) |
-| `SPARKWING_MODE` | [ci-embedded](ci-embedded.md) |
 | `SPARKWING_NO_AUTO_REGISTER` | [cli-configure](cli-configure.md) |
 | `SPARKWING_NO_BINCACHE` | [caching](caching.md) |
 | `SPARKWING_NO_SPARKS_RESOLVE` | [ci-embedded](ci-embedded.md) |
@@ -104,7 +132,10 @@ Kinds:
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
 | `SPARKWING_VERSION_HOLD` | [cli-version](cli-version.md) |
 | `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |
-| `SPARKWING_WORKERS` | [ci-embedded](ci-embedded.md) |
+| `SPARKWING_BOX_ID` | [sdk](sdk.md) |
+| `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
+| `SPARKWING_SUBMIT_ENV_ALLOW` | [cli-run](cli-run.md) |
+| `TYPESAFE_API_KEY` | [admission](admission.md) |
 
 ## Configuration: release tooling
 
@@ -112,11 +143,6 @@ Kinds:
 |---|---|
 | `SPARKWING_RELEASE_SIGNING_KEY` | [security](security.md) |
 | `SPARKWING_UPDATE_SIGNING_KEY` | [security](security.md) |
-
-## Configuration: `sparkwing-web`
-
-| Variable | Described in |
-|---|---|
 
 ## Runtime
 
@@ -131,11 +157,9 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_RUNNER_LABELS` | [architecture](architecture.md) |
 | `SPARKWING_API_SOCKET` | [architecture](architecture.md) |
 | `SPARKWING_PARENT_LIVENESS_FD` | [architecture](architecture.md) |
-| `SPARKWING_BOX_ID` | [sdk](sdk.md) |
 | `SPARKWING_PRIORITY` | [sdk](sdk.md) |
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
 | `SPARKWING_CACHE_GRANT` | [gitcache](gitcache.md) |
-| `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
 | `SPARKWING_PIPELINE_REV` | [local-execution](local-execution.md) |
 | `SPARKWING_RUN_HANDLE_FILE` | [local-execution](local-execution.md) |
@@ -186,6 +210,8 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_SECRETS_PROFILE` | Carries `--sw-secrets` to the pipeline binary. |
 | `SPARKWING_STOP_AT` | Carries `--sw-stop-at` to the pipeline binary. |
 | `SPARKWING_NODE_SPEC_HASH` | Fences a claimed node to the plan it was claimed under, across the exec into the node process. |
+| `SPARKWING_MODE` | Carries `--sw-mode` to the pipeline binary. |
+| `SPARKWING_WORKERS` | Carries `--sw-workers` to the pipeline binary. |
 
 ## Test
 
@@ -194,6 +220,49 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_TESTLEAK_HOST` | Marks the re-executed test binary in `internal/testleak`; it crosses exec, so it cannot be a flag. |
 | `SPARKWING_TEST_PG_URL` | Points the store test suite at a PostgreSQL database. |
 | `SPARKWING_TEST_STORE` | Selects the store backend the store test suite runs against. |
+
+## Other tools
+
+| Variable | Defined by |
+|---|---|
+| `ACTIONS_ID_TOKEN_REQUEST_TOKEN` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
+| `ACTIONS_ID_TOKEN_REQUEST_URL` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
+| `GITHUB_REPOSITORY` | GitHub Actions |
+| `GITHUB_RUN_ID` | GitHub Actions |
+| `KUBECONFIG` | Kubernetes client configuration |
+| `POD_NAME` | Kubernetes downward API |
+| `POD_NAMESPACE` | Kubernetes downward API |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry; see [observability](observability.md) |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OpenTelemetry |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OpenTelemetry |
+| `OTEL_SERVICE_NAME` | OpenTelemetry |
+| `OTEL_TRACES_SAMPLER_ARG` | OpenTelemetry |
+| `GIT_CONFIG_COUNT` | git |
+| `GIT_INDEX_FILE` | git |
+| `GIT_SSH` | git |
+| `GIT_SSH_COMMAND` | git |
+| `SSH_AUTH_SOCK` | OpenSSH agent |
+| `GOBIN` | Go toolchain |
+| `GOMODCACHE` | Go toolchain |
+| `GOPATH` | Go toolchain |
+| `GOPRIVATE` | Go toolchain |
+| `GOPROXY` | Go toolchain |
+| `GOWORK` | Go toolchain |
+| `PATH` | the operating system |
+| `SHELL` | the operating system |
+| `USER` | the operating system |
+| `LOCALAPPDATA` | Windows |
+| `MSYSTEM` | MSYS2 and Git for Windows |
+| `WSL_DISTRO_NAME` | Windows Subsystem for Linux |
+| `WSL_INTEROP` | Windows Subsystem for Linux |
+| `XDG_CACHE_HOME` | XDG Base Directory specification |
+| `XDG_CONFIG_HOME` | XDG Base Directory specification |
+| `XDG_RUNTIME_DIR` | XDG Base Directory specification |
+| `CI` | CI providers |
+| `CLICOLOR_FORCE` | terminal convention |
+| `NO_COLOR` | terminal convention |
+| `TERM` | terminal convention |
+| `TERM_PROGRAM` | terminal convention |
 
 ## Undecided
 
@@ -205,3 +274,4 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NAMESPACE` | Kubernetes namespace for `sparkwing debug attach`; only tests set it. |
 | `SPARKWING_AUTO_REGISTER_WORKTREES` | `1` lets automatic repo registration include git worktrees, which it otherwise skips; nothing sets it. |
 | `SPARKWING_DOCS_BASE_URL` | Base URL that `sparkwing docs` links point at; tests set it, and an earlier changelog entry offers it. |
+| `SPARKS_GO_BIN` | The `go` binary the sparks resolver runs when it writes a pipeline's module overlay; nothing sets it. |

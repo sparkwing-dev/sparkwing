@@ -8,6 +8,7 @@ import (
 	"go/printer"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,10 +81,32 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 
 var userNamedEnvReads = map[string]string{
 	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
+	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
 	"pkg/storage/storeurl/spec.go: name":                                                    "a pipeline's url_source: names the variable holding its state URL",
 	"sparkwing/inputs/inputs.go: name":                                                      "a pipeline declares which variables its inputs read",
 	"sparkwing/source_resolver.go: key":                                                     "a secret source's configured prefix plus the secret's name",
 }
+
+// safety: a computed read hides the names it produces, so each one is listed
+// here and the page check covers them like any other read.
+var constructedEnvReads = map[string][]string{
+	"internal/objectguard/config.go: classEnv(c, WindowMinute)": {
+		"SPARKWING_OBJECT_STORE_PUT_PER_MINUTE", "SPARKWING_OBJECT_STORE_GET_PER_MINUTE",
+		"SPARKWING_OBJECT_STORE_LIST_PER_MINUTE", "SPARKWING_OBJECT_STORE_DELETE_PER_MINUTE",
+	},
+	"internal/objectguard/config.go: classEnv(c, WindowDay)": {
+		"SPARKWING_OBJECT_STORE_PUT_PER_DAY", "SPARKWING_OBJECT_STORE_GET_PER_DAY",
+		"SPARKWING_OBJECT_STORE_LIST_PER_DAY", "SPARKWING_OBJECT_STORE_DELETE_PER_DAY",
+	},
+	// safety: only sparkwing-controller hands egress.Bind an environment.
+	"internal/egress/flags.go: name": {
+		"SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES", "SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS",
+		"SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS",
+	},
+	"internal/executorinfo/platform.go: key": {"WSL_INTEROP", "WSL_DISTRO_NAME"},
+}
+
+var envPageRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]*)` \\|")
 
 func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	if testing.Short() {
@@ -94,8 +117,13 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, site := range dynamic {
+		if constructed, ok := constructedEnvReads[site]; ok {
+			names = append(names, constructed...)
+			continue
+		}
 		if _, ok := userNamedEnvReads[site]; !ok {
-			t.Errorf("%s computes an environment variable name; document a caller-selected name in userNamedEnvReads with its source", site)
+			t.Errorf("%s computes an environment variable name; list what it produces in constructedEnvReads, "+
+				"or document a caller-selected name in userNamedEnvReads with its source", site)
 		}
 	}
 	for site := range userNamedEnvReads {
@@ -103,6 +131,13 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 			t.Errorf("userNamedEnvReads acknowledges %q, which the walk no longer finds; drop it", site)
 		}
 	}
+	for site := range constructedEnvReads {
+		if !slices.Contains(dynamic, site) {
+			t.Errorf("constructedEnvReads lists %q, which the walk no longer finds; drop it", site)
+		}
+	}
+	slices.Sort(names)
+	names = slices.Compact(names)
 	if len(names) == 0 {
 		t.Fatal("found no environment variable reads; source walk is incomplete")
 	}
@@ -132,7 +167,11 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 			t.Errorf("docs/environment-variables.md does not list %s, which the code reads", name)
 		}
 	}
-	for _, name := range envVarTokens.FindAllString(reference, -1) {
+	listed := envVarTokens.FindAllString(reference, -1)
+	for _, row := range envPageRow.FindAllStringSubmatch(reference, -1) {
+		listed = append(listed, row[1])
+	}
+	for _, name := range listed {
 		if !read[name] {
 			t.Errorf("docs/environment-variables.md lists %s, which nothing reads; remove its row", name)
 		}
@@ -172,9 +211,55 @@ func TestEnvVarWalkReadsNestedPackagesAndSkipsNestedModules(t *testing.T) {
 	if len(dynamic) != 0 {
 		t.Errorf("reported dynamic reads %v, want none", dynamic)
 	}
-	want := "SPARKWING_NESTED_VAR,SPARKWING_ROOT_VAR"
+	want := "KUBECONFIG,SPARKWING_NESTED_VAR,SPARKWING_ROOT_VAR"
 	if got := strings.Join(names, ","); got != want {
 		t.Fatalf("envVarsRead found %q, want %q", got, want)
+	}
+}
+
+func TestEnvVarWalkFollowsAnInjectedGetenv(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureModule(t, root, map[string]string{
+		"go.mod": "module fake\n\ngo 1.26\n",
+		"cfg.go": "package main\n\nconst prefix = \"SPARKWING_FOLDED_\"\nconst folded = prefix + \"NAME\"\n\n" +
+			"func load(getenv func(string) string) string { return getenv(\"SPARKWING_INJECTED\") + inner(getenv, folded) }\n\n" +
+			"func inner(getenv func(string) string, name string) string { return getenv(name) }\n\n" +
+			"func unrelated(f func(string) string) string { return f(\"SPARKWING_NOT_ENV\") }\n",
+		"lookup.go": "package main\n\nimport \"os\"\n\nvar lookupEnv = os.LookupEnv\n\n" +
+			"func lookup() bool { _, ok := lookupEnv(\"SPARKWING_ALIASED\"); return ok }\n",
+		"main.go": "package main\n\nimport (\n\t\"os\"\n\t\"strings\"\n)\n\n" +
+			"var a = load(os.Getenv)\n\nvar b = unrelated(strings.ToUpper)\n\nfunc main() { _ = load(os.Getenv) }\n",
+	})
+	names, dynamic, err := envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dynamic) != 0 {
+		t.Errorf("dynamic reads %v, want every injected read resolved", dynamic)
+	}
+	want := "SPARKWING_ALIASED,SPARKWING_FOLDED_NAME,SPARKWING_INJECTED"
+	if got := strings.Join(names, ","); got != want {
+		t.Errorf("envVarsRead found %q, want %q", got, want)
+	}
+}
+
+func TestEnvVarWalkReadsAnEnvironmentScanButNotAFilter(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureModule(t, root, map[string]string{
+		"go.mod": "module fake\n\ngo 1.26\n",
+		"main.go": "package main\n\nimport (\n\t\"os\"\n\t\"strings\"\n)\n\nconst allowKey = \"SPARKWING_SCANNED\"\n\n" +
+			"func allow() string {\n\tfor _, entry := range os.Environ() {\n\t\tkey, value, ok := strings.Cut(entry, \"=\")\n" +
+			"\t\tif !ok || key != allowKey {\n\t\t\tcontinue\n\t\t}\n\t\treturn value\n\t}\n\treturn \"\"\n}\n\n" +
+			"func strip(env []string) []string {\n\tvar out []string\n\tfor _, entry := range env {\n" +
+			"\t\tname, _, _ := strings.Cut(entry, \"=\")\n\t\tswitch {\n\t\tcase name == \"SPARKWING_DROPPED\":\n" +
+			"\t\tdefault:\n\t\t\tout = append(out, entry)\n\t\t}\n\t}\n\treturn out\n}\n",
+	})
+	names, _, err := envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(names, ","); got != "SPARKWING_SCANNED" {
+		t.Errorf("envVarsRead found %q, want the scanned key alone", got)
 	}
 }
 
@@ -427,8 +512,9 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 	constantValues := stringConstants(parsedFiles)
 	importedDirs := importQualifiers(root, parsedFiles)
 
-	helpers := envHelpers(parsedFiles)
-	forwardedSites := forwardedReads(parsedFiles)
+	readerCalls := envReaderCalls(parsedFiles)
+	helpers := envHelpers(parsedFiles, readerCalls)
+	forwardedSites := forwardedReads(parsedFiles, readerCalls)
 
 	namesRead := map[string]bool{}
 	for path, file := range parsedFiles {
@@ -441,12 +527,18 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 			qualifier: importedDirs[path],
 			values:    constantValues,
 		}
+		for _, name := range envScanReads(file, scope) {
+			namesRead[name] = true
+		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) == 0 {
 				return true
 			}
 			argumentIndex, ok := envReadArg(call.Fun, helpers)
+			if !ok && readerCalls[call.Pos()] {
+				argumentIndex, ok = 0, true
+			}
 			if !ok || argumentIndex >= len(call.Args) {
 				return true
 			}
@@ -458,7 +550,7 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 				dynamic = append(dynamic, fmt.Sprintf("%s: %s", rel, exprText(fileSet, call.Args[argumentIndex])))
 				return true
 			}
-			if strings.HasPrefix(v, envPrefix) {
+			if envNameShape.MatchString(v) {
 				namesRead[v] = true
 			}
 			return true
@@ -522,7 +614,11 @@ type constantScope struct {
 }
 
 func stringConstants(files map[string]*ast.File) map[constantKey]string {
-	values := map[constantKey]map[string]bool{}
+	type pending struct {
+		key  constantKey
+		expr ast.Expr
+	}
+	var specs []pending
 	for path, file := range files {
 		dir := filepath.Dir(path)
 		for _, decl := range file.Decls {
@@ -536,36 +632,67 @@ func stringConstants(files map[string]*ast.File) map[constantKey]string {
 					continue
 				}
 				for i, name := range vs.Names {
-					if i >= len(vs.Values) {
-						continue
+					if i < len(vs.Values) {
+						specs = append(specs, pending{constantKey{dir: dir, name: name.Name}, vs.Values[i]})
 					}
-					lit, ok := vs.Values[i].(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING {
-						continue
-					}
-					v, err := strconv.Unquote(lit.Value)
-					if err != nil {
-						continue
-					}
-					key := constantKey{dir: dir, name: name.Name}
-					if values[key] == nil {
-						values[key] = map[string]bool{}
-					}
-					values[key][v] = true
 				}
 			}
 		}
 	}
+	// safety: a name declared twice in one directory with different values
+	// resolves to neither, so a read of it stays dynamic rather than guessed.
 	out := map[constantKey]string{}
-	for key, vs := range values {
-		if len(vs) != 1 {
-			continue
-		}
-		for v := range vs {
-			out[key] = v
+	disputed := map[constantKey]bool{}
+	for changed := true; changed; {
+		changed = false
+		for _, p := range specs {
+			if disputed[p.key] {
+				continue
+			}
+			v, ok := foldString(p.expr, p.key.dir, out)
+			if !ok {
+				continue
+			}
+			if seen, done := out[p.key]; done {
+				if seen != v {
+					delete(out, p.key)
+					disputed[p.key] = true
+					changed = true
+				}
+				continue
+			}
+			out[p.key] = v
+			changed = true
 		}
 	}
 	return out
+}
+
+func foldString(e ast.Expr, dir string, known map[constantKey]string) (string, bool) {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if x.Kind != token.STRING {
+			return "", false
+		}
+		v, err := strconv.Unquote(x.Value)
+		return v, err == nil
+	case *ast.Ident:
+		v, ok := known[constantKey{dir: dir, name: x.Name}]
+		return v, ok
+	case *ast.ParenExpr:
+		return foldString(x.X, dir, known)
+	case *ast.BinaryExpr:
+		if x.Op != token.ADD {
+			return "", false
+		}
+		left, ok := foldString(x.X, dir, known)
+		if !ok {
+			return "", false
+		}
+		right, ok := foldString(x.Y, dir, known)
+		return left + right, ok
+	}
+	return "", false
 }
 
 func importQualifiers(root string, files map[string]*ast.File) map[string]map[string]string {
@@ -696,7 +823,7 @@ func envReadArg(fun ast.Expr, helpers map[string]int) (int, bool) {
 	return 0, false
 }
 
-func envHelpers(files map[string]*ast.File) map[string]int {
+func envHelpers(files map[string]*ast.File, readerCalls map[token.Pos]bool) map[string]int {
 	out := map[string]int{}
 	for _, file := range files {
 		for _, decl := range file.Decls {
@@ -714,7 +841,7 @@ func envHelpers(files map[string]*ast.File) map[string]int {
 			}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
-				if !ok || !isEnvRead(call.Fun) || len(call.Args) == 0 {
+				if !ok || !(isEnvRead(call.Fun) || readerCalls[call.Pos()]) || len(call.Args) == 0 {
 					return true
 				}
 				ident, ok := call.Args[0].(*ast.Ident)
@@ -731,7 +858,7 @@ func envHelpers(files map[string]*ast.File) map[string]int {
 	return out
 }
 
-func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
+func forwardedReads(files map[string]*ast.File, readerCalls map[token.Pos]bool) map[token.Pos]bool {
 	out := map[token.Pos]bool{}
 	for _, file := range files {
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -751,7 +878,7 @@ func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
 			params := paramNames(functionType)
 			ast.Inspect(body, func(inner ast.Node) bool {
 				call, ok := inner.(*ast.CallExpr)
-				if !ok || !isEnvRead(call.Fun) || len(call.Args) == 0 {
+				if !ok || !(isEnvRead(call.Fun) || readerCalls[call.Pos()]) || len(call.Args) == 0 {
 					return true
 				}
 				if ident, ok := call.Args[0].(*ast.Ident); ok && params[ident.Name] {
@@ -763,6 +890,229 @@ func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
 		})
 	}
 	return out
+}
+
+var envNameShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// safety: a read through a function value hides from a walk of os.Getenv calls,
+// so a package variable bound to os.Getenv or os.LookupEnv, and a parameter a
+// caller hands one to, count too, followed through every function passing it on.
+func envReaderCalls(files map[string]*ast.File) map[token.Pos]bool {
+	decls := map[string][]*ast.FuncDecl{}
+	aliases := map[string]bool{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Body != nil {
+					decls[d.Name.Name] = append(decls[d.Name.Name], d)
+				}
+			case *ast.GenDecl:
+				if d.Tok != token.VAR {
+					continue
+				}
+				for _, spec := range d.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, name := range vs.Names {
+						if i < len(vs.Values) && isEnvFunc(vs.Values[i]) {
+							aliases[name.Name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	marked := map[string]map[int]bool{}
+	readers := func(fn *ast.FuncDecl) map[string]bool {
+		out := maps.Clone(aliases)
+		for i, name := range orderedParams(fn.Type) {
+			if marked[fn.Name.Name][i] {
+				out[name] = true
+			}
+		}
+		return out
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, fns := range decls {
+			for _, fn := range fns {
+				scope := readers(fn)
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					callee := calleeName(call.Fun)
+					for i, arg := range call.Args {
+						if !isEnvFunc(arg) && !isScopedReader(arg, scope) {
+							continue
+						}
+						for _, target := range decls[callee] {
+							if !readerParam(target.Type, i) || marked[callee][i] {
+								continue
+							}
+							if marked[callee] == nil {
+								marked[callee] = map[int]bool{}
+							}
+							marked[callee][i] = true
+							changed = true
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
+	sites := map[token.Pos]bool{}
+	for _, fns := range decls {
+		for _, fn := range fns {
+			scope := readers(fn)
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok && len(call.Args) > 0 && isScopedReader(call.Fun, scope) {
+					sites[call.Pos()] = true
+				}
+				return true
+			})
+		}
+	}
+	return sites
+}
+
+func isEnvFunc(e ast.Expr) bool {
+	return isSelector(e, "os", "Getenv") || isSelector(e, "os", "LookupEnv")
+}
+
+func isScopedReader(e ast.Expr, scope map[string]bool) bool {
+	ident, ok := e.(*ast.Ident)
+	return ok && scope[ident.Name]
+}
+
+func calleeName(fun ast.Expr) string {
+	switch e := fun.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return e.Sel.Name
+	}
+	return ""
+}
+
+func orderedParams(functionType *ast.FuncType) []string {
+	var out []string
+	if functionType == nil || functionType.Params == nil {
+		return out
+	}
+	for _, field := range functionType.Params.List {
+		for _, name := range field.Names {
+			out = append(out, name.Name)
+		}
+	}
+	return out
+}
+
+func readerParam(functionType *ast.FuncType, i int) bool {
+	if functionType.Params == nil {
+		return false
+	}
+	at := 0
+	for _, field := range functionType.Params.List {
+		count := max(len(field.Names), 1)
+		if i < at+count {
+			ft, ok := field.Type.(*ast.FuncType)
+			if !ok || ft.Params == nil || len(ft.Params.List) != 1 || !isIdent(ft.Params.List[0].Type, "string") {
+				return false
+			}
+			if ft.Results == nil {
+				return false
+			}
+			var results []ast.Expr
+			for _, r := range ft.Results.List {
+				for range max(len(r.Names), 1) {
+					results = append(results, r.Type)
+				}
+			}
+			switch len(results) {
+			case 1:
+				return isIdent(results[0], "string")
+			case 2:
+				return isIdent(results[0], "string") && isIdent(results[1], "bool")
+			}
+			return false
+		}
+		at += count
+	}
+	return false
+}
+
+func isIdent(e ast.Expr, name string) bool {
+	ident, ok := e.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+// hack: an environment scan is spotted by shape: strings.Cut(entry, "=") over
+// os.Environ() or a slice named like an environment, its key compared in an if.
+func envScanReads(file *ast.File, scope constantScope) []string {
+	var out []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		loop, ok := n.(*ast.RangeStmt)
+		if !ok || !rangesOverEnvironment(loop.X) {
+			return true
+		}
+		entry, ok := loop.Value.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		keys := map[string]bool{}
+		ast.Inspect(loop.Body, func(inner ast.Node) bool {
+			switch node := inner.(type) {
+			case *ast.AssignStmt:
+				if len(node.Rhs) != 1 || len(node.Lhs) == 0 {
+					return true
+				}
+				call, ok := node.Rhs[0].(*ast.CallExpr)
+				if !ok || len(call.Args) != 2 || !isSelector(call.Fun, "strings", "Cut") || !isIdent(call.Args[0], entry.Name) {
+					return true
+				}
+				if sep, ok := staticString(call.Args[1], scope); !ok || sep != "=" {
+					return true
+				}
+				if key, ok := node.Lhs[0].(*ast.Ident); ok {
+					keys[key.Name] = true
+				}
+			case *ast.IfStmt:
+				// safety: only an if picks one entry to read; a switch over the
+				// key is how a filter drops names, which reads none of them.
+				ast.Inspect(node.Cond, func(c ast.Node) bool {
+					cmp, ok := c.(*ast.BinaryExpr)
+					if !ok || (cmp.Op != token.EQL && cmp.Op != token.NEQ) {
+						return true
+					}
+					for _, pair := range [][2]ast.Expr{{cmp.X, cmp.Y}, {cmp.Y, cmp.X}} {
+						if key, ok := pair[0].(*ast.Ident); ok && keys[key.Name] {
+							if v, ok := staticString(pair[1], scope); ok && envNameShape.MatchString(v) {
+								out = append(out, v)
+							}
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
+		return true
+	})
+	return out
+}
+
+func rangesOverEnvironment(e ast.Expr) bool {
+	if call, ok := e.(*ast.CallExpr); ok {
+		return isSelector(call.Fun, "os", "Environ")
+	}
+	ident, ok := e.(*ast.Ident)
+	return ok && strings.Contains(strings.ToLower(ident.Name), "env")
 }
 
 func paramNames(functionType *ast.FuncType) map[string]bool {
