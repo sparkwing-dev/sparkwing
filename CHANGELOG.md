@@ -172,6 +172,9 @@ unlock.
 
 ### Docs
 
+- **docs:** [Environment variables](docs/environment-variables.md) lists every `SPARKWING_*` variable the code reads, as configuration, runtime, plumbing, test or undecided, with the page that describes each
+  The docs contract test now fails when a variable is missing from that page or the page lists one nothing reads.
+
 - **security:** Record the accepted trust facts: editors can read masked secrets through a runner token they mint, the launcher token reaches every team's claim tokens, a run's plan declares its own secrets, pipeline stdout outside the exec helper is unmasked in container logs, and `docker -e K=V` is visible in a shared host's process table
 
 - **security:** State that a warm runner's pool token must belong to an operator-only team, because that team's pipeline code reaches the pool token, the runner's GitHub token, its Job-creating service account and its cloud role.
