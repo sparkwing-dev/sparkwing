@@ -97,6 +97,9 @@ unlock.
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
 
+- **runner + cache + cli (Breaking):** Twelve environment variables that only mirrored a flag are no longer read
+  `SPARKWING_TRIGGER_RUNNER`, `SPARKWING_RUNNER_IMAGE`, `SPARKWING_IMAGE_PULL_SECRET`, `SPARKWING_RUNNER_CONTROLLER_URL`, `SPARKWING_RUNNER_LOGS_URL`, `SPARKWING_RUNNER_NODE_SELECTOR` and `SPARKWING_RUNNER_TOLERATION` give way to the `sparkwing-runner runner --trigger-runner*` flags; `SPARKWING_GITCACHE_CONCURRENCY` to `sparkwing-cache --git-fork-limit`; `SPARKWING_WINGD_VERSION` to `sparkwing wingd run --version`; `SPARKWING_FORCE_COLOR` to `CLICOLOR_FORCE=1`. `SPARKWING_BAKED_BINARY` and its fallback are gone: a trigger with no repository fails with that reason instead of running an in-image binary the runner image never shipped. `SPARKWING_CHAOS_KEEP` was a test knob. See [migration guide](docs/migrations/_unreleased.md#flag-mirror-environment-variables-are-no-longer-read).
+
 - **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
 - **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`

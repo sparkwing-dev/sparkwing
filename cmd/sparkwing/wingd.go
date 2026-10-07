@@ -42,9 +42,6 @@ func runWingdRun(args []string) error {
 
 	v := *version
 	if v == "" {
-		v = os.Getenv("SPARKWING_WINGD_VERSION")
-	}
-	if v == "" {
 		v = installedVersion()
 	}
 

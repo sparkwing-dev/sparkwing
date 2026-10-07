@@ -52,7 +52,7 @@ type K8sRunnerFactoryConfig struct {
 
 func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Trigger) runner.Runner, error) {
 	if cfg.Image == "" {
-		return nil, fmt.Errorf("--image (or SPARKWING_RUNNER_IMAGE) is required with --runner k8s")
+		return nil, fmt.Errorf("--image is required with --runner k8s")
 	}
 	if cfg.Namespace == "" {
 		return nil, fmt.Errorf("--namespace (or POD_NAMESPACE) is required with --runner k8s")

@@ -120,8 +120,7 @@ func run(args []string) error {
 		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+
 			"which costs one upstream fetch each. 0 leaves the proxy unbounded. Falls back to $SPARKWING_CACHE_PROXY_MAX_BYTES.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
-		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
-		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
+		cfg.GitForkLimit, "max concurrent git subprocesses.")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 
@@ -171,15 +170,6 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	if v := os.Getenv(name); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
-		}
-	}
-	return fallback
-}
-
-func envInt(name string, fallback int) int {
-	if v := os.Getenv(name); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
 		}
 	}
 	return fallback

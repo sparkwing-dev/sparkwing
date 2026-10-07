@@ -168,6 +168,35 @@ ran it.
 - **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
   for a profile, is unchanged.
 
+## Flag-mirror environment variables are no longer read
+
+Each of these variables only supplied a flag's default. Neither chart sets
+them; a custom manifest that does passes the flag instead.
+
+| Variable | Use instead |
+|---|---|
+| `SPARKWING_TRIGGER_RUNNER` | `sparkwing-runner runner --trigger-runner` |
+| `SPARKWING_RUNNER_IMAGE` | `--trigger-runner-image` |
+| `SPARKWING_IMAGE_PULL_SECRET` | `--trigger-runner-image-pull-secret` |
+| `SPARKWING_RUNNER_CONTROLLER_URL` | `--trigger-runner-controller-url` |
+| `SPARKWING_RUNNER_LOGS_URL` | `--trigger-runner-logs-url` |
+| `SPARKWING_RUNNER_NODE_SELECTOR` | `--trigger-runner-node-selector`, once per entry |
+| `SPARKWING_RUNNER_TOLERATION` | `--trigger-runner-toleration`, once per entry |
+| `SPARKWING_GITCACHE_CONCURRENCY` | `sparkwing-cache --git-fork-limit` |
+| `SPARKWING_WINGD_VERSION` | `sparkwing wingd run --version` |
+| `SPARKWING_FORCE_COLOR=1` | `CLICOLOR_FORCE=1` |
+
+`SPARKWING_BAKED_BINARY` named a pipeline binary inside the runner image for
+triggers without a repository. The runner image ships no such binary, so the
+fallback only failed later with `no such file`; such a trigger now fails at
+once saying it has no repository. Delete the variable from any runner
+manifest. `SPARKWING_CHAOS_KEEP` kept chaos-test homes and has no replacement;
+a failed chaos test still keeps its home.
+
+**Edge case:** a variable set on the runner pod also reached each trigger's
+`handle-trigger` child, which read the same names. Both reads are gone, so
+the flag on `sparkwing-runner runner` is the only way to set these values.
+
 ## Legacy cache routes are removed
 
 **Before:** `sparkwing-cache` served source archives and single files

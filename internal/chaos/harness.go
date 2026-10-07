@@ -148,7 +148,7 @@ func Run(t testing.TB, cfg Config) {
 		t.Fatalf("temp home: %v", err)
 	}
 	t.Cleanup(func() {
-		if t.Failed() || os.Getenv("SPARKWING_CHAOS_KEEP") != "" {
+		if t.Failed() {
 			t.Logf("chaos home kept for inspection: %s", home)
 			return
 		}
