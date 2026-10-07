@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
+
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -235,8 +237,8 @@ type cronRepoSchedule struct {
 }
 
 type cronReposResponse struct {
-	Schedules []crons.ScheduleView `json:"schedules"`
-	Withdrawn []string             `json:"withdrawn,omitempty"`
+	Schedules []api.ScheduleView `json:"schedules"`
+	Withdrawn []string           `json:"withdrawn,omitempty"`
 }
 
 type cronRepoDeleteResponse struct {
@@ -270,9 +272,9 @@ func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("list cron schedules: %w", err))
 		return
 	}
-	out := crons.OverviewView{
+	out := api.OverviewView{
 		Health:    crons.NewHealthView(health),
-		Schedules: make([]crons.ScheduleView, 0, len(rows)),
+		Schedules: make([]api.ScheduleView, 0, len(rows)),
 	}
 	for _, row := range rows {
 		out.Schedules = append(out.Schedules, crons.NewScheduleView(row))
@@ -300,9 +302,9 @@ func (s *Server) handleGetCron(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("read upcoming instants: %w", err))
 		return
 	}
-	out := crons.DetailView{
+	out := api.DetailView{
 		Schedule: crons.NewScheduleView(row),
-		Fires:    make([]crons.FireView, 0, len(fires)),
+		Fires:    make([]api.FireView, 0, len(fires)),
 		Upcoming: make([]string, 0, len(upcoming)),
 	}
 	for _, fire := range fires {
@@ -375,7 +377,7 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := cronReposResponse{
-		Schedules: make([]crons.ScheduleView, 0, len(report.Schedules)),
+		Schedules: make([]api.ScheduleView, 0, len(report.Schedules)),
 		Withdrawn: report.Withdrawals,
 	}
 	for _, sched := range report.Schedules {
@@ -528,7 +530,7 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, crons.RunEnvelope{RunID: runID, Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, http.StatusOK, api.RunEnvelope{RunID: runID, Schedule: crons.NewScheduleView(row)})
 }
 
 func (s *Server) handleDisarmCron(w http.ResponseWriter, r *http.Request) {
@@ -549,7 +551,7 @@ func (s *Server) handleDisarmCron(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("disarm cron schedule: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, http.StatusOK, api.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
 func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
@@ -605,7 +607,7 @@ func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, http.StatusOK, api.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
 func (s *Server) handleClearCronOverride(w http.ResponseWriter, r *http.Request) {
@@ -622,7 +624,7 @@ func (s *Server) handleClearCronOverride(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, http.StatusOK, api.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
 func (s *Server) resolveCron(w http.ResponseWriter, r *http.Request, svc *crons.Service) (store.CronSchedule, bool) {
@@ -640,7 +642,7 @@ func (s *Server) writeCronSchedule(w http.ResponseWriter, r *http.Request, svc *
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, http.StatusOK, api.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
 func (s *Server) requestCronService(w http.ResponseWriter, r *http.Request, principal string) (*crons.Service, bool) {
