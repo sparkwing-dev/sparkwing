@@ -441,31 +441,10 @@ const maxRepositoryPages = 10
 // token that can read nothing but metadata. For an installation covering more
 // than 1000 it returns the first 1000 with [ErrTooManyRepositories].
 func (c *Client) InstallationRepositories(ctx context.Context, installation int64) ([]Repository, error) {
-	jwt, err := c.appJWT(time.Now())
+	permissions := map[string]string{"metadata": "read"}
+	tok, err := c.mintToken(ctx, installation, map[string]any{"permissions": permissions}, permissions)
 	if err != nil {
 		return nil, err
-	}
-	body, err := json.Marshal(map[string]any{"permissions": map[string]string{"metadata": "read"}})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.cfg.APIURL+"/app/installations/"+strconv.FormatInt(installation, 10)+"/access_tokens", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	c.apiHeaders(req, "Bearer "+jwt)
-	req.Header.Set("Content-Type", "application/json")
-	var tok Token
-	status, err := c.do(req, &tok)
-	if err != nil {
-		return nil, err
-	}
-	if status == http.StatusNotFound {
-		return nil, ErrNotInstalled
-	}
-	if status != http.StatusCreated && status != http.StatusOK || tok.Token == "" {
-		return nil, fmt.Errorf("githubapp: metadata token answered %d", status)
 	}
 	var out []Repository
 	for page := 1; page <= maxRepositoryPages; page++ {
