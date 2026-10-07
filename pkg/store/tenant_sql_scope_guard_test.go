@@ -283,6 +283,23 @@ var reviewedUnscopedSQL = map[string]string{
 		"selected, in the order the claim path names, and read nothing back",
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
+	"(*Store).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
+		"the deployment's alarm; the route serves it to an admin only",
+	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
+		"team's claimed cloud runners",
+	"(*Store).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
+	"(*Store).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
+	"(*Store).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
+	"(*Store).CreditLedgerTotals": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
+		"grants, charges and reservations and name none",
+	"(*Store).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
+		"principal",
+	"(*Store).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
+		"principal",
+	"(*Store).ListEgressUsage": "the controller restores the deployment's egress meter, which counts every principal, " +
+		"before it serves",
+	"(*Store).RecordEgressUsage": "the controller persists the deployment's egress meter for every principal it counted; " +
+		"each principal names its own team",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -291,35 +308,23 @@ var reviewedUnscopedSQL = map[string]string{
 var unportedSQL = []string{
 	"(*Store).AcknowledgeNodeExecutionStart",
 	"(*Store).AddNodeMetricSample",
-	"(*Store).CacheExcludedCounts",
-	"(*Store).ComputeAlarmState",
-	"(*Store).ComputeUsage",
 	"(*Store).ConsumeNodeBounce",
-	"(*Store).CountActiveRunners",
-	"(*Store).CountNodesByQueueState",
-	"(*Store).CountPendingNodes",
 	"(*Store).CountUsers",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
 	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
-	"(*Store).CreditLedgerTotals",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).finishNode",
-	"(*Store).ListCreditCharges",
-	"(*Store).ListCreditGrants",
-	"(*Store).ListEgressUsage",
 	"(*Store).ListLegacyAgentClaims",
 	"(*Store).ListNodeBounces",
 	"(*Store).ListNodeMetricsPage",
-	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
 	"(*Store).NodeSettlement",
 	"(*Store).PendingNodeBounce",
-	"(*Store).RecordEgressUsage",
 	"(*Store).RequestNodeBounce",
 	"(*Store).ResetNodeForAutoRetry",
 	"(*Store).RevokeNodeReady",
@@ -331,7 +336,6 @@ var unportedSQL = []string{
 	"(*Store).StorageRetainedBytes",
 	"(*Store).StorageUsageFor",
 	"(*Store).TokenMetered",
-	"(*Store).TopStorageTeams",
 	"(*Store).VerifyUser",
 	"(*Store).acknowledgeTriggerExecutionStart",
 	"(*Store).cancelMeteredNode",
@@ -363,7 +367,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 71
+const unportedSQLSize = 58
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

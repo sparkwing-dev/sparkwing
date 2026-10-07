@@ -1701,52 +1701,16 @@ func backfillTeamCreditStateTx(ctx context.Context, tx *storeTx) error {
 	return backfillStorageWatermarkTeamTx(ctx, tx)
 }
 
-// ListCreditGrants returns grants newest first, at most limit rows and never
-// more than [CreditHistoryMaxLimit].
+// ListCreditGrants returns the default team's grants newest first, at most
+// limit rows and never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
-	rows, err := s.query(ctx, `SELECT id, kind, amount_micro, reference, reverses, created_by, created_at
-	  FROM credit_grants ORDER BY created_at DESC, id DESC LIMIT ?`, creditLimit(limit))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []CreditGrant
-	for rows.Next() {
-		var g CreditGrant
-		var created int64
-		if err := rows.Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses,
-			&g.CreatedBy, &created); err != nil {
-			return nil, err
-		}
-		g.CreatedAt = time.Unix(0, created).UTC()
-		out = append(out, g)
-	}
-	return out, rows.Err()
+	return s.defaultTenant().ListCreditGrants(ctx, limit)
 }
 
-// ListCreditCharges returns charges newest first, at most limit rows and
-// never more than [CreditHistoryMaxLimit].
+// ListCreditCharges returns the default team's charges newest first, at most
+// limit rows and never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
-	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, principal, kind,
-	         seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at
-	  FROM credit_charges ORDER BY charged_at DESC, id DESC LIMIT ?`, creditLimit(limit))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []CreditCharge
-	for rows.Next() {
-		var c CreditCharge
-		var charged int64
-		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Principal, &c.Kind,
-			&c.Seconds, &c.AmountMicro, &c.StorageBytes,
-			&c.CPUClassCores, &c.RateMicroPerSecond, &charged); err != nil {
-			return nil, err
-		}
-		c.ChargedAt = time.Unix(0, charged).UTC()
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return s.defaultTenant().ListCreditCharges(ctx, limit)
 }
 
 func creditLimit(limit int) int {
