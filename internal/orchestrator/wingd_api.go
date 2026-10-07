@@ -96,6 +96,7 @@ var apiReadRoutes = []string{
 	"GET /api/v1/crons/{id}",
 	"GET /api/v1/storage",
 	"GET /api/v1/credits/settings",
+	"GET /api/v1/credits/payments/{reference}",
 }
 
 // safety: these routes hold a response open past any request bound: the event
