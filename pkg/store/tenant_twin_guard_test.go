@@ -18,34 +18,8 @@ import (
 // out of the package's own code.
 func TestTenantTwins_NoStoreCodeCallsADefaultTeamTwin(t *testing.T) {
 	fset := token.NewFileSet()
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var files []*ast.File
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		files = append(files, f)
-	}
-	twins := map[string]bool{}
-	for _, f := range files {
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if ok && fn.Recv != nil && exprString(fn.Recv.List[0].Type) == "*Store" && delegatesToDefaultTeam(fn) {
-				twins[fn.Name.Name] = true
-			}
-		}
-	}
-	if len(twins) < 50 {
-		t.Fatalf("found only %d default-team twins; the guard no longer reads this package", len(twins))
-	}
+	files := parseStoreSources(t, fset)
+	twins := defaultTeamTwinNames(t)
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -70,6 +44,32 @@ func TestTenantTwins_NoStoreCodeCallsADefaultTeamTwin(t *testing.T) {
 			})
 		}
 	}
+}
+
+func storeSourceFiles(t *testing.T) []*ast.File {
+	t.Helper()
+	return parseStoreSources(t, token.NewFileSet())
+}
+
+func parseStoreSources(t *testing.T, fset *token.FileSet) []*ast.File {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []*ast.File
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		files = append(files, f)
+	}
+	return files
 }
 
 func delegatesToDefaultTeam(fn *ast.FuncDecl) bool {
