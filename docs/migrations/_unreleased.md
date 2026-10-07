@@ -165,3 +165,19 @@ build loses a cache it was using.
 **Why:** the pool held the controller's broadest Kubernetes rights and ran
 the only privileged pods Sparkwing created, and no runner, launcher or chart
 template ever mounted one of its PVCs.
+
+## The concurrency notify stream is removed
+
+**Before:** `GET /api/v1/concurrency/{key}/notify?run_id=...&node_id=...`
+held a server-sent event stream open for up to 30 minutes and sent one
+`ready`, `superseded` or `stream_end` event when the waiter resolved.
+
+**After:** the route answers 404. Nothing Sparkwing ships opened it.
+
+**Upgrade:** a client of your own that waited on the stream polls
+`GET /api/v1/concurrency/{key}/resolve?run_id=...&node_id=...` instead. It
+takes the node's claim token or `runs.state` rather than `runs.read`, and its
+`status` field carries the same outcomes.
+
+**Why:** an unused stream that a claim token could hold open for half an hour
+was attack surface with no caller.

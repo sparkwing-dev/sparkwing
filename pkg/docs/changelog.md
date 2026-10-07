@@ -103,6 +103,11 @@ unlock.
   stops mounting an API token in its pod. `sparkwing cluster status` drops its `pool` probe, and the
   `sparkwing.pool.*` metrics are gone. See
   [The warm-PVC pool is removed](docs/migrations/_unreleased.md#the-warm-pvc-pool-is-removed).
+- **controller (Breaking):** Remove the concurrency waiter event stream
+  `GET /api/v1/concurrency/{key}/notify` answers 404. The SDK, the CLI and the dashboard never opened it; a waiter
+  learns its outcome from `GET /api/v1/concurrency/{key}/resolve`, which they already poll. Removing it drops a
+  30-minute stream a claim token could hold open. See
+  [The concurrency notify stream is removed](docs/migrations/_unreleased.md#the-concurrency-notify-stream-is-removed).
 
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence

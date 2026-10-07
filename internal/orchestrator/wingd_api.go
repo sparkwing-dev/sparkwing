@@ -104,7 +104,6 @@ var apiReadRoutes = []string{
 // http.ResponseController, and an artifact body. A context deadline here
 // truncates each into a clean EOF the client reads as completion.
 var apiStreamRoutes = []string{
-	"GET /api/v1/concurrency/{key}/notify",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream",
 	"GET /api/v1/artifacts/{key}",
 	"POST /api/v1/gitcache/seed",

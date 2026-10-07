@@ -33,7 +33,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/heartbeat` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/holder` | `claim` or `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/notify` | `claim` or `runs.read` |
 | `POST` | `/api/v1/concurrency/{key}/release` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |

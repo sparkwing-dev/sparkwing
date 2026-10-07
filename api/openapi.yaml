@@ -1583,63 +1583,6 @@ paths:
               schema: {$ref: "#/components/schemas/ConcurrencyState"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/concurrency/{key}/notify:
-    parameters:
-      - in: path
-        name: key
-        required: true
-        schema: {type: string}
-      - in: query
-        name: run_id
-        required: true
-        schema: {type: string}
-      - in: query
-        name: node_id
-        required: false
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: claim or runs.read
-      tags: [concurrency]
-      summary: Server-sent event stream of waiter resolution events.
-      description: |
-        Streams Server-Sent Events for a single (run_id, node_id)
-        waiter on this concurrency key. The server polls the
-        concurrency state at 250ms cadence and emits exactly one
-        terminal event per stream, then closes:
-
-        - `event: ready` -- the caller is now a holder of the slot.
-        - `event: superseded` -- the caller is no longer a waiter
-          (slot acquired elsewhere, run cancelled, etc.).
-        - `event: stream_end` -- fail-safe timeout (max 30 minutes
-          per stream) or the concurrency key no longer exists; the
-          event payload carries a `reason` field
-          (`"max_wait"` or `"key_not_found"`).
-
-        Every event payload also carries the `key` and `run_id`
-        fields, plus `node_id` when one was supplied. The stream
-        opens with a `: open` comment line so proxies don't buffer.
-      responses:
-        "200":
-          description: |
-            SSE stream of resolution events. The response is
-            `text/event-stream`; clients consume it line-by-line
-            until the terminal event arrives.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: |
-                  SSE frames. Each event has the form
-
-                  ```
-                  event: ready|superseded|stream_end
-                  data: {"key":"...","run_id":"...","node_id":"...","reason":"..."}
-                  ```
-
-                  `node_id` is present when the request supplied one;
-                  `reason` is present only on `stream_end`.
-        "400": {$ref: "#/components/responses/BadRequest"}
-
   /api/v1/concurrency/{key}/holder:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
@@ -1671,7 +1614,7 @@ paths:
       description: |
         Answers where the caller sits in the queue and what the leader it
         coalesced behind produced. `bypass_read=true` skips the cache
-        lookup. The polling counterpart to the `notify` stream.
+        lookup.
       parameters:
         - in: query
           name: run_id
