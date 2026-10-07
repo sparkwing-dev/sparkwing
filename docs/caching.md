@@ -160,17 +160,15 @@ The cache service bounds one archive at
 `sparkwing-cache --max-cache-archive-bytes`
 (`SPARKWING_CACHE_MAX_ARCHIVE_BYTES`), 500 MB by default and unbounded
 at `0`. A larger archive is refused with `413` naming the cap, and the
-node logs a warning and proceeds without the dependency cache.
-`--max-artifact-bytes` (`SPARKWING_CACHE_MAX_ARTIFACT_BYTES`) is the
-same cap for one uploaded artifact, also 500 MB. Both caps are applied
-before the first byte reaches the volume, so one pipeline cannot spend a
-team's quota, or the store ceiling, on a single object. The SDK skips an
-upload over 500 MB client-side before it asks; that constant is the
+node logs a warning and proceeds without the dependency cache. The cap
+is applied before the first byte reaches the volume, so one pipeline
+cannot spend a team's quota, or the store ceiling, on a single object.
+The SDK skips an upload over 500 MB client-side before it asks; that constant is the
 client's own, and the service's cap is what actually holds.
 
 `--max-store-bytes` and `--max-store-objects`
 (`SPARKWING_CACHE_MAX_STORE_BYTES`, `SPARKWING_CACHE_MAX_STORE_OBJECTS`)
-bound the artifact, dependency-archive, upload, team and git mirror trees
+bound the dependency-archive, team and git mirror trees
 together rather than one object. At or above either one the service refuses every upload
 with `507` naming the ceiling, while reads and deletes keep working, and
 a later measurement that finds the store back under the ceiling thaws

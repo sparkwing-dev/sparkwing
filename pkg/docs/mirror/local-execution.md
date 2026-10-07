@@ -467,7 +467,7 @@ pipeline guard leaves no run row.
 
 Add `--working-tree` to run current tracked edits and untracked non-ignored
 files remotely without committing or pushing them. Sparkwing freezes those
-bytes as a synthetic Git commit, requires the bundle seed to finish before it
+bytes as a synthetic Git commit, requires the bundle upload to finish before it
 admits the trigger, and prints the base SHA, snapshot SHA, file count, and
 bundle size. The source checkout's HEAD, refs, index, and object database stay
 unchanged. The bundle limit is 500 MiB.
@@ -476,8 +476,7 @@ the materialized checkout. A symlink at `.sparkwing` is refused before compilati
 The remote checkout is clean and detached at the synthetic SHA; file contents
 match the laptop, but staged-versus-unstaged state is intentionally flattened.
 Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories
-fail before upload. Workspace seed refs are capped at 128 distinct snapshots
-per repository; a full cache rejects a new snapshot before trigger admission.
+fail before upload.
 
 Before the upload, Sparkwing reads the snapshot manifest for secret-shaped
 files and refuses the trigger when it finds any, because the snapshot travels
@@ -544,12 +543,11 @@ The source proxy and trigger claim require the current admin-capable runner
 token. Login-enabled dashboard ingress passes this machine bearer directly to
 the controller without a browser session or CSRF token. The process opens no
 listener. A private direct cache URL can replace the controller proxy when the
-machines already share a LAN, VPN, or tailnet. Direct cache binary and seed
-writes use only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never
-sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct
-cache on a trusted private network. Upload and pack streams have
-a 30-minute server window; the CLI gives a direct upload two minutes before a
-fresh 15-minute controller fallback. Manual retries and same-repository
+machines already share a LAN, VPN, or tailnet. Direct cache binary writes use
+only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never sent to that
+raw cache. Raw Git reads have no cache-level auth, so keep a direct cache on a
+trusted private network. Pack streams have a 30-minute server window, and the
+CLI gives a working-tree upload 15 minutes. Manual retries and same-repository
 `RunAndAwait` children retain the original `pipeline-working-tree@<host>`
 placement source.
 Do not leave an unrestricted cluster runner racing for the same trigger source

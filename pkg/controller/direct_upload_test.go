@@ -28,6 +28,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+var testGrantScope = &authwire.CacheScope{Refs: []string{"manual:"}}
+
 type directObject struct {
 	body     []byte
 	checksum string
@@ -123,7 +125,7 @@ func claimedUploadGrant(t *testing.T, f *appFixture, team, runID, prefix string)
 		t.Fatalf("node claim = %+v prefix=%q err=%v", claim, tokenPrefix, err)
 	}
 	claim.TokenPrefix = tokenPrefix
-	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", team, runID, time.Now(), time.Hour, &claim, nil)
+	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", team, runID, time.Now(), time.Hour, &claim, testGrantScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestPendingTriggerCanCommitBinaryCacheUpload(t *testing.T) {
 	}
 	t.Setenv(authwire.CacheGrantKeyEnv, "direct-test-grant-key")
 	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", owner.team, "run-pending-cache", time.Now(), time.Hour,
-		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: prefix}, nil)
+		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: prefix}, testGrantScope)
 	if err != nil {
 		t.Fatal(err)
 	}

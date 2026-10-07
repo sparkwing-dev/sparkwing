@@ -32,7 +32,7 @@ func run(args []string) error {
 		"bind address (e.g. :8090). Default: $PORT_ADDR or :$PORT or :8090.")
 	fs.StringVar(&cfg.DataDir, "data-dir",
 		envOr("DATA_DIR", cfg.DataDir),
-		"root of the gitcache filesystem layout (repos/, archives/, artifacts/, bins/, cache/, uploads/). Falls back to $DATA_DIR.")
+		"root of the gitcache filesystem layout (repos/, bins/, cache/, teams/). Falls back to $DATA_DIR.")
 	fs.StringVar(&cfg.ProxyDir, "proxy-cache-dir",
 		envOr("PROXY_CACHE_DIR", ""),
 		"root of the package-registry proxy cache. Empty means $DATA_DIR/proxy. Falls back to $PROXY_CACHE_DIR.")
@@ -44,7 +44,7 @@ func run(args []string) error {
 		"how long a successful mirror fetch lets request handlers skip their own fetch, which bounds what a caller can spend: at most one origin fetch per repository per window. Negative disables the throttle. Falls back to $FETCH_FRESH_WINDOW.")
 	fs.DurationVar(&cfg.RecloneCooldown, "reclone-cooldown",
 		envDuration("RECLONE_COOLDOWN", cfg.RecloneCooldown),
-		"minimum gap between /archive recovery reclones, and between clone-if-missing attempts, for the same repo. Negative disables the cooldown. Falls back to $RECLONE_COOLDOWN.")
+		"minimum gap between clone-if-missing attempts for the same repo. Negative disables the cooldown. Falls back to $RECLONE_COOLDOWN.")
 	fs.DurationVar(&cfg.ProxyCacheTTL, "proxy-cache-ttl",
 		envDuration("PROXY_CACHE_TTL", cfg.ProxyCacheTTL),
 		"max age of mutable proxy entries before re-fetching upstream. Falls back to $PROXY_CACHE_TTL.")
@@ -59,32 +59,26 @@ func run(args []string) error {
 		"honor X-Forwarded-Host and X-Forwarded-Proto when rewriting registry bodies from the request, taking the right-most element of each. Only safe when a reverse proxy is the only route to this port, and inert when --public-url is set. Falls back to $SPARKWING_CACHE_TRUST_FORWARDED_HOST.")
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
-		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+		"bearer token required on the git and blob endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
 	fs.StringVar(&cfg.GrantKey, "grant-key",
 		envOr(authwire.CacheGrantKeyEnv, cfg.GrantKey),
 		"key that verifies cache grants, the one the controller signs them with. No runner holds it, and it "+
 			"must differ from --api-token. Empty accepts no grants. Falls back to $"+authwire.CacheGrantKeyEnv+".")
 	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
 		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
-		"start without a bearer token, leaving the git, blob, artifact, and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
+		"start without a bearer token, leaving the git and blob endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
 	fs.StringVar(&cfg.AutoRegisterRepos, "auto-register-repos",
 		envOr("GITCACHE_REPOS", cfg.AutoRegisterRepos),
 		"comma-separated name=url pairs cloned into the gitcache on startup. Falls back to $GITCACHE_REPOS.")
 	fs.StringVar(&cfg.SSHKeyDir, "ssh-key-dir",
 		envOr("SSH_KEY_DIR", cfg.SSHKeyDir),
 		"directory containing the SSH key + known_hosts (typically a k8s secret mount). Falls back to $SSH_KEY_DIR.")
-	fs.DurationVar(&cfg.WorkspaceSeedMaxAge, "workspace-seed-max-age",
-		envDuration("WORKSPACE_SEED_MAX_AGE", cfg.WorkspaceSeedMaxAge),
-		"how long a working-tree snapshot ref is retained before the next seed expires it. Negative disables expiry. Falls back to $WORKSPACE_SEED_MAX_AGE.")
-	fs.Int64Var(&cfg.MaxArtifactBytes, "max-artifact-bytes",
-		envInt64("SPARKWING_CACHE_MAX_ARTIFACT_BYTES", cfg.MaxArtifactBytes),
-		"size cap for one uploaded artifact; a larger upload is refused with 413 naming the cap. 0 accepts an artifact of any size. Falls back to $SPARKWING_CACHE_MAX_ARTIFACT_BYTES.")
 	fs.Int64Var(&cfg.MaxCacheArchiveBytes, "max-cache-archive-bytes",
 		envInt64("SPARKWING_CACHE_MAX_ARCHIVE_BYTES", cfg.MaxCacheArchiveBytes),
 		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreBytes, "max-store-bytes",
 		envInt64("SPARKWING_CACHE_MAX_STORE_BYTES", cfg.MaxStoreBytes),
-		"stored bytes across the artifact, dependency-archive, upload, team and git mirror trees at or above which every "+
+		"stored bytes across the dependency-archive, team and git mirror trees at or above which every "+
 			"upload is refused with 507 naming the ceiling, until a measurement finds the store back "+
 			"under it. 0, the default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreObjects, "max-store-objects",
@@ -105,7 +99,7 @@ func run(args []string) error {
 		envOr("SPARKWING_CACHE_BLOB_STORE", cfg.BlobStore),
 		"s3://bucket/prefix that holds the binary, dependency-archive and artifact stores instead of the volume, "+
 			"one teams/<team>/ namespace per team. Region and credentials come from the AWS default chain (IRSA on EKS); "+
-			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors, uploads and the registry proxy stay "+
+			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors and the registry proxy stay "+
 			"on --data-dir. Empty keeps everything on the volume. Falls back to $SPARKWING_CACHE_BLOB_STORE.")
 	fs.StringVar(&cfg.ControllerURL, "controller",
 		envOr("SPARKWING_CONTROLLER_URL", cfg.ControllerURL),

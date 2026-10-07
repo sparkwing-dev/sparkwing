@@ -31,7 +31,7 @@ unlock.
 ### Changed
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
-  service writes `/cache`, `/bin` and `/artifacts` entries only under the run's own ref. It reads the run's own
+  service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own
   ref, then its pull request's base, then the default branch, then entries written before this release. A
   branch's run therefore no longer replaces or deletes what its base branch's runs restore, and a run of
   another repository in the team no longer reads it. A run whose ref and commit its submitter chose (the CLI,
@@ -96,6 +96,21 @@ unlock.
 - **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
   `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/_unreleased.md#per-pipeline-github-webhooks-are-removed).
   The `sparkwing-full` chart refuses to render while `controller.githubWebhookSecret.name` or `controller.githubStatusToken.name` is still set, naming the value and the migration guide section, so a `helm upgrade --reuse-values` that carries them fails at render time instead of leaving deliveries to 404.
+- **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
+  `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
+  `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
+  longer serves `POST /api/v1/gitcache/refresh` or `POST /api/v1/gitcache/seed`. Nothing Sparkwing ships called
+  them: runners clone through `/git/<name>`, which refreshes a stale mirror itself, `--working-tree` uploads to
+  the direct data store, and artifacts use content-addressed `/bin` keys. The cache fills a mirror only from
+  origin. `--max-artifact-bytes` and `--workspace-seed-max-age` are gone, so a cache started with either exits
+  with an unknown-flag error, and the runner-bundle chart drops `cache.limits.maxArtifactBytes`. The
+  `sparkwing.gitcache.archives_served`, `files_served` and `recovery_reclones` metrics are gone. See
+  [Legacy cache routes are removed](docs/migrations/_unreleased.md#legacy-cache-routes-are-removed).
+- **cache + controller (Breaking):** Refuse cache grants that name no claim or no repository scope
+  Such a grant, minted by a controller from before grants carried a scope, opened its team's whole cache tree
+  on its signature alone until it expired. The cache and the controller's data routes now answer it 401, and no
+  controller mints one. See
+  [Cache grants need a claim and a scope](docs/migrations/_unreleased.md#cache-grants-need-a-claim-and-a-scope).
 
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence

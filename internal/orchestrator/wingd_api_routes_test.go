@@ -67,7 +67,6 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/concurrency/{key}/release",
 	"GET /api/v1/concurrency/{key}/resolve",
 	"POST /api/v1/object-store/reset-breaker",
-	"POST /api/v1/gitcache/refresh",
 	"POST /api/v1/launcher/claim",
 	"POST /api/v1/launcher/sync",
 	"POST /api/v1/runs/{id}/children",
