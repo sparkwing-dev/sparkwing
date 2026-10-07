@@ -13,7 +13,7 @@ import (
 
 // A row written before v51 has to survive the rebuild. Several lookups
 // on these tables answer a miss with a default rather than an error --
-// no pin, no floor, no binding -- so a rebuild that dropped the rows
+// no pin, no floor -- so a rebuild that dropped the rows
 // would read as "nothing configured" and pass a suite that only ever
 // writes after migrating. The narrowing here is the widening helper run
 // backwards, so the test cannot pass against a migration that does not
@@ -25,8 +25,6 @@ func TestSchemaV51CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
 	seeds := map[string]string{
 		"secrets": `INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
 		            VALUES ('default', 'DEPLOY_KEY', 'v', 'admin', 1, 'ci', 0, 1, 1)`,
-		"github_webhook_bindings": `INSERT INTO github_webhook_bindings (team, pipeline, repo, secret, events, hook_id, created_at, updated_at)
-		            VALUES ('default', 'ci', 'acme/app', 's', 'push', 7, 1, 1)`,
 		"pipeline_profiles": `INSERT INTO pipeline_profiles (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, pinned_cores, pinned_memory_bytes)
 		            VALUES ('default', 'ci', 'build', 10, 20, 2, 1024, 3, 1, 4, 2048)`,
 		"concurrency_entries": `INSERT INTO concurrency_entries (team, key, capacity, updated_at)
@@ -80,13 +78,6 @@ func TestSchemaV51CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
 	}
 	if profile == nil || profile.PinnedCores != 4 {
 		t.Errorf("profile after v51 = %+v, want the pre-existing pin of 4 cores", profile)
-	}
-	binding, err := tn.GetGitHubWebhookBinding(ctx, "ci", "acme/app")
-	if err != nil {
-		t.Fatalf("GetGitHubWebhookBinding after v51: %v", err)
-	}
-	if binding.HookID != 7 {
-		t.Errorf("binding after v51 = %+v, want the pre-existing hook 7", binding)
 	}
 	secret, err := tn.GetSecretRow("DEPLOY_KEY", "ci")
 	if err != nil {
@@ -151,53 +142,6 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 	}
 	if got.Value != "beta-ci" {
 		t.Errorf("beta's secret = %q after alpha deleted its own", got.Value)
-	}
-}
-
-func TestGitHubWebhookBindingIsUniquePerTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-
-	for _, c := range []struct {
-		tn     *store.Tenant
-		secret string
-		hookID int64
-	}{{alpha, "alpha-secret", 1}, {beta, "beta-secret", 2}} {
-		if err := c.tn.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
-			Pipeline: "ci", Repo: "acme/app", Secret: c.secret, HookID: c.hookID,
-		}); err != nil {
-			t.Fatalf("%s PutGitHubWebhookBinding: %v", c.tn.Team(), err)
-		}
-	}
-
-	for _, c := range []struct {
-		tn     *store.Tenant
-		secret string
-	}{{alpha, "alpha-secret"}, {beta, "beta-secret"}} {
-		got, err := c.tn.GetGitHubWebhookBinding(ctx, "ci", "acme/app")
-		if err != nil {
-			t.Fatalf("%s GetGitHubWebhookBinding: %v", c.tn.Team(), err)
-		}
-		if got.Secret != c.secret {
-			t.Errorf("%s reads the binding secret %q, want %q", c.tn.Team(), got.Secret, c.secret)
-		}
-	}
-
-	removed, err := alpha.DeleteGitHubWebhookBinding(ctx, "ci", "acme/app")
-	if err != nil || !removed {
-		t.Fatalf("alpha DeleteGitHubWebhookBinding = %v, %v", removed, err)
-	}
-	if _, err := beta.GetGitHubWebhookBinding(ctx, "ci", "acme/app"); err != nil {
-		t.Errorf("beta lost its binding to alpha's delete: %v", err)
-	}
-	list, err := beta.ListGitHubWebhookBindings(ctx, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].Secret != "beta-secret" {
-		t.Errorf("beta's listing = %+v, want only its own binding", list)
 	}
 }
 

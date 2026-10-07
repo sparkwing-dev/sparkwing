@@ -128,10 +128,12 @@ func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key 
 }
 
 // FindTriggerByWebhookReplay returns the trigger in t's team a refused
-// webhook delivery collided with, as [Store.FindTriggerByWebhookReplay]
-// does. The delivery id is an unsigned header, so a delivery signed for
-// one team naming another team's delivery id reads as not found rather
-// than as that team's run.
+// webhook delivery collided with: the one holding replayKey, or failing
+// that the one holding delivery. It reports [ErrNotFound] when neither
+// is stored, so a redelivery is answered with the run the first delivery
+// produced rather than a bare refusal. The delivery id is an unsigned
+// header, so a delivery signed for one team naming another team's
+// delivery id reads as not found rather than as that team's run.
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
 	if replayKey == "" && delivery == "" {
 		return nil, notFound("trigger for webhook delivery", delivery)

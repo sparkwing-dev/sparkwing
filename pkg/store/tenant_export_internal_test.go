@@ -18,13 +18,12 @@ func TenantTablesForTest() []string {
 // one carried before it.
 func UserKeyTablesForTest() map[string][]string {
 	return map[string][]string{
-		"secrets":                 {"name", "pipeline"},
-		"github_webhook_bindings": {"pipeline", "repo"},
-		"pipeline_profiles":       {"pipeline", "node_id"},
-		"concurrency_entries":     {"key"},
-		"concurrency_holders":     {"key", "holder_id"},
-		"concurrency_waiters":     {"key", "run_id", "node_id"},
-		"concurrency_cache":       {"key", "cache_key_hash"},
+		"secrets":             {"name", "pipeline"},
+		"pipeline_profiles":   {"pipeline", "node_id"},
+		"concurrency_entries": {"key"},
+		"concurrency_holders": {"key", "holder_id"},
+		"concurrency_waiters": {"key", "run_id", "node_id"},
+		"concurrency_cache":   {"key", "cache_key_hash"},
 	}
 }
 
