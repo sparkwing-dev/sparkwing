@@ -51,7 +51,7 @@ func downgradeV91DeliveryEvent(t *testing.T, st *store.Store) {
 	for _, statement := range []string{
 		`DROP INDEX idx_github_app_deliveries_received`,
 		`ALTER TABLE github_app_deliveries DROP COLUMN event`,
-		`DELETE FROM sparkwing_schema_version WHERE version = 91`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 91`,
 		`INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES ('legacy', 'd-legacy', 1)`,
 	} {
 		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
