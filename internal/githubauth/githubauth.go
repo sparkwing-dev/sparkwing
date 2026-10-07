@@ -101,6 +101,17 @@ func (c *Client) AuthorizeURL(state, verifier, redirectURI string) string {
 
 // Exchange redeems code and returns the profile of the account it belongs to.
 func (c *Client) Exchange(ctx context.Context, code, verifier, redirectURI string) (Profile, error) {
+	accessToken, err := c.RedeemCode(ctx, code, verifier, redirectURI)
+	if err != nil {
+		return Profile{}, err
+	}
+	return c.profile(ctx, accessToken)
+}
+
+// RedeemCode exchanges an authorization code, with the PKCE verifier and the
+// redirect URI it was issued for, for the user's access token. A code GitHub
+// refuses is [ErrRejected].
+func (c *Client) RedeemCode(ctx context.Context, code, verifier, redirectURI string) (string, error) {
 	form := url.Values{
 		"client_id":     {c.cfg.ClientID},
 		"client_secret": {c.cfg.ClientSecret},
@@ -110,7 +121,7 @@ func (c *Client) Exchange(ctx context.Context, code, verifier, redirectURI strin
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return Profile{}, fmt.Errorf("githubauth: build token request: %w", err)
+		return "", fmt.Errorf("githubauth: build token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	// hack: GitHub answers form-encoded unless asked for JSON.
@@ -121,18 +132,18 @@ func (c *Client) Exchange(ctx context.Context, code, verifier, redirectURI strin
 	}
 	status, err := c.fetchJSON(req, &tok)
 	if err != nil {
-		return Profile{}, err
+		return "", err
 	}
 	if tok.Error != "" || status == http.StatusBadRequest || status == http.StatusUnauthorized {
-		return Profile{}, fmt.Errorf("%w: github refused the code: %s", ErrRejected, tok.Error)
+		return "", fmt.Errorf("%w: github refused the code: %s", ErrRejected, tok.Error)
 	}
 	if status != http.StatusOK {
-		return Profile{}, fmt.Errorf("githubauth: token endpoint answered %d", status)
+		return "", fmt.Errorf("githubauth: token endpoint answered %d", status)
 	}
 	if tok.AccessToken == "" {
-		return Profile{}, fmt.Errorf("%w: github returned no access token", ErrRejected)
+		return "", fmt.Errorf("%w: github returned no access token", ErrRejected)
 	}
-	return c.profile(ctx, tok.AccessToken)
+	return tok.AccessToken, nil
 }
 
 func (c *Client) profile(ctx context.Context, accessToken string) (Profile, error) {
