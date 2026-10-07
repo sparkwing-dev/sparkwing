@@ -51,6 +51,7 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+- **Dashboard build:** Update `sharp` to 0.35.5 so `pnpm audit` passes GHSA-wq5f-xc86-pv6w; the static dashboard export never runs it at serve time.
 
 - **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt
   The ledger kept that money without granting anything or alerting. It now repays what the team owes at settlement, which a refunded reservation may have lowered since the charge opened, keeps the rest unapplied rather than as prepaid credit (a reversal under `unapplied:<payment>` on the payment's full grant), closes the open charge even when nothing was left to repay, so pay-now does not charge a cleared debt again, keeps the team held, and logs `alert=card_payment_warned` with the repaid and unapplied amounts; a warned payment that still grants nothing logs the same alert. A refund of that payment returns the unapplied rest first, which takes no credits back, and reverses only what it returns beyond it. Grant and reversal references starting with `unapplied:` are reserved for that record and answered 400.
