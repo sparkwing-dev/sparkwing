@@ -58,6 +58,9 @@ unlock.
 
 ### Fixed
 
+- **runner + cli:** The warm-root sweep removes direct-fetch git mirrors unused for 7 days
+  `sparkwing cluster gc` and the warm runner's startup sweep aged out `<root>/git`, which nothing writes, and never reached `<root>/source-direct`, where direct-fetch runners keep their mirrors. They now sweep `source-direct/` with the same 7-day rule, skipping a mirror a fetch holds or a checkout still uses.
+
 - **cache:** The cache keeps an operator's `GIT_SSH_COMMAND` and its own offers only the staged key
   It used to replace the environment's `GIT_SSH_COMMAND` with one that dropped `IdentitiesOnly=yes`, so ssh could also offer agent or default keys to the mirror's host.
 

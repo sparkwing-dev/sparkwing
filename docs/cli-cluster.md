@@ -174,7 +174,8 @@ so operators can trigger it against a running pod via kubectl
 exec during incident response.
 
 When --profile is omitted, the run-directory sweep is skipped; the
-mtime-based git/ and tmp/ sweeps still run and free disk. Supply
+mtime-based sweeps of source-direct/ git mirrors unused for 7 days and
+tmp/ entries older than a day still run and free disk. Supply
 --profile to enable the full sweep.
 
 ### Flags

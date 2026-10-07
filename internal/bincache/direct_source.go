@@ -515,6 +515,44 @@ func directEnforceCaps(root, own string, opts directOptions, git func(...string)
 }
 
 // safety: Keep a mirror's lock file while another checkout may wait on it, or a third process could bypass that lock.
+// SweepDirectMirrors removes the direct-fetch mirrors in dir that no fetch has
+// used since cutoff, skipping one a fetch holds or a checkout still uses. It
+// reports how many it removed and the bytes they held.
+func SweepDirectMirrors(ctx context.Context, dir string, cutoff time.Time) (removed int, freed int64) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.git"))
+	if err != nil {
+		return 0, 0
+	}
+	env := directLocalGitEnv(directGitEnv(os.Environ()))
+	git := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	for _, mirror := range paths {
+		if ctx.Err() != nil {
+			break
+		}
+		fi, err := os.Stat(mirror)
+		if err != nil || !fi.IsDir() || !fi.ModTime().Before(cutoff) {
+			continue
+		}
+		size, err := directDirSize(mirror)
+		if err != nil {
+			continue
+		}
+		if directEvict(mirror, git) {
+			removed++
+			freed += size
+		}
+	}
+	return removed, freed
+}
+
 func directEvict(mirror string, git func(...string) (string, error)) bool {
 	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
