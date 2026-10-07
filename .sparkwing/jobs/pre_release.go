@@ -95,6 +95,7 @@ func (PreRelease) Help() string {
 		"dependency checks, public interface checks, Terraform checks, and workflow checks. " +
 		"Committed Go modules must use released dependencies; the pipeline module may replace " +
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
+		"Published modules and generated init or template modules must use a minor-only or zero-patch Go floor. " +
 		"On an attached branch, the gate updates a stale Sparkwing dependency pin, regenerates interface " +
 		"snapshots, and commits those changes before the push. On a detached checkout, it leaves the pin " +
 		"artifacts unchanged and reports stale versions. Run this release-boundary tier explicitly with " +
@@ -155,6 +156,7 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "version-freshness", run: func(ctx context.Context) error {
 			return CheckVersionsFreshness(ctx, sparkwing.WorkDir())
 		}},
+		{id: "go-directives", run: checkGoDirectives},
 		{id: "pre-v1-policy", run: func(ctx context.Context) error {
 			return CheckPreV1Policy(ctx, sparkwing.WorkDir())
 		}},

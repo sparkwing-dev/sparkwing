@@ -81,7 +81,8 @@ file. Other syntax and workflow checks remain active.
   policy at 3 seconds, `pre-push` the fast tier with a one-minute hard limit,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 10 minutes for build, full lint, the short test suite,
-  published-version and SDK-pin checks, and changelog-link checks in parallel.
+  published-version, Go-directive and SDK-pin checks, and changelog-link checks
+  in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
@@ -380,6 +381,14 @@ file. Other syntax and workflow checks remain active.
   function, duration, select arm and exact marker, and fails if an exception
   disappears or changes or a marker has no approved wait. New waits and sleeps
   still fail.
+- **Go directive policy:** the release cut and `pre-release`, beside its version
+  checks, reject patch-level Go requirements in the published root module and
+  any `go.mod` shipped in the template registry. `go 1.26` and `go 1.26.0`
+  pass; `go 1.26.3` fails. Pipeline and fixture modules are excluded. Init and
+  pipeline scaffolding share a generator that takes only the running Go
+  version's major and minor; this step runs a focused scaffold test against a
+  patch-version toolchain to check the generated module through pipeline creation.
+
 - **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
@@ -555,8 +564,8 @@ file. Other syntax and workflow checks remain active.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local
   `release` pipeline checks the chosen version against origin tags, checks the
-  clean tree, and verifies published module freshness, coherent SDK pins and
-  changelog links in the fixed ten-minute build/lint/short-test class. It then
+  clean tree, and verifies published module freshness, Go directive policy,
+  coherent SDK pins and changelog links in the fixed ten-minute build/lint/short-test class. It then
   renames `[Unreleased]`, rolls the migration guide, validates the resulting
   section and guide before committing, and checks schema/wire change coverage.
   All refusals precede push-tag. Freshness checks published versions, not the
