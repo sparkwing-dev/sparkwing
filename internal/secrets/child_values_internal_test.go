@@ -135,6 +135,18 @@ func TestChildValuesMaskRecordMasksANumberEqualToAValue(t *testing.T) {
 	}
 }
 
+func TestChildValuesMaskRecordMatchesAVeryLongNumberByTextOnly(t *testing.T) {
+	long := "0." + strings.Repeat("7", 1_048_000)
+	if _, ok := parseNumber(long); ok {
+		t.Fatal("a 1 MB number was parsed as a rational")
+	}
+	v := knownValues("123456", long)
+	got := v.MaskRecord(sparkwing.LogRecord{Attrs: map[string]any{"a": json.Number(long), "b": json.Number("0." + strings.Repeat("7", 1_047_999))}})
+	if got.Attrs["a"] != "***" || got.Attrs["b"] == "***" {
+		t.Fatalf("a masked = %t, b masked = %t; want only the registered spelling masked", got.Attrs["a"] == "***", got.Attrs["b"] == "***")
+	}
+}
+
 func TestRegisterSharesAValueEqualToAnEarlierValuesEncoding(t *testing.T) {
 	var shared bytes.Buffer
 	shareMu.Lock()

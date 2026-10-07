@@ -79,6 +79,7 @@ type ChildValues struct {
 	done    bool
 	frame   []byte
 	writers []*LineWriter
+	numbers numberMatcher
 }
 
 // ShareWithChild hands cmd the write end of a values pipe and returns the
@@ -125,7 +126,7 @@ func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 	rec.Event, rec.Msg = m.Mask(rec.Event), m.Mask(rec.Msg)
 	rec.Attrs = m.MaskAttrs(rec.Attrs)
 	if patterns := m.Values(); len(patterns) > 0 && rec.Attrs != nil {
-		rec.Attrs, _ = numbersEqualTo(rec.Attrs, newNumberMatcher(patterns)).(map[string]any)
+		rec.Attrs, _ = numbersEqualTo(rec.Attrs, v.matcher(patterns)).(map[string]any)
 	}
 	return rec
 }
@@ -136,6 +137,16 @@ func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 type numberMatcher struct {
 	text    []string
 	numeric []*big.Rat
+}
+
+// perf: patterns only grow, so their count tells whether the parsed set is current.
+func (v *ChildValues) matcher(patterns []string) numberMatcher {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(v.numbers.text) != len(patterns) {
+		v.numbers = newNumberMatcher(patterns)
+	}
+	return v.numbers
 }
 
 func newNumberMatcher(patterns []string) numberMatcher {
@@ -151,6 +162,9 @@ func newNumberMatcher(patterns []string) numberMatcher {
 func (nm numberMatcher) matches(n json.Number) bool {
 	if slices.Contains(nm.text, string(n)) {
 		return true
+	}
+	if len(nm.numeric) == 0 {
+		return false
 	}
 	r, ok := parseNumber(string(n))
 	return ok && slices.ContainsFunc(nm.numeric, func(p *big.Rat) bool { return p.Cmp(r) == 0 })
@@ -178,11 +192,18 @@ func numbersEqualTo(v any, nm numberMatcher) any {
 	return v
 }
 
-// perf: big.Rat expands an exponent into its full digits, so a child could
-// stall the launcher with 1e999999999; no registered value is that long.
-const maxNumberExponent = 400
+// perf: big.Rat expands an exponent into its full digits and parses a long
+// mantissa in superlinear time, so a child could stall the launcher with
+// 1e999999999 or a million digits; such numbers are matched by text alone.
+const (
+	maxNumberExponent = 400
+	maxNumberText     = 128
+)
 
 func parseNumber(s string) (*big.Rat, bool) {
+	if len(s) > maxNumberText {
+		return nil, false
+	}
 	if i := strings.IndexAny(s, "eE"); i >= 0 {
 		if exp, err := strconv.Atoi(strings.TrimPrefix(s[i+1:], "+")); err != nil || exp > maxNumberExponent || exp < -maxNumberExponent {
 			return nil, false
