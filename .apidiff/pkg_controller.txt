@@ -284,15 +284,6 @@ func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, erro
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 const PaymentWarnedCode = "payment_warned"
-type PoolConfig struct {
-	Client kubernetes.Interface
-
-	Namespace string
-
-	ReconcileEvery time.Duration
-
-	WarmerServiceAccount string
-}
 type Principal struct {
 	Name        string
 	Kind        string
@@ -350,7 +341,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
 func (s *Server) AssistedRunHandler() http.Handler
-func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
 func (s *Server) DaemonHandler() http.Handler

@@ -74,9 +74,6 @@ label_owned_release_pvcs() {
   kube --namespace "$namespace" label persistentvolumeclaim \
     -l "app.kubernetes.io/instance=$release_name" \
     "$ownership_label" "$owner_token_label" --overwrite || label_status=1
-  kube --namespace "$namespace" label persistentvolumeclaim \
-    -l "app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache" \
-    "$ownership_label" "$owner_token_label" --overwrite || label_status=1
   return "$label_status"
 }
 

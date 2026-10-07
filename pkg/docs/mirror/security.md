@@ -127,7 +127,6 @@ filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
 `sparkwing cluster worker --runner k8s` gives nodes separate Job pods, while
 its planning process still has the runner-token authority described above.
-See [warm-pool.md](warm-pool.md) for that execution mode.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`
 combines the caller's filters with the authenticated team. A team reader can
@@ -874,12 +873,9 @@ isolation.
 
 The Helm charts run the long-lived services as non-root with explicit
 `securityContext` settings (the controller as uid 65534, privilege
-escalation disabled, all Linux capabilities dropped). The one exception
-is the warm-pool warmer: when the pool is enabled the controller
-launches an ephemeral `docker:27-dind` pod with `privileged: true` so
-it can run dockerd and pre-pull images into a warm PVC. It is
-short-lived, single-container, and the only privileged workload
-sparkwing creates. See [warm-pool.md](warm-pool.md).
+escalation disabled, all Linux capabilities dropped). The controller
+makes no Kubernetes API calls, so `sparkwing-full` binds it to no Role and
+mounts no API token in its pod.
 
 ## Runner Job placement
 

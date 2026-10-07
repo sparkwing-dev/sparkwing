@@ -6,7 +6,7 @@
 // mode is determined by which functional options the consumer sets,
 // not by a build flag.
 //
-//   - Cluster mode wires [Server.AttachPool] + [Server.WithCostRate].
+//   - Cluster mode wires [Server.WithCostRate].
 //   - Laptop mode wires [Server.WithArtifactStore] +
 //     [Server.WithReconcileHook].
 //   - The handler set is otherwise identical so the dashboard

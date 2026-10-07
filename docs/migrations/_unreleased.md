@@ -128,3 +128,40 @@ together.
 **Why:** a deploy role that trusts `ref:refs/heads/main` relies on branch
 protection deciding what runs on `main`; a shared cache let a branch's run put
 code into a later `main` run.
+
+## The warm-PVC pool is removed
+
+**Before:** `sparkwing-controller --pool` kept a set of PVCs labeled
+`sparkwing.dev/pool=cache` warm with privileged `docker:27-dind` pods and
+served `GET /api/v1/pool` and `POST /api/v1/pool/{checkout,return,heartbeat}`.
+`sparkwing-full` turned it on by default (`controller.pool.enabled: true`) and
+gave the controller a Role over PVCs, pods, configmaps, events and namespaces,
+a ClusterRole over StorageClasses, and a warmer ServiceAccount.
+
+**After:** the controller has no pool and makes no Kubernetes API calls. The
+four routes answer 404. Nothing Sparkwing ships ever checked a PVC out, so no
+build loses a cache it was using.
+
+**Operator steps:**
+
+- Remove `--pool`, `--pool-namespace`, `--warmer-service-account` and
+  `--kubeconfig` from the controller's arguments before upgrading; a
+  controller started with any of them exits. `SPARKWING_WARMER_SA` and
+  `POD_NAMESPACE` are no longer read.
+- With `sparkwing-full`, drop `controller.pool.*` and `rbac.*` from your
+  values. The upgrade deletes the controller's Role, RoleBinding, ClusterRole,
+  ClusterRoleBinding and `<release>-sparkwing-full-cache-warmer`
+  ServiceAccount, and the controller pod no longer mounts an API token.
+  Annotations on `serviceAccount` for IRSA or Workload Identity keep working.
+- Outside the chart, delete the Role and ClusterRole you granted the
+  controller for the pool, and any `sparkwing-cache-warmer` ServiceAccount.
+- Reclaim the pool's storage once the new controller runs:
+  `kubectl delete pod,pvc -n <pool-namespace> -l sparkwing.dev/managed=pool-manager`.
+  The `sparkwing-cache-config` ConfigMap, if you created one, is no longer read.
+- Drop dashboards and alerts on `sparkwing.pool.reconcile_duration`,
+  `sparkwing.pool.warm_duration`, `sparkwing.pool.checkouts` and
+  `sparkwing.pool.returns`.
+
+**Why:** the pool held the controller's broadest Kubernetes rights and ran
+the only privileged pods Sparkwing created, and no runner, launcher or chart
+template ever mounted one of its PVCs.

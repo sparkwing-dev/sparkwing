@@ -31,8 +31,6 @@ info:
 
     Mode-conditional routes are marked in each operation's `description`:
 
-    - **cluster-only** -- wired when the process calls `AttachPool`
-      (warm-PVC pool routes under `/api/v1/pool/*`).
     - **laptop-only** -- wired when the process calls `WithArtifactStore`
       (`GET /api/v1/artifacts/{key}`).
 
@@ -72,8 +70,6 @@ tags:
     description: Distributed mutual exclusion + coalescing.
   - name: debug-pauses
     description: Operator-induced pauses for live debugging.
-  - name: pool
-    description: Warm-PVC pool (cluster-only).
   - name: artifacts
     description: Content-addressed blob reads (laptop-only).
   - name: tokens
@@ -1915,73 +1911,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
-
-  /api/v1/pool:
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [pool]
-      summary: List warm-PVC pool. **cluster-only** (requires `AttachPool`).
-      responses:
-        "200":
-          description: Pool snapshot.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PoolListResponse"}
-        "503": {description: Pool not ready.}
-
-  /api/v1/pool/checkout:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Check out a clean PVC. **cluster-only**.
-      parameters:
-        - in: query
-          name: job_id
-          required: true
-          schema: {type: string}
-      responses:
-        "200":
-          description: Checked-out PVC name.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [pvc]
-                properties:
-                  pvc: {type: string}
-        "409": {description: No clean PVC available -- fall back to cache-less build.}
-
-  /api/v1/pool/return:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Return a PVC to the pool (marks it dirty). **cluster-only**.
-      parameters:
-        - in: query
-          name: pvc
-          required: true
-          schema: {type: string}
-      responses:
-        "204": {description: Returned.}
-
-  /api/v1/pool/heartbeat:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Keep ownership of an in-use PVC alive. **cluster-only**.
-      parameters:
-        - in: query
-          name: pvc
-          required: true
-          schema: {type: string}
-        - in: query
-          name: job_id
-          required: true
-          schema: {type: string}
-      responses:
-        "204": {description: Renewed.}
-        "409": {description: Heartbeat lost (job_id mismatch or PVC expired).}
 
   /api/v1/artifacts/{key}:
     parameters:
@@ -9555,27 +9484,6 @@ components:
         size: {type: integer, format: int64}
         expires: {type: string, format: date-time}
         source_run_id: {type: string, description: The run the output was read from.}
-    PoolListResponse:
-      x-sparkwing-go-type: none
-      type: object
-      description: Snapshot of the warm-PVC pool (cluster-only).
-      properties:
-        pool_size: {type: integer}
-        pvc_size: {type: string}
-        pvcs:
-          type: array
-          items:
-            type: object
-            x-sparkwing-go-type: none
-            required: [name]
-            properties:
-              name: {type: string}
-              state:
-                type: string
-                enum: [clean, in-use, dirty, warming, unknown]
-              warmed_at: {type: string}
-              checked_out_by: {type: string}
-              checked_out_at: {type: string}
     CronTimerState:
       x-sparkwing-go-type: internal/crons.TimerStateView
       type: object

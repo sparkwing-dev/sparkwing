@@ -218,6 +218,12 @@ a child process that compiles and runs the pipeline. It works at the
 trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
 which claims nodes.
 
+While external executors work on nodes, the warm runner reads their
+statuses with one `GET /api/v1/runs/{id}/nodes` per run. An unchanged run
+backs off from 500 ms to 12 seconds with jitter; a status change resets the
+interval. A `429` response with `Retry-After` or
+`X-Sparkwing-Poll-After` sets a minimum wait before the next read.
+
 ## Local-first placement in claim mode
 
 A warm cloud pool polls every 500ms, so first-in-first-out hands it every node

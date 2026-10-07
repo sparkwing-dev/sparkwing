@@ -92,6 +92,18 @@ unlock.
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
+### Removed
+- **controller + charts (Breaking):** Remove the warm-PVC pool
+  The controller no longer creates, warms or hands out Docker-cache PVCs, and no longer serves `GET /api/v1/pool` or
+  `POST /api/v1/pool/{checkout,return,heartbeat}`. Nothing Sparkwing ships mounted a pool PVC, so the pool held
+  Kubernetes PVC and pod create rights and ran privileged warmer pods for no consumer. `sparkwing-controller` drops
+  `--pool`, `--pool-namespace`, `--warmer-service-account` and `--kubeconfig`, so a controller started with any of
+  them exits with an unknown-flag error, and it no longer links a Kubernetes client. `sparkwing-full` drops
+  `controller.pool.*` and `rbac.*`, renders no Role, ClusterRole or warmer ServiceAccount for the controller, and
+  stops mounting an API token in its pod. `sparkwing cluster status` drops its `pool` probe, and the
+  `sparkwing.pool.*` metrics are gone. See
+  [The warm-PVC pool is removed](docs/migrations/_unreleased.md#the-warm-pvc-pool-is-removed).
+
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no

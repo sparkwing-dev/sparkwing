@@ -1900,33 +1900,24 @@ func TestFullChartMountsNoWebServiceAccountToken(t *testing.T) {
 	}
 }
 
-func TestFullChartScopesTheWarmerServiceAccountToTheRelease(t *testing.T) {
+func TestFullChartGrantsTheControllerNoKubernetesAccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	const want = "other-sparkwing-full-cache-warmer"
-	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "other", "default"))
-	var created bool
-	for _, resource := range resources {
-		if resource.Kind == "ServiceAccount" && resource.Metadata.Name == want {
-			created = true
-		}
-	}
-	if !created {
-		t.Errorf("no %s ServiceAccount for the controller's warmer pods", want)
-	}
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default"))
 	controller := componentResource(t, resources, "Deployment", "controller")
-	args := resourceContainer(t, controller).Args
-	got, ok := hasFlag(args, "--warmer-service-account=")
-	if !ok {
-		t.Fatalf("no --warmer-service-account flag in %v; the controller would name the unscoped default", args)
+	if pod := controller.Spec.Template.Spec; pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Error("controller pod automounts a ServiceAccount token")
 	}
-	if got != "--warmer-service-account="+want {
-		t.Errorf("warmer-service-account flag = %q, want the release-scoped account", got)
+	for _, resource := range resources {
+		if (resource.Kind == "Role" || resource.Kind == "ClusterRole" || resource.Kind == "RoleBinding" || resource.Kind == "ClusterRoleBinding") &&
+			resource.Metadata.Labels["app.kubernetes.io/component"] == "controller" {
+			t.Errorf("%s %s binds the controller to the Kubernetes API, which it never calls", resource.Kind, resource.Metadata.Name)
+		}
 	}
 }
 
-func TestFullChartWarmerServiceAccountDoesNotCollideAcrossReleases(t *testing.T) {
+func TestFullChartServiceAccountsDoNotCollideAcrossReleases(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}

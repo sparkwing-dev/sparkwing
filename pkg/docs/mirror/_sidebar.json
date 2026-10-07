@@ -62,7 +62,6 @@
         "scheduling",
         "github-actions-runners",
         "github-app",
-        "warm-pool",
         "gitcache",
         "git-credentials"
       ]

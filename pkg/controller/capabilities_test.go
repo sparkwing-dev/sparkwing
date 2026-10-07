@@ -143,30 +143,6 @@ func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
 	})
 }
 
-func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	dir := t.TempDir()
-	s, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	srv := httptest.NewServer(controller.New(s, nil).Handler())
-	t.Cleanup(srv.Close)
-
-	resp, err := http.Get(srv.URL + "/api/v1/pool")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("GET /api/v1/pool: status=%d want 404", resp.StatusCode)
-	}
-}
-
 func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {

@@ -98,9 +98,9 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 		path := strings.ReplaceAll(m[2], "{id}", "rx")
 		path = regexp.MustCompile(`\{[^}]+\}`).ReplaceAllString(path, "x")
 		path = strings.TrimSuffix(path, "...")
-		// safety: the pool and artifact routes are registered only on a server
-		// given a pool or an artifact store, which this fixture is not.
-		if strings.HasPrefix(m[2], "/api/v1/pool") || strings.HasPrefix(m[2], "/api/v1/artifacts/") {
+		// safety: the artifact route is registered only on a server given an
+		// artifact store, which this fixture is not.
+		if strings.HasPrefix(m[2], "/api/v1/artifacts/") {
 			continue
 		}
 		code := f.call(m[1], path, grant, map[string]any{}, nil)

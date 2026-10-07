@@ -108,10 +108,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/pipelines/{name}/profile/observations` | `runs.state` |
 | `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
 | `POST` | `/api/v1/pipelines/{name}/profile/waits` | `runs.state` |
-| `GET` | `/api/v1/pool` | `runs.read` |
-| `POST` | `/api/v1/pool/checkout` | `admin` |
-| `POST` | `/api/v1/pool/heartbeat` | `admin` |
-| `POST` | `/api/v1/pool/return` | `admin` |
 | `GET` | `/api/v1/queue/state` | `runs.read` |
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |

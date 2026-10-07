@@ -40,8 +40,6 @@ type Server struct {
 	gitCredentialLimit perMinuteLimiter
 	identityLinkLimit  perMinuteLimiter
 
-	pool *poolBinding
-
 	auth *Authenticator
 
 	peerPrincipal func(*http.Request) *Principal
@@ -1112,13 +1110,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
-	if s.pool != nil {
-		mux.Handle("GET /api/v1/pool", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePoolList)))
-		mux.Handle("POST /api/v1/pool/checkout", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolCheckout)))
-		mux.Handle("POST /api/v1/pool/return", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolReturn)))
-		mux.Handle("POST /api/v1/pool/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolHeartbeat)))
-	}
-
 	if s.artifactStore != nil {
 		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, s.metered(egress.ClassArtifact, http.HandlerFunc(s.handleArtifactGet))))
 	}
@@ -1395,22 +1386,19 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 // Serve starts the HTTP listener and blocks until ctx is done. On
 // ctx cancellation the server gracefully drains in-flight requests
 // up to shutdownTimeout. Also spawns the reaper goroutine that
-// re-queues triggers whose runner lease expired, and -- when a pool
-// has been attached via Server.AttachPool -- the pool's reconcile
-// and warming loops.
+// re-queues triggers whose runner lease expired.
 func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error {
 	return ServeWith(ctx, New(st, logger), addr)
 }
 
-// ServeWith runs a pre-built Server (configured with WithDispatcher /
-// AttachPool) at addr. Split from Serve so the controller pod main can
-// wire in an in-cluster k8s client without passing options through
-// Serve.
 // safety: the HTTP drain and the commit-status drain each get this whole
 // budget, so a request still folding a run's profiles is not cut off by
 // time the listener's own shutdown already spent.
 const controllerShutdownBudget = 5 * time.Second
 
+// ServeWith runs a pre-built Server (configured with WithDispatcher and
+// the other With options) at addr. Split from Serve so the controller pod
+// main can configure the server without passing options through Serve.
 func ServeWith(ctx context.Context, s *Server, addr string) error {
 	listener := func(addr string, h http.Handler) *http.Server {
 		return &http.Server{
@@ -1444,10 +1432,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runCardBilling(ctx, CardBillingInterval)
-
-	if s.pool != nil {
-		go s.pool.run(ctx, s.logger)
-	}
 
 	errCh := make(chan error, 1+len(servers))
 
