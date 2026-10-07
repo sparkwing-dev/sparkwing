@@ -614,3 +614,17 @@ func TestDirectSparkwingDirAcceptsACheckoutReachedThroughASymlink(t *testing.T) 
 		t.Fatalf("directSparkwingDir = %s, want %s", dir, want)
 	}
 }
+
+// FetchPipelineSourceDirect checks out repoURL at sha under workDir and
+// returns the checkout's .sparkwing directory. With a credential the fetch
+// presents only that credential and reads none of this machine's git config,
+// ssh agent or keys; the zero credential fetches with this process's own git
+// config and credentials, which only an owner-fenced runner may do. Fetched
+// objects stay in a mirror under the Sparkwing home keyed by the remote, so a
+// later run of the same repository fetches only what it lacks. An empty sha
+// takes the tip of branch.
+func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
+	opts := defaultDirectOptions()
+	opts.cred = cred
+	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
+}

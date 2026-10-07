@@ -1359,14 +1359,6 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 	return false
 }
 
-// Serve starts the HTTP listener and blocks until ctx is done. On
-// ctx cancellation the server gracefully drains in-flight requests
-// up to shutdownTimeout. Also spawns the reaper goroutine that
-// re-queues triggers whose runner lease expired.
-func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error {
-	return ServeWith(ctx, New(st, logger), addr)
-}
-
 // safety: the HTTP drain and the commit-status drain each get this whole
 // budget, so a request still folding a run's profiles is not cut off by
 // time the listener's own shutdown already spent.

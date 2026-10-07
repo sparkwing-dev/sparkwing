@@ -129,6 +129,74 @@ so upgrade the controller before or with the cache; see
 protection deciding what runs on `main`; a shared cache let a branch's run put
 code into a later `main` run.
 
+A deployment that still starts `sparkwing-runner worker` switches to the
+combined runner before upgrading; the chart and the documented manifests never
+ran it.
+
+## sparkwing-runner worker is removed
+
+- **Before:** `sparkwing-runner worker --controller <url> [--runner inprocess|k8s|warm]`
+  polled the trigger queue and ran each claimed trigger, either in-process or by
+  sending its nodes to Kubernetes Jobs or the warm pool.
+- **After:** the `worker` subcommand is unknown and exits 2. The combined
+  runner is the only trigger-claiming loop in `sparkwing-runner`.
+- **Upgrade:** replace the container args:
+
+  ```text
+  sparkwing-runner worker --controller=URL --logs=URL --runner=k8s \
+      --namespace=NS --image=IMAGE --runner-sa=SA --image-pull-secret=SECRET
+  ```
+
+  becomes
+
+  ```text
+  sparkwing-runner runner --controller=URL --logs=URL --also-claim-triggers --claim-nodes=false \
+      --trigger-runner=k8s --trigger-runner-namespace=NS --trigger-runner-image=IMAGE \
+      --trigger-runner-sa=SA --trigger-runner-image-pull-secret=SECRET
+  ```
+
+  `--trigger-sources`, `--token`, `--metrics-addr` and `--dependency-proxy`
+  carry over; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
+  and `--runner-logs-url` gain the `--trigger-runner-` prefix, and
+  `--artifact-store` becomes `--trigger-artifact-store`. Drop
+  `--claim-nodes=false` to let the same pod also run nodes. The worker's
+  `--log-store` has no runner equivalent: the runner streams logs to `--logs`.
+  `--k8s-cpu-ceiling`, `--k8s-memory-ceiling` and `--k8s-job-deadline` become
+  `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING` and
+  `SPARKWING_K8S_JOB_DEADLINE` in the runner pod's environment, which each
+  trigger's child inherits.
+- **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
+  for a profile, is unchanged.
+
+## Flag-mirror environment variables are no longer read
+
+Each of these variables only supplied a flag's default. Neither chart sets
+them; a custom manifest that does passes the flag instead.
+
+| Variable | Use instead |
+|---|---|
+| `SPARKWING_TRIGGER_RUNNER` | `sparkwing-runner runner --trigger-runner` |
+| `SPARKWING_RUNNER_IMAGE` | `--trigger-runner-image` |
+| `SPARKWING_IMAGE_PULL_SECRET` | `--trigger-runner-image-pull-secret` |
+| `SPARKWING_RUNNER_CONTROLLER_URL` | `--trigger-runner-controller-url` |
+| `SPARKWING_RUNNER_LOGS_URL` | `--trigger-runner-logs-url` |
+| `SPARKWING_RUNNER_NODE_SELECTOR` | `--trigger-runner-node-selector`, once per entry |
+| `SPARKWING_RUNNER_TOLERATION` | `--trigger-runner-toleration`, once per entry |
+| `SPARKWING_GITCACHE_CONCURRENCY` | `sparkwing-cache --git-fork-limit` |
+| `SPARKWING_WINGD_VERSION` | `sparkwing wingd run --version` |
+| `SPARKWING_FORCE_COLOR=1` | `CLICOLOR_FORCE=1` |
+
+`SPARKWING_BAKED_BINARY` named a pipeline binary inside the runner image for
+triggers without a repository. The runner image ships no such binary, so the
+fallback only failed later with `no such file`; such a trigger now fails at
+once saying it has no repository. Delete the variable from any runner
+manifest. `SPARKWING_CHAOS_KEEP` kept chaos-test homes and has no replacement;
+a failed chaos test still keeps its home.
+
+**Edge case:** a variable set on the runner pod also reached each trigger's
+`handle-trigger` child, which read the same names. Both reads are gone, so
+the flag on `sparkwing-runner runner` is the only way to set these values.
+
 Per-pipeline GitHub webhooks are gone, so every repository that posted to
 `/webhooks/github/<pipeline>` must move to the GitHub App before the
 controller is upgraded, or its pushes and pull requests stop starting runs.
@@ -260,6 +328,33 @@ needs changing.
 
 **Why:** the grant is the cache's only team boundary, and a grant that named
 neither the claim nor the repository it was minted for outlived both.
+
+## doctor no longer reports box-slot locks
+
+- **Before:** `sparkwing doctor` read `$SPARKWING_HOME/box-slots`, reported a
+  live holder as a pipeline pinned before v0.16, and purged idle lock files.
+  `sparkwing queue` printed the same warning.
+- **After:** neither command reads the directory. `doctor -o json` no longer
+  carries `legacy_box_slot_files_removed` or `live_legacy_holders`, and
+  `-o plain` no longer prints those two rows.
+- **Upgrade:** scripts that read either field drop it. A leftover
+  `$SPARKWING_HOME/box-slots` directory holds only lock files and can be
+  deleted with `rm -r "${SPARKWING_HOME:-$HOME/.sparkwing}/box-slots"`.
+
+## Unused pkg functions are removed
+
+Go programs that import these `pkg/` functions call the replacement instead:
+
+| Removed | Use instead |
+|---|---|
+| `controller.Serve(ctx, st, addr, logger)` | `controller.ServeWith(ctx, controller.New(st, logger), addr)` |
+| `logs.Serve`, `logs.ServeWithTokens`, `logs.ServePrivateWithTokens` | `logs.ServeWith(ctx, logs.ServeOptions{Root, Addr, ControllerURL, Logger, Private})` |
+| `sparkwinglogs.FromClient(c)` | `sparkwinglogs.New` with the client's URL and token |
+| `store.DetectDialect(dsn)` | `store.Open` for a SQLite path, `store.OpenPostgres` for a `postgres://` DSN |
+| `controller.AuditFields`, `store.SetArgon2AcquireTimeout`, `backends.LayerSurfaces` | nothing; no caller used them |
+
+`backends.LayerSurfaces` layered a pipeline target's backend over the
+profile's, a block `sparkwing.yaml` no longer accepts.
 
 ## Unimplemented backend types are removed
 

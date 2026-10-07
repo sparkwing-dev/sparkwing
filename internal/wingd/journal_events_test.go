@@ -14,7 +14,7 @@ func TestConnectionJournalKeepsIdentityAfterHandoff(t *testing.T) {
 	d := &Daemon{cfg: Config{Now: func() time.Time { return now }}, journal: journal.NewWriter(dir, 3, nil)}
 	d.recordJournal("connection_closed", &conn{id: 7, journalRunID: "run-1", pipeline: "build", pid: 999, peerPID: 123}, map[string]any{"role": "idle"})
 	d.journal.Close()
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestJournalRequestDoesNotAssignConnectionIdentityBeforeAdmission(t *testing
 		t.Fatalf("terminal response = %#v", msg)
 	}
 	d.journal.Close()
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestJournalReattachRefusalPreservesEmptyRunID(t *testing.T) {
 		t.Fatalf("refused reattach = %#v, connection run ID = %q", msg, c.runID)
 	}
 	d.journal.Close()
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

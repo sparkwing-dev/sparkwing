@@ -51,15 +51,6 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func ContextFromEnv(ctx context.Context) context.Context {
-	tp := os.Getenv("TRACEPARENT")
-	if tp == "" {
-		return ctx
-	}
-	carrier := propagation.MapCarrier{"traceparent": tp}
-	return propagation.TraceContext{}.Extract(ctx, carrier)
-}
-
 func TraceParentEnv(ctx context.Context) string {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {

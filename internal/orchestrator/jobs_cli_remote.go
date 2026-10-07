@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,45 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListOpts, out io.Writer) error {
-	if controllerURL == "" {
-		return errors.New("ListJobsRemote: controller URL required")
-	}
-	c := client.NewWithToken(controllerURL, nil, token)
-	filter, clientFilter, pager, err := runsQueryFor(opts)
-	if err != nil {
-		return err
-	}
-	runs, err := c.ListRuns(ctx, filter)
-	if err != nil {
-		return err
-	}
-	rows, resume, sourceMore := pager.window(TagShared(runs), clientFilter)
-
-	if opts.ByPipeline {
-		pivot := newPipelinePivot(opts.Pivot.SparklineLen)
-		pivot.add(untagRuns(rows))
-		stopped, err := forEachRunPage(ctx, c, pager, filter, clientFilter, resume, sourceMore,
-			func(page []TaggedRun) { pivot.add(untagRuns(page)) })
-		if err != nil {
-			return err
-		}
-		summary := PipelinePivotSummary{Kind: "summary", Truncated: stopped != "", Reason: stopped}
-		opts.Pivot.JSON = opts.JSON
-		opts.Pivot.Quiet = opts.Quiet
-		if err := renderPivotRows(pivot.sorted(), opts.Pivot, out); err != nil {
-			return err
-		}
-		return summary.write(opts.JSON && !opts.Quiet, out, os.Stderr)
-	}
-
-	rows, page := pager.page(rows, resume, sourceMore, filter.Since)
-	if err := renderRunList(rows, opts, out, nil); err != nil {
-		return err
-	}
-	return page.write(opts.JSON && !opts.Quiet, out, os.Stderr)
-}
 
 func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, opts StatusOpts, out io.Writer) error {
 	if controllerURL == "" {
@@ -254,19 +214,6 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	}
 	defer done()
 	return writeRunDetailJSON(ctx, st, runID, label, out)
-}
-
-func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, opts LogsOpts, out io.Writer) error {
-	if controllerURL == "" {
-		return errors.New("JobLogsRemote: controller URL required")
-	}
-	if logsURL == "" {
-		return errors.New("JobLogsRemote: logs URL required")
-	}
-	if opts.Tree {
-		return errors.New("JobLogsRemote: --tree is local-mode only")
-	}
-	return JobLogsRemoteWithTokens(ctx, controllerURL, logsURL, "", runID, opts, out)
 }
 
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {

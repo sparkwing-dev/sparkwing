@@ -196,8 +196,6 @@ func ensureTriggerWorkRoot(path string, private bool) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-var BakedBinary = os.Getenv("SPARKWING_BAKED_BINARY")
-
 func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) (selfTerminate bool, err error) {
 	ctx = orchestrator.DispatchContext(ctx, trigger)
 	ctx, span := otelutil.Tracer("sparkwing-trigger-loop").Start(ctx, "handleOneTrigger")
@@ -243,11 +241,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	grant := orchestrator.RequestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
 	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
 	if repoURL == "" && !workspaceSource {
-		if BakedBinary == "" {
-			return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)
-		}
-		execErr := execHandleTrigger(childCtx, BakedBinary, "", trigger, opts, grant, logger)
-		return awaitHeartbeat(), execErr
+		return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url, so there is no pipeline source to build", trigger.ID)
 	}
 
 	branch := trigger.GitBranch

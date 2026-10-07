@@ -74,7 +74,7 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 func TestRemoteBackends_FromBaseURL(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "tok-abc")
 	art := &noListArtifact{}
-	b := orchestrator.RemoteBackends(c, nil, art, nil, 0)
+	b := orchestrator.RemoteBackends(context.Background(), c, nil, art, nil, 0)
 	if b.State == nil || b.Logs == nil || b.Concurrency == nil {
 		t.Fatalf("RemoteBackends = %+v", b)
 	}
@@ -88,7 +88,7 @@ func TestRemoteBackends_FromBaseURL(t *testing.T) {
 
 func TestRemoteBackends_NilArtifact(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "")
-	b := orchestrator.RemoteBackends(c, nil, nil, nil, 0)
+	b := orchestrator.RemoteBackends(context.Background(), c, nil, nil, nil, 0)
 	if b.Artifact != nil {
 		t.Errorf("Artifact = %v, want nil", b.Artifact)
 	}

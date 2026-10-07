@@ -117,7 +117,7 @@ func TestDiagnose_NamesARepeatedRejectionCauseFromALiveDaemon(t *testing.T) {
 		t.Error("a machine refusing every admission read as clean")
 	}
 	var pretty bytes.Buffer
-	if err := opsview.RenderDoctor(&pretty, report, "pretty", ""); err != nil {
+	if err := opsview.RenderDoctor(&pretty, report, "pretty"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(pretty.String(), got.Cause) {

@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -257,12 +256,12 @@ func TestRunNode_OversizedChildLineDoesNotDeadlockTheRun(t *testing.T) {
 		switch {
 		case r.Msg == "after":
 			after++
-		case strings.Contains(r.Msg, "truncated"):
+		case r.Msg == droppedLineMarker:
 			sawTruncated = true
 		}
 	}
 	if !sawTruncated {
-		t.Error("the oversized line was dropped rather than truncated")
+		t.Error("the oversized line left no dropped-line marker")
 	}
 	if after != 5000 {
 		t.Errorf("forwarded %d of the 5000 lines that followed the oversized one", after)

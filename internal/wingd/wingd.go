@@ -458,14 +458,6 @@ func HomeDir(home string) (string, error) {
 	return l.home, nil
 }
 
-func LockPath(home string) (string, error) {
-	l, err := resolveLayout(home)
-	if err != nil {
-		return "", err
-	}
-	return l.lock, nil
-}
-
 func StateDir(home string) (string, error) {
 	l, err := resolveLayout(home)
 	if err != nil {

@@ -35,7 +35,7 @@ func TestDoctorReport_UngatedReposDoNotDecideCleanliness(t *testing.T) {
 
 func TestRenderDoctorPretty_NamesEachUngatedRepoAndItsFix(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, ungatedReport(), "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, ungatedReport(), ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -48,7 +48,7 @@ func TestRenderDoctorPretty_NamesEachUngatedRepoAndItsFix(t *testing.T) {
 
 func TestRenderDoctorPretty_ReportsUngatedReposOnTheHealthyPath(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, ungatedReport(), "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, ungatedReport(), ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -70,7 +70,7 @@ func TestRenderDoctorPretty_DoesNotRepeatTheCheckoutShadowedHooksDescribes(t *te
 		Gates:     []string{"pre-commit"},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if got := strings.Count(buf.String(), "/code/pulsewing/.git/hooks"); got != 1 {
@@ -91,7 +91,7 @@ func TestRenderDoctorPretty_StillNamesOtherReposWhenTheLocalOneIsShadowed(t *tes
 	})
 	r.ShadowedHooks = &githooks.Shadow{Repo: "/code/pulsewing", Gates: []string{"pre-commit"}}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(buf.String(), "/code/sparks-core") {
@@ -101,7 +101,7 @@ func TestRenderDoctorPretty_StillNamesOtherReposWhenTheLocalOneIsShadowed(t *tes
 
 func TestRenderDoctorPretty_SaysNothingAboutGatesWhenEveryRepoIsArmed(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if strings.Contains(buf.String(), "no gate") {
@@ -111,7 +111,7 @@ func TestRenderDoctorPretty_SaysNothingAboutGatesWhenEveryRepoIsArmed(t *testing
 
 func TestRenderDoctorPretty_StatesTheCleanGateVerdictRatherThanImplyingIt(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if got := buf.String(); !strings.Contains(got, "3 registered repo(s) surveyed, every declared gate fires") {
@@ -121,7 +121,7 @@ func TestRenderDoctorPretty_StatesTheCleanGateVerdictRatherThanImplyingIt(t *tes
 
 func TestRenderDoctorPretty_ClaimsNoGateVerdictWhenNothingWasSurveyed(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if got := buf.String(); strings.Contains(got, "every declared gate fires") {
@@ -131,11 +131,11 @@ func TestRenderDoctorPretty_ClaimsNoGateVerdictWhenNothingWasSurveyed(t *testing
 
 func TestRenderDoctorPretty_AnUnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T) {
 	var gated, blind bytes.Buffer
-	if err := opsview.RenderDoctor(&gated, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&gated, opsview.DoctorReport{GatesSurveyed: 3}, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse config.yaml: yaml: line 459"}
-	if err := opsview.RenderDoctor(&blind, blindReport, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&blind, blindReport, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if blind.String() == gated.String() {
@@ -153,11 +153,11 @@ func TestRenderDoctorPretty_AnUnreadableRegistryReadsNothingLikeAGatedFleet(t *t
 
 func TestRenderDoctorPlain_FlagsAGateSurveyThatDidNotRun(t *testing.T) {
 	var clean, blind bytes.Buffer
-	if err := opsview.RenderDoctor(&clean, opsview.DoctorReport{GatesSurveyed: 3}, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&clean, opsview.DoctorReport{GatesSurveyed: 3}, "plain"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse config.yaml"}
-	if err := opsview.RenderDoctor(&blind, blindReport, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&blind, blindReport, "plain"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(clean.String(), "gates_survey_failed\t0") {
@@ -170,7 +170,7 @@ func TestRenderDoctorPlain_FlagsAGateSurveyThatDidNotRun(t *testing.T) {
 
 func TestRenderDoctorJSON_AlwaysCarriesTheSurveyedGateCount(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(buf.String(), `"gates_surveyed"`) {
@@ -180,7 +180,7 @@ func TestRenderDoctorJSON_AlwaysCarriesTheSurveyedGateCount(t *testing.T) {
 
 func TestRenderDoctorJSON_CarriesUngatedRepos(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, ungatedReport(), "json", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, ungatedReport(), "json"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	var got opsview.DoctorReport
@@ -194,7 +194,7 @@ func TestRenderDoctorJSON_CarriesUngatedRepos(t *testing.T) {
 
 func TestRenderDoctorPlain_CountsUngatedRepos(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, ungatedReport(), "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, ungatedReport(), "plain"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(buf.String(), "ungated_repos") {

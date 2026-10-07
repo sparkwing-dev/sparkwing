@@ -297,9 +297,9 @@ func (s3StateAdapter) ReconcileOrphanedLocalRuns(context.Context, time.Duration)
 
 var _ StateBackend = (*client.Client)(nil)
 
-func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
+func RemoteBackends(ctx context.Context, c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
 	if logs == nil {
-		logs = NewHTTPLogsWithToken(remoteLogsURL(c), nil, c.Token(), nil)
+		logs = NewHTTPLogsWithToken(remoteLogsURL(ctx, c), nil, c.Token(), nil)
 	}
 	if h, ok := logs.(*HTTPLogs); ok {
 		logs = h.WithLiveSink(c)
@@ -315,8 +315,8 @@ func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore
 	}
 }
 
-func remoteLogsURL(c *client.Client) string {
-	ctx, cancel := context.WithTimeout(context.Background(), logsDiscoveryTimeout)
+func remoteLogsURL(ctx context.Context, c *client.Client) string {
+	ctx, cancel := context.WithTimeout(ctx, logsDiscoveryTimeout)
 	defer cancel()
 	if svc, err := discovery.ServicesFor(ctx, c.BaseURL(), c.Token()); err == nil && svc.Logs != "" {
 		return svc.Logs

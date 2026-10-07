@@ -91,32 +91,6 @@ func TestValidCostSource_AcceptsEveryResolvedSource(t *testing.T) {
 	}
 }
 
-func TestRequestFromWaiter_RoundTrips(t *testing.T) {
-	w := admission.WaiterState{
-		RequestID:   "w",
-		OwnerID:     "owner",
-		Priority:    9,
-		MilliCores:  2500,
-		SoftCores:   true,
-		StrictCores: true,
-		MemoryBytes: 4096,
-		Claims:      []admission.ClaimState{{Key: "k", Capacity: 2, Cost: 1, Policy: admission.PolicyQueue}},
-	}
-	req := requestFromWaiter(w)
-	if req.ID != "w" || req.Cores != 2.5 || !req.SoftCores || !req.StrictCores || req.MemoryBytes != 4096 {
-		t.Fatalf("host fields wrong: %+v", req)
-	}
-	if req.Priority != 9 {
-		t.Fatalf("priority = %d, want 9", req.Priority)
-	}
-	if req.OwnerID != "owner" {
-		t.Fatalf("owner id = %q, want owner", req.OwnerID)
-	}
-	if len(req.Semaphores) != 1 || req.Semaphores[0].Key != "k" {
-		t.Fatalf("claims wrong: %+v", req.Semaphores)
-	}
-}
-
 func TestSubmitErrorKey(t *testing.T) {
 	tests := []struct {
 		err  error
@@ -516,4 +490,33 @@ func TestClampHostChargeLocked_CapsMemoryLikeCores(t *testing.T) {
 	if pinned.Cores != 20 || pinned.MemoryBytes != 32<<30 {
 		t.Errorf("pin clamped to %+v, want it left hard", pinned)
 	}
+}
+
+func (d *Daemon) applyHeadroom(stat HostStat) {
+	d.applyHeadroomSample(stat, nil, true)
+}
+
+func requestFromWire(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
+	return requestFromWireWithMetadata(runID, ownerRunID, res, sems, costSource, priority, "", 0)
+}
+
+func (d *Daemon) shutdown() {
+	d.shutdownWithReason("requested")
+}
+
+func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
+	snap, events, _, err := readStateWithCancellations(path)
+	return snap, events, err
+}
+
+func writeState(path string, snap admission.Snapshot, events []admissionEvent) error {
+	return writeStateWithCancellations(path, snap, events, nil)
+}
+
+func LockPath(home string) (string, error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return "", err
+	}
+	return l.lock, nil
 }

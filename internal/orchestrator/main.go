@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -24,6 +25,7 @@ import (
 )
 
 func Main() {
+	secrets.ShareRegisteredFromEnv()
 	projectCfg := bindProjectPipelines()
 
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {

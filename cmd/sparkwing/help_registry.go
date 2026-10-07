@@ -1942,7 +1942,8 @@ var cmdWorker = Command{
 	Synopsis: "Claim triggers from a profile's controller and run them in-process",
 	Description: `Polls the trigger queue at the selected profile's
 controller and executes each claimed trigger in-process on this host.
-Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
+For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
+--trigger-runner k8s|warm, which carries the image and service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing serve start' via --profile local.`,
@@ -1987,10 +1988,9 @@ var cmdDoctor = Command{
 --dry-run reports proposed repairs. The command preserves live processes,
 active daemon state, and cluster-scoped records.
 
-Repairs cover home permissions, abandoned local run records, abandoned
-box-slot locks, ended local concurrency records, and orphaned run directories.
-Run-record repair requires a reachable daemon so held runs remain protected.
-A held box-slot lock is reported with guidance to update the pipeline SDK.
+Repairs cover home permissions, abandoned local run records, ended local
+concurrency records, and orphaned run directories. Run-record repair requires
+a reachable daemon so held runs remain protected.
 
 Run-directory removal requires a local store with recorded runs and profiles
 that all use that store. Directories written within the grace period remain.

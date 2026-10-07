@@ -201,22 +201,6 @@ func (r *githubCheckReporter) finish(runID string, sent githubCheckPhase) {
 	r.signalLocked()
 }
 
-func (r *githubCheckReporter) idle(ctx context.Context) error {
-	for {
-		r.mu.Lock()
-		empty, changed := len(r.jobs) == 0, r.changed
-		r.mu.Unlock()
-		if empty {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-changed:
-		}
-	}
-}
-
 func (r *githubCheckReporter) shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.accepting = false

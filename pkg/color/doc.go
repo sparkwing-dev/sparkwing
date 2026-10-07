@@ -6,7 +6,7 @@
 //
 // Color emission auto-detects: enabled only when stdout is a TTY and
 // neither NO_COLOR nor CI is set. Agents (Claude Code, Cursor, etc.)
-// and pipes get plain text. CLICOLOR_FORCE=1 / SPARKWING_FORCE_COLOR=1
+// and pipes get plain text. CLICOLOR_FORCE=1
 // re-enables for the rare case the user wants color through a pipe.
 //
 // The color helpers ([Red], [Green], [Yellow], [Blue], [Magenta],

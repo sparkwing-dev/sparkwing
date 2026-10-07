@@ -150,10 +150,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"before the team column exists",
 	"applyFleetMigrationSQLite":   "a schema step that backfills every team's node offer and attempt columns",
 	"applyFleetMigrationPostgres": "a schema step that backfills every team's node offer and attempt columns",
-	"bridgeLegacyFleetSQLite": "bridges a database from an older release by numbering every team's nodes, as the step it " +
-		"replaces did",
-	"validateLegacyFleetShape": "reads no row: its WHERE 1 = 0 probes only prove the bridged tables carry the expected " +
-		"columns",
 	"addNodeMetricsRunCascadePostgres": "a schema repair that drops node metric rows whose run is gone in any team before " +
 		"it adds the cascade",
 	"backfillAgentLossRetryNodeSourcesTx": "a schema step that records every team's pre-snapshot agent-loss retries as " +

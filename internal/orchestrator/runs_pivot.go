@@ -78,12 +78,6 @@ func (p *pipelinePivot) sorted() []PipelinePivotRow {
 	return out
 }
 
-func pivotByPipeline(runs []*store.Run, sparklineLen int) []PipelinePivotRow {
-	p := newPipelinePivot(sparklineLen)
-	p.add(runs)
-	return p.sorted()
-}
-
 func renderSparkline(statuses []string, style SparklineStyle) string {
 	var b strings.Builder
 	for _, s := range statuses {
@@ -141,10 +135,6 @@ type PivotOpts struct {
 	Style        SparklineStyle
 	JSON         bool
 	Quiet        bool
-}
-
-func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error {
-	return renderPivotRows(pivotByPipeline(runs, opts.SparklineLen), opts, out)
 }
 
 func renderPivotRows(rows []PipelinePivotRow, opts PivotOpts, out io.Writer) error {

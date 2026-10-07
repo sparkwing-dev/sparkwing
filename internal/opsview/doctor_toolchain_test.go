@@ -18,7 +18,7 @@ func TestDoctorGoToolchainFormats(t *testing.T) {
 	for _, format := range []string{"pretty", "plain", "json"} {
 		t.Run(format, func(t *testing.T) {
 			var out bytes.Buffer
-			if err := opsview.RenderDoctor(&out, report, format, ""); err != nil {
+			if err := opsview.RenderDoctor(&out, report, format); err != nil {
 				t.Fatal(err)
 			}
 			if format == "json" {
@@ -43,7 +43,7 @@ func TestDoctorGoToolchainFormats(t *testing.T) {
 func TestDoctorGoToolchainAbsentOutsideProject(t *testing.T) {
 	for _, format := range []string{"pretty", "plain", "json"} {
 		var out bytes.Buffer
-		if err := opsview.RenderDoctor(&out, opsview.DoctorReport{}, format, ""); err != nil {
+		if err := opsview.RenderDoctor(&out, opsview.DoctorReport{}, format); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(out.String(), "go_toolchain") || strings.Contains(out.String(), "Go toolchain:") {

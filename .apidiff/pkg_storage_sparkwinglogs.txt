@@ -1,6 +1,5 @@
 # pkg/storage/sparkwinglogs
 
-func FromClient(c *logs.Client) *Store
 func New(baseURL string, httpClient *http.Client, token string) *Store
 type Store struct {
 }

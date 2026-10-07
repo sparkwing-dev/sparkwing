@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/propagation"
+
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -277,4 +279,13 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("logging after Init did not return")
 	}
+}
+
+func ContextFromEnv(ctx context.Context) context.Context {
+	tp := os.Getenv("TRACEPARENT")
+	if tp == "" {
+		return ctx
+	}
+	carrier := propagation.MapCarrier{"traceparent": tp}
+	return propagation.TraceContext{}.Extract(ctx, carrier)
 }

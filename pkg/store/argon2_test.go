@@ -188,3 +188,16 @@ func TestVerifyUserShedsWhenHashingIsSaturated(t *testing.T) {
 		}
 	}
 }
+
+// SetArgon2AcquireTimeout bounds the wait for a free hashing slot and
+// returns the previous bound. A non-positive duration leaves it
+// unchanged.
+func SetArgon2AcquireTimeout(d time.Duration) time.Duration {
+	argonSemMu.Lock()
+	defer argonSemMu.Unlock()
+	prev := argonSemWait
+	if d > 0 {
+		argonSemWait = d
+	}
+	return prev
+}

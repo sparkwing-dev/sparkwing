@@ -13,8 +13,6 @@ func TestDoctorPlainReportsEveryConditionThatMakesAHomeUnclean(t *testing.T) {
 		"PermissionRepairs":         func(r *DoctorReport) { r.PermissionRepairs = []fssecure.Change{{Path: "p"}} },
 		"PermissionAuditUnverified": func(r *DoctorReport) { r.PermissionAuditUnverified = true },
 		"OrphanedRuns":              func(r *DoctorReport) { r.OrphanedRuns = []string{"run-1"} },
-		"LegacyBoxSlotFilesRemoved": func(r *DoctorReport) { r.LegacyBoxSlotFilesRemoved = 1 },
-		"LiveLegacyHolders":         func(r *DoctorReport) { r.LiveLegacyHolders = []DoctorLegacyHolder{{}} },
 		"DeadConcurrencyHolders":    func(r *DoctorReport) { r.DeadConcurrencyHolders = 1 },
 		"DeadConcurrencyWaiters":    func(r *DoctorReport) { r.DeadConcurrencyWaiters = 1 },
 		"DanglingRunDirs":           func(r *DoctorReport) { r.DanglingRunDirs = []string{"run-2"} },
