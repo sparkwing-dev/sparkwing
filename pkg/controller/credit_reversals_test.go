@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -340,5 +341,22 @@ func TestCheckoutClosedClosesOnlyTheTeamsOpenUnpaidSession(t *testing.T) {
 		if err != nil || len(events) != want {
 			t.Errorf("%s events = %+v, %v; want %d", kind, events, err, want)
 		}
+	}
+}
+
+// A reversal of a payment the ledger does not hold answers one 404 document
+// and logs no reversal.
+func TestAReversalOfAnUnknownPaymentAnswersOnly404(t *testing.T) {
+	raw, pub := multiTeamLicense(t)
+	logs := &lockedBuffer{}
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, logger: slog.New(slog.NewJSONHandler(logs, nil))})
+	var body map[string]any
+	if code := f.call("POST", "/api/v1/credits/reversals", "Bearer "+f.admin, map[string]any{
+		"payment_id": "pi_unknown", "reference": "refund:pi_unknown",
+	}, &body); code != http.StatusNotFound || body["error"] == nil {
+		t.Fatalf("unknown payment = %d %+v, want one 404 error document", code, body)
+	}
+	if strings.Contains(logs.String(), "payment reversed") {
+		t.Fatalf("logs = %s; want no reversal logged", logs.String())
 	}
 }
