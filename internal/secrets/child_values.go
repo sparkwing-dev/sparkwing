@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // MaskValuesFDEnv names the inherited file descriptor a pipeline process
@@ -106,13 +104,11 @@ func (v *ChildValues) Mask(s string) string {
 	return v.synced().Mask(s)
 }
 
-// MaskRecord masks a decoded log record's message and attribute values with
-// every value the child registered before it wrote the record.
-func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
-	m := v.synced()
-	rec.Msg = m.Mask(rec.Msg)
-	rec.Attrs = m.MaskAttrs(rec.Attrs)
-	return rec
+// MaskJSON masks every string and number value in a JSON document, keeping
+// its keys and structure, with every value the child registered before it
+// wrote the document. Text that is not JSON is masked as text.
+func (v *ChildValues) MaskJSON(doc []byte) []byte {
+	return v.synced().MaskJSON(doc)
 }
 
 func (v *ChildValues) synced() *Masker {

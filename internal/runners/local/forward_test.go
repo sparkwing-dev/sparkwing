@@ -17,11 +17,7 @@ type maskerOutput struct{ m *secrets.Masker }
 
 func (o maskerOutput) Mask(s string) string { return o.m.Mask(s) }
 
-func (o maskerOutput) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
-	rec.Msg = o.m.Mask(rec.Msg)
-	rec.Attrs = o.m.MaskAttrs(rec.Attrs)
-	return rec
-}
+func (o maskerOutput) MaskJSON(doc []byte) []byte { return o.m.MaskJSON(doc) }
 
 var unmasked = maskerOutput{m: secrets.NewMasker()}
 
@@ -248,21 +244,40 @@ func TestForwardLines_UnterminatedFinalLineIsEmitted(t *testing.T) {
 	}
 }
 
-func TestForwardRecordsMasksASecretNamedLikeAFieldWithoutBreakingTheRecord(t *testing.T) {
+func TestForwardRecordsMasksEveryValueAndKeepsTheRecordsShape(t *testing.T) {
 	m := secrets.NewMasker()
-	m.Register("msg")
+	for _, v := range []string{"msg", "fixture-secret-7c41e9", "12345678"} {
+		m.Register(v)
+	}
 	cap := &captureLogger{}
-	forwardRecords(strings.NewReader(`{"msg":"token msg sent","level":"info","attrs":{"k":"msg"}}`+"\n"+"raw msg line\n"),
-		runner.Request{NodeID: "build", Delegate: cap}, maskerOutput{m: m}, slog.Default())
+	lines := strings.Join([]string{
+		`{"msg":"ok","step":"fixture-secret-7c41e9"}`,
+		`{"msg":"ok","attrs":{"pin":12345678}}`,
+		`{"msg":"token msg sent","level":"info","attrs":{"msg":"msg","count":42,"ratio":0.25,"big":987654321098765432109}}`,
+		"raw msg line",
+	}, "\n") + "\n"
+	forwardRecords(strings.NewReader(lines), runner.Request{NodeID: "build", Delegate: cap}, maskerOutput{m: m}, slog.Default())
 
 	got := cap.records()
-	if len(got) != 2 {
-		t.Fatalf("got %d records, want 2: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d records, want 4: %+v", len(got), got)
 	}
-	if got[0].Msg != "token *** sent" || got[0].Level != "info" || got[0].Attrs["k"] != "***" {
-		t.Errorf("decoded record = %+v, want its message and attribute masked and its fields intact", got[0])
+	if got[0].Msg != "ok" || got[0].Step != "***" {
+		t.Errorf("step = %q, msg = %q; want the step masked", got[0].Step, got[0].Msg)
 	}
-	if got[1].Msg != "raw *** line" {
-		t.Errorf("raw line = %q, want it masked as text", got[1].Msg)
+	if got[1].Attrs["pin"] != "***" {
+		t.Errorf("pin = %#v, want the registered number masked", got[1].Attrs["pin"])
+	}
+	r := got[2]
+	if r.Msg != "token *** sent" || r.Level != "info" || r.Attrs["msg"] != "***" {
+		t.Errorf("record = %+v, want its keys kept and its values masked", r)
+	}
+	for k, want := range map[string]string{"count": "42", "ratio": "0.25", "big": "987654321098765432109"} {
+		if fmt.Sprint(r.Attrs[k]) != want {
+			t.Errorf("attrs[%s] = %v, want %s unchanged", k, r.Attrs[k], want)
+		}
+	}
+	if got[3].Msg != "raw *** line" {
+		t.Errorf("raw line = %q, want it masked as text", got[3].Msg)
 	}
 }
