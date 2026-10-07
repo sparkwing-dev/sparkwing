@@ -67,7 +67,7 @@ After:
 
 **Edge cases:**
 
-- The segment is set only when a GitHub App delivery started the run, or when a retry or child run inherits that repository. Runs from a legacy per-pipeline webhook, the CLI, the API or a schedule carry an empty segment, `team:acme:repository_id::pipeline:...`. A policy for such runs inserts `repository_id::`.
+- The segment is set only when a GitHub App delivery started the run, or when a retry or child run inherits that repository. Runs from the CLI, the API or a schedule carry an empty segment, `team:acme:repository_id::pipeline:...`. A policy for such runs inserts `repository_id::`.
 - A policy that ends in `*` after an earlier segment, such as `team:acme:*`, keeps matching, and now also matches every repository. Narrow it to `team:acme:repository_id:<id>:*` when the role belongs to one repository.
 - Google Cloud and Vault examples that condition on the individual claims keep working, but they should add a condition on `repository`, because a pipeline name is not unique across a team's repositories. See [OIDC tokens for cloud roles](../oidc.md).
 
@@ -128,3 +128,70 @@ together.
 **Why:** a deploy role that trusts `ref:refs/heads/main` relies on branch
 protection deciding what runs on `main`; a shared cache let a branch's run put
 code into a later `main` run.
+
+Per-pipeline GitHub webhooks are gone, so every repository that posted to
+`/webhooks/github/<pipeline>` must move to the GitHub App before the
+controller is upgraded, or its pushes and pull requests stop starting runs.
+
+## Per-pipeline GitHub webhooks are removed
+
+- **Before:** a repository webhook posted to `POST /webhooks/github/{pipeline}`,
+  signed with a secret from `sparkwing cluster webhooks connect`, the
+  `GITHUB_WEBHOOK_BINDINGS` document or `GITHUB_WEBHOOK_SECRET`, and the
+  controller's `GITHUB_TOKEN` posted commit statuses for its pull request runs.
+- **After:** the [GitHub App](../github-app.md) is the only signed GitHub
+  trigger. The old route, the bindings API and table, the `sparkwing cluster
+  webhooks` commands, the three environment settings and the chart values
+  `controller.githubWebhookSecret` and `controller.githubStatusToken` are gone.
+  A delivery to the old URL answers `404`. Schema v92 drops the stored bindings
+  and their secrets; nothing reads them back.
+
+To move a repository:
+
+1. Configure the App on the controller, once per deployment, as
+   [Operator configuration](../github-app.md#operator-configuration) lists:
+   `SPARKWING_GITHUB_APP_ID`, `SPARKWING_GITHUB_APP_SLUG`,
+   `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` (or `_PRIVATE_KEY`) and
+   `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`, with the App's webhook pointed at
+   `https://<controller>/webhooks/github-app`. The `sparkwing-full` chart takes
+   these through `controller.extraEnv`, and its ingress does not route
+   `/webhooks/github-app`, so add a rule for it as you did for the old path.
+   The hosted service already runs the App.
+2. A team owner opens **Team -> GitHub**, chooses **Connect GitHub**, and
+   installs the App on the account that owns the repository
+   ([Connecting a team](../github-app.md#connecting-a-team)).
+3. Subscribe each pipeline the old webhook URL named, in the same tab or with
+   the API. The old webhook ran `push` and `pull_request` (`opened`,
+   `synchronize`, `reopened`) and ignored tag pushes; this subscription keeps
+   that, and `branches` narrows it:
+
+   ```bash
+   curl -sS -X PUT https://<controller>/api/v1/team/github-app/triggers \
+     -H "Authorization: Bearer $SPARKWING_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"repository":"your-org/my-app","pipeline":"build-deploy","push":true,"pull_request":true}'
+   ```
+
+4. Delete the old webhook on GitHub (repository **Settings -> Webhooks**), or
+   leave it to fail with `404`.
+5. Remove `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN`
+   from the controller's environment, and `controller.githubWebhookSecret` and
+   `controller.githubStatusToken` from Helm values. The controller ignores
+   them, so leaving them changes nothing but hides what is configured.
+
+**Edge cases:**
+
+- Runs the App starts report a check run named `sparkwing/<pipeline>`
+  instead of a commit status under the same name. A branch protection rule
+  that requires `sparkwing/<pipeline>` and pins it to a source expects the
+  old token's statuses; set the App as that check's source. An installation
+  whose owner has not accepted the Checks permission gets commit statuses
+  until it does.
+- App runs carry the repository id in the OIDC subject, so a trust policy
+  written for webhook runs with `repository_id::` must name the id
+  ([OIDC subject names the repository](#oidc-subject-names-the-repository)).
+- A run already queued from the old webhook still runs. If it mints an OIDC
+  token after the upgrade, its trigger is `trigger:manual`, because it carries
+  no repository id.
+- A subscription runs only for repositories in the team's installation, and a
+  pull request from a fork starts nothing, as before.

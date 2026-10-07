@@ -26,7 +26,7 @@ The controller refuses to start with some of the App settings and not the others
 
 ### GitHub App settings
 
-The examples use the hosted deployment's hosts: the dashboard at `console.sparkwing.dev` and the controller at `api.sparkwing.dev`. A self-hosted deployment puts its own dashboard and controller external URL in their place.
+The examples use the hosted deployment's hosts: the dashboard at `console.sparkwing.dev` and the controller at `api.sparkwing.dev`. A self-hosted deployment puts its own dashboard URL (`--dashboard-url` or `SPARKWING_DASHBOARD_URL`) and controller external URL (`--external-url` or `SPARKWING_EXTERNAL_URL`) in their place.
 
 - **Webhook**: active. URL `https://api.sparkwing.dev/webhooks/github-app`. Secret: the webhook secret above.
 - **Setup URL**: `https://console.sparkwing.dev/github/app/setup`, with **Redirect on update** checked.
@@ -72,7 +72,7 @@ An installation stops being bound when GitHub reports it deleted, when a team ow
 
 ## Runs from GitHub events
 
-A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block. Each additional option defaults to `false`:
+A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly: the controller does not read a repository's `on:` block. Each additional option defaults to `false`:
 
 | Option | Event |
 | --- | --- |
@@ -86,7 +86,7 @@ A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/t
 
 The subscription follows GitHub's repository id across a rename. A `repository` `renamed` or `transferred` delivery updates its displayed name and installation when the new installation belongs to the same team and covers the repository. No pipeline runs from the repository event itself.
 
-`POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For each subscribed event it creates one trigger in that team per pipeline, recording the branch or tag ref, commit, repository and installation id. The controller resolves release tags and branch refs through a repository-restricted installation token before dispatch. The operator webhook at `POST /webhooks/github/{pipeline}` acknowledges tag pushes without starting runs.
+`POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For each subscribed event it creates one trigger in that team per pipeline, recording the branch or tag ref, commit, repository and installation id. The controller resolves release tags and branch refs through a repository-restricted installation token before dispatch.
 
 Runs expose `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_REF_TYPE` and `GITHUB_ACTION`. Tag push triggers carry `GITHUB_REF=refs/tags/<tag>`, `GITHUB_REF_TYPE=tag` and `GITHUB_TAG=<tag>`, and a tag node also gets `GITHUB_REF_NAME=<tag>`. Branch push triggers carry `GITHUB_REF=refs/heads/<branch>` and `GITHUB_REF_TYPE=branch`. PR runs also expose `GITHUB_LABEL` and `GITHUB_MERGED` (`true` or `false`), along with the existing `GITHUB_PR_*` fields. Release runs expose `GITHUB_TAG_NAME`. PR refs are `refs/pull/<number>/head`; release refs are `refs/tags/<tag>`; branch events expose `refs/heads/<branch>`, including the deleted branch. OIDC trigger claims use `push`, `pull_request`, `release`, `create` or `delete` with those refs.
 
@@ -137,7 +137,7 @@ The fetch inherits the token on a pipe, and a credential helper scoped to `https
 
 ## Check runs
 
-Each run the App started reports as one check run named `sparkwing/<pipeline>` on the commit it builds: the pushed commit, or a pull request's head. Only runs whose trigger the App webhook created report this way; the operator's `GITHUB_TOKEN` reporter keeps posting commit statuses for operator webhook bindings, unchanged.
+Each run the App started reports as one check run named `sparkwing/<pipeline>` on the commit it builds: the pushed commit, or a pull request's head. Only runs whose trigger the App webhook created report this way; runs from the CLI, the API or a schedule report nothing to GitHub.
 
 The check run is created `queued` when the run is dispatched, moves to `in_progress` when a runner starts it, and ends `completed` with one of these conclusions:
 

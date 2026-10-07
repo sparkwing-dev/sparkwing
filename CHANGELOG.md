@@ -92,6 +92,10 @@ unlock.
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
+### Removed
+- **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
+  `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/_unreleased.md#per-pipeline-github-webhooks-are-removed).
+
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no

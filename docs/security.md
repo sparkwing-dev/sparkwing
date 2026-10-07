@@ -325,10 +325,10 @@ what it always did.
 `--max-runs-per-principal-hour N` (chart
 `controller.maxRunsPerPrincipalHour`) caps the runs one principal may
 create in a rolling hour. An authenticated submission spends its own
-token's budget, or its team's for any team but the operator's; a webhook
-delivery carries no principal, so it spends the budget of the team whose
-binding signed it and the repository it names. A [GitHub App](github-app.md)
-delivery spends its team's budget once for every run it creates. Past the cap the controller answers
+token's budget, or its team's for any team but the operator's. A
+[GitHub App](github-app.md) delivery carries no principal, so it spends
+the budget of the team its installation is bound to, once for every run
+it creates. Past the cap the controller answers
 `429` with a `Retry-After` naming the real refill delay, which lengthens
 while a caller keeps knocking at an empty budget. The budget lives in
 controller memory, so a restart or a rollout refills every principal;
@@ -346,15 +346,12 @@ answers a content-identical `POST /api/v1/triggers` submission inside D
 with `409` and the run the first one started. The digest covers the
 submitting principal, so a `409` naming a run id only ever reaches the
 principal that owns that run and two tenants submitting the same body get
-a run each. A GitHub redelivery is deduped regardless: the store holds
-one trigger per delivery id and one per body digest, so a retried
-delivery answers `409` naming the original run whatever this window says.
-The body digest is also kept for 90 days apart from the run, so a
-signed push or pull request delivered again after its run was deleted
-answers `409` with no run id instead of starting the commit again. Past
-those 90 days a legacy webhook delivery is accepted again; GitHub App
-deliveries carry an event time and are refused once it is that old (see
-[GitHub App](github-app.md)).
+a run each. A GitHub App redelivery is deduped regardless: the
+controller keeps the digest of every signed body that started runs for
+90 days, apart from the runs, so a retried delivery answers `duplicate`
+with the runs it already started whatever this window says, and one
+whose runs were deleted starts nothing. A delivery whose event is older
+than those 90 days is refused (see [GitHub App](github-app.md)).
 
 Deduplication runs before the shed and the cap, so a redelivery is
 answered with its original run rather than a refusal, and retrying one
@@ -536,73 +533,20 @@ hosted controller is one flag beside the profile rather than a fork of
 it. `sparkwing cluster limits show` prints the budgets in force beside
 the stored compute guards.
 
-## Webhooks
+## GitHub webhooks
 
-GitHub webhook deliveries are verified by the controller: it checks the
-`X-Hub-Signature-256` HMAC with a constant-time compare before doing any
-work. The handler acts on `push` and on `pull_request` (opened /
-synchronize / reopened, against the PR head), and answers `ping`; other
-event types and other `pull_request` actions are accepted and ignored.
-
-`GITHUB_WEBHOOK_SECRET` is one value every configured repository holds,
-so on its own it says only that *some* holder signed the body -- any
-holder could then drive any pipeline against any repository. Bind the
-intake with `GITHUB_WEBHOOK_BINDINGS`, a JSON document:
-
-```json
-{
-  "pipelines": {
-    "sample-app-build": {"repos": ["acme/sample-app"], "secret": "..."}
-  },
-  "repo_secrets": {"acme/sample-app": "..."}
-}
-```
-
-`pipelines` is keyed by the `{pipeline}` path segment and `repo_secrets`
-by repository slug. A slug is lowercased once, when the delivery is
-read, and that one value picks the secret and answers the binding, so
-no case fold can send the two decisions to different repositories; a
-`repository.full_name` that is not an ASCII `owner/name` slug is refused
-outright. A pipeline with a `repos` list refuses any delivery naming a
-repository outside it, so a repository owner reaches only the pipelines
-you bound to them. A `repos` list that is present but empty refuses
-every repository; omit the key, or the pipeline entry, to leave the
-delivery's repository unchecked. The controller logs the resolved
-counts at startup, so an installed document that parsed to nothing is
-visible in the log.
-
-The signing secret resolves most specific first -- the pipeline's own
-secret, then the named repository's secret, then
-`GITHUB_WEBHOOK_SECRET`. Give every bound repository a secret of its own
-to isolate them completely: a repository left without one is verified
-with the shared secret its peers also hold. In the chart, pass the
-document through `controller.extraEnv` from a Kubernetes secret.
-
-A refusal does not say which of these rules it failed. An unbound
-repository answers `404`, the same as a pipeline that does not exist,
-and once any pipeline or repository carries a secret of its own, a
-delivery resolving to no secret answers `401` like a bad signature
-rather than `503`. Otherwise the status code alone would enumerate the
-binding table and the `repo_secrets` key set, one guess per request.
-`503` remains the answer when no secret is configured anywhere.
-
-Each delivery is recorded under two unique constraints: the
-`X-GitHub-Delivery` id, store-wide, and a digest of the material the
-signature covered -- the pipeline and the request body. The digest is
-what closes replay: `X-GitHub-Delivery` is a header the sender picks and
-the HMAC does not cover, so keying on it alone would let anyone who
-captured one delivery re-send it under an id of their own. Re-sending a
-body the controller already accepted answers `409` whatever header rides
-with it, and the response names the run the first delivery produced, so
-a redelivery from the GitHub side resolves to that run instead of a dead
-end. A delivery arriving without the header answers `400`.
-
-When `GITHUB_TOKEN` is set, the controller uses it only for outbound
-commit-status requests for `pull_request` webhook runs. Prefer a
-fine-grained token limited to the served repositories with **Commit
-statuses: Read and write**. The token never enters trigger environment,
-run state, logs, or the dashboard. An empty token disables outbound
-status reporting.
+The [GitHub App](github-app.md) is the only signed GitHub trigger. Its
+deliveries arrive at `POST /webhooks/github-app`, which checks the
+`X-Hub-Signature-256` HMAC against the App's webhook secret with a
+constant-time compare before doing any work and answers `401` when it
+does not verify. The installation the delivery names picks the team it
+runs in, and GitHub's own record of which installation covers the
+repository is read on every delivery that would start a run, so a
+delivery runs only pipelines a team owner subscribed to a repository
+that owner's installation covers. A pull request from a fork starts
+nothing. Replay is closed by the body digest described above, which
+covers the signed body rather than the `X-GitHub-Delivery` header the
+sender picks.
 
 ## Secrets at rest
 
@@ -1076,8 +1020,6 @@ scanner failure on `main` is what holds a release back, before the tag exists.
 - **Encrypt etcd / your secret store.** Kubernetes Secrets are
   base64, not encrypted, unless the cluster enables it.
 - **Rotate the GitHub credentials and cache SSH key** periodically.
-- **Limit the status token.** Give the controller's `GITHUB_TOKEN` commit-status
-  write access only to repositories whose pull requests Sparkwing reports.
 
 ## Controller client redirects
 

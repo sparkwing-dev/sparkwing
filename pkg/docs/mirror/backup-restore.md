@@ -22,9 +22,8 @@ restores a controller that starts and still cannot do its job.
   During a key rotation the same is true of
   `SPARKWING_SECRETS_PREVIOUS_KEY`.
 - **The controller's own start-up configuration**: its flags and the
-  rest of its environment, including `GITHUB_WEBHOOK_SECRET`,
-  `GITHUB_WEBHOOK_BINDINGS`, `GITHUB_TOKEN`, and the announced service
-  URLs. On Kubernetes that is the Helm values file and the Secrets it
+  rest of its environment, including the `SPARKWING_GITHUB_APP_*`
+  settings and the announced service URLs. On Kubernetes that is the Helm values file and the Secrets it
   names; on a single machine it is the unit file and its environment.
 
 What the state database does not hold, and what a restore therefore
