@@ -125,6 +125,9 @@ unlock.
 
 ### Removed
 
+- **controller (Breaking):** Remove `controller.Dispatcher`, `RunRequest`, `NoopDispatcher` and `Server.WithDispatcher`
+  Every build installed the no-op dispatcher, so a trigger was already only recorded for runners to claim by polling. A program embedding the controller drops its `WithDispatcher` call; a run it wants started is claimed from the trigger queue. See the [migration guide](docs/migrations/_unreleased.md#the-controllers-dispatcher-hook-is-removed).
+
 - **store (Breaking):** Remove `Store.ChargeNodeCredits`
   Nothing in the engine called it; a node's renewal, finish and launch settlement bill through the same charge inside their own transactions. A Go program that billed a node directly calls `FinalizeNodeCredits` to settle it.
 

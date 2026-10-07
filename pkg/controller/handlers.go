@@ -1150,23 +1150,7 @@ func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIn
 	}
 
 	s.recordQueueActivity(in.At)
-
-	return s.dispatcher.Dispatch(ctx, RunRequest{
-		RunID:    in.RunID,
-		Pipeline: in.Pipeline,
-		Args:     in.Args,
-		Trigger: sparkwing.TriggerInfo{
-			Source: in.Source,
-			User:   in.User,
-		},
-		Git: &sparkwing.Git{
-			Branch:  in.Git.Branch,
-			SHA:     in.Git.SHA,
-			Repo:    in.Git.Repo,
-			RepoURL: in.Git.RepoURL,
-		},
-		ParentRunID: in.ParentRunID,
-	})
+	return nil
 }
 
 type heartbeatResp struct {

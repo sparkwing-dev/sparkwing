@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/runretry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
@@ -73,23 +72,6 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
-		RunID:    created.ID,
-		Pipeline: created.Source.Pipeline,
-		Args:     created.Source.Args,
-		Trigger:  sparkwing.TriggerInfo{Source: created.TriggerSource},
-		Git: &sparkwing.Git{
-			Branch:  created.Source.GitBranch,
-			SHA:     created.Source.GitSHA,
-			Repo:    created.Source.DeclaredRepo,
-			RepoURL: created.Source.RepoURL,
-		},
-		RetryOf: srcID,
-	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

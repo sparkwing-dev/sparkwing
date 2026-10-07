@@ -21,8 +21,7 @@
 //
 // [New] returns a [*Server] bound to a
 // [github.com/sparkwing-dev/sparkwing/pkg/store.Store]. Tune with
-// chainable options: [Server.WithDispatcher] (default
-// [NoopDispatcher]), [Server.WithAuthenticator] (default no auth),
+// chainable options: [Server.WithAuthenticator] (default no auth),
 // [Server.WithQueueTimeout], [Server.WithSecretsCipher] (any
 // [Cipher] implementation), [Server.WithGitHubApp], and
 // the mode-specific options above. Call [Server.Handler] to get the
@@ -30,9 +29,8 @@
 //
 // # Plug points
 //
-// [Dispatcher] decouples the HTTP surface from how runs actually
-// launch -- pluggable so the same controller can drive in-process,
-// pool-backed pod, or external systems. [Cipher] decouples secret
+// Runs are not pushed anywhere: an accepted trigger is a row that runners
+// claim by polling. [Cipher] decouples secret
 // encryption from any specific implementation so consumers can
 // supply their own AEAD without depending on sparkwing's internal
 // secrets package. [Authenticator] resolves bearer tokens to a

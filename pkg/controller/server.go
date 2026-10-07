@@ -32,9 +32,8 @@ import (
 // dispatcher. A single Server instance services all concurrent HTTP
 // requests; the store itself serializes writes.
 type Server struct {
-	store      *store.Store
-	dispatcher Dispatcher
-	logger     *slog.Logger
+	store  *store.Store
+	logger *slog.Logger
 
 	hostKeyScan        func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	gitCredentialLimit perMinuteLimiter
@@ -229,9 +228,9 @@ func (s *Server) assistedPathAllowed(method, path string) bool {
 	return false
 }
 
-// New constructs a Server bound to the given store. A nil dispatcher
-// defaults to NoopDispatcher (triggers are recorded but no run is
-// launched). Callers own the store's lifecycle; New never closes it.
+// New constructs a Server bound to the given store. A trigger it accepts is
+// recorded for a runner to claim. Callers own the store's lifecycle; New
+// never closes it.
 func New(st *store.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -239,7 +238,6 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	srv := &Server{
 		store:               st,
 		outputSigner:        newOutputSigner(),
-		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
 		loginLimit:          newLoginLimiter(),
 		queueTimeout:        15 * time.Minute,
@@ -786,14 +784,6 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 // header may reach addr.
 func (s *Server) WithTrustedProxyAddr(addr string) *Server {
 	s.trustedProxyAddr = addr
-	return s
-}
-
-// WithDispatcher returns a Server that invokes the given dispatcher
-// when a trigger arrives. Separate from New so the dispatcher can
-// close over the Server itself.
-func (s *Server) WithDispatcher(d Dispatcher) *Server {
-	s.dispatcher = d
 	return s
 }
 
@@ -1364,8 +1354,8 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 // time the listener's own shutdown already spent.
 const controllerShutdownBudget = 5 * time.Second
 
-// ServeWith runs a pre-built Server (configured with WithDispatcher and
-// the other With options) at addr. Split from Serve so the controller pod
+// ServeWith runs a pre-built Server (configured with its With options)
+// at addr. Split from Serve so the controller pod
 // main can configure the server without passing options through Serve.
 func ServeWith(ctx context.Context, s *Server, addr string) error {
 	listener := func(addr string, h http.Handler) *http.Server {

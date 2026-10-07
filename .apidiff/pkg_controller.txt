@@ -92,9 +92,6 @@ type DirectUploadResponse struct {
 	Headers   map[string]string
 	ExpiresAt time.Time
 }
-type Dispatcher interface {
-	Dispatch(ctx context.Context, req RunRequest) error
-}
 const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
@@ -214,10 +211,6 @@ func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback
 const NoPayableChargeCode = "no_payable_charge"
-type NoopDispatcher struct {
-	Logger *slog.Logger
-}
-func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error
 type OIDCTokenRequest struct {
 	Audience string
 }
@@ -268,15 +261,6 @@ type RequestBudget struct {
 	RunnersPerToken     int
 }
 const RequestIDHeader = "X-Request-Id"
-type RunRequest struct {
-	RunID       string
-	Pipeline    string
-	Args        map[string]string
-	Trigger     sparkwing.TriggerInfo
-	Git         *sparkwing.Git
-	ParentRunID string
-	RetryOf     string
-}
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
@@ -326,7 +310,6 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
-func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server

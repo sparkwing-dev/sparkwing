@@ -1011,12 +1011,6 @@ func (s *Server) startGitHubAppRun(
 		return githubAppRun{}, fmt.Errorf("persist trigger: %w", err)
 	}
 	s.recordQueueActivity(time.Now())
-	if err := s.dispatcher.Dispatch(ctx, RunRequest{
-		RunID: runID, Pipeline: pipeline, Trigger: trigger,
-		Git: &sparkwing.Git{Branch: in.branch, SHA: in.sha, Repo: repo.Slug()},
-	}); err != nil {
-		return githubAppRun{}, err
-	}
 	s.reportGitHubRunState(context.WithoutCancel(ctx), runID, "pending")
 	return githubAppRun{Pipeline: pipeline, RunID: runID, Status: "dispatched"}, nil
 }

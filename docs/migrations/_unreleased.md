@@ -492,3 +492,23 @@ review as the route table moves to one declared list.
   `pkg/storage/s3`, beside `ParseURL` and `NewClient`. Behaviour is unchanged.
 - **Author steps:** replace `storeurl.OpenS3(ctx, raw)` with `s3.Open(ctx, raw)`
   from `github.com/sparkwing-dev/sparkwing/pkg/storage/s3`.
+
+## The controller's dispatcher hook is removed
+
+- **Before:** `controller.Server.WithDispatcher` took a `controller.Dispatcher`
+  that was called with a `controller.RunRequest` after each trigger was
+  recorded, defaulting to `controller.NoopDispatcher`.
+- **After:** the types and the option are gone. A trigger is recorded and a
+  runner claims it by polling, as with the default before.
+- **Author steps:** remove the `WithDispatcher` call. Start work for a recorded
+  trigger by claiming it (`POST /api/v1/triggers/claim`, or
+  `client.ClaimTriggerFor`).
+
+## Removed store and release helpers
+
+- **Before:** `store.Store.ChargeNodeCredits` billed a node's elapsed seconds
+  directly, and `go run ./cmd/sign-manifest -genkey` printed a signing key.
+- **After:** both are gone; node renewal, finish and launch settlement bill
+  inside their own transactions.
+- **Author steps:** settle a node with `FinalizeNodeCredits`; generate a release
+  seed as described above under `cmd/sign-manifest is removed`.
