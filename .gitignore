@@ -8,7 +8,6 @@
 
 # Command binaries dropped by `go build ./cmd/<name>` in the repo root
 /apidiff
-/sign-manifest
 /sparkwing-cache
 /sparkwing-controller
 /sparkwing-logs

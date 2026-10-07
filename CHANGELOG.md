@@ -116,6 +116,9 @@ unlock.
 
 ### Removed
 
+- **release (Breaking):** Remove `cmd/sign-manifest`
+  Release assets are signed by `cmd/verify-release`, and nothing invoked the older helper. Generate a signing seed with `openssl rand -base64 32`, and print its public key with `SPARKWING_RELEASE_SIGNING_KEY=<seed> go run ./cmd/verify-release --public-key`. See the [migration guide](docs/migrations/_unreleased.md#cmdsign-manifest-is-removed).
+
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
 

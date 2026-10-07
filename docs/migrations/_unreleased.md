@@ -473,3 +473,13 @@ review as the route table moves to one declared list.
 - **Operator steps:** a cache that accepted the agent token because its API
   token was set to the same value now needs the controller to mint cache grants
   (`SPARKWING_CACHE_GRANT_KEY` on the controller and the cache), or the dependency cache runs without the service.
+
+## cmd/sign-manifest is removed
+
+- **Before:** `go run ./cmd/sign-manifest -genkey` printed an Ed25519 keypair,
+  and the same helper could sign and verify a manifest.
+- **After:** the helper is gone. The release workflow signs and verifies
+  with `cmd/verify-release`.
+- **Operator steps:** generate a seed with `openssl rand -base64 32`, store it
+  as `SPARKWING_UPDATE_SIGNING_KEY`, and print its public key with
+  `SPARKWING_RELEASE_SIGNING_KEY=<seed> go run ./cmd/verify-release --public-key`.

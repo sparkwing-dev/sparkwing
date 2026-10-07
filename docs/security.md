@@ -878,8 +878,8 @@ post-install mismatch restores the prior binary and fails loudly.
 
 The signing key is release machinery, not per-user configuration:
 
-- Generate a base64-encoded 32-byte Ed25519 seed and store it as the
-  `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
+- Generate a base64-encoded 32-byte Ed25519 seed (`openssl rand -base64 32`)
+  and store it as the `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
 - Add its public key to `internal/releaseauth.TrustedPublicKeys`. The
   release verifier refuses publication unless the secret-derived key is
   in the updater trust set.
