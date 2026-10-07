@@ -3,10 +3,12 @@ package secrets
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -120,7 +122,34 @@ func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 	rec.Level, rec.JobID, rec.Step = m.Mask(rec.Level), m.Mask(rec.JobID), m.Mask(rec.Step)
 	rec.Event, rec.Msg = m.Mask(rec.Event), m.Mask(rec.Msg)
 	rec.Attrs = m.MaskAttrs(rec.Attrs)
+	if originals := m.originals(); len(originals) > 0 && rec.Attrs != nil {
+		rec.Attrs, _ = numbersEqualTo(rec.Attrs, originals).(map[string]any)
+	}
 	return rec
+}
+
+// safety: a record's numbers stay as written except one that is exactly a
+// registered value, so a numeric secret masks itself and no other number.
+func numbersEqualTo(v any, values []string) any {
+	switch t := v.(type) {
+	case json.Number:
+		if slices.Contains(values, string(t)) {
+			return maskedValue
+		}
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = numbersEqualTo(e, values)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = numbersEqualTo(e, values)
+		}
+		return out
+	}
+	return v
 }
 
 func (v *ChildValues) synced() *Masker {

@@ -389,6 +389,12 @@ func (e maskedError) MarshalJSON() ([]byte, error) { return json.Marshal(e.msg) 
 
 func (e maskedError) Unwrap() error { return e.err }
 
+func (m *Masker) originals() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return slices.Clone(m.registered)
+}
+
 // Values returns a copy of masking patterns: whole values, nonblank multiline
 // components, and their encoded forms.
 func (m *Masker) Values() []string {

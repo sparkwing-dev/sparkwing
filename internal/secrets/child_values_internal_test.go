@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -100,6 +101,22 @@ func TestChildValuesMaskJSONKeepsNumbersExact(t *testing.T) {
 		if got != `{"attrs":{"sequence":9007199254740993},"password":"***"}` {
 			t.Errorf("MaskJSON(%s) = %s", doc, got)
 		}
+	}
+}
+
+func TestChildValuesMaskRecordMasksOnlyANumberEqualToAValue(t *testing.T) {
+	rec := func() sparkwing.LogRecord {
+		return sparkwing.LogRecord{Msg: "ok", Attrs: map[string]any{
+			"pin": json.Number("123456"), "list": []any{json.Number("123456")}, "n": json.Number("7"),
+		}}
+	}
+	got := knownValues("123456").MaskRecord(rec())
+	if got.Attrs["pin"] != "***" || got.Attrs["list"].([]any)[0] != "***" || got.Attrs["n"] != json.Number("7") {
+		t.Fatalf("with 123456 registered, attrs = %#v", got.Attrs)
+	}
+	got = knownValues("1234567").MaskRecord(rec())
+	if got.Attrs["pin"] != json.Number("123456") {
+		t.Fatalf("with 1234567 registered, attrs = %#v; want 123456 untouched", got.Attrs)
 	}
 }
 
