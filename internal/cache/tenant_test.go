@@ -1,6 +1,10 @@
 package cache
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,13 +24,37 @@ import (
 
 func testGrantKey(token string) string { return token + "-grant-key" }
 
-func grantFor(t *testing.T, token, team string) string {
+var (
+	testClaim = &authwire.CacheClaim{
+		Kind: authwire.CacheClaimToken, NodeID: "build", Generation: 1,
+		Principal: "agent:runner", TokenPrefix: "swc_test",
+	}
+	testScope = &authwire.CacheScope{Repo: "github.com/acme/app", Refs: []string{"refs/heads/main"}}
+)
+
+func mintGrant(t *testing.T, key, team, run string, now time.Time, scope *authwire.CacheScope) string {
 	t.Helper()
-	g, err := authwire.MintCacheGrant(testGrantKey(token), team, "run-"+team, time.Now(), time.Hour)
+	g, err := authwire.MintClaimCacheGrant(key, team, run, now, time.Hour, testClaim, scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return g
+}
+
+func grantFor(t *testing.T, token, team string) string {
+	t.Helper()
+	return mintGrant(t, testGrantKey(token), team, "run-"+team, time.Now(), testScope)
+}
+
+// safety: the derivation is the wire contract authwire pins, repeated here because a controller
+// that predates claims and scopes signed grants authwire no longer mints.
+func signWholeTeamGrant(key, team string, expires time.Time) string {
+	payload := fmt.Sprintf(`{"t":%q,"r":"run-1","e":%d}`, team, expires.Unix())
+	body := authwire.CacheGrantPrefix + base64.RawURLEncoding.EncodeToString([]byte(payload))
+	derived := sha256.Sum256([]byte("sparkwing cache grant v1\x00" + key))
+	mac := hmac.New(sha256.New, derived[:])
+	mac.Write([]byte(body))
+	return body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func send(t *testing.T, srv *httptest.Server, method, path, bearer, body string) (int, string) {
@@ -135,11 +163,9 @@ func TestCacheRefusesGrantsItCannotVerify(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	forged := grantFor(t, "some-other-token", "team-a")
-	expired, err := authwire.MintCacheGrant(testGrantKey(token), "team-a", "run-1", time.Now().Add(-2*time.Hour), time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, bearer := range map[string]string{"forged": forged, "expired": expired, "none": ""} {
+	expired := mintGrant(t, testGrantKey(token), "team-a", "run-1", time.Now().Add(-2*time.Hour), testScope)
+	wholeTeam := signWholeTeamGrant(testGrantKey(token), "team-a", time.Now().Add(time.Hour))
+	for name, bearer := range map[string]string{"forged": forged, "expired": expired, "whole-team": wholeTeam, "none": ""} {
 		if code, _ := send(t, srv, http.MethodPut, "/bin/deadbeef", bearer, "x"); code != http.StatusUnauthorized {
 			t.Errorf("%s grant PUT /bin = %d, want 401", name, code)
 		}
@@ -281,10 +307,7 @@ func TestStoreCeilingCountsTheMirrors(t *testing.T) {
 func TestCacheVerifiesGrantsWithTheGrantKeyAlone(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
-	byToken, err := authwire.MintCacheGrant(token, "team-a", "run-1", time.Now(), time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	byToken := mintGrant(t, token, "team-a", "run-1", time.Now(), testScope)
 	if code, _ := send(t, srv, http.MethodPut, "/bin/deadbeef", byToken, "x"); code != http.StatusUnauthorized {
 		t.Errorf("a grant signed with the operator token = %d, want 401", code)
 	}

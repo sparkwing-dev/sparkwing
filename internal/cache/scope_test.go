@@ -5,8 +5,14 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
@@ -14,12 +20,7 @@ import (
 
 func scopedGrant(t *testing.T, token, repo string, refs ...string) string {
 	t.Helper()
-	g, err := authwire.MintClaimCacheGrant(testGrantKey(token), "team-a", "run-"+refs[0], time.Now(), time.Hour,
-		nil, &authwire.CacheScope{Repo: repo, Refs: refs})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return g
+	return mintGrant(t, testGrantKey(token), "team-a", "run-"+refs[0], time.Now(), &authwire.CacheScope{Repo: repo, Refs: refs})
 }
 
 // A pull request's run reads what its base branch wrote but cannot replace or
@@ -28,17 +29,39 @@ func scopedGrant(t *testing.T, token, repo string, refs ...string) string {
 // overwritten. The volume and the bucket keep the same boundary.
 func TestGrantsScopeBlobsToTheRunsRepositoryAndRef(t *testing.T) {
 	const token = "operator-token"
-	servers := map[string]func(t *testing.T) *httptest.Server{
-		"volume": func(t *testing.T) *httptest.Server { return newBudgetedServer(t, token, egress.Config{}) },
-		"bucket": func(t *testing.T) *httptest.Server { srv, _ := newBlobServer(t, token); return srv },
+	// safety: no grant writes the unscoped tree any longer, so an entry from before scopes is planted where one lay.
+	servers := map[string]func(t *testing.T) (*httptest.Server, func(rel, body string)){
+		"volume": func(t *testing.T) (*httptest.Server, func(rel, body string)) {
+			srv := newBudgetedServer(t, token, egress.Config{})
+			return srv, func(rel, body string) {
+				path := filepath.Join(teamsDir, "team-a", filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		"bucket": func(t *testing.T) (*httptest.Server, func(rel, body string)) {
+			srv, raw := newBlobServer(t, token)
+			return srv, func(rel, body string) {
+				if _, err := raw.PutObject(t.Context(), &s3.PutObjectInput{
+					Bucket: aws.String(blobTestBucket), Key: aws.String("cache/teams/team-a/" + rel),
+					Body: strings.NewReader(body),
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
 	}
 	for name, open := range servers {
 		t.Run(name, func(t *testing.T) {
-			srv := open(t)
+			srv, plantUnscoped := open(t)
 			main := scopedGrant(t, token, "github:1", "refs/heads/main")
 			feature := scopedGrant(t, token, "github:1", "refs/heads/feature", "refs/heads/main")
 			otherRepo := scopedGrant(t, token, "github:2", "refs/heads/main")
-			legacy := grantFor(t, token, "team-a")
+			unscopedReader := grantFor(t, token, "team-a")
 
 			entries := []struct{ method, write, read string }{
 				{http.MethodPut, "/bin/01234567-89abcdef", "/bin/01234567-89abcdef"},
@@ -63,7 +86,7 @@ func TestGrantsScopeBlobsToTheRunsRepositoryAndRef(t *testing.T) {
 				if _, body := send(t, srv, http.MethodGet, e.read, feature, ""); body != "poison" {
 					t.Errorf("feature reading its own %s = %q", e.read, body)
 				}
-				if _, body := send(t, srv, http.MethodGet, e.read, legacy, ""); body == "main bytes" || body == "poison" {
+				if _, body := send(t, srv, http.MethodGet, e.read, unscopedReader, ""); body == "main bytes" || body == "poison" {
 					t.Errorf("a scoped write reached the unscoped %s", e.read)
 				}
 			}
@@ -74,9 +97,7 @@ func TestGrantsScopeBlobsToTheRunsRepositoryAndRef(t *testing.T) {
 				t.Errorf("feature's delete removed main's binary: %d %q", code, body)
 			}
 
-			if code, body := send(t, srv, http.MethodPut, "/cache/before-scopes", legacy, "legacy bytes"); code/100 != 2 {
-				t.Fatalf("unscoped write = %d: %s", code, body)
-			}
+			plantUnscoped("cache/before-scopes.tar.gz", "legacy bytes")
 			if code, body := send(t, srv, http.MethodGet, "/cache/before-scopes", otherRepo, ""); code != http.StatusOK || body != "legacy bytes" {
 				t.Errorf("a scoped grant reading an unscoped entry = %d %q", code, body)
 			}

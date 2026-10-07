@@ -17,6 +17,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
@@ -151,11 +152,12 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 		}
 	}
 
+	scope := authwire.CacheGrant{Scope: testScope}.ScopePrefixes()[0]
 	want := map[string]bool{
-		"cache/teams/team-a/bins/deadbeef":           true,
-		"cache/teams/team-a/cache/go-mod-abc.tar.gz": true,
-		"cache/teams/team-b/bins/deadbeef":           true,
-		"cache/teams/team-b/cache/go-mod-abc.tar.gz": true,
+		"cache/teams/team-a/" + scope + "bins/deadbeef":           true,
+		"cache/teams/team-a/" + scope + "cache/go-mod-abc.tar.gz": true,
+		"cache/teams/team-b/" + scope + "bins/deadbeef":           true,
+		"cache/teams/team-b/" + scope + "cache/go-mod-abc.tar.gz": true,
 	}
 	got := bucketKeys(t, raw)
 	for _, k := range got {
