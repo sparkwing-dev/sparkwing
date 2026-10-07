@@ -334,22 +334,21 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			if first == nil {
 				return
 			}
+			excluding := mark
 			incomplete := mark || lost*100 > attempted*maxSampleLossPercent
+			var markerErr error
 			if incomplete {
 				markerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 				markerKind := store.MetricPartial
 				if mark {
 					markerKind = store.MetricUnknown
 				}
-				err := sink.backend.AddNodeMetricSample(markerCtx, runID, node.ID(), store.MetricSample{Kind: markerKind, TS: stamps.next(time.Now())})
-				if err != nil && markerKind == store.MetricPartial {
+				markerErr = sink.backend.AddNodeMetricSample(markerCtx, runID, node.ID(), store.MetricSample{Kind: markerKind, TS: stamps.next(time.Now())})
+				if markerErr != nil && markerKind == store.MetricPartial {
 					// safety: a backend that refuses the partial kind would otherwise learn from the
 					// measurement unrestricted; every backend accepts the exclusion marker.
 					markerKind = store.MetricUnknown
-					err = sink.backend.AddNodeMetricSample(markerCtx, runID, node.ID(), store.MetricSample{Kind: markerKind, TS: stamps.next(time.Now())})
-				}
-				if err != nil {
-					sparkwing.Debug(ctx, "record incomplete resource samples: %v", err)
+					markerErr = sink.backend.AddNodeMetricSample(markerCtx, runID, node.ID(), store.MetricSample{Kind: markerKind, TS: stamps.next(time.Now())})
 				}
 				cancel()
 				mark = markerKind == store.MetricUnknown
@@ -358,9 +357,15 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			message := fmt.Sprintf("resource samples partially recorded for %s: %d of %d not recorded (%v)", node.ID(), lost, attempted, first)
 			if incomplete {
 				kind = "resource_samples_incomplete"
-				message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v); capacity learning only raises this job's profile from it", node.ID(), lost, attempted, first)
-				if mark {
-					message = fmt.Sprintf("resource samples incomplete for %s: exclusion marker not recorded (%v); capacity learning skips this measurement", node.ID(), first)
+				switch {
+				case markerErr != nil:
+					message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v), and the marker that restricts capacity learning was not recorded either (%v); learning may use this measurement unrestricted", node.ID(), lost, attempted, first, markerErr)
+				case excluding:
+					message = fmt.Sprintf("resource samples incomplete for %s: a sample that excludes this measurement was not recorded (%v); the exclusion was recorded at finish, so capacity learning skips this measurement", node.ID(), first)
+				case mark:
+					message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v); the backend refused the partial marker, so capacity learning skips this measurement", node.ID(), lost, attempted, first)
+				default:
+					message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v); capacity learning only raises this job's profile from it", node.ID(), lost, attempted, first)
 				}
 				nlog.Log("warn", message)
 			}
