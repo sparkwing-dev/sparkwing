@@ -1937,7 +1937,8 @@ var cmdWorker = Command{
 	Synopsis: "Claim triggers from a profile's controller and run them in-process",
 	Description: `Polls the trigger queue at the selected profile's
 controller and executes each claimed trigger in-process on this host.
-Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
+For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
+--trigger-runner k8s|warm, which carries the image and service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing serve start' via --profile local.`,

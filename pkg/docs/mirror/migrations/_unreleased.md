@@ -129,6 +129,45 @@ so upgrade the controller before or with the cache; see
 protection deciding what runs on `main`; a shared cache let a branch's run put
 code into a later `main` run.
 
+A deployment that still starts `sparkwing-runner worker` switches to the
+combined runner before upgrading; the chart and the documented manifests never
+ran it.
+
+## sparkwing-runner worker is removed
+
+- **Before:** `sparkwing-runner worker --controller <url> [--runner inprocess|k8s|warm]`
+  polled the trigger queue and ran each claimed trigger, either in-process or by
+  sending its nodes to Kubernetes Jobs or the warm pool.
+- **After:** the `worker` subcommand is unknown and exits 2. The combined
+  runner is the only trigger-claiming loop in `sparkwing-runner`.
+- **Upgrade:** replace the container args:
+
+  ```text
+  sparkwing-runner worker --controller=URL --logs=URL --runner=k8s \
+      --namespace=NS --image=IMAGE --runner-sa=SA --image-pull-secret=SECRET
+  ```
+
+  becomes
+
+  ```text
+  sparkwing-runner runner --controller=URL --logs=URL --also-claim-triggers --claim-nodes=false \
+      --trigger-runner=k8s --trigger-runner-namespace=NS --trigger-runner-image=IMAGE \
+      --trigger-runner-sa=SA --trigger-runner-image-pull-secret=SECRET
+  ```
+
+  `--trigger-sources`, `--token`, `--metrics-addr` and `--dependency-proxy`
+  carry over; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
+  and `--runner-logs-url` gain the `--trigger-runner-` prefix, and
+  `--artifact-store` becomes `--trigger-artifact-store`. Drop
+  `--claim-nodes=false` to let the same pod also run nodes. The worker's
+  `--log-store` has no runner equivalent: the runner streams logs to `--logs`.
+  `--k8s-cpu-ceiling`, `--k8s-memory-ceiling` and `--k8s-job-deadline` become
+  `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING` and
+  `SPARKWING_K8S_JOB_DEADLINE` in the runner pod's environment, which each
+  trigger's child inherits.
+- **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
+  for a profile, is unchanged.
+
 ## Legacy cache routes are removed
 
 **Before:** `sparkwing-cache` served source archives and single files

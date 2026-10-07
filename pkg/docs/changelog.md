@@ -93,6 +93,10 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+
+- **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
+  `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
+
 - **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
 - **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`

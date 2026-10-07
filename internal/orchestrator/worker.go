@@ -30,8 +30,6 @@ type WorkerOptions struct {
 
 	Paths Paths
 
-	PollInterval time.Duration
-
 	HeartbeatInterval time.Duration
 
 	Logger *slog.Logger
@@ -41,8 +39,6 @@ type WorkerOptions struct {
 	RunnerFactory func(backends Backends, trigger *store.Trigger) runner.Runner
 
 	Token string
-
-	Sources []string
 }
 
 func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Backends, stateClient *client.Client, trigger *store.Trigger) {
