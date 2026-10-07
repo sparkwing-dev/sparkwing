@@ -2,8 +2,9 @@ package sparkwing
 
 import (
 	"context"
-	"errors"
 	"fmt"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 )
 
 // ErrSecretMissing classifies a "no entry for this name" outcome from
@@ -12,10 +13,10 @@ import (
 // resolver error matches this sentinel as silently empty; other
 // errors surface as run-start failures.
 //
-// The canonical instance lives here; the secrets package re-exports
-// the same value so existing callers that say
-// `errors.Is(err, secrets.ErrSecretMissing)` keep working unchanged.
-var ErrSecretMissing = errors.New("sparkwing: secret not found")
+// Every secrets backend returns this same value, so
+// `errors.Is(err, sparkwing.ErrSecretMissing)` matches a miss from any of
+// them.
+var ErrSecretMissing = secretsource.ErrMissing
 
 // SecretResolver resolves a stored value to (plain, masked) at the
 // moment of the call. The orchestrator installs a resolver on the

@@ -1,0 +1,188 @@
+// Package secretsource resolves secret and config values from the backend a
+// profile's secrets surface names: the controller, a dotenv file, or
+// prefixed environment variables. It is the one place those backends live;
+// the SDK reaches them through the resolver the engine installs.
+package secretsource
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+)
+
+// ErrMissing classifies a "no entry for this name" outcome as distinct
+// from a transport or authorization error.
+var ErrMissing = errors.New("sparkwing: secret not found")
+
+// Resolver resolves a stored value to (plain, masked) at the moment of the
+// call.
+type Resolver interface {
+	Resolve(ctx context.Context, name string) (value string, masked bool, err error)
+}
+
+// FromSpec builds an uncached, unmasked [Resolver] for the secrets surface
+// of spec. Callers wrap it with the run's cache and log masker.
+//
+//   - controller: GET spec.URL + /api/v1/secrets/<name> with
+//     spec.ResolvedToken() as the bearer.
+//   - filesystem: reads the dotenv file at spec.Path. Keys without values
+//     resolve to [ErrMissing] rather than the empty string.
+//   - env: looks up os.Getenv(spec.Prefix + name). An unset variable
+//     resolves to [ErrMissing].
+func FromSpec(spec backends.Spec) (Resolver, error) {
+	switch spec.Type {
+	case backends.TypeController:
+		if spec.URL == "" {
+			return nil, fmt.Errorf("secrets backend type=controller: url is empty")
+		}
+		return newRemoteControllerResolver(spec), nil
+	case backends.TypeFilesystem:
+		return newFileResolver(spec)
+	case backends.TypeEnv:
+		return newEnvResolver(spec), nil
+	case backends.TypeNone:
+		return noneResolver{}, nil
+	case "":
+		return nil, fmt.Errorf("secrets backend: type is required")
+	default:
+		return nil, fmt.Errorf("secrets backend: unsupported type %q (controller | filesystem | env | none)", spec.Type)
+	}
+}
+
+type noneResolver struct{}
+
+func (noneResolver) Resolve(_ context.Context, name string) (string, bool, error) {
+	return "", false, fmt.Errorf("secrets %q: profile declares no secrets backend (type=none)", name)
+}
+
+type remoteControllerResolver struct {
+	spec   backends.Spec
+	client *http.Client
+}
+
+func newRemoteControllerResolver(spec backends.Spec) *remoteControllerResolver {
+	return &remoteControllerResolver{spec: spec, client: http.DefaultClient}
+}
+
+func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error) {
+	base := strings.TrimRight(r.spec.URL, "/")
+	if base == "" {
+		return "", false, fmt.Errorf("secrets backend: url is empty")
+	}
+	endpoint := base + "/api/v1/secrets/" + url.PathEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("secrets backend %s: build request: %w", base, err)
+	}
+	if tok := r.spec.ResolvedToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return "", false, fmt.Errorf("secrets backend %s: %w", base, err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return "", false, ErrMissing
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "", false, fmt.Errorf("secrets backend %s: %d %s", base, resp.StatusCode, http.StatusText(resp.StatusCode))
+	default:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", false, fmt.Errorf("secrets backend %s: %d %s: %s", base, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
+	}
+	var body struct {
+		Value  string `json:"value"`
+		Masked bool   `json:"masked"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", false, fmt.Errorf("secrets backend %s: decode response: %w", base, err)
+	}
+	return body.Value, body.Masked, nil
+}
+
+type fileResolver struct {
+	spec  backends.Spec
+	mu    sync.Mutex
+	once  sync.Once
+	cache map[string]string
+	err   error
+}
+
+func newFileResolver(spec backends.Spec) (*fileResolver, error) {
+	if spec.Path == "" {
+		return nil, fmt.Errorf("secrets backend type=filesystem: path is empty")
+	}
+	return &fileResolver{spec: spec}, nil
+}
+
+func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, error) {
+	f.once.Do(f.load)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return "", false, f.err
+	}
+	v, ok := f.cache[name]
+	if !ok || v == "" {
+		return "", false, ErrMissing
+	}
+	return v, true, nil
+}
+
+func (f *fileResolver) load() {
+	raw, err := os.Open(f.spec.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			f.cache = map[string]string{}
+			return
+		}
+		f.err = fmt.Errorf("secrets backend filesystem %s: %w", f.spec.Path, err)
+		return
+	}
+	defer raw.Close()
+	out := map[string]string{}
+	sc := bufio.NewScanner(raw)
+	for sc.Scan() {
+		key, value, err := dotenv.ParseLine(sc.Text())
+		if err != nil || key == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if err := sc.Err(); err != nil {
+		f.err = fmt.Errorf("secrets backend filesystem %s: scan: %w", f.spec.Path, err)
+		return
+	}
+	f.cache = out
+}
+
+type envResolver struct {
+	spec backends.Spec
+}
+
+func newEnvResolver(spec backends.Spec) *envResolver {
+	return &envResolver{spec: spec}
+}
+
+func (e *envResolver) Resolve(_ context.Context, name string) (string, bool, error) {
+	key := e.spec.Prefix + name
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return "", false, ErrMissing
+	}
+	return v, true, nil
+}

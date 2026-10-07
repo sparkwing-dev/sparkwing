@@ -187,7 +187,7 @@ var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
-var ErrSecretMissing = errors.New("sparkwing: secret not found")
+var ErrSecretMissing = secretsource.ErrMissing
 func Error(ctx context.Context, format string, args ...any)
 const EventNodeAnnotation = "node_annotation"
 const EventNodeSummary = "node_summary"
@@ -901,13 +901,10 @@ func (p argSetPredicate) String() string
 func (p argUnsetPredicate) Eval(ctx PredicateContext) bool
 func (p argUnsetPredicate) String() string
 func (c *countReader) Read(p []byte) (int, error)
-func (e *envResolver) Resolve(_ context.Context, name string) (string, bool, error)
-func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (k groupKind) String() string
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
 func (localPredicate) Eval(ctx PredicateContext) bool
 func (localPredicate) String() string
-func (noneResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
 func (p notPredicate) Eval(ctx PredicateContext) bool
@@ -917,7 +914,6 @@ func (p orPredicate) String() string
 func (p profilePredicate) Eval(ctx PredicateContext) bool
 func (p profilePredicate) String() string
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
-func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error)
 func (remotePredicate) Eval(ctx PredicateContext) bool
 func (remotePredicate) String() string
 func (c *resolvedPredCtx) Arg(name string) (any, bool)
