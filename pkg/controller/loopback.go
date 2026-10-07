@@ -114,13 +114,12 @@ type loopbackCoordination interface {
 // ([Loopback.ownTrigger]); a pipeline name must be this run's
 // ([Loopback.ownPipeline]).
 type Loopback struct {
-	state         LoopbackState
-	concurrency   LoopbackConcurrency
-	artifactStore storage.ArtifactStore
-	runID         string
-	token         string
-	logger        *slog.Logger
-	outputs       *loopbackOutputs
+	state       LoopbackState
+	concurrency LoopbackConcurrency
+	runID       string
+	token       string
+	logger      *slog.Logger
+	outputs     *loopbackOutputs
 }
 
 // NewLoopback binds a loopback controller to one run's state surface.
@@ -147,14 +146,6 @@ func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) 
 // queued" -- the answer for a run with no plan concurrency at all.
 func (l *Loopback) WithConcurrency(c LoopbackConcurrency) *Loopback {
 	l.concurrency = c
-	return l
-}
-
-// WithArtifactStore exposes /api/v1/artifacts/{key}, matching what the
-// SQLite loopback wires so a node whose cache surface resolves to this
-// controller can stage inputs through it.
-func (l *Loopback) WithArtifactStore(a storage.ArtifactStore) *Loopback {
-	l.artifactStore = a
 	return l
 }
 
@@ -234,10 +225,6 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", requireScope(ScopeNodesClaim, l.ownRun(l.handleAddNodeUsage)))
 
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleConcurrencyState)))
-
-	if l.artifactStore != nil {
-		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleArtifactGet)))
-	}
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -1091,30 +1078,6 @@ func (l *Loopback) handleConcurrencyState(w http.ResponseWriter, r *http.Request
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
-	key := r.PathValue("key")
-	if key == "" {
-		http.Error(w, "missing key", http.StatusBadRequest)
-		return
-	}
-	if !safeArtifactKey(key) {
-		http.Error(w, "invalid key", http.StatusBadRequest)
-		return
-	}
-	rc, err := l.artifactStore.Get(r.Context(), key)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer func() { _ = rc.Close() }()
-	w.Header().Set("Content-Type", "application/octet-stream")
-	_, _ = io.Copy(w, rc)
 }
 
 func writeStateError(w http.ResponseWriter, err error) {

@@ -277,7 +277,7 @@ All of them took the cache's operator token or `admin`, except
 `/artifacts/<job>`, which also took a run's cache grant.
 
 **After:** those routes answer 404. The cache keeps `/git/register`,
-`/git/<name>/...`, `/bin/...`, `/cache/...`, `/repos`, `/admin/teams/{team}`,
+`/git/<name>/...`, `/bin/...`, `/cache/...`, `/admin/teams/{team}`,
 `/admin/store-ceiling/...`, `/health`, `/metrics`, `/stats` and `/proxy/...`.
 The controller keeps `POST /api/v1/gitcache/git/register` and the clone proxies.
 
@@ -364,3 +364,94 @@ the reference, since no build ever opened a backend of those types. Nothing
 changes at run time: a profile naming `gcs`, `azure-blob` or `mysql` failed at
 run start before and still does, now with an error naming the types its
 surface accepts.
+
+## The warm-PVC pool is removed
+
+**Before:** `sparkwing-controller --pool` kept a set of PVCs labeled
+`sparkwing.dev/pool=cache` warm with privileged `docker:27-dind` pods and
+served `GET /api/v1/pool` and `POST /api/v1/pool/{checkout,return,heartbeat}`.
+`sparkwing-full` turned it on by default (`controller.pool.enabled: true`) and
+gave the controller a Role over PVCs, pods, configmaps, events and namespaces,
+a ClusterRole over StorageClasses, and a warmer ServiceAccount.
+
+**After:** the controller has no pool and makes no Kubernetes API calls. The
+four routes answer 404. Nothing Sparkwing ships ever checked a PVC out, so no
+build loses a cache it was using.
+
+**Operator steps:**
+
+- Remove `--pool`, `--pool-namespace`, `--warmer-service-account` and
+  `--kubeconfig` from the controller's arguments before upgrading; a
+  controller started with any of them exits. `SPARKWING_WARMER_SA` and
+  `POD_NAMESPACE` are no longer read.
+- With `sparkwing-full`, drop `controller.pool.*` and `rbac.*` from your
+  values. The upgrade deletes the controller's Role, RoleBinding, ClusterRole,
+  ClusterRoleBinding and `<release>-sparkwing-full-cache-warmer`
+  ServiceAccount, and the controller pod no longer mounts an API token.
+  Annotations on `serviceAccount` for IRSA or Workload Identity keep working.
+- Outside the chart, delete the Role and ClusterRole you granted the
+  controller for the pool, and any `sparkwing-cache-warmer` ServiceAccount.
+- Reclaim the pool's storage once the new controller runs:
+  `kubectl delete pod,pvc -n <pool-namespace> -l sparkwing.dev/managed=pool-manager`.
+  The `sparkwing-cache-config` ConfigMap, if you created one, is no longer read.
+- Drop dashboards and alerts on `sparkwing.pool.reconcile_duration`,
+  `sparkwing.pool.warm_duration`, `sparkwing.pool.checkouts` and
+  `sparkwing.pool.returns`.
+
+**Why:** the pool held the controller's broadest Kubernetes rights and ran
+the only privileged pods Sparkwing created, and no runner, launcher or chart
+template ever mounted one of its PVCs.
+
+## The concurrency notify stream is removed
+
+**Before:** `GET /api/v1/concurrency/{key}/notify?run_id=...&node_id=...`
+held a server-sent event stream open for up to 30 minutes and sent one
+`ready`, `superseded` or `stream_end` event when the waiter resolved.
+
+**After:** the route answers 404. Nothing Sparkwing ships opened it.
+
+**Upgrade:** a client of your own that waited on the stream polls
+`GET /api/v1/concurrency/{key}/resolve?run_id=...&node_id=...` instead. It
+takes the node's claim token or `runs.state` rather than `runs.read`, and its
+`status` field carries the same outcomes.
+
+**Why:** an unused stream that a claim token could hold open for half an hour
+was attack surface with no caller.
+
+## The controller artifact route is removed
+
+**Before:** a controller or local daemon given an artifact store served
+`GET /api/v1/artifacts/{key}` to a `runs.read` caller, run keys to the run's
+team and content-addressed keys to the operator.
+
+**After:** the route answers 404. Nothing Sparkwing ships called it.
+
+**Upgrade:** a script that read artifacts this way reads the artifact store
+its profile names directly, the local directory or the bucket. On a cluster
+with direct data storage, `POST /api/v1/data/download` returns a signed URL
+for an `artifacts/...` key.
+
+**Why:** a second read path into the shared artifact store needed its own
+team check and its own egress accounting, and served no caller.
+
+## Four operator routes are removed
+
+**Before:** an `admin` token could read the controller's egress meter with its
+top consumers (`GET /api/v1/egress`), read a named team's credit balance
+(`GET /api/v1/credits/teams/{team}`), and give a team a free-tier slot past
+`--free-team-slots` (`PUT /api/v1/storage/teams/{team}/free-slot`). The cache's
+operator token could list its mirror files with `GET /repos`.
+
+**After:** all four answer 404.
+
+**What replaces each:**
+
+| Removed | Use instead |
+|---|---|
+| `GET /api/v1/egress` | `sparkwing_egress_day_bytes` and `sparkwing_egress_daily_alarm` on `/metrics`; `/api/v1/health` reports the alarm. Per-principal totals are no longer served. |
+| `GET /api/v1/credits/teams/{team}` | The operator console's `GET /api/v1/operator/teams/{team}`, or `GET /api/v1/credits` with the team's own credential. |
+| `PUT /api/v1/storage/teams/{team}/free-slot` | Raise `--free-team-slots` so the team takes a slot with its first byte. |
+| cache `GET /repos` | List `<data-dir>/repos/` on the cache volume. |
+
+**Why:** each was a privileged route with no caller, and each needed its own
+review as the route table moves to one declared list.

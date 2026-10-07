@@ -130,7 +130,6 @@ credential to disk can leave it where the next repository reads it.
 `sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
 separate Job pods, while its planning process still has the runner-token
 authority described above.
-See [warm-pool.md](warm-pool.md) for that execution mode.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`
 combines the caller's filters with the authenticated team. A team reader can
@@ -687,8 +686,8 @@ the published images are known bad.
 
 `sparkwing-cache` requires a bearer token (`--api-token`, falling back to
 `$SPARKWING_API_TOKEN`) on every route that touches repository content: git
-clone and registration, the repo listing, the binary and dependency-archive
-blob routes, and the admin routes. The cache serves no source archives, single
+clone and registration, the binary and dependency-archive blob routes, and
+the admin routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
 refuses to start without one unless the operator passes
 `--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
@@ -828,12 +827,9 @@ isolation.
 
 The Helm charts run the long-lived services as non-root with explicit
 `securityContext` settings (the controller as uid 65534, privilege
-escalation disabled, all Linux capabilities dropped). The one exception
-is the warm-pool warmer: when the pool is enabled the controller
-launches an ephemeral `docker:27-dind` pod with `privileged: true` so
-it can run dockerd and pre-pull images into a warm PVC. It is
-short-lived, single-container, and the only privileged workload
-sparkwing creates. See [warm-pool.md](warm-pool.md).
+escalation disabled, all Linux capabilities dropped). The controller
+makes no Kubernetes API calls, so `sparkwing-full` binds it to no Role and
+mounts no API token in its pod.
 
 ## Runner Job placement
 

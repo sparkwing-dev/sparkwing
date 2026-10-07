@@ -180,15 +180,6 @@ func retryAfterSeconds(d time.Duration) int64 {
 	return 1
 }
 
-func (s *Server) handleEgressState(w http.ResponseWriter, _ *http.Request) {
-	if s.egress == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
-		return
-	}
-	state := s.egress.State()
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "egress": state})
-}
-
 // safety: public health reports the alarm without exposing usage or budget totals.
 func (s *Server) egressHealth() (map[string]any, []string) {
 	if s.egress == nil {

@@ -195,7 +195,6 @@ func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
-func (l *Loopback) WithArtifactStore(a storage.ArtifactStore) *Loopback
 func (l *Loopback) WithConcurrency(c LoopbackConcurrency) *Loopback
 type LoopbackConcurrency interface {
 	State(ctx context.Context, key string) (*store.ConcurrencyState, error)
@@ -244,15 +243,6 @@ type ObjectStoreBreakerResponse struct {
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 const PaymentWarnedCode = "payment_warned"
-type PoolConfig struct {
-	Client kubernetes.Interface
-
-	Namespace string
-
-	ReconcileEvery time.Duration
-
-	WarmerServiceAccount string
-}
 type Principal struct {
 	Name        string
 	Kind        string
@@ -309,7 +299,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
 func (s *Server) AssistedRunHandler() http.Handler
-func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
 func (s *Server) DaemonHandler() http.Handler
@@ -397,11 +386,6 @@ const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
-type StorageTierResponse struct {
-	Team           string
-	Tier           storagequota.Tier
-	AllowanceBytes int64
-}
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
 	LogsURL   string

@@ -109,15 +109,14 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 	}
 }
 
-// A grant opens the blob stores and cloning. The repository listing and the
-// admin routes act on the shared mirrors or the whole store.
+// A grant opens the blob stores and cloning. The admin routes act on the
+// whole store.
 func TestGrantsDoNotReachMirrorsOrAdminRoutes(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	grant := grantFor(t, token, "team-a")
 
 	operatorOnly := []struct{ method, path string }{
-		{http.MethodGet, "/repos"},
 		{http.MethodPost, "/admin/store-ceiling/thaw"},
 		{http.MethodPost, "/admin/store-ceiling/measure"},
 		{http.MethodDelete, "/admin/teams/team-a"},

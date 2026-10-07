@@ -580,19 +580,19 @@ Connectivity + fleet + queue health check against a remote cluster
 
 Answers "is this cluster alive?" in one command. Runs the
 connectivity / auth probes from 'profiles test' plus cluster-
-state probes that hit /api/v1/agents, /api/v1/pool,
-/api/v1/triggers (status=claimed), and /api/v1/runs?since=24h.
+state probes that hit /api/v1/agents, /api/v1/triggers
+(status=claimed), and /api/v1/runs?since=24h.
 
 Sections:
 
   CONNECTIVITY  controller / auth / logs / gitcache
-  FLEET         agents (connected vs stale) + warm-runner pool
+  FLEET         agents (connected vs stale)
   QUEUE         stuck triggers + recent-run success rate
 
 Exit 0 when every probe is ok or warn; exit 1 when any probe
 fails (auth reject, controller down, HTTP 5xx). Warnings are
-informational -- low success rate, empty pool, stale agents --
-and don't change the exit code so scripts can still condition
+informational -- low success rate, stale agents -- and don't
+change the exit code so scripts can still condition
 on "is the cluster reachable at all?".
 
 ### Flags

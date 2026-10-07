@@ -40,8 +40,6 @@ type Server struct {
 	gitCredentialLimit perMinuteLimiter
 	identityLinkLimit  perMinuteLimiter
 
-	pool *poolBinding
-
 	auth *Authenticator
 
 	peerPrincipal func(*http.Request) *Principal
@@ -317,10 +315,9 @@ func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
 	return s
 }
 
-// WithArtifactStore enables in-process artifact serving at
-// /api/v1/artifacts/{key}. The route is registered only when this
-// option is set (laptop mode). Cluster mode serves artifacts from a
-// dedicated process and leaves this nil.
+// WithArtifactStore names the artifact store the bucket ceiling measures
+// when no bucket usage store is set (laptop mode). Cluster mode leaves it
+// nil.
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 	s.artifactStore = a
 	return s
@@ -1036,7 +1033,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/concurrency/{key}/holder", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot)))))
 	mux.Handle("GET /api/v1/concurrency/{key}/state", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotOwnKey, http.HandlerFunc(s.handleConcurrencyState))).orElse(requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState))))
 	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
-	mux.Handle("GET /api/v1/concurrency/{key}/notify", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleWaiterNotify))).orElse(requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify))))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", newClaimSensitiveRoute(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter)))))
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter)))))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
@@ -1047,7 +1043,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	if s.metricsAddr == "" {
 		mux.Handle("GET /metrics", requireScope(ScopeAdmin, metricsHandler()))
 	}
-	mux.Handle("GET /api/v1/egress", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEgressState)))
 
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
@@ -1102,17 +1097,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetApproval)))
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
-
-	if s.pool != nil {
-		mux.Handle("GET /api/v1/pool", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePoolList)))
-		mux.Handle("POST /api/v1/pool/checkout", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolCheckout)))
-		mux.Handle("POST /api/v1/pool/return", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolReturn)))
-		mux.Handle("POST /api/v1/pool/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolHeartbeat)))
-	}
-
-	if s.artifactStore != nil {
-		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, s.metered(egress.ClassArtifact, http.HandlerFunc(s.handleArtifactGet))))
-	}
 
 	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
 	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))
@@ -1180,7 +1164,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
-	mux.Handle("PUT /api/v1/storage/teams/{team}/free-slot", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGrantFreeSlot)))
 
 	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
 	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
@@ -1199,7 +1182,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/credits/card-refunds", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
 	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/payments/{reference}", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
-	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
@@ -1377,15 +1359,14 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 	return false
 }
 
-// ServeWith runs a pre-built Server (configured with WithDispatcher /
-// AttachPool) at addr. Split from Serve so the controller pod main can
-// wire in an in-cluster k8s client without passing options through
-// Serve.
 // safety: the HTTP drain and the commit-status drain each get this whole
 // budget, so a request still folding a run's profiles is not cut off by
 // time the listener's own shutdown already spent.
 const controllerShutdownBudget = 5 * time.Second
 
+// ServeWith runs a pre-built Server (configured with WithDispatcher and
+// the other With options) at addr. Split from Serve so the controller pod
+// main can configure the server without passing options through Serve.
 func ServeWith(ctx context.Context, s *Server, addr string) error {
 	listener := func(addr string, h http.Handler) *http.Server {
 		return &http.Server{
@@ -1419,10 +1400,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runCardBilling(ctx, CardBillingInterval)
-
-	if s.pool != nil {
-		go s.pool.run(ctx, s.logger)
-	}
 
 	errCh := make(chan error, 1+len(servers))
 

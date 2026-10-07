@@ -13,10 +13,6 @@ import (
 	"time"
 
 	flag "github.com/spf13/pflag"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -29,7 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -54,16 +49,6 @@ func run(args []string) error {
 		"bind address for the Prometheus /metrics endpoint. Set it to move "+
 			"/metrics off the API listener, and off any ingress fronting that "+
 			"listener, onto its own port. Empty serves /metrics on --addr.")
-	poolEnabled := fs.Bool("pool", false,
-		"enable the warm-PVC pool (requires in-cluster K8s access)")
-	poolNamespace := fs.String("pool-namespace", os.Getenv("POD_NAMESPACE"),
-		"namespace the pool manages (default: POD_NAMESPACE)")
-	warmerServiceAccount := fs.String("warmer-service-account",
-		firstNonEmpty(os.Getenv("SPARKWING_WARMER_SA"), pool.WarmerServiceAccountName),
-		"ServiceAccount the warm-pool warmer pods run as; it must exist in the pool "+
-			"namespace and needs no rules (env: SPARKWING_WARMER_SA)")
-	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"),
-		"kubeconfig path when --pool is set (empty = in-cluster)")
 	secretsKeyFile := fs.String("secrets-key-file", "",
 		"path to a file containing 32 raw bytes for secret encryption (alternative to SPARKWING_SECRETS_KEY)")
 	secretsPreviousKeyFile := fs.String("secrets-previous-key-file", "",
@@ -604,21 +589,6 @@ func run(args []string) error {
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err
 	}
-	if *poolEnabled {
-		if *poolNamespace == "" {
-			return fmt.Errorf("--pool requires --pool-namespace (or POD_NAMESPACE)")
-		}
-		kcli, kerr := kubeClient(*kubeconfig)
-		if kerr != nil {
-			return fmt.Errorf("pool: %w", kerr)
-		}
-		srv.AttachPool(controller.PoolConfig{
-			Client:               kcli,
-			Namespace:            *poolNamespace,
-			WarmerServiceAccount: *warmerServiceAccount,
-		})
-		checkStorageClasses(ctx, kcli, *poolNamespace)
-	}
 	return controller.ServeWith(ctx, srv, *addr)
 }
 
@@ -718,38 +688,6 @@ func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 		}
 	}
 	return nil
-}
-
-func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespace string) {
-	pvcs, err := kcli.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		fmt.Fprintln(os.Stderr,
-			"sparkwing-controller: storage check skipped: list PVCs:", err)
-		return
-	}
-	for _, pvc := range pvcs.Items {
-		if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
-			return
-		}
-	}
-	classes, err := kcli.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		fmt.Fprintln(os.Stderr,
-			"sparkwing-controller: storage check skipped: list StorageClasses:", err)
-		return
-	}
-	const defaultAnnotation = "storageclass.kubernetes.io/is-default-class"
-	for _, sc := range classes.Items {
-		if sc.Annotations[defaultAnnotation] == "true" {
-			return
-		}
-	}
-	fmt.Fprintln(os.Stderr,
-		"sparkwing-controller: WARNING: no PVC declares storageClassName "+
-			"and the cluster has no default StorageClass; PVCs will hang "+
-			"Pending. Set storageClassName on the PVCs (helm: "+
-			"--set storage.className=<class>) or mark a StorageClass "+
-			"default with storageclass.kubernetes.io/is-default-class=true.")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -941,20 +879,6 @@ func clearEnv(name string) {
 	if err := os.Unsetenv(name); err != nil {
 		fmt.Fprintf(os.Stderr, "sparkwing-controller: could not clear %s from the environment: %v\n", name, err)
 	}
-}
-
-func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
-	var rc *rest.Config
-	var err error
-	if kubeconfig != "" {
-		rc, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		rc, err = rest.InClusterConfig()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("kube config: %w", err)
-	}
-	return kubernetes.NewForConfig(rc)
 }
 
 // safety: an unreadable page budget must not silently become the default, because

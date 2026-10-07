@@ -178,8 +178,8 @@ func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	if code, res := f.reserve(cache, "default", "cache", 1<<40); code != http.StatusOK || res.Tier != store.TeamTierFunded {
 		t.Fatalf("the operator's team = %d %+v, want funded", code, res)
 	}
-	if code := f.call("PUT", "/api/v1/storage/teams/second/free-slot", "Bearer "+f.admin, nil, nil); code != http.StatusOK {
-		t.Fatalf("operator slot grant = %d", code)
+	if err := f.store.GrantFreeSlot(t.Context(), "second", time.Now()); err != nil {
+		t.Fatalf("grant second a slot: %v", err)
 	}
 	if code, _ := f.reserve(cache, "second", "cache", 1); code != http.StatusOK {
 		t.Fatalf("a granted team = %d, want 200", code)

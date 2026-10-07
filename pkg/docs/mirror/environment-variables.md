@@ -57,7 +57,6 @@ Kinds:
 | `SPARKWING_REQUIRE_AUTH` | [security](security.md) |
 | `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
-| `SPARKWING_WARMER_SA` | [warm-pool](warm-pool.md) |
 
 ## Configuration: `sparkwing-cache`
 
