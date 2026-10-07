@@ -8335,7 +8335,7 @@ func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, r
 	now := time.Now().UnixNano()
 
 	rows, err := s.query(ctx, `
-SELECT id FROM runs
+SELECT id, team FROM runs
  WHERE status = ?
    AND last_heartbeat_at IS NOT NULL
    AND last_heartbeat_at < ?
@@ -8347,13 +8347,15 @@ SELECT id FROM runs
 		return nil, err
 	}
 	var ids []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
+		teams[id] = Team(team)
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -8364,7 +8366,7 @@ SELECT id FROM runs
 		if err := s.cascadeOrphanedNodes(ctx, id, reason, now); err != nil {
 			return nil, err
 		}
-		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).FinishRun(ctx, id, runStatusFailed, reason); err != nil {
 			return nil, err
 		}
 	}
@@ -8470,7 +8472,7 @@ UPDATE nodes
 
 func (s *Store) orphanedRunsQuery() string {
 	return `
-SELECT r.id
+SELECT r.id, r.team
   FROM runs r
  WHERE r.status = ?
    AND r.started_at < ?
@@ -8489,13 +8491,15 @@ func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.D
 		return 0, err
 	}
 	var orphanIDs []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			_ = rows.Close()
 			return 0, err
 		}
 		orphanIDs = append(orphanIDs, id)
+		teams[id] = Team(team)
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -8508,7 +8512,7 @@ func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.D
 		if err := s.cascadeOrphanedNodes(ctx, id, errMsg, now); err != nil {
 			return 0, err
 		}
-		if err := s.FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
 			return 0, err
 		}
 	}

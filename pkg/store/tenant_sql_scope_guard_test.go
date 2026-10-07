@@ -281,6 +281,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"scoped to the asker is no answer; a token prefix is unique across teams",
 	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
 		"selected, in the order the claim path names, and read nothing back",
+	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
+		"team's handle; an answer scoped to the asker is no answer",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes

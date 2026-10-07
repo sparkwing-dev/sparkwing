@@ -1536,7 +1536,15 @@ const runHeartbeatStaleAfter = 3 * time.Minute
 // has executed yet belongs to the next claimant rather than to this sweep; the
 // queue-deadline sweep is what ends it when no claimant comes.
 func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
-	run, err := s.store.GetRun(ctx, id)
+	var tenant *store.Tenant
+	var run *store.Run
+	team, err := s.store.AsOperator().RunTeam(ctx, id)
+	if err == nil {
+		tenant, err = s.tenantForTeam(ctx, team)
+	}
+	if err == nil {
+		run, err = tenant.GetRun(ctx, id)
+	}
 	switch {
 	case err != nil:
 	case run.FinishedAt != nil:
@@ -1544,7 +1552,7 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 		s.logger.Warn("released stale claim; run waits for the next claimant",
 			"trigger_id", id)
 	default:
-		if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
+		if ferr := tenant.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
 			s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
 		} else {
 			s.reportGitHubRunState(ctx, id, "failed")

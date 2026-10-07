@@ -1561,6 +1561,7 @@ func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, er
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
+func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
