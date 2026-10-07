@@ -1119,37 +1119,23 @@ func TestWebCarriesNoTokenOnAnOptedOutInstall(t *testing.T) {
 	}
 }
 
-func TestControllerGitHubStatusEnvironment(t *testing.T) {
+func TestControllerDashboardURLEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	defaultController := renderController(t)
 	for _, env := range defaultController.Env {
-		if env.Name == "GITHUB_TOKEN" || env.Name == "SPARKWING_DASHBOARD_URL" {
+		if env.Name == "SPARKWING_DASHBOARD_URL" {
 			t.Errorf("default controller unexpectedly sets %s", env.Name)
 		}
 	}
 
-	configured := renderController(t,
-		"controller.githubStatusToken.name=github-status",
-		"controller.githubStatusToken.key=credential",
-		"controller.dashboardURL=https://sparkwing.example.com/team",
-	)
-	var token *renderedEnvVar
+	configured := renderController(t, "controller.dashboardURL=https://sparkwing.example.com/team")
 	dashboardURL := ""
 	for i := range configured.Env {
-		switch configured.Env[i].Name {
-		case "GITHUB_TOKEN":
-			token = &configured.Env[i]
-		case "SPARKWING_DASHBOARD_URL":
+		if configured.Env[i].Name == "SPARKWING_DASHBOARD_URL" {
 			dashboardURL = configured.Env[i].Value
 		}
-	}
-	if token == nil || token.ValueFrom == nil || token.ValueFrom.SecretKeyRef == nil {
-		t.Fatalf("GITHUB_TOKEN secretKeyRef missing: %+v", token)
-	}
-	if got := *token.ValueFrom.SecretKeyRef; got.Name != "github-status" || got.Key != "credential" {
-		t.Errorf("GITHUB_TOKEN secretKeyRef = %+v", got)
 	}
 	if dashboardURL != "https://sparkwing.example.com/team" {
 		t.Errorf("SPARKWING_DASHBOARD_URL = %q", dashboardURL)
@@ -1615,12 +1601,6 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 			want:  "cache.grantKeySecret.key is required",
 		},
 		{
-			name:  "controller webhook",
-			chart: "./sparkwing-full",
-			sets:  []string{"controller.githubWebhookSecret.name=webhook", "controller.githubWebhookSecret.key="},
-			want:  "controller.githubWebhookSecret.key is required",
-		},
-		{
 			name:  "controller encryption",
 			chart: "./sparkwing-full",
 			sets:  []string{"controller.secretsKey.name=encryption", "controller.secretsKey.key="},
@@ -1641,6 +1621,24 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemovedGitHubWebhookValuesFailTheRender(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
+	for _, value := range []string{"githubWebhookSecret", "githubStatusToken"} {
+		t.Run(value, func(t *testing.T) {
+			out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller."+value+".name=leftover")
+			for _, want := range []string{"controller." + value + " was removed", "Per-pipeline GitHub webhooks are removed"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("render error lacks %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+	// safety: --reuse-values carries the old defaults, whose names were empty, so they must still render.
+	helmTemplate(t, "sparkwing", "controller.githubWebhookSecret.name=", "controller.githubStatusToken.name=")
 }
 
 func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {

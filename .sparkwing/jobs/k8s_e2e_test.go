@@ -547,11 +547,9 @@ func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *tes
 		"configmap sparkwing-k8s-fixture",
 		"initContainers:",
 		"readinessProbe:",
-		"invalid webhook returned $invalid_webhook_status, want 401",
-		"sha256=0000000000000000000000000000000000000000000000000000000000000000",
+		"invalid trigger token returned $invalid_trigger_status, want 401",
 		".runs | length == 0",
-		"X-Hub-Signature-256",
-		"/webhooks/github/${pipeline}",
+		"/api/v1/triggers",
 		"/api/v1/tokens",
 		"/api/v1/agents",
 		"/logs/prove-controller-runner-logs",
@@ -607,10 +605,10 @@ func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *tes
 	if got := strings.Count(script, `start_forward "$controller_service" 80`); got != 4 {
 		t.Fatalf("controller forward starts = %d, want bootstrap, authenticated, restarted, and reinstalled", got)
 	}
-	invalidWebhook := strings.Index(script, "k8s-e2e: proving invalid webhook authentication")
-	validWebhook := strings.Index(script, "send_webhook k8s-success")
-	if invalidWebhook < 0 || validWebhook < 0 || invalidWebhook > validWebhook {
-		t.Fatal("Kubernetes harness does not reject an invalid HMAC before its first valid webhook")
+	invalidTrigger := strings.Index(script, "k8s-e2e: proving invalid trigger authentication")
+	validTrigger := strings.Index(script, "submit_trigger k8s-success")
+	if invalidTrigger < 0 || validTrigger < 0 || invalidTrigger > validTrigger {
+		t.Fatal("Kubernetes harness does not reject an invalid token before its first valid trigger")
 	}
 	fixture := readHostedCIFile(t, "testdata/k8s-e2e/repo/.sparkwing/jobs/k8s.go")
 	for _, marker := range []string{
@@ -732,7 +730,7 @@ func runWaitRunStatus(t *testing.T, responses ...string) (scriptResult, int) {
 	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
 	waitFunction := "wait_run_status() {\n" + between(t, script,
 		"wait_run_status() {\n",
-		"\n}\n\necho \"k8s-e2e: proving invalid webhook authentication\"",
+		"\n}\n\necho \"k8s-e2e: proving invalid trigger authentication\"",
 	) + "\n}\n"
 	responseDir := t.TempDir()
 	for i, response := range responses {

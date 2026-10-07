@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -777,7 +778,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	pipeline, slug, err := validGitHubBinding(req.Pipeline, req.Repository)
+	pipeline, slug, err := validGitHubSubscription(req.Pipeline, req.Repository)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -955,4 +956,43 @@ func (a *githubAppState) forgetCovering() {
 	a.mu.Lock()
 	clear(a.covering)
 	a.mu.Unlock()
+}
+
+func validGitHubSubscription(pipeline, repo string) (string, string, error) {
+	pipeline = strings.TrimSpace(pipeline)
+	if pipeline == "" {
+		return "", "", errors.New("pipeline is required")
+	}
+	if pipeline != url.PathEscape(pipeline) {
+		return "", "", fmt.Errorf("pipeline %q is not a single URL path segment", pipeline)
+	}
+	slug, ok := normalizeGitHubRepo(strings.TrimSpace(repo))
+	if !ok {
+		return "", "", fmt.Errorf("repo %q is not an ascii owner/name slug", repo)
+	}
+	return pipeline, slug, nil
+}
+
+func normalizeGitHubRepo(slug string) (string, bool) {
+	owner, name, ok := strings.Cut(slug, "/")
+	if !ok || !asciiSlugPart(owner) || !asciiSlugPart(name) {
+		return "", false
+	}
+	return strings.ToLower(slug), true
+}
+
+func asciiSlugPart(part string) bool {
+	if part == "" || len(part) > 100 {
+		return false
+	}
+	for i := range len(part) {
+		c := part[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }

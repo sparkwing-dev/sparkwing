@@ -531,8 +531,6 @@ func runCluster(args []string) error {
 		return runComputeLimits(args[1:])
 	case "image":
 		return runImage(args[1:])
-	case "webhooks":
-		return runWebhooks(args[1:])
 	case "concurrency":
 		return runConcurrency(args[1:])
 	case "object-store":

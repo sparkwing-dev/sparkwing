@@ -262,3 +262,10 @@ func probeRecentRuns(ctx context.Context, prof *profile.Profile) profileProbeRes
 	r.Detail = detail
 	return r
 }
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

@@ -11,7 +11,6 @@ image_pull_policy="${SPARKWING_K8S_E2E_PULL_POLICY:-IfNotPresent}"
 kube_context="${SPARKWING_K8S_E2E_KUBE_CONTEXT:-}"
 cleanup_allow="${SPARKWING_K8S_E2E_ALLOW_CLEANUP:-}"
 keep_resources="${SPARKWING_K8S_E2E_KEEP_RESOURCES:-0}"
-webhook_secret="sparkwing-k8s-webhook"
 ownership_label="sparkwing.dev/e2e-owned=true"
 owner_token_label=""
 ownership_selector=""
@@ -301,8 +300,6 @@ if [[ -n "$namespace_resource" ]]; then
 fi
 create_owned_namespace
 namespace_owned=1
-create_owned_secret sparkwing-webhook \
-  --from-literal="webhook-secret=$webhook_secret"
 create_owned_secret sparkwing-secrets-key \
   --from-literal="key=$(openssl rand -base64 32)"
 
@@ -419,8 +416,6 @@ controller:
     tag: $image_tag
     pullPolicy: $image_pull_policy
   allowOpenBootstrap: true
-  githubWebhookSecret:
-    name: sparkwing-webhook
   secretsKey:
     name: sparkwing-secrets-key
   storage:
@@ -616,33 +611,16 @@ fixture_sha="$(kube --namespace "$namespace" exec "deployment/$cache_deployment"
   git ls-remote "https://github.com/sparkwing-k8s/e2e.git" refs/heads/main | awk '{print $1}')"
 [[ "$fixture_sha" =~ ^[0-9a-f]{40}$ ]] || die "in-cluster Git returned invalid fixture commit $fixture_sha"
 
-webhook_payload() {
-  jq -nc --arg sha "$fixture_sha" --arg nonce "${1:-0}" '{
-    ref:"refs/heads/main",
-    before:"0000000000000000000000000000000000000000",
-    after:$sha,
-    deleted:false,
-    repository:{full_name:"sparkwing-k8s/e2e"},
-    pusher:{name:"k8s-e2e",email:"k8s-e2e@sparkwing.invalid"},
-    head_commit:{id:$sha,message:("Kind golden path " + $nonce)}
+trigger_body() {
+  jq -nc --arg pipeline "$1" --arg sha "$fixture_sha" '{
+    pipeline:$pipeline,
+    trigger:{source:"manual"},
+    git:{branch:"main", sha:$sha, repo:"sparkwing-k8s/e2e", github_owner:"sparkwing-k8s", github_repo:"e2e"}
   }'
 }
 
-webhook_sequence=0
-send_webhook() {
-  local pipeline=$1
-  local payload signature response
-  webhook_sequence=$((webhook_sequence + 1))
-  payload="$(webhook_payload "$webhook_sequence")"
-  signature="$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$webhook_secret" -hex | awk '{print $NF}')"
-  response="$(curl --fail --silent --show-error --max-time 10 \
-    -H 'Content-Type: application/json' \
-    -H 'X-GitHub-Event: push' \
-    -H "X-GitHub-Delivery: k8s-e2e-${webhook_sequence}" \
-    -H "X-Hub-Signature-256: sha256=$signature" \
-    --data "$payload" \
-    "http://127.0.0.1:${controller_port}/webhooks/github/${pipeline}")"
-  webhook_run_id="$(jq -er '.run_id' <<<"$response")"
+submit_trigger() {
+  trigger_run_id="$(api_post_json "/api/v1/triggers" "$(trigger_body "$1")" | jq -er '.run_id')"
 }
 
 prove_runner_execution() {
@@ -690,24 +668,21 @@ wait_run_status() {
   die "run $run_id did not reach $wanted within ${timeout_seconds}s"
 }
 
-echo "k8s-e2e: proving invalid webhook authentication"
+echo "k8s-e2e: proving invalid trigger authentication"
 api_get "/api/v1/runs?limit=100" | jq -e '.runs | length == 0' >/dev/null
-invalid_webhook_payload="$(webhook_payload)"
-invalid_webhook_status="$(curl --silent --show-error --max-time 10 \
-  -o "$artifact_dir/invalid-webhook-response.json" -w '%{http_code}' \
+invalid_trigger_status="$(curl --silent --show-error --max-time 10 \
+  -o "$artifact_dir/invalid-trigger-response.json" -w '%{http_code}' \
+  -X POST -H 'Authorization: Bearer swu_k8se2einvalidtokenk8se2einvalidtoken' \
   -H 'Content-Type: application/json' \
-  -H 'X-GitHub-Event: push' \
-  -H 'X-GitHub-Delivery: k8s-e2e-invalid' \
-  -H 'X-Hub-Signature-256: sha256=0000000000000000000000000000000000000000000000000000000000000000' \
-  --data "$invalid_webhook_payload" \
-  "http://127.0.0.1:${controller_port}/webhooks/github/k8s-success")"
-[[ "$invalid_webhook_status" == "401" ]] || die "invalid webhook returned $invalid_webhook_status, want 401"
+  --data "$(trigger_body k8s-success)" \
+  "http://127.0.0.1:${controller_port}/api/v1/triggers")"
+[[ "$invalid_trigger_status" == "401" ]] || die "invalid trigger token returned $invalid_trigger_status, want 401"
 api_get "/api/v1/runs?limit=100" | jq -e '.runs | length == 0' >/dev/null
 
-echo "k8s-e2e: proving valid webhook, trigger claim, node execution, and web proxies"
+echo "k8s-e2e: proving trigger submission, claim, node execution, and web proxies"
 IFS=$'\t' read -r initial_runner_pod initial_runner_uid < <(ready_pod_identity runner)
-send_webhook k8s-success
-success_run=$webhook_run_id
+submit_trigger k8s-success
+success_run=$trigger_run_id
 wait_run_status "$success_run" success 300
 success_nodes="$(api_get "/api/v1/runs/$success_run/nodes")"
 jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$success_nodes" >/dev/null
@@ -738,8 +713,8 @@ curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web
   grep -q "sparkwing-k8s-e2e-success run_id=$success_run"
 
 echo "k8s-e2e: proving cancellation"
-send_webhook k8s-slow
-cancelled_run=$webhook_run_id
+submit_trigger k8s-slow
+cancelled_run=$trigger_run_id
 wait_run_status "$cancelled_run" running 180
 curl --fail --silent --show-error --max-time 10 \
   -X POST -H "Authorization: Bearer $admin_token" \
@@ -756,8 +731,8 @@ kube --namespace "$namespace" get "deployment/$runner_deployment" -o json | \
 IFS=$'\t' read -r runner_pod_after runner_uid_after < <(ready_pod_identity runner)
 [[ "$runner_uid_after" != "$runner_uid_before" ]] || die "runner rollout did not replace its pod"
 [[ "$runner_pod_after" != "$runner_pod_before" ]] || die "runner rollout did not replace its pod name"
-send_webhook k8s-success
-post_runner_restart_run=$webhook_run_id
+submit_trigger k8s-success
+post_runner_restart_run=$trigger_run_id
 wait_run_status "$post_runner_restart_run" success 300
 post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run/nodes")"
 jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$post_runner_nodes" >/dev/null

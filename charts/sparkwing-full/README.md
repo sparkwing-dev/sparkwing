@@ -89,15 +89,6 @@ Operators bring their own Secrets so they can rotate without
 running install:
 
 ```bash
-# Webhook signing secret (HMAC for /webhooks/github/{pipeline}).
-# Skip if you won't expose webhooks publicly.
-kubectl -n sparkwing create secret generic sparkwing-webhook \
-    --from-literal=webhook-secret=<your-shared-secret>
-
-# GitHub token for PR commit statuses. Use a fine-grained token with
-# Commit statuses: Read and write for every repository this controller serves.
-kubectl -n sparkwing create secret generic sparkwing-github-status \
-    --from-literal=token=<your-github-token>
 
 # The first admin token. The controller stores it as an admin credential
 # before it binds, so it never serves a request unauthenticated. Keep the
@@ -163,7 +154,7 @@ sparkwing-runner-bundle:
 helm dep up ./charts/sparkwing-full
 
 # Install the complete stack with an explicitly compatible image set. This
-# source-test configuration has no auth, webhook verification, or encryption-at-rest,
+# source-test configuration has no auth or encryption-at-rest,
 # so the controller, the cache and the logs service must opt out of their
 # token requirement explicitly.
 helm install sparkwing ./charts/sparkwing-full \
@@ -216,8 +207,6 @@ For a production install, attach the Secrets you created above:
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
-    --set controller.githubWebhookSecret.name=sparkwing-webhook \
-    --set controller.githubStatusToken.name=sparkwing-github-status \
     --set controller.dashboardURL=https://sparkwing.example.com \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
@@ -265,9 +254,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
 | `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN. Empty keeps SQLite. | `""` |
 | `controller.databaseSecret.key` | Key holding the PostgreSQL DSN. | `dsn` |
-| `controller.githubWebhookSecret.name` | Secret holding `webhook-secret`. | `""` |
-| `controller.githubStatusToken.name` | Secret holding a GitHub token with commit-status write access. | `""` |
-| `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
+| `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for GitHub App check run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key, mounted as a file and named with `--secrets-key-file`. | `""` |
 | `controller.secretsPreviousKey.name` | Secret holding the key values were sealed under before `secretsKey`; read-only fallback for the window before `sparkwing secrets rotate` runs. | `""` |
 | `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
@@ -465,11 +452,12 @@ points at `sparkwing-web` (port 80); the SPA proxies `/api/v1/*` to
 the controller, so you don't need a separate Ingress for the
 controller.
 
-The web pod proxies `/api/v1/*` only. GitHub webhooks are served by
-the controller at `POST /webhooks/github/{pipeline}`; if you expose
-them, add your own Ingress rule (or host) routing that path to the
+The web pod proxies `/api/v1/*` only. GitHub App deliveries are served
+by the controller at `POST /webhooks/github-app`; if you use the App,
+add your own Ingress rule (or host) routing that path to the
 `<release>-controller` Service on port 80 -- this chart does not
-create one.
+create one. The App's settings come from `SPARKWING_GITHUB_APP_*`
+variables set through `controller.extraEnv`; see the GitHub App guide.
 
 ## Sub-chart dependency
 
@@ -555,7 +543,7 @@ helm uninstall sparkwing --namespace sparkwing
 ```
 
 PVCs survive (see Storage). Secrets you pre-created
-(`sparkwing-webhook`, `sparkwing-secrets-key`, `sparkwing-token`)
+(`sparkwing-secrets-key`, `sparkwing-token`)
 also survive -- the chart references them but doesn't own them.
 Delete manually if you want a fully clean slate.
 

@@ -88,8 +88,7 @@ func run(args []string) error {
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", os.Getenv("SPARKWING_EXTERNAL_URL"),
 		"base URL this controller answers on from outside the cluster, which is "+
-			"where GitHub posts webhook deliveries and runners read signed filesystem outputs. "+
-			"`sparkwing cluster webhooks connect` points a repository's webhook at it. "+
+			"where runners read signed filesystem outputs. "+
 			"Empty uses the URL each request arrived at.")
 	oidcKeyFile := fs.String("oidc-key-file", "",
 		"path to an RSA private key PEM (at least 2048 bits) that signs the OIDC ID "+
@@ -140,8 +139,9 @@ func run(args []string) error {
 		"how recently a claim-mode runner must have polled for a claim to count "+
 			"as live for the hold above")
 	maxRunsPerPrincipalHour := fs.Int("max-runs-per-principal-hour", 0,
-		"cap on the runs one principal may create in a rolling hour. A webhook "+
-			"delivery counts against the repository it names. Past the cap the "+
+		"cap on the runs one principal may create in a rolling hour. Each run a "+
+			"GitHub App delivery creates counts against the team the installation "+
+			"is bound to. Past the cap the "+
 			"controller answers 429 with a Retry-After and logs the principal and "+
 			"the reason. The budget lives in controller memory, so a restart "+
 			"refills every principal. Zero is unlimited.")
@@ -439,16 +439,6 @@ func run(args []string) error {
 				"secret values will be stored at rest as plaintext")
 	}
 
-	webhookCfg, whErr := controller.ParseGitHubWebhookConfig(os.Getenv("GITHUB_WEBHOOK_BINDINGS"))
-	if whErr != nil {
-		return fmt.Errorf("GITHUB_WEBHOOK_BINDINGS: %w", whErr)
-	}
-	wh := webhookCfg.BindingCounts()
-	fmt.Fprintf(os.Stderr,
-		"sparkwing-controller: github webhook bindings: %d pipelines, %d bound repositories, "+
-			"%d pipelines refusing every repository, %d repository secrets\n",
-		wh.Pipelines, wh.Repos, wh.DenyAll, wh.RepoSecrets)
-
 	if strings.TrimSpace(*billingURL) != "" && os.Getenv("SPARKWING_BILLING_TOKEN") == "" {
 		return errors.New("--billing-url is set but SPARKWING_BILLING_TOKEN is empty; " +
 			"the checkout service refuses a controller without its token")
@@ -456,9 +446,6 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		WithTrustedProxyAddr(*trustedProxyAddr).
-		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
-		WithGitHubWebhookConfig(webhookCfg).
-		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
 		WithCachePodURL(*cachePodURL).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithLogsURL(*logsURL).
