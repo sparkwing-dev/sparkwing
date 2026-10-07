@@ -30,13 +30,3 @@ func StreamLiveLog(ctx context.Context, b Backend, runID, nodeID string, since i
 	}
 	return lr.StreamNodeLiveLog(ctx, runID, nodeID, since)
 }
-
-// ReadLiveLog reads b's live buffer for one node, and reports ok false
-// when b has no live view or the node has no live buffer.
-func ReadLiveLog(ctx context.Context, b Backend, runID, nodeID string, since int64) (data []byte, next int64, done, ok bool, err error) {
-	lr, isLive := b.(LiveLogReader)
-	if !isLive {
-		return nil, 0, false, false, nil
-	}
-	return lr.ReadNodeLiveLog(ctx, runID, nodeID, since)
-}

@@ -48,3 +48,19 @@ func VerifyLiveDataGrant(ctx context.Context, s *Server, raw string) (bool, erro
 	}
 	return s.verifyLiveDataGrant(ctx, grant, false)
 }
+
+func (r *githubCheckReporter) idle(ctx context.Context) error {
+	for {
+		r.mu.Lock()
+		empty, changed := len(r.jobs) == 0, r.changed
+		r.mu.Unlock()
+		if empty {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}

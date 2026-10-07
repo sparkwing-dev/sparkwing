@@ -127,8 +127,4 @@ func UploadToArtifactStore(ctx context.Context, store storage.ArtifactStore, key
 	return nil
 }
 
-func HasInArtifactStore(ctx context.Context, store storage.ArtifactStore, key string) (bool, error) {
-	return store.Has(ctx, "bin/"+key)
-}
-
 func IsNotFound(err error) bool { return errors.Is(err, storage.ErrNotFound) }

@@ -531,3 +531,15 @@ func waitForDegradedConcurrencyPopulation(t *testing.T, ctx context.Context, st 
 		}
 	}
 }
+
+// NewReservedNodeAdmission attaches node execution to capacity that a caller
+// already reserved. The caller retains ownership of the lease and must release
+// it after execution stops.
+func NewReservedNodeAdmission(home, version, leaseToken string, origin wingwire.Origin) *LocalAdmission {
+	return &LocalAdmission{
+		Home:                   home,
+		Version:                version,
+		Origin:                 origin,
+		reservedNodeLeaseToken: leaseToken,
+	}
+}

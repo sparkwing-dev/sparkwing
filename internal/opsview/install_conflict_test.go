@@ -92,7 +92,7 @@ func TestRenderDoctor_ExplainsCompetingInstalls(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "pretty", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "pretty"); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -114,7 +114,7 @@ func TestRenderDoctor_ExplainsCompetingInstalls(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	if err := opsview.RenderDoctor(&plain, r, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&plain, r, "plain"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(plain.String(), "competing_installs\t1") {
@@ -135,7 +135,7 @@ func TestRenderDoctor_QuotesRemedyPathsWithSpaces(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "pretty", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "pretty"); err != nil {
 		t.Fatal(err)
 	}
 	want := "test ! -e '/home/u/My Apps/sparkwing.superseded' && test ! -L '/home/u/My Apps/sparkwing.superseded' && mv -n -- '/home/u/My Apps/sparkwing' '/home/u/My Apps/sparkwing.superseded' && test ! -e '/home/u/My Apps/sparkwing' && test ! -L '/home/u/My Apps/sparkwing'"

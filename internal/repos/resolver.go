@@ -8,76 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
-
-var ErrAmbiguous = errors.New("repos: pipeline name is ambiguous across registered repos")
-
-type resolver struct {
-	mu    sync.Mutex
-	built bool
-
-	nameToPath map[string]string
-}
-
-var defaultResolver = &resolver{}
-
-func ResolveRepoForPipeline(name string) (string, error) {
-	if name == "" {
-		return "", errors.New("ResolveRepoForPipeline: empty name")
-	}
-	defaultResolver.mu.Lock()
-	defer defaultResolver.mu.Unlock()
-	if !defaultResolver.built {
-		if err := defaultResolver.build(); err != nil {
-			return "", err
-		}
-	}
-	if p, ok := defaultResolver.nameToPath[name]; ok {
-		return p, nil
-	}
-	return "", ErrNotFound
-}
-
-func InvalidateCache() {
-	defaultResolver.mu.Lock()
-	defaultResolver.built = false
-	defaultResolver.nameToPath = nil
-	defaultResolver.mu.Unlock()
-}
-
-func (r *resolver) build() error {
-	cands, err := CandidatePaths()
-	if err != nil {
-		return err
-	}
-	r.nameToPath = map[string]string{}
-
-	for _, pass := range []bool{false, true} {
-		for _, c := range cands {
-			if c.Worktree != pass {
-				continue
-			}
-			names, err := PipelineNamesForRepo(c.Path)
-			if err != nil {
-				continue
-			}
-			for _, n := range names {
-				if _, exists := r.nameToPath[n]; exists {
-					continue
-				}
-				r.nameToPath[n] = c.Path
-			}
-		}
-	}
-	r.built = true
-	return nil
-}
 
 // DescribeRepo builds the pipeline binary a repository declares and returns
 // the schemas that build emits: each pipeline's name, arguments, and the risk

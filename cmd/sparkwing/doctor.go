@@ -102,7 +102,7 @@ func shadowedHooks(git githooks.Git) *githooks.Shadow {
 }
 
 func renderDoctor(w io.Writer, r doctorReport, format string) error {
-	return opsview.RenderDoctor(w, r, format, legacyWarningLine(len(r.LiveLegacyHolders)))
+	return opsview.RenderDoctor(w, r, format)
 }
 
 func diagnoseGoToolchain(ctx context.Context) *opsview.DoctorGoToolchain {

@@ -92,7 +92,7 @@ func TestRemoteBackends_PrefersAnnouncedLogsURL(t *testing.T) {
 	discovery.ResetCache()
 	t.Cleanup(discovery.ResetCache)
 	c := client.NewWithToken(ctrlSrv.URL, nil, "")
-	backends := orchestrator.RemoteBackends(c, nil, nil, nil, 0)
+	backends := orchestrator.RemoteBackends(context.Background(), c, nil, nil, nil, 0)
 
 	nlog, err := backends.Logs.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 	if err != nil {

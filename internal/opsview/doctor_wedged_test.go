@@ -187,7 +187,7 @@ func TestRenderDoctor_NamesAWedgedDaemonAndItsRecovery(t *testing.T) {
 		Detail: "the daemon holds this socket and answered nothing",
 	}}
 	var pretty bytes.Buffer
-	if err := opsview.RenderDoctor(&pretty, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&pretty, r, ""); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := pretty.String()
@@ -202,7 +202,7 @@ func TestRenderDoctor_NamesAWedgedDaemonAndItsRecovery(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	if err := opsview.RenderDoctor(&plain, r, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&plain, r, "plain"); err != nil {
 		t.Fatalf("render plain: %v", err)
 	}
 	if !strings.Contains(plain.String(), "daemon_wedged\t1") {

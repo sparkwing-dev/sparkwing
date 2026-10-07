@@ -31,7 +31,7 @@ func TestRenderDoctorCarriesPermissionRepairs(t *testing.T) {
 		t.Fatal("report with permission repairs reported clean")
 	}
 	var pretty bytes.Buffer
-	if err := opsview.RenderDoctor(&pretty, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&pretty, r, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"private paths found", `"runs/demo/node.log" 0644 -> 0600`} {
@@ -40,7 +40,7 @@ func TestRenderDoctorCarriesPermissionRepairs(t *testing.T) {
 		}
 	}
 	var plain bytes.Buffer
-	if err := opsview.RenderDoctor(&plain, r, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&plain, r, "plain"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(plain.String(), "permission_repairs\t1") {
@@ -53,7 +53,7 @@ func TestRenderDoctorQuotesPermissionPaths(t *testing.T) {
 		Path: "runs/demo\nhealthy: nothing to repair", Before: "0644", After: "0600",
 	}}}
 	var pretty bytes.Buffer
-	if err := opsview.RenderDoctor(&pretty, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&pretty, r, ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(pretty.String(), "runs/demo\nhealthy") {
@@ -70,7 +70,7 @@ func TestRenderDoctorRefusesFalsePermissionAllClear(t *testing.T) {
 		t.Fatal("unverified permission audit reported clean")
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "Windows access is governed by DACLs") {
@@ -83,7 +83,7 @@ func TestRenderDoctorPretty_ExplainsRepeatRejections(t *testing.T) {
 		AdmissionRejections: []opsview.DoctorRejection{{Cause: "cost_source", Count: 4}},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -112,7 +112,7 @@ func TestRenderDoctorPretty_ExplainsVersionSkew(t *testing.T) {
 		DaemonVersionSkew: &opsview.DoctorVersionSkew{Self: "(devel)", Daemon: "v0.18.0"},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -138,7 +138,7 @@ func TestRenderDoctorPretty_ListsQuarantinedLedgers(t *testing.T) {
 		QuarantinedLedgers: []string{"/home/.sparkwing/wingd/state.json.corrupt-1784666506"},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -171,7 +171,7 @@ func TestRenderDoctorPretty_NamesPoisonedProfileAndReset(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -204,7 +204,7 @@ func TestRenderDoctorPretty_ExplainsShadowedHooks(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -233,7 +233,7 @@ func TestRenderDoctorJSON_CarriesShadowedHooks(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "json", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "json"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	var got opsview.DoctorReport
@@ -251,7 +251,7 @@ func TestRenderDoctorJSON_CarriesRejections(t *testing.T) {
 		AdmissionRejections: []opsview.DoctorRejection{{Cause: "request", Count: 3}},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "json", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "json"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	var got opsview.DoctorReport

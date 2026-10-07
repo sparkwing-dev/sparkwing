@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -21,16 +19,6 @@ type WorkerOptions struct {
 	ControllerURL string
 
 	LogsURL string
-
-	LogStore storage.LogStore
-
-	ArtifactStore storage.ArtifactStore
-
-	HTTPClient *http.Client
-
-	Paths Paths
-
-	PollInterval time.Duration
 
 	HeartbeatInterval time.Duration
 
@@ -41,8 +29,6 @@ type WorkerOptions struct {
 	RunnerFactory func(backends Backends, trigger *store.Trigger) runner.Runner
 
 	Token string
-
-	Sources []string
 }
 
 func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Backends, stateClient *client.Client, trigger *store.Trigger) {
@@ -192,13 +178,9 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	paths := opts.Paths
-	if paths.Root == "" {
-		p, err := DefaultPaths()
-		if err != nil {
-			return fmt.Errorf("resolve paths: %w", err)
-		}
-		paths = p
+	paths, err := DefaultPaths()
+	if err != nil {
+		return fmt.Errorf("resolve paths: %w", err)
 	}
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure sparkwing root: %w", err)
@@ -211,16 +193,13 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	defer func() { _ = dummyStore.Close() }()
 	local := LocalBackends(paths, dummyStore, nil)
 
-	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
+	stateClient := client.NewWithToken(opts.ControllerURL, nil, opts.Token)
 
 	logsBackend := local.Logs
-	switch {
-	case opts.LogStore != nil:
-		logsBackend = NewLogStoreBackend(opts.LogStore, opts.Logger)
-	case opts.LogsURL != "":
-		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, opts.HTTPClient, opts.Token, opts.Logger)
+	if opts.LogsURL != "" {
+		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, nil, opts.Token, opts.Logger)
 	}
-	backends := RemoteBackends(stateClient, logsBackend, opts.ArtifactStore, opts.HTTPClient, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(ctx, stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)
 	if err != nil {

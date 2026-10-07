@@ -36,7 +36,7 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 	if err := bincache.UploadToArtifactStore(ctx, store, key, src); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
-	has, err := bincache.HasInArtifactStore(ctx, store, key)
+	has, err := store.Has(ctx, "bin/"+key)
 	if err != nil || !has {
 		t.Fatalf("Has = (%v, %v); want (true, nil)", has, err)
 	}

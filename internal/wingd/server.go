@@ -341,10 +341,6 @@ func (d *Daemon) watchContext(ctx context.Context) {
 	}
 }
 
-func (d *Daemon) shutdown() {
-	d.shutdownWithReason("requested")
-}
-
 func (d *Daemon) shutdownWithReason(reason string) {
 	d.shutdownOne.Do(func() {
 		d.recordJournal("shutdown", nil, map[string]any{"reason": reason})
@@ -730,10 +726,6 @@ func softCoreCostSource(costSource wingwire.CostSource) bool {
 	default:
 		return false
 	}
-}
-
-func requestFromWire(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
-	return requestFromWireWithMetadata(runID, ownerRunID, res, sems, costSource, priority, "", 0)
 }
 
 func requestFromWireWithMetadata(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int, class string, expectedP99MS int64) admission.Request {

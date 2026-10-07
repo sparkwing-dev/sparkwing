@@ -94,12 +94,6 @@ func (d dispatchProbe) Terminate(ctx context.Context, h Handle) error {
 	return d.platform.Terminate(ctx, h)
 }
 
-// OpenWithProbe returns the ledger at dir with a caller-supplied probe.
-func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, probe: probe} }
-
-// Dir is the ledger's directory.
-func (l *Ledger) Dir() string { return l.dir }
-
 func recordName(rec Record) string {
 	key := rec.Handle.ID
 	if key == "" {

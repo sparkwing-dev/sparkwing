@@ -75,7 +75,7 @@ func TestJournalRecordsQueueBlockerAndGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestJournalRecordsChildLineageAndCancelScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestHealthProbeProducesNoConnectionJournalRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestJournalConnectionIdentityAndOwnedNodeSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

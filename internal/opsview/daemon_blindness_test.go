@@ -123,10 +123,10 @@ func TestDoctor_UnreachedDaemonDoesNotReadLikeAHealthyOne(t *testing.T) {
 
 	for _, format := range []string{"json", "plain", "pretty"} {
 		var blind, served bytes.Buffer
-		if err := opsview.RenderDoctor(&blind, withoutDaemon, format, ""); err != nil {
+		if err := opsview.RenderDoctor(&blind, withoutDaemon, format); err != nil {
 			t.Fatalf("%s: render blind: %v", format, err)
 		}
-		if err := opsview.RenderDoctor(&served, withDaemon, format, ""); err != nil {
+		if err := opsview.RenderDoctor(&served, withDaemon, format); err != nil {
 			t.Fatalf("%s: render served: %v", format, err)
 		}
 		if blind.String() == served.String() {
@@ -163,7 +163,7 @@ func TestDoctor_BlindSweepIsNotClean(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, blind, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, blind, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -187,7 +187,7 @@ func TestDoctor_AbsentDaemonIsCleanAndStated(t *testing.T) {
 		t.Fatal("an idle home with no daemon reported unclean")
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, absent, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, absent, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(buf.String(), "daemon: none running") {
@@ -197,7 +197,7 @@ func TestDoctor_AbsentDaemonIsCleanAndStated(t *testing.T) {
 
 func TestRenderDoctorJSON_AlwaysCarriesTheDaemonSection(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(buf.String(), `"daemon"`) || !strings.Contains(buf.String(), `"reachable"`) {

@@ -1328,16 +1328,6 @@ func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
 	}
 }
 
-func TestRunnerDoesNotAdvertiseAMissingBakedBinary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	env := runnerEnv(t, renderRunner(t))
-	if got, exists := env["SPARKWING_BAKED_BINARY"]; exists {
-		t.Errorf("SPARKWING_BAKED_BINARY = %q, but the runner image contains no pipeline binary", got)
-	}
-}
-
 func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")

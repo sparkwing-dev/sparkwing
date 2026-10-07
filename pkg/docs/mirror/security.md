@@ -127,8 +127,9 @@ compatibility boundary on its own.
 run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
-`sparkwing cluster worker --runner k8s` gives nodes separate Job pods, while
-its planning process still has the runner-token authority described above.
+`sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
+separate Job pods, while its planning process still has the runner-token
+authority described above.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`
 combines the caller's filters with the authenticated team. A team reader can

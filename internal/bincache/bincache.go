@@ -202,10 +202,6 @@ func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
 	return nil
 }
 
-func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, "", "")
-}
-
 // FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
 func FetchPipelineSourceWithCredentials(
 	ctx context.Context,
