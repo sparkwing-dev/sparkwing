@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"os/exec"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -122,18 +124,25 @@ func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
 	rec.Level, rec.JobID, rec.Step = m.Mask(rec.Level), m.Mask(rec.JobID), m.Mask(rec.Step)
 	rec.Event, rec.Msg = m.Mask(rec.Event), m.Mask(rec.Msg)
 	rec.Attrs = m.MaskAttrs(rec.Attrs)
-	if originals := m.originals(); len(originals) > 0 && rec.Attrs != nil {
-		rec.Attrs, _ = numbersEqualTo(rec.Attrs, originals).(map[string]any)
+	var numeric []*big.Rat
+	for _, p := range m.Values() {
+		if r, ok := parseNumber(p); ok {
+			numeric = append(numeric, r)
+		}
+	}
+	if len(numeric) > 0 && rec.Attrs != nil {
+		rec.Attrs, _ = numbersEqualTo(rec.Attrs, numeric).(map[string]any)
 	}
 	return rec
 }
 
-// safety: a record's numbers stay as written except one that is exactly a
-// registered value, so a numeric secret masks itself and no other number.
-func numbersEqualTo(v any, values []string) any {
+// safety: a record's numbers stay as written except one numerically equal to
+// a registered value, so a numeric secret masks itself in any spelling and no
+// other number.
+func numbersEqualTo(v any, values []*big.Rat) any {
 	switch t := v.(type) {
 	case json.Number:
-		if slices.Contains(values, string(t)) {
+		if r, ok := parseNumber(string(t)); ok && slices.ContainsFunc(values, func(p *big.Rat) bool { return p.Cmp(r) == 0 }) {
 			return maskedValue
 		}
 	case map[string]any:
@@ -150,6 +159,19 @@ func numbersEqualTo(v any, values []string) any {
 		return out
 	}
 	return v
+}
+
+// perf: big.Rat expands an exponent into its full digits, so a child could
+// stall the launcher with 1e999999999; no registered value is that long.
+const maxNumberExponent = 400
+
+func parseNumber(s string) (*big.Rat, bool) {
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		if exp, err := strconv.Atoi(strings.TrimPrefix(s[i+1:], "+")); err != nil || exp > maxNumberExponent || exp < -maxNumberExponent {
+			return nil, false
+		}
+	}
+	return new(big.Rat).SetString(s)
 }
 
 func (v *ChildValues) synced() *Masker {

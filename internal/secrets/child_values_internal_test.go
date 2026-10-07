@@ -104,19 +104,31 @@ func TestChildValuesMaskJSONKeepsNumbersExact(t *testing.T) {
 	}
 }
 
-func TestChildValuesMaskRecordMasksOnlyANumberEqualToAValue(t *testing.T) {
-	rec := func() sparkwing.LogRecord {
+func TestChildValuesMaskRecordMasksANumberEqualToAValue(t *testing.T) {
+	rec := func(n string) sparkwing.LogRecord {
 		return sparkwing.LogRecord{Msg: "ok", Attrs: map[string]any{
-			"pin": json.Number("123456"), "list": []any{json.Number("123456")}, "n": json.Number("7"),
+			"pin": json.Number(n), "list": []any{json.Number(n)}, "n": json.Number("7"),
 		}}
 	}
-	got := knownValues("123456").MaskRecord(rec())
-	if got.Attrs["pin"] != "***" || got.Attrs["list"].([]any)[0] != "***" || got.Attrs["n"] != json.Number("7") {
-		t.Fatalf("with 123456 registered, attrs = %#v", got.Attrs)
-	}
-	got = knownValues("1234567").MaskRecord(rec())
-	if got.Attrs["pin"] != json.Number("123456") {
-		t.Fatalf("with 1234567 registered, attrs = %#v; want 123456 untouched", got.Attrs)
+	for _, tc := range []struct {
+		value, number string
+		masked        bool
+	}{
+		{"123456", "123456", true},
+		{"123456", "123456.0", true},
+		{"123456", "1.23456e5", true},
+		{"header\n123456\nfooter", "123456", true},
+		{"1234567", "123456", false},
+		{"123456", "1e999999999", false},
+	} {
+		got := knownValues(tc.value).MaskRecord(rec(tc.number))
+		want := any(json.Number(tc.number))
+		if tc.masked {
+			want = "***"
+		}
+		if got.Attrs["pin"] != want || got.Attrs["list"].([]any)[0] != want || got.Attrs["n"] != json.Number("7") {
+			t.Errorf("value %q, number %s: attrs = %#v", tc.value, tc.number, got.Attrs)
+		}
 	}
 }
 
