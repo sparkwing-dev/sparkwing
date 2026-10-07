@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func knownValues(values ...string) *ChildValues {
@@ -44,5 +46,13 @@ func TestLineWriterMasksASecretAcrossALongLinesChunkBoundary(t *testing.T) {
 				t.Fatalf("got %d filler bytes, want %d", strings.Count(got, "x"), maxMaskedLine)
 			}
 		})
+	}
+}
+
+func TestChildValuesMaskRecordKeepsFieldsNamedLikeASecret(t *testing.T) {
+	v := knownValues("msg")
+	rec := v.MaskRecord(sparkwing.LogRecord{Level: "info", Msg: "a msg", Attrs: map[string]any{"msg": "msg"}})
+	if rec.Level != "info" || rec.Msg != "a ***" || rec.Attrs["msg"] != "***" {
+		t.Fatalf("MaskRecord = %+v", rec)
 	}
 }

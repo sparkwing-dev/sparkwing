@@ -9,10 +9,21 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func unmasked(s string) string { return s }
+type maskerOutput struct{ m *secrets.Masker }
+
+func (o maskerOutput) Mask(s string) string { return o.m.Mask(s) }
+
+func (o maskerOutput) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
+	rec.Msg = o.m.Mask(rec.Msg)
+	rec.Attrs = o.m.MaskAttrs(rec.Attrs)
+	return rec
+}
+
+var unmasked = maskerOutput{m: secrets.NewMasker()}
 
 type captureLogger struct {
 	mu   sync.Mutex
@@ -234,5 +245,24 @@ func TestForwardLines_UnterminatedFinalLineIsEmitted(t *testing.T) {
 	}
 	if len(lines) != 2 || lines[1] != "b" {
 		t.Fatalf("lines = %q, want [a b]", lines)
+	}
+}
+
+func TestForwardRecordsMasksASecretNamedLikeAFieldWithoutBreakingTheRecord(t *testing.T) {
+	m := secrets.NewMasker()
+	m.Register("msg")
+	cap := &captureLogger{}
+	forwardRecords(strings.NewReader(`{"msg":"token msg sent","level":"info","attrs":{"k":"msg"}}`+"\n"+"raw msg line\n"),
+		runner.Request{NodeID: "build", Delegate: cap}, maskerOutput{m: m}, slog.Default())
+
+	got := cap.records()
+	if len(got) != 2 {
+		t.Fatalf("got %d records, want 2: %+v", len(got), got)
+	}
+	if got[0].Msg != "token *** sent" || got[0].Level != "info" || got[0].Attrs["k"] != "***" {
+		t.Errorf("decoded record = %+v, want its message and attribute masked and its fields intact", got[0])
+	}
+	if got[1].Msg != "raw *** line" {
+		t.Errorf("raw line = %q, want it masked as text", got[1].Msg)
 	}
 }

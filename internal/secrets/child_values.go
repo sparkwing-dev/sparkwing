@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // MaskValuesFDEnv names the inherited file descriptor a pipeline process
@@ -102,6 +104,15 @@ func ShareWithChild(cmd *exec.Cmd) (*ChildValues, error) {
 // Mask masks s with every value the child registered before it wrote s.
 func (v *ChildValues) Mask(s string) string {
 	return v.synced().Mask(s)
+}
+
+// MaskRecord masks a decoded log record's message and attribute values with
+// every value the child registered before it wrote the record.
+func (v *ChildValues) MaskRecord(rec sparkwing.LogRecord) sparkwing.LogRecord {
+	m := v.synced()
+	rec.Msg = m.Mask(rec.Msg)
+	rec.Attrs = m.MaskAttrs(rec.Attrs)
+	return rec
 }
 
 func (v *ChildValues) synced() *Masker {

@@ -193,8 +193,8 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 
 	var forwarders sync.WaitGroup
 	forwarders.Add(2)
-	go func() { defer forwarders.Done(); forwardRecords(stdout, req, values.Mask, r.cfg.Logger) }()
-	go func() { defer forwarders.Done(); forwardStderr(stderr, req, values.Mask) }()
+	go func() { defer forwarders.Done(); forwardRecords(stdout, req, values, r.cfg.Logger) }()
+	go func() { defer forwarders.Done(); forwardStderr(stderr, req, values) }()
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 		fmt.Sprintf("running, pid %d", group.ID()))
@@ -524,13 +524,18 @@ func (r *Runner) tokenDied(req runner.Request, err error) bool {
 	return true
 }
 
-func forwardRecords(out io.Reader, req runner.Request, mask func(string) string, logger *slog.Logger) {
+// safety: a decoded record is masked field by field, since masking its JSON could hit a key.
+type outputMasker interface {
+	Mask(string) string
+	MaskRecord(sparkwing.LogRecord) sparkwing.LogRecord
+}
+
+func forwardRecords(out io.Reader, req runner.Request, mask outputMasker, logger *slog.Logger) {
 	if req.Delegate == nil {
 		_, _ = io.Copy(io.Discard, out)
 		return
 	}
 	err := forwardLines(out, func(line []byte, truncated bool) {
-		line = []byte(mask(string(line)))
 		if len(bytes.TrimSpace(line)) == 0 {
 			return
 		}
@@ -547,24 +552,24 @@ func forwardRecords(out io.Reader, req runner.Request, mask func(string) string,
 				if rec.JobID == "" {
 					rec.JobID = req.NodeID
 				}
-				req.Delegate.Emit(rec)
+				req.Delegate.Emit(mask.MaskRecord(rec))
 				return
 			}
 		}
-		req.Delegate.Emit(rawLineRecord(req.NodeID, string(line), truncated))
+		req.Delegate.Emit(rawLineRecord(req.NodeID, mask.Mask(string(line)), truncated))
 	})
 	if err != nil && logger != nil {
 		logger.Debug("local runner: stdout forward ended", "node_id", req.NodeID, "err", err)
 	}
 }
 
-func forwardStderr(errOut io.Reader, req runner.Request, mask func(string) string) {
+func forwardStderr(errOut io.Reader, req runner.Request, mask outputMasker) {
 	if req.Delegate == nil {
 		_, _ = io.Copy(io.Discard, errOut)
 		return
 	}
 	_ = forwardLines(errOut, func(line []byte, truncated bool) {
-		text := mask(strings.TrimRight(string(line), "\r"))
+		text := mask.Mask(strings.TrimRight(string(line), "\r"))
 		if strings.TrimSpace(text) == "" {
 			return
 		}
