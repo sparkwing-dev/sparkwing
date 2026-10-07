@@ -171,6 +171,45 @@ var reviewedUnscopedSQL = map[string]string{
 		"gates is created over the whole table",
 	"duplicateTokenPrefixes": "a migration check that finds token prefixes repeated anywhere, because a token prefix is " +
 		"unique across teams",
+	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
+		"sweep that only reaped one team would leave the rest held",
+	"(*Store).reapQueueExpiredRuns": "the queue-deadline sweep ends every team's runs no claimant took; each write names a " +
+		"run its own scan selected by global id",
+	"(*Store).reapStalePendingRuns": "the stale-run sweep fails every team's pending runs whose trigger is gone or " +
+		"finished; each write names a run its own scan selected by global id",
+	"(*Store).reapStaleRunningRuns": "the stale-run sweep fails every team's running runs no orchestrator heartbeats",
+	"(*Store).reapTimedOutApprovals": "the approval sweep resolves every team's approvals past their timeout; each write " +
+		"names an approval its own scan selected",
+	"(*Store).reconcileOrphanedLocalRuns": "the orphan sweep fails every team's runs whose orchestrator stopped " +
+		"heartbeating, and cancels pending nodes left under any terminal run",
+	"(*Store).orphanedRunsQuery": "the orphan sweep's scan of every team's running runs, with each run's own nodes' " +
+		"heartbeats",
+	"(*Store).cascadeOrphanedNodes": "fails the open nodes of a run an orphan sweep selected by global id from its own " +
+		"scan",
+	"(*Store).failNodesInRun": "the trigger-claim sweep fails the open nodes of a run it reaped; the global run id comes " +
+		"off that sweep's own scan",
+	"(*Store).failStaleQueuedNodes": "the queue-wait sweep fails every team's ready nodes no runner claimed in time",
+	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails and retries every team's nodes whose runner lease " +
+		"lapsed; each write names a node its own locked scan selected",
+	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
+		"its own scan selected",
+	"(*Store).expirePendingAgentLossRetriesTx": "expires every team's agent-loss retries past their deadline, " +
+		"because a claim that expired only its own team's would leave the rest queued past it",
+	"(*Store).ListExpiredClaims": "the local trigger consumer's sweep lists every lapsed trigger claim on the store before " +
+		"judging each one",
+	"(*Store).FinishLapsedClaim": "closes a lapsed trigger claim the local consumer's sweep selected by global id; the run " +
+		"it checks is the trigger's own",
+	"(*Store).PruneRunsOlderThan": "the run retention window is the deployment's, so the prune finds every team's expired " +
+		"runs",
+	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
+	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
+	"(*Store).sweepTable": "the retention sweep deletes every team's events and node metrics past the window that the " +
+		"run's own retention allows",
+	"(*Store).expireRunStorage": "the storage retention pass frees one expired run's events and usage, named by the global " +
+		"run id and principal its own scan selected",
+	"(*Store).retainingPrincipals": "the storage pass lists every team's retaining principals with their teams and charges " +
+		"each against that team",
+	"txLiveRunningRunIDs": "the concurrency reapers ask which of the runs they found in any team are still live",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -204,11 +243,9 @@ var unportedSQL = []string{
 	"(*Store).DeleteRun",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
-	"(*Store).ExpireSessions",
 	"(*Store).FindSpawnedChildTriggerID",
 	"(*Store).FindTriggerByIdempotencyKey",
 	"(*Store).FindTriggerByWebhookReplay",
-	"(*Store).FinishLapsedClaim",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).FinishNodeStep",
 	"(*Store).finishNode",
@@ -229,7 +266,6 @@ var unportedSQL = []string{
 	"(*Store).ListDebugPauses",
 	"(*Store).ListEgressUsage",
 	"(*Store).ListEventsAfter",
-	"(*Store).ListExpiredClaims",
 	"(*Store).ListLegacyAgentClaims",
 	"(*Store).ListNodeBounces",
 	"(*Store).ListNodeDispatches",
@@ -254,9 +290,6 @@ var unportedSQL = []string{
 	"(*Store).PrincipalHoldsProfileClaim",
 	"(*Store).PrincipalHoldsRunClaim",
 	"(*Store).PrincipalHoldsTriggerClaim",
-	"(*Store).PruneEgressUsage",
-	"(*Store).PruneRunsOlderThan",
-	"(*Store).ReapExpiredNodeClaims",
 	"(*Store).RecordEgressUsage",
 	"(*Store).ReleaseClaimAtGeneration",
 	"(*Store).ReleaseDebugPause",
@@ -301,7 +334,6 @@ var unportedSQL = []string{
 	"(*Store).awardBestExecutorOffer",
 	"(*Store).buildNodeExecutionPolicyTx",
 	"(*Store).cancelMeteredNode",
-	"(*Store).cascadeOrphanedNodes",
 	"(*Store).chargeNodeTx",
 	"(*Store).chargeStorageTx",
 	"(*Store).claimReadyNodeForExecutorTx",
@@ -311,10 +343,6 @@ var unportedSQL = []string{
 	"(*Store).executorEligibilityTx",
 	"(*Store).expireConflictingExecutorOffersTx",
 	"(*Store).expireNodeExecutorOffersTx",
-	"(*Store).expirePendingAgentLossRetriesTx",
-	"(*Store).expireRunStorage",
-	"(*Store).failNodesInRun",
-	"(*Store).failStaleQueuedNodes",
 	"(*Store).finalizeExecutorClaimRoundAt",
 	"(*Store).finishLocalNodeExecutionAttempt",
 	"(*Store).finishTriggerExecutionAttempt",
@@ -325,26 +353,16 @@ var unportedSQL = []string{
 	"(*Store).markNodeReady",
 	"(*Store).mergeAgentLossRetryTx",
 	"(*Store).mintCSRFKey",
-	"(*Store).orphanedRunsQuery",
 	"(*Store).prepareNextExecutorClaim",
-	"(*Store).reapExpiredTriggers",
-	"(*Store).reapQueueExpiredRuns",
-	"(*Store).reapStalePendingRuns",
-	"(*Store).reapStaleRunningRuns",
-	"(*Store).reapTimedOutApprovals",
-	"(*Store).reconcileOrphanedLocalRuns",
 	"(*Store).recordExecutorOfferAt",
-	"(*Store).recoverExpiredNodeClaims",
 	"(*Store).rejectUnattestedExecutorOffer",
 	"(*Store).requiredAgentLossRetryNodeSourceTx",
 	"(*Store).reserveNodeCreditsTx",
-	"(*Store).retainingPrincipals",
 	"(*Store).rotateToken",
 	"(*Store).schedulingSummaryTx",
 	"(*Store).selectTokensByPrefix",
 	"(*Store).startLocalNodeExecutionAttempt",
 	"(*Store).storageQuotaRow",
-	"(*Store).sweepTable",
 	"appendEventTx",
 	"appendRunAnnotation",
 	"claimedExecutorOffer",
@@ -364,11 +382,10 @@ var unportedSQL = []string{
 	"stampCreditExhaustionAnchorTx",
 	"storageQuotaForTx",
 	"tokenMeteredTx",
-	"txLiveRunningRunIDs",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 188
+const unportedSQLSize = 166
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
