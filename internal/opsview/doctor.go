@@ -1384,8 +1384,8 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.
 		if !e.IsDir() {
 			continue
 		}
-		// safety: a run directory is dangling only when no team owns its id; a
-		// store shared by several teams holds runs the default team cannot read.
+		// safety: a run directory is kept only while some team holds a run row
+		// under its id; a deleted child's trigger outlives the run for lineage.
 		_, err := st.AsOperator().RunTeam(ctx, e.Name())
 		if err == nil {
 			continue
