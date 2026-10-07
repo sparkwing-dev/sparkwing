@@ -208,7 +208,8 @@ cache:
   # team's tree. The cache requires it and the controller holds it for
   # its own hop; runners never do. It must name a different Secret key
   # from controller.tokenSecret, because pipeline code can read the
-  # runner's token, and the chart refuses to render otherwise.
+  # runner's token, and the chart refuses to render otherwise. The
+  # cache reads it as the file cache-token under --credentials-dir.
   #   kubectl create secret generic sparkwing-cache-token \
   #     --from-literal=token=<token>
   tokenSecret:
@@ -220,7 +221,8 @@ cache:
   # run, so this key is held by the controller and the cache only, and
   # must name a different Secret key from both tokens above. Leave name
   # empty to mint no grants: runs then go without the binary and
-  # dependency caches.
+  # dependency caches. The cache reads it as the file cache-grant-key
+  # under --credentials-dir.
   #   kubectl create secret generic sparkwing-cache-grant-key \
   #     --from-literal=key=<random 32 bytes>
   grantKeySecret:
@@ -304,8 +306,8 @@ cache:
     # own mirror without turning the rest off.
     enabled: true
 
-  # Repos the cache should pre-warm / proxy. Format matches the
-  # GITCACHE_REPOS env: comma-separated `<alias>=<git-url>` pairs.
+  # Repos the cache should pre-warm / proxy, passed as
+  # --auto-register-repos: comma-separated `<alias>=<git-url>` pairs.
   # Empty = cache acts as a transparent proxy with no preloaded
   # repos.
   repos: ""

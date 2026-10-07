@@ -157,7 +157,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy; `false` also stops the cache serving it. Must be `false` when `cache.service.type` is not `ClusterIP`, because the proxy takes no credential. | `true` |
 | `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
-| `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
+| `cache.repos` | `--auto-register-repos` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
@@ -217,9 +217,10 @@ incoming Authorization header to the resolved controller's
 receive a second service bearer. Once a Secret name is configured, its key
 and the Secret itself are required.
 
-The cache reads its operator token from `cache.tokenSecret` as
-`SPARKWING_API_TOKEN`, and the key it verifies cache grants with from
-`cache.grantKeySecret` as `SPARKWING_CACHE_GRANT_KEY`. The runner holds
+The chart projects `cache.tokenSecret` and `cache.grantKeySecret` into one
+volume at `/etc/sparkwing/credentials` and passes it as `--credentials-dir`:
+the cache reads its operator token from the file `cache-token` and the key it
+verifies cache grants with from `cache-grant-key`. The runner holds
 neither: for each claimed run it asks the controller for a cache grant, which
 the controller signs with the grant key, and it hands the run only that grant.
 Pipeline code can read the runner's token, so the chart refuses to render when

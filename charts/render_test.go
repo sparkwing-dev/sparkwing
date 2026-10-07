@@ -299,6 +299,46 @@ type renderedVolume struct {
 	PersistentVolumeClaim *struct {
 		ClaimName string `yaml:"claimName"`
 	} `yaml:"persistentVolumeClaim"`
+	Projected *struct {
+		Sources []struct {
+			Secret *struct {
+				Name  string `yaml:"name"`
+				Items []struct {
+					Key  string `yaml:"key"`
+					Path string `yaml:"path"`
+				} `yaml:"items"`
+			} `yaml:"secret"`
+		} `yaml:"sources"`
+	} `yaml:"projected"`
+}
+
+func credentialRef(t *testing.T, rendered, file string) *renderedSecretKeyRef {
+	t.Helper()
+	for _, volume := range deploymentDocument(t, rendered).Spec.Template.Spec.Volumes {
+		if volume.Name != "credentials" || volume.Projected == nil {
+			continue
+		}
+		for _, source := range volume.Projected.Sources {
+			if source.Secret == nil {
+				continue
+			}
+			for _, item := range source.Secret.Items {
+				if item.Path == file {
+					return &renderedSecretKeyRef{Name: source.Secret.Name, Key: item.Key}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func flagValue(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }
 
 type renderedClaim struct {
@@ -1207,8 +1247,8 @@ func TestCachePublicURLMatchesTheProxyURLRunnersDial(t *testing.T) {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
 	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got := runnerEnv(t, renderCache(t))["SPARKWING_CACHE_PUBLIC_URL"]; got != want {
-		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want %q", got, want)
+	if got, _ := flagValue(runnerContainer(t, renderCache(t)).Args, "--public-url"); got != want {
+		t.Errorf("--public-url = %q, want %q", got, want)
 	}
 	if got := runnerEnv(t, renderRunner(t))["npm_config_registry"]; got != want+"/proxy/npm" {
 		t.Errorf("npm_config_registry = %q, want the same base the cache rewrites against", got)
@@ -1219,9 +1259,9 @@ func TestCachePublicURLOverrideWins(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	env := runnerEnv(t, renderCache(t, "cache.publicUrl=https://cache.example.com"))
-	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "https://cache.example.com" {
-		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+	args := runnerContainer(t, renderCache(t, "cache.publicUrl=https://cache.example.com")).Args
+	if got, _ := flagValue(args, "--public-url"); got != "https://cache.example.com" {
+		t.Errorf("--public-url = %q, want the explicit override", got)
 	}
 }
 
@@ -1230,17 +1270,17 @@ func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
 		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
 	}
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false"))
-		if got, ok := env["SPARKWING_CACHE_PUBLIC_URL"]; ok {
-			t.Errorf("%s Service set SPARKWING_CACHE_PUBLIC_URL = %q, want it unset so the proxy rewrites per request", serviceType, got)
+		args := runnerContainer(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false")).Args
+		if got, ok := flagValue(args, "--public-url"); ok {
+			t.Errorf("%s Service set --public-url %q, want it unset so the proxy rewrites per request", serviceType, got)
 		}
 	}
 
-	env := runnerEnv(t, renderCache(t,
+	args := runnerContainer(t, renderCache(t,
 		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false",
-		"cache.publicUrl=http://cache.example.com"))
-	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "http://cache.example.com" {
-		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+		"cache.publicUrl=http://cache.example.com")).Args
+	if got, _ := flagValue(args, "--public-url"); got != "http://cache.example.com" {
+		t.Errorf("--public-url = %q, want the explicit override", got)
 	}
 }
 

@@ -80,7 +80,6 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 
 var userNamedEnvReads = map[string]string{
 	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
-	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
 	"pkg/storage/storeurl/spec.go: name":                                                    "a pipeline's url_source: names the variable holding its state URL",
 	"sparkwing/inputs/inputs.go: name":                                                      "a pipeline declares which variables its inputs read",
 	"sparkwing/source_resolver.go: key":                                                     "a secret source's configured prefix plus the secret's name",

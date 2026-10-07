@@ -213,6 +213,87 @@ ran it.
   service off its 90-day default; only `--retention` counts now.
   `SPARKWING_S3_ENDPOINT` is still read, because it has no flag yet.
 
+## sparkwing-cache reads flags and a credentials directory
+
+- **Before:** `sparkwing-cache` took each flag's default from an environment
+  variable, including eleven without the `SPARKWING_` prefix, and its two
+  secrets from `SPARKWING_API_TOKEN` and `SPARKWING_CACHE_GRANT_KEY` or the
+  `--api-token` and `--grant-key` flags. A value it could not parse was
+  ignored: a malformed duration or boolean kept the default without a word, and
+  a malformed byte count printed a warning and stayed unlimited.
+- **After:** the cache reads settings from flags alone and its secrets from
+  `--credentials-dir`, a directory holding one file per secret: `cache-token`
+  (the operator token) and `cache-grant-key`. An absent file turns that
+  feature off, as an unset variable did. `--api-token` and `--grant-key` are
+  gone, because a flag value shows in `/proc/<pid>/cmdline`. A malformed flag
+  value now stops the cache at startup with an error naming the flag; so does
+  a `--credentials-dir` that names no directory.
+- **Operator steps:** the `sparkwing-runner-bundle` chart projects
+  `cache.tokenSecret` and `cache.grantKeySecret` into
+  `/etc/sparkwing/credentials` and passes the flags; upgrading the chart needs
+  no value changes. In a manifest of your own, mount the two Secret keys as
+  files and move each variable to its flag:
+
+  ```yaml
+  args:
+    - --credentials-dir
+    - /etc/sparkwing/credentials
+  volumeMounts:
+    - name: credentials
+      mountPath: /etc/sparkwing/credentials
+      readOnly: true
+  volumes:
+    - name: credentials
+      projected:
+        defaultMode: 0400
+        sources:
+          - secret:
+              name: sparkwing-cache-token
+              items: [{key: token, path: cache-token}]
+          - secret:
+              name: sparkwing-cache-grant-key
+              items: [{key: key, path: cache-grant-key}]
+  ```
+
+  | Variable or flag | Use instead |
+  |---|---|
+  | `SPARKWING_API_TOKEN`, `--api-token` | the file `cache-token` under `--credentials-dir` |
+  | `SPARKWING_CACHE_GRANT_KEY`, `--grant-key` | the file `cache-grant-key` under `--credentials-dir` |
+  | `PORT`, `PORT_ADDR` | `--addr` |
+  | `DATA_DIR` | `--data-dir` |
+  | `PROXY_CACHE_DIR` | `--proxy-cache-dir` |
+  | `PROXY_CACHE_TTL` | `--proxy-cache-ttl` |
+  | `PROXY_MAX_AGE` | `--proxy-max-age` |
+  | `FETCH_INTERVAL` | `--fetch-interval` |
+  | `FETCH_FRESH_WINDOW` | `--fetch-fresh-window` |
+  | `RECLONE_COOLDOWN` | `--reclone-cooldown` |
+  | `GITCACHE_REPOS` | `--auto-register-repos` |
+  | `SSH_KEY_DIR` | `--ssh-key-dir` |
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_METRICS_ADDR` | `--metrics-addr` |
+  | `SPARKWING_CACHE_PUBLIC_URL` | `--public-url` |
+  | `SPARKWING_CACHE_TRUST_FORWARDED_HOST` | `--trust-forwarded-host` |
+  | `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | `--allow-unauthenticated` |
+  | `SPARKWING_CACHE_BLOB_STORE` | `--blob-store` |
+  | `SPARKWING_CACHE_MAX_ARCHIVE_BYTES` | `--max-cache-archive-bytes` |
+  | `SPARKWING_CACHE_MAX_STORE_BYTES` | `--max-store-bytes` |
+  | `SPARKWING_CACHE_MAX_STORE_OBJECTS` | `--max-store-objects` |
+  | `SPARKWING_CACHE_WARN_STORE_BYTES` | `--warn-store-bytes` |
+  | `SPARKWING_CACHE_WARN_STORE_OBJECTS` | `--warn-store-objects` |
+  | `SPARKWING_CACHE_STORE_RECONCILE` | `--store-reconcile` |
+  | `SPARKWING_CACHE_PROXY_MAX_BYTES` | `--proxy-max-bytes` |
+  | `SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+
+- **Edge cases:** a cache whose environment carried a malformed value used to
+  start on the default; with the value moved to its flag it refuses to start,
+  so check the value before the upgrade. `--allow-unauthenticated` is a boolean
+  flag: pass it bare, because `--allow-unauthenticated=yes` is refused.
+  The controller still reads the same token as `SPARKWING_CACHE_TOKEN` and the
+  grant key as `SPARKWING_CACHE_GRANT_KEY`; when it moves to a credentials
+  directory it reads the same `cache-token` and `cache-grant-key` file names,
+  so one projected Secret volume will serve both. `SPARKWING_S3_ENDPOINT`,
+  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
+
 ## Flag-mirror environment variables are no longer read
 
 Each of these variables only supplied a flag's default. Neither chart sets

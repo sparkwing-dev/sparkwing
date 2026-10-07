@@ -104,6 +104,9 @@ unlock.
 
 ### Removed
 
+- **cache (Breaking):** `sparkwing-cache` reads settings from flags and its secrets from `--credentials-dir`
+  The operator token and grant key are the files `cache-token` and `cache-grant-key` under `--credentials-dir`; `SPARKWING_API_TOKEN`, `SPARKWING_CACHE_GRANT_KEY`, `--api-token` and `--grant-key` are gone. The cache ignores the 25 environment variables that used to seed its other flags, including the unprefixed `PORT`, `PORT_ADDR`, `DATA_DIR`, `PROXY_CACHE_DIR`, `PROXY_CACHE_TTL`, `PROXY_MAX_AGE`, `FETCH_INTERVAL`, `FETCH_FRESH_WINDOW`, `RECLONE_COOLDOWN`, `GITCACHE_REPOS` and `SSH_KEY_DIR`; pass the matching flag. A malformed value, which the cache used to ignore and start on its default, now stops it at startup naming the flag. The runner-bundle chart mounts both secrets and passes the flags. See [migration guide](docs/migrations/_unreleased.md#sparkwing-cache-reads-flags-and-a-credentials-directory).
+
 - **logs (Breaking):** `sparkwing-logs` no longer reads environment variables in place of its flags
   `SPARKWING_CONTROLLER_URL`, `SPARKWING_REQUIRE_AUTH`, `SPARKWING_LOGS_ARCHIVE_STORE`, `SPARKWING_LOGS_ARCHIVE_IDLE`, the fifteen `SPARKWING_LOGS_*` limit variables and the three `SPARKWING_LOGS_EGRESS_*` budgets are ignored; pass `--controller`, `--require-auth`, `--archive-store`, `--archive-idle`, the matching limit flag or `--egress-*` instead. A malformed flag value stops the service at startup naming the flag. The chart already passed flags. See [migration guide](docs/migrations/_unreleased.md#sparkwing-logs-reads-flags-only).
 

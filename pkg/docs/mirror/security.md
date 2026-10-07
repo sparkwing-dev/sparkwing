@@ -689,13 +689,13 @@ the published images are known bad.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token (`--api-token`, falling back to
-`$SPARKWING_API_TOKEN`) on every route that touches repository content: git
+`sparkwing-cache` requires a bearer token (the file `cache-token` in its
+`--credentials-dir`) on every route that touches repository content: git
 clone and registration, the binary and dependency-archive blob routes, and
 the admin routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
 refuses to start without one unless the operator passes
-`--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
+`--allow-unauthenticated`, which
 logs a startup warning. The guard has no network-location exemption: an
 in-cluster caller, a port-forward, and an ingress request are all rejected
 without the bearer, because a caller-controlled header cannot prove where a

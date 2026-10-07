@@ -782,10 +782,10 @@ log lines to `sparkwing-logs`, and each service stores them itself. Each
 therefore carries its own ceiling and refuses its own writes with `507`
 and an error naming its own flags.
 
-| Service | Flags | Environment |
-|--------|------|-------------|
-| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` | `SPARKWING_CACHE_MAX_STORE_BYTES` and the matching names |
-| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` | none |
+| Service | Flags |
+|--------|------|
+| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` |
+| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` |
 
 Each service counts what it stores as it stores it and walks its own
 trees on `--store-reconcile` (hourly by default, `0` measures once at
@@ -853,13 +853,10 @@ each guard; see [security.md](security.md#limits-profiles). A cache that
 verifies grants starts with a 200 GiB alarm unless the operator names
 another.
 
-The controller and the cache each read their own environment variables:
-`SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES`,
-`SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
-`SPARKWING_<SERVICE>_EGRESS_<BUDGET>`. `sparkwing-logs` reads the flags
-alone. They are separate on purpose: one
-variable on a shared ConfigMap read by three processes is one threshold
-applied three times.
+The controller also reads its budgets from environment variables:
+`SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
+`SPARKWING_CONTROLLER_EGRESS_<BUDGET>`. `sparkwing-logs` and
+`sparkwing-cache` read the flags alone.
 
 ### A team's daily download cap
 

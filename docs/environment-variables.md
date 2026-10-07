@@ -29,6 +29,7 @@ Kinds:
 | `SPARKWING_BILLING_URL` | [auth](auth.md) |
 | `SPARKWING_BOOTSTRAP_ADMIN_TOKEN` | [auth](auth.md), [security](security.md) |
 | `SPARKWING_CACHE_BLOB_STORE` | [self-hosting](self-hosting.md) |
+| `SPARKWING_CACHE_GRANT_KEY` | [gitcache](gitcache.md) |
 | `SPARKWING_CLOUDFRONT_DOMAIN` | [self-hosting](self-hosting.md) |
 | `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | [self-hosting](self-hosting.md) |
 | `SPARKWING_CLOUDFRONT_PRIVATE_KEY` | [self-hosting](self-hosting.md) |
@@ -47,6 +48,7 @@ Kinds:
 | `SPARKWING_LICENSE` | [auth](auth.md) |
 | `SPARKWING_LOGS_ARCHIVE_STORE` | [self-hosting](self-hosting.md) |
 | `SPARKWING_LOGS_DELETE_TOKEN` | [auth](auth.md) |
+| `SPARKWING_METRICS_ADDR` | [observability](observability.md) |
 | `SPARKWING_OAUTH_REDIRECT_URIS` | [auth](auth.md) |
 | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | [observability](observability.md) |
 | `SPARKWING_OBJECT_STORE_URL` | [observability](observability.md) |
@@ -57,24 +59,6 @@ Kinds:
 | `SPARKWING_REQUIRE_AUTH` | [security](security.md) |
 | `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
-
-## Configuration: `sparkwing-cache`
-
-| Variable | Described in |
-|---|---|
-| `SPARKWING_API_TOKEN` | [gitcache](gitcache.md), [security](security.md), [self-hosting](self-hosting.md), [sparks-core](sparks-core.md) |
-| `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | [gitcache](gitcache.md), [security](security.md) |
-| `SPARKWING_CACHE_GRANT_KEY` | [gitcache](gitcache.md) |
-| `SPARKWING_CACHE_MAX_ARCHIVE_BYTES` | [caching](caching.md) |
-| `SPARKWING_CACHE_MAX_STORE_BYTES` | [caching](caching.md), [observability](observability.md) |
-| `SPARKWING_CACHE_MAX_STORE_OBJECTS` | [caching](caching.md) |
-| `SPARKWING_CACHE_PROXY_MAX_BYTES` | [limits](limits.md) |
-| `SPARKWING_CACHE_PUBLIC_URL` | [build-caching](build-caching.md) |
-| `SPARKWING_CACHE_STORE_RECONCILE` | [caching](caching.md) |
-| `SPARKWING_CACHE_TRUST_FORWARDED_HOST` | [build-caching](build-caching.md) |
-| `SPARKWING_CACHE_WARN_STORE_BYTES` | [caching](caching.md) |
-| `SPARKWING_CACHE_WARN_STORE_OBJECTS` | [caching](caching.md) |
-| `SPARKWING_METRICS_ADDR` | [gitcache](gitcache.md), [observability](observability.md) |
 
 ## Configuration: `sparkwing-runner` and the Jobs it starts
 
