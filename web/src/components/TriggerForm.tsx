@@ -5,7 +5,7 @@ import {
   type PipelineArg,
   type PipelineMeta,
   getPipelines,
-  triggerJob,
+  triggerRun,
 } from "@/lib/api";
 import { repositoryExample, triggerGit } from "@/lib/triggerSource";
 import { useTeamState } from "@/lib/useTeam";
@@ -74,10 +74,11 @@ export default function TriggerForm({
     }
 
     try {
-      await triggerJob(selectedPipeline, {
-        args: Object.keys(argsToSend).length > 0 ? argsToSend : undefined,
-        git: source?.ok ? source.value : undefined,
-      });
+      await triggerRun(
+        selectedPipeline,
+        argsToSend,
+        source?.ok ? source.value : undefined,
+      );
       onTriggered?.();
       onClose?.();
     } catch (e) {

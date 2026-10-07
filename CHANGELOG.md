@@ -92,6 +92,10 @@ unlock.
 - **sdk:** Return published manifest digests from Docker and Buildx pushes
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
+### Removed
+- **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
+  Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
+
 ### Security
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no
