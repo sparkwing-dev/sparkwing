@@ -22,8 +22,8 @@ unlock.
 
 ### Added
 
-- **controller:** `Server.WithDashboard` attaches a browser surface: session cookies authenticate the page's own API calls
-  A `__Host-sw_session` cookie authenticates a request that carries no `Authorization` header, and a cookie-authenticated write must pass the same-origin check and present the session's CSRF token in `X-CSRF-Token`, matching the `__Host-sw_csrf` cookie. Bearer, claim-token and `Session` requests are unchanged. Responses carry the dashboard's security headers.
+- **controller:** The controller serves the dashboard, browser sign-in and the dashboard's log, event and capacity reads on its own listener
+  `Server.WithDashboard` attaches the surface; `sparkwing-controller` always attaches it. A `__Host-sw_session` cookie authenticates a request that carries no `Authorization` header, and a cookie-authenticated write must pass the same-origin check and send the session's CSRF token in `X-CSRF-Token`, matching the `__Host-sw_csrf` cookie. Bearer, claim-token and `Session` requests are unchanged, and a browser write from another site is refused. Pages need a signed-in browser whenever the controller authenticates its API. New routes: `GET /api/v1/runs/{id}/logs`, `/logs/search`, `/logs/{node}`, `/logs/{node}/stream`, `/logs/{node}/completeness`, `GET /api/v1/runs/grep`, `GET /api/v1/runs/{id}/events/stream` and `GET /api/v1/capacity/profiles` and `/explain`; log reads go through the logs service named by `--logs-url` with the caller's own credential. New flags `--hsts` and `--insecure-cookies`. `GET /api/v1/capabilities` adds `mode`, `storage`, `features` and `read_only` when a dashboard is attached. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
 
 - **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
   It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
@@ -35,6 +35,9 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
+
+- **helm chart (Breaking):** `sparkwing-full` routes its Ingress to the controller Service and drops the `web` values, Deployment and Service
+  A values file that sets `web` fails to render; `web.logs.url` moves to `controller.logs.url`. `ingress.tls` passes `--hsts` and `ingress.allowInsecure=true` without TLS passes `--insecure-cookies` to the controller. Because the Ingress now publishes the whole controller API, the render refuses an Ingress in front of a controller that would start open (`controller.requireAuth=false`, or `controller.allowOpenBootstrap=true` without `controller.bootstrapAdminToken.name`) unless `ingress.allowInsecure=true`. `sparkwing-runner-bundle` 0.1.10 drops `networkPolicy.webPodSelector`. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
   service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own

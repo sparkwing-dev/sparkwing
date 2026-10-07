@@ -86,15 +86,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{/*
-Per-component fully qualified resource names. Component suffix
-keeps controller + web distinct under one release.
+Per-component fully qualified resource names. The component suffix
+keeps the controller distinct from the runner-bundle's resources under
+one release.
 */}}
 {{- define "sparkwing-full.controller.fullname" -}}
 {{- include "sparkwing-full.componentFullname" (dict "root" . "component" "controller") }}
-{{- end }}
-
-{{- define "sparkwing-full.web.fullname" -}}
-{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "web") }}
 {{- end }}
 
 {{/*
@@ -121,39 +118,24 @@ Usage: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "r
 {{- end }}
 
 {{/*
-In-cluster URL of the controller Service. Used as a default for
-web.controller.url and for the runner-bundle sub-chart's
-controller.url override (so the bundled runner claims work from
-the bundled controller).
+In-cluster URL of the controller Service. Used for the runner-bundle
+sub-chart's controller.url override (so the bundled runner claims work
+from the bundled controller).
 */}}
 {{- define "sparkwing-full.controller.serviceURL" -}}
 {{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.controller.fullname" .) .Release.Namespace -}}
 {{- end }}
 
 {{/*
-Resolved web.controller.url: explicit override wins; otherwise the
-in-cluster controller Service.
-*/}}
-{{- define "sparkwing-full.web.controllerURL" -}}
-{{- if .Values.web.controller.url -}}
-{{- .Values.web.controller.url -}}
-{{- else -}}
-{{- include "sparkwing-full.controller.serviceURL" . -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Resolved web.logs.url: explicit override wins; otherwise the
+Resolved controller logs URL: explicit override wins; otherwise the
 in-cluster logs Service from the runner-bundle sub-chart (only if
-that sub-chart is enabled and its logs component is enabled).
-Empty string when neither applies, in which case the web pod runs
-in local-log mode (which won't find any logs in cluster mode --
-operators should set web.logs.url explicitly if they disable the
-sub-chart logs).
+that sub-chart is enabled and its logs component is enabled). Empty
+string when neither applies, in which case the controller announces
+no logs service and dashboard log panes stay empty.
 */}}
-{{- define "sparkwing-full.web.logsURL" -}}
-{{- if .Values.web.logs.url -}}
-{{- .Values.web.logs.url -}}
+{{- define "sparkwing-full.controller.logsURL" -}}
+{{- if .Values.controller.logs.url -}}
+{{- .Values.controller.logs.url -}}
 {{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "logs" "enabled") -}}
 {{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.logs.fullname" .) .Release.Namespace -}}
 {{- end -}}
@@ -211,30 +193,6 @@ sub-chart's helpers.
 
 {{- define "sparkwing-full.bundle.cache.fullname" -}}
 {{- include "sparkwing-full.bundle.componentFullname" (dict "root" . "component" "cache") -}}
-{{- end }}
-
-{{/*
-Resolved web.tokenSecret: the explicit web Secret wins; otherwise the
-runner-bundle's controller.tokenSecret, so the dashboard carries a
-bearer whenever the bundled logs service validates one. Without this
-default an operator who sets only the bundle's Secret gets a web pod
-with no SPARKWING_AGENT_TOKEN and 401s on every log pane. Empty when
-neither is set (the fully unauthenticated bootstrap install).
-*/}}
-{{- define "sparkwing-full.web.tokenSecretName" -}}
-{{- if .Values.web.tokenSecret.name -}}
-{{- .Values.web.tokenSecret.name -}}
-{{- else if index .Values "sparkwing-runner-bundle" "enabled" -}}
-{{- index .Values "sparkwing-runner-bundle" "controller" "tokenSecret" "name" -}}
-{{- end -}}
-{{- end }}
-
-{{- define "sparkwing-full.web.tokenSecretKey" -}}
-{{- if .Values.web.tokenSecret.name -}}
-{{- .Values.web.tokenSecret.key -}}
-{{- else if index .Values "sparkwing-runner-bundle" "enabled" -}}
-{{- index .Values "sparkwing-runner-bundle" "controller" "tokenSecret" "key" -}}
-{{- end -}}
 {{- end }}
 
 {{/*

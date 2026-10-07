@@ -479,11 +479,6 @@ networkPolicy:
   # installs). Set it to your controller's labels when it runs under a
   # different release in the same namespace.
   controllerPodSelector: {}
-  # Pod labels of the dashboard allowed to probe the cache. Empty
-  # admits this release's own web pod, which reads the cache's
-  # /health on every services-panel refresh. Set it to your
-  # dashboard's labels when it runs under a different release.
-  webPodSelector: {}
   # Pod labels of the Job pods the k8s runner backend creates. Those
   # pods carry neither an instance nor a component label, so they need
   # a peer of their own; they are handed the cache URL and token and
