@@ -108,8 +108,6 @@ var banned = []bannedPattern{
 	},
 }
 
-const narrativeExempt = "changelog-style.md"
-
 var bannedNarrative = []bannedPattern{
 	{
 		regexp.MustCompile(`(?i)(?:pre|post)-rewrite`),
@@ -140,7 +138,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
-		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
+		if strings.Contains(path, "/migrations/") {
 			return nil
 		}
 		targets = append(targets, path)
@@ -156,10 +154,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 			return false
 		}
 		rel, _ := filepath.Rel(repoRoot, path)
-		patterns := banned
-		if filepath.Base(path) != narrativeExempt {
-			patterns = append(append([]bannedPattern{}, banned...), bannedNarrative...)
-		}
+		patterns := append(append([]bannedPattern{}, banned...), bannedNarrative...)
 		for ln, line := range strings.Split(string(data), "\n") {
 			for _, b := range patterns {
 				if m := b.re.FindString(line); m != "" {

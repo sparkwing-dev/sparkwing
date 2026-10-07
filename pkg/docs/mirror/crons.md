@@ -59,10 +59,37 @@ pipelines:
         catch_up: 6h
 ```
 
-Every field, its accepted values, and its default are in
-[scheduling.md](scheduling.md#schedule-triggers-cron). `tz: local` resolves to
-the zone of whichever host evaluates the schedule, so a repository moved
-between machines follows the machine.
+The fields:
+
+- `where` is **required** and has no default: `local` fires from a host
+  that armed the schedule with `sparkwing crons install`, `controller`
+  from a controller the schedule was installed on. One side per entry,
+  so nothing fires somewhere you did not say it should; declare an entry
+  per side to fire from both.
+- `name` distinguishes the cadences on one pipeline and appears in
+  `sparkwing crons list` as `<repo>/<pipeline>/<name>`. Required once a
+  pipeline declares more than one entry. It matches
+  `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters.
+- `cron` takes lists, ranges, steps, month and day names, and the
+  `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` aliases.
+- `tz` is an IANA zone name. Default `UTC`; `local` means the zone of
+  the host evaluating the schedule, so a repository moved between machines
+  follows the machine.
+- `overlap` decides a fire that comes due while the previous scheduled
+  run is still running: `skip` (default) records it as skipped, `queue`
+  launches it and lets admission order the two.
+- `catch_up` is how long after its due minute a fire may still happen
+  when the host was asleep or the timer ran late. Default `1h`, floor
+  `2m`, ceiling `24h`. A window over the ceiling is lowered to it when
+  the schedule is evaluated, and `sparkwing crons show` marks the
+  effective window clamped. An older due minute is recorded as missed.
+- `args` supplies argument values for this cadence's runs, keyed by CLI
+  flag name exactly like `args:` on the pipeline. They sit above
+  `pipeline.args` and below a host's own override for the schedule, so
+  a `guards: {require: [arg:region=us-east]}` token reads them.
+
+The expression is validated when the config loads, so a malformed cron
+fails the command that reads it rather than the run.
 
 ### Several cadences on one pipeline
 

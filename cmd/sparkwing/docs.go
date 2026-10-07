@@ -119,7 +119,7 @@ func runDocsGuides(args []string) error {
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
+	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, auth)")
 	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs guides`)")
 	section := fs.Int("section", 0, "read the embedded section whose start_line was returned by docs search")
 	var wf docsWebFlags

@@ -1286,8 +1286,8 @@ pipelines this repo defines. 'new' scaffolds a fresh pipeline
 (auto-bootstraps .sparkwing/ on first use). 'run' invokes one
 (positional name; same as 'sparkwing run <name>'). 'hooks' wires
 pipelines to git pre-commit / pre-push / post-commit.
-'sparks' manages reusable spark libraries declared in
-.sparkwing/sparks.yaml.
+'sparks' manages reusable spark libraries declared in the
+sparks: block of .sparkwing/sparkwing.yaml.
 
 The discovery verbs (list / describe / discover / templates)
 support -o json so an agent can parse output directly rather
@@ -4002,18 +4002,18 @@ profile's controller, which needs an admin-scoped token.`,
 
 var cmdSparks = Command{
 	Path:     "sparkwing pipeline sparks",
-	Synopsis: "Manage sparks libraries declared in .sparkwing/sparks.yaml",
+	Synopsis: "Manage sparks libraries declared in .sparkwing/sparkwing.yaml",
 	Description: `Sparks libraries are Go modules that add opinionated helpers
 (Docker builds, GitOps deploys, ECR auth, language-specific
 checks) on top of the unopinionated SDK. Consumers declare
-which libraries they want live-tracked in
-.sparkwing/sparks.yaml; the resolver writes an overlay modfile
+which libraries they want live-tracked in the sparks: block
+of .sparkwing/sparkwing.yaml; the resolver writes an overlay modfile
 at .sparkwing/.resolved.mod that the compile step uses via
 'go build -modfile='. The consumer's tracked go.mod is
 never modified.
 
 See docs/sparks.md for the full spec (spark.json schema,
-sparks.yaml shape, resolution rules, warmup).`,
+sparks: block shape, resolution rules, warmup).`,
 	SubcommandOrder: []string{"catalog", "list", "lint", "resolve", "update", "add", "remove", "warmup", "inflate"},
 	Examples: []Example{
 		{"See what a library offers", "sparkwing pipeline sparks catalog"},
@@ -4027,7 +4027,7 @@ sparks.yaml shape, resolution rules, warmup).`,
 var cmdSparksList = Command{
 	Path:     "sparkwing pipeline sparks list",
 	Synopsis: "Show declared sparks libraries and their resolved versions",
-	Description: `Reads .sparkwing/sparks.yaml and prints one row per declared
+	Description: `Reads the sparks: block and prints one row per declared
 library with its declared constraint and the resolved tag
 (found via the module proxy). Use --no-resolve to skip the
 proxy calls when offline.`,
@@ -4112,8 +4112,8 @@ one library still, pin its "version:" field in
 
 var cmdSparksAdd = Command{
 	Path:     "sparkwing pipeline sparks add",
-	Synopsis: "Add a library to sparks.yaml",
-	Description: `Appends a new entry to .sparkwing/sparks.yaml. Defaults the
+	Synopsis: "Add a library to the sparks: block",
+	Description: `Appends an entry to the sparks: block. Defaults the
 version to 'latest' when --version is omitted. Refuses to add
 a duplicate (same source or same name).`,
 	Flags: []FlagSpec{
@@ -4131,7 +4131,7 @@ a duplicate (same source or same name).`,
 
 var cmdSparksRemove = Command{
 	Path:        "sparkwing pipeline sparks remove",
-	Synopsis:    "Remove a library from sparks.yaml",
+	Synopsis:    "Remove a library from the sparks: block",
 	Description: `Removes the entry matching NAME (or matching its source path).`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Library name or source path to remove", Required: true, Group: "Input"},
@@ -4175,7 +4175,7 @@ those are import packages rather than modules; inflate that
 library by its own module path.
 
 Without --library the catalog reads sparks-core. A library the
-repo declares in .sparkwing/sparks.yaml is read at the version
+repo declares in its sparks: block is read at the version
 declared there; any other resolves to latest. --path reads a
 checkout on disk and never touches the network.
 

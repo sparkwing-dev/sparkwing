@@ -6,7 +6,7 @@ Versioning](https://semver.org/spec/v2.0.0.html). The release pipeline refuses t
 new version without a matching entry below.
 
 Entries name the affected surface. A `(Breaking)` marker links to the release's
-migration guide. See [Changelog style](docs/changelog-style.md) for authoring rules.
+migration guide. See [Changelog style](CHANGELOG-STYLE.md) for authoring rules.
 
 ## Pre-1.0 caveat
 
@@ -150,6 +150,9 @@ unlock.
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
+
+- **docs:** Remove embedded pages that described unshipped work: the MCP server page and the `proposals/` design notes
+  `sparkwing docs read --topic mcp` and `--topic proposals/...` now report an unknown topic. The SDK extraction roadmap leaves `versioning`, the maintainer release recipe leaves `getting-started`, the cron field reference moves from `scheduling` into `crons`, and `sparkwing pipeline sparks --help` names the `sparks:` block of `.sparkwing/sparkwing.yaml` instead of the `sparks.yaml` file the loader rejects.
 
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.

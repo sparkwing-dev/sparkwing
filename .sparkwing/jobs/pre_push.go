@@ -70,7 +70,7 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func checkChangelogRequired(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-changelog.sh").Run(); err != nil {
-		return fmt.Errorf("a covered surface changed without a CHANGELOG.md entry under [Unreleased]; add one in the category docs/changelog-style.md names: %w", err)
+		return fmt.Errorf("a covered surface changed without a CHANGELOG.md entry under [Unreleased]; add one in the category CHANGELOG-STYLE.md names: %w", err)
 	}
 	return nil
 }

@@ -16,8 +16,8 @@ pipelines this repo defines. 'new' scaffolds a fresh pipeline
 (auto-bootstraps .sparkwing/ on first use). 'run' invokes one
 (positional name; same as 'sparkwing run <name>'). 'hooks' wires
 pipelines to git pre-commit / pre-push / post-commit.
-'sparks' manages reusable spark libraries declared in
-.sparkwing/sparks.yaml.
+'sparks' manages reusable spark libraries declared in the
+sparks: block of .sparkwing/sparkwing.yaml.
 
 The discovery verbs (list / describe / discover / templates)
 support -o json so an agent can parse output directly rather
@@ -39,7 +39,7 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 - `run` -- Invoke a pipeline
 - `trigger` -- Submit a pipeline to a profile's controller (remote execution)
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
-- `sparks` -- Manage sparks libraries declared in .sparkwing/sparks.yaml
+- `sparks` -- Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 
 ### Examples
 
@@ -612,19 +612,19 @@ sparkwing pipeline trigger deploy --profile prod
 
 ## `sparkwing pipeline sparks`
 
-Manage sparks libraries declared in .sparkwing/sparks.yaml
+Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 
 Sparks libraries are Go modules that add opinionated helpers
 (Docker builds, GitOps deploys, ECR auth, language-specific
 checks) on top of the unopinionated SDK. Consumers declare
-which libraries they want live-tracked in
-.sparkwing/sparks.yaml; the resolver writes an overlay modfile
+which libraries they want live-tracked in the sparks: block
+of .sparkwing/sparkwing.yaml; the resolver writes an overlay modfile
 at .sparkwing/.resolved.mod that the compile step uses via
 'go build -modfile='. The consumer's tracked go.mod is
 never modified.
 
 See docs/sparks.md for the full spec (spark.json schema,
-sparks.yaml shape, resolution rules, warmup).
+sparks: block shape, resolution rules, warmup).
 
 ### Subcommands
 
@@ -633,8 +633,8 @@ sparks.yaml shape, resolution rules, warmup).
 - `lint` -- Validate a spark.json library manifest
 - `resolve` -- Resolve versions and materialize the overlay modfile
 - `update` -- Re-resolve every declared library
-- `add` -- Add a library to sparks.yaml
-- `remove` -- Remove a library from sparks.yaml
+- `add` -- Add a library to the sparks: block
+- `remove` -- Remove a library from the sparks: block
 - `warmup` -- Pre-compile pipeline binaries after a sparks release
 - `inflate` -- Copy a spark library's source into this repo so you can edit it
 
@@ -659,9 +659,9 @@ sparkwing pipeline sparks add example.com/fictional/sparks
 
 ## `sparkwing pipeline sparks add`
 
-Add a library to sparks.yaml
+Add a library to the sparks: block
 
-Appends a new entry to .sparkwing/sparks.yaml. Defaults the
+Appends an entry to the sparks: block. Defaults the
 version to 'latest' when --version is omitted. Refuses to add
 a duplicate (same source or same name).
 
@@ -700,7 +700,7 @@ those are import packages rather than modules; inflate that
 library by its own module path.
 
 Without --library the catalog reads sparks-core. A library the
-repo declares in .sparkwing/sparks.yaml is read at the version
+repo declares in its sparks: block is read at the version
 declared there; any other resolves to latest. --path reads a
 checkout on disk and never touches the network.
 
@@ -812,7 +812,7 @@ sparkwing pipeline sparks lint ~/code/fictional-sparks
 
 Show declared sparks libraries and their resolved versions
 
-Reads .sparkwing/sparks.yaml and prints one row per declared
+Reads the sparks: block and prints one row per declared
 library with its declared constraint and the resolved tag
 (found via the module proxy). Use --no-resolve to skip the
 proxy calls when offline.
@@ -840,7 +840,7 @@ sparkwing pipeline sparks list --no-resolve
 
 ## `sparkwing pipeline sparks remove`
 
-Remove a library from sparks.yaml
+Remove a library from the sparks: block
 
 Removes the entry matching NAME (or matching its source path).
 

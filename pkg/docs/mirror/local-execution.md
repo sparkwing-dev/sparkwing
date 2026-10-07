@@ -63,7 +63,7 @@ and hands each node subprocess the same socket; the child runs it
 dispatches and any node replayed from it choose the same way. No process
 in a hosted run holds the file open, so the store's schema is out of a
 pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
-runs`, `sparkwing jobs`, `sparkwing doctor`, the dashboard -- are the
+runs`, `sparkwing doctor`, the dashboard -- are the
 installed build or a peer of it and still open it directly.
 
 A run the daemon cannot serve opens a store of its own instead, which is

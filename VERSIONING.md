@@ -51,7 +51,7 @@ vulnerabilities privately through the process in [SECURITY.md](./SECURITY.md).
 
 - Every user-visible change requires a `CHANGELOG.md` entry under the current `[Unreleased]` section.
 - Sections follow [Keep a Changelog](https://keepachangelog.com/): `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Docs`. (`Deprecated` is omitted -- sparkwing is pre-1.0 and follows hard-cut semantics; removals go straight into `Removed` with a `(Breaking)` marker.)
-- Entry format: bold scope prefix, `(Breaking)` inline for breaks, link to migration guide. See [docs/changelog-style.md](./docs/changelog-style.md) for the rubric the pre-release manicuring agent applies.
+- Entry format: bold scope prefix, `(Breaking)` inline for breaks, link to migration guide. See [CHANGELOG-STYLE.md](./CHANGELOG-STYLE.md) for the rubric the pre-release manicuring agent applies.
 - Every breaking change in a release gets a corresponding H2 in `docs/migrations/v<X.Y.Z>.md`; releases with no breaking changes have no guide file.
 - CI requires a `CHANGELOG.md` entry for changes to `pkg/`, `sparkwing/`, or any `cmd/<binary>/*.go`. It also covers chart `values.yaml`, `values.schema.json`, templates, `Chart.yaml`, `Chart.lock`, vendored `.tgz` dependencies, and `internal/runners/k8s/k8s.go`, which owns the Kubernetes runner image-pull and dependency-proxy defaults. Tests and testdata are exempt. Other internal files, chart documentation, `docs/`, `examples/`, `web/`, `install/`, `build/`, and `bench/` remain exempt from this file-based check. User-visible changes outside these paths still require an entry under the policy above. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
 - The chart source/archive check (`go test ./charts -run TestVendoredRunnerBundleMatchesItsSource`) compares runner-bundle values and templates with the vendored archive and checks its filename and lock version against the source version. After a chart change, update the chart version and dependency pin as needed, then run `helm dependency update ./charts/sparkwing-full` and commit the archive and lock together.
@@ -177,4 +177,4 @@ When a breaking change ships:
 - The migration guide carries the longer-form before/after code, multi-step ordering, gotchas, and any sibling-repo impact. Adopters scanning the release page see the short summary; adopters actively migrating click through to the detailed steps.
 - A release containing a breaking change ships `docs/migrations/v<X.Y.Z>.md`, and every `(Breaking)` CHANGELOG entry links to an H2 inside it, so `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` resolves for the releases that need it. A release with no breaking changes has no guide file.
 
-Full format conventions live in [docs/changelog-style.md](./docs/changelog-style.md).
+Full format conventions live in [CHANGELOG-STYLE.md](./CHANGELOG-STYLE.md).

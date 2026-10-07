@@ -24,8 +24,6 @@ var repoDocs = []string{"../../README.md"}
 
 var docCommand = regexp.MustCompile(`^sparkwing((?: [a-z][a-z-]*\b)+)`)
 
-var intentPages = []string{"mcp", "proposals/"}
-
 var versionedPages = []string{"changelog", "migrations/"}
 
 func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
@@ -36,7 +34,7 @@ func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
 	}
 	read := 0
 	for _, e := range pages {
-		if matchesAny(e.Slug, intentPages) || matchesAny(e.Slug, versionedPages) {
+		if matchesAny(e.Slug, versionedPages) {
 			continue
 		}
 		body, err := docs.ReadRaw(e.Slug)
@@ -55,7 +53,7 @@ func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
 }
 
 func TestEveryPageExemptionMatchesAPageThatExists(t *testing.T) {
-	for _, prefix := range append(append([]string{}, intentPages...), versionedPages...) {
+	for _, prefix := range versionedPages {
 		matched := false
 		for _, e := range docs.List() {
 			if matchesAny(e.Slug, []string{prefix}) {
@@ -69,39 +67,9 @@ func TestEveryPageExemptionMatchesAPageThatExists(t *testing.T) {
 	}
 }
 
-func TestIntentPagesDeclareThatTheyAreNotShipped(t *testing.T) {
-	for _, e := range docs.List() {
-		if !matchesAny(e.Slug, intentPages) {
-			continue
-		}
-		body, err := docs.ReadRaw(e.Slug)
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Slug, err)
-		}
-		if !declaresStatus(body) {
-			t.Errorf("docs page %q is exempt from the dispatch check as an intent page, "+
-				"but carries no status line saying what is and is not shipped", e.Slug)
-		}
-	}
-}
-
 func matchesAny(slug string, entries []string) bool {
 	for _, e := range entries {
 		if slug == e || (strings.HasSuffix(e, "/") && strings.HasPrefix(slug, e)) {
-			return true
-		}
-	}
-	return false
-}
-
-func declaresStatus(body string) bool {
-	lines := strings.Split(body, "\n")
-	if len(lines) > 14 {
-		lines = lines[:14]
-	}
-	for _, line := range lines {
-		trimmed := strings.ToLower(strings.TrimLeft(strings.TrimSpace(line), ">*# "))
-		if strings.HasPrefix(trimmed, "status") {
 			return true
 		}
 	}
@@ -180,7 +148,7 @@ func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 		{"fenced invocation of a missing verb", "```sh\nsparkwing teleport\n```", []string{"sparkwing teleport"}},
 		{"unlabelled fence is read as commands", "```\nsparkwing teleport\n```", []string{"sparkwing teleport"}},
 		{"inline invocation", "Run `sparkwing teleport` first.", []string{"sparkwing teleport"}},
-		{"a subcommand resolves to its parent path", "`sparkwing docs read --topic mcp`", nil},
+		{"a subcommand resolves to its parent path", "`sparkwing docs read --topic auth`", nil},
 		{"unknown child of a group is refused", "`sparkwing docs teleport`", []string{"sparkwing docs teleport"}},
 		{"arguments are not verbs", "`sparkwing run my-pipeline`", nil},
 		{"prose mention is not an invocation", "the sparkwing dashboard shows runs", nil},
