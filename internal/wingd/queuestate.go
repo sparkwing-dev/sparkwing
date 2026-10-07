@@ -446,24 +446,6 @@ func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	}
 }
 
-func semaphoreETACapacity(snap admission.Snapshot, key string) int {
-	eff := 0
-	for _, ss := range snap.Semaphores {
-		if ss.Key == key {
-			eff = effectiveCapacity(ss)
-			break
-		}
-	}
-	for _, w := range snap.Waiters {
-		for _, c := range w.Claims {
-			if c.Key == key && c.Capacity > 0 && (eff == 0 || c.Capacity < eff) {
-				eff = c.Capacity
-			}
-		}
-	}
-	return eff
-}
-
 func semaphoreETAHolderRows(qs *wingwire.QueueState, snap admission.Snapshot) map[admission.LeaseID]wingwire.Holder {
 	byParticipant := make(map[string]wingwire.Holder, len(qs.Holders))
 	for _, h := range qs.Holders {

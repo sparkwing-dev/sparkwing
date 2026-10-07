@@ -46,10 +46,6 @@ func Coordinated() RunNodeOption {
 	return func(c *runNodeConfig) { c.coordinated = true }
 }
 
-func ClaimedNode() RunNodeOption {
-	return func(c *runNodeConfig) { c.claimed = true }
-}
-
 // ClaimedNodeFence runs the node under a claim another process already holds,
 // fencing every controller write and log append with it. The caller is the
 // isolated execution, so unlike [ClaimedNode] it hands nothing to a child: a

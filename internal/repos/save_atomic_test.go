@@ -225,3 +225,9 @@ func waitForStagingFile(t *testing.T, dir string) {
 	}
 	t.Fatal("the child never exposed an in-progress staging file")
 }
+
+// Save replaces the repos section of the config.yaml at path with cfg,
+// keeping every other section; see [userconfig.Write].
+func Save(path string, cfg *Config) error {
+	return userconfig.Write(path, userconfig.Repos, "the repo registry", cfg)
+}

@@ -962,3 +962,7 @@ func TestFetchPipelineRefPreservesBranchAndTagIdentity(t *testing.T) {
 		})
 	}
 }
+
+func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, "", "")
+}

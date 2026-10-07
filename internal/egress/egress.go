@@ -790,21 +790,6 @@ func (m *Meter) raiseAlarmLocked(now time.Time) bool {
 	return true
 }
 
-// FormatBytes renders a byte count the way an operator reads a bill:
-// whole units, two significant places past a kilobyte.
-func FormatBytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for v := n / unit; v >= unit && exp < 4; v /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %ciB", float64(n)/float64(div), "KMGTP"[exp])
-}
-
 type countingWriter struct {
 	http.ResponseWriter
 	meter     *Meter

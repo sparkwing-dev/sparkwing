@@ -883,10 +883,6 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	return res, runErr
 }
 
-func DumpRunState(ctx context.Context, st *store.Store, runID string, art storage.ArtifactStore) error {
-	return dumpRunState(ctx, localState{st: st}, runID, art)
-}
-
 func dumpRunState(ctx context.Context, state StateBackend, runID string, art storage.ArtifactStore) error {
 	run, err := state.GetRun(ctx, runID)
 	if err != nil {

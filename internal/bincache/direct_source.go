@@ -101,20 +101,6 @@ func DirectRepoURLFromGitHub(fullName string) string {
 	return "https://github.com/" + fullName + ".git"
 }
 
-// FetchPipelineSourceDirect checks out repoURL at sha under workDir and
-// returns the checkout's .sparkwing directory. With a credential the fetch
-// presents only that credential and reads none of this machine's git config,
-// ssh agent or keys; the zero credential fetches with this process's own git
-// config and credentials, which only an owner-fenced runner may do. Fetched
-// objects stay in a mirror under the Sparkwing home keyed by the remote, so a
-// later run of the same repository fetches only what it lacks. An empty sha
-// takes the tip of branch.
-func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
-	opts := defaultDirectOptions()
-	opts.cred = cred
-	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
-}
-
 // safety: Only loopback tests may skip address validation; production fetches keep it and both caps.
 // A zero timeout leaves ctx in charge, while the byte cap covers all mirrors under one home.
 type directOptions struct {

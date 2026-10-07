@@ -711,7 +711,6 @@ const DefaultTeam Team = "default"
 const DefaultTeamCloudNodes = 100
 const DefaultWarmCPUClassCores = 2
 const DeletedUserLabel = "deleted user"
-func DetectDialect(dsn string) Dialect
 type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
@@ -1911,7 +1910,6 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
-func SetArgon2AcquireTimeout(d time.Duration) time.Duration
 func SetArgon2MemoryBudget(budget int64) int
 func SetBinaryVersion(v string)
 type SignInProfile struct {

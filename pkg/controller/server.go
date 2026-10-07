@@ -1387,16 +1387,6 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 	return false
 }
 
-// Serve starts the HTTP listener and blocks until ctx is done. On
-// ctx cancellation the server gracefully drains in-flight requests
-// up to shutdownTimeout. Also spawns the reaper goroutine that
-// re-queues triggers whose runner lease expired, and -- when a pool
-// has been attached via Server.AttachPool -- the pool's reconcile
-// and warming loops.
-func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error {
-	return ServeWith(ctx, New(st, logger), addr)
-}
-
 // ServeWith runs a pre-built Server (configured with WithDispatcher /
 // AttachPool) at addr. Split from Serve so the controller pod main can
 // wire in an in-cluster k8s client without passing options through

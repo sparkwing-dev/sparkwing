@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func RunOps(args []string) error { return runOpsCLI(args) }
-
 func runOpsCLI(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: ops queue|doctor|stats|stats-reset|version [flags]")

@@ -77,10 +77,6 @@ func sortCacheEntries(entries []CacheEntry) {
 	})
 }
 
-func PruneToConfiguredLimits(ctx context.Context) (PruneResult, error) {
-	return PruneToLimits(ctx, ConfiguredMaxBytes(), ConfiguredMaxEntries(), false)
-}
-
 func PruneToLimits(ctx context.Context, maxBytes int64, maxEntries int, removeAll bool) (PruneResult, error) {
 	return pruneToLimitsAtRoot(ctx, "", maxBytes, maxEntries, removeAll)
 }

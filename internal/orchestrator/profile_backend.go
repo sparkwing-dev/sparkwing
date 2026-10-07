@@ -87,10 +87,6 @@ var (
 	storeOpen              = store.Open
 )
 
-func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {
-	return applyProfileBackendsWithMirror(ctx, opts, p, paths, false)
-}
-
 func applyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths, keepState bool) error {
 	hadState := opts.State != nil
 	if err := applyProfileBackends(ctx, opts, p, keepState); err != nil {

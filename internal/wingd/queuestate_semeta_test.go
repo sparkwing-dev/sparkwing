@@ -325,19 +325,6 @@ func mixedETAState(hostExpected, hostElapsed, semExpected, semElapsed int64) (wi
 	return qs, snap
 }
 
-func TestSemaphoreETACapacity_TakesTheSmallestDeclaration(t *testing.T) {
-	snap := admission.Snapshot{
-		Semaphores: []admission.SemaphoreState{semState("deploy", 4, semHold("L1", 4, 1), semHold("L2", 3, 1))},
-		Waiters:    []admission.WaiterState{semWaiter("run-b", "deploy", 2, 1)},
-	}
-	if got := semaphoreETACapacity(snap, "deploy"); got != 2 {
-		t.Fatalf("capacity = %d, want the waiter's smaller declaration 2", got)
-	}
-	if got := semaphoreETACapacity(snap, "missing"); got != 0 {
-		t.Fatalf("capacity = %d, want 0 for a key nothing declares", got)
-	}
-}
-
 const semaNone = int64(-1)
 
 func semLease(id admission.LeaseID, runID, key string, capacity, cost int) admission.LeaseState {

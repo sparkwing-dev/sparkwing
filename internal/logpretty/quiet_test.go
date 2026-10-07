@@ -2,6 +2,7 @@ package logpretty
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -95,4 +96,8 @@ func TestQuiet_FailureOmitsCascadeNodes(t *testing.T) {
 	if strings.Contains(out, "downstream") {
 		t.Errorf("cancelled cascade node should not appear:\n%s", out)
 	}
+}
+
+func NewQuietRendererTo(w io.Writer, useColor bool) *QuietRenderer {
+	return &QuietRenderer{w: w, errW: w, useColor: useColor}
 }

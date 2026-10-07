@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -106,4 +107,14 @@ func TestRenderPipelinePivot_TableHasCounts(t *testing.T) {
 	if !strings.Contains(out, "PIPELINE") || !strings.Contains(out, "deploy") {
 		t.Errorf("missing header/row: %s", out)
 	}
+}
+
+func pivotByPipeline(runs []*store.Run, sparklineLen int) []PipelinePivotRow {
+	p := newPipelinePivot(sparklineLen)
+	p.add(runs)
+	return p.sorted()
+}
+
+func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error {
+	return renderPivotRows(pivotByPipeline(runs, opts.SparklineLen), opts, out)
 }

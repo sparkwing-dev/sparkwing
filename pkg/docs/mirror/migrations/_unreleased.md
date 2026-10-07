@@ -273,6 +273,21 @@ neither the claim nor the repository it was minted for outlived both.
   `$SPARKWING_HOME/box-slots` directory holds only lock files and can be
   deleted with `rm -r "${SPARKWING_HOME:-$HOME/.sparkwing}/box-slots"`.
 
+## Unused pkg functions are removed
+
+Go programs that import these `pkg/` functions call the replacement instead:
+
+| Removed | Use instead |
+|---|---|
+| `controller.Serve(ctx, st, addr, logger)` | `controller.ServeWith(ctx, controller.New(st, logger), addr)` |
+| `logs.Serve`, `logs.ServeWithTokens`, `logs.ServePrivateWithTokens` | `logs.ServeWith(ctx, logs.ServeOptions{Root, Addr, ControllerURL, Logger, Private})` |
+| `sparkwinglogs.FromClient(c)` | `sparkwinglogs.New` with the client's URL and token |
+| `store.DetectDialect(dsn)` | `store.Open` for a SQLite path, `store.OpenPostgres` for a `postgres://` DSN |
+| `controller.AuditFields`, `store.SetArgon2AcquireTimeout`, `backends.LayerSurfaces` | nothing; no caller used them |
+
+`backends.LayerSurfaces` layered a pipeline target's backend over the
+profile's, a block `sparkwing.yaml` no longer accepts.
+
 ## Unimplemented backend types are removed
 
 Code that imports `TypeGCS`, `TypeAzureBlob` or `TypeMySQL` from

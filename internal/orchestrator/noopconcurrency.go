@@ -13,8 +13,6 @@ type noopConcurrency struct {
 	warnedKeys sync.Map
 }
 
-func NoopConcurrency() ConcurrencyBackend { return &noopConcurrency{} }
-
 func (n *noopConcurrency) AcquireSlot(_ context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	if isCoordinatingPolicy(req.Policy) {
 		warnKey := req.Key + "|" + req.Policy

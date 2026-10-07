@@ -129,14 +129,6 @@ func (e Entry) Acquire(ctx context.Context) (*Lease, bool, error) {
 	return &Lease{entry: e, file: lease}, true, nil
 }
 
-func (e Entry) Materialize(ctx context.Context, write func(string) error) (published bool, err error) {
-	lease, published, err := e.AcquireOrMaterialize(ctx, write)
-	if lease != nil {
-		err = errors.Join(err, lease.Release())
-	}
-	return published, err
-}
-
 func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) error) (_ *Lease, published bool, err error) {
 	if write == nil {
 		return nil, false, errors.New("pipeline cache materializer is required")
@@ -561,11 +553,6 @@ func openCacheLockPath(path string, mode cacheLockMode) (*os.File, bool, error) 
 type cacheCandidate struct {
 	key     string
 	modTime int64
-}
-
-func cacheCandidates(ctx context.Context, root string, limit int) ([]cacheCandidate, error) {
-	candidates, _, err := cacheCandidatesBounded(ctx, root, limit)
-	return candidates, err
 }
 
 func cacheCandidatesBounded(ctx context.Context, root string, limit int) ([]cacheCandidate, bool, error) {
