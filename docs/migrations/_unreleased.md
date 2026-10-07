@@ -269,6 +269,7 @@ the reference, since no build ever opened a backend of those types. Nothing
 changes at run time: a profile naming `gcs`, `azure-blob` or `mysql` failed at
 run start before and still does, now with an error naming the types its
 surface accepts.
+
 ## The warm-PVC pool is removed
 
 **Before:** `sparkwing-controller --pool` kept a set of PVCs labeled
