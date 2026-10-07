@@ -101,11 +101,10 @@ func (c cacheCaller) operatorGrant() bool { return c.team == authwire.OperatorTe
 
 // safety: the operator's own runs register on first fetch as its token did; any other team would clone with the
 // cache's credentials.
-func (c cacheCaller) mayRegisterMirror() bool { return c.team == "" || c.operatorGrant() }
+func (c cacheCaller) mayRegisterMirror() bool { return c.operator() }
 
-// safety: the mirrors are shared by every team, so another team's grant reads
-// only a mirror that holds nothing private: an https origin the cache clones
-// with no credential, registered under the one name derived from that URL.
+// safety: anonymous git reaches only https, and the name a runner derives is the
+// one an operator registration of that URL must use.
 func grantMayUseMirror(name, repoURL string) bool {
 	u, err := url.Parse(repoURL)
 	if err != nil || u.Scheme != "https" || u.User != nil {
@@ -114,9 +113,13 @@ func grantMayUseMirror(name, repoURL string) bool {
 	return name == sourceurl.ClaimedRepoNameFromURL(repoURL)
 }
 
-// safety: the operator reads its own private mirrors; another team's grant reads only a public one.
+func (c cacheCaller) operator() bool { return c.team == "" || c.operatorGrant() }
+
+// safety: a seed or a credential the cache inherits puts private objects in the operator's mirror of
+// even an https URL, so another team's grant reads only the separate public mirror of an https origin
+// the operator registered, which the cache fills with no credential.
 func (c cacheCaller) mayReadMirror(name string) bool {
-	if c.team == "" || c.operatorGrant() {
+	if c.operator() {
 		return true
 	}
 	repoNamesMu.RLock()
