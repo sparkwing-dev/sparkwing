@@ -819,42 +819,26 @@ curl -s http://localhost:9001/jobs/<JOB_ID> | jq '.result.pipeline_result'
 `,
   },
   {
-    id: "webhooks",
-    title: "16. GitHub webhooks",
+    id: "github-app",
+    title: "16. GitHub App",
     content: `
-## Webhook setup
+## GitHub triggers
 
-Sparkwing receives GitHub push/PR events and triggers builds automatically.
+The GitHub App is the only way GitHub starts a run. A team owner installs the
+App, connects the installation under Team > GitHub, and subscribes each
+pipeline to the repository events that should run it. The App also reports
+each run as a check run on the commit it built.
 
-**Required environment:**
-- \`GITHUB_WEBHOOK_SECRET\` -- HMAC signing secret (must match GitHub)
-- \`GITHUB_TOKEN\` -- commit-status token with write access (optional)
-- \`SPARKWING_DASHBOARD_URL\` -- query-free HTTP(S) base URL for status links (optional)
+**Controller environment:**
+- \`SPARKWING_GITHUB_APP_ID\`, \`SPARKWING_GITHUB_APP_SLUG\` -- the App's id and slug
+- \`SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE\` -- the App's private key
+- \`SPARKWING_GITHUB_APP_WEBHOOK_SECRET\` -- the secret GitHub signs deliveries with
+- \`SPARKWING_DASHBOARD_URL\` -- query-free HTTP(S) base URL for check run links (optional)
 
-## Test webhook delivery
-
-\`\`\`bash
-# Simulate a GitHub push webhook
-SECRET="your-webhook-secret"
-PAYLOAD='{"ref":"refs/heads/main","repository":{"clone_url":"https://github.com/you/repo.git","full_name":"you/repo"},"head_commit":{"id":"abc123"}}'
-
-SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/.*= //')
-
-curl -X POST http://localhost:9001/webhooks/github/build \
-  -H "Content-Type: application/json" \
-  -H "X-GitHub-Event: push" \
-  -H "X-GitHub-Delivery: $(uuidgen)" \
-  -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
-  -d "$PAYLOAD"
-\`\`\`
-
-**What to verify:**
-- Valid signatures trigger a build
-- Invalid/missing signatures are rejected (401)
-- A delivery without \`X-GitHub-Delivery\` is rejected (400), and re-sending an accepted body answers 409
-- Repo URL is validated against allowlist (if set)
-- Git ref is sanitized
-- The correct pipeline is selected based on \`pipelines.yaml\` trigger rules
+GitHub posts deliveries to \`POST /webhooks/github-app\`. A delivery whose
+signature does not verify is rejected (401), and a redelivery answers with the
+run the first delivery started. The GitHub App guide in the docs has the full
+setup.
 
 ## Branch enforcement
 
