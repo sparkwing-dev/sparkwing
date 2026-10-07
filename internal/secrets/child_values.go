@@ -189,7 +189,7 @@ func (v *ChildValues) Close() {
 	}
 }
 
-// perf: an unterminated line longer than this is truncated rather than held whole.
+// perf: an unterminated line longer than this is dropped rather than held whole.
 const maxMaskedLine = 1 << 20
 
 // LineWriter masks a child's output a line at a time.
@@ -198,7 +198,6 @@ type LineWriter struct {
 	dst     io.Writer
 	mu      sync.Mutex
 	buf     []byte
-	cutting bool
 	dropped int
 	err     error
 }
@@ -222,26 +221,26 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// safety: any part of an overlong line written on its own could end inside a
+// value whose rest the masker never sees with it, so the whole line goes.
 func (w *LineWriter) take(p []byte) {
-	if w.cutting {
+	if w.dropped > 0 {
 		w.dropped += len(p)
 		return
 	}
 	w.buf = append(w.buf, p...)
 	if len(w.buf) > maxMaskedLine {
-		kept, dropped := w.v.MaskTruncated(string(w.buf))
-		w.write(kept)
-		w.buf, w.cutting, w.dropped = w.buf[:0], true, dropped
+		w.buf, w.dropped = w.buf[:0], len(w.buf)
 	}
 }
 
 func (w *LineWriter) endLine(end string) {
-	if w.cutting {
-		w.write(fmt.Sprintf(" [truncated %d bytes]%s", w.dropped, end))
+	if w.dropped > 0 {
+		w.write(fmt.Sprintf("[line over 1 MiB dropped: %d bytes]%s", w.dropped, end))
 	} else if len(w.buf) > 0 || end != "" {
 		w.write(w.v.Mask(string(w.buf)) + end)
 	}
-	w.buf, w.cutting, w.dropped = w.buf[:0], false, 0
+	w.buf, w.dropped = w.buf[:0], 0
 }
 
 func (w *LineWriter) flush() {

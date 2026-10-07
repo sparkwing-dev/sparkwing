@@ -18,41 +18,50 @@ func knownValues(values ...string) *ChildValues {
 	return v
 }
 
-// safety: an 8-byte piece already narrows a secret, so none may reach the output.
-func assertNoFragment(t *testing.T, out, secret string) {
-	t.Helper()
-	for n := 8; n <= len(secret); n++ {
-		for i := 0; i+n <= len(secret); i++ {
-			if strings.Contains(out, secret[i:i+n]) {
-				t.Fatalf("output holds %q, a piece of the secret", secret[i:i+n])
-			}
-		}
-	}
-}
-
-func TestLineWriterTruncatesALongLineWithoutLeakingASecret(t *testing.T) {
+func TestLineWriterDropsALongLineWhole(t *testing.T) {
 	const secret = "fixture-secret-7c41e9fixture"
-	for name, writes := range map[string][]string{
-		"secret ending at the limit": {strings.Repeat("x", maxMaskedLine-len(secret)) + secret + strings.Repeat("y", 64) + "\n"},
-		"secret straddling the cut":  {strings.Repeat("x", maxMaskedLine-5) + secret[:12], secret[12:] + "\n"},
-		"secret ending the buffer":   {strings.Repeat("x", maxMaskedLine-3) + secret, "rest\n"},
+	expanding := "0123456789" + strings.Repeat("a", 40) + "TAIL"
+	for name, tc := range map[string]struct {
+		values []string
+		writes []string
+	}{
+		"secret ending at the limit": {[]string{secret}, []string{strings.Repeat("x", maxMaskedLine-len(secret)) + secret + strings.Repeat("y", 64) + "\n"}},
+		"secret straddling the cut":  {[]string{secret}, []string{strings.Repeat("x", maxMaskedLine-5) + secret[:12], secret[12:] + "\n"}},
+		"secret ending the buffer":   {[]string{secret, "fixture"}, []string{strings.Repeat("x", maxMaskedLine-3) + secret, "rest\n"}},
+		"masking that expands text":  {[]string{"a", expanding}, []string{strings.Repeat("a", maxMaskedLine-30) + expanding + "\n"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			v := knownValues(secret, "fixture")
+			v := knownValues(tc.values...)
 			var out bytes.Buffer
 			w := v.Writer(&out)
-			for _, p := range append(writes, "next line\n") {
+			for _, p := range append(tc.writes, "next line\n") {
 				if _, err := w.Write([]byte(p)); err != nil {
 					t.Fatal(err)
 				}
 			}
 			v.Close()
-			got := out.String()
-			assertNoFragment(t, got, secret)
-			if !strings.Contains(got, " bytes]\nnext line\n") || strings.Count(got, "[truncated ") != 1 {
-				t.Fatalf("tail = %q, want one truncation marker then the next line", got[max(0, len(got)-60):])
+			if got := out.String(); !strings.HasPrefix(got, "[line over 1 MiB dropped: ") || !strings.HasSuffix(got, " bytes]\nnext line\n") || len(got) > 80 {
+				t.Fatalf("output = %q, want only the drop marker and the next line", got[:min(len(got), 120)])
 			}
 		})
+	}
+}
+
+func TestLineWriterMasksALineJustUnderTheLimitWhole(t *testing.T) {
+	const secret = "fixture-secret-7c41e9"
+	v := knownValues(secret)
+	var out bytes.Buffer
+	w := v.Writer(&out)
+	line := strings.Repeat("x", maxMaskedLine-len(secret)) + secret
+	if _, err := w.Write([]byte(line[:600_000])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(line[600_000:] + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+	if want := strings.Repeat("x", maxMaskedLine-len(secret)) + "***\n"; out.String() != want {
+		t.Fatalf("got %d bytes ending %q, want the whole line masked", out.Len(), out.String()[max(0, out.Len()-30):])
 	}
 }
 
