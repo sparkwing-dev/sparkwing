@@ -53,3 +53,19 @@ func TestHostedSchedule_AStalledPlanFailsItsPendingNodes(t *testing.T) {
 		}
 	}
 }
+
+func TestHostedCheck_RefusesPlacementItDoesNotEnforce(t *testing.T) {
+	for name, snap := range map[string]planSnapshot{
+		"runs_on":     {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{RunsOn: []string{"gpu"}}}}},
+		"prefers":     {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{Prefers: []string{"fast"}}}}},
+		"when_runner": {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{WhenRunner: []string{"linux"}}}}},
+		"requires":    {Requires: []string{"arm64"}, Nodes: []snapshotNode{{ID: "a"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := hostedCheck(snap)
+			if err == nil || !strings.Contains(err.Error(), "does not") {
+				t.Fatalf("err = %v, want a refusal", err)
+			}
+		})
+	}
+}

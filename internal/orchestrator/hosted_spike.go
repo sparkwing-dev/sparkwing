@@ -157,6 +157,9 @@ func hostedAdmit(ctx context.Context, st *store.Store, runID string, snap planSn
 }
 
 func hostedCheck(snap planSnapshot) error {
+	if len(snap.Requires) > 0 {
+		return fmt.Errorf("hosted run: the pipeline requires runner labels %v, which the hosted spike does not place", snap.Requires)
+	}
 	deps := make(map[string][]string, len(snap.Nodes))
 	for _, n := range snap.Nodes {
 		if _, dup := deps[n.ID]; dup {
@@ -233,6 +236,8 @@ func hostedUnsupported(n snapshotNode) string {
 		return "changes how its failure propagates"
 	case m.Inline:
 		return "runs inline"
+	case len(m.RunsOn) > 0 || len(m.Prefers) > 0 || len(m.WhenRunner) > 0:
+		return "has a runner placement condition"
 	}
 	return ""
 }
