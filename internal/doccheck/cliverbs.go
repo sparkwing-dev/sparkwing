@@ -30,8 +30,6 @@ var shellLangs = map[string]bool{
 	"text":    true,
 }
 
-var unshippedDesignRE = regexp.MustCompile(`(?i)not yet shipped|STATUS:\s*design`)
-
 func checkCLIVerbs(contentDir, repoRoot string) bool {
 	valid, posArgs, err := loadRegistry(repoRoot)
 	if err != nil {
@@ -45,7 +43,7 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 		if werr != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return werr
 		}
-		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
+		if strings.Contains(path, "/migrations/") {
 			return nil
 		}
 		if isGeneratedDoc(path) {
@@ -55,9 +53,6 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr
-		}
-		if unshippedDesignRE.Match(data) {
-			return nil
 		}
 		rel, _ := filepath.Rel(contentDir, path)
 		invocations = append(invocations, extractInvocations(rel, string(data))...)

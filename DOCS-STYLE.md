@@ -13,7 +13,7 @@ docs don't.
 | **Executable examples** | compile-checked | every ```` ```go ```` block in `docs/` is compiled against the SDK; every ```` ```yaml ```` `pipelines:` block is parsed by the real config parser. |
 | **Concepts** | hand-written, small | the *why* and the model (execution, profiles, the two-layer DAG, caching). Keep these short. |
 | **Tutorials** | real templates | `sparks-core/templates` + `sparkwing pipeline new`; the `template-verify` pipeline scaffolds, builds, lints and explains every registry template (and runs the runnable-tier ones), and the release pipeline gates on it. Prefer "scaffold this template" over prose steps. |
-| **Architecture** | near code | contributor docs (`DESIGN-*.md`, `architecture.md`). |
+| **Architecture** | near code | contributor docs (`architecture.md`). |
 
 One question per page: tutorial = *how do I?*, reference = *what does it
 do?*, concept = *why?*, architecture = *how is it built?*. A page that
@@ -69,16 +69,16 @@ CLI help registry, and is the durable guard:
 - sidebar completeness (`docs/_sidebar.json` and the docs tree agree in
   both directions, so a new page can't be published unreachable);
 - aux docs: the root-level markdown (README, DELIVERY, VERSIONING,
-  DESIGN-*, ...) and the charts/install/web READMEs get the drift subset
+  CHANGELOG-STYLE, ...) and the charts/install/web READMEs get the drift
+  subset
   (dead tokens, CLI-verb resolution, `.md`-link resolution); the
   pipeline registrations in `.sparkwing/` and `examples/*.yaml` get dead
   tokens and CLI-verb resolution over the `sparkwing ...` commands their
   help strings and workflow steps quote, since link resolution is a
   markdown-only check. The editorial checks stay `docs/`-only:
-  VERSIONING.md documents removal and breaking-change policy and
-  DESIGN-* docs record design evolution, so change vocabulary is their
-  subject matter. The CHANGELOG is excluded outright -- recording dead
-  names is its job.
+  VERSIONING.md and CHANGELOG-STYLE.md document removal and
+  breaking-change policy, so change vocabulary is their subject matter.
+  The CHANGELOG is excluded outright -- recording dead names is its job.
 
 Plus: a `pre-commit` check that `docs/` and `pkg/docs/mirror/` are in
 sync, and `pre-release` drift gates that regenerate the generated

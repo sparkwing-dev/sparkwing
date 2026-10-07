@@ -98,62 +98,6 @@
       }
     },
     {
-      "route": "/features",
-      "kind": "page",
-      "baselines": {
-        "local": {
-          "page_bytes": 256755,
-          "taken_at": "2026-09-10T08:57:11Z",
-          "commit": "ee750b0",
-          "host": "bomberangz-pc",
-          "load_per_cpu": 0.11,
-          "samples": 5
-        }
-      }
-    },
-    {
-      "route": "/guide",
-      "kind": "page",
-      "baselines": {
-        "local": {
-          "page_bytes": 262723,
-          "taken_at": "2026-09-10T08:57:11Z",
-          "commit": "ee750b0",
-          "host": "bomberangz-pc",
-          "load_per_cpu": 0.11,
-          "samples": 5
-        }
-      }
-    },
-    {
-      "route": "/learn",
-      "kind": "page",
-      "baselines": {
-        "local": {
-          "page_bytes": 258172,
-          "taken_at": "2026-09-10T08:57:11Z",
-          "commit": "ee750b0",
-          "host": "bomberangz-pc",
-          "load_per_cpu": 0.11,
-          "samples": 5
-        }
-      }
-    },
-    {
-      "route": "/pipeline-overview",
-      "kind": "page",
-      "baselines": {
-        "local": {
-          "page_bytes": 251669,
-          "taken_at": "2026-09-10T08:57:11Z",
-          "commit": "ee750b0",
-          "host": "bomberangz-pc",
-          "load_per_cpu": 0.11,
-          "samples": 5
-        }
-      }
-    },
-    {
       "route": "/queue",
       "kind": "page",
       "baselines": {

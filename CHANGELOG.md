@@ -6,7 +6,7 @@ Versioning](https://semver.org/spec/v2.0.0.html). The release pipeline refuses t
 new version without a matching entry below.
 
 Entries name the affected surface. A `(Breaking)` marker links to the release's
-migration guide. See [Changelog style](docs/changelog-style.md) for authoring rules.
+migration guide. See [Changelog style](CHANGELOG-STYLE.md) for authoring rules.
 
 ## Pre-1.0 caveat
 
@@ -117,6 +117,10 @@ unlock.
   `PUT /api/v1/storage/teams/{team}/free-slot`, and `sparkwing-cache` no longer serves `GET /repos`. Neither the CLI,
   the dashboard nor `sparkwing-ops` called them. `pkg/controller.StorageTierResponse` is gone. See
   [Four operator routes are removed](docs/migrations/_unreleased.md#four-operator-routes-are-removed).
+- **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
+  Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
+- **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
+  No build implemented them, so a profile naming one never opened. It now fails at run start with an error naming the types the surface accepts (state: `sqlite`, `postgres`, `s3`, `controller`; cache: `filesystem`, `s3`, `controller`; logs: `filesystem`, `s3`, `stdout`, `controller`), and `sparkwing-web --*-spec` refuses the `gcs://`, `azure-blob://` and `mysql://` schemes. See [migration guide](docs/migrations/_unreleased.md#unimplemented-backend-types-are-removed).
 - **cache + controller (Breaking):** Remove the cache's source-read, upload, seed, refresh and job-artifact routes
   `sparkwing-cache` no longer serves `/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/upload`,
   `/uploads/<id>`, `/sync/negotiate`, `/sync/seed`, `/git/refresh` or `/artifacts/<job>`, and the controller no
@@ -187,6 +191,9 @@ unlock.
 - **Security:** State that local dashboard browser sessions have no expiry and end when `serve-token` is deleted and the dashboard restarted
 
 - **Security:** Distinguish licensed team boundaries, operator authority, and runner and shared-cache trust requirements
+
+- **docs:** Remove embedded pages that described unshipped work: the MCP server page and the `proposals/` design notes
+  `sparkwing docs read --topic mcp` and `--topic proposals/...` now report an unknown topic. The SDK extraction roadmap leaves `versioning`, the maintainer release recipe leaves `getting-started`, the cron field reference moves from `scheduling` into `crons`, and `sparkwing pipeline sparks --help` names the `sparks:` block of `.sparkwing/sparkwing.yaml` instead of the `sparks.yaml` file the loader rejects.
 
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.

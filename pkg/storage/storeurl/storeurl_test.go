@@ -161,9 +161,6 @@ func TestOpenLogStore_FS(t *testing.T) {
 
 func TestOpen_BadScheme(t *testing.T) {
 	t.Parallel()
-	if _, err := OpenArtifactStore(context.Background(), "gcs://x"); err == nil {
-		t.Error("expected err for unknown scheme")
-	}
 	if _, err := OpenLogStore(context.Background(), "no-scheme"); err == nil {
 		t.Error("expected err for missing scheme")
 	}

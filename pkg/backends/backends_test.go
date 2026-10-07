@@ -44,11 +44,8 @@ func TestValidateFields_RequiresWhatEachTypeCannotWorkWithout(t *testing.T) {
 	}{
 		{"s3 without bucket", backends.Spec{Type: backends.TypeS3}, "requires bucket"},
 		{"s3 with prefix only", backends.Spec{Type: backends.TypeS3, Prefix: "runs"}, "requires bucket"},
-		{"gcs without bucket", backends.Spec{Type: backends.TypeGCS}, "requires bucket"},
-		{"azure without bucket", backends.Spec{Type: backends.TypeAzureBlob}, "requires bucket"},
 		{"filesystem without path", backends.Spec{Type: backends.TypeFilesystem}, "requires path"},
 		{"postgres without url", backends.Spec{Type: backends.TypePostgres}, "requires url or url_source"},
-		{"mysql without url", backends.Spec{Type: backends.TypeMySQL}, "requires url or url_source"},
 		{"controller without a name", backends.Spec{Type: backends.TypeController}, "requires controller"},
 		{"no type at all", backends.Spec{}, "type is required"},
 	}

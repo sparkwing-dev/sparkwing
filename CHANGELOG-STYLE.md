@@ -5,7 +5,7 @@ and the migration guides under `docs/migrations/`. Manual edits should
 follow the same conventions so the agent's diff at release time is
 small.
 
-Pairs with [VERSIONING.md](../VERSIONING.md) (the stability policy)
+Pairs with [VERSIONING.md](VERSIONING.md) (the stability policy)
 and the release pipeline in `.sparkwing/jobs/release.go` (which
 auto-renames `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD` on tag).
 
@@ -62,7 +62,7 @@ Mark inline with `(Breaking)` directly after the scope:
 ### Changed
 
 - **sdk (Breaking):** `Needs(...any)` replaced with `Needs(...Dep)`.
-  See [migration guide](migrations/v0.4.0.md#typed-dep-interface) for
+  See [migration guide](docs/migrations/v0.4.0.md#typed-dep-interface) for
   the multi-step pattern. Summary: typed Plan-layer dependency wiring;
   by-name string references no longer accepted.
 ```

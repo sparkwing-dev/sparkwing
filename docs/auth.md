@@ -114,7 +114,7 @@ the `metering` feature in its signed license. A signed `multi-team` license
 includes metering, including licenses issued before `metering` was named.
 Without either feature, credit and team billing routes return `404`, claims
 never check a balance or write charges, and the dashboard omits Billing.
-Customers who need metering can contact Korey for help running sparkwing-ops.
+Customers who need metering can ask the Sparkwing maintainers for help running sparkwing-ops.
 
 Cloud runner time is prepaid. One credit is $0.001, and that value is fixed:
 prices change by moving rates, never by changing the credit. Amounts are

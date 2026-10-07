@@ -411,84 +411,10 @@ its needed labels.
 ## Schedule triggers (cron)
 
 A pipeline declares its cadences with the `schedule` trigger in
-`sparkwing.yaml`. `on.schedule` takes a list of entries, one per
-cadence, and every entry says where it fires:
-
-```yaml
-pipelines:
-  - name: nightly-rebuild
-    entrypoint: NightlyRebuild
-    on:
-      schedule:
-        - name: host
-          cron: "0 3 * * *"   # 03:00 daily
-          where: local
-        - name: cluster
-          cron: "0 3 * * *"
-          tz: America/Denver
-          where: controller
-          overlap: queue
-          catch_up: 6h
-          args:
-            region: us-east
-```
-
-A pipeline with one cadence may write the entry as a bare mapping; it
-is named `default`:
-
-```yaml
-pipelines:
-  - name: nightly-rebuild
-    entrypoint: NightlyRebuild
-    on:
-      schedule:
-        cron: "0 3 * * *"
-        where: local
-```
-
-- `where` is **required** and has no default: `local` fires from a host
-  that armed the schedule with `sparkwing crons install`, `controller`
-  from a controller the schedule was installed on. One side per entry,
-  so nothing fires somewhere you did not say it should; declare an entry
-  per side to fire from both.
-- `name` distinguishes the cadences on one pipeline and appears in
-  `sparkwing crons list` as `<repo>/<pipeline>/<name>`. Required once a
-  pipeline declares more than one entry. It matches
-  `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters.
-- `cron` takes lists, ranges, steps, month and day names, and the
-  `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` aliases.
-- `tz` is an IANA zone name. Default `UTC`; `local` means the zone of
-  the host running the schedule.
-- `overlap` decides a fire that comes due while the previous scheduled
-  run is still running: `skip` (default) records it as skipped, `queue`
-  launches it and lets admission order the two.
-- `catch_up` is how long after its due minute a fire may still happen
-  when the host was asleep or the timer ran late. Default `1h`, floor
-  `2m`, ceiling `24h`. A window over the ceiling is lowered to it when
-  the schedule is evaluated, and `sparkwing crons show` marks the
-  effective window clamped. An older due minute is recorded as missed.
-- `args` supplies argument values for this cadence's runs, keyed by CLI
-  flag name exactly like `args:` on the pipeline. They sit above
-  `pipeline.args` and below a host's own override for the schedule, so
-  a `guards: {require: [arg:region=us-east]}` token reads them.
-
-The expression is validated when the config loads, so a malformed cron
-fails the command that reads it rather than the run.
-
-Declaring the cadence does not arm it. Run `sparkwing crons install` on
-the host that should evaluate a `where: local` entry; see the [crons
-page](crons.md). That host runs the pipeline locally at each due minute,
-and the run schedules onto a runner by the same label rules as any other
-run. Another host reading the same repository stays idle until it is
-armed too.
-
-A controller evaluates `where: controller` entries once they are pushed
-to it. `sparkwing crons install --profile <profile>` reads the repository's
-controller entries, resolves the checkout's origin, branch and HEAD, and
-sends them; the controller ticks every minute, and each due instant
-becomes a trigger the cluster clones and runs. One evaluator runs per
-store, so several controllers sharing one still fire each instant once.
-See the [crons page](crons.md#controller-schedules).
+`sparkwing.yaml`, and each entry names the side that fires it with
+`where: local` or `where: controller`. A scheduled run places its nodes
+by the same label rules as any other run. The [crons page](crons.md)
+covers every field, arming a host, and controller schedules.
 
 ## Worked examples
 

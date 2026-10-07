@@ -154,7 +154,7 @@ func parseHeading(line string) (level int, text string, ok bool) {
 }
 
 func nonCurrentPenalty(slug string) int {
-	if strings.HasPrefix(slug, "proposals/") || strings.HasPrefix(slug, "migrations/") {
+	if strings.HasPrefix(slug, "migrations/") {
 		return 1000
 	}
 	return 0

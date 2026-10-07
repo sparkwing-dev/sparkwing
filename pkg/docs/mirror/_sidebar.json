@@ -46,8 +46,7 @@
         "hooks",
         "crons",
         "api",
-        "api-reference",
-        "mcp"
+        "api-reference"
       ]
     },
     {
@@ -96,5 +95,5 @@
       ]
     }
   ],
-  "excluded": ["proposals/", "migrations/", "changelog-style"]
+  "excluded": ["migrations/"]
 }
