@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
@@ -83,6 +84,7 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return "", false, fmt.Errorf("secrets backend %s: %w", base, err)

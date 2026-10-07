@@ -45,6 +45,7 @@ type remoteExecutionBroker struct {
 	logsHost       string
 	logsURL        string
 	logSeal        childLogSeal
+	protocol       nodeProtocolCheck
 }
 
 func startRemoteExecutionBroker(
@@ -77,6 +78,7 @@ func startRemoteExecutionBroker(
 		upstreamToken: upstreamToken, runID: runID, nodeID: nodeID, fence: fence,
 		artifact:   artifact,
 		controller: httputil.NewSingleHostReverseProxy(controllerTarget), controllerHost: controllerTarget.Host,
+		protocol: nodeProtocolCheck{logger: logger},
 	}
 	if logsTarget != nil {
 		b.logs = httputil.NewSingleHostReverseProxy(logsTarget)
@@ -138,6 +140,7 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 		http.Error(w, "execution capability required", http.StatusUnauthorized)
 		return
 	}
+	b.protocol.observe(r)
 	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
 	if !b.allow(r) || (logsRequest && b.logs == nil) {
 		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)

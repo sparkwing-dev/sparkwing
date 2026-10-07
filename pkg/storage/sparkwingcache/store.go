@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -148,6 +149,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 }
 
 func (s *Store) authorize(req *http.Request) {
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}

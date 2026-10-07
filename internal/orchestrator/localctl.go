@@ -126,7 +126,7 @@ func serveLoopback(h http.Handler, runID string, logger *slog.Logger) (string, *
 		return "", nil, fmt.Errorf("loopback controller: listen: %w", err)
 	}
 	srv := &http.Server{
-		Handler:           h,
+		Handler:           (&nodeProtocolCheck{logger: logger}).wrap(h),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
