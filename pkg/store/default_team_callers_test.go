@@ -26,6 +26,7 @@ const (
 	defaultTeamBackend  = "the store backend serves one install's runs in the default team, as its ListRuns already does; a multi-team deployment serves its dashboard through the controller backend"
 	defaultTeamSecrets  = "local secrets live in the laptop's state database under the default team"
 	defaultTeamProfiles = "the host's capacity profiles are recorded by its local runs, in the default team"
+	defaultTeamHosted   = "the engine-hosted spike creates its run in a private local store through Store.CreateRun, so every node it starts or reads is the default team's"
 )
 
 // safety: every entry names a function outside this package that reaches a
@@ -61,6 +62,8 @@ var defaultTeamCallers = map[string]string{
 	"internal/localsecrets.(*storeSource).read":                             defaultTeamSecrets,
 	"internal/localsecrets.ImportLegacy":                                    defaultTeamSecrets,
 	"internal/opsview.diagnosePoisonedProfiles":                             defaultTeamProfiles,
+	"internal/orchestrator.hostedFinalize":                                  defaultTeamHosted,
+	"internal/orchestrator.hostedRunNode":                                   defaultTeamHosted,
 	"internal/orchestrator.(*HeldRunStore).FinalizeCancelledRuns":           defaultTeamStores,
 	"internal/orchestrator.(*HeldRunStore).IsRunTerminal":                   defaultTeamStores,
 	"internal/orchestrator.(*HeldRunStore).finalizeRun":                     defaultTeamStores,
