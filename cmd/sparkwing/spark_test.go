@@ -218,3 +218,31 @@ func TestSparksVerbsFindTheModuleFromASubdirectory(t *testing.T) {
 		t.Fatalf("sparks update from a subdirectory = %v, want it to reach the manifest above", err)
 	}
 }
+
+func TestSparksAddNeverAdoptsTheRuntimeHome(t *testing.T) {
+	home := t.TempDir()
+	runtimeHome := filepath.Join(home, ".sparkwing")
+	t.Setenv("HOME", home)
+	t.Setenv("SPARKWING_HOME", runtimeHome)
+	if err := os.MkdirAll(runtimeHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(runtimeHome, "sparkwing.yaml")
+	if err := os.WriteFile(marker, []byte("sparks: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(home, "code", "app")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := runIn(t, checkout, runSparksAdd, "--source", "example.com/lib")
+	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/ project") {
+		t.Fatalf("sparks add in an uninitialized checkout = %v, want a refusal naming the missing project", err)
+	}
+	if body, _ := os.ReadFile(marker); string(body) != "sparks: []\n" {
+		t.Fatalf("the runtime home's sparkwing.yaml was rewritten: %q", body)
+	}
+	if _, ok := nearestDotSparkwing(checkout); ok {
+		t.Fatal("discovery accepted the runtime home as a project")
+	}
+}

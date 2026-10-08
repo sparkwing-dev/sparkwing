@@ -59,7 +59,12 @@ func runSparksCatalog(args []string) error {
 	if err != nil {
 		return err
 	}
-	sparkwingDir := defaultSparkwingDir()
+	// safety: a catalog read needs no project; without one it downloads into
+	// the temp directory and reads the latest release.
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		sparkwingDir = ""
+	}
 
 	source := ""
 	target := *pathFlag

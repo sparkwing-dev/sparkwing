@@ -15,6 +15,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
+
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
@@ -1012,16 +1014,36 @@ func resolveHooksRepo() (repoRoot, sparkwingDir string, err error) {
 	return "", "", fmt.Errorf("no .sparkwing/ directory in %s or above it (pass -C DIR)", cwd)
 }
 
+// safety: the runtime home is also named .sparkwing (~/.sparkwing by default),
+// so the walk stops there and accepts only a directory carrying a project
+// marker; otherwise a checkout with no .sparkwing/ of its own would write its
+// project files into the runs store's directory.
 func nearestDotSparkwing(start string) (string, bool) {
-	for dir := start; ; dir = filepath.Dir(dir) {
+	runtimeHome := ""
+	if p, err := paths.DefaultPaths(); err == nil {
+		runtimeHome = filepath.Clean(p.Root)
+	}
+	for dir := filepath.Clean(start); ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, ".sparkwing")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		if candidate == runtimeHome {
+			return "", false
+		}
+		if isProjectDotSparkwing(candidate) {
 			return candidate, true
 		}
 		if filepath.Dir(dir) == dir {
 			return "", false
 		}
 	}
+}
+
+func isProjectDotSparkwing(dir string) bool {
+	for _, marker := range []string{"sparkwing.yaml", "go.mod"} {
+		if info, err := os.Stat(filepath.Join(dir, marker)); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func renderHookScript(hookName string, pipes []string, chainGlobal bool, profileName string) string {
