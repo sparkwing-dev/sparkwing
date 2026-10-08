@@ -286,33 +286,6 @@ func TestCaptureWorktreeSnapshotRejectsUnsafeSymlinks(t *testing.T) {
 	})
 }
 
-func TestMaterializeFleetSnapshotNeverCarriesCredentialedOrigin(t *testing.T) {
-	repo := initSnapshotRepo(t)
-	writeSnapshotFile(t, repo, "value", "exact\n", 0o644)
-	runSnapshotGit(t, repo, "add", ".")
-	runSnapshotGit(t, repo, "commit", "-m", "source")
-	runSnapshotGit(t, repo, "remote", "add", "origin", "https://secret@example.com/private/repo.git")
-	snapshot, err := captureWorktreeSnapshot(context.Background(), repo, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = snapshot.close() }()
-	checkout, repoURL, err := snapshot.materialize(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(repoURL, "secret") || !strings.Contains(repoURL, "source.sparkwing.invalid") {
-		t.Fatalf("materialized repo URL = %q", repoURL)
-	}
-	configured := strings.TrimSpace(runSnapshotGit(t, checkout, "remote", "get-url", "origin"))
-	if configured != repoURL {
-		t.Fatalf("checkout origin = %q, want %q", configured, repoURL)
-	}
-	if got := strings.TrimSpace(runSnapshotGit(t, checkout, "rev-parse", "HEAD")); got != snapshot.SHA {
-		t.Fatalf("coordinator checkout = %q, want exact snapshot %q", got, snapshot.SHA)
-	}
-}
-
 func TestCaptureWorktreeSnapshotRejectsCompressibleUncompressedOversize(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "large.txt", strings.Repeat("0", 2048), 0o644)

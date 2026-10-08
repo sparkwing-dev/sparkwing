@@ -1,8 +1,8 @@
 // Package userconfig owns config.yaml, the one settings file in the sparkwing
 // user config directory. Each top-level key is a section that belongs to one
 // package, which keeps its own typed struct and validation: admission and its
-// budget to internal/wingd, agent to internal/agentconfig, fleet to
-// internal/fleet, profiles to internal/profile and repos to internal/repos.
+// budget to internal/wingd, agent to internal/agentconfig, profiles to
+// internal/profile and repos to internal/repos.
 //
 // [Read] decodes one section and rejects unknown keys. [Update] and [Write]
 // rewrite one section under a lock, keeping every other section and the
@@ -38,12 +38,11 @@ const PathEnv = "SPARKWING_CONFIG"
 const (
 	Admission = "admission"
 	Agent     = "agent"
-	Fleet     = "fleet"
 	Profiles  = "profiles"
 	Repos     = "repos"
 )
 
-var sections = []string{Admission, Agent, Fleet, Profiles, Repos}
+var sections = []string{Admission, Agent, Profiles, Repos}
 
 // Path reports the settings file: $SPARKWING_CONFIG when set, else config.yaml
 // in [fssecure.ConfigDir]. SPARKWING_HOME does not move it, because a profile

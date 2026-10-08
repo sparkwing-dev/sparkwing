@@ -636,8 +636,6 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; " +
 			"set SPARKWING_NO_UPDATE=1 in this shell instead, which the submission environment snapshot carries, " +
 			"or run it in the foreground"},
-		{"--sw-fleet", wf.fleet, "enrolled helpers execute under the lifetime of the coordinating foreground process, " +
-			"which a detached run does not have; run it in the foreground with `sparkwing run --sw-fleet`"},
 	}
 }
 

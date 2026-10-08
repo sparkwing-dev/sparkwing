@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/sourceidentity"
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 const (
@@ -37,16 +35,15 @@ var defaultWorktreeSnapshotLimits = worktreeSnapshotLimits{
 }
 
 type worktreeSnapshot struct {
-	RepoRoot       string
-	BaseSHA        string
-	Baseline       bincache.WorkspaceBaseline
-	SHA            string
-	ManifestDigest string
-	BundlePath     string
-	FileCount      int
-	Size           int64
-	BundleSize     int64
-	tempDir        string
+	RepoRoot   string
+	BaseSHA    string
+	Baseline   bincache.WorkspaceBaseline
+	SHA        string
+	BundlePath string
+	FileCount  int
+	Size       int64
+	BundleSize int64
+	tempDir    string
 }
 
 func (s *worktreeSnapshot) close() error {
@@ -57,43 +54,6 @@ func (s *worktreeSnapshot) close() error {
 	s.tempDir = ""
 	// #nosec G703 -- dir is the private directory created by MkdirTemp for this snapshot.
 	return os.RemoveAll(dir)
-}
-
-func (s *worktreeSnapshot) materialize(ctx context.Context) (string, string, error) {
-	if s == nil || s.tempDir == "" || s.BundlePath == "" || s.SHA == "" {
-		return "", "", fmt.Errorf("working-tree snapshot is incomplete")
-	}
-	checkout := filepath.Join(s.tempDir, "checkout")
-	// #nosec G703 -- the fixed marker name is inside the snapshot's private temporary directory.
-	if err := os.WriteFile(filepath.Join(s.tempDir, ".sparkwing-fleet-owned"), []byte(s.SHA+"\n"), 0o600); err != nil {
-		return "", "", fmt.Errorf("mark exact source ownership: %w", err)
-	}
-	// #nosec G702 -- fixed git arguments target a generated temporary checkout without a shell.
-	if out, err := exec.CommandContext(ctx, "git", "init", "--quiet", checkout).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("initialize exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	ref := bincache.SeedRef(s.SHA)
-	// #nosec G702 -- the bundle is locally generated and the ref derives from its Git commit ID.
-	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "fetch", "--quiet", s.BundlePath, ref).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("import exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	// #nosec G702 -- SHA is the commit ID returned by git commit-tree for this snapshot.
-	if _, err := exec.CommandContext(ctx, "git", "-C", checkout, "checkout", "--detach", "--quiet", s.SHA).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("materialize exact source checkout: %w", snapshotGitError(err))
-	}
-	repoURL := ""
-	// #nosec G702 -- the selected local repository is a -C operand; origin is a fixed remote name.
-	if out, err := exec.CommandContext(ctx, "git", "-C", s.RepoRoot, "remote", "get-url", "origin").Output(); err == nil {
-		repoURL, _ = sourceurl.ValidateCloneURL(strings.TrimSpace(string(out)))
-	}
-	if repoURL == "" {
-		repoURL = "https://source.sparkwing.invalid/workspace-" + s.SHA[:16] + ".git"
-	}
-	// #nosec G702 -- the URL is validated by ValidateCloneURL or generated from the commit ID.
-	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "remote", "add", "origin", repoURL).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("bind exact source identity: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return checkout, repoURL, nil
 }
 
 func captureWorktreeSnapshot(ctx context.Context, start string, allowedSecretFiles []string) (*worktreeSnapshot, error) {
@@ -213,10 +173,6 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	if err != nil {
 		return fail(err)
 	}
-	manifestDigest, err := sourceidentity.GitTreeManifestDigest(ctx, gitDir, sha)
-	if err != nil {
-		return fail(err)
-	}
 	ref := bincache.SeedRef(sha)
 	if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
 		return fail(fmt.Errorf("name snapshot ref: %w", err))
@@ -233,7 +189,6 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 		return fail(fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes", info.Size(), maxWorktreeSnapshotBytes))
 	}
 	snapshot.SHA = sha
-	snapshot.ManifestDigest = manifestDigest
 	snapshot.BundlePath = bundlePath
 	snapshot.Size = sourceBytes
 	snapshot.BundleSize = info.Size()

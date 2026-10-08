@@ -8,9 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/fleet"
-	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestParseRunFlags_Only(t *testing.T) {
@@ -70,57 +67,6 @@ func TestParseRunFlags_LocalOnly(t *testing.T) {
 	}
 	if len(passthroughArgs) != 0 {
 		t.Errorf("passthrough should be empty, got %v", passthroughArgs)
-	}
-}
-
-func TestParseRunFlags_FleetAndLocalOnlyCoexist(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-fleet", "--sw-local-only"})
-	if !flags.fleet || !flags.localOnly {
-		t.Fatalf("flags = %+v", flags)
-	}
-	if len(passthroughArgs) != 0 {
-		t.Fatalf("passthrough = %v", passthroughArgs)
-	}
-}
-
-func TestDispatchFleetMissingConfigNamesSetupCommand(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(userconfig.PathEnv, filepath.Join(t.TempDir(), "missing.yaml"))
-	repo := t.TempDir()
-	if err := os.Mkdir(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(repo)
-	err := dispatchRun([]string{"missing", "--sw-fleet"})
-	if err == nil || !strings.Contains(err.Error(), "sparkwing fleet init") {
-		t.Fatalf("missing config error = %v", err)
-	}
-}
-
-func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv(userconfig.PathEnv, configPath)
-	if err := fleet.Create(configPath, fleet.Config{
-		Listen: "127.0.0.1:7443", PublicURL: "http://127.0.0.1:7443",
-		Local: fleet.Local{MaxConcurrent: 1, Contribution: "50%,50%"},
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
-	repo := t.TempDir()
-	if err := os.Mkdir(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(repo)
-	err := dispatchRun([]string{"missing", "--sw-fleet"})
-	if err == nil || !strings.Contains(err.Error(), "no enrolled helpers") {
-		t.Fatalf("empty config error = %v", err)
 	}
 }
 

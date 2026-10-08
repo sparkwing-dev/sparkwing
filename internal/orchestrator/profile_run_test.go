@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -18,27 +17,6 @@ func writeInnerProfiles(t *testing.T, body string) {
 		t.Fatalf("write profiles: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)
-}
-
-func TestFleetProfileRejectsRemoteAuthorityButLocalOnlyCanOverride(t *testing.T) {
-	local := &profile.Profile{
-		Secrets: &backends.Spec{Type: backends.TypeEnv},
-		State:   &backends.Spec{Type: backends.TypeSQLite},
-		Cache:   &backends.Spec{Type: backends.TypeFilesystem, Path: "/tmp/cache"},
-		Logs:    &backends.Spec{Type: backends.TypeFilesystem, Path: "/tmp/logs"},
-	}
-	if fleetProfileUsesRemoteAuthority(local) {
-		t.Fatal("local profile classified as remote authority")
-	}
-	for name, remote := range map[string]*profile.Profile{
-		"controller": {Controller: &profile.ControllerSpec{URL: "https://controller.example.com"}},
-		"postgres":   {State: &backends.Spec{Type: backends.TypePostgres, URL: "postgres://example"}},
-		"s3":         {Cache: &backends.Spec{Type: backends.TypeS3, Bucket: "shared"}},
-	} {
-		if !fleetProfileUsesRemoteAuthority(remote) {
-			t.Errorf("%s profile was not classified as remote authority", name)
-		}
-	}
 }
 
 func TestResolveActiveProfile_NoneSelected(t *testing.T) {

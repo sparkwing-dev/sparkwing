@@ -13,11 +13,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
-	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -28,8 +26,6 @@ import (
 	// host, and a schedule that declares tz: would fail to resolve its zone.
 	_ "time/tzdata"
 )
-
-const fleetUntrackedSourceWarning = "fleet source: every non-ignored untracked file is included; review Git ignores before sharing with enrolled helpers"
 
 func init() {
 	docs.Version = installedVersion()
@@ -169,8 +165,8 @@ func dispatchRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	if source != "" && (flags.ref != "" || flags.fleet) {
-		return errors.New("a declared pipeline source cannot be combined with --sw-ref or --sw-fleet")
+	if source != "" && flags.ref != "" {
+		return errors.New("a declared pipeline source cannot be combined with --sw-ref")
 	}
 	var afterChild func()
 	if flags.ref != "" {
@@ -245,58 +241,13 @@ func dispatchRun(args []string) error {
 	if flags.localOnly {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
-	var fleetSnapshot *worktreeSnapshot
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate || flags.fleet,
+		NoUpdate:     flags.noUpdate,
 		ExecutionDir: executionDir,
 		AfterChild:   afterChild,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
-	if flags.fleet {
-		configPath, err := userconfig.Path()
-		if err != nil {
-			return fmt.Errorf("--sw-fleet config: %w", err)
-		}
-		fleetConfig, err := fleet.Load(configPath, fleet.LocalTailscaleIPs)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("--sw-fleet: %s has no fleet section; create it with `sparkwing fleet init --tailnet` or explicit --listen and --public-url", configPath)
-			}
-			return fmt.Errorf("--sw-fleet config %s: %w", configPath, err)
-		}
-		if len(fleetConfig.Executors) == 0 {
-			return fmt.Errorf("--sw-fleet has no enrolled helpers; the fleet section of %s lists no executors", configPath)
-		}
-		// safety: the orchestrator takes its fleet config path from this variable
-		// alone, so it reads the file validated here.
-		env = setEnv(env, userconfig.PathEnv, configPath)
-		if err := resolveSparks(run.ctx, dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
-			return err
-		}
-		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir), flags.allowSecretFiles)
-		if err != nil {
-			return fmt.Errorf("--sw-fleet source: %w", err)
-		}
-		defer func() { _ = fleetSnapshot.close() }()
-		checkout, repoURL, checkoutErr := fleetSnapshot.materialize(context.Background())
-		if checkoutErr != nil {
-			return fmt.Errorf("--sw-fleet source: %w", checkoutErr)
-		}
-		fmt.Fprintf(os.Stderr, "fleet source: snapshot %s (%d files, %s uncompressed; %s bundle)\n",
-			fleetSnapshot.SHA, fleetSnapshot.FileCount, snapshotBytes(fleetSnapshot.Size), snapshotBytes(fleetSnapshot.BundleSize))
-		fmt.Fprintln(os.Stderr, fleetUntrackedSourceWarning)
-		dir = filepath.Join(checkout, ".sparkwing")
-		env = setEnv(env, "SPARKWING_FLEET", "1")
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_ROOT", fleetSnapshot.tempDir)
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BUNDLE", fleetSnapshot.BundlePath)
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_SHA", fleetSnapshot.SHA)
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_MANIFEST_DIGEST", fleetSnapshot.ManifestDigest)
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_REPO_URL", repoURL)
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_FILES", strconv.Itoa(fleetSnapshot.FileCount))
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BYTES", strconv.FormatInt(fleetSnapshot.Size, 10))
-		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BUNDLE_BYTES", strconv.FormatInt(fleetSnapshot.BundleSize, 10))
-	}
 	if len(flags.allow) > 0 {
 		env = append(env, "SPARKWING_ALLOW="+strings.Join(flags.allow, ","))
 	}
@@ -338,16 +289,6 @@ func dispatchRun(args []string) error {
 
 	if runNeedsDaemon(flags, passthrough) {
 		ensureRunDaemonFn()
-	}
-	var fleetParentGuard *fleet.ParentGuard
-	if flags.fleet {
-		fleetParentGuard, err = fleet.StartParentGuard()
-		if err != nil {
-			return fmt.Errorf("--sw-fleet coordinator lifetime: %w", err)
-		}
-		defer fleetParentGuard.Close()
-		env = setEnv(env, "SPARKWING_FLEET_PARENT_GUARD", fleetParentGuard.Address)
-		env = setEnv(env, "SPARKWING_FLEET_PARENT_TOKEN", fleetParentGuard.Token)
 	}
 	sweepStraySessionsBeforeRun()
 	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
@@ -412,8 +353,6 @@ func runSparkwing(args []string) error {
 		return runCloud(args[1:])
 	case "cluster":
 		return runCluster(args[1:])
-	case "fleet":
-		return runFleet(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "secrets":

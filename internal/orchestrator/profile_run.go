@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -22,35 +21,6 @@ func resolveActiveProfile(pipelineYAML *pipelines.Pipeline, projectCfg *projectc
 		return resolveDefaultProfile(projectCfg.Defaults.Profile, projectCfg)
 	}
 	return nil, &profile.Chain{Source: profile.ChainSourceNone}, nil
-}
-
-func fleetProfileUsesRemoteAuthority(p *profile.Profile) bool {
-	if p == nil {
-		return false
-	}
-	if p.HasController() {
-		return true
-	}
-	surfaces := p.Surfaces()
-	if !fleetSurfaceLocal(surfaces.Secrets, backends.TypeEnv, backends.TypeFilesystem, backends.TypeNone) ||
-		!fleetSurfaceLocal(surfaces.State, backends.TypeSQLite) ||
-		!fleetSurfaceLocal(surfaces.Cache, backends.TypeFilesystem) ||
-		!fleetSurfaceLocal(surfaces.Logs, backends.TypeFilesystem, backends.TypeStdout) {
-		return true
-	}
-	return !fleetSurfaceLocal(surfaces.BinaryCache(), backends.TypeFilesystem)
-}
-
-func fleetSurfaceLocal(spec *backends.Spec, allowed ...string) bool {
-	if spec == nil {
-		return true
-	}
-	for _, typ := range allowed {
-		if spec.Type == typ {
-			return true
-		}
-	}
-	return false
 }
 
 func resolveNamedProfile(name string, projectCfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {

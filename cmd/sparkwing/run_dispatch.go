@@ -70,7 +70,6 @@ type runFlags struct {
 	allow []string
 
 	localOnly bool
-	fleet     bool
 
 	allowSecretFiles []string
 
@@ -292,9 +291,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case argument == "--sw-local-only":
 			flags.localOnly = true
-			argumentIndex++
-		case argument == "--sw-fleet":
-			flags.fleet = true
 			argumentIndex++
 		case argument == "--sw-dry-run", argument == "--dry-run=true":
 			flags.dryRun = true

@@ -62,7 +62,6 @@ func TestMigrationCopiesEveryLegacyFileAndLeavesItInPlace(t *testing.T) {
 		"admission.yaml": "mode: auto\n",
 		"budget":         "# leave room for the desktop\n\n50%,8gb\n",
 		"agent.yaml":     "controller: http://ctrl\ntoken: tok\n",
-		"fleet.yaml":     "listen: 127.0.0.1:4346\n",
 		"profiles.yaml":  "profiles:\n  prod:\n    controller: {url: http://ctrl}\n",
 		"repos.yaml":     "repos:\n  - path: /src/a\nfallback_paths: [~/code]\n",
 	}
@@ -81,7 +80,7 @@ func TestMigrationCopiesEveryLegacyFileAndLeavesItInPlace(t *testing.T) {
 		t.Fatalf("admission = %+v, want mode and budget copied", admission)
 	}
 	for _, want := range []struct{ section, key string }{
-		{Agent, "token"}, {Fleet, "listen"}, {Profiles, "prod"}, {Repos, "fallback_paths"},
+		{Agent, "token"}, {Profiles, "prod"}, {Repos, "fallback_paths"},
 	} {
 		got := map[string]any{}
 		if found, err := Read(path, want.section, &got); err != nil || !found || got[want.key] == nil {
@@ -105,13 +104,13 @@ func TestMigrationMergesIntoAnExistingFileAndKeepsItsComments(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeLegacy(t, dir, "budget", "6\n")
-	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:4346\n")
+	writeLegacy(t, dir, "agent.yaml", "controller: http://ctrl\n")
 
 	if err := MigrateLegacy(); err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, path)
-	for _, want := range []string{"# my machine", "# home lab", "lab: {}", "mode: auto", `budget: "6"`, "listen: 127.0.0.1:4346"} {
+	for _, want := range []string{"# my machine", "# home lab", "lab: {}", "mode: auto", `budget: "6"`, "controller: http://ctrl"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("config.yaml lost or lacks %q:\n%s", want, body)
 		}
@@ -120,15 +119,15 @@ func TestMigrationMergesIntoAnExistingFileAndKeepsItsComments(t *testing.T) {
 
 func TestMigrationIgnoresALegacyFileWhoseSectionExists(t *testing.T) {
 	dir, path := legacyHome(t)
-	existing := "fleet:\n  listen: 127.0.0.1:1\nadmission:\n  budget: \"4\"\n"
+	existing := "agent:\n  controller: http://one\nadmission:\n  budget: \"4\"\n"
 	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:2\n")
+	writeLegacy(t, dir, "agent.yaml", "controller: http://two\n")
 	writeLegacy(t, dir, "budget", "6\n")
 
 	var got map[string]any
-	if _, err := Read(path, Fleet, &got); err != nil {
+	if _, err := Read(path, Agent, &got); err != nil {
 		t.Fatal(err)
 	}
 	if body := readBody(t, path); body != existing {
@@ -138,12 +137,12 @@ func TestMigrationIgnoresALegacyFileWhoseSectionExists(t *testing.T) {
 
 func TestMigrationRunsOnceAndSurvivesARepeat(t *testing.T) {
 	dir, path := legacyHome(t)
-	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:4346\n")
+	writeLegacy(t, dir, "agent.yaml", "controller: http://one\n")
 	if err := MigrateLegacy(); err != nil {
 		t.Fatal(err)
 	}
 	first := readBody(t, path)
-	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:9999\n")
+	writeLegacy(t, dir, "agent.yaml", "controller: http://two\n")
 	if err := MigrateLegacy(); err != nil {
 		t.Fatal(err)
 	}
@@ -154,41 +153,41 @@ func TestMigrationRunsOnceAndSurvivesARepeat(t *testing.T) {
 
 func TestMigrationRefusesOnlyTheSectionItsInvalidFileFeeds(t *testing.T) {
 	dir, path := legacyHome(t)
-	RegisterLegacyValidator(Fleet, func(section *yaml.Node) error {
+	RegisterLegacyValidator(Agent, func(section *yaml.Node) error {
 		var cfg struct {
-			Listen string `yaml:"listen"`
+			Controller string `yaml:"controller"`
 		}
 		return DecodeStrict(section, &cfg)
 	})
-	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:1\nsecret_token: nope\n")
+	writeLegacy(t, dir, "agent.yaml", "controller: http://ctrl\nsecret_token: nope\n")
 	writeLegacy(t, dir, "repos.yaml", "repos: []\nfallback_paths: [~/code]\n")
 
-	var fleet map[string]any
-	_, err := Read(path, Fleet, &fleet)
-	want := filepath.Join(dir, "fleet.yaml") + " sets secret_token, which sparkwing does not accept; remove that key from " +
-		filepath.Join(dir, "fleet.yaml") + " and rerun"
+	var agent map[string]any
+	_, err := Read(path, Agent, &agent)
+	want := filepath.Join(dir, "agent.yaml") + " sets secret_token, which sparkwing does not accept; remove that key from " +
+		filepath.Join(dir, "agent.yaml") + " and rerun"
 	if err == nil || err.Error() != want {
-		t.Fatalf("Read(fleet) error = %v, want %q", err, want)
+		t.Fatalf("Read(agent) error = %v, want %q", err, want)
 	}
 	repos := map[string]any{}
 	if found, err := Read(path, Repos, &repos); err != nil || !found {
-		t.Fatalf("Read(repos) = %v, %v; an invalid fleet.yaml must not block the repos section", found, err)
+		t.Fatalf("Read(repos) = %v, %v; an invalid agent.yaml must not block the repos section", found, err)
 	}
-	if strings.Contains(readBody(t, path), "fleet") {
-		t.Fatalf("config.yaml took the invalid fleet section:\n%s", readBody(t, path))
+	if strings.Contains(readBody(t, path), "agent") {
+		t.Fatalf("config.yaml took the invalid agent section:\n%s", readBody(t, path))
 	}
 }
 
 func TestMigrationLeavesAFileNoLinkedOwnerCanValidate(t *testing.T) {
 	dir, path := legacyHome(t)
-	delete(legacyValidators, Fleet)
-	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:4346\n")
+	delete(legacyValidators, Agent)
+	writeLegacy(t, dir, "agent.yaml", "controller: http://ctrl\n")
 	var got map[string]any
 	if _, err := Read(path, Profiles, &got); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("config.yaml was written without a fleet validator: %v", err)
+		t.Fatalf("config.yaml was written without an agent validator: %v", err)
 	}
 }
 
@@ -229,8 +228,8 @@ func TestMigrationUnderASandboxHomeReadsConfigAsItIs(t *testing.T) {
 func TestLegacyPathVariableRefuses(t *testing.T) {
 	_, path := legacyHome(t)
 	t.Setenv("SPARKWING_PROFILES", "/somewhere/profiles.yaml")
-	var got fleetish
-	_, err := Read(path, Fleet, &got)
+	got := map[string]any{}
+	_, err := Read(path, Repos, &got)
 	if err == nil || !strings.Contains(err.Error(), "SPARKWING_PROFILES no longer moves any setting") {
 		t.Fatalf("Read error = %v, want the variable named", err)
 	}

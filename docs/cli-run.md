@@ -84,7 +84,7 @@ launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---profile, --sw-fleet, and the other run-shaping --sw- flags)
+--profile, and the other run-shaping --sw- flags)
 is refused with the reason instead of ignored; run those in
 the foreground.
 
@@ -121,10 +121,9 @@ is running and exits after five idle minutes; see
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
 | `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
 | `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
-| `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
-| `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
+| `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file with the source snapshot anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop) |
