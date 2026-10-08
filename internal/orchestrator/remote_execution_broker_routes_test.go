@@ -282,3 +282,37 @@ func TestBrokeredNodeAwaitsAChildRun(t *testing.T) {
 		t.Errorf("own run's execution read: %v", err)
 	}
 }
+
+func TestBrokeredNodeReadsAnotherRunsOutputs(t *testing.T) {
+	st, _, child := adminBrokeredNode(t, "consume")
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-0", Pipeline: "upstream", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-0", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "run-0", "build", "success", "", []byte(`{"image":"app:1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(ctx, "run-0", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	resolve := newPipelineRefResolver(child, "run-1", func(_ context.Context, _ string, err error) {
+		t.Errorf("pipeline ref audit event: %v", err)
+	})
+	ref, err := resolve(sparkwingruntime.WithNode(ctx, "consume"), "upstream", "build", time.Hour)
+	if err != nil {
+		t.Fatalf("pipeline ref through the broker: %v", err)
+	}
+	if ref.RunID != "run-0" || string(ref.Data) != `{"image":"app:1"}` {
+		t.Fatalf("pipeline ref = %+v", ref)
+	}
+
+	executor := NewNodeExecutor(RemoteBackends(child, nil, nil, nil, time.Minute))
+	cached, err := executor.fetchCachedOutput(ctx, coordinationParameters{}, "run-0", "build")
+	if err != nil || string(cached) != `{"image":"app:1"}` {
+		t.Fatalf("cache-hit output from the origin run = %s, %v", cached, err)
+	}
+}

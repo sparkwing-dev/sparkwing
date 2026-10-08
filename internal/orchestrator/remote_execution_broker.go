@@ -279,6 +279,7 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodGet, "/api/v1/triggers/{run}", nil},
 	{http.MethodPost, "/api/v1/triggers", triggeredByThisNode},
 	{http.MethodGet, "/api/v1/triggers/spawned-child", spawnedChildOfThisNode},
+	{http.MethodGet, "/api/v1/pipelines/{name}/latest", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/steps", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}", nil},
