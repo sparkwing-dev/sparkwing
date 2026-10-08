@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -64,7 +65,9 @@ func applyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 		opts.ArtifactStore = store
 	}
 	if opts.LogStore == nil && logs != nil {
-		store, err := storeurl.OpenLogStoreFromSpec(ctx, *logs, lookup)
+		_, remoteState := opts.State.(*client.Client)
+		remoteState = remoteState || (opts.State == nil && !keepState)
+		store, err := openLogStoreFromSpec(ctx, *logs, remoteState, state, lookup)
 		if err != nil {
 			return fmt.Errorf("logs backend: %w", err)
 		}
@@ -168,6 +171,20 @@ func announcedLogsURL(p *profile.Profile) string {
 		return ""
 	}
 	return svc.Logs
+}
+
+// safety: a controller that keeps segments takes the node logs of the runs it holds, ahead of any logs
+// service it still announces; a run whose state stays elsewhere has no node rows there to grant against.
+func openLogStoreFromSpec(ctx context.Context, spec backends.Spec, remoteState bool, state *backends.Spec, lookup storeurl.ProfileLookup) (storage.LogStore, error) {
+	if remoteState && state != nil && state.Type == backends.TypeController && state.Controller == spec.Controller &&
+		spec.Type == backends.TypeController && lookup != nil {
+		if url, token, err := lookup(spec.Controller); err == nil && url != "" {
+			if seg := controllerSegmentLogs(ctx, client.NewWithToken(url, nil, token), nil); seg != nil {
+				return seg, nil
+			}
+		}
+	}
+	return storeurl.OpenLogStoreFromSpec(ctx, spec, lookup)
 }
 
 func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {

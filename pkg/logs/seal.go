@@ -263,6 +263,13 @@ func WithAppendSequenceRange(ctx context.Context, stream string, first, last int
 	return context.WithValue(ctx, appendSequenceKey{}, appendSequence{stream: stream, seq: first, end: last})
 }
 
+// AppendSequenceRangeFrom returns the numbering [WithAppendSequenceRange]
+// put on ctx, so a store that is not this client can honor it too.
+func AppendSequenceRangeFrom(ctx context.Context) (stream string, first, last int64, ok bool) {
+	s, ok := appendSequenceFromContext(ctx)
+	return s.stream, s.seq, s.end, ok
+}
+
 func appendSequenceFromContext(ctx context.Context) (appendSequence, bool) {
 	s, ok := ctx.Value(appendSequenceKey{}).(appendSequence)
 	return s, ok

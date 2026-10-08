@@ -64,7 +64,7 @@ var _ storage.LogStore = (*liveLogStore)(nil)
 // serves a live read, and doubles that surface's write path.
 func liveLogsRedundant(durable storage.LogStore) bool {
 	switch s := durable.(type) {
-	case *sparkwinglogs.Store:
+	case *sparkwinglogs.Store, *segmentLogStore:
 		return true
 	case *logbatch.Store:
 		return liveLogsRedundant(s.Delegate())

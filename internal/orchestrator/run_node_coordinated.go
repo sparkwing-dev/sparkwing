@@ -191,11 +191,12 @@ func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBacke
 	if prof == nil {
 		return nil, nil
 	}
-	_, logs, _ := profileSurfaceSpecs(prof, "")
+	// hack: the logs-service discovery this reaches without ctx goes when the logs service does.
+	state, logs, _ := profileSurfaceSpecs(prof, "") //nolint:contextcheck // see hack above
 	if logs == nil {
 		return nil, nil
 	}
-	sink, err := storeurl.OpenLogStoreFromSpec(ctx, *logs, profileControllerLookup(prof))
+	sink, err := openLogStoreFromSpec(ctx, *logs, true, state, profileControllerLookup(prof))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"run-node --coordinated: profile %q declares a %s logs surface this node cannot open: %w",

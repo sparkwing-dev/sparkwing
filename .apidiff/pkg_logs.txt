@@ -1,5 +1,6 @@
 # pkg/logs
 
+func AppendSequenceRangeFrom(ctx context.Context) (stream string, first, last int64, ok bool)
 type ArchiveOptions struct {
 	Store *teamblob.Store
 
