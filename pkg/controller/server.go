@@ -88,6 +88,8 @@ type Server struct {
 	directUploads    *directUploadS3
 	lastOutputPrune  time.Time
 	outputSigner     outputSigner
+	logRetention     map[store.Team]int
+	logLifecycle     logLifecycle
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.

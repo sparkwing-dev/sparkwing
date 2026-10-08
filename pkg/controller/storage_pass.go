@@ -85,7 +85,17 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if err := s.pruneExpiredOutputs(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("prune expired outputs: %w", err))
 	}
-	for kind, bucket := range p.stores {
+	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
+		bucket := p.stores[kind]
+		segments := s.logObjects()
+		// safety: a logs service with no archive keeps bytes on its volume that no listing sees, so its team
+		// counts are left to its writes rather than replaced by a listing of the segments alone.
+		if kind != store.StorageLogs || (bucket == nil && s.teamStorage.LogsURL != "") {
+			segments = nil
+		}
+		if bucket == nil && segments == nil {
+			continue
+		}
 		if kind == store.StorageCache {
 			expired, err := s.store.ClaimExpiredSourceBundles(ctx, now)
 			if err != nil {
@@ -109,14 +119,26 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			errs = append(errs, fmt.Errorf("%s marks: %w", kind, err))
 			continue
 		}
-		m, err := bucket.Measure(ctx)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("list the %s bucket: %w", kind, err))
-			continue
+		listed := map[store.Team]int64{}
+		var m teamblob.Measurement
+		if bucket != nil {
+			if m, err = bucket.Measure(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("list the %s bucket: %w", kind, err))
+				continue
+			}
+			for team, t := range m.Teams {
+				listed[store.Team(team)] = t.Bytes
+			}
 		}
-		listed := make(map[store.Team]int64, len(m.Teams))
-		for team, t := range m.Teams {
-			listed[store.Team(team)] = t.Bytes
+		if segments != nil {
+			counted, err := segments.measure(ctx)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("list the log segments: %w", err))
+				continue
+			}
+			for team, n := range counted {
+				listed[team] += n
+			}
 		}
 		if err := s.store.ReconcileStorage(ctx, kind, listed, marks, now); err != nil {
 			errs = append(errs, fmt.Errorf("reconcile %s: %w", kind, err))
@@ -128,11 +150,11 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			}
 		}
 		if kind == store.StorageLogs {
-			if err := s.pruneLogsOverShare(ctx, bucket, now); err != nil {
+			if err := s.pruneLogsOverShare(ctx, bucket, segments, now); err != nil {
 				errs = append(errs, fmt.Errorf("prune logs over a free share: %w", err))
 			}
 		}
-		s.logger.Info("storage pass", "store", string(kind), "teams", len(m.Teams),
+		s.logger.Info("storage pass", "store", string(kind), "teams", len(listed),
 			"expired_objects", m.Expired.Objects, "expired_bytes", m.Expired.Bytes)
 	}
 	utc := now.UTC()
@@ -187,31 +209,69 @@ func (s *Server) storagePassHealth() (map[string]any, []string) {
 
 // safety: a free team's log writes are granted past its share, so this pass is
 // what holds it there, about an hour behind: it deletes the team's least
-// recently written finished runs' logs through the logs service until the
-// team is back under, and never a run still going.
-func (s *Server) pruneLogsOverShare(ctx context.Context, bucket *teamblob.Store, now time.Time) error {
+// recently written finished runs' logs, segments first and then those the
+// logs service archived, until the team is back under, and never a run
+// still going.
+func (s *Server) pruneLogsOverShare(ctx context.Context, bucket *teamblob.Store, segments logObjectStore, now time.Time) error {
 	over, err := s.store.TeamsOverFreeLogShare(ctx)
 	if err != nil || len(over) == 0 {
 		return err
 	}
-	if s.teamStorage.LogsURL == "" {
-		return errors.New("teams are past their log share and no logs service is configured to prune them")
-	}
-	if err := s.checkLogsDeleteToken(now); err != nil {
-		return err
-	}
 	var errs []error
 	for _, t := range over {
-		freed, err := s.pruneTeamLogs(ctx, bucket, t)
+		freed, err := s.pruneTeamSegments(ctx, segments, t)
+		errs = append(errs, err)
+		if freed < t.OverBytes && bucket != nil {
+			if s.teamStorage.LogsURL == "" {
+				errs = append(errs, fmt.Errorf("team %s is past its log share and no logs service is configured to prune its archived logs", t.Team))
+			} else if err := s.checkLogsDeleteToken(now); err != nil {
+				errs = append(errs, err)
+			} else {
+				archived, err := s.pruneTeamLogs(ctx, bucket, store.TeamOverShare{Team: t.Team, OverBytes: t.OverBytes - freed})
+				freed += archived
+				errs = append(errs, err)
+			}
+		}
 		if freed > 0 {
 			errs = append(errs, s.store.CommitStorage(ctx, store.StorageCommit{
 				Team: t.Team, Kind: store.StorageLogs, Bytes: -freed, Now: now,
 			}))
 			s.logger.Info("pruned logs over a free share", "team", string(t.Team), "freed_bytes", freed)
 		}
-		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Server) pruneTeamSegments(ctx context.Context, segments logObjectStore, t store.TeamOverShare) (int64, error) {
+	if segments == nil {
+		return 0, nil
+	}
+	var freed int64
+	for freed < t.OverBytes {
+		recs, err := s.store.PrunableNodeLogs(ctx, t.Team, 100)
+		if err != nil || len(recs) == 0 {
+			return freed, err
+		}
+		for _, rec := range recs {
+			if freed >= t.OverBytes {
+				break
+			}
+			run, err := s.store.RunNodeLogs(ctx, t.Team, rec.RunID)
+			if err != nil {
+				return freed, err
+			}
+			if len(run) == 0 {
+				continue
+			}
+			if err := s.deleteRunSegments(ctx, segments, t.Team, rec.RunID); err != nil {
+				return freed, fmt.Errorf("delete log segments of run %s: %w", rec.RunID, err)
+			}
+			for _, r := range run {
+				freed += r.ChargedBytes
+			}
+		}
+	}
+	return freed, nil
 }
 
 func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t store.TeamOverShare) (int64, error) {

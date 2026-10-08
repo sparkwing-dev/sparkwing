@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -409,5 +412,88 @@ func TestUnrecordedLogsReadAndDelete(t *testing.T) {
 	}
 	if left, _ := objs.List(ctx, prefix); len(left) != 0 {
 		t.Fatalf("deleting the run left %v", left)
+	}
+}
+
+// On a multi-team controller a writer's reported stored bytes count
+// against its team's log storage once each, however often it reports
+// them.
+func TestLogSegmentsChargeTheTeamsLogStorageOnce(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	f.srv.WithLicense(license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMultiTeam}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	}), pub, now, nil))
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	committed := func() int64 {
+		marks, err := f.st.StorageMarks(t.Context(), store.StorageLogs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return marks[store.DefaultTeam]
+	}
+	for _, step := range []struct {
+		stored int64
+		want   int64
+	}{{0, 0}, {500, 500}, {500, 500}, {800, 800}} {
+		body := fmt.Sprintf(`{"next":1,"count":1,"stored_bytes":%d}`, step.stored)
+		if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/log-segments", tok, []byte(body)); code != http.StatusOK {
+			t.Fatalf("log-segments: %d %s", code, raw)
+		}
+		if got := committed(); got != step.want {
+			t.Fatalf("after reporting %d stored bytes the team holds %d, want %d", step.stored, got, step.want)
+		}
+	}
+}
+
+// The storage pass counts what a team's log segments hold, from a
+// listing of the bucket, so a count left wrong by a failed commit heals.
+func TestStoragePassCountsLogSegments(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	for i := 1; i <= 4; i++ {
+		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	counted, err := f.srv.logObjects().measure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := f.srv.logObjects().List(ctx, rec.Prefix)
+	if err != nil || len(keys) < 2 {
+		t.Fatalf("objects = %v, %v", keys, err)
+	}
+	var want int64
+	for _, k := range keys {
+		body, err := f.srv.logObjects().Get(ctx, k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, _ := io.Copy(io.Discard, body)
+		_ = body.Close()
+		want += n
+	}
+	if counted[store.DefaultTeam] != want {
+		t.Fatalf("measured %d bytes for the team, want %d", counted[store.DefaultTeam], want)
+	}
+	f.srv.WithStoragePass(nil, nil)
+	if ran, err := f.srv.RunStoragePass(ctx); err != nil || !ran {
+		t.Fatalf("storage pass = %v, %v", ran, err)
+	}
+	usage, err := f.st.TeamStorage(ctx, store.DefaultTeam)
+	if err != nil || usage[store.StorageLogs].UsedBytes != want {
+		t.Fatalf("reconciled log storage = %+v, %v; want %d used", usage[store.StorageLogs], err, want)
 	}
 }

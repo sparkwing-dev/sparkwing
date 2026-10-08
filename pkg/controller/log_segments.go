@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,6 +40,15 @@ type logObjectStore interface {
 	putIfAbsent(ctx context.Context, key string, body []byte) error
 	deletePrefix(ctx context.Context, prefix string) error
 	presignPut(ctx context.Context, r *http.Request, team store.Team, key string, manifest bool) (string, map[string]string, error)
+	measure(ctx context.Context) (map[store.Team]int64, error)
+}
+
+func logObjectTeam(key string) (store.Team, bool) {
+	parts := strings.SplitN(key, "/", 5)
+	if len(parts) < 5 || parts[0] != "logs" || parts[2] != "teams" {
+		return "", false
+	}
+	return store.Team(parts[3]), true
 }
 
 // safety: the S3 store presigns and the filesystem store signs URLs back at
@@ -78,6 +90,29 @@ func (o s3LogObjects) deletePrefix(ctx context.Context, prefix string) error {
 	return deleteListed(ctx, o.objs, prefix)
 }
 
+func (o s3LogObjects) measure(ctx context.Context) (map[store.Team]int64, error) {
+	out := map[store.Team]int64{}
+	root := o.d.prefix + "/"
+	var token *string
+	for {
+		page, err := o.d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(o.d.bucket), Prefix: aws.String(root + "logs/"), ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range page.Contents {
+			if team, ok := logObjectTeam(strings.TrimPrefix(aws.ToString(obj.Key), root)); ok {
+				out[team] += aws.ToInt64(obj.Size)
+			}
+		}
+		if !aws.ToBool(page.IsTruncated) {
+			return out, nil
+		}
+		token = page.NextContinuationToken
+	}
+}
+
 func (o s3LogObjects) presignPut(ctx context.Context, _ *http.Request, _ store.Team, key string, manifest bool) (string, map[string]string, error) {
 	in := &s3.PutObjectInput{Bucket: aws.String(o.d.bucket), Key: aws.String(o.d.prefix + "/" + key)}
 	if manifest {
@@ -117,6 +152,34 @@ func (o fsLogObjects) deletePrefix(ctx context.Context, prefix string) error {
 	return deleteListed(ctx, o.objs, prefix)
 }
 
+// hack: the filesystem store shards a key under its first two characters, and every log key begins
+// "logs/", so the log objects all sit under lo/logs/ beneath its root.
+func (o fsLogObjects) measure(context.Context) (map[store.Team]int64, error) {
+	out := map[store.Team]int64{}
+	root := filepath.Join(o.objs.Root, "lo")
+	err := filepath.WalkDir(filepath.Join(root, "logs"), func(path string, d iofs.DirEntry, err error) error {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if team, ok := logObjectTeam(filepath.ToSlash(rel)); ok {
+			out[team] += info.Size()
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (o fsLogObjects) presignPut(_ context.Context, r *http.Request, team store.Team, key string, manifest bool) (string, map[string]string, error) {
 	q := o.s.outputSigner.sign(logPutVerb(manifest), string(team), key, time.Now().Add(logSegmentURLTTL).Unix())
 	return o.s.externalBaseURL(r) + "/api/v1/log-segments/" + key + "?" + q.Encode(), nil, nil
@@ -148,14 +211,6 @@ func deleteListed(ctx context.Context, objs storage.ArtifactStore, prefix string
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (s *Server) logClass(context.Context, store.Team) string {
-	return logseg.ClassStandard
-}
-
-func (s *Server) logClasses() []string {
-	return []string{logseg.ClassStandard, logseg.ClassFree}
 }
 
 // safety: the attempt is the one the node's claim holds now, and a writer naming an older one is refused, so a
@@ -213,17 +268,9 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 		}
 		attempt = req.Attempt
 	}
-	prefix, err := logseg.AttemptPrefix(s.logClass(r.Context(), team), string(team), runID, nodeID, attempt, generation)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
 	now := time.Now()
-	rec, err := s.store.OpenNodeLog(r.Context(), store.NodeLog{
-		Team: team, RunID: runID, NodeID: nodeID, Attempt: attempt, Generation: generation, Prefix: prefix,
-	}, now)
-	if err != nil {
-		s.writeInternalError(w, r, "record the node's log", err)
+	rec, ok := s.openNodeLog(w, r, store.NodeLog{Team: team, RunID: runID, NodeID: nodeID, Attempt: attempt, Generation: generation}, now)
+	if !ok {
 		return
 	}
 	if !rec.SealedAt.IsZero() {
@@ -233,6 +280,10 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 	rec.UploadedThrough, rec.StoredBytes = int64(req.UploadedThrough), req.StoredBytes
 	if err := s.store.RecordNodeLogProgress(r.Context(), rec, now); err != nil {
 		s.writeInternalError(w, r, "record the node's log progress", err)
+		return
+	}
+	if err := s.chargeNodeLog(r.Context(), rec, req.StoredBytes, now); err != nil {
+		s.writeStorageRefusal(w, r, err)
 		return
 	}
 	grant := store.LogSegmentsGrant{
@@ -254,6 +305,75 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 	}
 	grant.ManifestURL = store.LogSegmentURL{URL: u, Headers: headers}
 	writeJSON(w, http.StatusOK, grant)
+}
+
+// safety: the team's standing on an attempt's first request picks its retention class, and a team whose storage
+// is paused, or a class no lifecycle rule expires, takes no log rather than one nothing would bill or expire.
+func (s *Server) openNodeLog(w http.ResponseWriter, r *http.Request, want store.NodeLog, now time.Time) (store.NodeLog, bool) {
+	rec, err := s.store.GetNodeLog(r.Context(), want.Team, want.RunID, want.NodeID, want.Attempt, want.Generation)
+	if err == nil {
+		return rec, true
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		s.writeInternalError(w, r, "read the node's log", err)
+		return store.NodeLog{}, false
+	}
+	tier := store.TeamTierFunded
+	if s.MultiTeam() {
+		res, err := s.store.ReserveStorage(r.Context(), store.StorageReserve{
+			Team: want.Team, Kind: store.StorageLogs, UpTo: true, Now: now,
+		})
+		if err != nil {
+			s.writeStorageRefusal(w, r, err)
+			return store.NodeLog{}, false
+		}
+		tier = res.Tier
+		if err := s.store.ReleaseStorage(r.Context(), want.Team, res.ID, now); err != nil {
+			s.logger.Warn("release a log standing probe", "team", string(want.Team), "err", err)
+		}
+	}
+	class := s.logClassFor(want.Team, tier)
+	if err := s.logClassReady(r.Context(), class); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
+		return store.NodeLog{}, false
+	}
+	if want.Prefix, err = logseg.AttemptPrefix(class, string(want.Team), want.RunID, want.NodeID, want.Attempt, want.Generation); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return store.NodeLog{}, false
+	}
+	if rec, err = s.store.OpenNodeLog(r.Context(), want, now); err != nil {
+		s.writeInternalError(w, r, "record the node's log", err)
+		return store.NodeLog{}, false
+	}
+	return rec, true
+}
+
+// safety: the writer reports what it stored, and the delta is claimed in the
+// record before it is committed, so two requests never charge it twice; the
+// hourly storage pass corrects a count left wrong by a failed commit.
+func (s *Server) chargeNodeLog(ctx context.Context, rec store.NodeLog, stored int64, now time.Time) error {
+	if !s.MultiTeam() || stored <= rec.ChargedBytes {
+		return nil
+	}
+	claimed, err := s.store.ChargeNodeLog(ctx, rec, stored)
+	if err != nil || !claimed {
+		return err
+	}
+	return s.store.CommitStorage(ctx, store.StorageCommit{
+		Team: rec.Team, Kind: store.StorageLogs, Bytes: stored - rec.ChargedBytes, Now: now,
+	})
+}
+
+func (s *Server) writeStorageRefusal(w http.ResponseWriter, r *http.Request, err error) {
+	var quota *store.StorageQuotaError
+	switch {
+	case errors.As(err, &quota):
+		writeError(w, http.StatusRequestEntityTooLarge, err)
+	case errors.Is(err, store.ErrFreeStoragePaused):
+		writeError(w, http.StatusPaymentRequired, err)
+	default:
+		s.writeInternalError(w, r, "charge the node's log storage", err)
+	}
 }
 
 // safety: a claim token is its node's own attempt; any other caller already
@@ -339,6 +459,9 @@ func (s *Server) sealNodeLog(ctx context.Context, objs logObjectStore, rec store
 	var stored int64
 	for _, seg := range m.Segments {
 		stored += seg.StoredBytes
+	}
+	if err := s.chargeNodeLog(ctx, rec, stored, now); err != nil {
+		s.logger.Warn("charge a sealed node log", "run_id", rec.RunID, "node_id", rec.NodeID, "err", err)
 	}
 	if err := s.store.MarkNodeLogSealed(ctx, rec, stored, now); err != nil {
 		return nil, err

@@ -343,6 +343,7 @@ func (s *Server) WithLicense(lic *license.License) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
+func (s *Server) WithLogRetention(days map[store.Team]int) *Server
 func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server

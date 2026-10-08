@@ -16,6 +16,7 @@ const nodeLogsTableSQL = `CREATE TABLE IF NOT EXISTS node_logs (
     prefix TEXT NOT NULL,
     uploaded_through BIGINT NOT NULL DEFAULT 0,
     stored_bytes BIGINT NOT NULL DEFAULT 0,
+    charged_bytes BIGINT NOT NULL DEFAULT 0,
     sealed_at BIGINT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
@@ -39,6 +40,9 @@ type NodeLog struct {
 	Prefix          string
 	UploadedThrough int64
 	StoredBytes     int64
+	// ChargedBytes is how much of StoredBytes is committed to the team's
+	// storage.
+	ChargedBytes int64
 	// SealedAt is zero while the attempt has no manifest.
 	SealedAt  time.Time
 	CreatedAt time.Time
@@ -86,6 +90,35 @@ func (s *Store) RecordNodeLogProgress(ctx context.Context, l NodeLog, now time.T
 	return err
 }
 
+// ChargeNodeLog records that the attempt's stored bytes up to charged
+// are committed to its team's storage. It reports false, changing
+// nothing, when another request charged the attempt since l was read, so
+// the caller commits each delta once.
+func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64) (bool, error) {
+	res, err := s.exec(ctx, `UPDATE node_logs SET charged_bytes = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ? AND charged_bytes = ?`,
+		charged, string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation, l.ChargedBytes)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// PrunableNodeLogs lists a team's log records of finished runs, least
+// recently written first, which is the order a team past its storage
+// share loses them in.
+func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error) {
+	rows, err := s.query(ctx, `SELECT `+nodeLogColumnsOf("l")+` FROM node_logs l
+  JOIN runs r ON r.team = l.team AND r.id = l.run_id
+ WHERE l.team = ? AND r.status IN (?, ?, ?)
+ ORDER BY l.updated_at LIMIT ?`, string(team), "success", runStatusFailed, runStatusCancelled, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectNodeLogs(rows)
+}
+
 // MarkNodeLogSealed records that the attempt's manifest exists, with
 // the bytes its segments hold.
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error {
@@ -94,6 +127,17 @@ func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes in
 		now.UnixNano(), storedBytes, now.UnixNano(),
 		string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation)
 	return err
+}
+
+// GetNodeLog returns one attempt's log record, or ErrNotFound.
+func (s *Store) GetNodeLog(ctx context.Context, team Team, runID, nodeID string, attempt, generation int64) (NodeLog, error) {
+	l, err := scanNodeLog(s.queryRow(ctx, `SELECT `+nodeLogColumns+` FROM node_logs
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ?`,
+		string(team), runID, nodeID, attempt, generation))
+	if errors.Is(err, sql.ErrNoRows) {
+		return NodeLog{}, notFound("node log", runID+"/"+nodeID)
+	}
+	return l, err
 }
 
 // LatestNodeLog returns the newest attempt's log record for a node, or
@@ -145,11 +189,12 @@ func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) 
 	return err
 }
 
-const nodeLogColumns = `team, run_id, node_id, attempt, generation, prefix, uploaded_through, stored_bytes, sealed_at, created_at, updated_at`
+const nodeLogColumns = `team, run_id, node_id, attempt, generation, prefix, uploaded_through, stored_bytes, charged_bytes, sealed_at, created_at, updated_at`
 
 func nodeLogColumnsOf(alias string) string {
 	return alias + ".team, " + alias + ".run_id, " + alias + ".node_id, " + alias + ".attempt, " + alias + ".generation, " +
-		alias + ".prefix, " + alias + ".uploaded_through, " + alias + ".stored_bytes, " + alias + ".sealed_at, " +
+		alias + ".prefix, " + alias + ".uploaded_through, " + alias + ".stored_bytes, " +
+		alias + ".charged_bytes, " + alias + ".sealed_at, " +
 		alias + ".created_at, " + alias + ".updated_at"
 }
 
@@ -159,7 +204,7 @@ func scanNodeLog(row rowScanner) (NodeLog, error) {
 	var sealed sql.NullInt64
 	var created, updated int64
 	if err := row.Scan(&team, &l.RunID, &l.NodeID, &l.Attempt, &l.Generation, &l.Prefix,
-		&l.UploadedThrough, &l.StoredBytes, &sealed, &created, &updated); err != nil {
+		&l.UploadedThrough, &l.StoredBytes, &l.ChargedBytes, &sealed, &created, &updated); err != nil {
 		return NodeLog{}, err
 	}
 	l.Team = Team(team)

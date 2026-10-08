@@ -93,3 +93,39 @@ func TestAbandonedNodeLogsWaitForTheGraceAfterTheNodeFinished(t *testing.T) {
 		t.Fatalf("abandoned = %+v, %v", got, err)
 	}
 }
+
+func TestNodeLogChargesOnceAndPrunesFinishedRunsOldestFirst(t *testing.T) {
+	f := newDispatchRun(t, "run-charge")
+	f.mustAccept(t, planOf("a"))
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	ctx, s := t.Context(), f.s
+	attempt, gen, err := s.CurrentNodeAttempt(ctx, store.DefaultTeam, f.run, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.OpenNodeLog(ctx, store.NodeLog{
+		Team: store.DefaultTeam, RunID: f.run, NodeID: "a",
+		Attempt: attempt, Generation: gen, Prefix: "p/",
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.ChargeNodeLog(ctx, rec, 100); err != nil || !ok {
+		t.Fatalf("first charge = %v, %v", ok, err)
+	}
+	if ok, err := s.ChargeNodeLog(ctx, rec, 150); err != nil || ok {
+		t.Fatalf("a charge from a stale read = %v, %v; want refused", ok, err)
+	}
+	if got, err := s.GetNodeLog(ctx, store.DefaultTeam, f.run, "a", attempt, gen); err != nil || got.ChargedBytes != 100 {
+		t.Fatalf("charged = %+v, %v", got, err)
+	}
+	if prunable, err := s.PrunableNodeLogs(ctx, store.DefaultTeam, 10); err != nil || len(prunable) != 0 {
+		t.Fatalf("a running run's logs are prunable: %+v, %v", prunable, err)
+	}
+	if _, err := f.report(tok, store.AttemptReport{Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	if prunable, err := s.PrunableNodeLogs(ctx, store.DefaultTeam, 10); err != nil || len(prunable) != 1 {
+		t.Fatalf("a finished run's logs = %+v, %v", prunable, err)
+	}
+}

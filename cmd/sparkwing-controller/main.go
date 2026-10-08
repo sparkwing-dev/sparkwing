@@ -241,6 +241,10 @@ func run(args []string) error {
 		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
 			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
 			"team keeps its own. Empty leaves the cache's counts to its writes alone (env: SPARKWING_CACHE_BLOB_STORE)")
+	logRetention := fs.String("log-retention", "",
+		"teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 "+
+			"(without), as team=days[,team=days...]. Each distinct number is a retention class under "+
+			"<cache prefix>/logs/r<days>/ that needs its own lifecycle rule in the cache bucket")
 	logsArchiveStore := fs.String("logs-archive-store", os.Getenv("SPARKWING_LOGS_ARCHIVE_STORE"),
 		"the logs service's --archive-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile "+
 			"what each team's archived logs hold; the logs service keeps its own retention "+
@@ -588,6 +592,11 @@ func run(args []string) error {
 			return err
 		}
 	}
+	retention, err := parseLogRetention(*logRetention)
+	if err != nil {
+		return fmt.Errorf("--log-retention: %w", err)
+	}
+	srv = srv.WithLogRetention(retention)
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
 		client, bucket, prefix, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
@@ -967,4 +976,21 @@ func dashboard(p paths.Paths, hsts, insecureCookies bool) controller.Dashboard {
 			"dashboard pages answer 503 until a build that ran bin/build-web.sh is deployed")
 	}
 	return d
+}
+
+func parseLogRetention(raw string) (map[store.Team]int, error) {
+	out := map[store.Team]int{}
+	for item := range strings.SplitSeq(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		team, rawDays, ok := strings.Cut(item, "=")
+		days, err := strconv.Atoi(rawDays)
+		if !ok || err != nil || days < 1 || !teamblob.ValidTeam(team) {
+			return nil, fmt.Errorf("%q is not team=days with a team slug and a positive number of days", item)
+		}
+		out[store.Team(team)] = days
+	}
+	return out, nil
 }
