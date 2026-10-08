@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
@@ -476,6 +477,7 @@ func runRunnerCLI(args []string, version string) error {
 			"advertise the github-actions label, and stop claiming before the credential expires")
 	team := fs.String("team", "",
 		"team slug whose work this GitHub Actions job runs; the team's owner must have bound this repository")
+	readLog := logutil.Bind(fs)
 	idleExit := fs.Duration("idle-exit", 0,
 		"exit once no node has been held for this long (0 = poll until stopped)")
 	if err := fs.Parse(args); err != nil {
@@ -594,7 +596,7 @@ func runRunnerCLI(args []string, version string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner", Log: readLog()})
 	if err != nil {
 		return err
 	}

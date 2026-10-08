@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -35,6 +37,7 @@ func runLaunchCLI(args []string) error {
 	fs.DurationVar(&cfg.Deadline, "deadline", launcher.MaxDeadline, "a Job's life and its claim token's")
 	fs.StringVar(&cfg.ScratchLimit, "scratch", "", "size limit of a Job's scratch volume (default 20Gi)")
 	poll := fs.Duration("poll", time.Second, "how often an idle launcher asks for work")
+	readLog := logutil.Bind(fs)
 	credentialsDir := fs.String(credentials.FlagName, "",
 		"directory holding "+agentTokenCredential+", the launcher's claims.launch bearer token (required)")
 	if err := fs.Parse(args); err != nil {
@@ -78,6 +81,11 @@ func runLaunchCLI(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-launcher", Log: readLog()})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 	l := &launcher.Launcher{
 		Kube: kube, Ctrl: client.NewWithToken(cfg.ControllerURL, nil, token), Config: cfg,
 		Holder: "launcher:" + holder, Poll: *poll, Logger: slog.Default(),

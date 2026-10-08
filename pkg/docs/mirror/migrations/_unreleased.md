@@ -509,6 +509,19 @@ ran it.
   in the process, such as SES invitation email on the controller; use the
   S3-specific name unless that is what you want.
 
+## Services take --log-format and --log-level
+
+- **Before:** `sparkwing-cache` alone read `SPARKWING_LOG_FORMAT=json` and
+  `SPARKWING_LOG_LEVEL` and wrote its log to stdout; the other services
+  wrote text at info level to stderr whatever was set.
+- **After:** the controller, cache, logs service, runner and launcher take
+  `--log-format text|json` and `--log-level debug|info|warn|error`, write to
+  stderr, and stop at startup on a value they do not know. No service reads
+  the two variables; the `sparkwing` CLI and the pipeline binary still do.
+- **Operator steps:** replace `SPARKWING_LOG_FORMAT=json` and
+  `SPARKWING_LOG_LEVEL` on a cache Deployment with the flags. A log shipper
+  that read the cache's stdout reads its stderr instead.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper

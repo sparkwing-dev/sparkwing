@@ -146,6 +146,9 @@ unlock.
 
 ### Removed
 
+- **services (Breaking):** Every service takes `--log-format` and `--log-level`; the cache stops reading `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL`
+  The controller, cache, logs service, runner and launcher write their own log to stderr as `text` or `json` at the level the flags name, and refuse an unknown value. The cache wrote to stdout before. See [migration guide](docs/migrations/_unreleased.md#services-take---log-format-and---log-level).
+
 - **storage (Breaking):** `AWS_ENDPOINT_URL_S3` replaces `SPARKWING_S3_ENDPOINT`
   Every S3 client takes its endpoint from the AWS SDK's own `AWS_ENDPOINT_URL_S3` (or `AWS_ENDPOINT_URL`) and addresses buckets path-style when either is set; no process reads `SPARKWING_S3_ENDPOINT`. See [migration guide](docs/migrations/_unreleased.md#aws_endpoint_url_s3-replaces-sparkwing_s3_endpoint).
 

@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 )
 
 func main() {
@@ -117,6 +118,7 @@ func run(args []string) error {
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		cfg.GitForkLimit, "max concurrent git subprocesses.")
 	readEgress := egress.Bind(fs, egress.CacheSurfaces)
+	readLog := logutil.Bind(fs)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -134,6 +136,7 @@ func run(args []string) error {
 		return err
 	}
 
+	cfg.Log = readLog()
 	egressCfg, named, err := readEgress()
 	if err != nil {
 		return err

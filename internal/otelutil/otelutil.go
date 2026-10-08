@@ -11,6 +11,7 @@ import (
 	"time"
 
 	promclient "github.com/prometheus/client_golang/prometheus"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -27,6 +28,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 )
 
 type Config struct {
@@ -37,6 +40,10 @@ type Config struct {
 	// Prometheus installs a meter provider whose instruments Telemetry.PromHandler
 	// serves. A service that mounts no /metrics for it leaves this false.
 	Prometheus bool
+
+	// Log is how the service writes its own log to stderr. The zero value
+	// keeps a handler the caller already installed.
+	Log logutil.Options
 }
 
 type Telemetry struct {
@@ -66,6 +73,13 @@ func Meter(name string) metric.Meter {
 
 func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	t := &Telemetry{}
+	if cfg.Log != (logutil.Options{}) {
+		h, err := cfg.Log.Handler(os.Stderr)
+		if err != nil {
+			return nil, err
+		}
+		slog.SetDefault(slog.New(h))
+	}
 
 	serviceName := cfg.ServiceName
 	if env := os.Getenv("OTEL_SERVICE_NAME"); env != "" {
@@ -143,6 +157,11 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		slog.SetDefault(slog.New(&traceContextHandler{
 			inner: configuredHandler(),
 		}))
+	}
+
+	if cfg.Log != (logutil.Options{}) {
+		log.SetFlags(0)
+		log.SetOutput(logutil.Bridge(slog.Default()))
 	}
 
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(

@@ -1,40 +1,69 @@
 package logutil
 
 import (
-	"log"
+	"fmt"
+	"io"
 	"log/slog"
-	"os"
 	"strings"
 )
 
-func Init() {
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{Level: level()}
+// Flag names every service registers for its own log.
+const (
+	FormatFlag = "log-format"
+	LevelFlag  = "log-level"
+)
 
-	if os.Getenv("SPARKWING_LOG_FORMAT") == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
-	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	}
-
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
-
-	log.SetFlags(0)
-	log.SetOutput(&bridgeWriter{logger: logger})
+// Options picks how a service writes its own log: Format is text or json,
+// Level is debug, info, warn or error.
+type Options struct {
+	Format string
+	Level  string
 }
 
-func level() slog.Level {
-	switch os.Getenv("SPARKWING_LOG_LEVEL") {
+type stringFlags interface {
+	String(name, value, usage string) *string
+}
+
+// Bind registers --log-format and --log-level on fs, which may be a
+// standard library or a pflag flag set, and returns the reader of the parsed
+// values.
+func Bind(fs stringFlags) func() Options {
+	format := fs.String(FormatFlag, "text", "format of this service's own log: text or json")
+	level := fs.String(LevelFlag, "info", "lowest level this service logs: debug, info, warn or error")
+	return func() Options { return Options{Format: *format, Level: *level} }
+}
+
+// Handler builds the slog handler o names, writing to w. It refuses a format
+// or level it does not know rather than logging in one nobody asked for.
+func (o Options) Handler(w io.Writer) (slog.Handler, error) {
+	var level slog.Level
+	switch o.Level {
 	case "debug":
-		return slog.LevelDebug
+		level = slog.LevelDebug
+	case "", "info":
+		level = slog.LevelInfo
 	case "warn":
-		return slog.LevelWarn
+		level = slog.LevelWarn
 	case "error":
-		return slog.LevelError
+		level = slog.LevelError
 	default:
-		return slog.LevelInfo
+		return nil, fmt.Errorf("--%s %q: want debug, info, warn or error", LevelFlag, o.Level)
 	}
+	opts := &slog.HandlerOptions{Level: level}
+	switch o.Format {
+	case "", "text":
+		return slog.NewTextHandler(w, opts), nil
+	case "json":
+		return slog.NewJSONHandler(w, opts), nil
+	default:
+		return nil, fmt.Errorf("--%s %q: want text or json", FormatFlag, o.Format)
+	}
+}
+
+// Bridge returns the writer the standard library log package writes through,
+// so a log.Printf line lands in logger at the level its prefix names.
+func Bridge(logger *slog.Logger) io.Writer {
+	return &bridgeWriter{logger: logger}
 }
 
 type bridgeWriter struct {

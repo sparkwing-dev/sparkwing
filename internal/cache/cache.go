@@ -22,6 +22,8 @@ import (
 )
 
 type Config struct {
+	// Log is how the cache writes its own log.
+	Log  logutil.Options
 	Addr string
 
 	DataDir string
@@ -134,7 +136,6 @@ type Server struct {
 }
 
 func New(cfg Config) (*Server, error) {
-	logutil.Init()
 	if cfg.Addr == "" {
 		cfg.Addr = ":8090"
 	}
@@ -283,7 +284,7 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{cfg: cfg}
 	// bug: instruments bind to the meter provider current when they are created, so telemetry starts first.
-	tel, err := otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache", Prometheus: true})
+	tel, err := otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache", Prometheus: true, Log: cfg.Log})
 	if err != nil {
 		return nil, err
 	}

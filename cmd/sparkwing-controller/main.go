@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
@@ -247,6 +248,7 @@ func run(args []string) error {
 			"listing is the only enumeration the ceiling costs; 0 measures once at "+
 			"startup and never again")
 	readEgress := egress.Bind(fs, egress.ControllerSurfaces)
+	readLog := logutil.Bind(fs)
 	googleClientID := fs.String("google-client-id", "",
 		"Google OAuth client id for dashboard sign-in; the secret is the "+
 			credGoogleClientSecret+" credential. Offered only with a multi-team license.")
@@ -416,7 +418,7 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller", Log: readLog()})
 	if err != nil {
 		return err
 	}

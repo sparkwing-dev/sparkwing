@@ -415,6 +415,15 @@ Finished runs (and their metrics) are kept until you prune them. There
 is no automatic time-based cleanup; use `sparkwing runs prune` to delete
 runs past a threshold or by id (see [cli-runs.md](cli-runs.md)).
 
+## Service logs
+
+`sparkwing-controller`, `sparkwing-cache`, `sparkwing-logs`, `sparkwing-runner
+runner` and `sparkwing-runner launch` write their own log to stderr.
+`--log-format` picks `text` (the default) or `json`, and `--log-level` picks the
+lowest level written: `debug`, `info` (the default), `warn` or `error`. A value
+the service does not know stops it at startup. With an OTLP logs endpoint
+configured, the same records also go to the collector.
+
 ## OpenTelemetry
 
 Every sparkwing service initializes OpenTelemetry and exposes a
