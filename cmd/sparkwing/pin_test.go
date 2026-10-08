@@ -29,14 +29,14 @@ func TestRun_RefusesAPinnedPipelineAndNamesTrigger(t *testing.T) {
 func TestPipelineTrigger_RefusesAProfileOtherThanThePin(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n  staging: { controller: { url: http://127.0.0.1:1 } }\n")
 	projectAt(t, pinnedProject)
-	err := runPipelineTrigger([]string{"release", "--profile", "staging"})
+	err := runPipelineTrigger([]string{"release", "--profile", "staging", "--working-tree"})
 	if err == nil || !strings.Contains(err.Error(), "pipeline release is pinned to profile prod; pass --profile prod") {
 		t.Fatalf("trigger release --profile staging = %v, want the pin refusal", err)
 	}
-	if err := refuseOtherThanPinnedProfile("release", "prod"); err != nil {
+	if err := refuseOtherThanPinnedProfile("release", "prod", true); err != nil {
 		t.Fatalf("the pinned profile was refused: %v", err)
 	}
-	if err := refuseOtherThanPinnedProfile("build", "staging"); err != nil {
+	if err := refuseOtherThanPinnedProfile("build", "staging", true); err != nil {
 		t.Fatalf("an unpinned pipeline was refused: %v", err)
 	}
 }
@@ -128,5 +128,31 @@ func TestPinRefusal_SuggestsACommandTriggerParses(t *testing.T) {
 		if perr != nil || flags.pipeline != args[0] || flags.profile == "" {
 			t.Fatalf("suggested %q parses to %+v, %v; want pipeline %s with a --profile", suggested, flags, perr, args[0])
 		}
+	}
+}
+
+// Without --working-tree the controller runs HEAD, so HEAD's sparkwing.yaml
+// holds the pin; with it the uploaded snapshot does.
+func TestPipelineTrigger_ReadsThePinFromTheSubmittedRevision(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	projectAt(t, pinnedProject)
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "init", "-q")
+	gitIn(t, root, "add", ".")
+	gitIn(t, root, "commit", "-q", "-m", "pinned")
+	unpinned := "pipelines:\n  - name: release\n    entrypoint: Release\n"
+	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"), []byte(unpinned), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := refuseOtherThanPinnedProfile("release", "staging", false); err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
+		t.Fatalf("trigger of HEAD, which pins release to prod = %v, want the pin refusal", err)
+	}
+	if err := refuseOtherThanPinnedProfile("release", "staging", true); err != nil {
+		t.Fatalf("--working-tree uploads the unpinned working tree, yet the pin was enforced: %v", err)
 	}
 }

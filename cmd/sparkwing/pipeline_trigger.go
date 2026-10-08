@@ -101,7 +101,7 @@ func runPipelineTrigger(args []string) error {
 		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")
 	}
 
-	if err := refuseOtherThanPinnedProfile(flags.pipeline, flags.profile); err != nil {
+	if err := refuseOtherThanPinnedProfile(flags.pipeline, flags.profile, flags.workingTree); err != nil {
 		return err
 	}
 	prof, err := resolveProfileFlag(flags.profile)
@@ -188,8 +188,14 @@ func statusOrUnknown(status string) string {
 
 // safety: the pin guards against sending a pipeline to the wrong controller by
 // mistake; the controller still decides who may run it.
-func refuseOtherThanPinnedProfile(pipelineName, profileName string) error {
-	pin, err := pinnedProfileHere(pipelineName)
+func refuseOtherThanPinnedProfile(pipelineName, profileName string, workingTree bool) error {
+	// safety: without --working-tree the controller runs the commit HEAD names,
+	// so that commit's sparkwing.yaml holds the pin, not the working tree's.
+	ref := "HEAD"
+	if workingTree {
+		ref = ""
+	}
+	pin, err := pinnedProfileHere(pipelineName, ref)
 	if err != nil {
 		return fmt.Errorf("pipeline trigger: %w", err)
 	}

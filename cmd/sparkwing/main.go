@@ -414,9 +414,9 @@ func pinnedPipelineAt(sparkwingDir, ref, pipelineName string) (*pipelines.Pipeli
 	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
 }
 
-func pinnedProfileHere(pipelineName string) (string, error) {
+func pinnedProfileHere(pipelineName, ref string) (string, error) {
 	if dir, dirErr := findSparkwingDir(); dirErr == nil {
-		entry, err := pinnedPipeline(dir, pipelineName)
+		entry, err := pinnedPipelineAt(dir, ref, pipelineName)
 		if err != nil {
 			return "", err
 		}
@@ -428,7 +428,7 @@ func pinnedProfileHere(pipelineName string) (string, error) {
 }
 
 func printPin(pipelineName string) {
-	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
+	if pin, err := pinnedProfileHere(pipelineName, ""); err == nil && pin != "" {
 		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", pin, pipelineName, pin)
 	}
 }
