@@ -53,6 +53,10 @@ type Backends struct {
 	APISocket string
 }
 
+// safety: profile:local guards and the Local/Remote predicates test this; a
+// run on this machine's store or daemon is local, a controller's is not.
+func (b Backends) dispatchesLocally() bool { return b.LocalCoordination }
+
 // RunCoordination is the store surface a run needs for its own
 // coordination rather than for node state: the child triggers it
 // dispatches, the capacity profile it measures and is priced from, and the

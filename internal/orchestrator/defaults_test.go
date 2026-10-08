@@ -170,23 +170,23 @@ func TestRun_ArgGuardOnUnsetArgDoesNotFire(t *testing.T) {
 	}
 }
 
-func TestRun_GuardRejectFiresBeforeDispatch(t *testing.T) {
+func TestRun_ProfileLocalGuardHoldsForALocalRun(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	p := newPathsWithStore(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "lock-defaults-pipe",
-		PipelineYAML: &pipelines.Pipeline{
-			Name:       "lock-defaults-pipe",
-			Entrypoint: "LockDefaults",
-			Guards: pipelines.Guards{
-				Reject: []string{"profile:local"},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
+	run := func(guards pipelines.Guards) (*orchestrator.Result, error) {
+		return orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+			Pipeline:     "lock-defaults-pipe",
+			PipelineYAML: &pipelines.Pipeline{Name: "lock-defaults-pipe", Entrypoint: "LockDefaults", Guards: guards},
+		})
 	}
-	if res.Status != "success" {
-		t.Fatalf("absent profile shouldn't trip profile:local guard; got %q (err=%v)", res.Status, res.Error)
+	res, err := run(pipelines.Guards{Require: []string{"profile:local"}})
+	if err != nil || res.Status != "success" {
+		t.Fatalf("require profile:local on a local run: res=%+v err=%v", res, err)
+	}
+	if _, err := run(pipelines.Guards{Require: []string{"profile:controller"}}); err == nil {
+		t.Fatal("require profile:controller passed on a local run")
+	}
+	if _, err := run(pipelines.Guards{Reject: []string{"profile:local"}}); err == nil {
+		t.Fatal("reject profile:local let a local run dispatch")
 	}
 }

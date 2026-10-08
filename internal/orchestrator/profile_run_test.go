@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
@@ -31,5 +32,14 @@ func TestRefusePinnedCheckoutRun_FailsWhenTheConfigCannotBeRead(t *testing.T) {
 	checkoutAt(t, "pipelines:\n  - name: release\n    entrypoint: Release\n")
 	if err := refusePinnedCheckoutRun(nil); err != nil {
 		t.Fatalf("a readable config with no pin was refused: %v", err)
+	}
+}
+
+func TestDispatchesLocally_FollowsTheDispatchBackend(t *testing.T) {
+	if !LocalBackends(Paths{Root: t.TempDir()}, nil, nil).dispatchesLocally() {
+		t.Error("a run on this machine's store is not reported local")
+	}
+	if RemoteBackends(client.NewWithToken("http://127.0.0.1:1", nil, ""), nil, nil, nil, 0).dispatchesLocally() {
+		t.Error("a run a controller dispatched is reported local")
 	}
 }

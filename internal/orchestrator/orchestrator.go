@@ -197,7 +197,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.PipelineYAML != nil {
 
 		guardCtx := pipelines.GuardContext{
-			Args: invokeArgs,
+			Args:           invokeArgs,
+			ProfileIsLocal: backends.dispatchesLocally(),
 		}
 		if opts.Git != nil {
 			guardCtx.GitBranch = opts.Git.Branch
@@ -296,7 +297,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
-	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{})
+	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{IsLocal: backends.dispatchesLocally()})
 
 	// safety: Plan runs before the run has a node to log against, so without a
 	// logger here sparkwing.Info from inside Plan resolves to the no-op sink.

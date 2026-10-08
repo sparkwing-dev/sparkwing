@@ -40,8 +40,8 @@ type GuardContext struct {
 	// profile is in scope (no --profile, no pipeline.profile).
 	ProfileName string
 
-	// ProfileIsLocal is true when the active profile routes
-	// in-process (no controller URL).
+	// ProfileIsLocal is true when this machine dispatches the run
+	// (every `sparkwing run`), false when a controller dispatched it.
 	ProfileIsLocal bool
 
 	// Args is the resolved args map keyed by CLI flag name.
