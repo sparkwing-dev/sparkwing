@@ -99,7 +99,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
-	if _, err := st.DB().ExecContext(ctx, `UPDATE tokens SET last_used_at = ? WHERE prefix = ?`, seen.UnixNano(), pi.Prefix); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `UPDATE tokens SET last_used_at = ? WHERE prefix = ?`, seen.Unix(), pi.Prefix); err != nil {
 		t.Fatal(err)
 	}
 	expect("the eligible agent is offline", "node apply needs tool:terraform; eligible agent pi is offline (last seen 2026-09-28T10:00:00Z)")

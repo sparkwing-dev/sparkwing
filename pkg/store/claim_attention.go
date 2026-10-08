@@ -140,7 +140,7 @@ func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]Register
   FROM tokens t
  WHERE t.team = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)
    AND (t.kind = 'runner' OR (t.kind = 'team' AND substr(t.principal, 1, 6) = 'agent:'))
- ORDER BY t.prefix`, string(team), time.Now().UnixNano())
+ ORDER BY t.prefix`, string(team), time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +150,8 @@ func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]Register
 		var a RegisteredAgent
 		var principal string
 		var advertised []byte
-		var usedNS sql.NullInt64
-		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &usedNS); err != nil {
+		var used sql.NullInt64
+		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &used); err != nil {
 			return nil, err
 		}
 		a.Name = strings.TrimPrefix(principal, agentPrincipalPrefix)
@@ -159,8 +159,8 @@ func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]Register
 		if len(advertised) > 0 && json.Unmarshal(advertised, &a.Profile.Labels) == nil {
 			a.Profile.Labels = match.SelfAsserted(a.Profile.Labels)
 		}
-		if usedNS.Int64 > 0 {
-			a.LastSeen = time.Unix(0, usedNS.Int64)
+		if used.Int64 > 0 {
+			a.LastSeen = time.Unix(used.Int64, 0)
 		}
 		out = append(out, a)
 	}
