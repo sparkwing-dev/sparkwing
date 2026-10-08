@@ -2354,6 +2354,18 @@ test("cron detail deep links survive hidden and missing schedules", async ({ pag
 test("runs trigger filters persist and offer badge include and exclude", async ({ page }) => {
   const scheduled = { ...runningRun, trigger_source: "schedule" };
   await installMockAPI(page, { runs: [finishedRun, scheduled] });
+  // The controller applies run filters, so this stand-in answers the trigger filters it is sent.
+  await page.route("**/api/v1/runs?**", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const include = params.get("trigger_source")?.split(",");
+    const exclude = params.get("exclude_trigger_source")?.split(",") ?? [];
+    const runs = [finishedRun, scheduled].filter(
+      (r) =>
+        (!include || include.includes(r.trigger_source ?? "")) &&
+        !exclude.includes(r.trigger_source ?? ""),
+    );
+    await route.fulfill({ json: { runs } });
+  });
   await page.goto("/runs");
   const githubRow = page.locator(`[data-run-id="${finishedRun.id}"]`);
   const scheduledRow = page.locator(`[data-run-id="${scheduled.id}"]`);
