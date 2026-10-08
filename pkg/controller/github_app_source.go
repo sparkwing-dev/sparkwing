@@ -95,7 +95,7 @@ func (s *Server) claimedRunSource(w http.ResponseWriter, r *http.Request, runID 
 		s.writeInternalError(w, r, "source credential team", err)
 		return claimedRunSource{}, false
 	}
-	trigger, err := s.store.GetTrigger(r.Context(), runID)
+	trigger, err := tenant.GetTrigger(r.Context(), runID)
 	if err != nil || store.NormalizeTeam(trigger.Team) != claimed.Team {
 		writeError(w, http.StatusNotFound, runNotFound(runID))
 		return claimedRunSource{}, false

@@ -80,7 +80,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 	if run == nil || run.Pipeline == "" {
 		return
 	}
-	nodes, err := s.store.ListNodes(ctx, run.ID)
+	nodes, err := t.ListNodes(ctx, run.ID)
 	if err != nil {
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 			runValid = false
 			continue
 		}
-		samples, err := s.store.ListNodeMetrics(ctx, run.ID, n.NodeID)
+		samples, err := t.ListNodeMetrics(ctx, run.ID, n.NodeID)
 		if err != nil || len(samples) == 0 {
 			runValid = false
 			continue

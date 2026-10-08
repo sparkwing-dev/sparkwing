@@ -273,15 +273,15 @@ func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
 	if _, err := st.AppendEvent(ctx, "run-acme", "build", "custom", []byte(`{}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := st.CreateDebugPause(ctx, store.DebugPause{
+	if err := acme.CreateDebugPause(ctx, store.DebugPause{
 		RunID: "run-acme", NodeID: "build", Reason: "inspect", PausedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("CreateDebugPause: %v", err)
 	}
-	if err := st.WriteNodeDispatch(ctx, store.NodeDispatch{RunID: "run-acme", NodeID: "build", DispatchedAt: now}); err != nil {
+	if err := acme.WriteNodeDispatch(ctx, store.NodeDispatch{RunID: "run-acme", NodeID: "build", DispatchedAt: now}); err != nil {
 		t.Fatalf("WriteNodeDispatch: %v", err)
 	}
-	if err := st.AddNodeMetricSample(ctx, "run-acme", "build", store.MetricSample{TS: now, CPUMillicores: 1}); err != nil {
+	if err := acme.AddNodeMetricSample(ctx, "run-acme", "build", store.MetricSample{TS: now, CPUMillicores: 1}); err != nil {
 		t.Fatalf("AddNodeMetricSample: %v", err)
 	}
 
@@ -295,22 +295,22 @@ func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
 	ackNodeAttempt(t, st, n, claimant, 1)
-	if err := st.StartNodeStep(ctx, "run-acme", "build", "compile"); err != nil {
+	if err := acme.StartNodeStep(ctx, "run-acme", "build", "compile"); err != nil {
 		t.Fatalf("StartNodeStep: %v", err)
 	}
-	if err := st.AppendStepAnnotation(ctx, "run-acme", "build", "annotated", "note"); err != nil {
+	if err := acme.AppendStepAnnotation(ctx, "run-acme", "build", "annotated", "note"); err != nil {
 		t.Fatalf("AppendStepAnnotation: %v", err)
 	}
-	if err := st.SetStepSummary(ctx, "run-acme", "build", "summarized", "done"); err != nil {
+	if err := acme.SetStepSummary(ctx, "run-acme", "build", "summarized", "done"); err != nil {
 		t.Fatalf("SetStepSummary: %v", err)
 	}
-	if err := st.FinishNodeStep(ctx, "run-acme", "build", "finished", store.StepPassed); err != nil {
+	if err := acme.FinishNodeStep(ctx, "run-acme", "build", "finished", store.StepPassed); err != nil {
 		t.Fatalf("FinishNodeStep: %v", err)
 	}
-	if err := st.SkipNodeStep(ctx, "run-acme", "build", "skipped"); err != nil {
+	if err := acme.SkipNodeStep(ctx, "run-acme", "build", "skipped"); err != nil {
 		t.Fatalf("SkipNodeStep: %v", err)
 	}
-	if err := st.CreateApproval(ctx, store.Approval{RunID: "run-acme", NodeID: "build", RequestedAt: now}); err != nil {
+	if err := acme.CreateApproval(ctx, store.Approval{RunID: "run-acme", NodeID: "build", RequestedAt: now}); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
 
@@ -353,10 +353,10 @@ func TestTriggerHolderMutatesItsOwnTeamsRun(t *testing.T) {
 	if err := st.CreateNode(fenced, store.Node{RunID: "run-acme", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	if err := st.StartNode(fenced, "run-acme", "build"); err != nil {
+	if err := acme.StartNode(fenced, "run-acme", "build"); err != nil {
 		t.Fatalf("StartNode: %v", err)
 	}
-	if err := st.AcknowledgeNodeExecutionStart(fenced, "run-acme", "build", runner, store.ExecutionStart{
+	if err := acme.AcknowledgeNodeExecutionStart(fenced, "run-acme", "build", runner, store.ExecutionStart{
 		ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1,
 	}); err != nil {
 		t.Fatalf("AcknowledgeNodeExecutionStart: %v", err)

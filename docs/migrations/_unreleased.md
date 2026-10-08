@@ -737,3 +737,29 @@ client of your own drives the browser pages that replace them.
 **Why:** two processes split one browser surface, and the proxy's route
 allowlist and service bearer were a second authorization layer to keep in
 step with the controller's own.
+
+## Node bounce requests move to their run's team
+
+- **Before:** a bounce request was recorded without its team, so every row
+  carried the default team whatever team its run belonged to.
+- **After:** schema 93 moves each existing request into the team of the run it
+  names, and new requests record their run's team. A team's open requests stay
+  visible to its runners, and its next request continues the node's sequence.
+- **Upgrade:** nothing to do; the controller applies schema 93 on start. An
+  older binary keeps reading the upgraded database.
+
+## Store methods removed or moved to Tenant
+
+- **Before:** `pkg/store` exported `Store.ActiveExecutorActivity`,
+  `Store.PrincipalHoldsPipelineClaim` and `Store.FailNodeForUnpricedClass`.
+- **After:** the first two are gone, and the third is a method of `Tenant`.
+  Many other `Store` methods now act on the default team only; their `Tenant`
+  methods of the same name serve every team.
+- **Upgrade:** code embedding `pkg/store` replaces
+  `st.ActiveExecutorActivity(ctx, now)` with
+  `team.ActiveExecutorActivity(ctx, now)` on the handle from
+  `st.ForTeam(ctx, slug)`, replaces `st.PrincipalHoldsPipelineClaim` with
+  `st.PrincipalHoldsProfileClaim` or `st.PrincipalHoldsRunClaim`, and calls
+  `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
+  writes runs, nodes or triggers of a team other than the default goes
+  through that team's handle.

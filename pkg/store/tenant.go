@@ -187,6 +187,46 @@ func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, 
 	return o.s.countRuns(ctx, allTeams(), f)
 }
 
+// RunTeam reports which team owns the run runID, for a sweep that found the
+// id across teams and has to act on it through that team's handle.
+// [ErrNotFound] when no run carries the id.
+//
+// safety: runs and triggers are looked up apart, because two teams may each
+// hold one of them under the same id, and a union would answer with either.
+func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
+	var team string
+	err := o.s.queryRow(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", notFound("run", runID)
+	}
+	return Team(team), err
+}
+
+// TriggerTeam reports which team owns the trigger triggerID, as RunTeam does
+// for runs. [ErrNotFound] when no trigger carries the id.
+func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error) {
+	var team string
+	err := o.s.queryRow(ctx, `SELECT team FROM triggers WHERE id = ?`, triggerID).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", notFound("trigger", triggerID)
+	}
+	return Team(team), err
+}
+
+// safety: a Store call that names a run and holds no handle acts in the run's
+// own team, where the run's rows were written; an unknown run is the default
+// team's, as every pre-tenant row is.
+func (s *Store) runTenant(ctx context.Context, runID string) (*Tenant, error) {
+	team, err := s.AsOperator().RunTeam(ctx, runID)
+	if errors.Is(err, ErrNotFound) {
+		return s.defaultTenant(), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &Tenant{s: s, team: team}, nil
+}
+
 // safety: a type rather than an empty team meaning "all", because that
 // sentinel cannot be told from a team a caller failed to set; the zero
 // value here scopes to the empty team, which matches nothing.

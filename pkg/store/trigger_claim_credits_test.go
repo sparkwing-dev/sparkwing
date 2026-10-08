@@ -174,7 +174,7 @@ func TestMeteredTriggerHeartbeatChargesOnlyItsTeamsUnpaidSeconds(t *testing.T) {
 	}
 	backdateTriggerClaim(t, st, "run-acme", pastTriggerMinimum(5*time.Second), time.Time{})
 	for range 2 {
-		if _, err := st.HeartbeatTrigger(ctx, "run-acme", time.Minute); err != nil {
+		if _, err := acme.HeartbeatTrigger(ctx, "run-acme", time.Minute); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -185,7 +185,7 @@ func TestMeteredTriggerHeartbeatChargesOnlyItsTeamsUnpaidSeconds(t *testing.T) {
 		t.Fatalf("globex balance after acme heartbeat = %d, %v; want %d", got, err, beforeGlobex)
 	}
 	backdateTriggerClaim(t, st, "run-acme", pastTriggerMinimum(7*time.Second), time.Time{})
-	if err := st.FinishTrigger(ctx, "run-acme"); err != nil {
+	if err := acme.FinishTrigger(ctx, "run-acme"); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := acme.CreditBalanceMicro(ctx); err != nil || got != 2*floor-7*rate {

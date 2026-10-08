@@ -25,7 +25,7 @@ func runnerToken(t *testing.T, tn *store.Tenant, name string) string {
 
 func reopenRound(ctx context.Context, t *testing.T, st *store.Store, runID, nodeID string) bool {
 	t.Helper()
-	if revoked, err := st.RevokeNodeReady(ctx, runID, nodeID); err != nil || !revoked {
+	if revoked, err := runTeam(ctx, t, st, runID).RevokeNodeReady(ctx, runID, nodeID); err != nil || !revoked {
 		t.Fatalf("reset offer round = %v, %v", revoked, err)
 	}
 	if err := st.MarkNodeReady(ctx, runID, nodeID); err != nil {

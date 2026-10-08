@@ -74,7 +74,11 @@ func main() {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := runretry.Create(t.Context(), st, "source", "retry", false, time.Now()); err != nil {
+			home, err := st.ForTeam(t.Context(), store.DefaultTeam)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runretry.Create(t.Context(), st, home, "source", "retry", false, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			trigger, err := st.GetTrigger(t.Context(), "retry")

@@ -429,9 +429,13 @@ func (s *Server) handleOutputCommit(w http.ResponseWriter, r *http.Request) {
 // safety: a claim reads within its own run only the outputs of its node's
 // transitive dependencies, which are the only ones its plan could wait for.
 func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	n, err := tenant.GetNode(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
