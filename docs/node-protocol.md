@@ -95,7 +95,7 @@ The protocol version is a string, currently `1`.
 
 ## Node-facing routes
 
-Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a spawned child's hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
+Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` matches only the node's own run, `{node}` the node's own id or a node it spawned (`<node>/<spawn id>`, sent as `<node>%2F<spawn id>`), `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a spawned child's hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
 
 <!-- node-routes:start -->
 | Method | Path | Reach | Request | Response | Handler |
@@ -111,6 +111,7 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/api/v1/runs/{run}/events` | broker | `{node_id?, kind, payload?}`, payload base64 | 200 `{seq}` | `pkg/controller/handlers.go` `handleAppendEvent` |
 | POST | `/api/v1/runs/{run}/heartbeat` | broker | none | 204 | `pkg/controller/handlers.go` `handleTouchRunHeartbeat` |
 | POST | `/api/v1/runs/{run}/oidc-token` | broker | `{audience}` | 200 `{token, expires_at}`; 404 when the controller holds no signing key or the caller no live claim on the run | `pkg/controller/oidc_token.go` `handleOIDCToken` |
+| POST | `/api/v1/runs/{run}/nodes` | broker | a node record `{id, status, deps?, ...}` for a node spawned at run time; through the broker `id` is `<node>/<spawn id>` under the node's own id | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/start` | broker | none | 204 | `pkg/controller/handlers.go` `handleStartNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/finish` | broker | `{outcome, error?, output?: {key, size, sha256}, failure_reason?, exit_code?}` | 204; 422 on an invalid outcome or an uncommitted output | `pkg/controller/handlers.go` `handleFinishNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/deps` | broker | `{deps: [node id]}` | 204 | `pkg/controller/handlers.go` `handleUpdateNodeDeps` |
@@ -149,7 +150,6 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/api/v1/runs/{id}/cache-grant` | direct | none | 200 `{grant, team, expires_at}` | `pkg/controller/cache_grant.go` `handleRunCacheGrant` |
 | PUT | `/api/v1/outputs/uploads/{id}` | direct | the output bytes, at the URL `output-upload` granted | 200 | `pkg/controller/node_output.go` `handleOutputBlobPut` |
 | GET | `/api/v1/outputs/objects/{key...}` | direct | none, at the URL `output` granted | 200 the output bytes | `pkg/controller/node_output.go` `handleOutputBlobGet` |
-| POST | `/api/v1/runs/{id}/nodes` | direct | a node record, for a node spawned at run time | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | direct | an attempt report, claim token only | 200 `{status}` | `pkg/controller/claim_dispatch.go` `handleReportAttempt` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | direct | `{kind, key?, cache_key_hash?, pipeline?, node?, max_age_ms?}`, claim token only | 200 the input | `pkg/controller/claim_run.go` `handleClaimInput` |
 | POST | `/api/v1/runs/{id}/children` | direct | `{ordinal, pipeline, args?, repo?, branch?}`, claim token only | 200 the child run | `pkg/controller/claim_run.go` `handleEnqueueChildRun` |
@@ -167,7 +167,7 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/node/v1/oidc-token` | target | `{audience}` | 200 `{token, expires_at}` | node host |
 <!-- node-routes:end -->
 
-**Auth.** `broker` routes take the node's bearer; the broker or loopback controller confines it to the node's own run and node. `direct` routes take a claim token or the loopback run token, and the controller checks the claim fence headers (`X-Sparkwing-Claim-Holder`, `X-Sparkwing-Claim-Membership`, `X-Sparkwing-Claim-Reservation`, `X-Sparkwing-Claim-Generation`) on writes. `PUT` and `GET` under `/api/v1/outputs/` take no bearer: the URL the grant returned is signed. `target` routes take the host's bearer and need no fence, because the host adds it.
+**Auth.** `broker` routes take the node's bearer; the broker or loopback controller confines it to the node's own run and node and the nodes it spawned. The broker then forwards with the runner's own credential, so the controller still decides: a runner token's live claim covers its own node only, and today the controller refuses a spawned node's row to it (`claim_required` or `held by another holder`), while an admin or loopback run token is served. `direct` routes take a claim token or the loopback run token, and the controller checks the claim fence headers (`X-Sparkwing-Claim-Holder`, `X-Sparkwing-Claim-Membership`, `X-Sparkwing-Claim-Reservation`, `X-Sparkwing-Claim-Generation`) on writes. `PUT` and `GET` under `/api/v1/outputs/` take no bearer: the URL the grant returned is signed. `target` routes take the host's bearer and need no fence, because the host adds it.
 
 **Target namespace.** Once the node host serves the routes, a node calls them under `/node/v1/` with the run and node implied by its bearer, so `/api/v1/runs/{run}/nodes/{node}/start` becomes `/node/v1/start`. The request and response bodies stay as listed.
 

@@ -263,10 +263,10 @@ func (b *remoteExecutionBroker) putArtifact(r *http.Request, key string) error {
 	return b.artifact.Put(r.Context(), key, tmp)
 }
 
-// safety: {run} and {node} match only this broker's own run and node, {other} any one-part
-// node id of this run, {spawned} any node id including hierarchical ones such as build/linux,
-// {name} any one segment, and a trailing {name...} the rest of the path. {other} stays one
-// part because an upstream that decodes %2F would read a/metrics as another node's route.
+// safety: {run} is this broker's run, {node} its node or one it spawned (node%2Fchild), {other} any
+// one-part node of the run, {spawned} any node id, {name} one segment, {name...} the rest. {other}
+// stays one part because an upstream decoding %2F would read a/metrics as another node's route;
+// a decoded {node} path stays inside the node's own subtree.
 type brokerRoute struct {
 	method, pattern string
 	check           func(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool
@@ -286,6 +286,7 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/heartbeat", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/oidc-token", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/nodes", spawnedByThisNode},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/start", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/finish", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/deps", nil},
@@ -359,7 +360,8 @@ func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[s
 				return nil, false
 			}
 		case w == "{node}":
-			if got != url.PathEscape(b.nodeID) {
+			node, err := url.PathUnescape(got)
+			if err != nil || !b.ownNode(node) {
 				return nil, false
 			}
 		case w == "{other}":
@@ -395,6 +397,19 @@ func runNodeID(id string) bool {
 	return true
 }
 
+// safety: a node spawned at run time is a row under the spawning node's id, so the node may
+// create and report it, and nothing outside its own subtree.
+func (b *remoteExecutionBroker) ownNode(id string) bool {
+	return id == b.nodeID || (strings.HasPrefix(id, b.nodeID+"/") && runNodeID(id))
+}
+
+func spawnedByThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	var node struct {
+		ID string `json:"id"`
+	}
+	return readBrokeredBody(r, &node) && node.ID != b.nodeID && b.ownNode(node.ID)
+}
+
 func secretForThisRun(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
 	return r.URL.Query().Get("run") == b.runID
 }
@@ -404,40 +419,48 @@ func concurrencyForThisNode(b *remoteExecutionBroker, r *http.Request, segments 
 	if err != nil || key == "" || strings.Contains(key, "/") {
 		return false
 	}
-	holder := b.runID + "/" + b.nodeID
+	ownHolder := func(holder string) bool {
+		node, ok := strings.CutPrefix(holder, b.runID+"/")
+		return ok && b.ownNode(node)
+	}
 	action := r.URL.EscapedPath()[strings.LastIndex(r.URL.EscapedPath(), "/")+1:]
 	switch action {
 	case "holder":
-		return r.URL.Query().Get("holder_id") == holder
+		return ownHolder(r.URL.Query().Get("holder_id"))
 	case "resolve":
-		return r.URL.Query().Get("run_id") == b.runID && r.URL.Query().Get("node_id") == b.nodeID
+		return r.URL.Query().Get("run_id") == b.runID && b.ownNode(r.URL.Query().Get("node_id"))
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
-	if err != nil || len(body) > 1<<20 {
-		return false
-	}
-	_ = r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(body))
 	var slot struct {
 		HolderID          string `json:"holder_id"`
 		InheritedHolderID string `json:"inherited_holder_id"`
 		RunID             string `json:"run_id"`
 		NodeID            string `json:"node_id"`
 	}
-	if json.Unmarshal(body, &slot) != nil {
+	if !readBrokeredBody(r, &slot) {
 		return false
 	}
 	if action == "cancel-waiter" {
-		return slot.RunID == b.runID && slot.NodeID == b.nodeID
+		return slot.RunID == b.runID && b.ownNode(slot.NodeID)
 	}
-	if slot.HolderID != holder {
+	if !ownHolder(slot.HolderID) {
 		return false
 	}
 	if action == "acquire" {
-		return slot.RunID == b.runID && slot.NodeID == b.nodeID &&
+		return slot.RunID == b.runID && slot.HolderID == b.runID+"/"+slot.NodeID &&
 			slot.InheritedHolderID == ""
 	}
 	return true
+}
+
+// safety: the check reads the body the upstream receives, so it is buffered and put back.
+func readBrokeredBody(r *http.Request, into any) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	if err != nil || len(body) > 1<<20 {
+		return false
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return json.Unmarshal(body, into) == nil
 }
 
 func (b *remoteExecutionBroker) bindRequest(r *http.Request) error {
