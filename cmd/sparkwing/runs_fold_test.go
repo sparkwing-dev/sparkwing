@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -138,5 +139,31 @@ func TestRunsListGroupByHonoursTheListingFilters(t *testing.T) {
 	})
 	if !strings.Contains(out, "run-denied") || strings.Contains(out, "run-timeout") {
 		t.Fatalf("failures = %q, want only the run whose error matches --error", out)
+	}
+}
+
+func TestWatchedRunHonoursQuiet(t *testing.T) {
+	run := &store.Run{ID: "run-new", Pipeline: "build", Status: "running", StartedAt: time.Now()}
+	for _, tc := range []struct {
+		json, quiet bool
+		want        string
+	}{
+		{false, true, "run-new\n"},
+		{true, true, "\"run-new\"\n"},
+	} {
+		var buf bytes.Buffer
+		if err := writeWatchedRun(&buf, run, tc.json, tc.quiet); err != nil {
+			t.Fatal(err)
+		}
+		if buf.String() != tc.want {
+			t.Errorf("json=%v quiet=%v: wrote %q, want %q", tc.json, tc.quiet, buf.String(), tc.want)
+		}
+	}
+	var full bytes.Buffer
+	if err := writeWatchedRun(&full, run, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(full.String(), `"pipeline":"build"`) {
+		t.Errorf("non-quiet JSON = %q, want the run record", full.String())
 	}
 }

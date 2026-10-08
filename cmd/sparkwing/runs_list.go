@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -108,12 +110,23 @@ func watchNewRuns(ctx context.Context, paths orchestrator.Paths, opts orchestrat
 			continue
 		}
 		last = runs[0].ID
-		if asJSON {
-			if err := jsonEncode(os.Stdout, store.RedactedRun(runs[0])); err != nil {
-				return err
-			}
-			continue
+		if err := writeWatchedRun(os.Stdout, runs[0], asJSON, opts.Quiet); err != nil {
+			return err
 		}
-		fmt.Printf("%s  %s  %s  (%s)\n", runs[0].ID, runs[0].Pipeline, runs[0].Status, relTime(runs[0].StartedAt))
+	}
+}
+
+func writeWatchedRun(w io.Writer, run *store.Run, asJSON, quiet bool) error {
+	switch {
+	case quiet && asJSON:
+		return json.NewEncoder(w).Encode(run.ID)
+	case quiet:
+		_, err := fmt.Fprintln(w, run.ID)
+		return err
+	case asJSON:
+		return json.NewEncoder(w).Encode(store.RedactedRun(run))
+	default:
+		_, err := fmt.Fprintf(w, "%s  %s  %s  (%s)\n", run.ID, run.Pipeline, run.Status, relTime(run.StartedAt))
+		return err
 	}
 }
