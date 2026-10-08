@@ -123,7 +123,7 @@ func parsePipelineExplainArgs(args []string) (pipelineExplainArgs, bool, error) 
 			parsed.all = false
 		case tok == "-o", tok == "--output":
 			if i+1 >= len(args) {
-				return parsed, false, errors.New("explain: --output expects a value")
+				return parsed, false, errors.New("plan --static: --output expects a value")
 			}
 			parsed.output = args[i+1]
 			i++
@@ -133,7 +133,7 @@ func parsePipelineExplainArgs(args []string) (pipelineExplainArgs, bool, error) 
 			parsed.output = strings.TrimPrefix(tok, "-o=")
 		case tok == "--name":
 			if i+1 >= len(args) {
-				return parsed, false, errors.New("explain: --name expects a value")
+				return parsed, false, errors.New("plan --static: --name expects a value")
 			}
 			parsed.pipeline = args[i+1]
 			i++
@@ -152,7 +152,7 @@ func runPipelineExplain(args []string) error {
 		return err
 	}
 	if helpRequested {
-		PrintHelp(cmdPipelineExplain, os.Stdout)
+		PrintHelp(cmdPipelinePlan, os.Stdout)
 		return nil
 	}
 	output := parsed.output
@@ -161,27 +161,27 @@ func runPipelineExplain(args []string) error {
 	passthrough := parsed.passthrough
 	if all {
 		if pipeline != "" {
-			return errors.New("explain: --all and --name are mutually exclusive")
+			return errors.New("plan --static: --all and --name are mutually exclusive")
 		}
 		if len(passthrough) > 0 {
-			return fmt.Errorf("explain: --all does not accept pipeline-specific flags (got %v)", passthrough)
+			return fmt.Errorf("plan --static: --all does not accept pipeline-specific flags (got %v)", passthrough)
 		}
-		format, err := resolveOutputFormat(output, cmdPipelineExplain.Path)
+		format, err := resolveOutputFormat(output, cmdPipelinePlan.Path)
 		if err != nil {
 			return err
 		}
 		return runPipelineExplainAll(format)
 	}
 	if pipeline == "" {
-		PrintHelp(cmdPipelineExplain, os.Stderr)
-		return errors.New("explain: --name or --all is required")
+		PrintHelp(cmdPipelinePlan, os.Stderr)
+		return errors.New("plan --static: --name or --all is required")
 	}
-	format, err := resolveOutputFormat(output, cmdPipelineExplain.Path)
+	format, err := resolveOutputFormat(output, cmdPipelinePlan.Path)
 	if err != nil {
 		return err
 	}
 	jsonOut := format == "json"
-	pipelineArgs := []string{"pipeline", "run", pipeline, "--explain"}
+	pipelineArgs := []string{"run", pipeline, "--explain"}
 	pipelineArgs = append(pipelineArgs, passthrough...)
 	binary, err := os.Executable()
 	if err != nil {
@@ -192,7 +192,7 @@ func runPipelineExplain(args []string) error {
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("explain: %w", err)
+		return fmt.Errorf("plan --static: %w", err)
 	}
 	if jsonOut {
 		_, _ = os.Stdout.Write(stdout.Bytes())
@@ -220,16 +220,16 @@ type allExplainResult struct {
 func runPipelineExplainAll(format string) error {
 	catalog, err := gatherPipelinesCatalog(true)
 	if err != nil {
-		return fmt.Errorf("explain --all: catalog: %w", err)
+		return fmt.Errorf("plan --static --all: catalog: %w", err)
 	}
 	if len(catalog) == 0 {
-		return errors.New("explain --all: no pipelines found in .sparkwing/sparkwing.yaml")
+		return errors.New("plan --static --all: no pipelines found in .sparkwing/sparkwing.yaml")
 	}
 	binary, err := os.Executable()
 	if err != nil {
 		binary = "sparkwing"
 	}
-	pipelinePrefix := []string{"pipeline", "run"}
+	pipelinePrefix := []string{"run"}
 	results := make([]allExplainResult, 0, len(catalog))
 	failed := 0
 	for _, p := range catalog {
@@ -272,7 +272,7 @@ func runPipelineExplainAll(format string) error {
 		printAllExplainTable(results, failed)
 	}
 	if failed > 0 {
-		return fmt.Errorf("explain --all: %d of %d pipelines failed", failed, len(results))
+		return fmt.Errorf("plan --static --all: %d of %d pipelines failed", failed, len(results))
 	}
 	return nil
 }

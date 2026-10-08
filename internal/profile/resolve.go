@@ -9,6 +9,7 @@ type ChainSource string
 const (
 	ChainSourceFlag ChainSource = "flag"
 	ChainSourceNone ChainSource = "none"
+	ChainSourceEnv  ChainSource = "env"
 
 	ChainSourceProjectDefault ChainSource = "project-default"
 )

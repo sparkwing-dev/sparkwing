@@ -8,35 +8,65 @@ Every `sparkwing repos` command, flag, and argument, generated from the CLI's ow
 
 The machine's fleet of sparkwing repos and their SDK pins
 
-Lists registered repositories and repositories with recorded pipeline runs.
-Each row shows the SDK version, last run, and intervening migration guides.
-Linked worktrees appear under their primary checkout, with differing SDK
-versions reported separately.
+'list' shows registered repositories and repositories with recorded pipeline
+runs, with their SDK pins; 'info' inspects one; 'update' validates or applies
+SDK upgrades. 'add', 'remove' and 'prune' edit the registry of checkouts.
 
-'sparkwing repos' and 'sparkwing repos list' print the same listing.
-Use 'sparkwing repos info' to inspect one repository and 'sparkwing repos
-update' to validate SDK upgrades for selected repositories.
+The registry maps pipeline names to local checkouts so
+cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
+annotations. Auto-populated when you run 'sparkwing run <pipeline>'
+in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
+disable).
+
+The registry is the repos section of config.yaml: $SPARKWING_CONFIG
+(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
+~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
+is the state, cache and logs root, and a registered checkout is a
+machine-wide fact that outlives any one home. A write from a command
+running under a home of its own is refused rather than sent to the
+machine's registry: set SPARKWING_CONFIG to a path inside that home
+to keep it there.
 
 ### Subcommands
 
 - `list` -- List the machine's fleet of sparkwing repos
 - `info` -- Inspect repository versions, worktrees, store compatibility, and pipelines
 - `update` -- Update repository SDK versions and compare pipeline plans
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+- `add` -- Register a checkout
+- `remove` -- Remove a registered checkout
+- `prune` -- Remove checkouts whose pipeline directory is gone
 
 ### Examples
 
 ```sh
 # List the fleet
-sparkwing repos
+sparkwing repos list
 
-# Agent-readable record
-sparkwing repos -o json
+# Register the current checkout
+sparkwing repos add
+
+# Drop entries whose checkout is gone
+sparkwing repos prune
+```
+
+## `sparkwing repos add`
+
+Register a checkout
+
+Registers a checkout explicitly. The path defaults to the current directory.
+
+### Arguments
+
+- `[path]` (optional) -- Checkout path; defaults to the current directory
+
+### Examples
+
+```sh
+# Register the current checkout
+sparkwing repos add
+
+# Register another checkout
+sparkwing repos add ../service
 ```
 
 ## `sparkwing repos info`
@@ -76,13 +106,20 @@ List the machine's fleet of sparkwing repos
 
 Lists registered repositories and repositories with recorded pipeline runs.
 Each row shows the SDK version, last run, and intervening migration guides.
-This is the same output as 'sparkwing repos'.
+Linked worktrees appear under their primary checkout, with differing SDK
+versions reported separately.
+
+--checkouts lists the registry itself instead: each registered checkout, its
+status, and the pipelines it provides (--pipelines=false skips the per-repo
+describe call).
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--checkouts` | List registered checkouts and their pipelines instead of SDK pins |
+| `--pipelines` | With --checkouts, include pipeline names (default: true) |
 
 ### Examples
 
@@ -92,6 +129,42 @@ sparkwing repos list
 
 # Agent-readable record
 sparkwing repos list -o json
+
+# Registered checkouts and their pipelines
+sparkwing repos list --checkouts
+
+# Skip pipeline discovery
+sparkwing repos list --checkouts --pipelines=false
+```
+
+## `sparkwing repos prune`
+
+Remove checkouts whose pipeline directory is gone
+
+Removes registered checkouts that no longer contain a .sparkwing directory.
+
+### Examples
+
+```sh
+# Remove stale registry entries
+sparkwing repos prune
+```
+
+## `sparkwing repos remove`
+
+Remove a registered checkout
+
+Removes every registry entry matching a path or basename.
+
+### Arguments
+
+- `<path-or-basename>` (required) -- Registered path or basename to remove
+
+### Examples
+
+```sh
+# Remove a checkout by basename
+sparkwing repos remove service
 ```
 
 ## `sparkwing repos update`
@@ -113,6 +186,15 @@ are skipped and named.
 --apply writes and commits updates per repository. --verify also runs each
 repository's pre-commit gate. --repo selects one repository.
 
+--in-place updates the checkout you stand in (or the one -C names) instead:
+native go get for the resolved release, then go mod tidy, with no plan
+comparison and no commit. Go keeps its toolchain selection, module
+verification and dependency rules. --in-place --check reads the pin and the
+release metadata without changing anything: exit 0 means current or ahead, 1
+means an update is available, and 2 means unknown, diverged or a check
+failure; a local SDK replacement reports unknown. Output is one update_check
+record for a check and one update receipt for an update.
+
 Progress goes to stderr. The first interrupt allows the active repository to
 restore module files and prints completed results. A second interrupt exits
 immediately. The report also identifies divergent SDK pins that may conflict
@@ -126,6 +208,8 @@ with the shared store schema.
 | `--apply` | Write the bumps and commit per repo (default is a dry run) |
 | `--verify` | Run each repo's pre-commit gate after the bump |
 | `--repo NAME_OR_PATH` | Scope to a single repo by name or checkout path |
+| `--in-place` | Bump this checkout's pin with go get and go mod tidy; no plan comparison, no commit |
+| `--check` | With --in-place, compare the pin with the release without changing it |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -142,4 +226,10 @@ sparkwing repos update --version v0.16.0 --apply
 
 # Scope to one repo and run its gate
 sparkwing repos update --repo fictional-app --verify
+
+# Bump this checkout's SDK pin
+sparkwing repos update --in-place
+
+# Check this checkout's SDK pin
+sparkwing repos update --in-place --check
 ```

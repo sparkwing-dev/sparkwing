@@ -150,7 +150,7 @@ func TestInstallFleet_SaysSoWhenTheRegistryIsEmpty(t *testing.T) {
 			t.Fatalf("installFleet: %v", err)
 		}
 	})
-	if !strings.Contains(out, "sparkwing configure xrepo add") {
+	if !strings.Contains(out, "sparkwing repos add") {
 		t.Errorf("an empty registry should say how to fill it:\n%s", out)
 	}
 }

@@ -57,7 +57,7 @@ func resolveRunLimit(opts GrepOpts) int {
 
 func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
-		return errors.New("runs grep: PATTERN is required")
+		return errors.New("runs logs --grep: PATTERN is required")
 	}
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -91,15 +91,15 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 
 func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
-		return errors.New("runs grep: PATTERN is required")
+		return errors.New("runs logs --grep: PATTERN is required")
 	}
 	if controllerURL == "" {
-		return errors.New("runs grep: profile must carry a controller URL")
+		return errors.New("runs logs --grep: profile must carry a controller URL")
 	}
 	if logsURL == "" {
 		var err error
 		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
-			return fmt.Errorf("runs grep: %w", err)
+			return fmt.Errorf("runs logs --grep: %w", err)
 		}
 	}
 	c := client.NewWithToken(controllerURL, nil, token)

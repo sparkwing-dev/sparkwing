@@ -19,7 +19,7 @@ func TestShellCompletionUsesLiveProfileFlag(t *testing.T) {
 			if !strings.Contains(tt.script, tt.want) {
 				t.Fatalf("completion does not handle live profile flag %q", tt.want)
 			}
-			for _, stale := range []string{"--sw-profile", "_complete-profiles-for-pipeline"} {
+			for _, stale := range []string{"--sw-profile"} {
 				if strings.Contains(tt.script, stale) {
 					t.Errorf("completion contains retired profile selection %q", stale)
 				}

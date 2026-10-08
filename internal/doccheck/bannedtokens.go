@@ -88,7 +88,7 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`sparkwing pipeline add\b`),
-		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`",
+		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing repos add <path>`",
 	},
 	{
 		regexp.MustCompile(`pipeline templates\b`),
@@ -104,7 +104,7 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`pipeline new\b[^\n]*--param\b`),
-		"removed; `pipeline new --template` takes one of five shapes and renders no parameters (`--param` lives on `examples scaffold`, which registry entries are read through)",
+		"removed; `pipeline new --template` takes one of five shapes and renders no parameters; read a parameterized example with `sparkwing examples --name NAME --body`",
 	},
 }
 

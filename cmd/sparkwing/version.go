@@ -325,7 +325,7 @@ func printVersionTable(r VersionReport) {
 		}
 		fmt.Printf("  sdk:      %s   %s\n", p.SDKPin, label)
 		if p.SDKBehind {
-			fmt.Printf("  upgrade:  sparkwing update --sdk\n")
+			fmt.Printf("  upgrade:  sparkwing repos update --in-place\n")
 		}
 	}
 	if len(p.Sparks) > 0 {

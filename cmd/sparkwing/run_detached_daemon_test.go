@@ -67,8 +67,9 @@ func TestRunDetachedStartsConsumerWithoutPreWarmingDaemon(t *testing.T) {
 		return nil
 	}
 
+	t.Chdir(repoDir)
 	err := runDetached(context.Background(), "warmfixture",
-		runFlags{detached: true, changeDir: repoDir, outputFormat: "json"}, nil)
+		runFlags{detached: true, outputFormat: "json"}, nil)
 	if err != nil {
 		t.Fatalf("runDetached: %v", err)
 	}

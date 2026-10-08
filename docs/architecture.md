@@ -84,7 +84,7 @@ serves it to runners that poll and claim.
 Executes pipeline binaries. A standing warm-pool Deployment runs the
 unified `sparkwing-runner` binary, which polls the controller and claims
 pending nodes. For per-node isolation it launches a Kubernetes Job that
-runs `sparkwing run-node`. The runner downloads code from the cache,
+runs `sparkwing-runner run-node`. The runner downloads code from the cache,
 compiles and runs the pipeline, and reports results.
 
 The trigger runner fetches and compiles with its shared source and build caches.

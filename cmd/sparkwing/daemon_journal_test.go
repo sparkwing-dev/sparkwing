@@ -65,16 +65,19 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plain := captureDaemonOutput(t, func() error { return runDaemonExplain([]string{"--home", home, "--run", "run-1", "-o", "plain"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
 	if !strings.Contains(plain, "Queued behind run run-0: cores") || !strings.Contains(plain, "Admitted after 350ms") {
 		t.Fatalf("timeline: %s", plain)
 	}
-	jsonExplain := captureDaemonOutput(t, func() error { return runDaemonExplain([]string{"--home", home, "--run", "run-1"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	jsonExplain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1"}) })
 	if strings.Count(jsonExplain, "\n") != 3 || !strings.Contains(jsonExplain, `"kind":"request"`) {
 		t.Fatalf("piped explanation: %s", jsonExplain)
 	}
 	json := captureDaemonOutput(t, func() error {
-		return runDaemonEvents([]string{"--home", home, "--run", "run-1", "--kind", "queued", "-o", "json"})
+		t.Setenv("SPARKWING_HOME", home)
+		return runDaemonEvents([]string{"--run", "run-1", "--kind", "queued", "-o", "json"})
 	})
 	if strings.Count(json, "\n") != 1 || !strings.Contains(json, `"kind":"queued"`) {
 		t.Fatalf("events: %s", json)
@@ -83,15 +86,18 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 
 func TestDaemonEventsReportsEmptyJournalLocation(t *testing.T) {
 	home := t.TempDir()
-	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--home", home, "-o", "plain"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"-o", "plain"}) })
 	if !strings.Contains(plain, "No events are retained in "+filepath.Join(home, "wingd")) {
 		t.Fatalf("empty journal: %q", plain)
 	}
-	json := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--home", home, "-o", "json"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	json := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"-o", "json"}) })
 	if json != "" {
 		t.Fatalf("empty JSON journal: %q", json)
 	}
-	if err := runDaemonEvents([]string{"--home", home, "-o", "csv"}); err == nil || !strings.Contains(err.Error(), "pretty|json|plain") {
+	t.Setenv("SPARKWING_HOME", home)
+	if err := runDaemonEvents([]string{"-o", "csv"}); err == nil || !strings.Contains(err.Error(), "pretty|json|plain") {
 		t.Fatalf("invalid output mode: %v", err)
 	}
 }
@@ -115,7 +121,8 @@ func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plain := captureDaemonOutput(t, func() error { return runDaemonExplain([]string{"--home", home, "--run", "run-1", "-o", "plain"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
 	for _, fragment := range []string{"node-slot: Requested 0.2 cores", "node-slot: Admitted after 12.4s (backfill)", "child-1: Attached child", "child-2: Request rejected: parent lease missing", "refused-slot: Request rejected: draining", "node-slot: Released lease-1"} {
 		if !strings.Contains(plain, fragment) {
 			t.Errorf("missing %q in %s", fragment, plain)
@@ -140,7 +147,8 @@ func TestDaemonExplainFollowsDescendantsTransitively(t *testing.T) {
 		}
 	}
 	output := captureDaemonOutput(t, func() error {
-		return runDaemonExplain([]string{"--home", home, "--run", "root", "-o", "json"})
+		t.Setenv("SPARKWING_HOME", home)
+		return runDaemonEvents([]string{"--explain", "--run", "root", "-o", "json"})
 	})
 	if strings.Count(output, `"run_id":"grandchild"`) != 2 || !strings.Contains(output, `"run_id":"child"`) || strings.Contains(output, `"run_id":"unrelated"`) {
 		t.Fatalf("transitive timeline: %s", output)
@@ -163,9 +171,10 @@ func TestDaemonJournalReportsSkippedRecords(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("SPARKWING_HOME", home)
 	for _, run := range []func() error{
-		func() error { return runDaemonEvents([]string{"--home", home, "-o", "json"}) },
-		func() error { return runDaemonExplain([]string{"--home", home, "--run", "run-1", "-o", "json"}) },
+		func() error { return runDaemonEvents([]string{"-o", "json"}) },
+		func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "json"}) },
 	} {
 		warning := captureDaemonErrorOutput(t, func() error {
 			_ = captureDaemonOutput(t, run)
@@ -235,7 +244,8 @@ func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
 	oldStderr := os.Stderr
 	os.Stderr = errWriter
 	defer func() { os.Stderr = oldStderr }()
-	first := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--home", home, "--run", "run-1"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	first := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--run", "run-1"}) })
 	_ = errWriter.Close()
 	os.Stderr = oldStderr
 	note, err := io.ReadAll(errReader)
@@ -249,11 +259,13 @@ func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
 	if !strings.Contains(string(note), "--offset 50") {
 		t.Fatalf("continuation: %q", note)
 	}
-	older := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--home", home, "--run", "run-1", "--offset", "50"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	older := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--run", "run-1", "--offset", "50"}) })
 	if strings.Count(older, "\n") != 5 || !strings.Contains(strings.Split(older, "\n")[0], `"index":0`) || !strings.Contains(older, `"index":4`) {
 		t.Fatalf("older page: %s", older)
 	}
-	all := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--home", home, "--run", "run-1", "--limit", "0"}) })
+	t.Setenv("SPARKWING_HOME", home)
+	all := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--run", "run-1", "--limit", "0"}) })
 	if strings.Count(all, "\n") != 55 {
 		t.Fatalf("all records: got %d", strings.Count(all, "\n"))
 	}

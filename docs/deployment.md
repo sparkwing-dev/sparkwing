@@ -92,7 +92,7 @@ profiles:
       token: <api-token>
 ```
 
-Register profiles with `sparkwing configure profiles add`.
+Register profiles with `sparkwing cloud connect`.
 
 ## Deploy Strategies
 

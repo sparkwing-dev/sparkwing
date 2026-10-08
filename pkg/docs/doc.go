@@ -3,7 +3,7 @@
 // running binary. Source of truth is repo-root /docs/; this package
 // embeds a mirror under mirror/.
 //
-// The CLI's `sparkwing docs read`, `docs list`, `docs all`, and
+// The CLI's `sparkwing docs read`, `docs list`, `docs read --all`, and
 // `docs search` verbs delegate to [Read], [List], [All], and
 // [Search] here. Each doc topic is described by an [Entry].
 // Unknown slugs return [ErrNotFound].

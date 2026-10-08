@@ -29,7 +29,6 @@ func runDoctor(args []string) error {
 	fs := flag.NewFlagSet(cmdDoctor.Path, flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "report what would be repaired without changing anything")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	timeout := fs.Duration("timeout", doctorDefaultTimeout, "budget for the daemon and local-state checks; each takes a slice of it")
 	if err := parseAndCheck(cmdDoctor, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -48,14 +47,14 @@ func runDoctor(args []string) error {
 	if *timeout <= 0 {
 		return fmt.Errorf("doctor: --timeout must be positive, got %s", *timeout)
 	}
-	p, err := homePaths(*home)
+	p, err := homePaths("")
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	report, err := diagnose(ctx, p, *home, *dryRun)
+	report, err := diagnose(ctx, p, "", *dryRun)
 	if err != nil {
 		return renderPartialDoctor(os.Stdout, report, format, fmt.Errorf("doctor: %w", err))
 	}

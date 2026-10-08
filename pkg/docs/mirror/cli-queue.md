@@ -55,7 +55,6 @@ concurrency key, its holders and waiters, and registered runner capacity.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile NAME` | Inspect this profile's controller instead of the local daemon |
 
 ### Examples
@@ -123,7 +122,6 @@ This is the same output as 'sparkwing queue'.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile NAME` | Inspect this profile's controller instead of the local daemon |
 
 ### Examples
@@ -177,7 +175,6 @@ and 4 when the daemon's socket cannot be reached at all.
 | `--run ID` | Run id to re-rank (required) |
 | `--set VALUE` | New priority: an integer, front, or back (required) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples
 

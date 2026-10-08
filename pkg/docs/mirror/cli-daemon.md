@@ -21,7 +21,6 @@ for event records and dump paths.
 
 - `status` -- Report whether wingd is running and which build it serves
 - `events` -- Read retained admission events without starting the daemon
-- `explain` -- Explain one run's admission history from retained events
 - `restart` -- Refresh an answering wingd to this installed build
 - `stop` -- Drain an answering wingd and leave it stopped
 - `recover-state` -- Preserve unreadable daemon state after its holders stop
@@ -45,17 +44,19 @@ Read retained admission events without starting the daemon
 
 Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.
 
+--explain --run ID explains that run's admission history in sentences instead, including descendant node slots and attached children; JSON output keeps the structured records.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--home DIR` | Sparkwing home to inspect |
 | `--run ID` | Filter by run ID |
 | `--since DURATION` | Lookback duration |
 | `--kind KIND` | Record kind (repeatable) |
 | `--incarnation N` | Daemon incarnation |
 | `--limit N` | Maximum records (default 50; 0 for all) |
 | `--offset N` | Matching records to skip from newest |
+| `--explain` | With --run, explain the run's admission history in sentences |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -63,27 +64,9 @@ Reads the size-capped journal in the daemon directory. Lists the newest 50 match
 ```sh
 # Events for one run
 sparkwing daemon events --run abc -o json
-```
 
-## `sparkwing daemon explain`
-
-Explain one run's admission history from retained events
-
-Explains a run's admission history in sentences, including descendant node slots and attached children, without starting the daemon. Unreadable records are skipped and counted on stderr. JSON output retains the structured records.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--home DIR` | Sparkwing home to inspect |
-| `--run ID` | Run ID to explain (required) |
-| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Explain a run
-sparkwing daemon explain --run abc
+# Explain one run's admission history
+sparkwing daemon events --run abc --explain
 ```
 
 ## `sparkwing daemon recover-state`
@@ -100,14 +83,13 @@ copy, and never discards readable state.
 
 | Flag | Description |
 |---|---|
-| `--home DIR` | Sparkwing home whose unreadable daemon state should be preserved |
 | `--yes` | Confirm every run described by the unreadable state has stopped (required) |
 
 ### Examples
 
 ```sh
 # Recover only after verifying the described runs stopped
-sparkwing daemon recover-state --home /path/to/home --yes
+SPARKWING_HOME=/path/to/home sparkwing daemon recover-state --yes
 ```
 
 ## `sparkwing daemon restart`
@@ -124,7 +106,6 @@ daemon is running, nothing is started.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--home DIR` | Sparkwing state directory |
 | `--force` | Replace the daemon even when it already serves this build |
 
 ### Examples
@@ -173,7 +154,6 @@ continues serving with artifact routes disabled.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--home DIR` | Sparkwing state directory |
 
 ### Examples
 
@@ -199,7 +179,6 @@ A run still holding admission finishes against the store it already opened.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--home DIR` | Sparkwing home whose daemon should stop |
 
 ### Examples
 

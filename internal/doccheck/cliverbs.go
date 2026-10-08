@@ -12,8 +12,6 @@ var registryPathRE = regexp.MustCompile(`Path:\s*"(sparkwing[^"]*)"`)
 
 var posArgsFieldRE = regexp.MustCompile(`^\s*PosArgs:`)
 
-var hiddenTopLevel = []string{"run-node", "handle-trigger"}
-
 type cliVerb struct {
 	file   string
 	line   int
@@ -104,9 +102,6 @@ func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
 	if len(valid) == 0 {
 		return nil, nil, fmt.Errorf("no Command paths found in help_registry.go")
 	}
-	for _, v := range hiddenTopLevel {
-		valid["sparkwing "+v] = true
-	}
 	return valid, posArgs, nil
 }
 
@@ -147,6 +142,8 @@ func extractInvocations(file, doc string) []cliVerb {
 	return out
 }
 
+var rootValueFlags = map[string]bool{"-C": true, "--profile": true, "-o": true, "--output": true}
+
 var subcmdTokenRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 func parseInvocation(file string, line int, s string) (cliVerb, bool) {
@@ -157,8 +154,12 @@ func parseInvocation(file string, line int, s string) (cliVerb, bool) {
 	if len(fields) == 0 || fields[0] != "sparkwing" {
 		return cliVerb{}, false
 	}
+	rest := fields[1:]
+	for len(rest) > 1 && rootValueFlags[rest[0]] {
+		rest = rest[2:]
+	}
 	var tokens []string
-	for _, f := range fields[1:] {
+	for _, f := range rest {
 		if isShellOperator(f) || strings.HasPrefix(f, "#") {
 			break
 		}

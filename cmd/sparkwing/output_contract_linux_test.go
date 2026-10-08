@@ -34,9 +34,9 @@ func TestOutputContractTerminal(t *testing.T) {
 		{"serve-plain", "plain", []string{"serve", "stop"}, 0},
 		{"consumer-default", "", []string{"runs", "consumer", "stop"}, 0},
 		{"consumer-json", "json", []string{"runs", "consumer", "stop"}, 0},
-		{"update-default", "", []string{"update", "--sdk", "--check"}, 2},
-		{"update-json", "json", []string{"update", "--sdk", "--check"}, 2},
-		{"update-plain", "plain", []string{"update", "--sdk", "--check"}, 2},
+		{"update-default", "", []string{"repos", "update", "--in-place", "--check"}, 2},
+		{"update-json", "json", []string{"repos", "update", "--in-place", "--check"}, 2},
+		{"update-plain", "plain", []string{"repos", "update", "--in-place", "--check"}, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mode := tc.mode
@@ -58,14 +58,18 @@ func TestOutputContractTerminal(t *testing.T) {
 			}
 			defer slave.Close()
 			args := append([]string{}, tc.args...)
+			home := ""
 			if strings.HasPrefix(tc.name, "serve-running") {
 				dp, _, _ := dashboardSleepingRecord(t)
-				args = append(args, "--home", dp.home)
+				home = dp.home
 			}
 			if mode != "" {
 				args = append(args, "--output", mode)
 			}
 			cmd := outputContractCommand(t, args...)
+			if home != "" {
+				cmd.Env = setEnv(cmd.Env, "SPARKWING_HOME", home)
+			}
 			cmd.Env = setEnv(cmd.Env, "NO_COLOR", "")
 			cmd.Env = setEnv(cmd.Env, "CLICOLOR_FORCE", "1")
 			cmd.Stdout = slave

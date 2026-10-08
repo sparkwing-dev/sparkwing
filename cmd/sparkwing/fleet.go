@@ -21,10 +21,12 @@ func runFleet(args []string) error {
 		PrintHelp(cmdFleet, os.Stdout)
 		return nil
 	}
-	if args[0] != "init" {
+	switch args[0] {
+	case "init":
+		return runFleetInit(args[1:])
+	default:
 		return fmt.Errorf("fleet: unknown subcommand %q", args[0])
 	}
-	return runFleetInit(args[1:])
 }
 
 func runFleetInit(args []string) error {

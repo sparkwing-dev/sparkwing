@@ -28,7 +28,9 @@ func TestRunsErrorsReadsTheProfilesController(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 
 	var err error
-	captureStdout(t, func() { err = runJobs([]string{"errors", runID, "--profile", "prod"}) })
+	captureStdout(t, func() {
+		err = runJobs([]string{"status", runID, "--view", "errors", "--profile", "prod", "--exit-zero"})
+	})
 	if err != nil {
 		t.Fatalf("runs errors --profile: %v", err)
 	}

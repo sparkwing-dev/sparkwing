@@ -84,23 +84,24 @@ indexed in [cli-reference.md](cli-reference.md):
 | Group | For |
 |---|---|
 | `info` | Agent entrypoint card: what sparkwing is, what's in this repo, what to run next |
-| `pipeline` | This repo's pipelines: list / describe / discover / new / explain / run / trigger / hooks / sparks |
-| `run` | Shortcut for `pipeline run` (the positional form) |
-| `runs` | Inspect and manage runs: list / status / logs / retry / cancel, plus `approvals` and `triggers` |
-| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update |
-| `queue` | Local admission: holders, connections, waiters, capacity |
-| `daemon` | The local admission daemon: status / restart |
-| `profile` | Show which profile would resolve for this invocation, and why (read-only; never prints tokens) |
-| `version` | Composite CLI + SDK + sparks version card; `update --sdk` bumps the pinned SDK |
+| `pipeline` | This repo's pipelines: list / describe / new / lint / plan / trigger / hooks / sparks |
+| `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
+| `crons` | This host's pipeline schedules: install / uninstall / list / show / set / run |
+| `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / bounce / prune, plus `approvals` and `annotations` |
+| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
+| `queue` | Local admission: holders, connections, waiters, capacity; `priority` re-ranks a queued run |
+| `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain |
+| `daemon` | The local admission daemon: status / events / restart / stop / recover-state |
+| `version` | Composite CLI + SDK + sparks version card; `repos update --in-place` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
-| `dashboard` | Detached local dashboard server: start / kill / status |
+| `serve` | Detached local dashboard server: start / stop / restart / status / logs |
 | `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |
-| `cloud` | Connect this machine to a controller: connect / status / disconnect |
-| `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
+| `cloud` | Connect this machine to a controller: connect / status (`--cluster` for fleet and queue health) / disconnect |
+| `cluster` | Cluster ops against a profile's controller: agents / runners / worker / triggers / users / tokens / limits / concurrency / object-store |
 | `secrets` | Secrets in the local store, or controller-stored with `--profile`: set / get / list / delete / rotate |
-| `configure` | Laptop-local config: init / profiles / xrepo |
+| `configure` | Laptop-local config: init / profiles |
 | `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |
-| `docs` | The embedded copy of this doc tree: list / read / all / search |
+| `docs` | The embedded copy of this doc tree: list / read / search / migrations |
 | `examples` | The worked-pipeline registry; `--name <example> --body` prints the source |
 | `commands` | The full CLI surface as JSON (agent self-discovery) |
 | `completion` | Shell completion script (`--shell bash\|zsh\|fish`) |
@@ -117,10 +118,16 @@ indexed in [cli-reference.md](cli-reference.md):
   time (`json.Decoder` in a loop, `jq -c .` with no `-s`, `while read
   line`, and similar readers). An empty listing is an empty stream. Describe, get, and status verbs return
   one compact JSON object.
+- **Root flags.** `-C DIR`, `--profile NAME` and `-o FORMAT` may go before
+  the verb, as in `sparkwing -C ~/code/other runs list`. `-C` works only
+  there; it moves the working directory before anything else is read.
 - **Profile addressing.** `--profile NAME` picks the storage/dispatch
-  profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
-  `sparkwing run` always executes locally; `sparkwing pipeline trigger` is
-  the verb for remote (cluster) execution.
+  profile. Without it, verbs that read runs use `SPARKWING_PROFILE`, then
+  the project's `defaults.profile`, then local state (SQLite under
+  `~/.sparkwing/`); verbs that change state elsewhere (secrets, crons,
+  runs cancel and similar) act locally. `sparkwing run` always executes
+  locally; `sparkwing pipeline trigger` is the verb for remote (cluster)
+  execution.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail
   before any side effect.
 - **Hidden entries.** Pipelines marked `hidden: true` don't appear in
@@ -136,7 +143,7 @@ sparkwing commands --query status
 sparkwing runs status --help
 sparkwing pipeline list -o json
 sparkwing pipeline describe --name fictional-build -o json
-sparkwing pipeline discover --query fictional-build -o json
+sparkwing pipeline list --query fictional-build -o json
 ```
 
 Command records carry `path`, `synopsis`, and `subcommand_count`.

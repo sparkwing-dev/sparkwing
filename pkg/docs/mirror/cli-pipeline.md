@@ -11,32 +11,28 @@ This repo's pipelines
 Per-project namespace. Every verb here operates on the
 nearest .sparkwing/ walking up from the current directory.
 
-Discovery (list / describe / discover / explain) shows what
-pipelines this repo defines. 'new' scaffolds a fresh pipeline
-(auto-bootstraps .sparkwing/ on first use). 'run' invokes one
-(positional name; same as 'sparkwing run <name>'). 'hooks' wires
+Discovery (list / describe / plan) shows what pipelines this repo
+defines. 'new' scaffolds a fresh pipeline (auto-bootstraps .sparkwing/
+on first use); 'sparkwing run <name>' invokes one. 'hooks' wires
 pipelines to git pre-commit / pre-push / post-commit.
 'sparks' manages reusable spark libraries declared in the
 sparks: block of .sparkwing/sparkwing.yaml.
 
-The discovery verbs (list / describe / discover / templates)
+The discovery verbs (list / describe / plan)
 support -o json so an agent can parse output directly rather
 than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
-'sparkwing update --sdk'. To see the current pin, run
+'sparkwing repos update --in-place'. To see the current pin, run
 'sparkwing version' (composite card).
 
 ### Subcommands
 
 - `list` -- Enumerate every pipeline with metadata
 - `describe` -- Print one pipeline's full metadata
-- `discover` -- Fuzzy search over pipeline names + descriptions + tags
 - `new` -- Scaffold a new Go pipeline
-- `explain` -- Render the pipeline's Plan DAG without dispatching any jobs
 - `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
 - `plan` -- Render the runtime-resolved DAG without dispatching any jobs
-- `run` -- Invoke a pipeline
 - `trigger` -- Submit a pipeline to a profile's controller (remote execution)
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
 - `sparks` -- Manage sparks libraries declared in .sparkwing/sparkwing.yaml
@@ -51,16 +47,16 @@ sparkwing pipeline list -o json
 sparkwing pipeline describe --name fictional-release -o json
 
 # Search by intent
-sparkwing pipeline discover --query "tag a release"
+sparkwing pipeline list --query "tag a release"
 
 # First pipeline in a new repository (auto-bootstraps)
 sparkwing pipeline new --name release
 
 # Inspect the DAG before running
-sparkwing pipeline explain --name fictional-release
+sparkwing pipeline plan --static --name fictional-release
 
 # Run a pipeline
-sparkwing pipeline run release
+sparkwing run release
 ```
 
 ## `sparkwing pipeline describe`
@@ -73,12 +69,15 @@ frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.
 
+--secrets compiles the pipeline and prints each declared secret, its
+source binding, and its resolution status instead of the metadata.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `--name NAME` | Pipeline name to describe (required) |
+| `--secrets` | Print the pipeline's declared secrets with provenance instead of its metadata |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -89,80 +88,9 @@ sparkwing pipeline describe --name release
 
 # Agent-readable
 sparkwing pipeline describe --name fictional-release -o json
-```
 
-## `sparkwing pipeline discover`
-
-Fuzzy search over pipeline names + descriptions + tags
-
-Search the catalog by intent. Every token in --query
-must match some haystack field (name / short / help / group /
-tags / triggers); matches in the name score higher than matches
-in prose so direct hits surface first.
-
--o json emits {name, kind, group, ..., score} records sorted by
-score descending; agents should prefer -o json for consumption.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-C, --sw-cd DIR` | Operate as if started in this directory |
-| `--query TEXT` | Search query (one or more tokens, all must hit some field) (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Find release-related pipelines
-sparkwing pipeline discover --query release
-
-# Multi-token, all must hit
-sparkwing pipeline discover --query "tag release"
-
-# Agent-readable ranked hits
-sparkwing pipeline discover --query deploy -o json
-```
-
-## `sparkwing pipeline explain`
-
-Render the pipeline's Plan DAG without dispatching any jobs
-
-Compiles the pipeline binary, calls the named pipeline's Plan method, and
-prints its nodes, dependencies, and approval gates. Jobs remain unexecuted.
-
-Arguments other than --name, --all, -o/--output, and --help pass to the
-pipeline. This previews plans controlled by --env, --version, and similar
-inputs. Missing required arguments are tolerated so the plan can be inspected
-before every input is supplied.
-
---all constructs every declared pipeline with no extra arguments and exits
-non-zero if any plan fails validation. Validation detects mismatched typed
-references, inconsistent declared outputs, duplicate node IDs, and similar
-errors.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Pipeline to explain (one of --name or --all required) |
-| `--all` | Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Inspect the example release DAG
-sparkwing pipeline explain --name fictional-release
-
-# Preview with args (forwarded to the pipeline)
-sparkwing pipeline explain --name example-release --env prod
-
-# Agent-readable JSON
-sparkwing pipeline explain --name fictional-release -o json
-
-# Validate every pipeline (CI gate)
-sparkwing pipeline explain --all
+# Inspect the declared secrets
+sparkwing pipeline describe --name fictional-release --secrets -o json
 ```
 
 ## `sparkwing pipeline hooks`
@@ -189,45 +117,6 @@ them with a warning.
 - `install` -- Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
 - `uninstall` -- Remove sparkwing-managed git hooks
 - `status` -- Report declared, installed, and missing sparkwing hooks
-- `survey` -- Report effective gates for registered repositories
-- `fire` -- Make the gate refuse a commit, to see that it can
-
-## `sparkwing pipeline hooks fire`
-
-Make the gate refuse a commit, to see that it can
-
-Attempts a commit with a managed gate instructed to refuse it and reports
-whether the gate blocked Git. A control attempt with hooks disabled must
-succeed, so an unrelated commit failure cannot count as a passing diagnostic.
-
-The attempts use a temporary detached worktree and index. The source checkout
-and its branches remain unchanged. Only managed hooks carrying the diagnostic
-guard execute; other hooks are reported as unprovable.
-
-Exits nonzero unless every applicable repository refused the test commit
-through its own gate. Repositories without a pre-commit trigger are excluded.
-This command verifies pre-commit hooks.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
-| `--fleet` | Fire the gate in every registered repo instead of one |
-| `-o, --output FMT` | Output format: pretty\|json\|plain |
-
-### Examples
-
-```sh
-# Prove this repo's gate refuses a commit
-sparkwing pipeline hooks fire
-
-# Prove every registered repo's gate
-sparkwing pipeline hooks fire --fleet
-
-# Machine-readable
-sparkwing pipeline hooks fire -o json
-```
 
 ## `sparkwing pipeline hooks install`
 
@@ -251,7 +140,6 @@ gate.
 
 | Flag | Description |
 |---|---|
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Install into every registered repo instead of one |
 | `--no-prove` | Claim core.hooksPath without running the gate first |
 | `--profile NAME` | Pin the hook's runs to this storage profile (default: local-only) |
@@ -263,7 +151,7 @@ gate.
 sparkwing pipeline hooks install
 
 # Install in a different repo
-sparkwing pipeline hooks install --repo /path/to/repo
+sparkwing -C /path/to/repo pipeline hooks install
 
 # Arm every registered repo
 sparkwing pipeline hooks install --fleet
@@ -280,55 +168,51 @@ Lists every managed hook file under .git/hooks/ along with the pipelines it
 invokes. Declared hooks that are missing, shadowed, or borrowed are named with
 the command that repairs them.
 
+--prove attempts a commit with a managed gate instructed to refuse it and
+reports whether the gate blocked Git. A control attempt with hooks disabled
+must succeed, so an unrelated commit failure cannot count as a passing
+diagnostic. The attempts use a temporary detached worktree and index; the
+checkout and its branches remain unchanged. Only managed hooks carrying the
+diagnostic guard execute; other hooks are reported as unprovable. It exits
+nonzero unless every applicable repository refused the test commit through
+its own gate, and it proves pre-commit hooks only. --fleet proves every
+registered repository.
+
+--all reports declared hooks for every registered repository as armed,
+shadowed, uninstalled, or undeclared. A shadowed hook is installed but
+core.hooksPath selects another location. The STATE column reads no-gate where
+every declared hook fires and none of them is pre-commit or pre-push, because
+nothing there refuses a commit or a push. Register other checkouts before
+expecting them in the report; an unreadable registry produces an error.
+--ungated selects repositories where commits or pushes run without a gate.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints hook names. |
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
+| `--prove` | Make the gate refuse a test commit and report whether it did |
+| `--fleet` | With --prove, prove every registered repo |
+| `--all` | Report the effective gates of every registered repo |
+| `--ungated` | With --all, list only the repos git runs no gate for |
 
 ### Examples
 
 ```sh
 # Show hook status
 sparkwing pipeline hooks status
-```
 
-## `sparkwing pipeline hooks survey`
+# Prove this repo's gate refuses a commit
+sparkwing pipeline hooks status --prove
 
-Report effective gates for registered repositories
+# Prove every registered repo's gate
+sparkwing pipeline hooks status --prove --fleet
 
-Reports declared hooks for every registered repository as armed, shadowed,
-uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
-selects another location. The STATE column reads no-gate where every declared
-hook fires and none of them is pre-commit or pre-push, because nothing there
-refuses a commit or a push.
-
-Coverage includes registered repositories and configured fallback paths.
-Register other checkouts before expecting them in the report. An unreadable
-registry produces an error.
-
---ungated selects repositories where commits or pushes run without a gate.
-Only pre-commit and pre-push hooks can block those operations.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FMT` | Output format: pretty\|json\|plain |
-| `--ungated` | List only the repos git runs no gate for |
-
-### Examples
-
-```sh
-# Survey the fleet
-sparkwing pipeline hooks survey
+# Survey every registered repo's gates
+sparkwing pipeline hooks status --all
 
 # Just the ungated repos
-sparkwing pipeline hooks survey --ungated
-
-# Machine-readable
-sparkwing pipeline hooks survey -o json
+sparkwing pipeline hooks status --all --ungated
 ```
 
 ## `sparkwing pipeline hooks uninstall`
@@ -337,12 +221,6 @@ Remove sparkwing-managed git hooks
 
 Deletes every file under .git/hooks/ that carries the "Installed by sparkwing"
 marker. Hand-written hooks are left alone.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 
 ### Examples
 
@@ -391,7 +269,6 @@ override with --dir.
 | `--rules` | Print each rule's charter (what it forbids and why) and exit |
 | `--dir DIR` | Directory of pipeline source to scan (default: <.sparkwing>/jobs) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -423,13 +300,18 @@ metadata, and prints a grouped aligned table.
 --all includes entries marked 'hidden: true'. By default they're
 omitted.
 
+--query searches by intent instead: every token must match some field
+(name / short / help / group / tags / triggers), hidden entries included,
+and matches in the name rank above matches in prose. -o json adds a score
+to each record, highest first.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--all` | Include entries marked hidden |
+| `--query TEXT` | Rank entries whose fields match every token |
 
 ### Examples
 
@@ -442,6 +324,12 @@ sparkwing pipeline list -o json
 
 # Include hidden entries
 sparkwing pipeline list --all
+
+# Find release-related pipelines
+sparkwing pipeline list --query release
+
+# Agent-readable ranked hits
+sparkwing pipeline list --query "tag release" -o json
 ```
 
 ## `sparkwing pipeline new`
@@ -472,7 +360,7 @@ Generated actions print placeholder output. Replace them with the work the
 pipeline should perform. Use 'sparkwing docs read --guide authoring' for
 pipeline authoring guidance and 'sparkwing examples' for complete examples.
 
---sw-cd/-C selects another repository. --hidden hides the entry from default
+'sparkwing -C DIR pipeline new' selects another repository. --hidden hides the entry from default
 listings. --short sets its description.
 
 ### Flags
@@ -480,7 +368,6 @@ listings. --short sets its description.
 | Flag | Description |
 |---|---|
 | `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
-| `-C, --sw-cd DIR` | Scaffold as if started in this directory (re-anchors the .sparkwing search) |
 | `--template SHAPE` | DAG to scaffold: minimal (1 node) \| build-test-deploy (3) \| ci-pr-check (3) \| release (3) \| scheduled-report (5) (default: minimal) |
 | `--on EVENT` | Trigger(s) to declare: pull_request \| push \| schedule \| pre_commit \| pre_push \| post_commit \| manual (repeatable or comma-separated) (default: the shape's own) |
 | `--hidden` | Mark the entry hidden in default tab-complete menus |
@@ -527,11 +414,21 @@ Dynamic fan-out counts remain unresolved when they require execution.
 Skipping a state-loading step with --start-at leaves that state empty;
 downstream predicates are evaluated with the resulting state.
 
+--static prints the Plan DAG as the pipeline declares it -- nodes,
+dependencies, approval gates -- without resolving runtime skips. Missing
+required arguments are tolerated so the plan can be inspected before every
+input is supplied. --static --all constructs every declared pipeline with
+no extra arguments and exits non-zero if any plan fails validation
+(mismatched typed references, inconsistent declared outputs, duplicate node
+IDs, and similar errors), which makes it a CI gate.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--name NAME` | Pipeline to plan |
+| `--static` | Print the declared Plan DAG without resolving runtime skips |
+| `--all` | With --static, validate every pipeline in sparkwing.yaml; non-zero exit on any failure |
 | `--start-at STEP` | Skip every WorkStep upstream of STEP in the resulting plan |
 | `--stop-at STEP` | Skip every WorkStep downstream of STEP in the resulting plan |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
@@ -547,67 +444,12 @@ sparkwing pipeline plan --name fictional-cluster --start-at fictional-install
 
 # Agent-readable JSON for diff against expectations
 sparkwing pipeline plan --name fictional-release -o json
-```
 
-## `sparkwing pipeline run`
+# The declared DAG, with args forwarded to the pipeline
+sparkwing pipeline plan --static --name example-release --env prod
 
-Invoke a pipeline
-
-Compiles and runs the named pipeline from the nearest pipeline directory.
-This command has the same behavior as 'sparkwing run <pipeline>'.
-
-Runner options use the --sw- prefix. Unknown --sw- options fail before
-execution setup. Other arguments pass to the pipeline. Put -- before
-pipeline arguments that resemble runner options; every argument after the
-separator passes through unchanged.
-
-### Arguments
-
-- `<pipeline>` (required) -- Pipeline name registered in .sparkwing/sparkwing.yaml
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-C, --sw-cd PATH` | Run as if started in PATH |
-| `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
-| `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
-| `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
-| `--sw-idempotency-key KEY` | Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one |
-| `--sw-request-id ID` | Detached only: tracing identifier recorded on the run; never affects deduplication |
-| `--sw-consumer-idle DUR` | Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m) |
-| `--sw-consumer-claim-lease DUR` | Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
-| `--sw-output FORMAT` | Detached only: run-handle format, pretty\|json\|plain (default: pretty on a TTY, json when piped) |
-| `-v, --sw-verbose` | Enable debug logging and the complete live JSON event stream |
-| `--sw-start-at STEP` | Start the run at STEP |
-| `--sw-stop-at STEP` | Stop the run after STEP |
-| `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
-| `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
-| `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
-| `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
-| `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
-| `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
-| `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
-| `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
-| `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
-| `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop) |
-| `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
-
-### Examples
-
-```sh
-# Run with no flags
-sparkwing pipeline run fictional-build
-
-# Pass a typed pipeline arg
-sparkwing pipeline run fictional-release --version v0.28.1
-
-# Run from a different git ref
-sparkwing pipeline run fictional-build --sw-ref feature/xyz
-
-# Dispatch remotely
-sparkwing pipeline trigger deploy --profile prod
+# Validate every pipeline (CI gate)
+sparkwing pipeline plan --static --all
 ```
 
 ## `sparkwing pipeline sparks`
@@ -672,7 +514,6 @@ a duplicate (same source or same name).
 | `--source PATH` | Go module path (required) |
 | `--version VER` | Declared version ('latest', exact tag, or semver range) |
 | `--name NAME` | Short library name (default: last path segment of --source) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
 
@@ -714,7 +555,6 @@ packages[] row as its package name.
 |---|---|
 | `--library MODULE` | Spark library module path (default: github.com/sparkwing-dev/sparks-core) |
 | `--path DIR` | Read a library checkout on disk instead of downloading it |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -753,7 +593,6 @@ module replacement.
 | Flag | Description |
 |---|---|
 | `--module NAME` | Sparks-core module name or full module path (required) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-o, --output FMT` | Output format: pretty\|json |
 
 ### Examples
@@ -821,7 +660,6 @@ proxy calls when offline.
 
 | Flag | Description |
 |---|---|
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 | `--no-resolve` | Skip module-proxy lookups; print declared versions only |
 
@@ -849,7 +687,6 @@ Removes the entry matching NAME (or matching its source path).
 | Flag | Description |
 |---|---|
 | `--name NAME` | Library name or source path to remove (required) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
 
@@ -873,7 +710,6 @@ overlay already matches. The repository's module file stays unchanged.
 
 | Flag | Description |
 |---|---|
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `-q, --quiet` | Suppress the 'up-to-date' message |
 
 ### Examples
@@ -905,7 +741,6 @@ one library still, pin its "version:" field in
 | Flag | Description |
 |---|---|
 | `--name NAME` | Refused; update re-resolves every declared library |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
 
@@ -926,7 +761,6 @@ Warmup uses the same compilation path and cache key as 'sparkwing run'.
 
 | Flag | Description |
 |---|---|
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 | `--clear-cache` | Delete the local pipeline binary cache before compiling |
 
 ### Examples

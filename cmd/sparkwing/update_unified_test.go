@@ -89,6 +89,22 @@ func checkUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
 	return report, exitCodeFor(commandError)
 }
 
+func checkPinUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
+	t.Helper()
+	var commandError error
+	out := captureStdout(t, func() {
+		commandError = runSparkwing(append([]string{"repos", "update", "--in-place"}, args...))
+	})
+	var report updateCheckReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("pin check output is not one JSON record: %v %q (%v)", err, out, commandError)
+	}
+	if report.Kind != "update_check" || report.Tool != "sparkwing" || report.Strategy != "release" {
+		t.Fatalf("shared update contract: %+v", report)
+	}
+	return report, exitCodeFor(commandError)
+}
+
 func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {
 	isolateUpdateTests(t)
 	_, revision := updateMetadataFixture(t)
@@ -138,7 +154,7 @@ func TestUnifiedUpdateRejectsInputsBeforeProbes(t *testing.T) {
 	updateFetchLatest = func(context.Context) (string, error) { called = true; return "v0.49.0", nil }
 	updateReadInstalled = func() updateIdentity { called = true; return updateIdentity{} }
 	updateLookupRelease = func(context.Context, string) error { called = true; return nil }
-	for _, args := range [][]string{{"--cli", "--sdk"}, {"--sdk", "--force"}, {"--sdk", "--force=false"}, {"--sdk", "--override-hold"}, {"--sdk=false"}, {"--version", "../../not-a-tag"}, {"--version="}, {"--check", "-o", "jsonl"}, {"--output="}, {"extra"}} {
+	for _, args := range [][]string{{"--cli=false"}, {"--sdk"}, {"--version", "../../not-a-tag"}, {"--version="}, {"--check", "-o", "jsonl"}, {"--output="}, {"extra"}} {
 		if err := runSparkwing(append([]string{"update"}, args...)); err == nil {
 			t.Errorf("invalid args accepted: %v", args)
 		}
@@ -264,7 +280,7 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	report, code := checkUpdate(t, "--sdk", "--check", "--version", "v0.49.0")
+	report, code := checkPinUpdate(t, "--check", "--version", "v0.49.0")
 	if report.Target != "sdk" || report.Status != "update_available" || code != 1 || report.Installed.Version != "v0.48.0" {
 		t.Fatalf("SDK report: %+v code%d", report, code)
 	}
@@ -281,7 +297,7 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), append(before, []byte("replace "+sdkModulePath+" => ../local-sdk\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	report, code = checkUpdate(t, "--sdk", "--check")
+	report, code = checkPinUpdate(t, "--check")
 	if report.Status != "unknown" || code != 2 || !strings.Contains(report.Reason, "replacement") {
 		t.Fatalf("replacement misreported: %+v code%d", report, code)
 	}
@@ -581,7 +597,7 @@ func TestSDKCheckRefusesOversizedModuleWithoutWriting(t *testing.T) {
 	if err := os.WriteFile(file, []byte(strings.Repeat("x", maxMetadataBytes+1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	report, code := checkUpdate(t, "--sdk", "--check")
+	report, code := checkPinUpdate(t, "--check")
 	if report.Status != "unknown" || code != 2 || report.Installed.Path != file || !strings.Contains(report.Reason, "1 MiB") {
 		t.Fatalf("oversized module misreported: %+v %d", report, code)
 	}
@@ -641,7 +657,7 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	t.Setenv("GOTOOLCHAIN", "go1.26.6+auto")
 	t.Setenv(versionHoldEnv, "v0.10")
 	var commandError error
-	out := captureStdout(t, func() { commandError = runUpdate([]string{"--sdk"}) })
+	out := captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
 	if commandError != nil {
 		t.Fatal(commandError)
 	}
@@ -663,7 +679,7 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte("previous sum\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out = captureStdout(t, func() { commandError = runUpdate([]string{"--sdk"}) })
+	out = captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
 	if commandError != nil {
 		t.Fatal(commandError)
 	}
@@ -690,7 +706,7 @@ func TestUnifiedSDKPartialFailureHasNoSuccessReceipt(t *testing.T) {
 	}
 	t.Setenv("PATH", bin)
 	var commandError error
-	out := captureStdout(t, func() { commandError = runUpdate([]string{"--sdk"}) })
+	out := captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
 	if commandError == nil || out != "" || !strings.Contains(commandError.Error(), "SDK files may have changed") {
 		t.Fatalf("partial SDK failure misreported: %v %q", commandError, out)
 	}

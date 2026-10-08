@@ -1,7 +1,7 @@
 # Pipelines
 
 Pipelines define what happens when you run
-`sparkwing run <name>` (or `sparkwing pipeline run <name>`). See the
+`sparkwing run <name>`. See the
 [SDK guide](sdk.md) for API usage and [Authoring pipelines](authoring-pipelines.md)
 for the rules enforced by `sparkwing pipeline lint`.
 

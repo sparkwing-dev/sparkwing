@@ -653,6 +653,279 @@ operator token could list its mirror files with `GET /repos`.
 **Why:** each was a privileged route with no caller, and each needed its own
 review as the route table moves to one declared list.
 
+## CLI aliases and internal verbs
+
+Every verb the CLI dispatches is now a registered command, so `--help`,
+`sparkwing commands` and completion see the whole surface.
+
+| Before | After |
+|---|---|
+| `sparkwing configure profiles ls` | `sparkwing configure profiles list` |
+| `sparkwing configure profiles rm NAME`, `... delete NAME` | `sparkwing cloud disconnect --name NAME --keep-token` |
+| `sparkwing configure profiles dup ...` | none; see [Connection verbs fold into cloud](#connection-verbs-fold-into-cloud) |
+| `sparkwing secrets rm ...`, `sparkwing secrets remove ...` | `sparkwing secrets delete ...` |
+| `sparkwing pipeline sparks ls`, `... rm ...` | `sparkwing pipeline sparks list`, `... remove ...` |
+| `sparkwing configure xrepo ls`, `... rm ...` | `sparkwing repos list --checkouts`, `sparkwing repos remove ...` |
+| `sparkwing runs consumer kill` | `sparkwing runs consumer stop` |
+| `sparkwing run <pipeline> config [-o json]` | `sparkwing pipeline describe --name <pipeline> --secrets [-o json]` |
+| `sparkwing pipeline publish` | none; a runner compiles the pipeline on first use and shares the binary through the cache |
+| `sparkwing run-node` | none; the pipeline binary and `sparkwing-runner run-node` keep the node protocol |
+
+- **Shell completion:** the nine `_complete-*` helpers are one hidden
+  `sparkwing __complete KIND`. A completion script installed by an earlier
+  release calls the old names and completes nothing; regenerate it:
+
+  ```bash
+  sparkwing completion --shell zsh > "${fpath[1]}/_sparkwing"
+  ```
+
+- **`crons tick`:** hidden from `--help` and `sparkwing commands`, and still
+  invoked by the same name. OS timers installed by `crons install` need
+  nothing. A host that runs the tick from its own scheduler keeps calling
+  `sparkwing crons tick`.
+
+## cluster gc, examples scaffold and retired-flag pointers are removed
+
+| Before | After |
+|---|---|
+| `sparkwing cluster gc [--root DIR] [--profile P]` | none; `sparkwing-runner runner` sweeps its warm root when it starts |
+| `sparkwing examples scaffold --name EXAMPLE` | `sparkwing examples --name EXAMPLE --body`, then save the body under `.sparkwing/jobs/` |
+| `--on P`, `--sw-on P` | `--profile P` |
+| `sparkwing run X --sw-profile P` | `sparkwing pipeline trigger X --profile P` |
+| `--sw-target T` | `--target T` |
+| `sparkwing run X --sw-isolated-home DIR` | `SPARKWING_HOME=DIR sparkwing run X` |
+
+The retired spellings still fail; the error now says the flag is unknown
+instead of naming its replacement.
+
+## Root flags replace per-verb directory and home flags
+
+`-C DIR` goes before the verb and applies to every verb.
+
+| Before | After |
+|---|---|
+| `sparkwing run X --sw-cd DIR`, `sparkwing run X -C DIR` | `sparkwing -C DIR run X` |
+| `sparkwing pipeline list --sw-cd DIR` (and every other verb that took `--sw-cd`) | `sparkwing -C DIR pipeline list` |
+| `sparkwing pipeline sparks list --sparkwing-dir DIR/.sparkwing` | `sparkwing -C DIR pipeline sparks list` |
+| `sparkwing cache explain --dir DIR/.sparkwing` | `sparkwing -C DIR cache explain` |
+| `sparkwing pipeline hooks install --repo DIR` (also `uninstall`, `status`, `fire`) | `sparkwing -C DIR pipeline hooks install` |
+| `sparkwing crons install --repo DIR` (also `uninstall`) | `sparkwing -C DIR crons install` |
+| `sparkwing daemon status --home DIR` (also `queue`, `doctor`, `serve *`, `runs cancel/retry/bounce`, `runs consumer *`) | `SPARKWING_HOME=DIR sparkwing daemon status` |
+
+- `-C` walks up from DIR to the nearest `.sparkwing/`, so it accepts any
+  directory inside the repository. `--sparkwing-dir` and `cache explain --dir`
+  named the `.sparkwing/` directory itself; pass its parent to `-C`.
+- `pipeline lint --dir` still names the pipeline source to scan. `--repo`
+  still names a registered repository on `repos`, and an `OWNER/NAME`
+  filter on `runs` and `cluster` verbs.
+- `--profile NAME` may also go before the verb, for verbs that accept it.
+  Without `--profile`, verbs that read runs (`runs list/status/logs/stats`,
+  `run`, `pipeline hooks`, `serve`, `pipeline trigger`) use
+  `SPARKWING_PROFILE`, then the project's `defaults.profile`. `runs stats`
+  read the local store unless `--profile` was given; it now follows that
+  chain, so a repository with `defaults.profile` reads its controller. Verbs
+  that change state elsewhere (`secrets`, `crons`, `runs cancel/retry/bounce/prune`,
+  `cluster`) still act locally unless `--profile` is given.
+- `SPARKWING_PROFILE` is set for a pipeline's own process by
+  `sparkwing run --profile P`, so a `sparkwing runs ...` call inside a step
+  now reads P's store.
+
+## Runs verbs fold into status, list and logs
+
+| Before | After |
+|---|---|
+| `sparkwing runs get --run ID` | `sparkwing runs status ID -o json --exit-zero` |
+| `sparkwing runs wait --run ID [--timeout 10m] [--poll 3s]` | `sparkwing runs status ID --follow --timeout 10m [--poll 3s]` |
+| `sparkwing runs summary --run ID` | `sparkwing runs status ID --view summary --exit-zero` |
+| `sparkwing runs timeline --run ID [--steps] [--width N]` | `sparkwing runs status ID --view timeline [--steps] [--width N] --exit-zero` |
+| `sparkwing runs receipt --run ID` | `sparkwing runs status ID --view receipt --exit-zero` |
+| `sparkwing runs errors ID` | `sparkwing runs status ID --view errors --exit-zero` |
+| `sparkwing runs tree --run ID` | `sparkwing runs status ID --view tree --exit-zero` |
+| `sparkwing runs last [--pipeline P] [--watch]` | `sparkwing runs list --limit 1 [--pipeline P] [--watch]` |
+| `sparkwing runs find --git-sha S --repo R --root-only --wait --find-timeout D` | `sparkwing runs list --sha S --repo R --root-only --wait --wait-timeout D` |
+| `sparkwing runs failures [--group-by step\|node]` | `sparkwing runs list --status failed --group-by run\|step\|node` |
+| `sparkwing runs grep --pattern P [filters]` | `sparkwing runs logs --grep P [filters]` |
+| `sparkwing runs triggers list\|get` | `sparkwing cluster triggers list\|get` |
+
+- **Exit codes:** `runs status` exits 1 for a run that did not succeed, and
+  every view inherits that; add `--exit-zero` where a script read a view of a
+  failed run. `--follow --timeout` keeps `runs wait`'s codes: 0 succeeded, 1
+  failed or cancelled, 2 timed out, 3 the run could not be read.
+- **Output shape:** `runs wait -o json` printed the run record; `runs status -o json`
+  prints `{"run": ..., "nodes": ...}`, so read `.run.status` instead of
+  `.status`. `runs get -o json` output is a subset of `runs status -o json`.
+- **Defaults:** `runs find` looked back one hour by default; `runs list` has no
+  default lookback, so pass `--since 1h` to keep that window. `runs failures`
+  printed one row per failed run; that is `--group-by run`.
+- **Profiles:** `runs get`, `wait`, `last`, `find`, `failures`, `grep` and the
+  views read the local store unless `--profile` was given. Their replacements
+  follow `runs status`: `--profile`, then `SPARKWING_PROFILE`, then the
+  project's `defaults.profile`.
+
+## Pipeline verbs fold into list, plan and hooks status
+
+| Before | After |
+|---|---|
+| `sparkwing pipeline run X [flags]` | `sparkwing run X [flags]` |
+| `sparkwing pipeline discover --query Q [-o json]` | `sparkwing pipeline list --query Q [-o json]` |
+| `sparkwing pipeline explain --name X [-- pipeline-flags]` | `sparkwing pipeline plan --static --name X [-- pipeline-flags]` |
+| `sparkwing pipeline explain --all` | `sparkwing pipeline plan --static --all` |
+| `sparkwing pipeline hooks fire [--fleet]` | `sparkwing pipeline hooks status --prove [--fleet]` |
+| `sparkwing pipeline hooks survey [--ungated]` | `sparkwing pipeline hooks status --all [--ungated]` |
+
+- Output, exit codes and JSON shapes are unchanged; only the invocation moves.
+- A CI step that gates on `pipeline explain --all` changes its command line
+  and nothing else.
+- Pipelines scaffolded by an earlier `pipeline new` list
+  `sparkwing pipeline explain --name X` among their examples; edit the
+  example to `sparkwing pipeline plan --static --name X`.
+
+## Crons verbs fold into uninstall, list, show and set
+
+| Before | After |
+|---|---|
+| `sparkwing crons disarm NAME` | `sparkwing crons uninstall --name NAME` |
+| `sparkwing crons status` | `sparkwing crons list --timer` |
+| `sparkwing crons next [--count N]` | `sparkwing crons list --next N` |
+| `sparkwing crons next NAME [--count N]` | `sparkwing crons show NAME --next N` |
+| `sparkwing crons lock NAME` | `sparkwing crons set NAME --pin` |
+| `sparkwing crons unlock NAME` | `sparkwing crons set NAME --unpin` |
+| `sparkwing crons pause NAME` | `sparkwing crons set NAME --pause` |
+| `sparkwing crons resume NAME` | `sparkwing crons set NAME --resume` |
+| `sparkwing crons reset NAME` | `sparkwing crons set NAME --reset` |
+
+- **Exit codes and output:** each replacement prints what the old verb printed,
+  in every `-o` format, and exits the same way. `crons list --timer` still exits
+  1 when schedules are armed and the timer is not evaluating them, so a check
+  script only changes its command line. `-o json` keeps the old shapes: the
+  health record for `--timer`, one NDJSON instant per line for `--next`, the
+  schedule row for `--pin`, `--unpin`, `--pause` and `--resume`, and
+  `{"schedule": ..., "name": ...}` for `uninstall --name`. Error messages
+  name the new spelling, such as `crons set --pause:`.
+- **Defaults:** `crons next` showed 5 instants unless `--count` said otherwise;
+  `--next` takes the count as its value, so write `--next 5` for the old
+  default.
+- **Profiles:** `--profile NAME` works on each replacement as it did on the old
+  verb. `--pin` and `--unpin` refuse it, as `lock` and `unlock` did.
+- **One action per call:** `--pin`, `--unpin`, `--pause`, `--resume` and
+  `--reset` each stand alone on `crons set`, and none mixes with `--cron`,
+  `--tz`, `--overlap`, `--catch-up` or `--arg`. `crons list` takes one of
+  `--all`, `--timer` and `--next`. `uninstall --name` refuses `--fleet`, and
+  leaves the OS timer in place as `disarm` did.
+- **Positionals:** `crons list` and `crons uninstall` now refuse a stray
+  positional. `crons uninstall NAME` used to ignore the name and disarm the
+  whole repository.
+- **Timer units:** the systemd and launchd units run `sparkwing crons tick`,
+  which keeps its name, so an installed timer needs no change.
+
+## Docs verbs fold into list, read and migrations
+
+| Before | After |
+|---|---|
+| `sparkwing docs guides` | `sparkwing docs list --guides` |
+| `sparkwing docs versions [--web] [--no-cache]` | `sparkwing docs list --versions [--web] [--no-cache]` |
+| `sparkwing docs all` | `sparkwing docs read --all` |
+| `sparkwing docs migrations list [--web]` | `sparkwing docs migrations [--web]` |
+| `sparkwing docs migrations read --version V` | `sparkwing docs migrations --version V` |
+| `sparkwing docs migrations read V` | `sparkwing docs migrations V` |
+| `sparkwing docs migrations between --from A --to B` | `sparkwing docs migrations --from A --to B` |
+| `sparkwing docs migrations between` | `sparkwing docs migrations --from v0.0.0` |
+| `sparkwing docs cache info` | `sparkwing cache info --docs` |
+| `sparkwing docs cache clear` | `sparkwing cache prune --docs` |
+
+- **Agents:** a prompt, skill or script that runs
+  `docs migrations read --version V` or `docs migrations between --from A --to B`
+  drops the `read` or `between` word and keeps its flags. A bare
+  `docs migrations` now lists the guides; the every-guide blob that bare
+  `between` printed needs `--from v0.0.0`. The old words fail loudly:
+  `docs migrations read --version V` is refused as an unexpected positional,
+  and a bare `docs migrations read` as an invalid version.
+- **Output and exit codes:** each replacement prints what the old verb printed
+  in every `-o` format and exits the same way, with two exceptions.
+  `cache info --docs` heads its pretty report `DOCS WEB CACHE` instead of
+  `CACHE`, and with `-o plain` prints the cache directory where
+  `docs cache info` refused plain. `cache prune --docs` honours `-o`:
+  `-o json` prints `{"dir": ..., "removed": N}` and `-o plain` the removed
+  count, where `docs cache clear` printed its sentence for every format.
+- **Flag combinations:** `--guides` takes only `--output`; `--versions` takes
+  `--web` and `--no-cache`; `read --all` takes only `--output`. `--version`
+  and `--from`/`--to` on `docs migrations` cannot be combined. `--docs` on
+  `cache info` and `cache prune` refuses `--all`, `--max-bytes` and
+  `--max-entries`. `docs list` now refuses a stray positional.
+
+## Connection verbs fold into cloud
+
+| Before | After |
+|---|---|
+| `sparkwing configure profiles add --name N --controller URL --token-stdin` | `sparkwing cloud connect --name N --controller URL --token-stdin` |
+| `sparkwing configure profiles add --name N --controller URL` (controller not up, or unauthenticated) | `sparkwing cloud connect --name N --controller URL --no-probe` |
+| `sparkwing configure profiles add ... --token T` | `printf %s "$T" \| sparkwing cloud connect ... --token-stdin` |
+| `sparkwing configure profiles remove --name N` | `sparkwing cloud disconnect --name N --keep-token` |
+| `sparkwing configure profiles test --profile P [-o json]` | `sparkwing cloud status --profile P [-o json]` |
+| `sparkwing cluster status --profile P [-o json]` | `sparkwing cloud status --profile P --cluster [-o json]` |
+| `sparkwing profile [--profile P] [-o json]` | `sparkwing configure profiles show [--profile P] [-o json]` |
+| `sparkwing cluster tokens lookup --prefix X --profile P` | `sparkwing cluster tokens list --prefix X --profile P` |
+| `sparkwing configure profiles duplicate --src A --dst B` | copy the `A:` entry under `profiles:` in config.yaml to `B:` |
+
+- **`cloud connect` probes by default:** it checks the controller answers
+  unless `--no-probe` is given, and refuses an existing profile name unless
+  `--force` is given, as `configure profiles add` refused one.
+  `--token` on the command line is gone; pipe the token to `--token-stdin`.
+- **`cloud status` output:** a superset of `configure profiles test`: the same
+  probe table and exit code, plus the principal, scopes and dashboard when the
+  profile names a controller. JSON adds `controller`, `principal`, `scopes`,
+  `token_prefix` and `dashboard` beside `profile`, `probes` and `ok`.
+- **`cloud status --cluster`** prints the old `cluster status` report in the
+  same shape, with the same exit codes.
+- **`configure profiles show`** keeps `--name NAME [--show-token]` for one
+  config.yaml entry; without `--name` it prints the resolution report
+  `sparkwing profile` printed.
+
+## Repository verbs gather under repos
+
+| Before | After |
+|---|---|
+| `sparkwing configure xrepo add [path]` | `sparkwing repos add [path]` |
+| `sparkwing configure xrepo remove <path-or-basename>` | `sparkwing repos remove <path-or-basename>` |
+| `sparkwing configure xrepo prune` | `sparkwing repos prune` |
+| `sparkwing configure xrepo list [--pipelines=false] [-o json]` | `sparkwing repos list --checkouts [--pipelines=false] [-o json]` |
+| `sparkwing repos [-o json]` | `sparkwing repos list [-o json]` |
+| `sparkwing update --sdk [--version V]` | `sparkwing repos update --in-place [--version V]` |
+| `sparkwing update --sdk --check` | `sparkwing repos update --in-place --check` |
+
+- `repos update --in-place` runs the old `update --sdk` path unchanged: native
+  `go get` for the resolved release, then `go mod tidy`, in the checkout you
+  stand in or the one `sparkwing -C DIR` names. It neither compares plans nor
+  commits, and it refuses `--apply`, `--verify` and `--repo`, which act on the
+  tracked fleet.
+- `--in-place --check` keeps the exit codes: 0 current or ahead, 1 an update
+  is available, 2 unknown, diverged or a failed check.
+- `sparkwing update` updates the CLI only. `--cli` still names that target;
+  `--force` and `--override-hold` are unchanged.
+
+## daemon explain moves to daemon events --explain
+
+| Before | After |
+|---|---|
+| `sparkwing daemon explain --run ID [-o json]` | `sparkwing daemon events --run ID --explain [-o json]` |
+
+The output and exit codes are unchanged.
+
+## cluster image rollout is removed
+
+`sparkwing cluster image rollout --image NAME --tag TAG [--wait] [--tail-logs]`
+edited `images[].newTag` in a gitops checkout's kustomization.yaml, committed
+and pushed, ran `argocd app sync`, and waited with `kubectl rollout status`.
+Run those steps from a pipeline job instead:
+
+```bash
+cd "$GITOPS_REPO" && kustomize edit set image "NAME=REGISTRY/NAME:TAG"
+git commit -am "rollout NAME TAG" && git push
+argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
+```
+
+`SPARKWING_GITOPS_REPO` is no longer read.
+
 ## Pipeline steps no longer see SPARKWING_AGENT_TOKEN
 
 - **Before:** the pipeline binary kept the runner's `SPARKWING_AGENT_TOKEN` in

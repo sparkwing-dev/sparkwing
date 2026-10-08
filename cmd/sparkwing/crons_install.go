@@ -58,7 +58,6 @@ type cronsArmed struct {
 
 func runCronsInstall(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsInstall.Path, flag.ContinueOnError)
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "arm every registered repo")
 	only := fs.StringSlice("only", nil, "arm only these pipelines or pipeline/name entries")
 	follow := fs.Bool("follow", false, "arm without pinning, so each fire compiles the checkout")
@@ -75,9 +74,6 @@ func runCronsInstall(args []string) error {
 		}
 		return err
 	}
-	if *fleet && *repo != "" {
-		return errors.New("crons install: --fleet arms every registered repo; drop --repo or drop --fleet")
-	}
 	if *fleet && len(*only) > 0 {
 		return errors.New("crons install: --only names entries of one repo; drop --fleet or drop --only")
 	}
@@ -89,7 +85,7 @@ func runCronsInstall(args []string) error {
 		return err
 	}
 
-	roots, err := cronsTargetRoots(*repo, *fleet)
+	roots, err := cronsTargetRoots(*fleet)
 	if err != nil {
 		return fmt.Errorf("crons install: %w", err)
 	}
@@ -309,8 +305,8 @@ func cronsClampedCatchUps(schedules []store.CronSchedule) []cronsCatchUpCap {
 
 func runCronsUninstall(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsUninstall.Path, flag.ContinueOnError)
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "disarm every registered repo")
+	name := fs.String("name", "", "disarm this one schedule instead of the repo's")
 	outFmt := cronsOutputFlag(fs)
 	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsUninstall, fs, args); err != nil {
@@ -319,22 +315,31 @@ func runCronsUninstall(args []string) error {
 		}
 		return err
 	}
-	if *fleet && *repo != "" {
-		return errors.New("crons uninstall: --fleet disarms every registered repo; drop --repo or drop --fleet")
+	if fs.NArg() > 0 {
+		return fmt.Errorf("crons uninstall: unexpected positional %q; --name NAME disarms one schedule", fs.Arg(0))
 	}
 	if *on != "" && *fleet {
 		return fmt.Errorf("crons uninstall: %w", errCronsProfileAndFleet)
+	}
+	if fs.Changed("name") && *fleet {
+		return errors.New("crons uninstall: --name disarms one schedule and --fleet every one; drop one")
+	}
+	if fs.Changed("name") && *name == "" {
+		return errors.New("crons uninstall: --name needs a schedule name")
 	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUninstall.Path)
 	if err != nil {
 		return err
 	}
+	if *name != "" {
+		return runCronsDisarmOne(*name, format, *on)
+	}
 	if *on != "" {
-		roots, rerr := cronsTargetRoots(*repo, false)
+		root, rerr := resolveCleanupRoot()
 		if rerr != nil {
 			return fmt.Errorf("crons uninstall: %w", rerr)
 		}
-		return runCronsUninstallProfile(*on, roots[0], format)
+		return runCronsUninstallProfile(*on, root, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -357,10 +362,11 @@ func runCronsUninstall(args []string) error {
 	}
 	roots := armedRoots
 	if !*fleet {
-		roots, err = cronsTargetRoots(*repo, false)
-		if err != nil {
-			return fmt.Errorf("crons uninstall: %w", err)
+		root, rerr := resolveCleanupRoot()
+		if rerr != nil {
+			return fmt.Errorf("crons uninstall: %w", rerr)
 		}
+		roots = []string{root}
 	}
 
 	report := cronsUninstallReport{}
@@ -437,18 +443,18 @@ func renderCronsUninstall(report cronsUninstallReport, format string) error {
 	return nil
 }
 
-func cronsTargetRoots(repo string, fleet bool) ([]string, error) {
+func cronsTargetRoots(fleet bool) ([]string, error) {
 	if fleet {
 		roots, err := fleetRepoRoots(runGit)
 		if err != nil {
 			return nil, err
 		}
 		if len(roots) == 0 {
-			return nil, errors.New("no repos registered; run `sparkwing configure xrepo add <dir>` first")
+			return nil, errors.New("no repos registered; run `sparkwing repos add <dir>` first")
 		}
 		return roots, nil
 	}
-	root, _, err := resolveHooksRepo(repo)
+	root, _, err := resolveHooksRepo()
 	if err != nil {
 		return nil, err
 	}

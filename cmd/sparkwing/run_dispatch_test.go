@@ -93,7 +93,8 @@ func TestDispatchFleetMissingConfigNamesSetupCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
+	t.Chdir(repo)
+	err := dispatchRun([]string{"missing", "--sw-fleet"})
 	if err == nil || !strings.Contains(err.Error(), "sparkwing fleet init") {
 		t.Fatalf("missing config error = %v", err)
 	}
@@ -116,7 +117,8 @@ func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
+	t.Chdir(repo)
+	err := dispatchRun([]string{"missing", "--sw-fleet"})
 	if err == nil || !strings.Contains(err.Error(), "no enrolled helpers") {
 		t.Fatalf("empty config error = %v", err)
 	}
@@ -173,26 +175,13 @@ func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
+func TestParseRunFlags_RetiredSwProfileIsUnknown(t *testing.T) {
 	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "fictional-remote"})
 	if flags.profile != "" {
 		t.Errorf("--sw-profile should not set profile; got %q", flags.profile)
 	}
-	if err := checkRetiredWhereFlags(passthroughArgs, nil); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
-		t.Errorf("checkRetiredWhereFlags: want --sw-profile pointer, got %v", err)
-	}
-}
-
-func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
-	args := []string{"--name", "x", "--on", "pull_request"}
-	if err := checkRetiredWhereFlags(args, map[string]bool{"on": true}); err != nil {
-		t.Errorf("a command declaring --on still hit the retired-flag guard: %v", err)
-	}
-	if err := checkRetiredWhereFlags(args, map[string]bool{"name": true}); err == nil {
-		t.Error("--on passed the guard on a command that does not declare it")
-	}
-	if err := checkRetiredWhereFlags([]string{"--on=fictional-production"}, nil); err == nil {
-		t.Error("--on=value form escaped the guard")
+	if flags.unknownRunnerFlag != "--sw-profile" {
+		t.Errorf("--sw-profile should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
 	}
 }
 
@@ -213,8 +202,8 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 		t.Run(unknown, func(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", "")
 			t.Setenv("XDG_CONFIG_HOME", "")
-			missing := filepath.Join(t.TempDir(), "missing")
-			err := dispatchRun([]string{"fictional", "--sw-cd", missing, unknown})
+			t.Chdir(t.TempDir())
+			err := dispatchRun([]string{"fictional", unknown})
 			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unknown runner flag %q", unknown)) {
 				t.Errorf("dispatch error = %v, want unknown runner flag %q", err, unknown)
 			}
@@ -225,35 +214,11 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 	}
 }
 
-func TestRetiredIsolatedHomeNamesItsReplacement(t *testing.T) {
-	err := checkRetiredWhereFlags([]string{"--sw-isolated-home", "/tmp/gate"}, nil)
-	if err == nil {
-		t.Fatal("--sw-isolated-home passed the retired-flag guard")
-	}
-	for _, want := range []string{"admission daemon", "SPARKWING_HOME"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("retired-flag error = %q, want it to name %q", err, want)
-		}
-	}
-	if strings.Contains(err.Error(), "See http") {
-		t.Errorf("retired-flag error = %q, want no migration URL while the guide is unreleased", err)
-	}
-	if err := checkRetiredWhereFlags([]string{"--sw-isolated-home=/tmp/gate"}, nil); err == nil {
-		t.Error("--sw-isolated-home=value form escaped the guard")
-	}
-}
-
-func TestDispatchRun_RetiredRunnerFlagKeepsMigrationHint(t *testing.T) {
-	err := dispatchRun([]string{"fictional", "--sw-profile", "fictional"})
-	if err == nil || !strings.Contains(err.Error(), "--profile") || strings.Contains(err.Error(), "unknown runner flag") {
-		t.Fatalf("dispatch error = %v, want retired profile flag migration", err)
-	}
-}
-
 func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing")
-	err := dispatchRun([]string{"fictional", "--sw-cd", missing, "--", "--sw-profile", "fictional"})
-	if err == nil || !strings.Contains(err.Error(), missing) {
+	empty := t.TempDir()
+	t.Chdir(empty)
+	err := dispatchRun([]string{"fictional", "--", "--sw-profile", "fictional"})
+	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/main.go found from "+empty) {
 		t.Fatalf("dispatch error = %v, want pipeline directory lookup", err)
 	}
 }
@@ -297,7 +262,8 @@ func main() {
 	ensureRunDaemonFn = func() {}
 	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
 	want := []string{"fictional", "--sw-profile", "fictional", "--sw-mystery=value", "--", "literal"}
-	arguments := append([]string{"fictional", "--sw-no-update", "--sw-cd", repository, "--"}, want[1:]...)
+	t.Chdir(repository)
+	arguments := append([]string{"fictional", "--sw-no-update", "--"}, want[1:]...)
 	if err := dispatchRun(arguments); err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +329,8 @@ func main() {
 	ensureRunDaemonFn = func() {}
 	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
 
-	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-cd", repository, "--sw-workers", "3"}); err != nil {
+	t.Chdir(repository)
+	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-workers", "3"}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(environmentFile)

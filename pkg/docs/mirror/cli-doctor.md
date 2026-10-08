@@ -54,7 +54,6 @@ alongside the error.
 |---|---|
 | `--dry-run` | Report what would be repaired without changing anything |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--timeout DURATION` | Budget for the daemon and local-state checks; each takes a slice of it (default: 10s) |
 
 ### Examples

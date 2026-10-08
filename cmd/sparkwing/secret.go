@@ -33,7 +33,7 @@ func runSecret(args []string) error {
 		return runSecretGet(args[1:])
 	case "list":
 		return runSecretList(args[1:])
-	case "delete", "rm", "remove":
+	case "delete":
 		return runSecretDelete(args[1:])
 	case "rotate":
 		return runSecretRotate(args[1:])

@@ -295,7 +295,8 @@ func TestRenderPartialDoctorWritesTheReportItReachedOnASpentBudget(t *testing.T)
 }
 
 func TestRunDoctor_RejectsANonPositiveTimeout(t *testing.T) {
-	err := runDoctor([]string{"--timeout", "0s", "--dry-run", "--home", t.TempDir(), "-o", "plain"})
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	err := runDoctor([]string{"--timeout", "0s", "--dry-run", "-o", "plain"})
 	if err == nil || !strings.Contains(err.Error(), "--timeout must be positive") {
 		t.Fatalf("runDoctor with --timeout 0s = %v, want a positive-timeout error", err)
 	}

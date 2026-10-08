@@ -23,7 +23,7 @@ func (Example) Help() string {
 func (Example) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run the full tour", Command: "sparkwing run example"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name example"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name example"},
 		{Comment: "Skip the rollout step via Work-layer SkipIf", Command: "DRY_RUN=1 sparkwing run example"},
 	}
 }

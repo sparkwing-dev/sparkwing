@@ -69,8 +69,8 @@ func TestProfilesAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) 
 	userConfig := scratchUserConfigDir(t)
 	underAScratchHome(t)
 
-	err := runProfilesAdd([]string{"--name", "drill", "--controller", "http://127.0.0.1:4344"})
-	wantRefusedAndUnwritten(t, "profiles add", err, filepath.Join(userConfig, userconfig.Filename))
+	err := runCloudConnect([]string{"--name", "drill", "--controller", "http://127.0.0.1:4344", "--no-probe"})
+	wantRefusedAndUnwritten(t, "cloud connect", err, filepath.Join(userConfig, userconfig.Filename))
 }
 
 func TestProfilesAddWritesInsideTheHomeItIsPointedAt(t *testing.T) {
@@ -79,8 +79,8 @@ func TestProfilesAddWritesInsideTheHomeItIsPointedAt(t *testing.T) {
 	inHome := filepath.Join(home, userconfig.Filename)
 	t.Setenv(userconfig.PathEnv, inHome)
 
-	if err := runProfilesAdd([]string{"--name", "drill", "--controller", "http://127.0.0.1:4344"}); err != nil {
-		t.Fatalf("profiles add with %s=%s: %v", userconfig.PathEnv, inHome, err)
+	if err := runCloudConnect([]string{"--name", "drill", "--controller", "http://127.0.0.1:4344", "--no-probe"}); err != nil {
+		t.Fatalf("cloud connect with %s=%s: %v", userconfig.PathEnv, inHome, err)
 	}
 
 	if p := loadSavedProfile(t, inHome, "drill"); p.Controller == nil || p.Controller.URL != "http://127.0.0.1:4344" {

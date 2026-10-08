@@ -39,8 +39,7 @@ var (
 
 func runUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdUpdate.Path, flag.ContinueOnError)
-	cli := fs.Bool("cli", false, "update the CLI binary (default target)")
-	sdk := fs.Bool("sdk", false, "update this project's SDK pin")
+	cli := fs.Bool("cli", false, "update the CLI binary (the only target; the flag is optional)")
 	check := fs.Bool("check", false, "compare the selected target without changing it")
 	force := fs.Bool("force", false, "allow CLI downgrades")
 	version := fs.String("version", "", "target release tag; omit for latest published release")
@@ -55,14 +54,8 @@ func runUpdate(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("update: unexpected positional %q", fs.Arg(0))
 	}
-	if fs.Changed("cli") && fs.Changed("sdk") {
-		return errors.New("update: --cli and --sdk are mutually exclusive")
-	}
-	if *sdk && (fs.Changed("force") || fs.Changed("override-hold")) {
-		return errors.New("update: --force and --override-hold apply only to --cli")
-	}
-	if fs.Changed("cli") && !*cli || fs.Changed("sdk") && !*sdk {
-		return errors.New("update: target selectors must be enabled; choose --cli or --sdk")
+	if fs.Changed("cli") && !*cli {
+		return errors.New("update: --cli=false selects nothing; to bump this project's SDK pin use `sparkwing repos update --in-place`")
 	}
 	if fs.Changed("version") && !validUpdateVersion(*version) {
 		return errors.New("update: --version must be a canonical release tag such as v0.48.1; omit it for latest")
@@ -71,19 +64,10 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	target := "cli"
-	if *sdk {
-		target = "sdk"
-	}
 	if *check {
-		return runUpdateCheck(target, *version, *force, *overrideHold, mode)
+		return runUpdateCheck("cli", *version, *force, *overrideHold, mode)
 	}
-	var result updateReceipt
-	if *sdk {
-		result, err = updateSDK(*version)
-	} else {
-		result, err = updateBinary(*version, *force, *overrideHold)
-	}
+	result, err := updateBinary(*version, *force, *overrideHold)
 	if err != nil {
 		return err
 	}

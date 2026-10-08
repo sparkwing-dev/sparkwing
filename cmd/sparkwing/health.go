@@ -10,8 +10,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -30,25 +28,7 @@ type healthReport struct {
 	Warnings int `json:"warnings"`
 }
 
-func runHealth(args []string) error {
-	fs := flag.NewFlagSet(cmdHealth.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name")
-	outputFormat := fs.StringP("output", "o", "", "output format: pretty | json")
-	if err := parseAndCheck(cmdHealth, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+func reportClusterHealth(ctx context.Context, prof *profile.Profile, outputFormat string) error {
 	report := healthReport{Profile: prof.Name, OK: true}
 	report.Sections = []healthSection{
 		{
@@ -86,7 +66,7 @@ func runHealth(args []string) error {
 		}
 	}
 
-	if *outputFormat == "json" {
+	if outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		if err := enc.Encode(report); err != nil {
 			return err

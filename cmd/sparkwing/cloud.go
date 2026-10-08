@@ -66,6 +66,7 @@ func runCloudConnect(args []string) error {
 	scopes := fs.String("scope", strings.Join(cloudUserTokenScopes, ","), "comma-separated scopes for the minted token")
 	setDefault := fs.Bool("set-default", false, "set defaults.profile in this project's .sparkwing/sparkwing.yaml")
 	force := fs.Bool("force", false, "replace an existing profile of that name")
+	noProbe := fs.Bool("no-probe", false, "write the profile without contacting the controller")
 	if err := parseAndCheck(cmdCloudConnect, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -115,6 +116,12 @@ func runCloudConnect(args []string) error {
 	if !*adminStdin {
 		prof.Controller.Token = supplied
 	}
+	if *noProbe {
+		if *adminStdin {
+			return errors.New("cloud connect: --admin-token-stdin mints on the controller, so it cannot combine with --no-probe; pass --token-stdin")
+		}
+		return writeConnectedProfile(cfg, path, prof, defaultsPath)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -134,17 +141,8 @@ func runCloudConnect(args []string) error {
 		fmt.Printf("minted user token %s for %s\n", minted.Prefix, name)
 	}
 
-	cfg.Profiles[name] = prof
-	if err := profile.Save(path, cfg); err != nil {
+	if err := writeConnectedProfile(cfg, path, prof, defaultsPath); err != nil {
 		return err
-	}
-	fmt.Printf("connected profile %q to %s (%s)\n", name, base, displayConfigPath(path))
-
-	if defaultsPath != "" {
-		if err := projectconfig.SetDefaultProfile(defaultsPath, name); err != nil {
-			return err
-		}
-		fmt.Printf("set defaults.profile: %s in %s\n", name, defaultsPath)
 	}
 
 	printAnnouncedDashboard(ctx, prof)
@@ -155,6 +153,21 @@ func runCloudConnect(args []string) error {
 	}
 	if !report.OK {
 		return errors.New("the profile is written, but one or more probes failed")
+	}
+	return nil
+}
+
+func writeConnectedProfile(cfg *profile.Config, path string, prof *profile.Profile, defaultsPath string) error {
+	cfg.Profiles[prof.Name] = prof
+	if err := profile.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("connected profile %q to %s (%s)\n", prof.Name, prof.ControllerURL(), displayConfigPath(path))
+	if defaultsPath != "" {
+		if err := projectconfig.SetDefaultProfile(defaultsPath, prof.Name); err != nil {
+			return err
+		}
+		fmt.Printf("set defaults.profile: %s in %s\n", prof.Name, defaultsPath)
 	}
 	return nil
 }
@@ -246,6 +259,7 @@ func runCloudStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdCloudStatus.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
+	cluster := fs.Bool("cluster", false, "add the fleet and queue probes an operator reads")
 	if err := parseAndCheck(cmdCloudStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -256,24 +270,28 @@ func runCloudStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "cloud status"); err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if *cluster {
+		return reportClusterHealth(ctx, prof, *outputFormat)
+	}
 
 	status := cloudStatusReport{
 		Profile:    prof.Name,
 		Controller: prof.ControllerURL(),
-		Principal:  "(unauthenticated)",
 	}
-	if who, err := fetchWhoami(ctx, prof); err == nil {
-		status.Principal = who.Principal
-		status.Scopes = sortedScopes(who.Scopes)
-		status.TokenPrefix = who.TokenPrefix
-	}
-	if services, err := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken()); err == nil {
-		status.Dashboard = services.Dashboard
+	// safety: a profile with no controller still has storage surfaces to probe,
+	// so only the identity and dashboard lookups need one.
+	if prof.ControllerURL() != "" {
+		status.Principal = "(unauthenticated)"
+		if who, err := fetchWhoami(ctx, prof); err == nil {
+			status.Principal = who.Principal
+			status.Scopes = sortedScopes(who.Scopes)
+			status.TokenPrefix = who.TokenPrefix
+		}
+		if services, err := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken()); err == nil {
+			status.Dashboard = services.Dashboard
+		}
 	}
 	report := probeProfile(ctx, prof)
 	status.Probes = report.Probes
@@ -289,8 +307,10 @@ func runCloudStatus(args []string) error {
 		return nil
 	}
 	fmt.Printf("profile:    %s\n", status.Profile)
-	fmt.Printf("controller: %s\n", status.Controller)
-	fmt.Printf("principal:  %s\n", status.Principal)
+	if status.Controller != "" {
+		fmt.Printf("controller: %s\n", status.Controller)
+		fmt.Printf("principal:  %s\n", status.Principal)
+	}
 	if len(status.Scopes) > 0 {
 		fmt.Printf("scopes:     %s\n", strings.Join(status.Scopes, ","))
 	}
@@ -308,8 +328,8 @@ func runCloudStatus(args []string) error {
 
 type cloudStatusReport struct {
 	Profile     string               `json:"profile"`
-	Controller  string               `json:"controller"`
-	Principal   string               `json:"principal"`
+	Controller  string               `json:"controller,omitempty"`
+	Principal   string               `json:"principal,omitempty"`
 	Scopes      []string             `json:"scopes,omitempty"`
 	TokenPrefix string               `json:"token_prefix,omitempty"`
 	Dashboard   string               `json:"dashboard,omitempty"`

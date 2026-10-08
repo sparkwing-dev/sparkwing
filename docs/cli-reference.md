@@ -21,14 +21,13 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing fleet`](cli-fleet.md) -- Configure foreground assisted execution
 - [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
-- [`sparkwing profile`](cli-profile.md) -- Show the selected profile and how it was chosen
 - [`sparkwing queue`](cli-queue.md) -- Inspect local admission holders, connections, and waiters
 - [`sparkwing repos`](cli-repos.md) -- The machine's fleet of sparkwing repos and their SDK pins
 - [`sparkwing run`](cli-run.md) -- Invoke a pipeline
 - [`sparkwing runs`](cli-runs.md) -- Inspect and control pipeline runs
 - [`sparkwing secrets`](cli-secrets.md) -- Manage secrets in this machine's local store or on a controller
 - [`sparkwing serve`](cli-serve.md) -- Manage the local dashboard + API server
-- [`sparkwing update`](cli-update.md) -- Update the CLI binary or this project's SDK pin
+- [`sparkwing update`](cli-update.md) -- Update the CLI binary
 - [`sparkwing version`](cli-version.md) -- Inspect versions (CLI, SDK, sparks)
 
 ## `sparkwing`
@@ -40,6 +39,16 @@ programs in a repo's .sparkwing/ directory, triggered by git hooks,
 webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.
+
+Three flags go before any verb:
+  -C DIR          run as if started in DIR (the .sparkwing search starts there)
+  --profile NAME  select a profile; the verb must accept --profile
+  -o FORMAT       pretty | json | plain, for verbs that print a document
+
+Without --profile, verbs that read runs fall back to SPARKWING_PROFILE, then
+the project's defaults.profile. Verbs that change state elsewhere (secrets,
+crons, runs cancel, cluster, and similar) act locally unless --profile names
+the controller.
 
 ### Examples
 
@@ -61,4 +70,7 @@ sparkwing pipeline new --name release
 
 # Start the local dashboard
 sparkwing serve start
+
+# List another checkout's pipelines
+sparkwing -C ~/code/other pipeline list
 ```

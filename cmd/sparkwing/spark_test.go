@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -183,20 +184,92 @@ func TestSparkManifestShape(t *testing.T) {
 
 func TestSparksUpdateRefusesName(t *testing.T) {
 	root := writeSparkFixture(t, map[string]string{
-		"sparkwing.yaml": "sparks:\n" +
+		".sparkwing/sparkwing.yaml": "sparks:\n" +
 			"  - name: libA\n    source: example.com/a\n    version: latest\n" +
 			"  - name: libB\n    source: example.com/b\n    version: latest\n",
-		"go.mod": "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
+		".sparkwing/go.mod": "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
 	})
 
-	err := runSparksUpdate([]string{"--sparkwing-dir", root, "--name", "libA"})
+	err := runIn(t, root, runSparksUpdate, "--name", "libA")
 	if err == nil {
 		t.Fatal("expected --name to be refused")
 	}
 	if !strings.Contains(err.Error(), "--name is not supported") {
 		t.Fatalf("refusal does not name the flag: %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(root, ".resolved.mod")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(root, ".sparkwing", ".resolved.mod")); statErr == nil {
 		t.Fatal("refused update still wrote an overlay")
+	}
+}
+
+func runIn(t *testing.T, dir string, run func([]string) error, args ...string) error {
+	t.Helper()
+	t.Chdir(dir)
+	return run(args)
+}
+
+func TestSparksVerbsFindTheModuleFromASubdirectory(t *testing.T) {
+	root := writeSparkFixture(t, map[string]string{
+		".sparkwing/sparkwing.yaml": "sparks:\n  - name: libA\n    source: example.com/a\n    version: latest\n",
+		".sparkwing/go.mod":         "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
+		"services/api/README":       "x\n",
+	})
+	err := runIn(t, filepath.Join(root, "services", "api"), runSparksUpdate, "--name", "libA")
+	if err == nil || !strings.Contains(err.Error(), "--name is not supported") {
+		t.Fatalf("sparks update from a subdirectory = %v, want it to reach the manifest above", err)
+	}
+}
+
+func TestSparksAddNeverAdoptsTheRuntimeHome(t *testing.T) {
+	home := t.TempDir()
+	runtimeHome := filepath.Join(home, ".sparkwing")
+	t.Setenv("HOME", home)
+	t.Setenv("SPARKWING_HOME", runtimeHome)
+	if err := os.MkdirAll(runtimeHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(runtimeHome, "sparkwing.yaml")
+	if err := os.WriteFile(marker, []byte("sparks: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(home, "code", "app")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := runIn(t, checkout, runSparksAdd, "--source", "example.com/lib")
+	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/ project") {
+		t.Fatalf("sparks add in an uninitialized checkout = %v, want a refusal naming the missing project", err)
+	}
+	if body, _ := os.ReadFile(marker); string(body) != "sparks: []\n" {
+		t.Fatalf("the runtime home's sparkwing.yaml was rewritten: %q", body)
+	}
+	if _, ok, _ := nearestDotSparkwing(checkout); ok {
+		t.Fatal("discovery accepted the runtime home as a project")
+	}
+}
+
+func TestDiscoveryStopsAtAnUnreadableNestedProject(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny directory reads on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 directory")
+	}
+	root := writeSparkFixture(t, map[string]string{
+		".sparkwing/sparkwing.yaml":     "sparks: []\n",
+		"app/.sparkwing/sparkwing.yaml": "sparks: []\n",
+		"app/src/README":                "x\n",
+	})
+	nested := filepath.Join(root, "app", ".sparkwing")
+	if err := os.Chmod(nested, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(nested, 0o755) })
+	err := runIn(t, filepath.Join(root, "app", "src"), runSparksAdd, "--source", "example.com/lib")
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("sparks add under an unreadable project = %v, want the inspection error", err)
+	}
+	if body, _ := os.ReadFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml")); string(body) != "sparks: []\n" {
+		t.Fatalf("the ancestor project's sparkwing.yaml was rewritten: %q", body)
 	}
 }

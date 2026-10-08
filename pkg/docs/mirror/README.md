@@ -44,8 +44,8 @@ Every top-level verb is listed with a one-line synopsis in
 [cli-reference.md](cli-reference.md), generated from the command
 registry; `sparkwing commands` prints the same index offline (`-o json`
 for the machine-readable index, one record per line -- narrow with
-`--path` or cut with `head`). Cross-repo registry lives under `configure
-xrepo`; sparks library management under `pipeline sparks`. Run any verb
+`--path` or cut with `head`). The cross-repo registry lives under `repos`;
+sparks library management under `pipeline sparks`. Run any verb
 with `--help` for its full spec.
 
 ## Repo-local helpers vs sparkwing

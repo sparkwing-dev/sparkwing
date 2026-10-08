@@ -70,30 +70,6 @@ func TestProfilesRegistryMatchesDispatcher(t *testing.T) {
 	}
 }
 
-func TestProfilesShowHelpRequiresName(t *testing.T) {
-	for _, spec := range cmdProfilesShow.Flags {
-		if spec.Name == "name" {
-			if !spec.Required {
-				t.Fatal("profiles show --name is optional in help but required by the handler")
-			}
-			return
-		}
-	}
-	t.Fatal("profiles show help does not declare --name")
-}
-
-func TestProfilesTestHelpRequiresProfile(t *testing.T) {
-	for _, spec := range cmdProfilesTest.Flags {
-		if spec.Name == "profile" {
-			if !spec.Required {
-				t.Fatal("profiles test --profile is optional in help but required by the handler")
-			}
-			return
-		}
-	}
-	t.Fatal("profiles test help does not declare --profile")
-}
-
 func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
 	fset := token.NewFileSet()
 	for _, filename := range []string{"profiles.go", "profiles_test_cmd.go"} {
@@ -250,19 +226,14 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 			want: "  sparkwing queue [<subcommand>] [flags]\n",
 		},
 		{
-			name: "runnable parent with positional",
+			name: "leaf with positional",
 			cmd:  cmdRun,
-			want: "  sparkwing run <pipeline> [<subcommand>] [flags] [-- pipeline-flags...]\n",
+			want: "  sparkwing run <pipeline> [flags] [-- pipeline-flags...]\n",
 		},
 		{
 			name: "runnable parent with flags",
 			cmd:  cmdVersion,
 			want: "  sparkwing version [<subcommand>] [flags]\n",
-		},
-		{
-			name: "runnable parent with default action",
-			cmd:  cmdRepos,
-			want: "  sparkwing repos [<subcommand>] [flags]\n",
 		},
 		{
 			name: "command group",
@@ -395,14 +366,13 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		cmd  Command
 	}{
 		{"sparkwing run", cmdRun},
-		{"sparkwing pipeline run", cmdPipelineRun},
 	}
 	allFlags := []string{
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
 		"--target", "--profile",
-		"--sw-cd", "--sw-verbose",
+		"--sw-verbose",
 		"--sw-allow",
 	}
 	for _, tc := range cases {
@@ -428,7 +398,7 @@ func TestCompletionFlagsListsHotOnly(t *testing.T) {
 		"--help",
 	}
 	advancedFlags := []string{
-		"--sw-cd", "--sw-verbose",
+		"--sw-verbose",
 		"--sw-allow",
 	}
 	for _, tc := range []struct {
@@ -436,7 +406,6 @@ func TestCompletionFlagsListsHotOnly(t *testing.T) {
 		cmd  Command
 	}{
 		{"sparkwing run", cmdRun},
-		{"sparkwing pipeline run", cmdPipelineRun},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			flags := visibleFlagsForHelp(tc.cmd, true)
@@ -613,7 +582,7 @@ func TestExamplesUseOnlyDeclaredFlags(t *testing.T) {
 	}
 	for _, command := range allCommands {
 		for _, example := range command.Examples {
-			line := example.Command
+			line := stripRootFlags(example.Command)
 			if i := strings.IndexAny(line, "|;&"); i >= 0 {
 				line = line[:i]
 			}

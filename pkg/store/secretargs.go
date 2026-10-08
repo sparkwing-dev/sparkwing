@@ -11,7 +11,7 @@ import (
 // writes it at run start from the pipeline's input schema.
 //
 // It exists because a run row outlives the process that registered its
-// pipeline: `sparkwing runs get` on a laptop, the controller serving
+// pipeline: `sparkwing runs status -o json` on a laptop, the controller serving
 // the dashboard, and a receipt recomputed months later all read args
 // out of the database with no schema to consult. Recording the
 // classification alongside the args is what lets those read paths

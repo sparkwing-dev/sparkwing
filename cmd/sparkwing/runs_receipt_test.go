@@ -52,8 +52,8 @@ func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
 	st.Close()
 
 	out := captureStdout(t, func() {
-		if err := runJobsReceipt(ctx, paths, []string{"--run", "run-cli-1"}); err != nil {
-			t.Fatalf("runJobsReceipt: %v", err)
+		if err := renderRunView(ctx, paths, runView{name: "receipt", runID: "run-cli-1", format: "json"}); err != nil {
+			t.Fatalf("receipt view: %v", err)
 		}
 	})
 
@@ -72,23 +72,21 @@ func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
 	}
 }
 
-func TestRunJobsReceipt_RejectsBadOutput(t *testing.T) {
-	dir := t.TempDir()
-	paths := orchestrator.PathsAt(dir)
-	err := runJobsReceipt(context.Background(), paths,
-		[]string{"--run", "x", "--output", "table"})
-	if err == nil || !strings.Contains(err.Error(), "pretty|json|plain") {
-		t.Fatalf("want canonical output error, got %v", err)
+func TestRunsStatusReceiptViewRefusesTextOutput(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	err := runJobs([]string{"status", "run-x", "--view", "receipt", "-o", "pretty"})
+	if err == nil || !strings.Contains(err.Error(), "only renders json") {
+		t.Fatalf("want a json-only refusal, got %v", err)
 	}
 }
 
 func TestReceiptHelpMatchesLocalCost(t *testing.T) {
-	description := strings.ToLower(cmdJobsReceipt.Description)
+	description := strings.ToLower(cmdJobsStatus.Description)
 	if strings.Contains(description, "cost_per_runner_hour") {
-		t.Fatalf("receipt help advertises removed profile rate: %q", cmdJobsReceipt.Description)
+		t.Fatalf("receipt help advertises removed profile rate: %q", cmdJobsStatus.Description)
 	}
 	if !strings.Contains(description, "zero cost") {
-		t.Fatalf("receipt help does not describe the local cost result: %q", cmdJobsReceipt.Description)
+		t.Fatalf("receipt help does not describe the local cost result: %q", cmdJobsStatus.Description)
 	}
 }
 

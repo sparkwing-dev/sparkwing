@@ -112,6 +112,14 @@ func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 }
 
 func runPipelinePlan(args []string) error {
+	if static, rest := takeStaticFlag(args); static {
+		for _, tok := range rest {
+			if strings.HasPrefix(tok, "--sw-start-at") || strings.HasPrefix(tok, "--sw-stop-at") || strings.HasPrefix(tok, "--start-at") || strings.HasPrefix(tok, "--stop-at") {
+				return errors.New("plan --static: --start-at and --stop-at need the runtime plan; drop --static")
+			}
+		}
+		return runPipelineExplain(rest)
+	}
 	parsed, helpRequested, err := parsePipelinePlanArgs(args)
 	if err != nil {
 		return err
@@ -130,7 +138,7 @@ func runPipelinePlan(args []string) error {
 	}
 	jsonOut := format == "json"
 
-	pipelineArgs := []string{"pipeline", "run", parsed.pipeline, "--plan"}
+	pipelineArgs := []string{"run", parsed.pipeline, "--plan"}
 	pipelineArgs = append(pipelineArgs, parsed.passthrough...)
 	binary, err := os.Executable()
 	if err != nil {
@@ -259,4 +267,21 @@ func orDashStr(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func takeStaticFlag(args []string) (bool, []string) {
+	rest := make([]string, 0, len(args))
+	static := false
+	for i, tok := range args {
+		if tok == "--" {
+			rest = append(rest, args[i:]...)
+			break
+		}
+		if tok == "--static" || tok == "--static=true" {
+			static = true
+			continue
+		}
+		rest = append(rest, tok)
+	}
+	return static, rest
 }

@@ -40,7 +40,6 @@ type SparkwingFlagDoc struct {
 }
 
 var sparkwingFlagDocs = []SparkwingFlagDoc{
-	{Name: "sw-cd", Short: "C", Argument: "PATH", Desc: "Run as if started in PATH", Group: "System"},
 	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
 	{Name: "sw-pipeline-ref", Argument: "REF", Desc: "Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref", Group: "System"},
 	{Name: "sw-detached", Desc: "Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal", Group: "System", Hot: true},

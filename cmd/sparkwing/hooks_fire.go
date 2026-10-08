@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,51 +10,31 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-func runHooksFire(args []string) error {
-	fs := flag.NewFlagSet(cmdHooksFire.Path, flag.ContinueOnError)
-	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
-	fleet := fs.Bool("fleet", false, "fire the gate in every registered repo")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	if err := parseAndCheck(cmdHooksFire, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *fleet && *repo != "" {
-		return errors.New("hooks fire: --fleet fires in every registered repo; drop --repo or drop --fleet")
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdHooksFire.Path)
-	if err != nil {
-		return err
-	}
-
+func proveHooks(fleet bool, format string) error {
 	var results []githooks.FireResult
-	if *fleet {
+	if fleet {
 		roots, err := fleetRepoRoots(runGit)
 		if err != nil {
-			return fmt.Errorf("hooks fire: %w", err)
+			return fmt.Errorf("hooks status --prove: %w", err)
 		}
 		for _, root := range roots {
 			declared, err := declaredHookNames(root)
 			if err != nil {
-				return fmt.Errorf("hooks fire: %w", err)
+				return fmt.Errorf("hooks status --prove: %w", err)
 			}
 			results = append(results, githooks.Fire(runGit, root, declared))
 		}
 	} else {
-		repoRoot, _, err := resolveHooksRepo(*repo)
+		repoRoot, _, err := resolveHooksRepo()
 		if err != nil {
-			return fmt.Errorf("hooks fire: %w", err)
+			return fmt.Errorf("hooks status --prove: %w", err)
 		}
 		declared, err := declaredHookNames(repoRoot)
 		if err != nil {
-			return fmt.Errorf("hooks fire: %w", err)
+			return fmt.Errorf("hooks status --prove: %w", err)
 		}
 		results = append(results, githooks.Fire(runGit, repoRoot, declared))
 	}
@@ -63,7 +42,7 @@ func runHooksFire(args []string) error {
 		return err
 	}
 	if unenforced := unenforcedResults(results); len(unenforced) > 0 {
-		return fmt.Errorf("hooks fire: %d repo(s) did not refuse a commit", len(unenforced))
+		return fmt.Errorf("hooks status --prove: %d repo(s) did not refuse a commit", len(unenforced))
 	}
 	return nil
 }
@@ -122,9 +101,9 @@ func renderHooksFire(w io.Writer, results []githooks.FireResult, format string) 
 func fireRemedy(r githooks.FireResult) string {
 	switch r.Verdict {
 	case githooks.FireBorrowed:
-		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
+		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	case githooks.FireAccepted, githooks.FireUnprovable:
-		return fmt.Sprintf("sparkwing pipeline hooks install --repo %s", r.Repo)
+		return fmt.Sprintf("sparkwing -C %s pipeline hooks install", r.Repo)
 	default:
 		return ""
 	}

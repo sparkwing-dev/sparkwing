@@ -12,12 +12,14 @@ func TestQueueListPrintsTheSameListingAsBareQueue(t *testing.T) {
 	for _, format := range []string{"pretty", "json", "plain"} {
 		t.Run(format, func(t *testing.T) {
 			bare := captureStdout(t, func() {
-				if err := runQueue([]string{"--home", home, "-o", format}); err != nil {
+				t.Setenv("SPARKWING_HOME", home)
+				if err := runQueue([]string{"-o", format}); err != nil {
 					t.Fatalf("queue: %v", err)
 				}
 			})
 			listed := captureStdout(t, func() {
-				if err := runQueue([]string{"list", "--home", home, "-o", format}); err != nil {
+				t.Setenv("SPARKWING_HOME", home)
+				if err := runQueue([]string{"list", "-o", format}); err != nil {
 					t.Fatalf("queue list: %v", err)
 				}
 			})

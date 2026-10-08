@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -154,4 +155,155 @@ func registeredCommandPaths(t *testing.T) map[string]bool {
 		}
 	}
 	return registered
+}
+
+// hack: these dispatchers never pass their Command to handleParentHelp or
+// PrintHelp, so the walk cannot infer the group their cases belong to.
+var dispatchersWithoutHelp = map[string]string{
+	"runQueue":    "cmdQueue",
+	"runVersion":  "cmdVersion",
+	"runExamples": "cmdExamples",
+	"runWingd":    "cmdWingd",
+}
+
+func TestEveryDispatchedVerbIsRegistered(t *testing.T) {
+	varPaths := registryVarPaths(t)
+	registered := map[string]*Command{}
+	for _, c := range allCommands {
+		registered[c.Path] = c
+	}
+	dispatched := dispatchedVerbs(t, varPaths)
+	if len(dispatched["sparkwing"]) == 0 {
+		t.Fatal("found no top-level dispatch cases, so this check proves nothing")
+	}
+
+	for group, verbs := range dispatched {
+		for verb := range verbs {
+			if registered[group+" "+verb] == nil {
+				t.Errorf("%s dispatches %q, but %q is not a registered command; register it (Hidden when internal) or delete the case",
+					group, verb, group+" "+verb)
+			}
+		}
+	}
+	for path := range registered {
+		if path == "sparkwing" || len(childCommands(path)) > 0 {
+			continue
+		}
+		i := strings.LastIndex(path, " ")
+		if !dispatched[path[:i]][path[i+1:]] {
+			t.Errorf("%s is registered, but no dispatcher for %q has a case %q", path, path[:i], path[i+1:])
+		}
+	}
+}
+
+func dispatchedVerbs(t *testing.T, varPaths map[string]string) map[string]map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	files := map[string]*ast.File{}
+	consts := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		files[name] = f
+		for _, decl := range f.Decls {
+			if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.CONST {
+				for _, spec := range gen.Specs {
+					vs := spec.(*ast.ValueSpec)
+					for i, n := range vs.Names {
+						if i < len(vs.Values) {
+							if v, ok := stringLiteral(vs.Values[i]); ok {
+								consts[n.Name] = v
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	literal := func(e ast.Expr) (string, bool) {
+		if id, ok := e.(*ast.Ident); ok {
+			v, ok := consts[id.Name]
+			return v, ok
+		}
+		return stringLiteral(e)
+	}
+	out := map[string]map[string]bool{}
+	for name, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			var verbs []string
+			group := dispatchersWithoutHelp[fn.Name.Name]
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.CallExpr:
+					if id, ok := n.Fun.(*ast.Ident); ok && (id.Name == "handleParentHelp" || id.Name == "PrintHelp") && len(n.Args) > 0 {
+						if arg, ok := n.Args[0].(*ast.Ident); ok && group == "" && varPaths[arg.Name] != "" {
+							group = arg.Name
+						}
+					}
+				case *ast.SwitchStmt:
+					if isArgsZero(n.Tag) {
+						for _, stmt := range n.Body.List {
+							for _, e := range stmt.(*ast.CaseClause).List {
+								if v, ok := literal(e); ok {
+									verbs = append(verbs, v)
+								}
+							}
+						}
+					}
+				case *ast.BinaryExpr:
+					if n.Op == token.EQL && isArgsZero(n.X) {
+						if v, ok := literal(n.Y); ok {
+							verbs = append(verbs, v)
+						}
+					}
+				}
+				return true
+			})
+			var real []string
+			for _, v := range verbs {
+				if v != "help" && !strings.HasPrefix(v, "-") {
+					real = append(real, v)
+				}
+			}
+			if len(real) == 0 {
+				continue
+			}
+			if group == "" {
+				t.Errorf("%s: %s dispatches %v but names no Command; add it to dispatchersWithoutHelp", name, fn.Name.Name, real)
+				continue
+			}
+			path := varPaths[group]
+			if out[path] == nil {
+				out[path] = map[string]bool{}
+			}
+			for _, v := range real {
+				out[path][v] = true
+			}
+		}
+	}
+	return out
+}
+
+func isArgsZero(e ast.Expr) bool {
+	idx, ok := e.(*ast.IndexExpr)
+	if !ok {
+		return false
+	}
+	id, ok := idx.X.(*ast.Ident)
+	lit, isLit := idx.Index.(*ast.BasicLit)
+	return ok && id.Name == "args" && isLit && lit.Value == "0"
 }

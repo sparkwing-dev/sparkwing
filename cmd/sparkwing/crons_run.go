@@ -15,47 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 )
 
-func runCronsPause(args []string) error {
-	return runCronsPauseResume(cmdCronsPause, args, true)
-}
-
-func runCronsResume(args []string) error {
-	return runCronsPauseResume(cmdCronsResume, args, false)
-}
-
-func runCronsPauseResume(cmd Command, args []string, pause bool) error {
-	verb := "resume"
+func runCronsPauseResume(session *cronsSession, name, format string, pause bool) error {
+	verb := "--resume"
 	if pause {
-		verb = "pause"
+		verb = "--pause"
 	}
-	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 1 {
-		PrintHelp(cmd, os.Stderr)
-		return fmt.Errorf("crons %s: one schedule name is required", verb)
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmd.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return runCronsPauseResumeProfile(*on, fs.Arg(0), format, pause)
-	}
-	session, release, err := openCrons("")
-	if err != nil {
-		return fmt.Errorf("crons %s: %w", verb, err)
-	}
-	defer release()
-
 	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
+	sched, err := session.svc.Resolve(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -65,11 +31,11 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 		err = session.svc.Resume(ctx, sched.ID)
 	}
 	if err != nil {
-		return fmt.Errorf("crons %s: %w", verb, err)
+		return fmt.Errorf("crons set %s: %w", verb, err)
 	}
 	row, _, err := session.svc.Show(ctx, sched.ID, 1)
 	if err != nil {
-		return fmt.Errorf("crons %s: %w", verb, err)
+		return fmt.Errorf("crons set %s: %w", verb, err)
 	}
 	switch format {
 	case "json":

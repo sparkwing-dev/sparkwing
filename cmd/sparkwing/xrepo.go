@@ -16,43 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
 
-func runXrepo(args []string) error {
-	if handleParentHelp(cmdConfigureXrepo, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdConfigureXrepo, os.Stderr)
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "list", "ls":
-		return runXrepoList(args[1:])
-	case "add":
-		return runXrepoAdd(args[1:])
-	case "remove", "rm":
-		return runXrepoRemove(args[1:])
-	case "prune":
-		return runXrepoPrune(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "sparkwing configure xrepo: unknown subcommand %q\n\n", args[0])
-		PrintHelp(cmdConfigureXrepo, os.Stderr)
-		os.Exit(2)
-	}
-	return nil
-}
-
-func runXrepoList(args []string) error {
-	fs := flag.NewFlagSet("repo list", flag.ContinueOnError)
-	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
-	pipelines := fs.Bool("pipelines", true,
-		"include pipeline names (set --pipelines=false to skip the per-repo describe call)")
-	if err := parseAndCheck(cmdConfigureXrepoList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-
+func listCheckouts(outputFormat string, withPipelines bool) error {
 	entries, err := repos.List()
 	if err != nil {
 		return err
@@ -66,7 +30,7 @@ func runXrepoList(args []string) error {
 	rows := make([]rowOut, 0, len(entries))
 	for _, e := range entries {
 		row := rowOut{Path: e.Path, Status: e.Status, Worktree: e.Worktree}
-		if *pipelines && e.Status == "ok" {
+		if withPipelines && e.Status == "ok" {
 			if pipes, perr := repos.PipelineNamesForRepo(e.Path); perr == nil {
 				sort.Strings(pipes)
 				row.Pipelines = pipes
@@ -75,13 +39,13 @@ func runXrepoList(args []string) error {
 		rows = append(rows, row)
 	}
 
-	if *outputFormat == "json" {
+	if outputFormat == "json" {
 		return ndjson.Write(os.Stdout, rows)
 	}
 
 	if len(rows) == 0 {
 		fmt.Println("no repos registered")
-		fmt.Println("(register with `sparkwing configure xrepo add <path>` or just run `sparkwing run` in a .sparkwing/-bearing repo)")
+		fmt.Println("(register with `sparkwing repos add <path>` or just run `sparkwing run` in a .sparkwing/-bearing repo)")
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -92,7 +56,7 @@ func runXrepoList(args []string) error {
 			status += " (worktree)"
 		}
 		pipelinesCol := strings.Join(r.Pipelines, ", ")
-		if !*pipelines {
+		if !withPipelines {
 			pipelinesCol = "-"
 		}
 		if pipelinesCol == "" {
@@ -104,8 +68,8 @@ func runXrepoList(args []string) error {
 }
 
 func runXrepoAdd(args []string) error {
-	fs := flag.NewFlagSet("repo add", flag.ContinueOnError)
-	if err := parseAndCheck(cmdConfigureXrepoAdd, fs, args); err != nil {
+	fs := flag.NewFlagSet(cmdReposAdd.Path, flag.ContinueOnError)
+	if err := parseAndCheck(cmdReposAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
@@ -127,15 +91,15 @@ func runXrepoAdd(args []string) error {
 }
 
 func runXrepoRemove(args []string) error {
-	fs := flag.NewFlagSet("repo remove", flag.ContinueOnError)
-	if err := parseAndCheck(cmdConfigureXrepoRemove, fs, args); err != nil {
+	fs := flag.NewFlagSet(cmdReposRemove.Path, flag.ContinueOnError)
+	if err := parseAndCheck(cmdReposRemove, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
 	if fs.NArg() == 0 {
-		return errors.New("usage: sparkwing configure xrepo remove <path-or-basename>")
+		return errors.New("usage: sparkwing repos remove <path-or-basename>")
 	}
 	match := fs.Arg(0)
 	n, err := repos.Remove(match)
@@ -147,8 +111,8 @@ func runXrepoRemove(args []string) error {
 }
 
 func runXrepoPrune(args []string) error {
-	fs := flag.NewFlagSet("repo prune", flag.ContinueOnError)
-	if err := parseAndCheck(cmdConfigureXrepoPrune, fs, args); err != nil {
+	fs := flag.NewFlagSet(cmdReposPrune.Path, flag.ContinueOnError)
+	if err := parseAndCheck(cmdReposPrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}

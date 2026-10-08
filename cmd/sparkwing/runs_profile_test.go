@@ -17,17 +17,6 @@ func setProfilesFixture(t *testing.T, body string) {
 	t.Setenv("SPARKWING_CONFIG", path)
 }
 
-func TestRunsList_OnFlagRetired(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runJobs([]string{"list", "--on", "prod"})
-	if err == nil {
-		t.Fatal("expected retired-flag error for --on")
-	}
-	if !strings.Contains(err.Error(), "--on") || !strings.Contains(err.Error(), "--profile") {
-		t.Errorf("message = %q, want --on -> --profile migration pointer", err.Error())
-	}
-}
-
 func TestRunsList_ProfileNotFound(t *testing.T) {
 	setProfilesFixture(t, `
 profiles:

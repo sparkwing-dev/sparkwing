@@ -11,7 +11,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
+// safety: every verb resolves one way: --profile, then SPARKWING_PROFILE, then
+// the project defaults.profile, so two readers of one run agree on its store.
 func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
+	if name == "" {
+		if env := os.Getenv("SPARKWING_PROFILE"); env != "" {
+			p, chain, path, err := resolveProfileChain(env)
+			if chain.Source == profile.ChainSourceFlag {
+				chain.Source = profile.ChainSourceEnv
+			}
+			return p, chain, path, err
+		}
+	}
 	path, err := profile.DefaultPath()
 	if err != nil {
 		return nil, profile.Chain{}, "", err
@@ -114,42 +125,6 @@ func loadProjectConfig() (*projectconfig.Config, bool, error) {
 func resolveProfileFlag(name string) (*profile.Profile, error) {
 	p, _, _, err := resolveProfileChain(name)
 	return p, err
-}
-
-const migrationLinkWhereFlag = "https://sparkwing.dev/docs/migration-guide/v0.5.0#-profile-is-the-only-where-flag"
-
-type retiredFlag struct {
-	reason string
-	link   string
-}
-
-var retiredWhereFlags = map[string]retiredFlag{
-	"--on":         {"v0.5.0 replaces --on with --profile.", migrationLinkWhereFlag},
-	"--sw-on":      {"v0.5.0 replaces --sw-on with --profile.", migrationLinkWhereFlag},
-	"--sw-profile": {"v0.5.0 removes --sw-profile; `sparkwing run` always executes locally. Use `sparkwing pipeline trigger --profile X` for remote dispatch.", migrationLinkWhereFlag},
-	"--sw-target":  {"--sw-target was renamed to --target in v0.5.0; same semantics.", migrationLinkWhereFlag},
-	"--sw-isolated-home": {"--sw-isolated-home is removed; every run joins the machine's admission daemon. " +
-		"A daemon that cannot read this branch's runs store refuses the run and names the upgrade. " +
-		"SPARKWING_HOME still gives a command a home of its own, outside the machine's admission ledger.", ""},
-}
-
-func checkRetiredWhereFlags(args []string, owned map[string]bool) error {
-	for _, a := range args {
-		name := a
-		if eq := strings.IndexByte(a, '='); eq >= 0 {
-			name = a[:eq]
-		}
-		if owned[strings.TrimPrefix(name, "--")] {
-			continue
-		}
-		if retired, ok := retiredWhereFlags[name]; ok {
-			if retired.link == "" {
-				return fmt.Errorf("unknown flag %s. %s", name, retired.reason)
-			}
-			return fmt.Errorf("unknown flag %s. %s\nSee %s", name, retired.reason, retired.link)
-		}
-	}
-	return nil
 }
 
 func displayConfigPath(path string) string {

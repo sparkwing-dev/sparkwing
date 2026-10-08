@@ -9,10 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-func TestRunDocsVersions_EmbeddedOnly(t *testing.T) {
+func TestRunDocsListVersions_EmbeddedOnly(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsVersions([]string{"-o", "json"}); err != nil {
-			t.Fatalf("docs versions: %v", err)
+		if err := runDocsList([]string{"--versions", "-o", "json"}); err != nil {
+			t.Fatalf("docs list --versions: %v", err)
 		}
 	})
 	rows := decodeNDJSON[versionRow](t, out)
@@ -26,7 +26,7 @@ func TestRunDocsVersions_EmbeddedOnly(t *testing.T) {
 	}
 }
 
-func TestRunDocsVersions_WebMergesRemote(t *testing.T) {
+func TestRunDocsListVersions_WebMergesRemote(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/versions.json" {
 			http.NotFound(w, r)
@@ -39,8 +39,8 @@ func TestRunDocsVersions_WebMergesRemote(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if err := runDocsVersions([]string{"--web", "-o", "json"}); err != nil {
-			t.Fatalf("docs versions --web: %v", err)
+		if err := runDocsList([]string{"--versions", "--web", "-o", "json"}); err != nil {
+			t.Fatalf("docs list --versions --web: %v", err)
 		}
 	})
 	rows := decodeNDJSON[versionRow](t, out)
@@ -65,7 +65,7 @@ func TestRunDocsVersions_WebMergesRemote(t *testing.T) {
 	}
 }
 
-func TestRunDocsVersions_WebFailureNonZeroExit(t *testing.T) {
+func TestRunDocsListVersions_WebFailureNonZeroExit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -73,7 +73,7 @@ func TestRunDocsVersions_WebFailureNonZeroExit(t *testing.T) {
 	t.Setenv(docs.BaseURLEnvVar, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	err := runDocsVersions([]string{"--web"})
+	err := runDocsList([]string{"--versions", "--web"})
 	if err == nil {
 		t.Fatal("expected error when --web discovery fails")
 	}
@@ -165,7 +165,7 @@ func TestRunDocsRead_WebUnknownVersionMessagesVersionList(t *testing.T) {
 	}
 }
 
-func TestRunDocsMigrationsRead_WebFetches(t *testing.T) {
+func TestRunDocsMigrations_VersionWebFetches(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/versions.json":
@@ -181,8 +181,8 @@ func TestRunDocsMigrationsRead_WebFetches(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if err := runDocsMigrationsRead([]string{"--version", "v0.5.0", "--web"}); err != nil {
-			t.Fatalf("migrations read --web: %v", err)
+		if err := runDocsMigrations([]string{"--version", "v0.5.0", "--web"}); err != nil {
+			t.Fatalf("migrations --version --web: %v", err)
 		}
 	})
 	if !strings.Contains(out, "v0.5.0") {
@@ -190,17 +190,17 @@ func TestRunDocsMigrationsRead_WebFetches(t *testing.T) {
 	}
 }
 
-func TestRunDocsCache_ClearOnEmptyIsNotAnError(t *testing.T) {
+func TestCacheDocs_ClearOnEmptyIsNotAnError(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	if err := runDocsCache([]string{"clear"}); err != nil {
+	if err := runCachePrune([]string{"--docs"}); err != nil {
 		t.Errorf("clear on empty cache should not error; got %v", err)
 	}
 }
 
-func TestRunDocsCache_InfoOnEmptyDescribesAbsence(t *testing.T) {
+func TestCacheDocs_InfoOnEmptyDescribesAbsence(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out := captureStdout(t, func() {
-		if err := runDocsCache([]string{"info", "--output", "pretty"}); err != nil {
+		if err := runCacheInfo([]string{"--docs", "--output", "pretty"}); err != nil {
 			t.Errorf("info on empty cache: %v", err)
 		}
 	})

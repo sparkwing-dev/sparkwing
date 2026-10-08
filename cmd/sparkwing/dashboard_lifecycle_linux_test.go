@@ -68,7 +68,8 @@ func TestServeStartPreservesEveryOwnedRunningInstance(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := captureStdout(t, func() {
-				if err = runSparkwing([]string{"serve", "start", "--home", dp.home, "--addr", "127.0.0.1:54321", "--read-only=false", "-o", "json"}); err != nil {
+				t.Setenv("SPARKWING_HOME", dp.home)
+				if err = runSparkwing([]string{"serve", "start", "--addr", "127.0.0.1:54321", "--read-only=false", "-o", "json"}); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -115,7 +116,8 @@ func TestServeRefusesReusedOrOpaquePID(t *testing.T) {
 			}
 			for _, action := range []string{"start", "stop", "restart", "status"} {
 				output := captureStdout(t, func() {
-					err := runSparkwing([]string{"serve", action, "--home", dp.home, "-o", "json"})
+					t.Setenv("SPARKWING_HOME", dp.home)
+					err := runSparkwing([]string{"serve", action, "-o", "json"})
 					if exitCodeFor(err) != 2 {
 						t.Fatalf("%s error=%v", action, err)
 					}
@@ -178,7 +180,8 @@ func TestServeRefusesUnsafeStateInputsBeforeWrites(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := captureStdout(t, func() {
-				err := runSparkwing([]string{"serve", "start", "--home", home, "-o", "json"})
+				t.Setenv("SPARKWING_HOME", home)
+				err := runSparkwing([]string{"serve", "start", "-o", "json"})
 				if exitCodeFor(err) != 2 {
 					t.Fatalf("unsafe state: %v", err)
 				}

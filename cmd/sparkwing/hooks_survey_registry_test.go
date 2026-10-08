@@ -20,7 +20,7 @@ func armedFleet(t *testing.T) {
 	f.asProcessEnv(t)
 	f.registerRepos(t, f.repo)
 	captureStdout(t, func() {
-		if err := runHooksInstall([]string{"--repo", f.repo, "--no-prove"}); err != nil {
+		if err := runIn(t, f.repo, runHooksInstall, "--no-prove"); err != nil {
 			t.Fatalf("hooks install: %v", err)
 		}
 	})
@@ -29,7 +29,7 @@ func armedFleet(t *testing.T) {
 func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T) {
 	armedFleet(t)
 	gatedOut := captureStdout(t, func() {
-		if err := runHooksSurvey([]string{"-o", "pretty"}); err != nil {
+		if err := runHooksStatus([]string{"--all", "-o", "pretty"}); err != nil {
 			t.Fatalf("survey of a gated fleet: %v", err)
 		}
 	})
@@ -42,7 +42,7 @@ func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T)
 	blind.corruptRegistry(t)
 	var blindErr error
 	blindOut := captureStdout(t, func() {
-		blindErr = runHooksSurvey([]string{"-o", "pretty"})
+		blindErr = runHooksStatus([]string{"--all", "-o", "pretty"})
 	})
 
 	if blindErr == nil {
@@ -69,7 +69,7 @@ func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runHooksSurvey([]string{"-o", "json", "--ungated"})
+		err = runHooksStatus([]string{"--all", "-o", "json", "--ungated"})
 	})
 	if err == nil {
 		t.Fatal("survey --ungated -o json exited zero on an unreadable registry")
@@ -82,7 +82,7 @@ func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 	for name, run := range map[string]func() error{
 		"install": func() error { return installFleet(installOptions{}) },
-		"fire":    func() error { return runHooksFire([]string{"--fleet", "-o", "plain"}) },
+		"fire":    func() error { return runHooksStatus([]string{"--prove", "--fleet", "-o", "plain"}) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newChainFixture(t)

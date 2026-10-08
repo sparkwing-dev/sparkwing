@@ -149,7 +149,7 @@ func TestServeCompletionReplacesDashboardRoot(t *testing.T) {
 	if !found {
 		t.Fatal("completion omits serve")
 	}
-	cmd := outputContractCommand(t, "_complete-verbs")
+	cmd := outputContractCommand(t, "__complete", "verbs")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("completion helper: %v %s", err, out)
@@ -157,7 +157,7 @@ func TestServeCompletionReplacesDashboardRoot(t *testing.T) {
 	if !strings.Contains(string(out), "serve\t") || strings.Contains(string(out), "dashboard\t") {
 		t.Fatalf("wrong root completion: %s", out)
 	}
-	if !strings.Contains(renderBash(), "_complete-verbs") || !strings.Contains(renderZsh(), "_complete-verbs") || !strings.Contains(renderFish(), "serve") {
+	if !strings.Contains(renderBash(), "__complete verbs") || !strings.Contains(renderZsh(), "__complete verbs") || !strings.Contains(renderFish(), "serve") {
 		t.Fatal("shell completions omit the current command registry")
 	}
 }

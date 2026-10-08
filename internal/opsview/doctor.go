@@ -1755,7 +1755,7 @@ func renderLockedOutRepos(w io.Writer, r DoctorReport) {
 func renderUngatedRepos(w io.Writer, r DoctorReport) {
 	if r.GatesSurveyError != "" {
 		fmt.Fprintf(w, "\nwarning: the gate survey could not run, so no repo here was checked for a gate\n  %s\n"+
-			"  this is not a gated fleet, it is an unread one; fix the registry and re-run, or list it with `sparkwing configure xrepo list`\n",
+			"  this is not a gated fleet, it is an unread one; fix the registry and re-run, or list it with `sparkwing repos list --checkouts`\n",
 			r.GatesSurveyError)
 		return
 	}
@@ -1777,7 +1777,7 @@ func renderUngatedRepos(w io.Writer, r DoctorReport) {
 		fmt.Fprintf(w, "  %s\n    %s\n", g.Summary(), g.Remedy())
 	}
 	if r.GatesSurveyed > 0 {
-		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks fire --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
+		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks status --prove --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
 	}
 }
 

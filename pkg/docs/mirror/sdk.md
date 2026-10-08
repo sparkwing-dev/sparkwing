@@ -823,9 +823,9 @@ parsing, `--help`, schema introspection (`sparkwing pipeline describe
 ### What `secret:"true"` covers
 
 A secret-marked input is redacted to `***` on every read surface: the
-`run_start` setup block `sparkwing run` prints, `runs list`, `runs get`,
-`runs status`, `runs find`, `runs tree`, `runs wait`, `runs receipt`
-(including the `rerun` reproducer command), the controller's run API,
+`run_start` setup block `sparkwing run` prints, `runs list`,
+`runs status` and its `--view` renderings (including the receipt's
+`rerun` reproducer command), the controller's run API,
 and the dashboard's Setup panel. Node log bodies are masked separately
 by the run's masker, which replaces the value anywhere it appears in
 emitted text.
@@ -849,8 +849,8 @@ Limits worth knowing:
   otherwise. The row records the arguments the caller passed, and the
   yaml layers are re-read from the checkout each run, so a retry picks
   up the project's current value instead of a copy of the old one.
-- Trigger rows are not redacted. `sparkwing runs triggers get`,
-  `sparkwing runs triggers list`, and `GET /api/v1/triggers` show
+- Trigger rows are not redacted. `sparkwing cluster triggers get`,
+  `sparkwing cluster triggers list`, and `GET /api/v1/triggers` show
   argument values, because the same endpoint hands them to the runner
   claiming the work.
 - A run pre-allocated by a fresh trigger shows its arguments while it
@@ -906,7 +906,6 @@ type WrapperInputs struct {
 using the `sw-` prefix for its long control options:
 
 ```
--C, --sw-cd PATH          // re-anchor .sparkwing/ discovery
     --sw-ref REF          // compile the pipeline at a git ref
 -v, --sw-verbose          // debug logging
     --sw-start-at STEP    // start the run at STEP
@@ -1121,7 +1120,7 @@ members still take turns oldest-first inside the group.
 
 - `sparkwing docs read --topic pipelines` - conceptual tour
 - `sparkwing docs read --topic sdk` - this page
-- `sparkwing docs all` - every doc concatenated (one stdout dump for agents)
-- `sparkwing pipeline explain --name X [-o json]` - render the full
+- `sparkwing docs read --all` - every doc concatenated (one stdout dump for agents)
+- `sparkwing pipeline plan --static --name X [-o json]` - render the full
   Plan -> Job -> Work -> Step tree before running
 - [`pipelines.md`](pipelines.md) - the conceptual Plan/Work tour

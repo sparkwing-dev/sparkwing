@@ -64,7 +64,8 @@ func TestServiceOutputDoesNotTrustOpaqueDashboardPID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "dashboard.pid"), fmt.Appendf(nil, "%d", os.Getpid()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := outputContractCommand(t, "serve", "status", "--home", home)
+	cmd := outputContractCommand(t, "serve", "status")
+	cmd.Env = setEnv(cmd.Env, "SPARKWING_HOME", home)
 	out, err := cmd.Output()
 	if err == nil || cmd.ProcessState.ExitCode() != 2 {
 		t.Fatalf("opaque PID error: %v", err)
@@ -104,7 +105,7 @@ func TestHooksStatusOutputRoute(t *testing.T) {
 	repo := gateRepo(t)
 	installInto(t, (&fakeGit{}).run, repo)
 	for _, mode := range []string{"json", "plain", "pretty"} {
-		cmd := outputContractCommand(t, "pipeline", "hooks", "status", "--repo", repo, "--output="+mode)
+		cmd := outputContractCommand(t, "-C", repo, "pipeline", "hooks", "status", "--output="+mode)
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("%s: %v", mode, err)
@@ -137,7 +138,7 @@ func TestHooksStatusOutputKeepsHooksWhenConfigFails(t *testing.T) {
 	installInto(t, (&fakeGit{}).run, repo)
 	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), unloadableProject)
 	for _, mode := range []string{"json", "plain", "pretty"} {
-		cmd := outputContractCommand(t, "pipeline", "hooks", "status", "--repo", repo, "--output", mode)
+		cmd := outputContractCommand(t, "-C", repo, "pipeline", "hooks", "status", "--output", mode)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()

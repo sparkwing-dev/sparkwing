@@ -38,7 +38,7 @@ func TestConfigHelpDoesNotInspectPipeline(t *testing.T) {
 			if flag == "json" && !json.Valid(raw) {
 				t.Fatalf("help is not JSON: %q", raw)
 			}
-			if !strings.Contains(string(raw), "USAGE") || !strings.Contains(string(raw), "config") {
+			if !strings.Contains(string(raw), "USAGE") || !strings.Contains(string(raw), "--secrets") {
 				t.Fatalf("help=%q", raw)
 			}
 		})

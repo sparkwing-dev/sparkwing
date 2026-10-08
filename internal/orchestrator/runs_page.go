@@ -140,6 +140,8 @@ func runsQueryFor(opts ListOpts) (store.RunFilter, CompiledFilter, runsPager, er
 		Statuses:          opts.Statuses,
 		GitBranches:       opts.Filter.Branches,
 		GitSHAPrefixes:    opts.Filter.SHAPrefixes,
+		DeclaredRepos:     opts.Repos,
+		RootOnly:          opts.RootOnly,
 	}
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)

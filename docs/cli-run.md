@@ -88,8 +88,8 @@ A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 is refused with the reason instead of ignored; run those in
 the foreground.
 
-PIPELINE resolves against the checkout you are standing in (or
---sw-cd PATH) first, then the repo registry, and the chosen
+PIPELINE resolves against the checkout you are standing in (or the
+one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
 GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
@@ -97,10 +97,6 @@ every credential-shaped name -- widened by naming variables in
 SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.
-
-### Subcommands
-
-- `config` -- Print a pipeline's declared Secrets with provenance
 
 ### Arguments
 
@@ -110,7 +106,6 @@ is running and exits after five idle minutes; see
 
 | Flag | Description |
 |---|---|
-| `-C, --sw-cd PATH` | Run as if started in PATH |
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
 | `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
 | `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
@@ -160,35 +155,11 @@ sparkwing run fictional-build --sw-detached --sw-pipeline-ref main
 sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging
 
 # Detach a pipeline from another checkout
-sparkwing run lint --sw-detached --sw-cd ~/code/other-project
+sparkwing -C ~/code/other-project run lint --sw-detached
 
 # Retry a failed run
 sparkwing runs retry --run run-fictional --failed
 
 # Submit to a remote controller
 sparkwing pipeline trigger deploy --profile prod
-```
-
-## `sparkwing run config`
-
-Print a pipeline's declared Secrets with provenance
-
-Lists each declared secret, its source binding, and its resolution status.
-Invoke it with 'sparkwing run <pipeline> config'. The pipeline binary
-handles this inspection command.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Inspect the declared secrets
-sparkwing run fictional-release config
-
-# Agent-readable form
-sparkwing run fictional-release config -o json
 ```

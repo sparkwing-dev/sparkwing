@@ -136,15 +136,15 @@ func undeclaredGateSummary(fires []string) string {
 
 func (r RepoGates) Remedy() string {
 	if r.State == GateBroken {
-		return fmt.Sprintf("fix the config, then sparkwing pipeline hooks install --repo %s", r.Repo)
+		return fmt.Sprintf("fix the config, then sparkwing -C %s pipeline hooks install", r.Repo)
 	}
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
-		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
+		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
 	if !r.DeclaresBlocking() {
-		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
+		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
 	}
-	return fmt.Sprintf("sparkwing pipeline hooks install --repo %s", r.Repo)
+	return fmt.Sprintf("sparkwing -C %s pipeline hooks install", r.Repo)
 }
 
 func Survey(git Git, repoRoot string, declared []string) RepoGates {

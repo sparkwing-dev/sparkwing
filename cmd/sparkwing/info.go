@@ -874,7 +874,7 @@ func printInfoTable(info Info) {
 	fmt.Println()
 
 	fmt.Println(color.Bold("MIGRATION GUIDES"))
-	fmt.Printf("  cli:        %s %s\n", color.Cyan("sparkwing docs migrations list / read / between"), color.Dim("(offline, version-locked)"))
+	fmt.Printf("  cli:        %s %s\n", color.Cyan("sparkwing docs migrations [--version V | --from A --to B]"), color.Dim("(offline, version-locked)"))
 	fmt.Printf("  web:        %s\n", color.Cyan(info.Docs.MigrationGuidesURL))
 	fmt.Printf("  agent:      %s %s\n", color.Cyan(info.Docs.MigrationGuidesAgentURL), color.Dim("(concatenated corpus, one fetch)"))
 	fmt.Printf("  index:      %s %s\n", color.Cyan(info.Docs.MigrationGuidesIndexURL), color.Dim("(structured migration discovery)"))

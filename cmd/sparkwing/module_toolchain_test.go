@@ -20,9 +20,6 @@ func TestPipelineModuleCommandsHonorToolchainFloor(t *testing.T) {
 		name string
 		run  func(context.Context, string) error
 	}{
-		{"publish", func(ctx context.Context, dir string) error {
-			return compileForPlatform(ctx, dir, filepath.Join(dir, "pipeline"), platform{OS: "linux", Arch: "amd64"})
-		}},
 		{"init tidy", func(ctx context.Context, dir string) error { _, err := tidySkeleton(ctx, dir); return err }},
 		{"SDK get", func(ctx context.Context, dir string) error {
 			_, err := runGoModCmd(ctx, dir, "get", sdkModulePath+"@v0.49.0")

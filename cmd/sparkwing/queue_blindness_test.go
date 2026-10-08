@@ -106,7 +106,8 @@ func queueOutput(t *testing.T, home string) string {
 	t.Helper()
 	var err error
 	out := captureStdout(t, func() {
-		err = runQueue([]string{"--home", home, "-o", "json"})
+		t.Setenv("SPARKWING_HOME", home)
+		err = runQueue([]string{"-o", "json"})
 	})
 	if err != nil {
 		t.Fatalf("queue --home %s: %v", home, err)
@@ -145,7 +146,8 @@ func TestRunQueue_UnreachableDaemonExitsWithTheInfrastructureCode(t *testing.T) 
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runQueue([]string{"--home", home, "-o", "json"})
+		t.Setenv("SPARKWING_HOME", home)
+		err = runQueue([]string{"-o", "json"})
 	})
 	if err == nil {
 		t.Fatal("queue exited 0 against a daemon it could not reach")

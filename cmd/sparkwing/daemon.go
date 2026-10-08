@@ -77,8 +77,6 @@ func runDaemon(args []string) error {
 		return runDaemonRecoverState(args[1:])
 	case "events":
 		return runDaemonEvents(args[1:])
-	case "explain":
-		return runDaemonExplain(args[1:])
 	default:
 		PrintHelp(cmdDaemon, os.Stderr)
 		return fmt.Errorf("daemon: unknown subcommand %q", args[0])
@@ -101,7 +99,6 @@ func reportSkippedJournalRecords(skipped int) {
 
 func runDaemonEvents(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonEvents.Path, flag.ContinueOnError)
-	home := fs.String("home", "", "sparkwing home to inspect")
 	run := fs.String("run", "", "run ID")
 	since := fs.Duration("since", 0, "lookback duration")
 	kinds := fs.StringArray("kind", nil, "record kind (repeatable)")
@@ -109,11 +106,23 @@ func runDaemonEvents(args []string) error {
 	limit := fs.Int("limit", 50, "maximum records (0 for all)")
 	offset := fs.Int("offset", 0, "matching records to skip from newest")
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
+	explain := fs.Bool("explain", false, "with --run, explain the run's admission history in sentences")
 	if err := parseAndCheck(cmdDaemonEvents, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
+	}
+	if *explain {
+		for _, name := range []string{"since", "kind", "incarnation", "limit", "offset"} {
+			if fs.Changed(name) {
+				return fmt.Errorf("daemon events --explain: --%s filters the event list; --explain reads every record of the run", name)
+			}
+		}
+		if *run == "" {
+			return errors.New("daemon events --explain: --run is required")
+		}
+		return explainRunAdmission(*run, *output)
 	}
 	if *since < 0 {
 		return errors.New("daemon events: --since must be nonnegative")
@@ -128,13 +137,13 @@ func runDaemonEvents(args []string) error {
 	if err != nil {
 		return err
 	}
-	records, skipped, err := daemonJournal(*home)
+	records, skipped, err := daemonJournal("")
 	if err != nil {
 		return err
 	}
 	reportSkippedJournalRecords(skipped)
 	if len(records) == 0 && format != "json" {
-		dir, err := wingd.StateDir(*home)
+		dir, err := wingd.StateDir("")
 		if err != nil {
 			return err
 		}
@@ -178,33 +187,20 @@ func runDaemonEvents(args []string) error {
 	return nil
 }
 
-func runDaemonExplain(args []string) error {
-	fs := flag.NewFlagSet(cmdDaemonExplain.Path, flag.ContinueOnError)
-	home := fs.String("home", "", "sparkwing home to inspect")
-	run := fs.String("run", "", "run ID to explain")
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	if err := parseAndCheck(cmdDaemonExplain, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *run == "" {
-		return errors.New("daemon explain: --run is required")
-	}
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonExplain.Path)
+func explainRunAdmission(runID, output string) error {
+	format, err := resolveTTYAwareOutput(output, cmdDaemonEvents.Path)
 	if err != nil {
 		return err
 	}
-	records, skipped, err := daemonJournal(*home)
+	records, skipped, err := daemonJournal("")
 	if err != nil {
 		return err
 	}
 	reportSkippedJournalRecords(skipped)
 	children := make(map[string][]string)
-	related := map[string]bool{*run: true}
+	related := map[string]bool{runID: true}
 	for _, r := range records {
-		if r.DisplayRunID == *run && r.RunID != "" {
+		if r.DisplayRunID == runID && r.RunID != "" {
 			related[r.RunID] = true
 		}
 		if r.RunID == "" {
@@ -239,7 +235,7 @@ func runDaemonExplain(args []string) error {
 	}
 	found := false
 	for _, r := range records {
-		if !related[r.RunID] && r.DisplayRunID != *run {
+		if !related[r.RunID] && r.DisplayRunID != runID {
 			continue
 		}
 		found = true
@@ -250,17 +246,17 @@ func runDaemonExplain(args []string) error {
 			continue
 		}
 		label := ""
-		if r.RunID != "" && r.RunID != *run {
+		if r.RunID != "" && r.RunID != runID {
 			name := r.RunID
 			if shown := display[r.RunID]; shown != "" {
-				name = strings.TrimPrefix(shown, *run+"/")
+				name = strings.TrimPrefix(shown, runID+"/")
 			}
 			label = name + ": "
 		}
 		fmt.Fprintf(os.Stdout, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r))
 	}
 	if !found && format != "json" {
-		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", *run)
+		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", runID)
 	}
 	return nil
 }
@@ -449,7 +445,6 @@ func compactValue(value any) string {
 
 func runDaemonRecoverState(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonRecoverState.Path, flag.ContinueOnError)
-	home := fs.String("home", "", "sparkwing home whose unreadable daemon state should be preserved")
 	yes := fs.Bool("yes", false, "confirm every run described by the unreadable state has stopped")
 	if err := parseAndCheck(cmdDaemonRecoverState, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -460,7 +455,7 @@ func runDaemonRecoverState(args []string) error {
 	if !*yes {
 		return errors.New("daemon recover-state: refusing without --yes; unreadable state may describe live admission holders")
 	}
-	quarantined, err := wingd.RecoverUnreadableState(*home, time.Now())
+	quarantined, err := wingd.RecoverUnreadableState("", time.Now())
 	if err != nil {
 		return fmt.Errorf("daemon recover-state: %w", err)
 	}
@@ -471,7 +466,6 @@ func runDaemonRecoverState(args []string) error {
 func runDaemonStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonStatus.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	home := fs.String("home", "", "sparkwing home to inspect")
 	if err := parseAndCheck(cmdDaemonStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -480,7 +474,7 @@ func runDaemonStatus(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	report, err := inspectDaemon(ctx, *home)
+	report, err := inspectDaemon(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -637,7 +631,6 @@ type daemonRestartDeps struct {
 func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 	fs := flag.NewFlagSet(cmdDaemonRestart.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	home := fs.String("home", "", "sparkwing home to refresh")
 	force := fs.Bool("force", false, "replace the daemon even when it already serves this build")
 	if err := parseAndCheck(cmdDaemonRestart, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -657,12 +650,12 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 		replace = deps.restart
 	}
 	result, err := replace(ctx, wingdclient.Options{
-		Home:    *home,
+		Home:    "",
 		Version: target,
 		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 	})
 	if errors.Is(err, wingdclient.ErrNoDaemon) {
-		report, inspectErr := deps.inspect(ctx, *home)
+		report, inspectErr := deps.inspect(ctx, "")
 		if inspectErr != nil {
 			return inspectErr
 		}
@@ -671,7 +664,7 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 	if err != nil {
 		return fmt.Errorf("daemon restart: %w", err)
 	}
-	report, err := deps.inspect(ctx, *home)
+	report, err := deps.inspect(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -696,7 +689,6 @@ type daemonStopDeps struct {
 func runDaemonStopWith(args []string, deps daemonStopDeps) error {
 	fs := flag.NewFlagSet(cmdDaemonStop.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	home := fs.String("home", "", "sparkwing home whose daemon should stop")
 	if err := parseAndCheck(cmdDaemonStop, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -709,7 +701,7 @@ func runDaemonStopWith(args []string, deps daemonStopDeps) error {
 	if err != nil {
 		return err
 	}
-	before, err := deps.inspect(ctx, *home)
+	before, err := deps.inspect(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -717,14 +709,14 @@ func runDaemonStopWith(args []string, deps daemonStopDeps) error {
 		return emitDaemonReport(before, format)
 	}
 	stopErr := deps.stop(ctx, wingdclient.Options{
-		Home:    *home,
+		Home:    "",
 		Version: installedVersion(),
 		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 	})
 	if stopErr != nil && !errors.Is(stopErr, wingdclient.ErrNoDaemon) {
 		return fmt.Errorf("daemon stop: %w", stopErr)
 	}
-	report, err := deps.inspect(ctx, *home)
+	report, err := deps.inspect(ctx, "")
 	if err != nil {
 		return err
 	}

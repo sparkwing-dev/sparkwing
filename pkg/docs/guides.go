@@ -70,7 +70,7 @@ func GuideNames() []string {
 }
 
 // ReadGuide concatenates a guide's topics in reading order, each under
-// the same separator `docs all` uses, so a caller that already parses
+// the same separator `docs read --all` uses, so a caller that already parses
 // one parses the other.
 func ReadGuide(name string) (string, error) {
 	g, ok := GuideByName(name)
