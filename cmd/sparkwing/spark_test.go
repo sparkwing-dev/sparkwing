@@ -206,3 +206,15 @@ func runIn(t *testing.T, dir string, run func([]string) error, args ...string) e
 	t.Chdir(dir)
 	return run(args)
 }
+
+func TestSparksVerbsFindTheModuleFromASubdirectory(t *testing.T) {
+	root := writeSparkFixture(t, map[string]string{
+		".sparkwing/sparkwing.yaml": "sparks:\n  - name: libA\n    source: example.com/a\n    version: latest\n",
+		".sparkwing/go.mod":         "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
+		"services/api/README":       "x\n",
+	})
+	err := runIn(t, filepath.Join(root, "services", "api"), runSparksUpdate, "--name", "libA")
+	if err == nil || !strings.Contains(err.Error(), "--name is not supported") {
+		t.Fatalf("sparks update from a subdirectory = %v, want it to reach the manifest above", err)
+	}
+}

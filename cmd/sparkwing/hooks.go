@@ -1006,13 +1006,20 @@ func resolveHooksRepo() (repoRoot, sparkwingDir string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	for dir := cwd; ; dir = filepath.Dir(dir) {
+	if dir, ok := nearestDotSparkwing(cwd); ok {
+		return filepath.Dir(dir), dir, nil
+	}
+	return "", "", fmt.Errorf("no .sparkwing/ directory in %s or above it (pass -C DIR)", cwd)
+}
+
+func nearestDotSparkwing(start string) (string, bool) {
+	for dir := start; ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, ".sparkwing")
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			return dir, candidate, nil
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate, true
 		}
 		if filepath.Dir(dir) == dir {
-			return "", "", fmt.Errorf("no .sparkwing/ directory in %s or above it (pass -C DIR)", cwd)
+			return "", false
 		}
 	}
 }

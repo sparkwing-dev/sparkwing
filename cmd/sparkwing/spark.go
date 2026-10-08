@@ -19,10 +19,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
+// safety: -C may name a subdirectory, so the nearest .sparkwing/ upward is
+// the module; with none, the path under the working directory names what is
+// missing in the error the caller reports.
 func defaultSparkwingDir() string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ".sparkwing"
+	}
+	if dir, ok := nearestDotSparkwing(cwd); ok {
+		return dir
 	}
 	return filepath.Join(cwd, ".sparkwing")
 }
