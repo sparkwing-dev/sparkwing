@@ -223,6 +223,10 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, l.ownRun(l.handleListPendingTriggersForParent)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetNodeMetrics)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", requireScope(ScopeNodesClaim, l.ownRun(l.handleAddNodeUsage)))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, l.ownRun(l.handlePendingNodeBounce)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, l.ownRun(l.handleConsumeNodeBounce)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, l.ownRun(l.handleAcknowledgeNodeExecutionStart)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, l.ownRun(l.handleFinishNodeExecutionAttempt)))
 
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleConcurrencyState)))
 

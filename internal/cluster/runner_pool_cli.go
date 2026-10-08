@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -128,8 +129,14 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 
 	held := newHeldResources()
 	ctrl.WithClaimResources(held.report)
+	// safety: a node's WhenRunner and Runtime().Runner read this, and the node's process is a
+	// brokered child that sees none of this runner's own configuration.
+	identity := &sparkwing.RunnerInfo{
+		Name: cfg.HolderPrefix, Type: os.Getenv("SPARKWING_RUNNER_TYPE"), Labels: slices.Clone(cfg.Labels),
+	}
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
 		defer held.hold(n)()
+		execCtx = sparkwingruntime.WithRunner(execCtx, identity)
 		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.AllowRepos, cfg.Token,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}

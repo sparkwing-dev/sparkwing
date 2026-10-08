@@ -201,12 +201,6 @@ func RunNodeOnce(
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}
 
-	// safety: propagate the dispatcher's resolved args or an external node
-	// silently falls back to schema defaults.
-	if ra := plan.ResolvedArgs(); ra != nil {
-		ctx = sparkwingruntime.WithResolvedArgs(ctx, ra)
-	}
-
 	if info := podRunnerInfo(); info != nil {
 		ctx = sparkwingruntime.WithRunner(ctx, info)
 	}
@@ -302,13 +296,6 @@ func RunNodeOnce(
 	}
 
 	r := NewNodeExecutor(backends)
-	// safety: this process is the only thing that can serve a SpawnNode
-	// call in the node it is about to run. The dispatcher's handler
-	// splices the child into a live plan object that exists only in the
-	// dispatcher's memory, and a pod has no dispatcher to ask at all.
-	ctx = sparkwingruntime.WithSpawnHandler(ctx, newNodeSpawnHandler(
-		r, backends, plan, runID, run.Pipeline, nodeID, delegate,
-		nodeProcessPipelineRequires(run.Pipeline, logger)))
 	req := runner.Request{
 		RunID:    runID,
 		NodeID:   nodeID,
@@ -348,6 +335,7 @@ func runContextFor(run *store.Run) sparkwing.RunContext {
 }
 
 func runNodeCLI(args []string) error {
+	defer secrets.StopSharingRegistered()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
 		"controller base URL (env: SPARKWING_CONTROLLER_URL)")
@@ -443,11 +431,11 @@ func runNodeCLI(args []string) error {
 	if *coordinated {
 		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
 		runOpts = append(runOpts, Coordinated())
-		var abandon context.CancelFunc
-		ctx, abandon = context.WithCancel(ctx)
-		defer abandon()
-		defer WatchParentLiveness(abandon)()
 	}
+	var abandon context.CancelFunc
+	ctx, abandon = context.WithCancel(ctx)
+	defer abandon()
+	defer WatchParentLiveness(abandon)()
 	if brokeredChild {
 		for name := range remoteExecutionPrivateEnv {
 			_ = os.Unsetenv(name)

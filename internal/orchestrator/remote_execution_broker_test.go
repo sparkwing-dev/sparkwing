@@ -383,7 +383,6 @@ func TestRemoteExecutionBrokerMemoizedSlot(t *testing.T) {
 		{http.MethodPost, "/api/v1/concurrency/" + key + "/release", `{"holder_id":"run-2/node-a","outcome":"success"}`},
 		{http.MethodPost, "/api/v1/concurrency/" + key + "/heartbeat", `{"holder_id":"run-2/node-a"}`},
 		{http.MethodPost, "/api/v1/concurrency/" + key + "/cancel-waiter", `{"run_id":"run-2","node_id":"node-a"}`},
-		{http.MethodPost, "/api/v1/concurrency/" + key + "/force-release", `{}`},
 	} {
 		r, err := http.NewRequest(req.method, broker.URL()+req.path, strings.NewReader(req.body))
 		if err != nil {

@@ -2351,9 +2351,42 @@ test("cron detail deep links survive hidden and missing schedules", async ({ pag
 });
 
 
+test("a page link keeps its own filters over the session's saved ones", async ({ page }) => {
+  const lists: URL[] = [];
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    onRequest: (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/runs") lists.push(url);
+    },
+  });
+  await page.addInitScript(() => sessionStorage.setItem("sparkwing.runFilters", "status=failed"));
+  await page.goto("/runs?older=1791478850000000000:run-older");
+  await expect.poll(() => lists.length).toBeGreaterThan(0);
+  await expect(page.locator(`[data-run-id="${finishedRun.id}"]`)).toBeVisible();
+  expect(new URL(page.url()).searchParams.has("status")).toBe(false);
+  expect(lists.every((url) => !url.searchParams.has("status"))).toBe(true);
+  expect(lists.at(-1)?.searchParams.get("after_id")).toBe("run-older");
+
+  await page.goto("/runs");
+  await expect(page).toHaveURL(/(?:\?|&)status=failed(?:&|$)/);
+});
+
 test("runs trigger filters persist and offer badge include and exclude", async ({ page }) => {
   const scheduled = { ...runningRun, trigger_source: "schedule" };
   await installMockAPI(page, { runs: [finishedRun, scheduled] });
+  // The controller applies run filters, so this stand-in answers the trigger filters it is sent.
+  await page.route("**/api/v1/runs?**", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const include = params.get("trigger_source")?.split(",");
+    const exclude = params.get("exclude_trigger_source")?.split(",") ?? [];
+    const runs = [finishedRun, scheduled].filter(
+      (r) =>
+        (!include || include.includes(r.trigger_source ?? "")) &&
+        !exclude.includes(r.trigger_source ?? ""),
+    );
+    await route.fulfill({ json: { runs } });
+  });
   await page.goto("/runs");
   const githubRow = page.locator(`[data-run-id="${finishedRun.id}"]`);
   const scheduledRow = page.locator(`[data-run-id="${scheduled.id}"]`);
@@ -2450,6 +2483,54 @@ test("Search finds an older run through server-side filters", async ({ page }) =
   await expect(page.getByRole("button", { name: /^TRIGGER/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^REPO/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^TAG/ })).toHaveCount(0);
+});
+
+test("a failed search for older runs keeps the matches found and can be retried", async ({ page }) => {
+  await installMockAPI(page);
+  const searched: URL[] = [];
+  const cursor = { after_id: "run-a", after_started_at: "1791478850123456789" };
+  await page.route("**/api/v1/runs/grep?**", async (route) => {
+    const url = new URL(route.request().url());
+    searched.push(url);
+    if (!url.searchParams.has("after_id")) {
+      await route.fulfill({
+        json: {
+          query: "needle",
+          matches: [{ run_id: "run-a", pipeline: "build", node_id: "build", line: 1, content: "needle on the first page" }],
+          runs: { "run-a": { ...finishedRun, id: "run-a" } },
+          total: 1,
+          runs_scanned: 200,
+          runs_matching: 200,
+          next_cursor: cursor,
+        },
+      });
+    } else if (searched.length === 2) {
+      await route.fulfill({ status: 503, body: "busy" });
+    } else {
+      await route.fulfill({
+        json: {
+          query: "needle",
+          matches: [{ run_id: "run-b", pipeline: "build", node_id: "build", line: 2, content: "needle on the second page" }],
+          runs: { "run-b": { ...finishedRun, id: "run-b" } },
+          total: 1,
+          runs_scanned: 30,
+          runs_matching: 30,
+        },
+      });
+    }
+  });
+  await page.goto("/runs?view=search&gq=needle&gsince=all");
+  await expect(page.getByText("needle on the first page")).toBeVisible();
+  const older = page.getByRole("button", { name: "Search older runs" });
+  await older.click();
+  await expect(page.getByText("error: Search failed (503)")).toBeVisible();
+  await expect(page.getByText("needle on the first page")).toBeVisible();
+  await older.click();
+  await expect(page.getByText("needle on the second page")).toBeVisible();
+  await expect(page.getByText("needle on the first page")).toBeVisible();
+  await expect(page.getByText(/searched 230 runs, every matching run/)).toBeVisible();
+  expect(searched[1].searchParams.get("after_started_at")).toBe(cursor.after_started_at);
+  expect(searched[2].searchParams.get("after_id")).toBe("run-a");
 });
 
 test("Search keeps visible filters aligned with same-view navigation", async ({ page }) => {

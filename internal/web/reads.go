@@ -459,7 +459,7 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 			}
 		}
 		shaPrefixes := r.URL.Query()["sha"]
-		for _, prefix := range shaPrefixes {
+		for _, prefix := range append(slices.Clone(shaPrefixes), r.URL.Query()["nsha"]...) {
 			prefix = strings.TrimSpace(prefix)
 			if prefix == "" || strings.IndexFunc(prefix, func(ch rune) bool {
 				return !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'))
@@ -469,28 +469,37 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 			}
 		}
 		filter := store.RunFilter{
-			Pipelines:      r.URL.Query()["pipeline"],
-			Statuses:       r.URL.Query()["status"],
-			GitBranches:    r.URL.Query()["branch"],
-			GitSHAPrefixes: shaPrefixes,
-			Limit:          runLimit,
+			Pipelines:             r.URL.Query()["pipeline"],
+			Statuses:              r.URL.Query()["status"],
+			GitBranches:           r.URL.Query()["branch"],
+			GitSHAPrefixes:        shaPrefixes,
+			ExcludePipelines:      r.URL.Query()["npipeline"],
+			ExcludeStatuses:       r.URL.Query()["nstatus"],
+			ExcludeGitBranches:    r.URL.Query()["nbranch"],
+			ExcludeGitSHAPrefixes: r.URL.Query()["nsha"],
+			// perf: one row past the page tells a last page from a full one without a count.
+			Limit: runLimit + 1,
 		}
 		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 			if d, err := time.ParseDuration(sinceStr); err == nil && d > 0 {
 				filter.Since = time.Now().Add(-d)
 			}
 		}
+		if id := r.URL.Query().Get("after_id"); id != "" {
+			at, err := strconv.ParseInt(r.URL.Query().Get("after_started_at"), 10, 64)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, errors.New("after_id needs a numeric after_started_at"))
+				return
+			}
+			filter.AfterID, filter.AfterStartedAt = id, at
+		}
 		runs, err := b.ListRuns(r.Context(), filter)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		runs = applyGrepExcludes(runs, grepExcludes{
-			pipelines:   r.URL.Query()["npipeline"],
-			statuses:    r.URL.Query()["nstatus"],
-			branches:    r.URL.Query()["nbranch"],
-			shaPrefixes: r.URL.Query()["nsha"],
-		})
+		more := len(runs) > runLimit
+		runs = runs[:min(len(runs), runLimit)]
 		if ids, specified := r.URL.Query()["run_id"]; specified {
 			allowed := make(map[string]bool, len(ids))
 			for _, id := range ids {
@@ -509,11 +518,14 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 		truncated := false
 		searched := 0
 		runsMeta := make(map[string]*store.Run)
+		var last *store.Run
 		for _, run := range runs {
 			if r.Context().Err() != nil || (maxMatches > 0 && len(matches) >= maxMatches) {
 				truncated = true
+				more = true
 				break
 			}
+			last = run
 			nodes, err := b.ListNodes(r.Context(), run.ID)
 			if err != nil {
 				truncated = true
@@ -556,7 +568,7 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 				truncated = truncated || errors.Is(sc.Err(), bufio.ErrTooLong)
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		body := map[string]any{
 			"query":         q,
 			"matches":       matches,
 			"runs":          runsMeta,
@@ -564,54 +576,17 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 			"runs_scanned":  searched,
 			"runs_matching": len(runs),
 			"truncated":     truncated,
-		})
-	}
-}
-
-type grepExcludes struct {
-	pipelines   []string
-	statuses    []string
-	branches    []string
-	shaPrefixes []string
-}
-
-func applyGrepExcludes(runs []*store.Run, ex grepExcludes) []*store.Run {
-	if len(ex.pipelines)+len(ex.statuses)+len(ex.branches)+len(ex.shaPrefixes) == 0 {
-		return runs
-	}
-	out := runs[:0]
-	for _, run := range runs {
-		if containsExact(ex.pipelines, run.Pipeline) {
-			continue
 		}
-		if containsExact(ex.statuses, run.Status) {
-			continue
-		}
-		if containsExact(ex.branches, run.GitBranch) {
-			continue
-		}
-		excludedBySHA := false
-		for _, p := range ex.shaPrefixes {
-			if p != "" && strings.HasPrefix(run.GitSHA, p) {
-				excludedBySHA = true
-				break
+		// safety: the instant travels as a string, because a browser reads a JSON number
+		// past 2^53 nanoseconds as a different instant and the next page would skip runs.
+		if more && last != nil {
+			body["next_cursor"] = map[string]string{
+				"after_id":         last.ID,
+				"after_started_at": strconv.FormatInt(store.RunCursorKey(last.StartedAt), 10),
 			}
 		}
-		if excludedBySHA {
-			continue
-		}
-		out = append(out, run)
+		writeJSON(w, http.StatusOK, body)
 	}
-	return out
-}
-
-func containsExact(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // NodeLogsHandler serves the log of the {node} of run {id}.

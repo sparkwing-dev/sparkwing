@@ -591,22 +591,12 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 		} else {
 			i++
 		}
-		if len(arg.Enum) > 0 && !inEnumList(value, arg.Enum) {
-			return nil, fmt.Errorf("--%s=%q not allowed (must be one of %s)",
-				arg.Name, value, strings.Join(arg.Enum, ", "))
+		if err := arg.CheckEnum(value); err != nil {
+			return nil, err
 		}
 		out[arg.Name] = value
 	}
 	return out, nil
-}
-
-func inEnumList(v string, enum []string) bool {
-	for _, e := range enum {
-		if e == v {
-			return true
-		}
-	}
-	return false
 }
 
 func readDebugDirectivesFromEnv() DebugDirectives {

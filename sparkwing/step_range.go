@@ -76,9 +76,7 @@ func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string {
 		return nil
 	}
 	steps := w.Steps()
-	spawns := w.Spawns()
-	gens := w.SpawnGens()
-	items := make(map[string]*workItem, len(steps)+len(spawns)+len(gens))
+	items := make(map[string]*workItem, len(steps))
 	add := func(id string, deps []string) {
 		if _, exists := items[id]; exists {
 			return
@@ -87,12 +85,6 @@ func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string {
 	}
 	for _, s := range steps {
 		add(s.ID(), s.DepIDs())
-	}
-	for _, sp := range spawns {
-		add(sp.ID(), sp.DepIDs())
-	}
-	for _, g := range gens {
-		add(g.ID(), g.DepIDs())
 	}
 	if _, hasStart := items[startAt]; startAt != "" && !hasStart {
 		if _, hasStop := items[stopAt]; stopAt == "" || !hasStop {
@@ -154,10 +146,7 @@ func emitStepSkippedWithReason(ctx context.Context, stepID, reason string) {
 
 // TopologicalStepOrder returns Work item IDs in a stable topological
 // order consistent with their Needs DAG: ties broken by registration
-// order (the order Step / SpawnNode / SpawnNodeForEach was called).
-// Hidden synthetic items (SpawnNodeForEach generators) appear at
-// their natural position; renderers that want a human-readable view
-// should filter them. Returns nil for a nil/empty Work.
+// order (the order Step was called). Returns nil for a nil/empty Work.
 //
 // Exposed so `sparkwing pipeline plan` and friends can render
 // "this is what --start-at=X would skip" without dispatching.
@@ -166,9 +155,7 @@ func (w *Work) TopologicalStepOrder() []string {
 		return nil
 	}
 	steps := w.Steps()
-	spawns := w.Spawns()
-	gens := w.SpawnGens()
-	total := len(steps) + len(spawns) + len(gens)
+	total := len(steps)
 	if total == 0 {
 		return nil
 	}
@@ -186,12 +173,6 @@ func (w *Work) TopologicalStepOrder() []string {
 	}
 	for _, s := range steps {
 		add(s.ID(), s.DepIDs())
-	}
-	for _, sp := range spawns {
-		add(sp.ID(), sp.DepIDs())
-	}
-	for _, g := range gens {
-		add(g.ID(), g.DepIDs())
 	}
 
 	indeg := make(map[string]int, total)

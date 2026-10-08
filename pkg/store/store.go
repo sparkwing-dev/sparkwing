@@ -4180,10 +4180,36 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 
+	// The Exclude lists drop a run matching any of their values.
+	ExcludePipelines      []string
+	ExcludeStatuses       []string
+	ExcludeGitSHAPrefixes []string
+	ExcludeGitBranches    []string
+	TriggerSources        []string
+	ExcludeTriggerSources []string
+	// RepoNames match the name the dashboard labels a run with: the last path segment of
+	// its declared repository, else of its GitHub repository, else "unknown".
+	RepoNames        []string
+	ExcludeRepoNames []string
+	// StartedBefore, FinishedAfter and FinishedBefore are inclusive bounds; a finished
+	// bound excludes every unfinished run.
+	StartedBefore  time.Time
+	FinishedAfter  time.Time
+	FinishedBefore time.Time
+	// Text keeps runs containing every term, and ExcludeText drops runs containing any,
+	// in the id, pipeline, repository, branch, SHA, error, trigger source or status. Only
+	// ASCII letters match regardless of case, the same on every backend.
+	Text        []string
+	ExcludeText []string
+
 	// AfterStartedAt and AfterID resume a listing after one already-seen run. The id
 	// breaks ties among runs sharing an instant, which an instant alone would skip.
 	AfterStartedAt int64
 	AfterID        string
+	// BeforeStartedAt and BeforeID page the other way: the Limit runs just newer than
+	// one already-seen run, still returned newest first.
+	BeforeStartedAt int64
+	BeforeID        string
 
 	// ProbeMayBeClamped marks a limit this process chose rather than one a caller asked
 	// for. A server clamping the probe row away then leaves the result reported as cut
@@ -4194,6 +4220,9 @@ type RunFilter struct {
 // HasCursor reports whether the filter resumes after an already-seen run. It keys on
 // the id alone, because a run started at the Unix epoch carries an instant of zero.
 func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
+
+// HasBeforeCursor reports whether the filter pages toward newer runs.
+func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
@@ -4206,7 +4235,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
 }
 
 func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(scope, f)
+	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
 		return nil, err
 	}
@@ -4218,10 +4247,14 @@ func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ [
 	limit = min(limit, maxRunListFetch)
 	args = append(args, limit)
 
+	order := "started_at DESC, id DESC"
+	if f.HasBeforeCursor() {
+		order = "started_at ASC, id ASC"
+	}
 	query := `
 SELECT ` + runColumns + `
   FROM runs` + where + `
- ORDER BY started_at DESC, id DESC
+ ORDER BY ` + order + `
  LIMIT ?`
 
 	rows, err := s.query(ctx, query, args...)
@@ -4241,6 +4274,9 @@ SELECT ` + runColumns + `
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	if f.HasBeforeCursor() {
+		slices.Reverse(out)
 	}
 	return out, rows.Err()
 }
@@ -4273,7 +4309,7 @@ func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 }
 
 func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(scope, f)
+	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
 		return 0, err
 	}
@@ -4285,21 +4321,17 @@ func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (in
 	return n, nil
 }
 
-func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
+func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []any, error) {
 	if !scope.all && scope.team == "" {
 		return "", nil, ErrNoTeam
 	}
-	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
-	for i, prefix := range f.GitSHAPrefixes {
-		prefix = strings.ToLower(strings.TrimSpace(prefix))
-		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
-			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
-		}) >= 0 {
-			return "", nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
-		}
-		normalizedPrefixes[i] = prefix
+	var err error
+	if f.GitSHAPrefixes, err = normalizeSHAPrefixes(f.GitSHAPrefixes); err != nil {
+		return "", nil, err
 	}
-	f.GitSHAPrefixes = normalizedPrefixes
+	if f.ExcludeGitSHAPrefixes, err = normalizeSHAPrefixes(f.ExcludeGitSHAPrefixes); err != nil {
+		return "", nil, err
+	}
 
 	where := ""
 	args := []any{}
@@ -4337,18 +4369,8 @@ func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
 		args = append(args, values...)
 	}
 	if len(f.GitSHAPrefixes) > 0 {
-		parts := make([]string, 0, len(f.GitSHAPrefixes))
-		values := make([]any, 0, len(f.GitSHAPrefixes)*2)
-		for _, prefix := range f.GitSHAPrefixes {
-			if upper, ok := prefixUpperBound(prefix); ok {
-				parts = append(parts, "(git_sha >= ? AND git_sha < ?)")
-				values = append(values, prefix, upper)
-			} else {
-				parts = append(parts, "git_sha = ?")
-				values = append(values, prefix)
-			}
-		}
-		addClause("("+strings.Join(parts, " OR ")+")", values...)
+		clause, values := shaPrefixClause(f.GitSHAPrefixes)
+		addClause(clause, values...)
 	}
 	if f.ParentRunID != "" {
 		addClause("parent_run_id = ?", f.ParentRunID)
@@ -4358,8 +4380,17 @@ func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
 	if !f.Since.IsZero() {
 		addClause("started_at >= ?", f.Since.UnixNano())
 	}
+	if f.HasCursor() && f.HasBeforeCursor() {
+		return "", nil, errBothCursors
+	}
 	if f.HasCursor() {
 		addClause(runCursorClause(f.AfterStartedAt), runCursorArgs(f)...)
+	}
+	if f.HasBeforeCursor() {
+		addClause(runBeforeCursorClause(f.BeforeStartedAt), runBeforeCursorArgs(f)...)
+	}
+	for _, c := range runDisplayFilterClauses(dialect, f) {
+		addClause(c.sql, c.args...)
 	}
 	return where, args, nil
 }
