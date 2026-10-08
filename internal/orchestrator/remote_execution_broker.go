@@ -285,6 +285,7 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodGet, "/api/v1/secrets/{name}", secretForThisRun},
 	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/heartbeat", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/oidc-token", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/start", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/finish", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/deps", nil},

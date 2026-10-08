@@ -110,6 +110,7 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | GET | `/api/v1/secrets/{name}` | broker | query `run` = the node's run | 200 `{name, value?, principal, pipeline?, masked, shared?, bound, created_at, updated_at}`; 404 when unset | `pkg/controller/claim_run.go` `handleClaimSecret` for a claim token, else `pkg/controller/secrets.go` `handleGetSecret` |
 | POST | `/api/v1/runs/{run}/events` | broker | `{node_id?, kind, payload?}`, payload base64 | 200 `{seq}` | `pkg/controller/handlers.go` `handleAppendEvent` |
 | POST | `/api/v1/runs/{run}/heartbeat` | broker | none | 204 | `pkg/controller/handlers.go` `handleTouchRunHeartbeat` |
+| POST | `/api/v1/runs/{run}/oidc-token` | broker | `{audience}` | 200 `{token, expires_at}`; 404 when the controller holds no signing key or the caller no live claim on the run | `pkg/controller/oidc_token.go` `handleOIDCToken` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/start` | broker | none | 204 | `pkg/controller/handlers.go` `handleStartNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/finish` | broker | `{outcome, error?, output?: {key, size, sha256}, failure_reason?, exit_code?}` | 204; 422 on an invalid outcome or an uncommitted output | `pkg/controller/handlers.go` `handleFinishNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/deps` | broker | `{deps: [node id]}` | 204 | `pkg/controller/handlers.go` `handleUpdateNodeDeps` |
@@ -146,7 +147,6 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | HEAD | `/bin/{key...}` | broker | as GET | 200 or 404 | as GET |
 | PUT | `/bin/{key...}` | broker | the blob; its sha256 must equal the key's digest | 201; 400 on a digest mismatch | as GET |
 | POST | `/api/v1/runs/{id}/cache-grant` | direct | none | 200 `{grant, team, expires_at}` | `pkg/controller/cache_grant.go` `handleRunCacheGrant` |
-| POST | `/api/v1/runs/{id}/oidc-token` | direct | `{audience}` | 200 `{token, expires_at}` | `pkg/controller/oidc_token.go` `handleOIDCToken` |
 | PUT | `/api/v1/outputs/uploads/{id}` | direct | the output bytes, at the URL `output-upload` granted | 200 | `pkg/controller/node_output.go` `handleOutputBlobPut` |
 | GET | `/api/v1/outputs/objects/{key...}` | direct | none, at the URL `output` granted | 200 the output bytes | `pkg/controller/node_output.go` `handleOutputBlobGet` |
 | POST | `/api/v1/runs/{id}/nodes` | direct | a node record, for a node spawned at run time | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
