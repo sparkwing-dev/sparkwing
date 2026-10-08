@@ -75,7 +75,8 @@ export function useUrlFilterState() {
     if (restored.current) return;
     restored.current = true;
     const hasAny = FILTER_URL_KEYS.some((k) => searchParams.get(k));
-    if (hasAny) return;
+    // A page link names a view of exactly the filters it carries, none being all runs.
+    if (hasAny || searchParams.has("older") || searchParams.has("newer")) return;
     const saved = sessionStorage.getItem(FILTER_STORAGE_KEY);
     if (!saved) return;
     const savedParams = new URLSearchParams(saved);

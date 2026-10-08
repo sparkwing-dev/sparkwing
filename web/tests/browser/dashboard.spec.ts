@@ -2351,6 +2351,27 @@ test("cron detail deep links survive hidden and missing schedules", async ({ pag
 });
 
 
+test("a page link keeps its own filters over the session's saved ones", async ({ page }) => {
+  const lists: URL[] = [];
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    onRequest: (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/runs") lists.push(url);
+    },
+  });
+  await page.addInitScript(() => sessionStorage.setItem("sparkwing.runFilters", "status=failed"));
+  await page.goto("/runs?older=1791478850000000000:run-older");
+  await expect.poll(() => lists.length).toBeGreaterThan(0);
+  await expect(page.locator(`[data-run-id="${finishedRun.id}"]`)).toBeVisible();
+  expect(new URL(page.url()).searchParams.has("status")).toBe(false);
+  expect(lists.every((url) => !url.searchParams.has("status"))).toBe(true);
+  expect(lists.at(-1)?.searchParams.get("after_id")).toBe("run-older");
+
+  await page.goto("/runs");
+  await expect(page).toHaveURL(/(?:\?|&)status=failed(?:&|$)/);
+});
+
 test("runs trigger filters persist and offer badge include and exclude", async ({ page }) => {
   const scheduled = { ...runningRun, trigger_source: "schedule" };
   await installMockAPI(page, { runs: [finishedRun, scheduled] });
