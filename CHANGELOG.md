@@ -145,6 +145,9 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+- **sdk (Breaking):** Remove the programmatic job-args schema builder; `WithArgs[T]` reads the pipeline Inputs tags
+  `NewSchema`, `SchemaBuilder`, `FieldBuilder`, `GroupBuilder`, `Schema`, `SchemaProvider`, `NewSchemaFromType`, `ResolveAs`, `ResolveInputs`, the `Constraint` functions (`Required`, `RequiredWhen`, `Default`, `Computed`, `DependsOn`, `Bind`, `OneOf`, `Min`, `Max`, `Range`, `Positive`, `Custom`), the predicates (`Predicate`, `PredicateContext`, `ArgEq`, `ArgNeq`, `ArgIn`, `ArgSet`, `ArgUnset`, `And`, `Or`, `Not`, `Local`, `Remote`, `Profile`, `Always`), `Arg`, `ArgOrDefault`, `WithResolvedArgs`, `ProfileResolutionContext`, `TransitiveArg`, `Plan.JobArgSchema`, `Plan.JobArgSchemas`, `Plan.TransitiveArgsSurface`, `Plan.ResolvedArgs`, `WithArgs.BindFromAny` and `WithArgs.ArgsType` are gone. Declare a job's constraints with the struct tags pipeline Inputs use (`flag`, `short`, `desc`, `default`, `required`, `enum`), and read values with `j.Args(ctx)`. A field without a `flag:` tag is no longer a flag; `secret:"true"` and `flag:",extra"` stay pipeline-only and panic on a job. `Plan.JobArgs` lists a plan's job flags for tooling. See [migration guide](docs/migrations/_unreleased.md#the-job-args-schema-builder-is-removed).
+
 - **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
   Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
 

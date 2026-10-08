@@ -201,12 +201,6 @@ func RunNodeOnce(
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}
 
-	// safety: propagate the dispatcher's resolved args or an external node
-	// silently falls back to schema defaults.
-	if ra := plan.ResolvedArgs(); ra != nil {
-		ctx = sparkwingruntime.WithResolvedArgs(ctx, ra)
-	}
-
 	if info := podRunnerInfo(); info != nil {
 		ctx = sparkwingruntime.WithRunner(ctx, info)
 	}

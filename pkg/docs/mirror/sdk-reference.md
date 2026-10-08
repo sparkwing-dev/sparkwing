@@ -18,8 +18,6 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 ## Functions
 
 - `func Annotate(ctx context.Context, msg string)` -- Annotate records a persistent, human-readable summary string on the currently-executing Job.
-- `func Arg[T any](ctx context.Context, name string) (T, error)` -- Arg returns a single resolved arg by its CLI flag name.
-- `func ArgOrDefault[T any](ctx context.Context, name string, d T) T` -- ArgOrDefault is the convenience wrapper that returns d when the arg isn't present or doesn't unmarshal to T. Useful for steps that want to read an optional arg without surfacing an error.
 - `func BindPipelinesFromYAML(cfg interface { EachPipeline(func(name, entrypoint string)) }, )` -- BindPipelinesFromYAML walks every pipeline entry in cfg and installs a Registration under the pipeline's name, sharing the Invoke / Schema / Instance of the registered entrypoint.
 - `func Config(ctx context.Context, name string) (string, error)` -- Config resolves a non-secret config value through the same store as Secret.
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug-level LogRecord.
@@ -41,7 +39,6 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Register[T any](name string, factory func() Pipeline[T])` -- Register installs a pipeline under the given name.
 - `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint installs a Go work unit (the entrypoint) under the given type-name, matching the `entrypoint:` field in sparkwing.yaml.
 - `func Registered() []string` -- Registered returns the names of all registered pipelines, sorted.
-- `func ResolveAs[T any](s *Schema, in ResolveInputs) (T, error)` -- ResolveAs is the typed convenience wrapper: same semantics as Schema.Resolve but returns T directly so callers don't have to type-assert the reflect.Value.
 - `func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)` -- RestoreLintCache downloads the blob-store seed for the current WorkDir and expands it into the golangci-lint tool-cache directory.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
 - `func RunWork(ctx context.Context, w *Work) (any, error)` -- RunWork executes w's step + spawn DAG.
@@ -49,7 +46,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
 - `func SetGit(g *Git)` -- SetGit attaches a fully-populated Git to the runtime.
 - `func SetWorkDir(dir string)` -- SetWorkDir overrides the WorkDir field on the runtime singleton and updates the Git workDir so live methods follow.
-- `func SkipArgResolve(ctx context.Context) context.Context` -- SkipArgResolve marks ctx so the registration's invoke() builds a plan without running the v0.6 args resolution+bind pass.
+- `func SkipArgResolve(ctx context.Context) context.Context` -- SkipArgResolve marks ctx so a registration's Invoke builds the plan without resolving and binding WithArgs values.
 - `func StepFromContext(ctx context.Context) string` -- StepFromContext returns the active step ID, or "" outside a step.
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
 - `func Summary(ctx context.Context, markdown string)` -- Summary records a persistent markdown run summary on the currently-executing Job or Step.
@@ -59,7 +56,6 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
 - `func WithFailure(ctx context.Context, f Failure) context.Context` -- WithFailure returns a context carrying f, read back by a failure-aware recovery callback.
-- `func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context` -- WithResolvedArgs installs a resolved-args map on the context so sparkwing.Arg[T] / ArgOrDefault can read it from any step body.
 - `func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context` -- WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec report each finished command's measured CPU and memory.
 - `func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context` -- WithSecretResolver returns a derived ctx carrying the given resolver.
 - `func WithStep(ctx context.Context, stepID string) context.Context` -- WithStep installs the active step ID into ctx so the breadcrumb on records emitted *inside* the step body carries it.
@@ -338,29 +334,6 @@ type ConcurrencyLimit struct {
 ```
 
 
-### type Constraint
-
-Constraint is the closed type for per-field declarations in a SchemaBuilder.
-
-```
-type Constraint interface {
-    // contains filtered or unexported methods
-}
-```
-
-- `func Bind(argName string) Constraint` -- Bind ties this struct field to a schema-bearing YAML arg key.
-- `func Computed(fn any) Constraint` -- Computed defines a default that depends on other (already-resolved) args.
-- `func Custom(fn any) Constraint` -- Custom is the escape hatch for validators that don't fit the declarative vocabulary.
-- `func Default(v any) Constraint` -- Default supplies a literal fallback used when no higher-priority source (explicit flag) provides a value.
-- `func DependsOn(names ...string) Constraint` -- DependsOn declares an explicit ordering edge: the framework resolves the named args before this one.
-- `func Max(v any) Constraint` -- Max sets an upper bound; mirror of Min.
-- `func Min(v any) Constraint` -- Min sets a lower bound on the field's resolved value.
-- `func OneOf(values ...any) Constraint` -- OneOf restricts the field's resolved value to the supplied set.
-- `func Positive() Constraint` -- Positive is sugar for Min(1).
-- `func Range(min, max any) Constraint` -- Range is sugar for Min(min)+Max(max).
-- `func Required() Constraint` -- Required marks the field as unconditionally required: the resolution chain errors if no source (explicit flag, Default, or Computed) provides a value.
-- `func RequiredWhen(p Predicate) Constraint` -- RequiredWhen marks the field required only when the predicate evaluates true at resolution time.
-
 ### type ConsumeEdge
 
 ConsumeEdge is a resolved consumer->producer artifact edge: the producer whose artifacts this node stages, and the staging prefix (empty stages at the producer's declared relative paths).
@@ -633,29 +606,6 @@ const (
 
 - `func (s FailureStage) String() string` -- String returns "action" or "verify".
 
-### type FieldBuilder
-
-FieldBuilder is the chainable handle returned by SchemaBuilder.Field.
-
-```
-type FieldBuilder[T any] struct {
-    // contains filtered or unexported fields
-}
-```
-
-- `func (fb *FieldBuilder[T]) Bind(argName string) *FieldBuilder[T]` -- Bind ties this field to a schema-bearing YAML arg key.
-- `func (fb *FieldBuilder[T]) Computed(fn any) *FieldBuilder[T]` -- Computed supplies a function-based default that may depend on other (already-resolved) args.
-- `func (fb *FieldBuilder[T]) Custom(fn any) *FieldBuilder[T]` -- Custom is the escape-hatch validator (func(T) error).
-- `func (fb *FieldBuilder[T]) Default(v any) *FieldBuilder[T]` -- Default supplies a literal fallback value.
-- `func (fb *FieldBuilder[T]) DependsOn(names ...string) *FieldBuilder[T]` -- DependsOn declares ordering edges to upstream args.
-- `func (fb *FieldBuilder[T]) Max(v any) *FieldBuilder[T]` -- Max sets a numeric upper bound.
-- `func (fb *FieldBuilder[T]) Min(v any) *FieldBuilder[T]` -- Min sets a numeric lower bound.
-- `func (fb *FieldBuilder[T]) OneOf(values ...any) *FieldBuilder[T]` -- OneOf restricts the resolved value to the supplied set.
-- `func (fb *FieldBuilder[T]) Positive() *FieldBuilder[T]` -- Positive is sugar for Min(1).
-- `func (fb *FieldBuilder[T]) Range(min, max any) *FieldBuilder[T]` -- Range is sugar for Min(min)+Max(max).
-- `func (fb *FieldBuilder[T]) Required() *FieldBuilder[T]` -- Required marks the field unconditionally required.
-- `func (fb *FieldBuilder[T]) RequiredWhen(p Predicate) *FieldBuilder[T]` -- RequiredWhen marks the field required when the predicate holds.
-
 ### type Git
 
 Git is the run-scoped view of a single git working tree.
@@ -682,23 +632,6 @@ type Git struct {
 - `func (g *Git) ShortSHA() string` -- ShortSHA returns g.SHA truncated to 12 chars; safe to call on a nil receiver (returns "").
 - `func (g *Git) TagsAtHead(ctx context.Context) ([]string, error)` -- TagsAtHead returns every tag pointing at HEAD.
 - `func (g *Git) WorkDir() string` -- WorkDir returns the absolute path of the working tree this Git describes, or "" when constructed without a real clone.
-
-### type GroupBuilder
-
-GroupBuilder is the chainable handle returned by SchemaBuilder.Group.
-
-```
-type GroupBuilder struct {
-    // contains filtered or unexported fields
-}
-```
-
-- `func (g *GroupBuilder) AllOrNone() *GroupBuilder` -- AllOrNone requires the group's fields to be uniformly set or uniformly unset.
-- `func (g *GroupBuilder) AtLeastOne() *GroupBuilder` -- AtLeastOne requires at least one of the group's fields to be set.
-- `func (g *GroupBuilder) AtMostOne() *GroupBuilder` -- AtMostOne forbids more than one of the group's fields being set.
-- `func (g *GroupBuilder) Desc(msg string) *GroupBuilder` -- Desc overrides the auto-generated violation message.
-- `func (g *GroupBuilder) ExactlyOne() *GroupBuilder` -- ExactlyOne requires exactly one of the group's fields to be set after resolution.
-- `func (g *GroupBuilder) When(p Predicate) *GroupBuilder` -- When gates the group's activation.
 
 ### type HelpProvider
 
@@ -1112,18 +1045,15 @@ type Plan struct {
 - `func (p *Plan) Inputs() any` -- Inputs returns the parsed pipeline inputs, or nil for a Plan built directly.
 - `func (p *Plan) IsDynamicNode(id string) bool` -- IsDynamicNode reports whether the node supplies a dynamic fan-out expansion.
 - `func (p *Plan) Job(id string) *JobNode` -- Job returns the node with the given ID, or nil if absent.
-- `func (p *Plan) JobArgSchema(id string) *Schema` -- JobArgSchema returns the args schema for the named job, or nil when that job doesn't declare typed args.
-- `func (p *Plan) JobArgSchemas() map[string]*Schema` -- JobArgSchemas returns every job-args schema registered against this plan, keyed by node id.
+- `func (p *Plan) JobArgs() []DescribeArg` -- JobArgs returns the flags that jobs embedding WithArgs add to the pipeline, in registration order, each stamped with its owning job id.
 - `func (p *Plan) JobGroupNames(id string) []string` -- JobGroupNames returns the names of every declared *JobGroup whose members include the given node.
 - `func (p *Plan) LintWarnings() []LintWarning` -- LintWarnings returns the non-fatal Plan-time advisories accumulated while building this Plan.
 - `func (p *Plan) Nodes() []*JobNode` -- Nodes returns the plan's nodes in insertion order.
 - `func (p *Plan) PlanConcurrency() []PlanConcurrency` -- PlanConcurrency returns every whole-run gate declared via Plan.Concurrency.
 - `func (p *Plan) Priority(n int) *Plan` -- Priority sets this run's local admission priority.
 - `func (p *Plan) PriorityValue() int` -- PriorityValue returns the run's local admission priority.
-- `func (p *Plan) ResolvedArgs() map[string]any` -- ResolvedArgs returns the merged map of every job's typed-args resolution result, keyed by CLI flag name.
 - `func (p *Plan) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the plan-level resource pin declared via Plan.Resources, or nil when the plan declared none.
 - `func (p *Plan) Resources(hints ...ResourceHint) *Plan` -- Resources pins the whole run's peak CPU and memory: an explicit, authoritative charge admission uses verbatim instead of measuring the pipeline.
-- `func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg` -- TransitiveArgsSurface returns the deduplicated map of every flag the plan exposes (across all its jobs that declare args), keyed by flag name with the owning job id.
 
 ### type PlanConcurrency
 
@@ -1133,63 +1063,6 @@ PlanConcurrency records one whole-run concurrency gate.
 type PlanConcurrency struct {
     Group *ConcurrencyGroup
     Cost  int
-}
-```
-
-
-### type Predicate
-
-Predicate is the closed condition language used by the args resolution chain: RequiredWhen, group .When(), default-when, etc.
-
-```
-type Predicate interface {
-    // Eval returns true when the condition holds against the current
-    // resolution context.
-    Eval(ctx PredicateContext) bool
-    // String returns a deterministic human-readable rendering for
-    // error messages and the `pipeline describe --args` view. Avoid
-    // embedding values that change run-to-run.
-    String() string
-    // contains filtered or unexported methods
-}
-```
-
-```
-var Local Predicate = localPredicate{}
-```
-
-```
-var Remote Predicate = remotePredicate{}
-```
-
-- `func Always() Predicate` -- Always holds unconditionally.
-- `func And(preds ...Predicate) Predicate` -- And holds when every nested predicate holds.
-- `func ArgEq(name string, value any) Predicate` -- ArgEq holds when the named arg's resolved value equals value.
-- `func ArgIn(name string, values ...any) Predicate` -- ArgIn holds when the named arg's resolved value matches any of the supplied values.
-- `func ArgNeq(name string, value any) Predicate` -- ArgNeq holds when the named arg has a resolved value AND that value is not equal to value.
-- `func ArgSet(name string) Predicate` -- ArgSet holds when some source (explicit flag, schema default, or computed) has populated the named arg.
-- `func ArgUnset(name string) Predicate` -- ArgUnset holds when no source has populated the named arg -- it has no resolved value at all.
-- `func Not(p Predicate) Predicate` -- Not inverts the nested predicate.
-- `func Or(preds ...Predicate) Predicate` -- Or holds when any nested predicate holds.
-- `func Profile(name string) Predicate` -- Profile holds when the named profile is the resolved profile.
-
-### type PredicateContext
-
-PredicateContext is the evaluation environment for a Predicate.
-
-```
-type PredicateContext interface {
-    // Arg returns the resolved value of the named arg and true when
-    // some source provided a value (explicit flag, computed, or a constraint Default). Returns
-    // (nil, false) when the arg has no resolved value at all -- this
-    // is the signal [ArgUnset] looks for.
-    Arg(name string) (value any, ok bool)
-    // ProfileName is the resolved profile's name.
-    ProfileName() string
-    // ProfileIsLocal returns true when the resolved profile has no
-    // controller -- the run executes on the operator's machine. Used
-    // by [Local] / [Remote].
-    ProfileIsLocal() bool
 }
 ```
 
@@ -1211,25 +1084,6 @@ Produces is a zero-size marker embedded in a Job to declare its output contract 
 
 ```
 type Produces[T any] struct{}
-```
-
-
-### type ProfileResolutionContext
-
-ProfileResolutionContext is the slice of profile state the v0.6 args-resolver needs at registration-invoke time: the active profile name (so Profile("prod") predicates fire) and whether that profile is local-only (so Local / Remote gates resolve correctly).
-
-```
-type ProfileResolutionContext struct {
-    // Name is the active profile's name (e.g. "prod", "local"), used
-    // by the [Profile](name) predicate. Empty when no profile is
-    // active.
-    Name string
-
-    // IsLocal reports whether the active profile routes through the
-    // in-process local SQLite (i.e. the laptop builtin). Drives the
-    // [Local] / [Remote] context predicates.
-    IsLocal bool
-}
 ```
 
 
@@ -1340,28 +1194,6 @@ RequiresProvider is optionally implemented by a Workable struct to declare its o
 ```
 type RequiresProvider interface {
     Requires() []string
-}
-```
-
-
-### type ResolveInputs
-
-ResolveInputs is everything the resolution chain needs to bind a pipeline's args.
-
-```
-type ResolveInputs struct {
-    // FlagValues is the parsed CLI flag map keyed by flag name
-    // (kebab-cased; matches fieldMeta.Flag). Absence of a key means
-    // the user didn't pass --flag on the command line. Values are
-    // stored as strings; the resolver converts to the target field's
-    // Go type during binding.
-    FlagValues map[string]string
-
-    // ProfileName / ProfileIsLocal feed the predicate context used
-    // by RequiredWhen and group .When() evaluation. ProfileIsLocal
-    // is true when the resolved profile has no controller.
-    ProfileName    string
-    ProfileIsLocal bool
 }
 ```
 
@@ -1560,48 +1392,6 @@ type RuntimeConfig struct {
 ```
 
 - `func CurrentRuntime() RuntimeConfig` -- CurrentRuntime returns the RuntimeConfig snapshot for this process.
-
-### type Schema
-
-Schema is the immutable, fully-validated arg metadata produced by SchemaBuilder.Build.
-
-```
-type Schema struct {
-    // contains filtered or unexported fields
-}
-```
-
-- `func NewSchemaFromType(t reflect.Type) (*Schema, error)` -- NewSchemaFromType synthesizes a zero-constraint schema from a reflect.Type.
-- `func (s *Schema) DescribeArgs() []DescribeArg` -- DescribeArgs projects the schema's fields into the wire-format DescribeArg shape so the describe-cache / --help renderer / tab- completion all see a job's WithArgs[T] fields in the same envelope as pipeline-level Inputs fields.
-- `func (s *Schema) Fields() []string` -- Fields returns the field names in resolution order (topo-sorted over DependsOn + inferred Computed edges).
-- `func (s *Schema) GoType() reflect.Type` -- GoType returns the args struct type the schema validates against.
-- `func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error)` -- Resolve binds the schema's fields against the supplied inputs and returns a populated reflect.Value of the args struct (kind=Struct, type matches s.GoType).
-
-### type SchemaBuilder
-
-SchemaBuilder is the chainable builder for a job's args schema.
-
-```
-type SchemaBuilder[T any] struct {
-    // contains filtered or unexported fields
-}
-```
-
-- `func NewSchema[T any]() *SchemaBuilder[T]` -- NewSchema constructs a fresh SchemaBuilder over the args struct T. The framework constructs one per job at registration time and passes it to the job's Schema(*SchemaBuilder[T]) method.
-- `func (sb *SchemaBuilder[T]) Build() (*Schema, error)` -- Build validates the accumulated schema against the args struct T and produces an immutable Schema ready for the resolution chain.
-- `func (sb *SchemaBuilder[T]) Field(name string) *FieldBuilder[T]` -- Field returns the FieldBuilder for the named struct field.
-- `func (sb *SchemaBuilder[T]) Group(names ...string) *GroupBuilder` -- Group declares a cross-field cardinality rule over the named struct fields.
-
-### type SchemaProvider
-
-SchemaProvider is the optional interface a job implements to declare its typed args' constraints.
-
-```
-type SchemaProvider interface {
-    Schema() (*Schema, error)
-}
-```
-
 
 ### type Scope
 
@@ -1841,21 +1631,6 @@ type ToolSlotProvider func(ctx context.Context, group *ConcurrencyGroup, cost in
 ```
 
 
-### type TransitiveArg
-
-TransitiveArg is one entry in Plan.TransitiveArgsSurface: the flag, the job that owns it, the underlying Go field, and the schema for resolving its value.
-
-```
-type TransitiveArg struct {
-    Flag      string
-    JobID     string
-    FieldName string
-    Desc      string
-    Schema    *Schema
-}
-```
-
-
 ### type TriggerInfo
 
 TriggerInfo describes the trigger that started the run.
@@ -1907,7 +1682,7 @@ type WhenRunnerProvider interface {
 
 ### type WithArgs
 
-WithArgs is the embedded helper a job uses to declare a typed Args struct.
+WithArgs is the embedded helper a job uses to declare typed args.
 
 ```
 type WithArgs[T any] struct {
@@ -1916,8 +1691,6 @@ type WithArgs[T any] struct {
 ```
 
 - `func (w *WithArgs[T]) Args(ctx context.Context) T` -- Args returns the resolved typed args for the current run.
-- `func (w *WithArgs[T]) ArgsType() reflect.Type` -- ArgsType returns the reflect.Type of T. Used by the framework's schema-discovery pass: given a job that embeds WithArgs[T], the framework calls ArgsType on the embedded value to learn T without having to peek at the unexported bound field.
-- `func (w *WithArgs[T]) BindFromAny(val any) error` -- BindFromAny is called by the framework to populate the resolved args struct.
 
 ### type Work
 
@@ -2073,22 +1846,20 @@ var RuntimePlumbing = struct {
     Fns  runtimePlumbingFns
 }{
     Keys: runtimePlumbingKeys{
-        DryRun:            dryRunKey{},
-        Runner:            runnerCtxKey{},
-        SpawnHandler:      keySpawnHandler,
-        StepRange:         stepRangeKey{},
-        JSONRefResolver:   keyJSONRefResolver,
-        PipelineResolver:  keyPipelineResolver,
-        PipelineAwaiter:   keyPipelineAwaiter,
-        Inputs:            keyInputs,
-        PipelineSecrets:   keyPipelineSecrets,
-        SecretResolver:    keySecretResolver,
-        Logger:            keyLogger,
-        Node:              keyNode,
-        ResolvedArgs:      keyResolvedArgs,
-        ProfileResolution: keyProfileResolution,
-        Admission:         keyAdmission,
-        OIDCTokenSource:   oidcTokenSourceKey{},
+        DryRun:           dryRunKey{},
+        Runner:           runnerCtxKey{},
+        SpawnHandler:     keySpawnHandler,
+        StepRange:        stepRangeKey{},
+        JSONRefResolver:  keyJSONRefResolver,
+        PipelineResolver: keyPipelineResolver,
+        PipelineAwaiter:  keyPipelineAwaiter,
+        Inputs:           keyInputs,
+        PipelineSecrets:  keyPipelineSecrets,
+        SecretResolver:   keySecretResolver,
+        Logger:           keyLogger,
+        Node:             keyNode,
+        Admission:        keyAdmission,
+        OIDCTokenSource:  oidcTokenSourceKey{},
     },
     Fns: runtimePlumbingFns{
         PlanInsertChild:    (*Plan).insertChild,

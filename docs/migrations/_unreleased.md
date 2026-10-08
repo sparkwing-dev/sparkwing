@@ -983,6 +983,67 @@ argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
 - **Author steps:** settle a node with `FinalizeNodeCredits`; generate a release
   seed as described above under `cmd/sign-manifest is removed`.
 
+## The job-args schema builder is removed
+
+**Before:** a job embedding `sparkwing.WithArgs[T]` turned every exported
+field of `T` into a kebab-cased flag, and declared constraints in Go
+through a `Schema()` method built with `sparkwing.NewSchema[T]()`.
+`sparkwing.Arg[T]` and `ArgOrDefault` read any job's arg by flag name.
+
+```go
+type DeployArgs struct {
+    Replicas int
+    Image    string
+    Strategy string
+}
+
+func (DeployJob) Schema() (*sparkwing.Schema, error) {
+    s := sparkwing.NewSchema[DeployArgs]()
+    s.Field("Replicas").Default(3)
+    s.Field("Image").Required()
+    s.Field("Strategy").Default("rolling").OneOf("rolling", "recreate")
+    return s.Build()
+}
+```
+
+**After:** `T` uses the pipeline Inputs tags, and only `flag:`-tagged
+fields are flags. Required, default and enum checks run before any step,
+as they do for Inputs.
+
+```go
+type DeployArgs struct {
+    Replicas int    `flag:"replicas" default:"3"`
+    Image    string `flag:"image" required:"true"`
+    Strategy string `flag:"strategy" default:"rolling" enum:"rolling,recreate"`
+}
+```
+
+**Author steps:**
+
+1. Add a `flag:"name"` tag to every `T` field that should stay a flag,
+   using the kebab-cased name the field had (`MainSourceRoot` was
+   `--main-source-root`). An untagged field now fails as an unknown flag
+   when passed.
+2. Move constraints into tags and delete the `Schema()` method:
+
+| Removed | Use instead |
+|---|---|
+| `.Required()` | `required:"true"` |
+| `.Default(v)` | `default:"v"` |
+| `.OneOf(a, b)` | `enum:"a,b"` (string fields; needs `default` or `required`) |
+| `.Min`, `.Max`, `.Range`, `.Positive`, `.Custom` | check the value at the top of the step and return an error |
+| `.Computed(fn)`, `.DependsOn` | compute the value inside the step from `j.Args(ctx)` |
+| `.RequiredWhen(p)`, `Group(...)`, predicates | validate the combination inside the step and return an error |
+| `.Bind("target")` | a `flag:"target"` tag; `Bind` only checked its argument |
+| `sparkwing.Arg[T](ctx, flag)`, `ArgOrDefault` | `j.Args(ctx)` on the job that declares the flag, or a pipeline Inputs field read in `Plan` |
+
+Move a `secret:"true"` arg to the pipeline's Inputs: the run masks only
+pipeline secrets, so a job secret panics at registration.
+
+Tools that read `Plan.TransitiveArgsSurface` or `JobArgSchemas` use
+`Plan.JobArgs`, which returns `DescribeArg` records stamped with the
+owning job id.
+
 ## Six unused SDK names are removed
 
 **Before:** the `sparkwing` package exported `Cache`, `Logs` and `State` (type

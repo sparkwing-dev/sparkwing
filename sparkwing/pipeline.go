@@ -135,17 +135,9 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 			}
 		}
 		if !skipArgResolveFromContext(ctx) {
-			pr := profileResolutionFromContext(ctx)
-			resolveIn := ResolveInputs{
-				FlagValues:     args,
-				ProfileName:    pr.Name,
-				ProfileIsLocal: pr.IsLocal,
-			}
-			resolved, err := resolveAndBindJobArgs(plan, resolveIn)
-			if err != nil {
+			if err := resolveAndBindJobArgs(plan, args); err != nil {
 				return nil, fmt.Errorf("pipeline %q: %w", name, err)
 			}
-			plan.setResolvedArgs(resolved)
 		}
 		return plan, nil
 	}

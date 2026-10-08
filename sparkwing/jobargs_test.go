@@ -2,18 +2,19 @@ package sparkwing
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 )
 
 type jobargsArgs1 struct {
-	Replicas int    `desc:"replicas"`
-	Image    string `desc:"image"`
+	Replicas int    `flag:"replicas" required:"true" desc:"replicas"`
+	Image    string `flag:"image" default:"nginx:latest" desc:"image"`
+	Mode     string `flag:"mode" short:"m" default:"rolling" enum:"rolling,recreate" desc:"rollout mode"`
+	Scratch  string
 }
 
 type jobargsArgs2 struct {
-	Webhook string `desc:"slack webhook"`
+	Webhook string `flag:"webhook" desc:"slack webhook"`
 }
 
 type jobargsJob1 struct {
@@ -23,21 +24,6 @@ type jobargsJob1 struct {
 
 func (j *jobargsJob1) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
-}
-
-type jobargsJob1WithSchema struct {
-	Base
-	WithArgs[jobargsArgs1]
-}
-
-func (j *jobargsJob1WithSchema) Work(w *Work) (*WorkStep, error) {
-	return Step(w, "run", func(_ context.Context) error { return nil }), nil
-}
-
-func (jobargsJob1WithSchema) Schema() (*Schema, error) {
-	s := NewSchema[jobargsArgs1]()
-	s.Field("Replicas").Required()
-	return s.Build()
 }
 
 type jobargsJob2 struct {
@@ -58,7 +44,7 @@ func (j *jobargsJobNoArgs) Work(w *Work) (*WorkStep, error) {
 }
 
 type jobargsCollidingArgs struct {
-	Replicas int `desc:"colliding name"`
+	Replicas int `flag:"replicas" desc:"colliding name"`
 }
 
 type jobargsJobColliding struct {
@@ -70,168 +56,172 @@ func (j *jobargsJobColliding) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-type jobargsJobBadSchema struct {
-	Base
-	WithArgs[jobargsArgs1]
+type jobargsSecretArgs struct {
+	Token string `flag:"token" secret:"true"`
 }
 
-func (j *jobargsJobBadSchema) Work(w *Work) (*WorkStep, error) {
+type jobargsJobSecret struct {
+	Base
+	WithArgs[jobargsSecretArgs]
+}
+
+func (j *jobargsJobSecret) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-func (jobargsJobBadSchema) Schema() (*Schema, error) {
-	return nil, errors.New("simulated build failure")
+type jobargsExtraArgs struct {
+	Rest map[string]string `flag:",extra"`
 }
 
-func TestJobArgs_RegistersSynthesizedSchema(t *testing.T) {
+type jobargsJobExtra struct {
+	Base
+	WithArgs[jobargsExtraArgs]
+}
+
+func (j *jobargsJobExtra) Work(w *Work) (*WorkStep, error) {
+	return Step(w, "run", func(_ context.Context) error { return nil }), nil
+}
+
+func mustPanic(t *testing.T, want []string, fn func()) {
+	t.Helper()
+	defer func() {
+		t.Helper()
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic")
+		}
+		msg, _ := r.(string)
+		for _, w := range want {
+			if !strings.Contains(msg, w) {
+				t.Errorf("panic %q should mention %q", msg, w)
+			}
+		}
+	}()
+	fn()
+}
+
+func TestJobArgs_DescribesTaggedFieldsOnly(t *testing.T) {
 	p := NewPlan()
 	Job(p, "deploy", &jobargsJob1{})
 
-	s := p.JobArgSchema("deploy")
-	if s == nil {
-		t.Fatal("expected synthesized schema for job embedding WithArgs[T]")
+	got := p.JobArgs()
+	if len(got) != 3 {
+		t.Fatalf("JobArgs = %+v, want the three flag-tagged fields", got)
 	}
-	if s.GoType().Name() != "jobargsArgs1" {
-		t.Errorf("schema GoType: got %s, want jobargsArgs1", s.GoType().Name())
+	byName := map[string]DescribeArg{}
+	for _, a := range got {
+		if a.JobID != "deploy" {
+			t.Errorf("--%s JobID = %q, want deploy", a.Name, a.JobID)
+		}
+		byName[a.Name] = a
 	}
-	if len(s.fields) != 2 {
-		t.Errorf("expected 2 fields; got %d", len(s.fields))
+	if !byName["replicas"].Required || byName["replicas"].Type != "int" {
+		t.Errorf("--replicas = %+v, want a required int", byName["replicas"])
 	}
-}
-
-func TestJobArgs_RegistersAuthoredSchema(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1WithSchema{})
-
-	s := p.JobArgSchema("deploy")
-	if s == nil {
-		t.Fatal("expected schema for job that implements SchemaProvider")
+	if byName["image"].Default != "nginx:latest" {
+		t.Errorf("--image default = %q", byName["image"].Default)
 	}
-	if !s.field("Replicas").Required {
-		t.Error("Required constraint from SchemaProvider should be in registered schema")
+	mode := byName["mode"]
+	if mode.Short != "m" || len(mode.Enum) != 2 {
+		t.Errorf("--mode = %+v, want short m and a two-value enum", mode)
 	}
 }
 
-func TestJobArgs_NoEntryForJobWithoutWithArgs(t *testing.T) {
+func TestJobArgs_NoneForJobsWithoutWithArgs(t *testing.T) {
 	p := NewPlan()
 	Job(p, "lint", &jobargsJobNoArgs{})
-	if got := p.JobArgSchema("lint"); got != nil {
-		t.Errorf("expected nil schema for job without WithArgs; got %v", got)
-	}
-}
-
-func TestJobArgs_NoEntryForFunctionJob(t *testing.T) {
-	p := NewPlan()
 	Job(p, "fn", func(_ context.Context) error { return nil })
-	if got := p.JobArgSchema("fn"); got != nil {
-		t.Errorf("expected nil schema for function-style job; got %v", got)
-	}
-}
-
-func TestJobArgs_TwoJobsDisjointArgsRegisterBoth(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1{})
-	Job(p, "notify", &jobargsJob2{})
-
-	all := p.JobArgSchemas()
-	if len(all) != 2 {
-		t.Errorf("expected 2 registered schemas; got %d", len(all))
-	}
-	if _, ok := all["deploy"]; !ok {
-		t.Error("deploy schema missing from JobArgSchemas")
-	}
-	if _, ok := all["notify"]; !ok {
-		t.Error("notify schema missing from JobArgSchemas")
+	if got := p.JobArgs(); got != nil {
+		t.Errorf("JobArgs = %+v, want nil", got)
 	}
 }
 
 func TestJobArgs_FlagCollisionPanics(t *testing.T) {
 	p := NewPlan()
 	Job(p, "deploy", &jobargsJob1{})
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic on flag collision across two jobs")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "deploy") || !strings.Contains(msg, "colliding") || !strings.Contains(msg, "--replicas") {
-			t.Errorf("collision panic should name both jobs and the flag; got %q", msg)
-		}
-	}()
-	Job(p, "colliding", &jobargsJobColliding{})
+	mustPanic(t, []string{"deploy", "colliding", "--replicas"}, func() {
+		Job(p, "colliding", &jobargsJobColliding{})
+	})
 }
 
-func TestJobArgs_SchemaProviderErrorPanics(t *testing.T) {
+func TestJobArgs_PipelineOnlyTagsPanic(t *testing.T) {
+	mustPanic(t, []string{"secret", "pipeline Inputs"}, func() {
+		Job(NewPlan(), "s", &jobargsJobSecret{})
+	})
+	mustPanic(t, []string{"extra", "pipeline Inputs"}, func() {
+		Job(NewPlan(), "e", &jobargsJobExtra{})
+	})
+}
+
+func TestResolveAndBindJobArgs_AppliesTagsAndBinds(t *testing.T) {
 	p := NewPlan()
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic when SchemaProvider returns error")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "simulated build failure") {
-			t.Errorf("panic should include the underlying error; got %q", msg)
-		}
-	}()
-	Job(p, "bad", &jobargsJobBadSchema{})
-}
+	deploy := &jobargsJob1{}
+	notify := &jobargsJob2{}
+	Job(p, "deploy", deploy)
+	Job(p, "notify", notify)
 
-func TestJobArgs_TransitiveArgsSurface(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1{})
-	Job(p, "notify", &jobargsJob2{})
-
-	surface := p.TransitiveArgsSurface()
-	if len(surface) != 3 {
-		t.Fatalf("expected 3 flags across both jobs; got %d (%v)", len(surface), keysOf(surface))
+	err := resolveAndBindJobArgs(p, map[string]string{"replicas": "5", "webhook": "https://hook", "pipeline-flag": "x"})
+	if err != nil {
+		t.Fatalf("resolveAndBindJobArgs: %v", err)
 	}
-	if surface["replicas"].JobID != "deploy" {
-		t.Errorf("--replicas should be owned by deploy; got %q", surface["replicas"].JobID)
+	a := deploy.Args(context.Background())
+	if a.Replicas != 5 || a.Image != "nginx:latest" || a.Mode != "rolling" {
+		t.Errorf("deploy args = %+v", a)
 	}
-	if surface["webhook"].JobID != "notify" {
-		t.Errorf("--webhook should be owned by notify; got %q", surface["webhook"].JobID)
+	if got := notify.Args(context.Background()).Webhook; got != "https://hook" {
+		t.Errorf("notify webhook = %q", got)
 	}
 }
 
-func TestJobArgs_EmptyPlanReturnsNilSurfaces(t *testing.T) {
-	p := NewPlan()
-	if got := p.JobArgSchemas(); got != nil {
-		t.Errorf("empty plan should return nil schemas map; got %v", got)
+func TestResolveAndBindJobArgs_RequiredAndEnumFailNamingTheJob(t *testing.T) {
+	cases := map[string]map[string]string{
+		"missing required": {},
+		"outside enum":     {"replicas": "1", "mode": "blue-green"},
 	}
-	if got := p.TransitiveArgsSurface(); got != nil {
-		t.Errorf("empty plan should return nil transitive surface; got %v", got)
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := NewPlan()
+			Job(p, "deploy", &jobargsJob1{})
+			err := resolveAndBindJobArgs(p, args)
+			if err == nil || !strings.Contains(err.Error(), `job "deploy"`) {
+				t.Fatalf("err = %v, want one naming job deploy", err)
+			}
+		})
 	}
 }
 
-func TestAssertJobArgsCoverage_AcceptsJobDeclaredFlags(t *testing.T) {
+func TestAssertJobArgsCoverage(t *testing.T) {
 	p := NewPlan()
 	Job(p, "deploy", &jobargsJob1{})
 
 	if err := assertJobArgsCoverage(p, map[string]string{"replicas": "3", "image": "nginx"}); err != nil {
 		t.Errorf("flags declared by the job should pass; got %v", err)
 	}
-}
-
-func TestAssertJobArgsCoverage_RejectsTypos(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1{})
-
-	err := assertJobArgsCoverage(p, map[string]string{"replicass": "3"})
-	if err == nil || !strings.Contains(err.Error(), "replicass") {
-		t.Errorf("typo should be flagged by name; got %v", err)
+	err := assertJobArgsCoverage(p, map[string]string{"scratch": "3"})
+	if err == nil || !strings.Contains(err.Error(), "--scratch") {
+		t.Errorf("an untagged field is not a flag; got %v", err)
 	}
-}
-
-func TestAssertJobArgsCoverage_NilPlanIsNoop(t *testing.T) {
 	if err := assertJobArgsCoverage(nil, map[string]string{"anything": "x"}); err != nil {
 		t.Errorf("nil plan should be a no-op; got %v", err)
 	}
 }
 
-func keysOf(m map[string]TransitiveArg) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+func TestWithArgs_ArgsPanicsBeforeBind(t *testing.T) {
+	mustPanic(t, []string{"before"}, func() {
+		_ = (&jobargsJob2{}).Args(context.Background())
+	})
+}
+
+func TestEmbeddedArgs_NilAndNonStructInputs(t *testing.T) {
+	for name, v := range map[string]any{
+		"nil":            nil,
+		"nil-ptr":        (*jobargsJob1)(nil),
+		"non-ptr":        jobargsJob1{},
+		"non-struct-ptr": new(int),
+		"no-withargs":    &jobargsJobNoArgs{},
+	} {
+		if holder, argsType := embeddedArgs(v); holder != nil || argsType != nil {
+			t.Errorf("%s: got holder=%v argsType=%v, want nil", name, holder, argsType)
+		}
 	}
-	return out
 }

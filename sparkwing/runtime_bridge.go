@@ -7,22 +7,20 @@ import (
 )
 
 type runtimePlumbingKeys struct {
-	DryRun            any
-	Runner            any
-	SpawnHandler      any
-	StepRange         any
-	JSONRefResolver   any
-	PipelineResolver  any
-	PipelineAwaiter   any
-	Inputs            any
-	PipelineSecrets   any
-	SecretResolver    any
-	Logger            any
-	Node              any
-	ResolvedArgs      any
-	ProfileResolution any
-	Admission         any
-	OIDCTokenSource   any
+	DryRun           any
+	Runner           any
+	SpawnHandler     any
+	StepRange        any
+	JSONRefResolver  any
+	PipelineResolver any
+	PipelineAwaiter  any
+	Inputs           any
+	PipelineSecrets  any
+	SecretResolver   any
+	Logger           any
+	Node             any
+	Admission        any
+	OIDCTokenSource  any
 }
 
 type runtimePlumbingFns struct {
@@ -49,22 +47,20 @@ var RuntimePlumbing = struct {
 	Fns  runtimePlumbingFns
 }{
 	Keys: runtimePlumbingKeys{
-		DryRun:            dryRunKey{},
-		Runner:            runnerCtxKey{},
-		SpawnHandler:      keySpawnHandler,
-		StepRange:         stepRangeKey{},
-		JSONRefResolver:   keyJSONRefResolver,
-		PipelineResolver:  keyPipelineResolver,
-		PipelineAwaiter:   keyPipelineAwaiter,
-		Inputs:            keyInputs,
-		PipelineSecrets:   keyPipelineSecrets,
-		SecretResolver:    keySecretResolver,
-		Logger:            keyLogger,
-		Node:              keyNode,
-		ResolvedArgs:      keyResolvedArgs,
-		ProfileResolution: keyProfileResolution,
-		Admission:         keyAdmission,
-		OIDCTokenSource:   oidcTokenSourceKey{},
+		DryRun:           dryRunKey{},
+		Runner:           runnerCtxKey{},
+		SpawnHandler:     keySpawnHandler,
+		StepRange:        stepRangeKey{},
+		JSONRefResolver:  keyJSONRefResolver,
+		PipelineResolver: keyPipelineResolver,
+		PipelineAwaiter:  keyPipelineAwaiter,
+		Inputs:           keyInputs,
+		PipelineSecrets:  keyPipelineSecrets,
+		SecretResolver:   keySecretResolver,
+		Logger:           keyLogger,
+		Node:             keyNode,
+		Admission:        keyAdmission,
+		OIDCTokenSource:  oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:    (*Plan).insertChild,

@@ -900,6 +900,41 @@ type WrapperInputs struct {
 }
 ```
 
+### Job args: `WithArgs[T]`
+
+A reusable job can declare its own flags by embedding
+`sw.WithArgs[T]`. `T` uses the Inputs tags above; a field without a
+`flag:` tag is not a flag. The job's flags join the pipeline's in
+`--help`, `pipeline describe` and completion, marked with the job id.
+
+```go
+type DeployArgs struct {
+    Replicas int    `flag:"replicas" default:"3" desc:"target replica count"`
+    Image    string `flag:"image" required:"true" desc:"OCI image ref"`
+    Strategy string `flag:"strategy" default:"rolling" enum:"rolling,recreate"`
+}
+
+type Deploy struct {
+    sw.Base
+    sw.WithArgs[DeployArgs]
+}
+
+func (j *Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "rollout", func(ctx context.Context) error {
+        a := j.Args(ctx)
+        _, err := sw.Exec(ctx, "kubectl", "set", "image", "deploy/app", "app="+a.Image).Run()
+        return err
+    }), nil
+}
+```
+
+The run resolves every job's args before any step runs, so a missing
+`required:"true"` value or a value outside `enum` fails the run up
+front. `Args(ctx)` panics when called from `Plan`. Two jobs in one plan
+may not declare the same flag. `secret:"true"` and `flag:",extra"` are
+pipeline-only and panic at registration: declare a secret on the
+pipeline's Inputs, where the run masks it.
+
 ### Flag namespace: `--sw-*` vs your flags
 
 `sparkwing run` keeps its own control flags out of your way by

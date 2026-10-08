@@ -313,17 +313,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
-	var profileName string
-	var profileIsLocal bool
-	if opts.Profile != nil {
-		profileName = opts.Profile.Name
-		profileIsLocal = opts.Profile.ControllerURL() == ""
-	}
-	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
-		Name:    profileName,
-		IsLocal: profileIsLocal,
-	})
-
 	// safety: Plan runs before the run has a node to log against, so without a
 	// logger here sparkwing.Info from inside Plan resolves to the no-op sink.
 	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, delegate), invokeArgs, rc)
@@ -1722,9 +1711,6 @@ func newDispatchState(
 	s.resolverCtx = sparkwingruntime.WithPipelineAwaiter(s.resolverCtx, s.pipelineAwaiter())
 	if in := plan.Inputs(); in != nil {
 		s.resolverCtx = sparkwingruntime.WithInputs(s.resolverCtx, in)
-	}
-	if ra := plan.ResolvedArgs(); ra != nil {
-		s.resolverCtx = sparkwingruntime.WithResolvedArgs(s.resolverCtx, ra)
 	}
 	return s
 }

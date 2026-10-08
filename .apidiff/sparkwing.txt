@@ -11,8 +11,6 @@ const AdmissionInteractive AdmissionClass = "interactive"
 const AdmissionNormal AdmissionClass = "normal"
 func Admitted(ctx context.Context) (Admission, bool)
 type AfterRunFn func(ctx context.Context, err error)
-func Always() Predicate
-func And(preds ...Predicate) Predicate
 func Annotate(ctx context.Context, msg string)
 const ApprovalApprove ApprovalTimeoutPolicy = "approve"
 type ApprovalConfig struct {
@@ -37,13 +35,6 @@ func (g *ApprovalGate) OnFailure(id string, x any) *ApprovalGate
 func (g *ApprovalGate) Optional() *ApprovalGate
 func (g *ApprovalGate) SkipIf(fn SkipPredicate, opts ...SkipOption) *ApprovalGate
 type ApprovalTimeoutPolicy string
-func Arg[T any](ctx context.Context, name string) (T, error)
-func ArgEq(name string, value any) Predicate
-func ArgIn(name string, values ...any) Predicate
-func ArgNeq(name string, value any) Predicate
-func ArgOrDefault[T any](ctx context.Context, name string, d T) T
-func ArgSet(name string) Predicate
-func ArgUnset(name string) Predicate
 type AwaitOption func(*awaitConfig)
 type AwaitRequest struct {
 	Pipeline string
@@ -58,7 +49,6 @@ type AwaitRequest struct {
 type Base struct{}
 func Bash(ctx context.Context, line string) *Cmd
 type BeforeRunFn func(ctx context.Context) error
-func Bind(argName string) Constraint
 func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
 },
@@ -94,7 +84,6 @@ func (c *Cmd) Run() (ExecResult, error)
 func (c *Cmd) String() (string, error)
 func CoerceSpawnEachJob(v any) (Workable, error)
 const CollectAll ParallelFailurePolicy = "collect-all"
-func Computed(fn any) Constraint
 type ConcurrencyGroup struct {
 }
 func (g *ConcurrencyGroup) Limit() ConcurrencyLimit
@@ -112,10 +101,6 @@ type ConcurrencyLimit struct {
 	CancelTimeout time.Duration
 }
 func Config(ctx context.Context, name string) (string, error)
-type Constraint interface {
-	applyTo(*fieldMeta) error
-	isConstraint()
-}
 type ConsumeEdge struct {
 	Producer string
 	Into     string
@@ -123,15 +108,12 @@ type ConsumeEdge struct {
 type ConsumeOption func(*consumeEdge)
 func Cores(n float64) ResourceHint
 func CurrentRuntime() RuntimeConfig
-func Custom(fn any) Constraint
 func Debug(ctx context.Context, format string, args ...any)
 func DebugEnabled() bool
-func Default(v any) Constraint
 const DefaultCacheTTL = 7 * 24 * time.Hour
 type Dep interface {
 	depID() string
 }
-func DependsOn(names ...string) Constraint
 type DescribeArg struct {
 	Name     string
 	GoName   string
@@ -239,20 +221,6 @@ type Failure struct {
 type FailureRecoveryFn func(ctx context.Context, f Failure) error
 type FailureStage int
 func (s FailureStage) String() string
-type FieldBuilder[T any] struct {
-}
-func (fb *FieldBuilder[T]) Bind(argName string) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Computed(fn any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Custom(fn any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Default(v any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) DependsOn(names ...string) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Max(v any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Min(v any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) OneOf(values ...any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Positive() *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Range(min, max any) *FieldBuilder[T]
-func (fb *FieldBuilder[T]) Required() *FieldBuilder[T]
-func (fb *FieldBuilder[T]) RequiredWhen(p Predicate) *FieldBuilder[T]
 type Git struct {
 	SHA           string
 	Branch        string
@@ -272,14 +240,6 @@ func (g *Git) WorkDir() string
 func GithubOwnerRepo(slug string) (owner, repo string)
 func Glob(pattern string) ([]string, error)
 func GoModules() DirCache
-type GroupBuilder struct {
-}
-func (g *GroupBuilder) AllOrNone() *GroupBuilder
-func (g *GroupBuilder) AtLeastOne() *GroupBuilder
-func (g *GroupBuilder) AtMostOne() *GroupBuilder
-func (g *GroupBuilder) Desc(msg string) *GroupBuilder
-func (g *GroupBuilder) ExactlyOne() *GroupBuilder
-func (g *GroupBuilder) When(p Predicate) *GroupBuilder
 func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup
 func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup
 type HelpProvider interface {
@@ -412,7 +372,6 @@ type LintWarning struct {
 	Code   string
 	Msg    string
 }
-var Local Predicate = localPredicate{}
 type LogRecord struct {
 	TS    time.Time
 	Level string
@@ -428,7 +387,6 @@ type Logger interface {
 }
 func LoggerFromContext(ctx context.Context) Logger
 func Lookup(name string) (*Registration, bool)
-func Max(v any) Constraint
 func MaxAge(d time.Duration) RefOption
 const MaxCacheTTL = 35 * 24 * time.Hour
 type MemoizeConfig struct {
@@ -438,7 +396,6 @@ type MemoizeConfig struct {
 }
 type MemoizeOption func(*MemoizeConfig)
 func MemoryGB(n float64) ResourceHint
-func Min(v any) Constraint
 func MustConfig(ctx context.Context, name string) string
 func MustSecret(ctx context.Context, name string) string
 func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup
@@ -446,20 +403,15 @@ func NewDetachedNode(id string, job Workable) *JobNode
 func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git
 func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
 func NewPlan() *Plan
-func NewSchema[T any]() *SchemaBuilder[T]
-func NewSchemaFromType(t reflect.Type) (*Schema, error)
 func NewSecretResolverFromSpec(_ context.Context, spec backends.Spec) (SecretResolver, error)
 func NewWork() *Work
 const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
-func Not(p Predicate) Predicate
 func NpmCache() DirCache
 func OIDCToken(ctx context.Context, audience string) (string, error)
 type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
 type OnLimit string
-func OneOf(values ...any) Constraint
-func Or(preds ...Predicate) Predicate
 type Outcome string
 func (o Outcome) OK() bool
 func (o Outcome) Terminal() bool
@@ -495,47 +447,23 @@ func (p *Plan) GroupSourceIDs(id string) []string
 func (p *Plan) Inputs() any
 func (p *Plan) IsDynamicNode(id string) bool
 func (p *Plan) Job(id string) *JobNode
-func (p *Plan) JobArgSchema(id string) *Schema
-func (p *Plan) JobArgSchemas() map[string]*Schema
+func (p *Plan) JobArgs() []DescribeArg
 func (p *Plan) JobGroupNames(id string) []string
 func (p *Plan) LintWarnings() []LintWarning
 func (p *Plan) Nodes() []*JobNode
 func (p *Plan) PlanConcurrency() []PlanConcurrency
 func (p *Plan) Priority(n int) *Plan
 func (p *Plan) PriorityValue() int
-func (p *Plan) ResolvedArgs() map[string]any
 func (p *Plan) ResourceHints() *ResourceHints
 func (p *Plan) Resources(hints ...ResourceHint) *Plan
-func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg
 type PlanConcurrency struct {
 	Group *ConcurrencyGroup
 	Cost  int
-}
-func Positive() Constraint
-type Predicate interface {
-	Eval(ctx PredicateContext) bool
-
-	String() string
-
-	isPredicate()
-}
-type PredicateContext interface {
-	Arg(name string) (value any, ok bool)
-
-	ProfileName() string
-
-	ProfileIsLocal() bool
 }
 type PrefersProvider interface {
 	Prefers() []string
 }
 type Produces[T any] struct{}
-func Profile(name string) Predicate
-type ProfileResolutionContext struct {
-	Name string
-
-	IsLocal bool
-}
 type PullRequest struct {
 	Number int
 
@@ -549,7 +477,6 @@ type PullRequest struct {
 }
 func PullRequestFromEnv(env map[string]string) *PullRequest
 const Queue OnLimit = "queue"
-func Range(min, max any) Constraint
 func ReadFile(path string) ([]byte, error)
 type Ref[T any] struct {
 	NodeID string
@@ -583,18 +510,8 @@ type Registration struct {
 func (r *Registration) Instance() any
 func (r *Registration) SecretArgNames() []string
 func (r *Registration) SecretValues(args map[string]string) []string
-var Remote Predicate = remotePredicate{}
-func Required() Constraint
-func RequiredWhen(p Predicate) Constraint
 type RequiresProvider interface {
 	Requires() []string
-}
-func ResolveAs[T any](s *Schema, in ResolveInputs) (T, error)
-type ResolveInputs struct {
-	FlagValues map[string]string
-
-	ProfileName    string
-	ProfileIsLocal bool
 }
 type ResolvedPipelineRef struct {
 	RunID string
@@ -665,22 +582,20 @@ var RuntimePlumbing = struct {
 	Fns  runtimePlumbingFns
 }{
 	Keys: runtimePlumbingKeys{
-		DryRun:            dryRunKey{},
-		Runner:            runnerCtxKey{},
-		SpawnHandler:      keySpawnHandler,
-		StepRange:         stepRangeKey{},
-		JSONRefResolver:   keyJSONRefResolver,
-		PipelineResolver:  keyPipelineResolver,
-		PipelineAwaiter:   keyPipelineAwaiter,
-		Inputs:            keyInputs,
-		PipelineSecrets:   keyPipelineSecrets,
-		SecretResolver:    keySecretResolver,
-		Logger:            keyLogger,
-		Node:              keyNode,
-		ResolvedArgs:      keyResolvedArgs,
-		ProfileResolution: keyProfileResolution,
-		Admission:         keyAdmission,
-		OIDCTokenSource:   oidcTokenSourceKey{},
+		DryRun:           dryRunKey{},
+		Runner:           runnerCtxKey{},
+		SpawnHandler:     keySpawnHandler,
+		StepRange:        stepRangeKey{},
+		JSONRefResolver:  keyJSONRefResolver,
+		PipelineResolver: keyPipelineResolver,
+		PipelineAwaiter:  keyPipelineAwaiter,
+		Inputs:           keyInputs,
+		PipelineSecrets:  keyPipelineSecrets,
+		SecretResolver:   keySecretResolver,
+		Logger:           keyLogger,
+		Node:             keyNode,
+		Admission:        keyAdmission,
+		OIDCTokenSource:  oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:    (*Plan).insertChild,
@@ -694,20 +609,6 @@ var RuntimePlumbing = struct {
 }
 const Satisfied Outcome = "satisfied"
 func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)
-type Schema struct {
-}
-func (s *Schema) DescribeArgs() []DescribeArg
-func (s *Schema) Fields() []string
-func (s *Schema) GoType() reflect.Type
-func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error)
-type SchemaBuilder[T any] struct {
-}
-func (sb *SchemaBuilder[T]) Build() (*Schema, error)
-func (sb *SchemaBuilder[T]) Field(name string) *FieldBuilder[T]
-func (sb *SchemaBuilder[T]) Group(names ...string) *GroupBuilder
-type SchemaProvider interface {
-	Schema() (*Schema, error)
-}
 type Scope string
 const ScopeBox Scope = "box"
 const ScopeGlobal Scope = "global"
@@ -805,13 +706,6 @@ func ToolCacheDir(tool string) string
 func ToolCostCenticores(cores float64) int
 func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)
 type ToolSlotProvider func(ctx context.Context, group *ConcurrencyGroup, cost int) (release func(), err error)
-type TransitiveArg struct {
-	Flag      string
-	JobID     string
-	FieldName string
-	Desc      string
-	Schema    *Schema
-}
 type TriggerInfo struct {
 	Source string
 	User   string
@@ -829,8 +723,6 @@ type WhenRunnerProvider interface {
 type WithArgs[T any] struct {
 }
 func (w *WithArgs[T]) Args(ctx context.Context) T
-func (w *WithArgs[T]) ArgsType() reflect.Type
-func (w *WithArgs[T]) BindFromAny(val any) error
 func WithCommandEnv(ctx context.Context, env map[string]string) context.Context
 func WithFailure(ctx context.Context, f Failure) context.Context
 func WithFreshArgs(args map[string]string) AwaitOption
@@ -838,7 +730,6 @@ func WithFreshBranch(branch string) AwaitOption
 func WithFreshInputs[T any](in T) AwaitOption
 func WithFreshRepo(repo string) AwaitOption
 func WithFreshTimeout(d time.Duration) AwaitOption
-func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context
 func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context
 func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context
 func WithStep(ctx context.Context, stepID string) context.Context
@@ -885,37 +776,9 @@ type Workable interface {
 func WriteFile(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
-func (alwaysPredicate) Eval(PredicateContext) bool
-func (alwaysPredicate) String() string
-func (p andPredicate) Eval(ctx PredicateContext) bool
-func (p andPredicate) String() string
 func (a *approvalJob) Work(w *Work) (*WorkStep, error)
-func (p argEqPredicate) Eval(ctx PredicateContext) bool
-func (p argEqPredicate) String() string
-func (p argInPredicate) Eval(ctx PredicateContext) bool
-func (p argInPredicate) String() string
-func (p argNeqPredicate) Eval(ctx PredicateContext) bool
-func (p argNeqPredicate) String() string
-func (p argSetPredicate) Eval(ctx PredicateContext) bool
-func (p argSetPredicate) String() string
-func (p argUnsetPredicate) Eval(ctx PredicateContext) bool
-func (p argUnsetPredicate) String() string
 func (c *countReader) Read(p []byte) (int, error)
-func (k groupKind) String() string
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
-func (localPredicate) Eval(ctx PredicateContext) bool
-func (localPredicate) String() string
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
-func (p notPredicate) Eval(ctx PredicateContext) bool
-func (p notPredicate) String() string
-func (p orPredicate) Eval(ctx PredicateContext) bool
-func (p orPredicate) String() string
-func (p profilePredicate) Eval(ctx PredicateContext) bool
-func (p profilePredicate) String() string
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
-func (remotePredicate) Eval(ctx PredicateContext) bool
-func (remotePredicate) String() string
-func (c *resolvedPredCtx) Arg(name string) (any, bool)
-func (c *resolvedPredCtx) ProfileIsLocal() bool
-func (c *resolvedPredCtx) ProfileName() string

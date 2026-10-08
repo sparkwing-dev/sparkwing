@@ -39,9 +39,7 @@ type Plan struct {
 
 	inputs any
 
-	jobArgs map[string]*Schema
-
-	resolvedArgs map[string]any
+	jobArgs []jobArgsDecl
 }
 
 // LintWarning is a non-fatal Plan-time advisory attached to a node.

@@ -2,22 +2,20 @@ package sparkwing
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 )
 
-// WithArgs is the embedded helper a job uses to declare a typed Args
-// struct. The framework reflects on the job at registration time to
-// discover the embedded WithArgs[T] -> T, builds the args [Schema]
-// from T (plus the job's optional Schema(*SchemaBuilder[T]) method),
-// and at Work-time populates a resolved T that step bodies read via
-// the [Args] accessor.
-//
-// Typical shape:
+// WithArgs is the embedded helper a job uses to declare typed args.
+// T uses the pipeline Inputs tag vocabulary: a field becomes a flag
+// only with a `flag:"name"` tag, and `desc`, `default`, `required`,
+// `enum` and `short` behave as they do on Inputs. The framework
+// resolves T from the run's flags before any step runs; a missing
+// required arg or a value outside `enum` fails the run. `secret` and
+// `flag:",extra"` are pipeline-only and panic at registration.
 //
 //	type DeployArgs struct {
-//	    Replicas int    `desc:"target replica count"`
-//	    Image    string `desc:"OCI image ref"`
+//	    Replicas int    `flag:"replicas" default:"3" desc:"target replica count"`
+//	    Image    string `flag:"image" required:"true" desc:"OCI image ref"`
 //	}
 //
 //	type DeployJob struct {
@@ -32,8 +30,7 @@ import (
 //	    }), nil
 //	}
 //
-// Jobs that take no args simply don't embed WithArgs (or embed
-// WithArgs[NoInputs] if they want to write the call uniformly).
+// Two jobs in one plan may not declare the same flag.
 type WithArgs[T any] struct {
 	bound *T
 }
@@ -42,10 +39,6 @@ type WithArgs[T any] struct {
 // when called before the framework has bound them (most commonly:
 // from Plan, before Work has started, or from a goroutine spawned
 // outside the framework's lifecycle).
-//
-// The ctx parameter is currently unused but kept in the signature so
-// future per-context binding (e.g., per-spawn child runs) doesn't
-// force a breaking API change on every job that reads its args.
 func (w *WithArgs[T]) Args(ctx context.Context) T {
 	_ = ctx
 	if w.bound == nil {
@@ -57,36 +50,19 @@ func (w *WithArgs[T]) Args(ctx context.Context) T {
 	return *w.bound
 }
 
-// BindFromAny is called by the framework to populate the resolved
-// args struct. Job code should NOT call this directly -- Go's
-// visibility model doesn't have a "package-internal-callers-only"
-// modifier so the method has to be exported for cross-package use
-// from internal/orchestrator. The framework asserts the value to T
-// before storing; type mismatches return an error rather than
-// panicking so the caller can include the resolution-chain context
-// in the surface error.
-func (w *WithArgs[T]) BindFromAny(val any) error {
-	v, ok := val.(T)
-	if !ok {
-		var zero T
-		return fmt.Errorf("sparkwing.WithArgs[%T].BindFromAny: type mismatch (got %T)", zero, val)
-	}
+func (w *WithArgs[T]) bindArgs(val any) {
+	v := val.(T)
 	w.bound = &v
-	return nil
 }
 
-// ArgsType returns the reflect.Type of T. Used by the framework's
-// schema-discovery pass: given a job that embeds WithArgs[T], the
-// framework calls ArgsType on the embedded value to learn T without
-// having to peek at the unexported bound field.
-func (w *WithArgs[T]) ArgsType() reflect.Type {
+func (w *WithArgs[T]) argsType() reflect.Type {
 	var zero T
 	return reflect.TypeOf(zero)
 }
 
 type argsHolder interface {
-	ArgsType() reflect.Type
-	BindFromAny(val any) error
+	argsType() reflect.Type
+	bindArgs(val any)
 }
 
 func embeddedArgs(jobPtr any) (argsHolder, reflect.Type) {
@@ -112,7 +88,7 @@ func embeddedArgs(jobPtr any) (argsHolder, reflect.Type) {
 			continue
 		}
 		if holder, ok := fv.Addr().Interface().(argsHolder); ok {
-			return holder, holder.ArgsType()
+			return holder, holder.argsType()
 		}
 	}
 	return nil, nil

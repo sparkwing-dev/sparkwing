@@ -18,18 +18,12 @@ import (
 )
 
 type podArgsArgs struct {
-	Replicas int `desc:"replica count"`
+	Replicas int `flag:"replicas" default:"1" desc:"replica count"`
 }
 
 type podArgsJob struct {
 	sparkwing.Base
 	sparkwing.WithArgs[podArgsArgs]
-}
-
-func (podArgsJob) Schema() (*sparkwing.Schema, error) {
-	s := sparkwing.NewSchema[podArgsArgs]()
-	s.Field("Replicas").Default(1)
-	return s.Build()
 }
 
 var podArgsSeen struct {
@@ -41,7 +35,7 @@ func (j *podArgsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) error {
 		podArgsSeen.mu.Lock()
 		defer podArgsSeen.mu.Unlock()
-		podArgsSeen.n = sparkwing.ArgOrDefault(ctx, "replicas", -1)
+		podArgsSeen.n = j.Args(ctx).Replicas
 		return nil
 	}), nil
 }
@@ -62,7 +56,7 @@ func registerPodArgsPipe() {
 	})
 }
 
-func TestRunNodeOnce_InstallsResolvedArgs(t *testing.T) {
+func TestRunNodeOnce_BindsJobArgs(t *testing.T) {
 	registerPodArgsPipe()
 	isolateCheckout(t)
 	isolateProfiles(t)
@@ -119,6 +113,6 @@ func TestRunNodeOnce_InstallsResolvedArgs(t *testing.T) {
 	got := podArgsSeen.n
 	podArgsSeen.mu.Unlock()
 	if got != 5 {
-		t.Fatalf("ArgOrDefault(replicas) = %d, want 5 (1 means the resolved args never reached the node)", got)
+		t.Fatalf("Args(ctx).Replicas = %d, want 5 (1 means the run's args never reached the node)", got)
 	}
 }
