@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -155,7 +157,7 @@ func dispatchRun(args []string) error {
 		return err
 	}
 	if runInvokesAdmission(passthrough) {
-		entry, err := pinnedPipeline(dir, pipelineName)
+		entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
 		if err != nil {
 			return fmt.Errorf("run: %w", err)
 		}
@@ -366,6 +368,38 @@ func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, err
 	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil || cfg == nil {
 		return nil, err
+	}
+	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
+}
+
+// safety: --sw-ref executes another revision, so its sparkwing.yaml, not the
+// checkout's, says whether the pipeline is pinned.
+func pinnedPipelineAt(sparkwingDir, ref, pipelineName string) (*pipelines.Pipeline, error) {
+	if ref == "" {
+		return pinnedPipeline(sparkwingDir, pipelineName)
+	}
+	repoRoot := filepath.Dir(sparkwingDir)
+	commit, err := orchestrator.ResolveRefCommit(context.Background(), repoRoot, ref, slog.Default())
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: %w", ref, err)
+	}
+	path := ".sparkwing/" + projectconfig.Filename
+	// #nosec G204 -- the commit is a resolved object ID and the path a constant.
+	listed, err := exec.Command("git", "-C", repoRoot, "ls-tree", "--name-only", string(commit), "--", path).Output()
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: list %s: %w", ref, path, err)
+	}
+	if strings.TrimSpace(string(listed)) == "" {
+		return nil, nil
+	}
+	// #nosec G204 -- the commit is a resolved object ID and the path a constant.
+	raw, err := exec.Command("git", "-C", repoRoot, "show", string(commit)+":./"+path).Output()
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: read %s: %w", ref, path, err)
+	}
+	cfg, err := projectconfig.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: %s: %w", ref, path, err)
 	}
 	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
 }
