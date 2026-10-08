@@ -1634,6 +1634,8 @@ type WithArgs[T any] struct {
 ```
 
 - `func (w *WithArgs[T]) Args(ctx context.Context) T` -- Args returns the resolved typed args for the current run.
+- `func (w *WithArgs[T]) ArgsType() reflect.Type` -- ArgsType returns the reflect.Type of T, which the framework reads to find the tags of a job that embeds WithArgs.
+- `func (w *WithArgs[T]) BindFromAny(val any) error` -- BindFromAny stores resolved args.
 
 ### type Work
 

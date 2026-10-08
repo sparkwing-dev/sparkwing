@@ -121,7 +121,9 @@ func resolveAndBindJobArgs(p *Plan, args map[string]string) error {
 			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
 			continue
 		}
-		d.holder.bindArgs(val.Interface())
+		if err := d.holder.BindFromAny(val.Interface()); err != nil {
+			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
+		}
 	}
 	return errors.Join(problems...)
 }

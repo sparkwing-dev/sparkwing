@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 )
 
@@ -50,19 +51,29 @@ func (w *WithArgs[T]) Args(ctx context.Context) T {
 	return *w.bound
 }
 
-func (w *WithArgs[T]) bindArgs(val any) {
-	v := val.(T)
+// BindFromAny stores resolved args. The framework calls it before the
+// job's steps run; a unit test calls it to set args without a run. A
+// value that is not a T returns an error.
+func (w *WithArgs[T]) BindFromAny(val any) error {
+	v, ok := val.(T)
+	if !ok {
+		var zero T
+		return fmt.Errorf("sparkwing.WithArgs[%T].BindFromAny: type mismatch (got %T)", zero, val)
+	}
 	w.bound = &v
+	return nil
 }
 
-func (w *WithArgs[T]) argsType() reflect.Type {
+// ArgsType returns the reflect.Type of T, which the framework reads to
+// find the tags of a job that embeds WithArgs.
+func (w *WithArgs[T]) ArgsType() reflect.Type {
 	var zero T
 	return reflect.TypeOf(zero)
 }
 
 type argsHolder interface {
-	argsType() reflect.Type
-	bindArgs(val any)
+	ArgsType() reflect.Type
+	BindFromAny(val any) error
 }
 
 func embeddedArgs(jobPtr any) (argsHolder, reflect.Type) {
@@ -88,7 +99,7 @@ func embeddedArgs(jobPtr any) (argsHolder, reflect.Type) {
 			continue
 		}
 		if holder, ok := fv.Addr().Interface().(argsHolder); ok {
-			return holder, holder.argsType()
+			return holder, holder.ArgsType()
 		}
 	}
 	return nil, nil

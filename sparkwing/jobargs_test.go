@@ -225,3 +225,16 @@ func TestEmbeddedArgs_NilAndNonStructInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestWithArgs_BindFromAny(t *testing.T) {
+	j := &jobargsJob2{}
+	if err := j.BindFromAny(jobargsArgs2{Webhook: "https://hook"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := j.Args(context.Background()).Webhook; got != "https://hook" {
+		t.Errorf("Webhook = %q", got)
+	}
+	if err := j.BindFromAny("wrong"); err == nil || !strings.Contains(err.Error(), "type mismatch") {
+		t.Errorf("BindFromAny(wrong type) = %v, want a type mismatch", err)
+	}
+}
