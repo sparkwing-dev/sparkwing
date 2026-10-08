@@ -129,6 +129,9 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		if err := plan.validateArtifactEdges(); err != nil {
 			return nil, err
 		}
+		if err := assertJobArgsDisjoint(plan, schema); err != nil {
+			return nil, fmt.Errorf("pipeline %q: %w", name, err)
+		}
 		if len(extraArgs) > 0 {
 			if err := assertJobArgsCoverage(plan, extraArgs); err != nil {
 				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)

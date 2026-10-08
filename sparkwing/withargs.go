@@ -31,7 +31,8 @@ import (
 //	    }), nil
 //	}
 //
-// Two jobs in one plan may not declare the same flag.
+// A job may not declare a flag or short alias that another job in the
+// plan or the pipeline's Inputs declare.
 type WithArgs[T any] struct {
 	bound *T
 }

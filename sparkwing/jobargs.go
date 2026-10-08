@@ -78,6 +78,33 @@ func (p *Plan) JobArgs() []DescribeArg {
 	return out
 }
 
+// safety: the CLI maps every flag and alias of the pipeline and its jobs
+// into one table, so a shared name would silently route a value to one owner.
+func assertJobArgsDisjoint(p *Plan, pipe InputSchema) error {
+	names := map[string]bool{}
+	shorts := map[string]string{}
+	for _, f := range pipe.Fields {
+		if f.isExtraBag {
+			continue
+		}
+		names[f.Name] = true
+		if f.Short != "" {
+			shorts[f.Short] = f.Name
+		}
+	}
+	for _, d := range p.jobArgs {
+		for _, f := range d.schema.Fields {
+			if names[f.Name] {
+				return fmt.Errorf("job %q declares --%s, which the pipeline Inputs already declare", d.jobID, f.Name)
+			}
+			if prior, dup := shorts[f.Short]; f.Short != "" && dup {
+				return fmt.Errorf("job %q declares -%s for --%s, which the pipeline Inputs already use for --%s", d.jobID, f.Short, f.Name, prior)
+			}
+		}
+	}
+	return nil
+}
+
 func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
 	if p == nil || len(extra) == 0 {
 		return nil

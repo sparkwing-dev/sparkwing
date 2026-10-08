@@ -238,3 +238,63 @@ func TestWithArgs_BindFromAny(t *testing.T) {
 		t.Errorf("BindFromAny(wrong type) = %v, want a type mismatch", err)
 	}
 }
+
+type jobargsPipeInputs struct {
+	Target string `flag:"target" short:"t" desc:"deploy target"`
+}
+
+type jobargsTagArgs struct {
+	Tag string `flag:"tag" short:"t" desc:"image tag"`
+}
+
+type jobargsTagJob struct {
+	Base
+	WithArgs[jobargsTagArgs]
+}
+
+func (j *jobargsTagJob) Work(w *Work) (*WorkStep, error) {
+	return Step(w, "run", func(_ context.Context) error { return nil }), nil
+}
+
+type jobargsTargetArgs struct {
+	Target string `flag:"target" desc:"job's own target"`
+}
+
+type jobargsTargetJob struct {
+	Base
+	WithArgs[jobargsTargetArgs]
+}
+
+func (j *jobargsTargetJob) Work(w *Work) (*WorkStep, error) {
+	return Step(w, "run", func(_ context.Context) error { return nil }), nil
+}
+
+type jobargsCollidePipe struct{ job Workable }
+
+func (c jobargsCollidePipe) Plan(_ context.Context, plan *Plan, _ jobargsPipeInputs, _ RunContext) error {
+	Job(plan, "deploy", c.job)
+	return nil
+}
+
+func TestInvoke_RefusesJobFlagsThatShadowPipelineInputs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		job  Workable
+		want string
+	}{
+		"short": {&jobargsTagJob{}, "-t for --tag"},
+		"long":  {&jobargsTargetJob{}, "declares --target"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pipe := "jobargs-collide-" + name
+			job := tc.job
+			Register[jobargsPipeInputs](pipe, func() Pipeline[jobargsPipeInputs] { return jobargsCollidePipe{job: job} })
+			reg, _ := Lookup(pipe)
+			for _, ctx := range []context.Context{context.Background(), SkipArgResolve(context.Background())} {
+				_, err := reg.Invoke(ctx, map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("Invoke = %v, want an error containing %q", err, tc.want)
+				}
+			}
+		})
+	}
+}

@@ -917,8 +917,8 @@ func (j *Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
 
 The run resolves every job's args before any step runs, so a missing
 `required:"true"` value or a value outside `enum` fails the run up
-front. `Args(ctx)` panics when called from `Plan`. Two jobs in one plan
-may not declare the same flag. `secret:"true"` and `flag:",extra"` are
+front. `Args(ctx)` panics when called from `Plan`. A job may not declare
+a flag or short alias that another job or the pipeline's Inputs declare. `secret:"true"` and `flag:",extra"` are
 pipeline-only and panic at registration: declare a secret on the
 pipeline's Inputs, where the run masks it.
 
