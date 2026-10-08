@@ -159,7 +159,7 @@ func emitStepSkippedWithReason(ctx context.Context, stepID, reason string) {
 // their natural position; renderers that want a human-readable view
 // should filter them. Returns nil for a nil/empty Work.
 //
-// Exposed so `sparkwing pipeline explain` and friends can render
+// Exposed so `sparkwing pipeline plan` and friends can render
 // "this is what --start-at=X would skip" without dispatching.
 func (w *Work) TopologicalStepOrder() []string {
 	if w == nil {

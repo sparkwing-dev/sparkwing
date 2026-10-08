@@ -34,9 +34,9 @@ type Section struct {
 	// " > ". Empty for a top-level section.
 	//
 	// The generated CLI reference has one "Examples" section per verb --
-	// 139 of them, identically titled -- and a heading that repeats
+	// one per verb, identically titled -- and a heading that repeats
 	// verbatim across a doc identifies nothing on its own. The
-	// breadcrumb is what makes "Examples" under `sparkwing pipeline run`
+	// breadcrumb is what makes "Examples" under `sparkwing runs status`
 	// a different thing from "Examples" under `sparkwing version`, both
 	// to a ranking function and to whoever reads the hit.
 	Breadcrumb string `json:"breadcrumb,omitempty"`
