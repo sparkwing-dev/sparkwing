@@ -31,8 +31,15 @@
 {{- if not (kindIs "bool" .Values.controller.allowOpenBootstrap) -}}
 {{- fail "sparkwing-full: controller.allowOpenBootstrap must be a bool. A quoted value such as 'false' reads as true to the template, which would silently open the controller's bootstrap window" -}}
 {{- end -}}
-{{- if and .Values.controller.requireAuth (not .Values.controller.bootstrapAdminToken.name) (ne .Values.controller.allowOpenBootstrap true) -}}
-{{- fail "sparkwing-full: controller.requireAuth=true without controller.bootstrapAdminToken.name leaves a fresh controller no way to mint its first token. Set controller.bootstrapAdminToken.name to a Secret holding the first admin token, or set controller.allowOpenBootstrap=true to start without one: an empty tokens table then serves every route, token minting included, unauthenticated to anything that reaches the Service until a token exists and the controller restarts" -}}
+{{- if not (kindIs "bool" .Values.controller.credentialsSecret.holdsBootstrapAdminToken) -}}
+{{- fail "sparkwing-full: controller.credentialsSecret.holdsBootstrapAdminToken must be a bool" -}}
+{{- end -}}
+{{- if and .Values.controller.credentialsSecret.holdsBootstrapAdminToken (not .Values.controller.credentialsSecret.name) -}}
+{{- fail "sparkwing-full: controller.credentialsSecret.holdsBootstrapAdminToken=true needs controller.credentialsSecret.name, the Secret holding the bootstrap-admin-token key" -}}
+{{- end -}}
+{{- $hasBootstrap := include "sparkwing-full.controller.hasBootstrapAdminToken" . -}}
+{{- if and .Values.controller.requireAuth (not $hasBootstrap) (ne .Values.controller.allowOpenBootstrap true) -}}
+{{- fail "sparkwing-full: controller.requireAuth=true without controller.bootstrapAdminToken.name leaves a fresh controller no way to mint its first token. Set controller.bootstrapAdminToken.name to a Secret holding the first admin token, or put it in controller.credentialsSecret as bootstrap-admin-token and set controller.credentialsSecret.holdsBootstrapAdminToken=true, or set controller.allowOpenBootstrap=true to start without one: an empty tokens table then serves every route, token minting included, unauthenticated to anything that reaches the Service until a token exists and the controller restarts" -}}
 {{- end -}}
 {{- if not (kindIs "bool" .Values.ingress.allowInsecure) -}}
 {{- fail "sparkwing-full: ingress.allowInsecure must be a bool. A quoted value such as 'false' reads as true to the template, which would silently drop the published-controller guard" -}}
@@ -41,7 +48,7 @@
 {{- if not .Values.ingress.tls -}}
 {{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the controller API, its tokens and the dashboard's session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also passes --insecure-cookies so a browser keeps its session" -}}
 {{- end -}}
-{{- if or (not .Values.controller.requireAuth) (and .Values.controller.allowOpenBootstrap (not .Values.controller.bootstrapAdminToken.name)) -}}
+{{- if or (not .Values.controller.requireAuth) (and .Values.controller.allowOpenBootstrap (not $hasBootstrap)) -}}
 {{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name, publishes the whole controller API: while its tokens table is empty, anyone reaching the Ingress can mint an admin token and drive every route. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to publish it open anyway" -}}
 {{- end -}}
 {{- end -}}

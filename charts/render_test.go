@@ -1113,6 +1113,27 @@ func TestControllerNumbersFromAValuesFileRenderWhole(t *testing.T) {
 	}
 }
 
+func TestControllerBootstrapTokenInTheCredentialsBundleSatisfiesRequireAuth(t *testing.T) {
+	args := renderController(t,
+		"controller.allowOpenBootstrap=false",
+		"controller.credentialsSecret.name=sparkwing-credentials",
+		"controller.credentialsSecret.holdsBootstrapAdminToken=true").Args
+	if !containsArg(args, "--require-auth") || !containsArg(args, "--credentials-dir=/etc/sparkwing/credentials") {
+		t.Fatalf("controller args = %v, want --require-auth and the credentials directory", args)
+	}
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.allowOpenBootstrap=false",
+		"controller.credentialsSecret.name=sparkwing-credentials")
+	if !strings.Contains(out, "holdsBootstrapAdminToken") {
+		t.Fatalf("render without the bundle flag = %s, want a refusal naming controller.credentialsSecret.holdsBootstrapAdminToken", out)
+	}
+	out = helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.credentialsSecret.holdsBootstrapAdminToken=true")
+	if !strings.Contains(out, "needs controller.credentialsSecret.name") {
+		t.Fatalf("render with the flag and no Secret = %s, want a refusal", out)
+	}
+}
+
 func TestControllerDashboardURLFlag(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")

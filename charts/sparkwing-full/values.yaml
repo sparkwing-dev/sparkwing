@@ -181,6 +181,11 @@ controller:
   # names.
   credentialsSecret:
     name: ""
+    # Set true when that Secret has a bootstrap-admin-token key. Helm
+    # cannot read a Secret's keys, so this is how requireAuth learns the
+    # first admin token arrives through the bundle rather than through
+    # bootstrapAdminToken below. Bool only.
+    holdsBootstrapAdminToken: false
 
   # Secrets-store encryption key, mounted as the secrets-key credential.
   # Without it a SQLite controller creates its own key beside state.db on

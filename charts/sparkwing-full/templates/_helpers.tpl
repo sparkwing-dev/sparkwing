@@ -226,3 +226,14 @@ the controller reads. Empty when no credential is configured.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+"true" when the controller receives a bootstrap admin token, either through
+bootstrapAdminToken or as a key of credentialsSecret; empty otherwise.
+*/}}
+{{- define "sparkwing-full.controller.hasBootstrapAdminToken" -}}
+{{- $c := .Values.controller -}}
+{{- if or $c.bootstrapAdminToken.name (and $c.credentialsSecret.name (eq $c.credentialsSecret.holdsBootstrapAdminToken true)) -}}
+true
+{{- end -}}
+{{- end -}}
