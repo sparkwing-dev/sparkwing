@@ -31,7 +31,7 @@ func TestUnlocatableChildError_NamesRealCauseNotPhantomVerb(t *testing.T) {
 	for _, want := range []string{
 		"light",
 		"no git identity",
-		"sparkwing configure xrepo add",
+		"sparkwing repos add",
 		"WithFreshRepo",
 	} {
 		if !strings.Contains(msg, want) {

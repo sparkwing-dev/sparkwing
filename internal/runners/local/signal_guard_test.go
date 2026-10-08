@@ -16,7 +16,6 @@ var nodeEntrypoints = []string{
 }
 
 var nodeDispatchers = []string{
-	filepath.Join("cmd", "sparkwing", "main.go"),
 	filepath.Join("internal", "cluster", "main.go"),
 }
 
