@@ -233,7 +233,7 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 	}
 	grant := store.LogSegmentsGrant{
 		Attempt: attempt, Generation: generation, Prefix: rec.Prefix,
-		ExpiresAt: now.Add(logSegmentURLTTL).UTC(),
+		ExpiresAt: now.Add(logSegmentURLTTL).UTC(), Watched: s.liveLogs.Watched(runID, nodeID),
 	}
 	for n := req.Next; n < req.Next+count; n++ {
 		u, headers, err := objs.presignPut(r.Context(), r, team, logseg.SegmentKey(rec.Prefix, n), false)

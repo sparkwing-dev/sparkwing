@@ -760,8 +760,17 @@ paths:
         heartbeat cannot extend a claim past the claim's own bound.
         A launcher Job's claim token renews its own claim here with no
         `holder_id`, bills the node's seconds since the last beat, and is
-        answered `200` with `cancel` set once the run is being cancelled;
-        a lost claim, or one its team can no longer pay for, is `409`.
+        answered `200` with `cancel` set once the run is being cancelled
+        and `watched` set while a viewer has the node's log open; a lost
+        claim, or one its team can no longer pay for, is `409`. A runner
+        heartbeat that sends `X-Sparkwing-Log-Watch: 1` is answered `200`
+        with `watched` instead of `204`.
+      parameters:
+        - in: header
+          name: X-Sparkwing-Log-Watch
+          required: false
+          schema: {type: string, enum: ["1"]}
+          description: Ask whether a viewer watches the node.
       requestBody:
         required: true
         content:
@@ -774,6 +783,15 @@ paths:
                 holder_id: {type: string}
                 lease_secs: {type: integer, minimum: 0}
       responses:
+        "200":
+          description: Lease extended; says whether a viewer watches the node.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.nodeHeartbeatResp
+                type: object
+                properties:
+                  watched: {type: boolean}
         "204": {description: Lease extended.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
@@ -787,8 +805,24 @@ paths:
       description: |
         Keeps the reaper from declaring the run lost while its nodes are
         between claims. The caller must hold a live claim on one of the
-        run's nodes.
+        run's nodes. A caller that sends `X-Sparkwing-Log-Watch: 1` is
+        answered `200` with the run's nodes a viewer has open.
+      parameters:
+        - in: header
+          name: X-Sparkwing-Log-Watch
+          required: false
+          schema: {type: string, enum: ["1"]}
+          description: Ask which of the run's nodes a viewer watches.
       responses:
+        "200":
+          description: Heartbeat recorded; lists the watched nodes.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.runHeartbeatResp
+                type: object
+                properties:
+                  watched_nodes: {type: array, items: {type: string}}
         "204": {description: Heartbeat recorded. Empty body.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -7536,6 +7570,7 @@ paths:
                       url: {type: string}
                       headers: {type: object, additionalProperties: {type: string}}
                   expires_at: {type: string, format: date-time}
+                  watched: {type: boolean, description: "A viewer has the node's log open, so the writer pushes its lines to the live ring."}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The attempt was superseded or already sealed.}

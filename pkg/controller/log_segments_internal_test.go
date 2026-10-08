@@ -3,6 +3,7 @@ package controller
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -215,6 +216,7 @@ func TestSegmentStreamJoinsTheLiveRingByOffset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.SetWatched(true)
 	var want []string
 	for i := 1; i <= 5; i++ {
 		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
@@ -320,5 +322,48 @@ func TestCapabilitiesAdvertiseLogSegments(t *testing.T) {
 	keeps, err := client.NewWithToken(f.url, nil, "").KeepsLogSegments(t.Context())
 	if err != nil || !keeps {
 		t.Fatalf("KeepsLogSegments = %v, %v", keeps, err)
+	}
+}
+
+// A viewer holding a node's stream open marks it watched; the node's
+// claim heartbeat and its run heartbeat report it, and a heartbeat that
+// does not ask keeps its old 204.
+func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	beat := func() bool {
+		code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/heartbeat", tok, []byte(`{"lease_secs":60}`))
+		var out struct {
+			Watched bool `json:"watched"`
+		}
+		if code != http.StatusOK || json.Unmarshal(raw, &out) != nil {
+			t.Fatalf("claim heartbeat: %d %s", code, raw)
+		}
+		return out.Watched
+	}
+	if beat() {
+		t.Fatal("an unviewed node reads watched")
+	}
+	f.srv.liveLogs.Watch("run-d", "a")
+	if !beat() {
+		t.Fatal("a viewed node reads unwatched")
+	}
+
+	admin := f.admin(t)
+	runBeat := func(ask bool) (int, []byte) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-d/heartbeat", nil)
+		req.Header.Set("Authorization", "Bearer "+admin)
+		if ask {
+			req.Header.Set(store.LogWatchHeader, "1")
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.Bytes()
+	}
+	if code, body := runBeat(false); code != http.StatusNoContent {
+		t.Fatalf("run heartbeat that did not ask: %d %s", code, body)
+	}
+	if code, body := runBeat(true); code != http.StatusOK || !strings.Contains(string(body), `"watched_nodes":["a"]`) {
+		t.Fatalf("run heartbeat that asked: %d %s", code, body)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -47,17 +48,25 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	// safety: a node's lines reach the live ring only while someone watches it, so the test opens a viewer once
+	// the node's log exists and takes the first live push as the sign that the pipeline child is writing.
 	started := make(chan struct{})
-	var once sync.Once
+	var once, viewing sync.Once
+	viewCtx, stopViewing := context.WithCancel(context.Background())
+	t.Cleanup(stopViewing)
+	var ctrlHTTP *httptest.Server
 	ctrlHandler := controller.New(st, nil).Handler()
-	ctrlHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ctrlHTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctrlHandler.ServeHTTP(w, r)
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/r1/nodes/n1/logs" {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/r1/nodes/n1/log-segments":
+			viewing.Do(func() { go viewNodeLog(viewCtx, ctrlHTTP.URL+"/api/v1/runs/r1/logs/n1/stream") })
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/r1/nodes/n1/logs":
 			once.Do(func() { close(started) })
 		}
 	}))
 	t.Cleanup(ctrlHTTP.Close)
-	ctrl := client.New(ctrlHTTP.URL, nil)
+	ctrl := client.New(ctrlHTTP.URL, nil).WithWatchObserver(orchestrator.NoteWatch)
 	logSrv, err := logs.New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -159,4 +168,17 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	} else if node.Status != "done" || node.Outcome != "cancelled" {
 		t.Fatalf("cancelled pipeline node = %+v, %v", node, err)
 	}
+}
+
+func viewNodeLog(ctx context.Context, url string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 }

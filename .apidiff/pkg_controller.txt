@@ -205,6 +205,7 @@ type LiveLogRead struct {
 
 	Done bool
 }
+const LiveLogWatchLease = 30 * time.Second
 func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
@@ -442,6 +443,9 @@ func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
 func (l *liveLogs) Stats() (nodes int, bytes int64)
 func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
+func (l *liveLogs) Watch(runID, nodeID string)
+func (l *liveLogs) Watched(runID, nodeID string) bool
+func (l *liveLogs) WatchedNodes(runID string) []string
 func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric)
 func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc)
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)

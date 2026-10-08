@@ -122,6 +122,7 @@ func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, re
 	var off, segEnd int64
 	read := 0
 	for {
+		live.Watch(rec.RunID, rec.NodeID)
 		log, err := logseg.Open(ctx, objs, rec.Prefix)
 		if err != nil {
 			return err

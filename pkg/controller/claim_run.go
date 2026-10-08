@@ -18,7 +18,8 @@ type claimHeartbeatReq struct {
 }
 
 type claimBeatResp struct {
-	Cancel bool `json:"cancel"`
+	Cancel  bool `json:"cancel"`
+	Watched bool `json:"watched"`
 }
 
 // safety: a refused beat is 409 and renews nothing, which is how a claim that
@@ -49,7 +50,7 @@ func (s *Server) handleClaimHeartbeat(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.writeInternalError(w, r, "claim heartbeat", err)
 	default:
-		writeJSON(w, http.StatusOK, claimBeatResp{Cancel: beat.Cancel})
+		writeJSON(w, http.StatusOK, claimBeatResp{Cancel: beat.Cancel, Watched: s.liveLogs.Watched(tok.RunID, tok.NodeID)})
 	}
 }
 

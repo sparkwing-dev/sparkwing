@@ -103,7 +103,7 @@ func RunNodeCommand(args []string) error {
 			go func() {
 				defer wg.Done()
 				heartbeatDispatchedClaim(hbCtx,
-					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken),
+					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken).WithWatchObserver(NoteWatch),
 					runID, nodeID, fence, lease, abandon, slog.Default())
 			}()
 		}

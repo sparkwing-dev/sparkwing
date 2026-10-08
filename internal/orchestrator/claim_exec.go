@@ -38,7 +38,7 @@ var errRunCancelled = errors.New("the run was cancelled")
 // before the execution start is recorded, and the claim token is the only
 // credential the pipeline process gets.
 func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token string, logger *slog.Logger) error {
-	c := client.NewWithToken(controllerURL, nil, token)
+	c := client.NewWithToken(controllerURL, nil, token).WithWatchObserver(NoteWatch)
 	ctx, abandon := context.WithCancelCause(ctx)
 	defer abandon(nil)
 	if _, err := c.HeartbeatClaim(ctx, runID, nodeID, claimLease); err != nil {

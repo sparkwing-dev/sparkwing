@@ -138,6 +138,7 @@ func streamLiveLog(ctx context.Context, l *liveLogs, out liveLogSink, runID, nod
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		l.Watch(runID, nodeID)
 		// safety: the wait is sliced so a silent node still reaches the
 		// keepalive below; an idle stream with no bytes is one an
 		// intermediary closes.

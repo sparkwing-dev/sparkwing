@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -58,6 +59,7 @@ type liveLogs struct {
 
 	mu        sync.Mutex
 	nodes     map[liveKey]*liveRing
+	watches   map[liveKey]time.Time
 	total     int64
 	lastSweep time.Time
 
@@ -73,7 +75,51 @@ func newLiveLogs() *liveLogs {
 		maxNodes:     DefaultLiveLogMaxNodes,
 		idle:         DefaultLiveLogIdleTimeout,
 		nodes:        map[liveKey]*liveRing{},
+		watches:      map[liveKey]time.Time{},
 	}
+}
+
+// LiveLogWatchLease is how long one watch keeps a node watched. A
+// viewer's open stream renews it well inside the lease.
+const LiveLogWatchLease = 30 * time.Second
+
+// Watch marks a node watched for one lease: its writer pushes lines to
+// the ring while any viewer holds a watch.
+func (l *liveLogs) Watch(runID, nodeID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.watches[liveKey{runID, nodeID}] = l.clock().Add(LiveLogWatchLease)
+}
+
+// Watched reports whether a viewer holds a live watch on the node.
+func (l *liveLogs) Watched(runID, nodeID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.watchedLocked(liveKey{runID, nodeID}, l.clock())
+}
+
+// WatchedNodes lists the run's nodes a viewer holds a live watch on.
+func (l *liveLogs) WatchedNodes(runID string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.clock()
+	nodes := []string{}
+	for key := range l.watches {
+		if key.run == runID && l.watchedLocked(key, now) {
+			nodes = append(nodes, key.node)
+		}
+	}
+	slices.Sort(nodes)
+	return nodes
+}
+
+func (l *liveLogs) watchedLocked(key liveKey, now time.Time) bool {
+	until, ok := l.watches[key]
+	if ok && !now.Before(until) {
+		delete(l.watches, key)
+		return false
+	}
+	return ok
 }
 
 func (l *liveLogs) clock() time.Time {
@@ -260,6 +306,11 @@ func (l *liveLogs) sweepLocked(now time.Time) {
 		return
 	}
 	l.lastSweep = now
+	for key, until := range l.watches {
+		if !now.Before(until) {
+			delete(l.watches, key)
+		}
+	}
 	for key, r := range l.nodes {
 		expired := r.done && now.Sub(r.doneAt) > liveLogDrainGrace
 		idle := !r.touched.IsZero() && now.Sub(r.touched) > l.idle

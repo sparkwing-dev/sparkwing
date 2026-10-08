@@ -2426,7 +2426,20 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.runnerHeartbeats.record(presenceKey{tokenPrefix: fence.Claimant.TokenPrefix, name: presenceName(body.HolderID)}, time.Now())
+	// safety: a runner that predates the watched flag reads any answer but 204 as a refused renewal.
+	if r.Header.Get(store.LogWatchHeader) == "1" {
+		writeJSON(w, http.StatusOK, nodeHeartbeatResp{Watched: s.liveLogs.Watched(runID, nodeID)})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type nodeHeartbeatResp struct {
+	Watched bool `json:"watched"`
+}
+
+type runHeartbeatResp struct {
+	WatchedNodes []string `json:"watched_nodes"`
 }
 
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {
@@ -2719,6 +2732,11 @@ func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request)
 	}
 	if err := tenant.TouchRunHeartbeat(r.Context(), runID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// safety: a dispatcher that predates the watched flag reads any answer but 204 as a failed beat.
+	if r.Header.Get(store.LogWatchHeader) == "1" {
+		writeJSON(w, http.StatusOK, runHeartbeatResp{WatchedNodes: s.liveLogs.WatchedNodes(runID)})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

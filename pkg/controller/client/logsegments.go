@@ -20,6 +20,38 @@ import (
 // segments: it predates the route, or it has no store to keep them in.
 var ErrLogSegmentsUnavailable = errors.New("controller/client: the controller keeps no log segments")
 
+// WatchReport is what a heartbeat reply says about viewers. A node
+// report names NodeID and whether a viewer watches it; a run report sets
+// WholeRun and lists in Nodes every node of the run a viewer watches.
+type WatchReport struct {
+	RunID    string
+	NodeID   string
+	Watched  bool
+	WholeRun bool
+	Nodes    []string
+}
+
+// WithWatchObserver has this client hand fn every watch report a node
+// claim or run heartbeat reply carries, so the process that writes a
+// node's log knows when to push its lines to the live view. Set it
+// before the client serves requests.
+func (c *Client) WithWatchObserver(fn func(WatchReport)) *Client {
+	c.watchObserver = fn
+	return c
+}
+
+func (c *Client) askWatched(req *http.Request) {
+	if c.watchObserver != nil {
+		req.Header.Set(store.LogWatchHeader, "1")
+	}
+}
+
+func (c *Client) reportWatch(r WatchReport) {
+	if c.watchObserver != nil {
+		c.watchObserver(r)
+	}
+}
+
 // KeepsLogSegments reports whether the controller advertises that it
 // keeps node logs as segments. A controller that predates segments
 // answers false.
@@ -110,6 +142,9 @@ type LogSegmentUploader struct {
 	through  int
 	stored   int64
 	received bool
+
+	onWatched func(bool)
+	heard     chan bool
 }
 
 var _ logseg.Uploader = (*LogSegmentUploader)(nil)
@@ -118,7 +153,34 @@ var _ logseg.Uploader = (*LogSegmentUploader)(nil)
 // request it makes carries the values of base, such as the node's claim
 // fence; base's cancellation is not inherited.
 func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader {
-	return &LogSegmentUploader{c: c, base: context.WithoutCancel(base), runID: runID, nodeID: nodeID, urls: map[int]store.LogSegmentURL{}}
+	return &LogSegmentUploader{
+		c: c, base: context.WithoutCancel(base), runID: runID, nodeID: nodeID,
+		urls: map[int]store.LogSegmentURL{}, heard: make(chan bool, 1),
+	}
+}
+
+// OnWatched hands fn the watched flag every reply from the controller
+// carries. Set it before Open.
+func (u *LogSegmentUploader) OnWatched(fn func(bool)) { u.onWatched = fn }
+
+// safety: the flag is handed on after mu is released, so the callback may
+// take its own locks; a newer flag replaces one not yet handed on.
+func (u *LogSegmentUploader) noteWatched(watched bool) {
+	select {
+	case <-u.heard:
+	default:
+	}
+	u.heard <- watched
+}
+
+func (u *LogSegmentUploader) handOnWatched() {
+	select {
+	case watched := <-u.heard:
+		if u.onWatched != nil {
+			u.onWatched(watched)
+		}
+	default:
+	}
 }
 
 // Open takes the attempt's first URL batch, which records where its log
@@ -126,8 +188,10 @@ func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID strin
 // keeps no segments, so the caller can keep the log another way.
 func (u *LogSegmentUploader) Open(ctx context.Context) error {
 	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.refreshLocked(ctx, 1)
+	err := u.refreshLocked(ctx, 1)
+	u.mu.Unlock()
+	u.handOnWatched()
+	return err
 }
 
 func (u *LogSegmentUploader) requestCtx(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -152,6 +216,7 @@ func (u *LogSegmentUploader) refreshLocked(ctx context.Context, next int) error 
 		return err
 	}
 	u.grant, u.received = grant, true
+	u.noteWatched(grant.Watched)
 	clear(u.urls)
 	for _, s := range grant.URLs {
 		u.urls[s.N] = s
@@ -207,6 +272,7 @@ func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
 			err = u.touchLocked(ctx)
 		}
 		u.mu.Unlock()
+		u.handOnWatched()
 		if err != nil && ctx.Err() == nil {
 			onError(err)
 		}
@@ -217,10 +283,13 @@ func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
 func (u *LogSegmentUploader) touchLocked(ctx context.Context) error {
 	rc, cancel := u.requestCtx(ctx)
 	defer cancel()
-	_, err := u.c.LogSegments(rc, u.runID, u.nodeID, store.LogSegmentsRequest{
+	grant, err := u.c.LogSegments(rc, u.runID, u.nodeID, store.LogSegmentsRequest{
 		Attempt: u.grant.Attempt, Generation: u.grant.Generation,
 		Next: u.through + 1, UploadedThrough: u.through, StoredBytes: u.stored,
 	})
+	if err == nil {
+		u.noteWatched(grant.Watched)
+	}
 	return err
 }
 
@@ -229,6 +298,7 @@ func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment,
 	u.mu.Lock()
 	target, err := u.urlLocked(ctx, seg.N)
 	u.mu.Unlock()
+	u.handOnWatched()
 	if err != nil {
 		return err
 	}

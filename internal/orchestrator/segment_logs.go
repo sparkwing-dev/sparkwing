@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,6 +72,10 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 	}
 	n.sink = sink
 	n.handler = logseg.AppendHandler(sink, runID, nodeID)
+	if live {
+		up.OnWatched(sink.SetWatched)
+		watchedSinks.Store(watchKey(runID, nodeID), n)
+	}
 	freshCtx, stop := context.WithCancel(nodeCtx)
 	n.stopFresh = stop
 	go func() {
@@ -86,6 +91,7 @@ func (n *nodeLogSink) ServeHTTP(w http.ResponseWriter, r *http.Request) { n.hand
 
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 	n.closeOnce.Do(func() {
+		watchedSinks.CompareAndDelete(watchKey(n.runID, n.nodeID), n)
 		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), childLogSealBudget)
 		defer cancel()
 		m, err := n.sink.Close(sealCtx, logseg.End{Stopped: stopped})
@@ -382,4 +388,30 @@ func (l *EngineNodeLog) Close(ctx context.Context) {
 	if sink != nil {
 		sink.close(ctx, false)
 	}
+}
+
+// safety: one process hosts every sink of the nodes it supervises, so a
+// heartbeat reply any of its clients receives can reach the right sink.
+var watchedSinks sync.Map
+
+func watchKey(runID, nodeID string) string { return runID + "\x00" + nodeID }
+
+// NoteWatch applies a heartbeat's watch report to the node logs this
+// process keeps as segments, turning their live view on or off. Hand it
+// to [client.Client.WithWatchObserver] on every client that heartbeats a
+// node or run whose log this process keeps.
+func NoteWatch(r client.WatchReport) {
+	if !r.WholeRun {
+		if n, ok := watchedSinks.Load(watchKey(r.RunID, r.NodeID)); ok {
+			n.(*nodeLogSink).sink.SetWatched(r.Watched)
+		}
+		return
+	}
+	prefix := r.RunID + "\x00"
+	watchedSinks.Range(func(key, value any) bool {
+		if nodeID, ok := strings.CutPrefix(key.(string), prefix); ok {
+			value.(*nodeLogSink).sink.SetWatched(slices.Contains(r.Nodes, nodeID))
+		}
+		return true
+	})
 }

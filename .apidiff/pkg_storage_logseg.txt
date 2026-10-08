@@ -126,6 +126,7 @@ type Sink struct {
 }
 func (s *Sink) Append(data []byte, stream string, first, last int64) error
 func (s *Sink) Close(ctx context.Context, end End) (Manifest, error)
+func (s *Sink) SetWatched(watched bool)
 func (s *Sink) WriterSealed(stream string, finalSeq, dropped int64)
 const StateComplete = "complete"
 const StateCutOff = "cut_off"

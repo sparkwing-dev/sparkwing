@@ -56,9 +56,10 @@ type Options struct {
 	Interval     time.Duration
 	SegmentBytes int64
 	MaxBytes     int64
-	// Live, when set, receives every stored append in order with the
-	// byte offset in the log it begins at, for the controller's live
-	// view. It must not block.
+	// Live, when set, receives stored appends in order with the byte
+	// offset in the log each begins at, for the controller's live view,
+	// while a viewer watches the node (see [Sink.SetWatched]). It must
+	// not block.
 	Live func(offset int64, data []byte)
 	// AfterFunc schedules the interval cut; time.AfterFunc when nil.
 	AfterFunc func(d time.Duration, f func()) (stop func() bool)
@@ -139,6 +140,7 @@ type Sink struct {
 	gaps      []Gap
 	extraGap  int64
 	closed    bool
+	watched   bool
 
 	upMu sync.Mutex
 	work chan struct{}
@@ -209,7 +211,7 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 		return fmt.Errorf("logseg: write spool: %w", err)
 	}
 	s.advance(ws, last)
-	if s.opts.Live != nil {
+	if s.watched && s.opts.Live != nil {
 		s.opts.Live(s.written, data)
 	}
 	s.written += int64(len(data))
@@ -258,6 +260,34 @@ func (s *Sink) WriterSealed(stream string, finalSeq, dropped int64) {
 	}
 	ws.sealed = true
 	ws.dropped = max(ws.dropped, dropped)
+}
+
+// SetWatched turns the live view on or off. Turning it on first hands
+// Live every byte after the last uploaded segment, so the live view
+// joins the segments with no gap; while it is off, nothing goes live.
+func (s *Sink) SetWatched(watched bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if watched == s.watched || s.closed {
+		return
+	}
+	s.watched = watched
+	if !watched || s.opts.Live == nil {
+		return
+	}
+	var from int64
+	for _, seg := range s.uploaded {
+		from += seg.Bytes
+	}
+	if from >= s.written {
+		return
+	}
+	pending := make([]byte, s.written-from)
+	if _, err := s.spool.ReadAt(pending, from); err != nil {
+		s.opts.Logger.Warn("read the log spool for the live view", "run_id", s.opts.Run, "node_id", s.opts.Node, "err", err)
+		return
+	}
+	s.opts.Live(from, pending)
 }
 
 func (s *Sink) cutOnInterval() {

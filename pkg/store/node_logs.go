@@ -191,6 +191,11 @@ func collectNodeLogs(rows *sql.Rows) (out []NodeLog, err error) {
 // segments sends it, so a reader can join the live view to the segments.
 const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
 
+// LogWatchHeader is the request header that, sent as "1" on a node claim
+// or run heartbeat, asks the controller to answer which of the run's
+// nodes a viewer is watching. A heartbeat without it is answered 204.
+const LogWatchHeader = "X-Sparkwing-Log-Watch"
+
 // LogSegmentsRequest asks the controller for upload URLs for a node
 // attempt's log segments. Attempt and Generation echo the previous
 // grant, so a writer whose attempt was superseded is refused; both are
@@ -223,4 +228,7 @@ type LogSegmentsGrant struct {
 	URLs        []LogSegmentURL `json:"urls"`
 	ManifestURL LogSegmentURL   `json:"manifest_url"`
 	ExpiresAt   time.Time       `json:"expires_at"`
+	// Watched reports that a viewer has the node's log open, so the
+	// writer pushes its lines to the live view.
+	Watched bool `json:"watched"`
 }

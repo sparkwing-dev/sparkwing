@@ -1296,6 +1296,8 @@ type LogSegmentsGrant struct {
 	URLs        []LogSegmentURL
 	ManifestURL LogSegmentURL
 	ExpiresAt   time.Time
+
+	Watched bool
 }
 type LogSegmentsRequest struct {
 	Attempt         int64
@@ -1305,6 +1307,7 @@ type LogSegmentsRequest struct {
 	UploadedThrough int
 	StoredBytes     int64
 }
+const LogWatchHeader = "X-Sparkwing-Log-Watch"
 const LogsDeleteScope = "logs.delete"
 func LooksLikeEmail(email string) bool
 var Maintenance = storeMaintenanceFns{

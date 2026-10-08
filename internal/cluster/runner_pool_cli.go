@@ -95,7 +95,8 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token).
-		WithRunnerIdentity(holderRunnerIdentity(cfg.HolderPrefix))
+		WithRunnerIdentity(holderRunnerIdentity(cfg.HolderPrefix)).
+		WithWatchObserver(orchestrator.NoteWatch)
 	if !cfg.AllowRepos.Empty() {
 		ctrl.WithAllowRepos(cfg.AllowRepos.Patterns())
 	}

@@ -228,6 +228,7 @@ func (c *Client) WithAllowRepos(patterns []string) *Client
 func (c *Client) WithClaimResources(fn func() *ClaimResources) *Client
 func (c *Client) WithRunnerIdentity(id string) *Client
 func (c *Client) WithTriggerNodeRunner(kind string) *Client
+func (c *Client) WithWatchObserver(fn func(WatchReport)) *Client
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 type ConcurrencyState struct {
 	Key               string
@@ -337,6 +338,7 @@ func LoadSignal(err error) (time.Duration, bool)
 type LogSegmentUploader struct {
 }
 func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
+func (u *LogSegmentUploader) OnWatched(fn func(bool))
 func (u *LogSegmentUploader) Open(ctx context.Context) error
 func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error
 func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error
@@ -541,6 +543,13 @@ type WaiterResolution struct {
 	Position            int
 	QueueLength         int
 	Holders             []WaiterHolder
+}
+type WatchReport struct {
+	RunID    string
+	NodeID   string
+	Watched  bool
+	WholeRun bool
+	Nodes    []string
 }
 
 # methods on un-declared receiver types (likely a bug)

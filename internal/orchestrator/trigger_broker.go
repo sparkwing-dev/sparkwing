@@ -157,7 +157,41 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
+	if r.Method == http.MethodPost && r.URL.EscapedPath() == "/api/v1/runs/"+url.PathEscape(b.runID)+"/heartbeat" {
+		r = r.WithContext(context.WithValue(r.Context(), childAskedWatchKey{}, r.Header.Get(store.LogWatchHeader) == "1"))
+		r.Header.Set(store.LogWatchHeader, "1")
+	}
 	b.controller.ServeHTTP(w, r)
+}
+
+type childAskedWatchKey struct{}
+
+// safety: the broker asks the run heartbeat which nodes a viewer watches so its sinks know when to go live, and
+// answers a child that did not ask with the 204 an older SDK requires.
+func (b *TriggerBroker) noteRunWatch(resp *http.Response) error {
+	asked, ours := resp.Request.Context().Value(childAskedWatchKey{}).(bool)
+	if !ours || resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	var beat struct {
+		WatchedNodes []string `json:"watched_nodes"`
+	}
+	if json.Unmarshal(raw, &beat) == nil {
+		NoteWatch(client.WatchReport{RunID: b.runID, WholeRun: true, Nodes: beat.WatchedNodes})
+	}
+	if !asked {
+		resp.StatusCode, resp.Status = http.StatusNoContent, "204 No Content"
+		resp.Body, resp.ContentLength = http.NoBody, 0
+		resp.Header.Del("Content-Type")
+		resp.Header.Del("Content-Length")
+	}
+	return nil
 }
 
 func (b *TriggerBroker) grantRoute(r *http.Request) bool {
@@ -302,6 +336,9 @@ func (b *TriggerBroker) refOutput(path string) bool {
 }
 
 func (b *TriggerBroker) recordRuns(resp *http.Response) error {
+	if err := b.noteRunWatch(resp); err != nil {
+		return err
+	}
 	req := resp.Request
 	child := req.Method == http.MethodPost && req.URL.Path == "/api/v1/triggers"
 	ref := req.Method == http.MethodGet && latestRunLookup(req.URL.EscapedPath())

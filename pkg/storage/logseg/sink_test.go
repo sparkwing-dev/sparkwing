@@ -374,6 +374,7 @@ func TestSinkHandsTheLiveViewEachAppendAtItsOffset(t *testing.T) {
 			pushed = append(pushed, string(data))
 		},
 	})
+	s.SetWatched(true)
 	for i := 1; i <= 3; i++ {
 		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
 			t.Fatal(err)
@@ -385,5 +386,49 @@ func TestSinkHandsTheLiveViewEachAppendAtItsOffset(t *testing.T) {
 	n := int64(len(line(0)))
 	if len(offsets) != 3 || offsets[0] != 0 || offsets[1] != n || offsets[2] != 2*n || pushed[2] != logseg.TruncationMarker {
 		t.Fatalf("live view got %q at %v", pushed, offsets)
+	}
+}
+
+// An unwatched node pushes nothing live. When a viewer arrives, the
+// sink first pushes everything after the last uploaded segment, so the
+// live view joins the segments with no gap, then each new line; when the
+// viewer leaves it stops.
+func TestSinkPushesLiveOnlyWhileWatched(t *testing.T) {
+	objs := newMemObjects()
+	up := newMemUploader(objs, testPrefix)
+	var mu sync.Mutex
+	var pushed []string
+	var offsets []int64
+	n := int64(len(line(0)))
+	s := newSink(t, up, logseg.Options{
+		SegmentBytes: 2 * n,
+		Live: func(off int64, data []byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			offsets = append(offsets, off)
+			pushed = append(pushed, string(data))
+		},
+	})
+	for i := 1; i <= 3; i++ {
+		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitStored(t, up, 1)
+	s.SetWatched(true)
+	if err := s.Append([]byte(line(4)), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	s.SetWatched(false)
+	if err := s.Append([]byte(line(5)), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(pushed) != 2 || pushed[0] != line(3) || offsets[0] != 2*n || pushed[1] != line(4) || offsets[1] != 3*n {
+		t.Fatalf("live view got %q at %v, want line 3 at %d then line 4 at %d", pushed, offsets, 2*n, 3*n)
 	}
 }
