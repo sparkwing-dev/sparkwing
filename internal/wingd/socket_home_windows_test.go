@@ -14,14 +14,8 @@ import (
 func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 	home := filepath.Clean(t.TempDir())
 	forward := filepath.ToSlash(home)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relative, err := filepath.Rel(cwd, home)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(filepath.Dir(home))
+	relative := filepath.Base(home)
 	aliases := []string{home, forward, strings.ToLower(home[:1]) + home[1:], strings.ToLower(home), strings.ToUpper(home), home + `\unused\..`, relative}
 	daemon, err := New(Config{Home: forward, Version: "test"})
 	if err != nil {
