@@ -412,6 +412,10 @@ func readSealRecords(root *os.Root, runID, nodeID string) ([]sealRecord, error) 
 		}
 		return nil, err
 	}
+	return decodeSealRecords(data), nil
+}
+
+func decodeSealRecords(data []byte) []sealRecord {
 	var out []sealRecord
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
@@ -423,7 +427,7 @@ func readSealRecords(root *os.Root, runID, nodeID string) ([]sealRecord, error) 
 			out = append(out, rec)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (s *Server) appendSealRecord(root *os.Root, runID, nodeID string, rec sealRecord) error {

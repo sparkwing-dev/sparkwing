@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 )
 
@@ -31,6 +32,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "export" {
+		return runExport(args[1:])
+	}
 	fs := flag.NewFlagSet("sparkwing-logs", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:4345", "bind address")
 	root := fs.String("root", "", "storage root; explicit roots keep shared/PVC creation modes subject to umask (default: private $SPARKWING_HOME/logs-service)")
@@ -258,4 +262,48 @@ func openArchive(ctx context.Context, raw string) (*teamblob.Store, error) {
 		return nil, err
 	}
 	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
+}
+
+func runExport(args []string) error {
+	fs := flag.NewFlagSet("sparkwing-logs export", flag.ContinueOnError)
+	root := fs.String("root", "", "the logs service's storage root, as it runs with --root (required)")
+	archiveStore := fs.String("archive-store", "", "the logs service's --archive-store, as s3://bucket/prefix; empty when it archives nothing")
+	to := fs.String("to", "", "where the controller keeps log segments: its --cache-blob-store as s3://bucket/prefix, "+
+		"or for a controller without one, its state directory as a filesystem path (required)")
+	defaultTeam := fs.String("default-team", "default", "the team of a run the logs service recorded no team for")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *root == "" || *to == "" {
+		return errors.New("export needs --root and --to")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	opts := logs.ExportOptions{Root: *root, DefaultTeam: *defaultTeam}
+	if *archiveStore != "" {
+		store, err := openArchive(ctx, *archiveStore)
+		if err != nil {
+			return fmt.Errorf("--archive-store: %w", err)
+		}
+		opts.Archive = store
+	}
+	if strings.HasPrefix(*to, "s3://") {
+		client, bucket, prefix, err := s3store.Open(ctx, *to)
+		if err != nil {
+			return fmt.Errorf("--to: %w", err)
+		}
+		opts.To = s3store.NewArtifactStore(bucket, prefix, client)
+	} else {
+		store, err := fsstore.NewArtifactStore(*to)
+		if err != nil {
+			return fmt.Errorf("--to: %w", err)
+		}
+		opts.To = store
+	}
+	report, err := logs.Export(ctx, opts)
+	fmt.Printf("exported %d run(s), %d attempt(s); %d attempt(s) already exported\n", report.Runs, report.Attempts, report.Skipped)
+	for runID, ferr := range report.Failed {
+		fmt.Fprintf(os.Stderr, "run %s: %v\n", runID, ferr)
+	}
+	return err
 }

@@ -83,3 +83,12 @@ func TestRunRejectsNegativeLimitFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestExportNeedsARootAndADestination(t *testing.T) {
+	if err := run([]string{"export", "--root", t.TempDir()}); err == nil {
+		t.Fatal("export without --to ran")
+	}
+	if err := run([]string{"export", "--root", t.TempDir(), "--to", t.TempDir()}); err != nil {
+		t.Fatalf("export of an empty service: %v", err)
+	}
+}

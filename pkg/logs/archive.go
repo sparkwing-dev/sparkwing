@@ -305,11 +305,15 @@ func (s *Server) ensureLocal(ctx context.Context, runID string, l *runLock) (str
 }
 
 func (s *Server) readRunIndex(ctx context.Context, runID string) (runIndex, error) {
-	var idx runIndex
 	data, err := s.archive.store.ReadAll(ctx, "", indexRunRel(runID))
 	if err != nil {
-		return idx, err
+		return runIndex{}, err
 	}
+	return parseRunIndex(runID, data)
+}
+
+func parseRunIndex(runID string, data []byte) (runIndex, error) {
+	var idx runIndex
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return idx, fmt.Errorf("index for run %s: %w", runID, err)
 	}

@@ -27,12 +27,17 @@ const (
 	ReasonDropped      = "writer dropped lines"
 	ReasonUnsealed     = "writer did not seal"
 	ReasonStopped      = "node stopped before its log was finished"
+	// ReasonMigratedUnsealed marks a log exported from the logs service
+	// whose writer never numbered its lines, so nothing said it was whole.
+	ReasonMigratedUnsealed = "migrated without seal"
 )
 
 // Who sealed a log.
 const (
 	SealedByNode       = "node"
 	SealedByController = "controller"
+	// SealedByExport marks a log the logs service's export converted.
+	SealedByExport = "export"
 )
 
 // Manifest seals one node attempt's log: which segments it holds, what
