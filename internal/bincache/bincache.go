@@ -542,7 +542,12 @@ func registerRepoWithCache(ctx context.Context, gcURL, token, name, repoURL stri
 var errRegisterForbidden = errors.New("the cache refused this credential a registration")
 
 func gitHTTPEnv(gcURL, token string) []string {
-	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=0", "GIT_ASKPASS=")
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if runtime.GOOS == "windows" {
+		// safety: Git for Windows' default helper, Git Credential Manager, opens a
+		// sign-in window that only GCM_INTERACTIVE suppresses.
+		env = append(env, "GCM_INTERACTIVE=0")
+	}
 	count, countIndex := 0, -1
 	for i, value := range env {
 		if strings.HasPrefix(value, "GIT_CONFIG_COUNT=") {
