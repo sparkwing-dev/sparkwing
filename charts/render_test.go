@@ -1186,6 +1186,13 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	if strings.Contains(notes, "openssl rand") || strings.Contains(notes, "secretsKey.name is empty") {
 		t.Errorf("notes with a credentials bundle claim a key state the chart cannot see:\n%s", notes)
 	}
+	if !strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "(umask 077 && kubectl") {
+		t.Errorf("SQLite notes with a credentials bundle lack the generated-key backup:\n%s", notes)
+	}
+	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.databaseSecret.name=sparkwing-db")
+	if strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "refuses to store secrets until") {
+		t.Errorf("PostgreSQL notes with a credentials bundle:\n%s", notes)
+	}
 }
 
 func TestControllerDashboardURLFlag(t *testing.T) {
@@ -2816,6 +2823,7 @@ func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
 	for _, sets := range [][]string{
 		{"controller.allowOpenBootstrap=true"},
 		{"controller.allowOpenBootstrap=false", "controller.requireAuth=false"},
+		{"controller.allowOpenBootstrap=true", "controller.credentialsSecret.name=sparkwing-credentials"},
 	} {
 		container := runnerContainer(t, helmRender(t, "./sparkwing-full",
 			"templates/controller-deployment.yaml", "sparkwing", sets...))
