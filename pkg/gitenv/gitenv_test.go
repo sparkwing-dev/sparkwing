@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -62,13 +63,13 @@ func TestUnbind_LetsGitResolveTheDirectoryItIsPointedAt(t *testing.T) {
 	t.Setenv("GIT_DIR", filepath.Join(gating, ".git"))
 	t.Setenv("GIT_WORK_TREE", gating)
 
-	if got := gitDirOf(t, elsewhere); got != filepath.Join(gating, ".git") {
+	if got := gitDirOf(t, elsewhere); filepath.Clean(got) != filepath.Join(gating, ".git") {
 		t.Fatalf("fixture is not reproducing the hook environment: git resolved %q, want the gating repository", got)
 	}
 
 	Unbind()
 
-	if got := gitDirOf(t, elsewhere); got != filepath.Join(elsewhere, ".git") {
+	if got := gitDirOf(t, elsewhere); filepath.Clean(got) != filepath.Join(elsewhere, ".git") {
 		t.Errorf("git -C %s resolved %q; a pipeline step still operates on the gating repository", elsewhere, got)
 	}
 }
@@ -138,21 +139,70 @@ func TestShellUnbind_CapturesAndScrubsWhatUnbindDoes(t *testing.T) {
 		"[ -z \"$val\" ] || echo \"$v survived as $val\"\n" +
 		"done\n"
 
-	cmd := exec.Command("/bin/sh", "-c", script)
-	cmd.Dir = dir
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_INDEX_FILE=.git/index", "GIT_DIR=.git"}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("sh: %v\n%s", err, out)
+	shell := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		shell, err = exec.LookPath("sh")
+		if err != nil {
+			t.Fatal(err)
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, ".git"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(dir, ".git", "index"))
+		script = ShellUnbind() + "\"$GITENV_TEST_EXE\" -test.run=^TestShellUnbindNativeIndexHelper$\n"
+		t.Setenv("GITENV_TEST_EXE", filepath.ToSlash(executable))
 	}
+	indexes := []string{".git/index"}
+	arguments := []string{"-c", script}
+	if runtime.GOOS == "windows" {
+		indexes = append(indexes, filepath.Join(dir, ".git", "index"))
+		file := filepath.Join(dir, "hook.sh")
+		if err := os.WriteFile(file, []byte(script), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		arguments = []string{filepath.ToSlash(file)}
+	}
+	for _, index := range indexes {
+		cmd := exec.Command(shell, arguments...)
+		cmd.Dir = dir
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_INDEX_FILE=" + index, "GIT_DIR=.git"}
+		if runtime.GOOS == "windows" {
+			cmd.Env = append(cmd.Env, "GITENV_TEST_EXE="+os.Getenv("GITENV_TEST_EXE"), "GITENV_TEST_NATIVE_HELPER=1")
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("sh: %v\n%s", err, out)
+		}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if want := filepath.Join(dir, ".git", "index"); lines[0] != want {
-		t.Errorf("the hook exported %q, want %q: an older sparkwing on PATH gets no index to check", lines[0], want)
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if want := filepath.Join(dir, ".git", "index"); filepath.Clean(lines[0]) != want {
+			t.Errorf("the hook exported %q, want %q: an older sparkwing on PATH gets no index to check", lines[0], want)
+		}
+		if len(lines) > 1 {
+			t.Errorf("the hook left bindings behind:\n%s", strings.Join(lines[1:], "\n"))
+		}
 	}
-	if len(lines) > 1 {
-		t.Errorf("the hook left bindings behind:\n%s", strings.Join(lines[1:], "\n"))
+}
+
+func TestShellUnbindNativeIndexHelper(t *testing.T) {
+	if os.Getenv("GITENV_TEST_NATIVE_HELPER") != "1" {
+		return
 	}
+	for _, name := range bindingVars {
+		if _, exists := os.LookupEnv(name); exists {
+			os.Exit(2)
+		}
+	}
+	if GateIndex() == "" {
+		_, _ = os.Stderr.WriteString("captured index unavailable: " + os.Getenv(GateIndexVar) + "\n")
+		os.Exit(2)
+	}
+	_, _ = os.Stdout.WriteString(GateIndex() + "\n")
+	os.Exit(0)
 }
 
 func writeFile(t *testing.T, path string) {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -94,8 +95,18 @@ func stubDocker(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(self, filepath.Join(dir, "docker")); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		raw, err := os.ReadFile(self)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "docker.exe"), raw, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := os.Symlink(self, filepath.Join(dir, "docker")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv(stubDockerArgvEnv, argv)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

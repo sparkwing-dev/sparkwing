@@ -14,7 +14,77 @@ const auditSupported = false
 
 func tighten(string, fs.FileMode) error { return nil }
 
-func tightenOpen(*os.File, fs.FileMode) error { return nil }
+func tightenOpen(file *os.File, _ fs.FileMode) error {
+	return tightenPrivateOpen(file, func(path string) (*os.File, error) {
+		native, err := privateFileNativePath(path)
+		if err != nil {
+			return nil, err
+		}
+		name, err := windows.UTF16PtrFromString(native)
+		if err != nil {
+			return nil, err
+		}
+		handle, err := windows.CreateFile(name, windows.READ_CONTROL|windows.WRITE_DAC,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+			nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+		if err != nil {
+			return nil, err
+		}
+		return os.NewFile(uintptr(handle), path), nil
+	})
+}
+
+func tightenPrivateOpen(file *os.File, reopen func(string) (*os.File, error)) error {
+	expected, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !expected.Mode().IsRegular() {
+		return fmt.Errorf("private file %q is not regular", file.Name())
+	}
+	// safety: the permission handle must identify the file that will receive the bytes.
+	permissionFile, err := reopen(file.Name())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = permissionFile.Close() }()
+	opened, err := permissionFile.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(expected, opened) {
+		return fmt.Errorf("private file %q changed while it was opened", file.Name())
+	}
+	handle := windows.Handle(permissionFile.Fd())
+	if err := rejectReparsePoint(handle, file.Name()); err != nil {
+		return err
+	}
+	sd, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return err
+	}
+	current, _, _, err := privateConfigSIDs()
+	if err != nil {
+		return err
+	}
+	if owner == nil || !owner.Equals(current) {
+		return fmt.Errorf("private file %q owner is not the current user", file.Name())
+	}
+	acl, err := privateConfigACL(windows.NO_INHERITANCE)
+	if err != nil {
+		return err
+	}
+	if err := windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, acl, nil); err != nil {
+		return err
+	}
+	return verifyOpenedPrivateConfig(file.Name(), permissionFile, opened)
+}
 
 func securePrivateDir(path string, expected os.FileInfo) error {
 	path16, err := windows.UTF16PtrFromString(path)

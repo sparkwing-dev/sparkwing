@@ -631,12 +631,6 @@ func parsePlanDoc(pipeline string, raw []byte) (repos.Plan, error) {
 			for _, s := range n.Work.Steps {
 				pn.Steps = append(pn.Steps, repos.PlanStep{ID: s.ID, Needs: s.Needs, Decision: s.Decision})
 			}
-			for _, s := range n.Work.Spawns {
-				pn.Steps = append(pn.Steps, repos.PlanStep{ID: "spawn:" + s.ID, Needs: s.Needs, Decision: s.Decision})
-			}
-			for _, s := range n.Work.SpawnEach {
-				pn.Steps = append(pn.Steps, repos.PlanStep{ID: "spawn_each:" + s.ID, Needs: s.Needs, Decision: s.Decision})
-			}
 		}
 		plan.Nodes = append(plan.Nodes, pn)
 	}

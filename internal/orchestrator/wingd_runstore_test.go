@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -348,6 +349,21 @@ func TestHeldRunStoreFollowsAReplacedStoreFile(t *testing.T) {
 	}
 
 	db := PathsAt(home).StateDB()
+	if runtime.GOOS == "windows" {
+		if err := os.Remove(db); err == nil {
+			t.Fatal("Windows removed a live SQLite database")
+		}
+		runs.mu.Lock()
+		if err := runs.ro.Close(); err != nil {
+			runs.mu.Unlock()
+			t.Fatal(err)
+		}
+		if err := runs.rw.Close(); err != nil {
+			runs.mu.Unlock()
+			t.Fatal(err)
+		}
+		runs.mu.Unlock()
+	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if err := os.Remove(db + suffix); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("remove %s: %v", db+suffix, err)

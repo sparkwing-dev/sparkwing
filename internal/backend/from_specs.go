@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -131,6 +133,9 @@ func ParseInlineSpec(s string) (*backends.Spec, error) {
 		path := u.Path
 		if u.Host != "" {
 			path = "/" + u.Host + u.Path
+		}
+		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") && filepath.IsAbs(strings.TrimPrefix(path, "/")) {
+			path = strings.TrimPrefix(path, "/")
 		}
 		return &backends.Spec{Type: backends.TypeSQLite, Path: path}, nil
 	case "postgres", "postgresql":

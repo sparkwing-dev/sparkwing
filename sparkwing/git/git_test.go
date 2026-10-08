@@ -292,7 +292,7 @@ func TestFilesetHashRespectsDockerignore(t *testing.T) {
 }
 
 func TestFilesetHashFilesystemFallback(t *testing.T) {
-	dir := t.TempDir()
+	dir := filesystemFixture(t)
 	writeFile(t, dir, "a.txt", "alpha")
 	writeFile(t, dir, "sub/b.txt", "beta")
 
@@ -501,7 +501,7 @@ func TestPushTagRejectsEmpty(t *testing.T) {
 }
 
 func TestFilesetHashFramesFileContents(t *testing.T) {
-	first, second := t.TempDir(), t.TempDir()
+	first, second := filesystemFixture(t), filesystemFixture(t)
 	writeFile(t, first, "a", "")
 	writeFile(t, first, "b", "c")
 	writeFile(t, second, "a", "b\x00c")
@@ -516,6 +516,27 @@ func TestFilesetHashFramesFileContents(t *testing.T) {
 	if a == b {
 		t.Fatalf("different file sets collided: %s", a)
 	}
+}
+
+func filesystemFixture(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return t.TempDir()
+	}
+	base := filepath.Join(os.Getenv("PUBLIC"), "Documents")
+	if !filepath.IsAbs(base) {
+		t.Fatal("PUBLIC Documents is not absolute")
+	}
+	dir, err := os.MkdirTemp(base, "sparkwing-filesystem-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Error(err)
+		}
+	})
+	return dir
 }
 
 func TestFilesetHashIncludesPermissions(t *testing.T) {

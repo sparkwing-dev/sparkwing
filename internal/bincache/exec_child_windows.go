@@ -4,6 +4,7 @@ package bincache
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 )
@@ -16,6 +17,9 @@ func execChild(bin string, args, env []string, afterChild func()) error {
 		afterChild()
 	}
 	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("execute %s: %w", bin, os.ErrNotExist)
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.ExitCode()) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status

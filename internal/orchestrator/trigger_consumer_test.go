@@ -432,7 +432,7 @@ func TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locateTriggerRepo: %v", err)
 	}
-	if got != repoDir {
+	if filepath.Clean(got) != filepath.Clean(repoDir) {
 		t.Fatalf("located %q, want the submitting checkout %q", got, repoDir)
 	}
 }

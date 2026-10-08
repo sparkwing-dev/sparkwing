@@ -155,7 +155,7 @@ func TestRun_TheDocumentedContextTableIsWhatTheRuntimeProduces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	doc := string(raw)
+	doc := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	i, j := strings.Index(doc, tableBegin), strings.Index(doc, tableEnd)
 	if i < 0 || j < 0 {
 		t.Fatalf("docs/sdk.md carries no %s .. %s block", tableBegin, tableEnd)

@@ -149,16 +149,12 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 const testInstallVersion = "v9.9.9"
 
 func testVerifiedAsset(t *testing.T) verifiedReleaseAsset {
-	skipWithoutShellFixtures(t)
-	body := releaseFixture(testInstallVersion)
+	body := releaseFixtureForPlatform(t, testInstallVersion)
 	digest := sha256.Sum256(body)
 	return verifiedReleaseAsset{name: "sparkwing-test", bytes: body, digest: hex.EncodeToString(digest[:])}
 }
 
 func TestInstallVerifiedAssetPreservesExistingPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission bits")
-	}
 	target := filepath.Join(t.TempDir(), "sparkwing")
 	if err := os.WriteFile(target, []byte("old binary"), 0o700); err != nil {
 		t.Fatal(err)
@@ -170,7 +166,11 @@ func TestInstallVerifiedAssetPreservesExistingPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o700 {
+	expectedMode := os.FileMode(0o700)
+	if runtime.GOOS == "windows" {
+		expectedMode = 0o666
+	}
+	if info.Mode().Perm() != expectedMode {
 		t.Fatalf("mode=%o want700", info.Mode().Perm())
 	}
 }

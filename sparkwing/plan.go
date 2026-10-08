@@ -13,7 +13,7 @@ import (
 // Plan holds the job graph populated by a pipeline's Plan method.
 // The orchestrator consumes it, snapshots the graph, and dispatches
 // [JobNode]s in dependency order. Build a Plan via [NewPlan] and
-// attach jobs with [Job], [JobApproval], or [JobSpawn]; chain
+// attach jobs with [Job], [JobApproval], or [JobFanOutDynamic]; chain
 // dependencies with [JobNode.Needs].
 type Plan struct {
 	mu         sync.Mutex
@@ -39,9 +39,7 @@ type Plan struct {
 
 	inputs any
 
-	jobArgs map[string]*Schema
-
-	resolvedArgs map[string]any
+	jobArgs []jobArgsDecl
 }
 
 // LintWarning is a non-fatal Plan-time advisory attached to a node.
@@ -209,26 +207,6 @@ func newNode(caller, id string, job Workable) *JobNode {
 		}
 	}
 	return n
-}
-
-// NewDetachedNode validates a node for runtime insertion without registering it on a Plan.
-// Pipeline authors use [Job].
-func NewDetachedNode(id string, job Workable) *JobNode {
-	return newNode("NewDetachedNode", id, job)
-}
-
-func (p *Plan) insertChild(child *JobNode) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if child == nil {
-		return fmt.Errorf("insertChild: nil child node")
-	}
-	if _, exists := p.byID[child.id]; exists {
-		return fmt.Errorf("insertChild: duplicate id %q", child.id)
-	}
-	p.byID[child.id] = child
-	p.nodes = append(p.nodes, child)
-	return nil
 }
 
 func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {

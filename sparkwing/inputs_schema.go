@@ -309,16 +309,8 @@ func populateInputs(schema InputSchema, dst reflect.Value, m map[string]string) 
 		if err != nil {
 			return fmt.Errorf("--%s: %w", f.Name, err)
 		}
-		if len(f.Enum) > 0 {
-			values := []string{raw}
-			if fv.Kind() == reflect.Slice {
-				values = splitCSV(raw)
-			}
-			for _, v := range values {
-				if !inEnum(v, f.Enum) {
-					return fmt.Errorf("--%s=%q not allowed (must be one of %s)", f.Name, v, strings.Join(f.Enum, ", "))
-				}
-			}
+		if err := checkEnum(f.Name, fv.Kind() == reflect.Slice, f.Enum, raw); err != nil {
+			return err
 		}
 		if err := setField(fv, f, raw); err != nil {
 			return fmt.Errorf("--%s: %w", f.Name, err)
@@ -482,6 +474,22 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func checkEnum(name string, slice bool, enum []string, raw string) error {
+	if len(enum) == 0 {
+		return nil
+	}
+	values := []string{raw}
+	if slice {
+		values = splitCSV(raw)
+	}
+	for _, v := range values {
+		if !inEnum(v, enum) {
+			return fmt.Errorf("--%s=%q not allowed (must be one of %s)", name, v, strings.Join(enum, ", "))
+		}
+	}
+	return nil
 }
 
 func inEnum(v string, enum []string) bool {

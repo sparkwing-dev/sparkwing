@@ -47,6 +47,7 @@ type Server struct {
 	counter   *storagequota.Client
 	logBlocks logBlocks
 	claims    claimCache
+	claimNow  func() time.Time
 	dirMode   os.FileMode
 	fileMode  os.FileMode
 
@@ -834,7 +835,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (app
 	}
 	key, cacheable := claimCacheKey(r, runID, nodeID, credential, claimToken)
 	if cacheable {
-		if e, ok := s.claims.valid(key, time.Now()); ok {
+		if e, ok := s.claims.valid(key, s.claimTime()); ok {
 			if claimToken {
 				p.Team = e.team
 			}
@@ -859,7 +860,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (app
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		entry := claimEntry{until: time.Now().Add(ttl)}
+		entry := claimEntry{until: s.claimTime().Add(ttl)}
 		// safety: a claim's run is labeled with the team the controller
 		// bound the claim to, and its write goes to the attempt the
 		// controller named, never one the pod names.

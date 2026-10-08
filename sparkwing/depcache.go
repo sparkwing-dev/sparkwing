@@ -61,8 +61,9 @@ func GoModules() DirCache {
 // NpmCache caches npm's content-addressed cache directory, keyed on
 // package-lock.json.
 //
-// It deliberately caches npm's store (`npm config get cache`,
-// default ~/.npm) rather than node_modules: `npm ci` deletes
+// It caches npm's store (`npm config get cache`,
+// default ~/.npm on Unix and %LOCALAPPDATA%/npm-cache on Windows) rather
+// than node_modules: `npm ci` deletes
 // node_modules before installing, so a restored install tree is
 // discarded bytes, while a restored store makes the reinstall fast.
 // The store is also safe under a stale key -- npm tops up only what
@@ -71,7 +72,7 @@ func GoModules() DirCache {
 // yours.
 //
 // The directory comes from npm_config_cache, then
-// `npm config get cache`, then $HOME/.npm, resolved where the node
+// `npm config get cache`, then the platform default, resolved where the node
 // runs.
 func NpmCache() DirCache {
 	return DirCache{spec: depcache.Spec{

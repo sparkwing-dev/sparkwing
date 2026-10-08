@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -39,7 +40,7 @@ func TestTriggerSourceURLFallsBackToGitHubFields(t *testing.T) {
 // A direct fetch goes where the trigger's author pushed, as they recorded it,
 // and never to the ssh form the git cache registers.
 func TestDirectTriggerSourceURLUsesTheRecordedRemote(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
 	got, err := TriggerSourceURL(&store.Trigger{RepoURL: "https://git.example.com/acme/widgets.git"}, true)
 	if err != nil {
@@ -61,7 +62,7 @@ func TestDirectTriggerSourceURLUsesTheRecordedRemote(t *testing.T) {
 // A cloud pod holds no ssh key, so a recorded GitHub ssh remote is fetched
 // anonymously over https there.
 func TestDirectTriggerSourceURLFetchesGitHubOverHTTPSWithoutAKey(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Setenv("SSH_AUTH_SOCK", "")
 	t.Setenv("GIT_SSH_COMMAND", "")
 	t.Setenv("GIT_SSH", "")

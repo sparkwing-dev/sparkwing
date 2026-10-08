@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +115,9 @@ func registerForTest(t *testing.T, name, repoURL string) {
 // only what origin serves without a credential: the public repository, but not
 // the private one, nor a commit pushed after the public one turned private.
 func TestTeamGrantsReadOnlyWhatOriginServesAnonymously(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sparkwing-cache has no Windows release, so its mirror environment targets only Linux and macOS")
+	}
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	root := t.TempDir()
@@ -234,6 +238,9 @@ func TestRegistrationClearsThePublicCloneCooldown(t *testing.T) {
 // The keep-warm pass refreshes a public mirror a team read, from origin and
 // without the credential the cache's own mirrors fetch with.
 func TestKeepWarmRefreshesPublicMirrorsAnonymously(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sparkwing-cache has no Windows release, so its mirror environment targets only Linux and macOS")
+	}
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	root := t.TempDir()

@@ -72,7 +72,8 @@ func (j *Job) Start(cmd *exec.Cmd) error {
 	}
 	// safety: suspension closes the window in which the command could spawn
 	// before it is assigned to the job.
-	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	// bug: background commands launched by consoleless parents otherwise create visible windows.
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -126,10 +127,15 @@ func (j *Job) ActiveProcesses() (uint32, error) {
 
 // Terminate ends every member of the job now.
 func (j *Job) Terminate() error {
+	return j.TerminateWithCode(1)
+}
+
+// TerminateWithCode lets the owner attribute a member's exit to its own termination request.
+func (j *Job) TerminateWithCode(code uint32) error {
 	if j == nil {
 		return nil
 	}
-	return windows.TerminateJobObject(j.handle, 1)
+	return windows.TerminateJobObject(j.handle, code)
 }
 
 // Close releases the handle; kill-on-close ends any member still running.

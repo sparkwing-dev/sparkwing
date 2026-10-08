@@ -84,6 +84,9 @@ func installFakeGo(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
 	log := filepath.Join(binDir, "argv.log")
+	if installNativeFakeGo(t, binDir, log, false, "", "") {
+		return log
+	}
 	script := "#!/bin/sh\n" + fakeGoEnvProbe + "printf '%s\\n' \"$*\" >> " + log + "\n" +
 		"while [ $# -gt 0 ]; do\n" +
 		"  if [ \"$1\" = \"-o\" ]; then\n" +
@@ -200,6 +203,9 @@ func installFakeGoLoggingEnv(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
 	log := filepath.Join(binDir, "argv.log")
+	if installNativeFakeGo(t, binDir, log, true, "", "") {
+		return log
+	}
 	script := "#!/bin/sh\n" + fakeGoEnvProbe +
 		"printf 'ARGV %s\\n' \"$*\" >> " + log + "\n" +
 		"printf 'GOWORK %s\\n' \"${GOWORK}\" >> " + log + "\n" +
@@ -301,6 +307,9 @@ func mustReadFile(t *testing.T, path string) []byte {
 func installFailingGo(t *testing.T, stderrLine, stdoutLine string) {
 	t.Helper()
 	binDir := t.TempDir()
+	if installNativeFakeGo(t, binDir, "", false, stdoutLine, stderrLine) {
+		return
+	}
 	script := "#!/bin/sh\n" + fakeGoEnvProbe +
 		"printf '%s\\n' " + shQuote(stdoutLine) + "\n" +
 		"printf '%s\\n' " + shQuote(stderrLine) + " 1>&2\n" +

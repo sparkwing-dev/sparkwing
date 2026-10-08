@@ -10,10 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
@@ -128,7 +128,7 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	if err != nil {
 		return verifyEnv{}, fmt.Errorf("template-verify: temp dir: %w", err)
 	}
-	bin := filepath.Join(dir, "sparkwing")
+	bin := templateVerifyCLIPath(dir, runtime.GOOS)
 	if _, err := sparkwing.Exec(ctx, "go", "build", "-o", bin, "./cmd/sparkwing").Dir(root).Run(); err != nil {
 		return verifyEnv{}, fmt.Errorf("template-verify: build CLI: %w", err)
 	}
@@ -154,6 +154,14 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	}, nil
 }
 
+func templateVerifyCLIPath(dir, goos string) string {
+	name := "sparkwing"
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(dir, name)
+}
+
 func acquireTemplateVerifyLock(root string) error {
 	templateVerifyLockOnce.Do(func() {
 		path := filepath.Join(root, "sparkwing-template-verify.lock")
@@ -162,7 +170,7 @@ func acquireTemplateVerifyLock(root string) error {
 			templateVerifyLockErr = err
 			return
 		}
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		if err := lockTemplateVerifyFile(f); err != nil {
 			_ = f.Close()
 			templateVerifyLockErr = err
 			return
@@ -185,14 +193,6 @@ func cleanupTemplateScratch(root string) error {
 		}
 	}
 	return nil
-}
-
-func availableTemplateVerifyDisk(path string) (uint64, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
-		return 0, err
-	}
-	return uint64(stat.Bavail) * uint64(stat.Bsize), nil
 }
 
 func requireTemplateVerifyDisk(free uint64) error {

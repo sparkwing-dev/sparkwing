@@ -340,7 +340,7 @@ func daemonUnreachable(home, sock string, spawns int, cause, dialErr error) erro
 			ErrDaemonUnreachable, spawns, path, cause)
 	}
 	if u := unreachable(sock, dialErr); u != nil {
-		return u
+		return errors.Join(u, cause)
 	}
 	return fmt.Errorf("%w: %w", ErrDaemonUnreachable, cause)
 }

@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+func testSocketBase(t *testing.T) string {
+	t.Helper()
+	base, err := socketBaseDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base
+}
+
 func deepHome(t *testing.T) string {
 	t.Helper()
 	home := filepath.Join(t.TempDir(), strings.Repeat("nested-segment/", 12))
@@ -32,8 +41,8 @@ func TestSocketPath_StaysShortForDeepHome(t *testing.T) {
 	if len(sock) >= maxSunPath() {
 		t.Fatalf("resolved socket %q is %d bytes, over the %d-byte limit", sock, len(sock), maxSunPath())
 	}
-	if !strings.HasPrefix(sock, socketBaseDir()) {
-		t.Errorf("socket %q not under socket base %q", sock, socketBaseDir())
+	if base := testSocketBase(t); !strings.HasPrefix(sock, base) {
+		t.Errorf("socket %q not under socket base %q", sock, base)
 	}
 
 	lock, _ := LockPath(home)

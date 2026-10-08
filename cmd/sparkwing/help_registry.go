@@ -1,16 +1,9 @@
 package main
 
-import (
-	"runtime"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-)
+import "github.com/sparkwing-dev/sparkwing/sparkwing"
 
 func helpExampleScratchDir(name string) string {
-	if runtime.GOOS == "windows" {
-		return `%TEMP%\` + name
-	}
-	return "/tmp/" + name
+	return "./" + name
 }
 
 var cmdSparkwing = Command{
@@ -362,10 +355,11 @@ after install, then run 'sparkwing pipeline new --name <name>'
 inside each project to scaffold .sparkwing/ + your first pipeline
 in one step (no separate init needed).
 
-Re-running on an already-set-up laptop re-applies 0700 to
-~/.config/sparkwing/ and reports each config file's mode, naming any
-that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command reports existing state.
+Re-running on an already-set-up laptop prepares ~/.config/sparkwing/
+and reports files that other users can read. Unix reports
+permission modes and applies 0700 to the directory; Windows checks
+access lists and names Windows Security permissions for review.
+--dry-run skips directory creation and permission changes.
 
 Run inside a sparkwing project, it also reports whether this
 checkout's declared git hooks fire, and names the command that
@@ -1508,9 +1502,11 @@ PIPELINE resolves against the checkout you are standing in (or the
 one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
-GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
-every credential-shaped name -- widened by naming variables in
-SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, widened
+by naming variables in SPARKWING_SUBMIT_ENV_ALLOW. Windows also
+preserves its user profile, system, shell, temporary, and application
+data paths, plus absolute Sparkwing key-file paths. Credential values
+and credential-shaped names are filtered. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.`,
 	PosArgs: []PosArg{

@@ -94,7 +94,9 @@ func TestFetchPipelineSourceDirectRefusesABranchThatIsAnOption(t *testing.T) {
 }
 
 func TestDirectFetchURLUsesHTTPSForGitHubWithoutAnSSHIdentity(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 	t.Setenv("GIT_SSH_COMMAND", "")
 	t.Setenv("GIT_SSH", "")
@@ -278,7 +280,7 @@ func TestDirectCheckoutRunsNoFilterDriverTheTreeNames(t *testing.T) {
 			})
 			marker := filepath.Join(t.TempDir(), "filter-ran")
 			global := filepath.Join(t.TempDir(), "gitconfig")
-			writeTestFile(t, global, strings.ReplaceAll(config, "%s", marker))
+			writeTestFile(t, global, strings.ReplaceAll(config, "%s", shellQuote(filepath.ToSlash(marker))))
 			t.Setenv("GIT_CONFIG_GLOBAL", global)
 
 			dest := filepath.Join(t.TempDir(), "run")
@@ -301,7 +303,7 @@ func fakeSSH(t *testing.T) (program, argsFile string) {
 	dir := t.TempDir()
 	argsFile = filepath.Join(dir, "args")
 	program = filepath.Join(dir, "fake-ssh")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '" + argsFile + "'\nexit 1\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + shellQuote(filepath.ToSlash(argsFile)) + "\nexit 1\n"
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -320,10 +322,10 @@ func TestDirectCheckoutHardensTheUsersSSHCommand(t *testing.T) {
 			wantUserArgs := true
 			switch source {
 			case "GIT_SSH_COMMAND":
-				t.Setenv("GIT_SSH_COMMAND", program+" -i /keys/user")
+				t.Setenv("GIT_SSH_COMMAND", shellQuote(filepath.ToSlash(program))+" -i /keys/user")
 			case "core.sshCommand":
 				global := filepath.Join(t.TempDir(), "gitconfig")
-				writeTestFile(t, global, "[core]\n\tsshCommand = "+program+" -i /keys/user\n")
+				writeTestFile(t, global, "[core]\n\tsshCommand = "+shellQuote(filepath.ToSlash(program))+" -i /keys/user\n")
 				t.Setenv("GIT_CONFIG_GLOBAL", global)
 			case "GIT_SSH":
 				t.Setenv("GIT_SSH", program)

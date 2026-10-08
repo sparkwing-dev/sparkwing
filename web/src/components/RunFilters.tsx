@@ -8,7 +8,7 @@ import type { Run, PipelineMeta } from "@/lib/api";
 import Tooltip from "@/components/Tooltip";
 
 
-const FILTER_URL_KEYS = [
+export const FILTER_URL_KEYS = [
   "status",
   "nstatus",
   "trigger",
@@ -55,6 +55,9 @@ export function useUrlFilterState() {
             if (empty) next.delete(k);
             else next.set(k, Array.isArray(v) ? v.join(",") : v);
           }
+          // A page cursor belongs to the filters it was read under; new filters start at the newest runs.
+          next.delete("older");
+          next.delete("newer");
           const qs = next.toString();
           router.replace(qs ? `${pathname}?${qs}` : pathname, {
             scroll: false,
@@ -72,7 +75,8 @@ export function useUrlFilterState() {
     if (restored.current) return;
     restored.current = true;
     const hasAny = FILTER_URL_KEYS.some((k) => searchParams.get(k));
-    if (hasAny) return;
+    // A page link names a view of exactly the filters it carries, none being all runs.
+    if (hasAny || searchParams.has("older") || searchParams.has("newer")) return;
     const saved = sessionStorage.getItem(FILTER_STORAGE_KEY);
     if (!saved) return;
     const savedParams = new URLSearchParams(saved);

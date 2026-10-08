@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,18 @@ func runRunnerImageCheck(t *testing.T, manifest string) (string, error) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("/bin/sh", "../../bin/check-runner-image.sh")
+	if runtime.GOOS == "windows" {
+		git, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		bash := filepath.Join(filepath.Dir(git), "bash.exe")
+		if _, err := os.Stat(bash); err != nil {
+			bash = filepath.Join(filepath.Dir(git), "..", "bin", "bash.exe")
+		}
+		cmd = exec.Command(bash, "../../bin/check-runner-image.sh")
+		tools = filepath.ToSlash(tools)
+	}
 	cmd.Env = append(os.Environ(), "RUNNER_TOOLS="+tools)
 	out, err := cmd.CombinedOutput()
 	return string(out), err

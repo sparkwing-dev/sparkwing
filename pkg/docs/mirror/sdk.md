@@ -26,8 +26,6 @@ Both layers use `sw.<Verb>(<container>, ...args).<modifier>(...)`.
 | Plan | `sw.GroupJobs(plan, name, members...)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
 | Plan | `sw.RefTo[T](node)` | |
 | Work | `sw.Step(w, id, fn)` | `w.Steps()` / `w.StepByID(id)` |
-| Work | `sw.JobSpawn(w, id, job)` | `w.Spawns()` / `w.SpawnGens()` |
-| Work | `sw.JobSpawnEach(w, items, fn)` | |
 | Work | `sw.GroupSteps(w, name, steps...)` | |
 | Work | `sw.StepGet[T](ctx, step)` | |
 
@@ -100,7 +98,7 @@ rather than work inside one.
 A test renders that table from a pipeline run and fails if this page and the
 runtime disagree.
 
-The table describes a run. `sparkwing pipeline plan` and `--describe` seal instead, so a step or spawn
+The table describes a run. `sparkwing pipeline plan` and `--describe` seal instead, so a step
 skip predicate that reaches a guarded helper is refused there and the step is
 reported as skipped, so an inspection command never executes an author's side
 effects.
@@ -449,14 +447,12 @@ The SDK wraps the closure into a Workable.
 
 ## Work - the inner DAG
 
-The Work layer mirrors Plan's free-function grammar. Four adders
+The Work layer mirrors Plan's free-function grammar. Two adders
 plus one typed reader:
 
 ```
 sw.Step(w, id, fn any) *WorkStep                          // register a step (untyped or typed; see below)
 sw.GroupSteps(w, name, steps...) *StepGroup               // named cluster + Needs target
-sw.JobSpawn(w, id, job) *SpawnSpec                        // spawn one Plan node from inside Work
-sw.JobSpawnEach(w, items, fn) *SpawnGenSpec               // spawn many Plan nodes (per-item template)
 sw.StepGet[T](ctx, step) T                                // typed-read accessor for use inside step bodies
 ```
 
@@ -471,7 +467,7 @@ only declaration site for typing.
 Step modifiers (chainable on `*WorkStep`):
 
 ```
-step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnSpec, *SpawnGenSpec; splat a slice: s.Needs(steps...)
+step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup; splat a slice: s.Needs(steps...)
 step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
 step.Finally() *WorkStep                                 // cleanup after declared deps terminate, even after sibling failure
 step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under --sw-dry-run
@@ -540,18 +536,9 @@ group.Needs(deps...) *StepGroup                           // applies to every me
 group.SkipIf(predicate) *StepGroup                        // applies to every member
 ```
 
-Reads on `*Work` stay methods: `w.Steps()`, `w.StepByID(id)`,
-`w.Spawns()`, `w.SpawnGens()`.
-
-Spawn handles:
-
-```
-spawn.Needs(deps...)                                     // declare upstream Steps / Spawns
-spawn.SkipIf(predicate)                                  // skip predicate before firing
-```
-
-The spawned Plan node's id is namespaced as `parent/spawnID` so logs
-and the run history are unambiguous.
+Reads on `*Work` stay methods: `w.Steps()`, `w.StepByID(id)`.
+Steps never create Jobs; add Jobs on the Plan, and use
+`sw.JobFanOutDynamic` when an earlier Job's output decides them.
 
 ## Typed step composition
 
@@ -899,6 +886,41 @@ type WrapperInputs struct {
     Extra map[string]string `flag:",extra"`
 }
 ```
+
+### Job args: `WithArgs[T]`
+
+A reusable job can declare its own flags by embedding
+`sw.WithArgs[T]`. `T` uses the Inputs tags above; a field without a
+`flag:` tag is not a flag. The job's flags join the pipeline's in
+`--help`, `pipeline describe` and completion, marked with the job id.
+
+```go
+type DeployArgs struct {
+    Replicas int    `flag:"replicas" default:"3" desc:"target replica count"`
+    Image    string `flag:"image" required:"true" desc:"OCI image ref"`
+    Strategy string `flag:"strategy" default:"rolling" enum:"rolling,recreate"`
+}
+
+type Deploy struct {
+    sw.Base
+    sw.WithArgs[DeployArgs]
+}
+
+func (j *Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "rollout", func(ctx context.Context) error {
+        a := j.Args(ctx)
+        _, err := sw.Exec(ctx, "kubectl", "set", "image", "deploy/app", "app="+a.Image).Run()
+        return err
+    }), nil
+}
+```
+
+The run resolves every job's args before any step runs, so a missing
+`required:"true"` value or a value outside `enum` fails the run up
+front. `Args(ctx)` panics when called from `Plan`. A job may not declare
+a flag or short alias that another job or the pipeline's Inputs declare. `secret:"true"` and `flag:",extra"` are
+pipeline-only and panic at registration: declare a secret on the
+pipeline's Inputs, where the run masks it.
 
 ### Flag namespace: `--sw-*` vs your flags
 

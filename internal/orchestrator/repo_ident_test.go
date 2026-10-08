@@ -1,8 +1,10 @@
 package orchestrator
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -173,7 +175,16 @@ func TestRepoShortName_SubmoduleKeepsItsOwnIdentity(t *testing.T) {
 }
 
 func TestRepoShortName_EmptyOutsideAnyRepo(t *testing.T) {
-	if got := repoShortName(t.TempDir()); got != "" {
+	outside := t.TempDir()
+	if runtime.GOOS == "windows" {
+		var err error
+		outside, err = os.MkdirTemp(filepath.Join(os.Getenv("PUBLIC"), "Documents"), "sw-no-repo-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(outside) })
+	}
+	if got := repoShortName(outside); got != "" {
 		t.Errorf("outside a repo: got %q, want empty", got)
 	}
 }
@@ -208,7 +219,7 @@ func cloneWithOrigin(t *testing.T, dirName, originURL string) string {
 	if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = " + originURL + "\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+	config := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = \"" + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(originURL) + "\"\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
 	if err := os.WriteFile(filepath.Join(clone, ".git", "config"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +286,12 @@ func TestRepoShortName_OriginUsesGitConfigSemantics(t *testing.T) {
 func TestRepoShortName_LocalOriginsAreStableAndPrivate(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "private", "acme-service.git")
 	first := cloneWithOrigin(t, "first", origin)
-	second := cloneWithOrigin(t, "second", "file://"+origin)
+	uriPath := filepath.ToSlash(origin)
+	if filepath.VolumeName(origin) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	uri := (&url.URL{Scheme: "file", Path: uriPath}).String()
+	second := cloneWithOrigin(t, "second", uri)
 	a, b := repoShortName(first), repoShortName(second)
 	if a != b {
 		t.Fatalf("equivalent local origins differ: %q and %q", a, b)

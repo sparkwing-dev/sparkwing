@@ -23,6 +23,55 @@ container images. This means:
 
 ## How it works
 
+### Windows with Git Bash
+
+Use the native Windows Go toolchain and Sparkwing executable from Git Bash;
+WSL is not required. The website's install command is the same on each OS:
+
+```sh
+curl -fsSL https://sparkwing.dev/install.sh | sh
+```
+
+The installer selects a Windows `.exe` in Git Bash. In WSL it selects the
+Linux binary, and on macOS it selects the macOS binary.
+Git for Windows supplies `bash` and the Unix shell utilities;
+its `bin` and `usr/bin` directories must be visible to child processes through
+`PATH`. `sparkwing.Bash` continues to execute Bash, including on Windows.
+
+The Windows local node runner uses kill-on-close Job Objects. It starts each
+node suspended, assigns it to its job, and then resumes it, so descendants
+inherit ownership. Cancellation terminates that job immediately. Normal node
+exit also cleans up remaining descendants, and dispatcher exit closes the
+handle and terminates the job. Windows does not use the Unix fd 3 liveness
+pipe or the Unix termination grace period.
+
+The pipeline executable contains the SDK version selected by `.sparkwing/go.mod`.
+Installing a newer CLI alone does not update that SDK. Windows local execution
+needs the Windows-capable runner in both the CLI and the pipeline SDK. When
+testing SDK changes from source, use an untracked Go workspace that includes
+both the SDK checkout and the pipeline's `.sparkwing` module.
+
+The source installer accepts native Windows paths and writes `.exe` files.
+`SPARKWING_INSTALL_NAME=sparkwing-<name>` installs a candidate alongside the
+normal executable. Pipeline commands still need their own Windows support:
+invoke JavaScript CLI entrypoints through `node.exe` instead of executing
+`.cmd` files with `sparkwing.Exec`. Go race tests also need a native C compiler,
+such as LLVM MinGW, on `PATH`; `CC` can select its compiler explicitly.
+
+From the Sparkwing source checkout, run `sparkwing run windows-verify` to check
+native process cleanup, SDK command execution, npm cache configuration,
+daemon discovery, and run-handle publication with the race detector. It also
+checks template executable paths, file locking, disk space, and both Git Bash
+installers. Every check reports its result, and any failure fails the pipeline.
+
+Pipeline code still has to compile for Windows: Git Bash does not supply Unix
+Go system calls or turn Windows into Linux. A pipeline that requires Linux
+tools or services can instead run in WSL or through `pipeline trigger` on a
+Linux runner. Install and authenticate any tools the particular pipeline uses
+before attempting a release.
+
+### Execution commands
+
 ```bash
 # Run locally -- uses your Docker, your caches, your machine
 sparkwing run build-deploy

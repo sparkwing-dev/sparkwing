@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func budgetEnvSandbox(t *testing.T) string {
@@ -21,7 +23,7 @@ func writeBudgetConfig(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("create config dir: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 }

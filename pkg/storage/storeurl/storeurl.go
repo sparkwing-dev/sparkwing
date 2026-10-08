@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -104,6 +106,14 @@ func splitScheme(raw string) (scheme, rest string, err error) {
 func fsPath(rest string) (string, error) {
 	if rest == "" {
 		return "", errors.New("storeurl: fs:// requires a path")
+	}
+	if runtime.GOOS == "windows" {
+		if strings.HasPrefix(rest, "/") && filepath.IsAbs(rest[1:]) {
+			rest = rest[1:]
+		}
+		if filepath.IsAbs(rest) {
+			return filepath.FromSlash(rest), nil
+		}
 	}
 	if !strings.HasPrefix(rest, "/") && !strings.HasPrefix(rest, "~") {
 		return "", fmt.Errorf("storeurl: fs path must be absolute, got %q", rest)

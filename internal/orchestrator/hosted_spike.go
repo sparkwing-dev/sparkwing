@@ -21,7 +21,7 @@ import (
 
 // hack: only tests reach this spike. The engine owns the run row, the DAG and
 // dispatch, and drives the pipeline binary only to evaluate the plan and run one
-// node per process; docs/design/engine-hosted-execution.md is the design.
+// node per process; design/engine-hosted-execution.md is the design.
 type hostedRun struct {
 	Describe []byte
 	Binary   string
@@ -245,8 +245,6 @@ func hostedUnsupported(n snapshotNode) string {
 		return "is an OnFailure recovery"
 	case len(n.OptionalDeps) > 0:
 		return "has optional dependencies"
-	case n.Work != nil && (len(n.Work.Spawns) > 0 || len(n.Work.SpawnEach) > 0):
-		return "spawns nodes"
 	}
 	m := n.Modifiers
 	if m == nil {

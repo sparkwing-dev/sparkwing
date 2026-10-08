@@ -50,9 +50,6 @@ func podRunnerInfo() *sparkwing.RunnerInfo {
 	if name == "" && typ == "" && labelsRaw == "" {
 		return nil
 	}
-	if typ == "" {
-		typ = "kubernetes"
-	}
 	var labels []string
 	if labelsRaw != "" {
 		labels = sparkwingruntime.NormalizeLabels(strings.Split(labelsRaw, ","))

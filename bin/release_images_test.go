@@ -67,7 +67,7 @@ func runReleaseScript(t *testing.T, dir, root, name string, env ...string) ([]by
 	t.Helper()
 	cmd := exec.Command("bash", filepath.Join(root, name))
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), append([]string{"PATH=" + dir + ":" + os.Getenv("PATH")}, env...)...)
+	cmd.Env = append(os.Environ(), append([]string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}, env...)...)
 	return cmd.CombinedOutput()
 }
 

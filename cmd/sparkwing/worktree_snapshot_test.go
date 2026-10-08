@@ -333,6 +333,7 @@ func initSnapshotRepo(t *testing.T) string {
 	runSnapshotGit(t, repo, "config", "user.name", "Snapshot Test")
 	runSnapshotGit(t, repo, "config", "user.email", "snapshot@example.test")
 	runSnapshotGit(t, repo, "config", "commit.gpgsign", "false")
+	runSnapshotGit(t, repo, "config", "core.autocrlf", "false")
 	return repo
 }
 
@@ -367,6 +368,10 @@ func importSnapshotBundle(t *testing.T, snapshot *worktreeSnapshot) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "checkout")
 	runSnapshotGit(t, filepath.Dir(dir), "init", "--quiet", dir)
+	runSnapshotGit(t, dir, "config", "core.autocrlf", "false")
+	if runtime.GOOS == "windows" {
+		runSnapshotGit(t, dir, "config", "core.longpaths", "true")
+	}
 	ref := bincache.SeedRef(snapshot.SHA)
 	runSnapshotGit(t, dir, "fetch", "--quiet", snapshot.BundlePath, ref+":"+ref)
 	runSnapshotGit(t, dir, "checkout", "--quiet", snapshot.SHA)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,7 +119,7 @@ func supersedingConsumer(t *testing.T) string {
 	// leaves GOWORK alone exercises nothing.
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "")
-	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(proxyDir))
+	t.Setenv("GOPROXY", (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(proxyDir), "/")}).String())
 	t.Setenv("GOSUMDB", "off")
 	t.Setenv("GONOSUMDB", "*")
 	t.Setenv("GOMODCACHE", writableTempDir(t))
@@ -217,6 +218,9 @@ func countingGoBin(t *testing.T) (bin, counter string) {
 	}
 	dir := t.TempDir()
 	counter = filepath.Join(dir, "invocations")
+	if native, ok := nativeSparksGo(t, real, counter); ok {
+		return native, counter
+	}
 	bin = filepath.Join(dir, "go")
 	script := "#!/bin/sh\necho x >> " + counter + "\nexec " + real + " \"$@\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {

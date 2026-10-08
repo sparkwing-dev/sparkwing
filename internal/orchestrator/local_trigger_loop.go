@@ -250,6 +250,11 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		args = append(args, "--profile", profileName)
 	}
 	args = append(args, trig.ID)
+	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env)
+	if err != nil {
+		return fmt.Errorf("prepare local dispatch admission: %w", err)
+	}
+	defer closeAdmission()
 	return execLocalChild(ctx, binPath, repoDir, args, env)
 }
 
@@ -298,7 +303,7 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 	}
 	outcome, startErr := runAssistedChildProcess(ctx, cmd, nil)
 	if err := errors.Join(startErr, outcome.waitErr, outcome.cancelCause); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
 			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {
 				return fmt.Errorf(
 					"child executable lease %q is unavailable (local pipeline-cache provenance). "+

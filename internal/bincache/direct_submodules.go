@@ -27,6 +27,7 @@ func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCr
 	base := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	env := credentialFetchEnv(directLocalGitEnv(base))
 	var extra []*os.File
+	cleanupCredential := func() error { return nil }
 	switch cred.Kind {
 	case CredentialGitHubApp, CredentialHTTPS:
 		prefix := strings.TrimRight(scope, "/") + "/"
@@ -34,12 +35,11 @@ func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCr
 		env = withGitConfig(env,
 			"url."+prefix+".insteadOf", "git@"+cred.Host+":",
 			"url."+prefix+".insteadOf", "ssh://git@"+cred.Host+"/")
-		pipe, err := credentialPipe(cred.Username, cred.Secret, fetchCredentialAsks)
+		var err error
+		env, extra, cleanupCredential, err = prepareCredentialTransport(env, cred.Username, cred.Secret, fetchCredentialAsks)
 		if err != nil {
-			return fmt.Errorf("direct source: submodule credential pipe: %w", err)
+			return fmt.Errorf("direct source: submodule credential transport: %w", err)
 		}
-		defer func() { _ = pipe.Close() }()
-		extra = []*os.File{pipe}
 		env = append(env, "GIT_SSH_COMMAND=ssh"+directSSHOptions)
 	case CredentialSSH:
 		_, command, cleanup, err := writeSSHCredential(cred, opts.keyTmpfsOnly)
@@ -74,8 +74,10 @@ func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCr
 	cmd.Env = env
 	cmd.ExtraFiles = extra
 	killGroupOnCancel(cmd)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("direct source: check out submodules: %w: %s", err, strings.TrimSpace(string(out)))
+	out, runErr := gitCommandCombinedOutput(cmd)
+	runErr = errors.Join(runErr, cleanupCredential())
+	if runErr != nil {
+		return fmt.Errorf("direct source: check out submodules: %w: %s", runErr, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

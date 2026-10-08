@@ -3,11 +3,11 @@ package main
 import (
 	"encoding/json"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -104,8 +104,8 @@ func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 func TestProfilesListStreamsRedactedRecords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte(
-		"profiles:\n  prod:\n    controller:\n      url: https://example.invalid\n      token: swu_supersecretvalue\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(
+		"profiles:\n  prod:\n    controller:\n      url: https://example.invalid\n      token: swu_supersecretvalue\n")); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)

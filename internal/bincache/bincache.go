@@ -395,7 +395,7 @@ func fetchGitRef(ctx context.Context, gcURL, cloneURL, token, ref, dest string) 
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dest
 		cmd.Env = gitHTTPEnv(gcURL, token)
-		return cmd.CombinedOutput()
+		return gitCommandCombinedOutput(cmd)
 	}
 	steps := [][]string{
 		{"init", "--quiet"},
@@ -492,7 +492,7 @@ func shallowCloneBranch(ctx context.Context, gcURL, cloneURL, token, branch, des
 		cloneURL, dest,
 	)
 	cmd.Env = gitHTTPEnv(gcURL, token)
-	out, err := cmd.CombinedOutput()
+	out, err := gitCommandCombinedOutput(cmd)
 	if err != nil {
 		return fmt.Errorf("git clone %s (branch %s): %w: %s",
 			cloneURL, branch, err, strings.TrimSpace(string(out)))
@@ -539,6 +539,11 @@ var errRegisterForbidden = errors.New("the cache refused this credential a regis
 
 func gitHTTPEnv(gcURL, token string) []string {
 	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if runtime.GOOS == "windows" {
+		// safety: Git for Windows' default helper, Git Credential Manager, opens a
+		// sign-in window that only GCM_INTERACTIVE suppresses.
+		env = append(env, "GCM_INTERACTIVE=0")
+	}
 	count, countIndex := 0, -1
 	for i, value := range env {
 		if strings.HasPrefix(value, "GIT_CONFIG_COUNT=") {

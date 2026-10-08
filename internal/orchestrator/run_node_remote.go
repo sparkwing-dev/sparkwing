@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
@@ -233,6 +234,10 @@ func runNodeChild(
 		childBaseEnv,
 		"SPARKWING_CONTROLLER_URL="+broker.URL(),
 		"SPARKWING_LOGS_URL="+childLogsURL,
+		"SPARKWING_RUN_ID="+runID,
+		"SPARKWING_NODE_ID="+nodeID,
+		// safety: this process forwards the child's stdout as log records, whatever the operator chose.
+		"SPARKWING_LOG_FORMAT=json",
 		remoteExecutionCapabilityInputEnv+"=1",
 	)
 	if fence.ClaimGeneration > 0 {
@@ -243,6 +248,23 @@ func runNodeChild(
 	}
 	if cacheGrant != "" {
 		childEnv = append(childEnv, authwire.CacheGrantEnv+"="+cacheGrant)
+	}
+	runnerInfo := sparkwing.Runner(ctx)
+	if runnerInfo == nil {
+		runnerInfo = podRunnerInfo()
+	}
+	childEnv = slices.DeleteFunc(childEnv, func(item string) bool {
+		return strings.HasPrefix(item, "SPARKWING_RUNNER_")
+	})
+	if runnerInfo != nil {
+		for name, value := range map[string]string{
+			"SPARKWING_RUNNER_NAME": runnerInfo.Name, "SPARKWING_RUNNER_TYPE": runnerInfo.Type,
+			"SPARKWING_RUNNER_LABELS": strings.Join(runnerInfo.Labels, ","),
+		} {
+			if value != "" {
+				childEnv = append(childEnv, name+"="+value)
+			}
+		}
 	}
 
 	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell

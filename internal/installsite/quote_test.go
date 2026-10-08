@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,7 +62,7 @@ func TestRetireRemedyRefusesACollision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remedy := retireRemedy("darwin", path)
+	remedy := retireRemedy("darwin", filepath.ToSlash(path))
 	if err := exec.Command("sh", "-c", remedy.Action).Run(); err == nil {
 		t.Fatal("retirement command overwrote or ignored an existing destination")
 	}
@@ -88,6 +89,9 @@ func TestRetireRemedyRefusesACollision(t *testing.T) {
 	}
 	race := exec.Command("sh", "-c", remedy.Action)
 	race.Env = append(os.Environ(), "PATH="+stubDir+":/usr/bin:/bin")
+	if runtime.GOOS == "windows" {
+		race = exec.Command("sh", "-c", "mv() {\n"+strings.ReplaceAll(strings.TrimPrefix(stub, "#!/bin/sh\n"), "exec /bin/mv", "/bin/mv")+"}\n"+remedy.Action)
+	}
 	if out, err := race.CombinedOutput(); err == nil {
 		t.Fatalf("retirement command hid a destination race: %s", out)
 	}

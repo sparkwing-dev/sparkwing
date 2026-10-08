@@ -138,7 +138,7 @@ sparkwing serve start
 sparkwing serve start --addr 127.0.0.1:5000
 
 # Isolate state under a scratch dir
-SPARKWING_HOME=/tmp/sparkwing-x sparkwing serve start
+SPARKWING_HOME=./sparkwing-x sparkwing serve start
 
 # Tail CI runs from S3 (no SQLite)
 sparkwing serve start --profile ci-smoke --no-local-store --read-only

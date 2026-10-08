@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -133,6 +134,11 @@ func pointResolverAt(t *testing.T, srv *httptest.Server) {
 
 func fakeGo(t *testing.T) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("SPARKWING_TEST_NATIVE_FAKE_GO", "1")
+		t.Setenv("SPARKS_GO_BIN", os.Args[0])
+		return
+	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"for arg in \"$@\"; do\n" +
@@ -150,6 +156,26 @@ func fakeGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKS_GO_BIN", bin)
+}
+
+func init() {
+	if runNativeFakeGo() {
+		os.Exit(0)
+	}
+}
+
+func runNativeFakeGo() bool {
+	if runtime.GOOS != "windows" || os.Getenv("SPARKWING_TEST_NATIVE_FAKE_GO") != "1" {
+		return false
+	}
+	for _, arg := range os.Args[1:] {
+		if mod, ok := strings.CutPrefix(arg, "-modfile="); ok {
+			if err := os.WriteFile(strings.TrimSuffix(mod, ".mod")+".sum", nil, 0o600); err != nil {
+				os.Exit(1)
+			}
+		}
+	}
+	return true
 }
 
 func TestResolveSparks_NoManifest_FastPath(t *testing.T) {

@@ -100,8 +100,8 @@ func (envDocPipe) EnvVars() []sparkwing.EnvVarDoc {
 }
 
 type describeJobArgs struct {
-	Replicas int    `desc:"replica count"`
-	Image    string `desc:"OCI image ref"`
+	Replicas int    `flag:"replicas" required:"true" desc:"replica count"`
+	Image    string `flag:"image" default:"nginx:latest" desc:"OCI image ref"`
 }
 
 type describeJob struct {
@@ -111,13 +111,6 @@ type describeJob struct {
 
 func (j *describeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(_ context.Context) error { return nil }), nil
-}
-
-func (describeJob) Schema() (*sparkwing.Schema, error) {
-	s := sparkwing.NewSchema[describeJobArgs]()
-	s.Field("Replicas").Required().Range(1, 100)
-	s.Field("Image").Default("nginx:latest")
-	return s.Build()
 }
 
 type withJobArgsPipe struct{ sparkwing.Base }
@@ -149,7 +142,7 @@ func TestDescribePipeline_TransitiveWithArgsAppearInDescribe(t *testing.T) {
 		t.Errorf("--replicas JobID = %q, want deploy", rep.JobID)
 	}
 	if !rep.Required {
-		t.Error("--replicas should be marked Required by Schema()")
+		t.Error("--replicas should be marked Required by its tag")
 	}
 	if rep.Type != "int" {
 		t.Errorf("--replicas Type = %q, want int", rep.Type)

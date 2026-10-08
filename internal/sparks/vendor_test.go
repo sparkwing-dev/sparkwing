@@ -3,6 +3,7 @@ package sparks
 import (
 	"bytes"
 	"context"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,7 +108,7 @@ func TestVendor_EndToEnd(t *testing.T) {
 
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "-mod=mod")
-	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(proxyDir))
+	t.Setenv("GOPROXY", (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(proxyDir), "/")}).String())
 	t.Setenv("GOSUMDB", "off")
 	t.Setenv("GOMODCACHE", modCache)
 	t.Setenv("GOTOOLCHAIN", "local")

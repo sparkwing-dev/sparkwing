@@ -2,17 +2,30 @@ package jobs
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLocalBehindRemoteDistinguishesGitFailures(t *testing.T) {
 	for _, kind := range []string{"outside checkout", "git unavailable", "stale linked worktree", "malformed metadata", "nested malformed metadata", "unreadable directory", "cancelled context"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
+			if kind == "outside checkout" && runtime.GOOS == "windows" {
+				outsideBase := filepath.Join(os.Getenv("PUBLIC"), "Documents")
+				outside, err := os.MkdirTemp(outsideBase, "sparkwing-outside-")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.RemoveAll(outside) })
+				root = outside
+			}
 			ctx := context.Background()
 			if kind != "outside checkout" {
 				versionFixtureGit(t, root, "init", "--quiet")
@@ -41,6 +54,13 @@ func TestLocalBehindRemoteDistinguishesGitFailures(t *testing.T) {
 					}
 				}
 			case "unreadable directory":
+				if runtime.GOOS == "windows" {
+					root = filepath.Join(root, "not-a-directory")
+					if err := os.WriteFile(root, []byte("fixture"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					break
+				}
 				if os.Geteuid() == 0 {
 					t.Skip("root bypasses directory permissions")
 				}
@@ -126,19 +146,19 @@ func TestLocalBehindRemotePreservesNonApplicableOrigins(t *testing.T) {
 				}
 			}
 			if kind == "authentication failure" {
-				realGit, err := exec.LookPath("git")
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("VERSION_FIXTURE_GIT", realGit)
-				bin := t.TempDir()
-				stub := "#!/bin/sh\ncase \"$*\" in *' fetch '*|*' ls-remote '*) echo 'fatal: Authentication failed' >&2; exit 128;; esac\nexec \"$VERSION_FIXTURE_GIT\" \"$@\"\n"
-				if err := os.WriteFile(filepath.Join(bin, "git"), []byte(stub), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "Authentication failed", http.StatusForbidden)
+				}))
+				t.Cleanup(server.Close)
+				versionFixtureGit(t, root, "remote", "set-url", "origin", server.URL+"/repo.git")
+				t.Setenv("GIT_TERMINAL_PROMPT", "0")
+				t.Setenv("GIT_CONFIG_COUNT", "1")
+				t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
+				t.Setenv("GIT_CONFIG_VALUE_0", "")
 			}
-			behind, by, err := localBehindRemote(context.Background(), root)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			behind, by, err := localBehindRemote(ctx, root)
 			if kind == "unreachable origin" || kind == "unreachable cached origin" || kind == "authentication failure" {
 				if err == nil {
 					t.Fatal("unreachable origin produced a clean verdict")

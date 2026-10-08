@@ -64,8 +64,6 @@ type planSnapshotModifiers struct {
 
 type planSnapshotWork struct {
 	Steps      []planSnapshotStep      `json:"steps,omitempty"`
-	Spawns     []planSnapshotSpawn     `json:"spawns,omitempty"`
-	SpawnEach  []planSnapshotSpawnEach `json:"spawn_each,omitempty"`
 	StepGroups []planSnapshotStepGroup `json:"step_groups,omitempty"`
 	ResultStep string                  `json:"result_step,omitempty"`
 }
@@ -82,22 +80,6 @@ type planSnapshotStep struct {
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
 
 	Risks []string `json:"risks,omitempty"`
-}
-
-type planSnapshotSpawn struct {
-	ID         string            `json:"id"`
-	Needs      []string          `json:"needs,omitempty"`
-	TargetJob  string            `json:"target_job,omitempty"`
-	TargetWork *planSnapshotWork `json:"target_work,omitempty"`
-	HasSkipIf  bool              `json:"has_skip_if,omitempty"`
-}
-
-type planSnapshotSpawnEach struct {
-	ID               string            `json:"id"`
-	Needs            []string          `json:"needs,omitempty"`
-	TargetJob        string            `json:"target_job,omitempty"`
-	ItemTemplateWork *planSnapshotWork `json:"item_template_work,omitempty"`
-	Note             string            `json:"note,omitempty"`
 }
 
 type pipelineExplainArgs struct {
@@ -478,41 +460,6 @@ func printWork(w *planSnapshotWork, indent string) {
 			needs = "  needs: " + strings.Join(s.Needs, ", ")
 		}
 		fmt.Printf("%s  Step %q%s%s\n", indent, s.ID, marker, needs)
-	}
-	for _, sp := range w.Spawns {
-		needs := ""
-		if len(sp.Needs) > 0 {
-			needs = "  needs: " + strings.Join(sp.Needs, ", ")
-		}
-		skip := ""
-		if sp.HasSkipIf {
-			skip = " [skip_if]"
-		}
-		job := sp.TargetJob
-		if job == "" {
-			job = "<unknown>"
-		}
-		fmt.Printf("%s  JobSpawn %q (job=%s)%s%s\n", indent, sp.ID, job, skip, needs)
-		if sp.TargetWork != nil {
-			printWork(sp.TargetWork, indent+"    ")
-		}
-	}
-	for _, e := range w.SpawnEach {
-		needs := ""
-		if len(e.Needs) > 0 {
-			needs = "  needs: " + strings.Join(e.Needs, ", ")
-		}
-		job := e.TargetJob
-		if job == "" {
-			job = "<runtime>"
-		}
-		fmt.Printf("%s  JobSpawnEach %q (per item; job=%s)%s\n", indent, e.ID, job, needs)
-		if e.Note != "" {
-			fmt.Printf("%s    note: %s\n", indent, e.Note)
-		}
-		if e.ItemTemplateWork != nil {
-			printWork(e.ItemTemplateWork, indent+"    ")
-		}
 	}
 }
 

@@ -136,7 +136,7 @@ func TestToolCacheDir_SurvivesTemporaryDirectoryChanges(t *testing.T) {
 	if first != second {
 		t.Fatalf("cache moved between shells: %q -> %q", first, second)
 	}
-	if !strings.HasPrefix(second, home+string(filepath.Separator)) {
+	if !strings.HasPrefix(second, filepath.Clean(home)+string(filepath.Separator)) {
 		t.Fatalf("cache outside Sparkwing home: %q", second)
 	}
 	if data, err := os.ReadFile(filepath.Join(second, "cached-result")); err != nil || string(data) != "result" {

@@ -35,19 +35,15 @@ type planPreviewNodeDoc struct {
 }
 
 type planPreviewWorkDoc struct {
-	Steps     []planPreviewItemDoc `json:"steps,omitempty"`
-	Spawns    []planPreviewItemDoc `json:"spawns,omitempty"`
-	SpawnEach []planPreviewItemDoc `json:"spawn_each,omitempty"`
+	Steps []planPreviewItemDoc `json:"steps,omitempty"`
 }
 
 type planPreviewItemDoc struct {
-	ID                string   `json:"id"`
-	Needs             []string `json:"needs,omitempty"`
-	Decision          string   `json:"decision"`
-	SkipReason        string   `json:"skip_reason,omitempty"`
-	SkipDetail        string   `json:"skip_detail,omitempty"`
-	Cardinality       string   `json:"cardinality,omitempty"`
-	CardinalitySource string   `json:"cardinality_source,omitempty"`
+	ID         string   `json:"id"`
+	Needs      []string `json:"needs,omitempty"`
+	Decision   string   `json:"decision"`
+	SkipReason string   `json:"skip_reason,omitempty"`
+	SkipDetail string   `json:"skip_detail,omitempty"`
 
 	Risks []string `json:"risks,omitempty"`
 }
@@ -230,12 +226,6 @@ func printPlanPreviewWork(w *planPreviewWorkDoc, indent string) {
 	for _, s := range w.Steps {
 		printPlanPreviewItem("Step", &s, indent)
 	}
-	for _, sp := range w.Spawns {
-		printPlanPreviewItem("JobSpawn", &sp, indent)
-	}
-	for _, sg := range w.SpawnEach {
-		printPlanPreviewItem("JobSpawnEach", &sg, indent)
-	}
 }
 
 func printPlanPreviewItem(kind string, it *planPreviewItemDoc, indent string) {
@@ -249,13 +239,6 @@ func printPlanPreviewItem(kind string, it *planPreviewItemDoc, indent string) {
 	fmt.Printf("%s%s %q [%s]\n", indent, kind, it.ID, decision)
 	if it.SkipDetail != "" {
 		fmt.Printf("%s  reason: %s\n", indent, it.SkipDetail)
-	}
-	if it.Cardinality != "" {
-		src := it.CardinalitySource
-		if src == "" {
-			src = "<unknown>"
-		}
-		fmt.Printf("%s  cardinality: %s (resolved at runtime from %s)\n", indent, it.Cardinality, src)
 	}
 	if len(it.Needs) > 0 {
 		fmt.Printf("%s  needs: %s\n", indent, strings.Join(it.Needs, ", "))

@@ -1,11 +1,12 @@
 package wingd
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -15,7 +16,7 @@ func writeAdmissionConfig(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	indented := "admission:\n  " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ") + "\n"
-	if err := os.WriteFile(path, []byte(indented), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(indented)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)

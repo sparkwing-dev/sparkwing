@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -117,7 +118,7 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	}
 
 	gitDir := filepath.Join(tempDir, "repo.git")
-	if out, ierr := exec.CommandContext(ctx, "git", "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
+	if out, ierr := snapshotGitCommand(ctx, "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
 		return fail(fmt.Errorf("initialize snapshot object store: %w: %s", ierr, strings.TrimSpace(string(out))))
 	}
 	commonDir, err := gitOutput(ctx, repoRoot, nil, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -342,7 +343,7 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 	if updates.Len() == 0 {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "update-index", "-z", "--index-info")
+	cmd := snapshotGitCommand(ctx, "-C", repoRoot, "update-index", "-z", "--index-info")
 	cmd.Env = appendGitEnv(env)
 	cmd.Stdin = &updates
 	if _, err := cmd.CombinedOutput(); err != nil {
@@ -360,7 +361,7 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string
 		"GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
 		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
 	}
-	cmd := exec.CommandContext(ctx, "git", "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
+	cmd := snapshotGitCommand(ctx, "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
 	cmd.Env = appendGitEnv(append(env, identity...))
 	cmd.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
 	out, err := cmd.CombinedOutput()
@@ -585,7 +586,7 @@ func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string
 	for _, pattern := range envredact.CredentialBlockPatterns() {
 		args = append(args, "-e", pattern)
 	}
-	cmd := exec.CommandContext(ctx, "git", append(args, tree)...)
+	cmd := snapshotGitCommand(ctx, append(args, tree)...)
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -608,7 +609,7 @@ func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string
 func snapshotBlobPrefix(ctx context.Context, gitDir, sha string, limit int64) ([]byte, error) {
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(readCtx, "git", "--git-dir", gitDir, "cat-file", "blob", sha)
+	cmd := snapshotGitCommand(readCtx, "--git-dir", gitDir, "cat-file", "blob", sha)
 	stdout, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
 		return nil, pipeErr
@@ -644,7 +645,7 @@ func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {
 	if out == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "check-attr", "-z", "--stdin", "filter", "working-tree-encoding")
+	cmd := snapshotGitCommand(ctx, "-C", repoRoot, "check-attr", "-z", "--stdin", "filter", "working-tree-encoding")
 	cmd.Stdin = strings.NewReader(out)
 	checked, err := cmd.Output()
 	if err != nil {
@@ -690,7 +691,7 @@ func snapshotGitError(err error) error {
 func gitOutput(ctx context.Context, repoRoot string, env []string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", repoRoot}, args...)
 	// #nosec G702 -- Callers fix Git subcommands; repository paths are -C operands and filenames follow --.
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd := snapshotGitCommand(ctx, fullArgs...)
 	cmd.Env = appendGitEnv(env)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -701,7 +702,7 @@ func gitOutput(ctx context.Context, repoRoot string, env []string, args ...strin
 
 func gitDirOutput(ctx context.Context, gitDir string, args ...string) (string, error) {
 	fullArgs := append([]string{"--git-dir", gitDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd := snapshotGitCommand(ctx, fullArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -739,4 +740,11 @@ func snapshotBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+func snapshotGitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		args = append([]string{"-c", "core.longpaths=true"}, args...)
+	}
+	return exec.CommandContext(ctx, "git", args...)
 }
