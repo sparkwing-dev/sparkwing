@@ -54,14 +54,13 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
 	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
 	{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority", Group: "System", Hot: true},
-	{Name: "sw-local-only", Desc: "Force local secrets, state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
+	{Name: "sw-local-only", Desc: "Keep every node on this machine's secrets, cache, and logs, ignoring SPARKWING_CACHE_URL", Group: "System"},
 	{Name: "sw-fleet", Desc: "Let explicitly enrolled helpers execute nodes under this foreground process's authority", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-allow-secret-file", Argument: "PATH", Desc: "Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable)", Group: "System"},
 	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
 	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
-	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop)", Group: "System", Hot: true},
 	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
 }
 

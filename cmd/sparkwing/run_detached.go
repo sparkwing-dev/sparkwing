@@ -621,9 +621,6 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 			"Run it in the foreground with `sparkwing run --sw-index`"},
 		{"--sw-dry-run", wf.dryRun, "a dry run finishes in seconds and reports to your terminal; run it in the foreground with `sparkwing run --sw-dry-run`"},
 
-		{"--profile", wf.profile != "", "the resident consumer executes against this home's local store, " +
-			"so a profile's backends would not receive the run; run profile-backed runs in the foreground"},
-
 		{"--sw-start-at", wf.startAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-stop-at", wf.stopAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-only", wf.only != "", "job filtering is not carried on the trigger yet; run it in the foreground"},
@@ -632,7 +629,6 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-workers", wf.workers > 0, "worker capping is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-allow", len(wf.allow) > 0, "risk authorization is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-local-only", wf.localOnly, "backend overrides are not carried on the trigger yet; run it in the foreground"},
-		{"--sw-secrets", wf.secrets != "", "secret-profile selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; " +
 			"set SPARKWING_NO_UPDATE=1 in this shell instead, which the submission environment snapshot carries, " +
 			"or run it in the foreground"},

@@ -212,26 +212,13 @@ func Main() {
 			}
 		}
 	}
-	prof, profChain, profErr := resolveActiveProfile(pipelineYAML, projectCfg)
-	if profErr != nil {
-		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
-		cleanupFleet()
-		os.Exit(1)
-	}
-	opts.Profile = prof
-	opts.ProfileChain = profChain
-	if opts.Fleet && !opts.LocalOnly && fleetProfileUsesRemoteAuthority(prof) {
-		fmt.Fprintln(os.Stderr, "sparkwing run --sw-fleet: the foreground coordinator requires local state, logs, cache, and secrets; use a local profile or --sw-local-only")
+	if pinErr := RefusePinnedLocalRun(pipelineYAML); pinErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing run:", pinErr)
 		cleanupFleet()
 		os.Exit(1)
 	}
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
-		cleanupFleet()
-		os.Exit(1)
-	}
-	if secretsErr := applySecretsProfileOverride(&opts); secretsErr != nil {
-		fmt.Fprintln(os.Stderr, "sparkwing run: --sw-secrets:", secretsErr)
 		cleanupFleet()
 		os.Exit(1)
 	}

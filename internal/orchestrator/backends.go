@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -192,109 +191,6 @@ func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Back
 	}
 }
 
-func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.ArtifactStore) Backends {
-	return Backends{
-		State:       s3StateAdapter{Backend: state},
-		Logs:        NewLogStoreBackend(log, nil),
-		Concurrency: NewS3Concurrency(art),
-		Artifact:    art,
-	}
-}
-
-type s3StateAdapter struct {
-	*s3state.Backend
-}
-
-func (s s3StateAdapter) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	return s.Backend.ResetNodeForAutoRetry(ctx, runID, nodeID)
-}
-
-func s3Unsupported(op string) error {
-	return fmt.Errorf("%w: %s has no object-store state backing", storage.ErrNotSupported, op)
-}
-
-// ErrTriggersUnsupported reports that this run's state backend enqueues a
-// trigger that nothing ever claims, so a pipeline spawned through it would
-// never start. It wraps [storage.ErrNotSupported].
-var ErrTriggersUnsupported = fmt.Errorf(
-	"%w: pipeline triggers need a trigger-claim path, which the object-store state backend does not have, "+
-		"so a spawned run would be enqueued and never start; use Mode 3 (Postgres) or Mode 4 (hosted controller)",
-	storage.ErrNotSupported)
-
-// safety: fails closed on the one backend proven to have no claim path rather
-// than on LocalCoordination, which a hosted controller also leaves false while
-// dispatching child triggers on its own side. The local mirror wraps the
-// object-store backend on the ordinary Mode 2 run, so the test unwraps first.
-func (b Backends) checkTriggerDispatch() error {
-	if _, objectStore := canonicalState(b.State).(s3StateAdapter); objectStore {
-		return ErrTriggersUnsupported
-	}
-	return nil
-}
-
-// safety: the refusal lives on the enqueue as well as on the awaiter's early
-// guard, because a node running in its own process reaches this backend through
-// the loopback shim and never passes that guard.
-func (s3StateAdapter) EnqueueTrigger(
-	context.Context, string, map[string]string, string, string, string, string, string, string, string,
-) (string, error) {
-	return "", ErrTriggersUnsupported
-}
-
-func (s3StateAdapter) EnqueueTriggerWithEnv(
-	context.Context, string, map[string]string, string, string, string, string, string, string, string, map[string]string,
-) (string, error) {
-	return "", ErrTriggersUnsupported
-}
-
-func (s3StateAdapter) ListNodes(context.Context, string) ([]*store.Node, error) {
-	return nil, s3Unsupported("ListNodes")
-}
-
-func (s3StateAdapter) ListNodeMetrics(context.Context, string, string) ([]store.MetricSample, error) {
-	return nil, s3Unsupported("ListNodeMetrics")
-}
-
-func (s3StateAdapter) AddNodeUsage(context.Context, string, string, store.NodeUsage) error {
-	return s3Unsupported("AddNodeUsage")
-}
-
-func (s3StateAdapter) ListPendingTriggersForParent(context.Context, string) ([]string, error) {
-	return nil, s3Unsupported("ListPendingTriggersForParent")
-}
-
-func (s3StateAdapter) ClaimSpecificTrigger(context.Context, string, time.Duration) (*store.Trigger, error) {
-	return nil, s3Unsupported("ClaimSpecificTrigger")
-}
-
-func (s3StateAdapter) FinishTrigger(context.Context, string) error {
-	return s3Unsupported("FinishTrigger")
-}
-
-func (s3StateAdapter) GetPipelineProfile(context.Context, string, string) (*store.PipelineProfile, error) {
-	return nil, s3Unsupported("GetPipelineProfile")
-}
-
-func (s3StateAdapter) SetPipelinePin(context.Context, string, string, float64, int64) error {
-	return s3Unsupported("SetPipelinePin")
-}
-
-func (s3StateAdapter) RecordProfileObservation(context.Context, string, string, store.ProfileObservation) error {
-	return s3Unsupported("RecordProfileObservation")
-}
-
-func (s3StateAdapter) RecordContention(context.Context, string) error {
-	return s3Unsupported("RecordContention")
-}
-
-func (s3StateAdapter) RecordWaitObservation(context.Context, string, time.Duration) error {
-	return s3Unsupported("RecordWaitObservation")
-}
-
-func (s3StateAdapter) ReconcileOrphanedLocalRuns(context.Context, time.Duration) (int, error) {
-	return 0, s3Unsupported("ReconcileOrphanedLocalRuns")
-}
-
 var _ StateBackend = (*client.Client)(nil)
 
 func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
@@ -332,14 +228,6 @@ func DiscoverLogsURL(ctx context.Context, controllerURL, token string) (string, 
 const logsDiscoveryTimeout = 3 * time.Second
 
 func defaultHTTPClient() *http.Client { return nil }
-
-// safety: a child run's rows belong in the canonical store, never in this run's mirror copy.
-func canonicalState(b StateBackend) StateBackend {
-	if m, ok := b.(*mirrorStateBackend); ok {
-		return canonicalState(m.canonical)
-	}
-	return b
-}
 
 func localRunLogDir(b LogBackend, runID string) string {
 	switch l := b.(type) {

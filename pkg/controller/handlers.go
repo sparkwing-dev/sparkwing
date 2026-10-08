@@ -1006,7 +1006,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 		if body.Git.Repo == "" {
 			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
-				writeError(w, http.StatusUnprocessableEntity, errors.New("cloud RunAndAwait cannot inherit a working-tree source bundle; run the child locally or rerun sparkwing run <pipeline> --profile <cloud-profile> from the checkout"))
+				writeError(w, http.StatusUnprocessableEntity, errors.New("cloud RunAndAwait cannot inherit a working-tree source bundle; run the child locally or submit a new run with sparkwing pipeline trigger --profile <cloud-profile> --working-tree <pipeline> from the checkout"))
 				return
 			}
 			body.Git.Repo = parent.DeclaredRepo

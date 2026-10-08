@@ -101,13 +101,15 @@ func runPipelineTrigger(args []string) error {
 		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")
 	}
 
+	if err := refuseOtherThanPinnedProfile(flags.pipeline, flags.profile); err != nil {
+		return err
+	}
 	prof, err := resolveProfileFlag(flags.profile)
 	if err != nil {
 		return err
 	}
 	if prof.ControllerURL() == "" {
-		return fmt.Errorf("pipeline trigger: profile %q has no controller; `pipeline trigger` requires a profile that defines controller:. "+
-			"Use sparkwing run --profile %s for local execution against this profile's storage instead", prof.Name, prof.Name)
+		return fmt.Errorf("pipeline trigger: profile %q has no controller; `pipeline trigger` requires a profile that defines a controller", prof.Name)
 	}
 
 	source := triggerSource("pipeline-trigger")
@@ -182,4 +184,17 @@ func statusOrUnknown(status string) string {
 		return "unknown"
 	}
 	return status
+}
+
+// safety: the pin guards against sending a pipeline to the wrong controller by
+// mistake; the controller still decides who may run it.
+func refuseOtherThanPinnedProfile(pipelineName, profileName string) error {
+	pin, err := pinnedProfileHere(pipelineName)
+	if err != nil {
+		return fmt.Errorf("pipeline trigger: %w", err)
+	}
+	if pin == "" || pin == profileName {
+		return nil
+	}
+	return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", pipelineName, pin, pin)
 }

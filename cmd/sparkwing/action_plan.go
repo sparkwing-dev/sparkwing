@@ -168,6 +168,7 @@ func runPipelinePlan(args []string) error {
 		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
+	printPin(parsed.pipeline)
 	printPlanPreview(&doc)
 	return nil
 }

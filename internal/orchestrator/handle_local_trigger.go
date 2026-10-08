@@ -8,14 +8,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName string) error {
+func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 	logger := slog.Default()
 
 	paths, err := DefaultPaths()
@@ -26,7 +25,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		return fmt.Errorf("ensure sparkwing root: %w", err)
 	}
 
-	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths, profileName)
+	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths)
 	if err != nil {
 		return err
 	}
@@ -82,6 +81,14 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	}
 
 	applyCheckoutProjectConfig(&opts, logger)
+	if pinErr := RefusePinnedLocalRun(opts.PipelineYAML); pinErr != nil {
+		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, pinErr); ferr != nil {
+			finishTrigger = false
+			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)
+		}
+		logger.Error("run refused", "run_id", trigger.ID, "err", pinErr)
+		return nil
+	}
 	execution, err := setupLocalExecution(ctx, paths, &opts, backends, nodeWorkspace(), logger)
 	if err != nil {
 		return err
@@ -113,25 +120,20 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 
 // safety: a child run picks its backend the way its parent did, so a hosted
 // run dispatches children that open nothing either and an unhosted one hands
-// its child the very store its trigger row lives in. A named profile is
-// excluded because the daemon stands in front of this machine's store alone.
-func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, hostedSelection, func(), error) {
-	var sel hostedSelection
-	if profileName == "" {
-		opts := Options{
-			DefaultStateDB: paths.StateDB(),
-			Admission:      pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal),
-		}
-		hosted, selection, release, err := hostedBackendsForRun(ctx, paths, &opts)
-		if err != nil {
-			return Backends{}, sel, func() {}, err
-		}
-		if hosted.APISocket != "" {
-			return hosted, selection, release, nil
-		}
-		sel = selection
+// its child the very store its trigger row lives in.
+func localTriggerBackends(ctx context.Context, paths Paths) (Backends, hostedSelection, func(), error) {
+	opts := Options{
+		DefaultStateDB: paths.StateDB(),
+		Admission:      pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal),
 	}
-	st, err := openLocalTriggerStore(ctx, paths, profileName)
+	hosted, sel, release, err := hostedBackendsForRun(ctx, paths, &opts)
+	if err != nil {
+		return Backends{}, sel, func() {}, err
+	}
+	if hosted.APISocket != "" {
+		return hosted, sel, release, nil
+	}
+	st, err := openLocalTriggerStore(paths)
 	if err != nil {
 		return Backends{}, sel, func() {}, err
 	}
@@ -162,48 +164,14 @@ func childStandalone(backends Backends, sel hostedSelection) *standaloneRun {
 	return &standaloneRun{reason: reason, stateDB: path, skew: sel.storeSkew, announced: true}
 }
 
-func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
-	if profileName == "" {
-		path := parentStateDB()
-		if path == "" {
-			path = paths.StateDB()
-		}
-		st, err := storeOpen(path)
-		if err != nil {
-			return nil, fmt.Errorf("open local store %s: %w", path, err)
-		}
-		return st, nil
+func openLocalTriggerStore(paths Paths) (*store.Store, error) {
+	path := parentStateDB()
+	if path == "" {
+		path = paths.StateDB()
 	}
-	store, err := openProfileTriggerStore(ctx, paths, profileName)
+	st, err := storeOpen(path)
 	if err != nil {
-		return nil, fmt.Errorf("open profile %q state: %w", profileName, err)
-	}
-	return store, nil
-}
-
-func openProfileTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
-	store, err := loadProfileStateBackend(ctx, paths, profileName)
-	if err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
-func loadProfileStateBackend(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
-	p, err := profile.LoadAndResolve(profileName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve profile %q: %w", profileName, err)
-	}
-	opts := Options{
-		Profile:        p,
-		DefaultStateDB: paths.StateDB(),
-	}
-	if err := ApplyProfileBackends(ctx, &opts, p); err != nil {
-		return nil, err
-	}
-	st, ok := opts.State.(*store.Store)
-	if !ok {
-		return nil, fmt.Errorf("profile %q state is %T, not a local *store.Store; handle-trigger --local only supports sqlite or postgres profiles", profileName, opts.State)
+		return nil, fmt.Errorf("open local store %s: %w", path, err)
 	}
 	return st, nil
 }

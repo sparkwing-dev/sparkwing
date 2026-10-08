@@ -107,7 +107,7 @@ func TestHooksInstall_LeavesTheHooksPathAloneWhenNoGatePasses(t *testing.T) {
 func TestHooksInstall_KeepsTheHooksOfARepoItCannotArm(t *testing.T) {
 	f := newChainFixture(t)
 	prior := filepath.Join(f.repo, ".git", "hooks", "pre-commit")
-	writeExec(t, prior, renderHookScript("pre-commit", []string{"gate"}, false, ""))
+	writeExec(t, prior, renderHookScript("pre-commit", []string{"gate"}, false))
 
 	var proved []string
 	captureStdout(t, func() {
@@ -125,7 +125,7 @@ func TestHooksInstall_ArmsNothingWhenTheGateIsRedAndAPostCommitHookIsDeclared(t 
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), gateAndNotifyProject)
 	prior := filepath.Join(f.repo, ".git", "hooks", "pre-commit")
-	writeExec(t, prior, renderHookScript("pre-commit", []string{"gate"}, false, ""))
+	writeExec(t, prior, renderHookScript("pre-commit", []string{"gate"}, false))
 
 	var proved []string
 	var gated bool
@@ -317,7 +317,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 	f := newChainFixture(t)
 	hooks := filepath.Join(f.repo, ".git", "hooks")
 	priorPath := filepath.Join(hooks, "pre-commit")
-	priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false, "")
+	priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false)
 	writeExec(t, priorPath, priorBody)
 	f.git(t, "config", "core.hooksPath", hooks)
 	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
@@ -420,7 +420,7 @@ func TestHooksInstall_GlobalHookChangesDuringProofPublishNothing(t *testing.T) {
 			f := newChainFixture(t)
 			hooks := filepath.Join(f.repo, ".git", "hooks")
 			priorPath := filepath.Join(hooks, "pre-commit")
-			priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false, "")
+			priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false)
 			writeExec(t, priorPath, priorBody)
 			f.git(t, "config", "core.hooksPath", hooks)
 			priorConfig := f.git(t, "config", "--local", "core.hooksPath")
@@ -473,7 +473,7 @@ func TestHooksInstall_GlobalHooksPathChangesDuringProofPublishNothing(t *testing
 	f := newChainFixture(t)
 	hooks := filepath.Join(f.repo, ".git", "hooks")
 	priorPath := filepath.Join(hooks, "pre-commit")
-	priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false, "")
+	priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false)
 	writeExec(t, priorPath, priorBody)
 	f.git(t, "config", "core.hooksPath", hooks)
 	priorConfig := f.git(t, "config", "--local", "core.hooksPath")

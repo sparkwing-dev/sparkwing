@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,23 +57,6 @@ func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--sw-profile") {
 		t.Errorf("message = %q, want --sw-profile migration pointer", err.Error())
-	}
-}
-
-func TestDispatchRun_ProfileNotFoundBeforeCompile(t *testing.T) {
-	writeProfilesFixture(t, `
-profiles:
-  prod: { controller: { url: https://api.example.dev } }
-`)
-	err := dispatchRun([]string{"some-pipeline", "--profile", "ghost"})
-	if err == nil {
-		t.Fatal("expected not-found error")
-	}
-	if !strings.Contains(err.Error(), `profile "ghost" not found`) {
-		t.Errorf("message = %q, want not-found text", err.Error())
-	}
-	if errors.Is(err, errHelpRequested) {
-		t.Error("unexpected help-requested error")
 	}
 }
 

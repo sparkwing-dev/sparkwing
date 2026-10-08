@@ -371,7 +371,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
-		"--target", "--profile",
+		"--target",
 		"--sw-verbose",
 		"--sw-allow",
 	}
@@ -394,7 +394,7 @@ func TestCompletionFlagsListsHotOnly(t *testing.T) {
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
-		"--target", "--profile",
+		"--target",
 		"--help",
 	}
 	advancedFlags := []string{

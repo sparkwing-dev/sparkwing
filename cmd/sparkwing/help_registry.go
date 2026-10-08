@@ -1183,8 +1183,10 @@ each path and whether it is tracked. Untrack it with
 'git rm --cached', ignore it, or send it anyway by naming it with
 --allow-secret-file PATH once per file; there is no blanket bypass.
 
-Requires a profile with controller: set. For local execution
-against a profile's storage, use 'sparkwing run --profile X'.`,
+Requires --profile naming a profile with controller: set; there is no
+default. A pipeline whose sparkwing.yaml entry names profile: P is pinned
+to P: trigger refuses any other --profile, and 'sparkwing run' refuses it
+locally.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered on the controller", Required: true},
 	},
@@ -1423,11 +1425,13 @@ IDs, and similar errors), which makes it a CI gate.`,
 }
 
 var cmdRun = Command{
-	Path:              "sparkwing run",
-	ReachesController: true,
-	Synopsis:          "Invoke a pipeline",
+	Path:     "sparkwing run",
+	Synopsis: "Invoke a pipeline",
 	Description: `Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline.
+with the named pipeline. A run always executes on this machine against its
+local store and secrets; it accepts no --profile. A pipeline whose
+sparkwing.yaml entry names a profile: is pinned to that controller, and run
+refuses it.
 
 Pipeline-module builds honor the highest go directive in go.mod and an active
 resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
@@ -1439,7 +1443,7 @@ execution setup. Other arguments pass to the pipeline. Put -- before
 pipeline arguments that resemble runner options; every argument after the
 separator passes through unchanged.
 
-For remote execution on a profile's controller, use
+For execution on a profile's controller, use
 'sparkwing pipeline trigger <name> --profile PROF'.
 
 Output: pretty on a terminal, compact NDJSON otherwise. JSON runs
@@ -1502,7 +1506,7 @@ launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---profile, --sw-fleet, and the other run-shaping --sw- flags)
+--sw-fleet, and the other run-shaping --sw- flags)
 is refused with the reason instead of ignored; run those in
 the foreground.
 
@@ -2575,9 +2579,8 @@ them with a warning.`,
 }
 
 var cmdHooksInstall = Command{
-	Path:              "sparkwing pipeline hooks install",
-	ReachesController: true,
-	Synopsis:          "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
+	Path:     "sparkwing pipeline hooks install",
+	Synopsis: "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
 	Description: `Installs managed hooks for declared pre_commit, pre_push, and post_commit
 triggers. Existing unmanaged hooks are preserved and reported.
 
@@ -2587,20 +2590,17 @@ an installation failure restores prior managed hooks, forwarders, modes,
 and configuration. A rejected installation exits nonzero and reports its
 reason on stderr. --no-prove skips gate execution.
 
-Without --profile, hooks use --sw-local-only. --profile NAME selects shared
-storage. --fleet processes registered repositories and distinguishes installed
-gates, gates that could not execute, and repositories declaring no blocking
-gate.`,
+Every hook runs its pipelines with --sw-local-only on this machine. --fleet
+processes registered repositories and distinguishes installed gates, gates
+that could not execute, and repositories declaring no blocking gate.`,
 	Flags: []FlagSpec{
 		{Name: "fleet", Desc: "Install into every registered repo instead of one", Group: "Input"},
 		{Name: "no-prove", Desc: "Claim core.hooksPath without running the gate first", Group: "Behavior"},
-		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: local-only)", Group: "Storage"},
 	},
 	Examples: []Example{
 		{"Install in the current repo", "sparkwing pipeline hooks install"},
 		{"Install in a different repo", "sparkwing -C /path/to/repo pipeline hooks install"},
 		{"Arm every registered repo", "sparkwing pipeline hooks install --fleet"},
-		{"Pin the gate's runs to one store", "sparkwing pipeline hooks install --profile bucket"},
 	},
 }
 

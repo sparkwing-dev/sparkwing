@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
@@ -120,6 +121,10 @@ func dispatchRun(args []string) error {
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
 	}
+	if flags.profileGiven {
+		return fmt.Errorf("run: --profile is not accepted; sparkwing run always executes locally against this machine's store. "+
+			"To run on a controller: sparkwing pipeline trigger --profile P %s", pipelineName)
+	}
 	if separator := slices.Index(passthrough, "--"); separator >= 0 {
 		passthrough = slices.Delete(passthrough, separator, separator+1)
 	}
@@ -137,12 +142,6 @@ func dispatchRun(args []string) error {
 	if err := refuseDetachedOnlyFlags(flags); err != nil {
 		return err
 	}
-	if flags.profile != "" {
-		if _, profileErr := resolveProfileFlag(flags.profile); profileErr != nil {
-			return profileErr
-		}
-	}
-
 	projectStart := ""
 	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
 		projectStart = cwd
@@ -154,6 +153,15 @@ func dispatchRun(args []string) error {
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
+	}
+	if runInvokesAdmission(passthrough) {
+		entry, err := pinnedPipeline(dir, pipelineName)
+		if err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
+		if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
@@ -247,11 +255,9 @@ func dispatchRun(args []string) error {
 	}
 	var fleetSnapshot *worktreeSnapshot
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:       flags.noUpdate || flags.fleet,
-		ExecutionDir:   executionDir,
-		AfterChild:     afterChild,
-		Profile:        flags.profile,
-		SecretsProfile: flags.secrets,
+		NoUpdate:     flags.noUpdate || flags.fleet,
+		ExecutionDir: executionDir,
+		AfterChild:   afterChild,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
@@ -349,19 +355,38 @@ func dispatchRun(args []string) error {
 	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
 }
 
-// safety: the pipeline process selects its profile from these variables, so a
-// value inherited from the caller's environment would target a remote the
-// invocation never named.
-func handoffProfiles(env []string, profileName, secretsProfile string) []string {
-	env = removeEnv(env, orchestrator.ProfileEnv)
-	env = removeEnv(env, orchestrator.SecretsProfileEnv)
-	if profileName != "" {
-		env = append(env, orchestrator.ProfileEnv+"="+profileName)
+// safety: a pipeline binary built against an older SDK selects a remote
+// profile or secrets source from these variables, so an inherited value would
+// send a local run to a remote.
+func stripProfileHandoff(env []string) []string {
+	return removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
+}
+
+func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	if err != nil || cfg == nil {
+		return nil, err
 	}
-	if secretsProfile != "" {
-		env = append(env, orchestrator.SecretsProfileEnv+"="+secretsProfile)
+	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
+}
+
+func pinnedProfileHere(pipelineName string) (string, error) {
+	if dir, dirErr := findSparkwingDir(); dirErr == nil {
+		entry, err := pinnedPipeline(dir, pipelineName)
+		if err != nil {
+			return "", err
+		}
+		if entry != nil {
+			return entry.Profile, nil
+		}
 	}
-	return env
+	return "", nil
+}
+
+func printPin(pipelineName string) {
+	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
+		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger --profile %s %s`\n", pin, pin, pipelineName)
+	}
 }
 
 func removeEnv(env []string, key string) []string {

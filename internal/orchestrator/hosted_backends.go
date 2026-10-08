@@ -15,7 +15,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -297,12 +296,7 @@ func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Back
 }
 
 // safety: the daemon stands in front of this machine's own runs store and
-// nothing else, so a controller or object-store profile keeps its own
-// backend even when a daemon is serving.
+// nothing else, so a run pointed at another state database keeps it.
 func runsOnMachineStore(opts *Options, paths Paths) bool {
-	if opts.LocalOnly {
-		return opts.DefaultStateDB == paths.StateDB()
-	}
-	spec, _, _ := effectiveSurfaceSpecs(opts.Profile, opts, opts.DefaultStateDB)
-	return spec != nil && spec.Type == backends.TypeSQLite && spec.Path == paths.StateDB()
+	return opts.DefaultStateDB == paths.StateDB()
 }

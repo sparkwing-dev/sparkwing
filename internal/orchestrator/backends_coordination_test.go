@@ -10,8 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -134,111 +132,6 @@ func TestLocalStateSetPipelinePinClearsWithoutCreatingARow(t *testing.T) {
 	}
 	if prof != nil {
 		t.Errorf("profile = %+v, want nil: clearing a pin must not create a row", prof)
-	}
-}
-
-func TestS3StateAdapterReportsCoordinationUnsupported(t *testing.T) {
-	backend := s3state.New(nil)
-	t.Cleanup(func() { _ = backend.Close() })
-	adapter := s3StateAdapter{Backend: backend}
-	ctx := context.Background()
-
-	checks := map[string]func() error{
-		"ListNodes":                    func() error { _, err := adapter.ListNodes(ctx, "r1"); return err },
-		"ListNodeMetrics":              func() error { _, err := adapter.ListNodeMetrics(ctx, "r1", "n"); return err },
-		"AddNodeUsage":                 func() error { return adapter.AddNodeUsage(ctx, "r1", "n", store.NodeUsage{}) },
-		"ListPendingTriggersForParent": func() error { _, err := adapter.ListPendingTriggersForParent(ctx, "r1"); return err },
-		"ClaimSpecificTrigger":         func() error { _, err := adapter.ClaimSpecificTrigger(ctx, "t1", time.Minute); return err },
-		"FinishTrigger":                func() error { return adapter.FinishTrigger(ctx, "t1") },
-		"GetPipelineProfile":           func() error { _, err := adapter.GetPipelineProfile(ctx, "demo", ""); return err },
-		"SetPipelinePin":               func() error { return adapter.SetPipelinePin(ctx, "demo", "", 1, 1) },
-		"RecordProfileObservation": func() error {
-			return adapter.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{})
-		},
-		"RecordContention":           func() error { return adapter.RecordContention(ctx, "demo") },
-		"RecordWaitObservation":      func() error { return adapter.RecordWaitObservation(ctx, "demo", time.Second) },
-		"ReconcileOrphanedLocalRuns": func() error { _, err := adapter.ReconcileOrphanedLocalRuns(ctx, time.Hour); return err },
-	}
-	for name, call := range checks {
-		if err := call(); !errors.Is(err, storage.ErrNotSupported) {
-			t.Errorf("%s err = %v, want ErrNotSupported", name, err)
-		}
-	}
-}
-
-func TestMirrorStateBackendKeepsCapacityWritesOnTheCanonical(t *testing.T) {
-	canonical := coordinationStore(t)
-	mirror := coordinationStore(t)
-	seedCoordinationRun(t, canonical)
-	seedCoordinationRun(t, mirror)
-	ctx := context.Background()
-
-	m := newMirrorStateBackend(localState{st: canonical}, mirror, quietTestLogger())
-	if err := m.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1 << 20, CPUMeasured: true,
-	}); err != nil {
-		t.Fatalf("RecordProfileObservation: %v", err)
-	}
-	if prof, err := canonical.GetPipelineProfile(ctx, "demo", ""); err != nil || prof == nil {
-		t.Fatalf("canonical profile = %v, %v; want a row", prof, err)
-	}
-	prof, err := mirror.GetPipelineProfile(ctx, "demo", "")
-	if err != nil {
-		t.Fatalf("mirror profile: %v", err)
-	}
-	if prof != nil {
-		t.Errorf("mirror profile = %+v, want nil: a per-run mirror must not collect machine capacity", prof)
-	}
-
-	if err := m.AddNodeUsage(ctx, "r1", "build", store.NodeUsage{CPUTime: time.Second, MaxRSSBytes: 2048}); err != nil {
-		t.Fatalf("AddNodeUsage: %v", err)
-	}
-	canonicalNode, err := canonical.GetNode(ctx, "r1", "build")
-	if err != nil {
-		t.Fatalf("canonical get node: %v", err)
-	}
-	if canonicalNode.MaxRSSBytes != 2048 {
-		t.Errorf("canonical node max rss = %d, want 2048", canonicalNode.MaxRSSBytes)
-	}
-	mirrorNode, err := mirror.GetNode(ctx, "r1", "build")
-	if err != nil {
-		t.Fatalf("mirror get node: %v", err)
-	}
-	if mirrorNode.MaxRSSBytes != 0 {
-		t.Errorf("mirror node max rss = %d, want 0: usage is machine capacity accounting", mirrorNode.MaxRSSBytes)
-	}
-}
-
-func TestCanonicalStateUnwrapsTheMirrorSoAChildStaysOutOfIt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	canonical := coordinationStore(t)
-	mirror := coordinationStore(t)
-	ctx := context.Background()
-
-	m := newMirrorStateBackend(localState{st: canonical}, mirror, quietTestLogger())
-	child := store.Run{ID: "child-1", Pipeline: "child", Status: "failed", StartedAt: time.Now()}
-
-	if err := m.CreateRun(ctx, child); err != nil {
-		t.Fatalf("CreateRun through the mirror: %v", err)
-	}
-	if _, err := mirror.GetRun(ctx, "child-1"); err != nil {
-		t.Fatalf("the mirror tees run rows, so this one should be there: %v", err)
-	}
-
-	other := coordinationStore(t)
-	m2 := newMirrorStateBackend(localState{st: canonical}, other, quietTestLogger())
-	if err := canonicalState(m2).CreateRun(ctx, store.Run{
-		ID: "child-2", Pipeline: "child", Status: "failed", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun through the canonical backend: %v", err)
-	}
-	if _, err := canonical.GetRun(ctx, "child-2"); err != nil {
-		t.Fatalf("canonical missing the child run: %v", err)
-	}
-	if _, err := other.GetRun(ctx, "child-2"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("mirror GetRun err = %v, want ErrNotFound: a child run belongs to no run's mirror", err)
 	}
 }
 

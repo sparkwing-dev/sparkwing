@@ -200,9 +200,6 @@ func TestPipelineTrigger_NoController(t *testing.T) {
 	if !strings.Contains(msg, `profile "laptop" has no controller`) {
 		t.Errorf("message should name the controller-less profile: %q", msg)
 	}
-	if !strings.Contains(msg, "sparkwing run --profile laptop") {
-		t.Errorf("message should point at the local-run alternative: %q", msg)
-	}
 	if code := exitCodeFor(err); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}

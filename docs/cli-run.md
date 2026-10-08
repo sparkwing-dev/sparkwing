@@ -9,7 +9,10 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 Invoke a pipeline
 
 Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline.
+with the named pipeline. A run always executes on this machine against its
+local store and secrets; it accepts no --profile. A pipeline whose
+sparkwing.yaml entry names a profile: is pinned to that controller, and run
+refuses it.
 
 Pipeline-module builds honor the highest go directive in go.mod and an active
 resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
@@ -21,7 +24,7 @@ execution setup. Other arguments pass to the pipeline. Put -- before
 pipeline arguments that resemble runner options; every argument after the
 separator passes through unchanged.
 
-For remote execution on a profile's controller, use
+For execution on a profile's controller, use
 'sparkwing pipeline trigger <name> --profile PROF'.
 
 Output: pretty on a terminal, compact NDJSON otherwise. JSON runs
@@ -84,7 +87,7 @@ launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---profile, --sw-fleet, and the other run-shaping --sw- flags)
+--sw-fleet, and the other run-shaping --sw- flags)
 is refused with the reason instead of ignored; run those in
 the foreground.
 
@@ -120,14 +123,13 @@ is running and exits after five idle minutes; see
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
 | `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
-| `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
+| `--sw-local-only` | Keep every node on this machine's secrets, cache, and logs, ignoring SPARKWING_CACHE_URL |
 | `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 
 ### Examples

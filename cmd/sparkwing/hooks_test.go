@@ -93,7 +93,7 @@ func rejectedInstallOutput(t *testing.T, git githooks.Git, repo string) string {
 
 func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 	for _, hook := range []string{"pre-commit", "pre-push"} {
-		script := renderHookScript(hook, []string{"lint", "test"}, false, "")
+		script := renderHookScript(hook, []string{"lint", "test"}, false)
 		if !strings.Contains(script, "set -e") {
 			t.Errorf("%s hook should set -e so git aborts on failure:\n%s", hook, script)
 		}
@@ -108,7 +108,7 @@ func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 
 func TestRenderHookScript_QuietByDefault(t *testing.T) {
 	for _, hook := range []string{"pre-commit", "pre-push", "post-commit"} {
-		script := renderHookScript(hook, []string{"lint"}, false, "")
+		script := renderHookScript(hook, []string{"lint"}, false)
 		if !strings.Contains(script, `export SPARKWING_LOG_FORMAT="${SPARKWING_LOG_FORMAT:-quiet}"`) {
 			t.Errorf("%s hook should default the log format to quiet while honoring an override:\n%s", hook, script)
 		}
@@ -116,7 +116,7 @@ func TestRenderHookScript_QuietByDefault(t *testing.T) {
 }
 
 func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
-	script := renderHookScript("post-commit", []string{"self-install", "notify"}, false, "")
+	script := renderHookScript("post-commit", []string{"self-install", "notify"}, false)
 	if strings.Contains(script, "set -e") {
 		t.Errorf("post-commit hook must not set -e (the commit already landed):\n%s", script)
 	}
@@ -131,7 +131,7 @@ func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
 }
 
 func TestRenderHookScript_ChainRunsThePipelineBeforeTheGlobalHook(t *testing.T) {
-	script := renderHookScript("pre-push", []string{"gate"}, true, "")
+	script := renderHookScript("pre-push", []string{"gate"}, true)
 	run := strings.Index(script, "sparkwing run 'gate'")
 	chain := strings.Index(script, `exec "$hook"`)
 	if run < 0 || chain < 0 {
@@ -152,7 +152,7 @@ func TestRenderHookScript_ChainRunsThePipelineBeforeTheGlobalHook(t *testing.T) 
 }
 
 func TestRenderHookScript_ForwarderOnlyChains(t *testing.T) {
-	script := renderHookScript("prepare-commit-msg", nil, true, "")
+	script := renderHookScript("prepare-commit-msg", nil, true)
 	if strings.Contains(script, "sparkwing run") {
 		t.Errorf("a forwarder runs no pipeline:\n%s", script)
 	}
@@ -166,7 +166,7 @@ func TestRenderHookScript_ForwarderOnlyChains(t *testing.T) {
 
 func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
 	for _, hook := range []string{"pre-commit", "pre-push"} {
-		script := renderHookScript(hook, []string{"gate"}, false, "")
+		script := renderHookScript(hook, []string{"gate"}, false)
 		if !githooks.CarriesSelfTest(script) {
 			t.Errorf("%s hook cannot be asked to refuse:\n%s", hook, script)
 		}
@@ -180,8 +180,8 @@ func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
 
 func TestRenderHookScript_NothingButABlockingGateCarriesTheGuard(t *testing.T) {
 	for name, script := range map[string]string{
-		"post-commit": renderHookScript("post-commit", []string{"notify"}, false, ""),
-		"forwarder":   renderHookScript("prepare-commit-msg", nil, true, ""),
+		"post-commit": renderHookScript("post-commit", []string{"notify"}, false),
+		"forwarder":   renderHookScript("prepare-commit-msg", nil, true),
 	} {
 		if githooks.CarriesSelfTest(script) {
 			t.Errorf("%s carries a guard it has no gate to prove:\n%s", name, script)
@@ -457,7 +457,7 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
       pre_push: {}
 `)
 	writeExec(t, filepath.Join(repo, ".git", "hooks", "pre-commit"),
-		renderHookScript("pre-commit", []string{"lint"}, false, ""))
+		renderHookScript("pre-commit", []string{"lint"}, false))
 
 	out := captureStdout(t, func() {
 		if err := statusHooks((&fakeGit{}).run, repo, "pretty"); err != nil {
@@ -607,7 +607,7 @@ func TestHooksGuidance_NamesCommandsTheCLIDispatches(t *testing.T) {
 		"remedy for a machine-wide override": shadow.Remedy(),
 		"remedy for a repository override":   repoScoped.Remedy(),
 		"install refusing the claim":         rejectedInstallOutput(t, (&fakeGit{global: global}).run, repo),
-		"rendered hook script":               renderHookScript("pre-commit", []string{"lint"}, true, ""),
+		"rendered hook script":               renderHookScript("pre-commit", []string{"lint"}, true),
 		"status with nothing installed": captureStdout(t, func() {
 			if err := statusHooks((&fakeGit{}).run, empty, "pretty"); err != nil {
 				t.Fatalf("status: %v", err)
@@ -694,7 +694,7 @@ func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T
 		t.Fatal(err)
 	}
 	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
-	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}, false, ""))
+	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}, false))
 	captureStdout(t, func() {
 		if err := runIn(t, filepath.Join(repo, ".sparkwing"), runHooksUninstall); err != nil {
 			t.Fatalf("hooks uninstall with no sparkwing.yaml or go.mod: %v", err)

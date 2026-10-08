@@ -2,8 +2,6 @@ package orchestrator_test
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"strings"
 	"testing"
 
@@ -27,7 +25,7 @@ func init() {
 	register("ci-embedded-hello", func() sparkwing.Pipeline[sparkwing.NoInputs] { return ciEmbeddedHelloPipe{} })
 }
 
-func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
+func TestCIEmbedded_LogStore(t *testing.T) {
 	logRoot := t.TempDir()
 	artRoot := t.TempDir()
 	logStore, err := fs.NewLogStore(logRoot)
@@ -58,34 +56,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "hello-from-ci-embedded") {
 		t.Errorf("log read = %q, want hello-from-ci-embedded", got)
-	}
-
-	rc, err := artStore.Get(context.Background(), "runs/"+res.RunID+"/state.ndjson")
-	if err != nil {
-		t.Fatalf("ArtifactStore.Get state.ndjson: %v", err)
-	}
-	defer rc.Close()
-	dump, _ := io.ReadAll(rc)
-	if len(dump) == 0 {
-		t.Fatal("state.ndjson is empty")
-	}
-	lines := strings.Split(strings.TrimSpace(string(dump)), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("state.ndjson should have run + node lines, got %d lines: %q", len(lines), dump)
-	}
-	var first map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatalf("decode line 0: %v", err)
-	}
-	if first["kind"] != "run" {
-		t.Errorf("line 0 kind = %v, want run", first["kind"])
-	}
-	var second map[string]any
-	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
-		t.Fatalf("decode line 1: %v", err)
-	}
-	if second["kind"] != "node" {
-		t.Errorf("line 1 kind = %v, want node", second["kind"])
 	}
 }
 

@@ -21,65 +21,6 @@ func OpenReadBackendForProfile(ctx context.Context, paths Paths, p *profile.Prof
 	return backend.FromSpecs(ctx, state, logs, cache, paths, profileControllerLookup(p))
 }
 
-func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile) error {
-	return applyProfileBackends(ctx, opts, p, false)
-}
-
-// safety: keepState is set by a run whose state already reaches this
-// machine's store through the admission daemon. Resolving the state surface
-// again would open the file the daemon owns, which is the whole point of
-// that run not owning it.
-func applyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile, keepState bool) error {
-	if opts.LocalOnly {
-		opts.LogStore = nil
-		opts.ArtifactStore = nil
-		if keepState {
-			return nil
-		}
-		opts.State = nil
-		if opts.DefaultStateDB == "" {
-			return fmt.Errorf("--sw-local-only: no default state database path resolved")
-		}
-		spec := backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
-		st, err := openStateStoreFromSpec(ctx, spec, nil)
-		if err != nil {
-			return fmt.Errorf("--sw-local-only: open sqlite state: %w", err)
-		}
-		opts.State = st
-		return nil
-	}
-
-	state, logs, cache := effectiveSurfaceSpecs(p, opts, opts.DefaultStateDB)
-
-	lookup := profileControllerLookup(p)
-	if opts.ProfileLookup != nil {
-		lookup = opts.ProfileLookup
-	}
-
-	if opts.ArtifactStore == nil && cache != nil {
-		store, err := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup)
-		if err != nil {
-			return fmt.Errorf("cache backend: %w", err)
-		}
-		opts.ArtifactStore = store
-	}
-	if opts.LogStore == nil && logs != nil {
-		store, err := storeurl.OpenLogStoreFromSpec(ctx, *logs, lookup)
-		if err != nil {
-			return fmt.Errorf("logs backend: %w", err)
-		}
-		opts.LogStore = store
-	}
-	if opts.State == nil && state != nil && !keepState {
-		st, err := openStateStoreFromSpec(ctx, *state, lookup)
-		if err != nil {
-			return fmt.Errorf("state backend: %w", err)
-		}
-		opts.State = st
-	}
-	return nil
-}
-
 // hack: indirections so a test can count every store a run opens, whichever
 // path opened it.
 var (
@@ -87,49 +28,36 @@ var (
 	storeOpen              = store.Open
 )
 
-func applyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths, keepState bool) error {
-	hadState := opts.State != nil
-	if err := applyProfileBackends(ctx, opts, p, keepState); err != nil {
-		return err
+// safety: keepState is set by a run whose state already reaches this
+// machine's store through the admission daemon or the standalone fallback.
+// Opening the state database again would take the file that run does not own.
+func applyLocalBackends(ctx context.Context, opts *Options, paths Paths, keepState bool) error {
+	if opts.LocalOnly {
+		opts.LogStore = nil
+		opts.ArtifactStore = nil
+		if !keepState {
+			opts.State = nil
+		}
 	}
-	localCache := opts.LocalOnly
-	if !localCache && opts.ArtifactStore == nil {
-		localCache = isLocalState(p.Surfaces().State)
-	}
-	if opts.ArtifactStore == nil && localCache {
+	if opts.ArtifactStore == nil {
 		art, err := localArtifactStore(paths)
 		if err != nil {
 			return fmt.Errorf("local artifact cache: %w", err)
 		}
 		opts.ArtifactStore = art
 	}
-	if opts.LocalOnly || hadState || opts.State == nil {
+	if keepState || opts.State != nil {
 		return nil
 	}
-	if p == nil || !p.EffectiveMirrorLocal() {
-		return nil
+	if opts.DefaultStateDB == "" {
+		return fmt.Errorf("state backend: no default state database path resolved")
 	}
-	state, _, _ := profileSurfaceSpecs(p, opts.DefaultStateDB)
-	if isLocalState(state) {
-		return nil
-	}
-	local, err := storeOpen(paths.StateDB())
+	st, err := openStateStoreFromSpec(ctx, backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}, nil)
 	if err != nil {
-		return fmt.Errorf("mirror: open local state %s: %w", paths.StateDB(), err)
+		return fmt.Errorf("open sqlite state: %w", err)
 	}
-	opts.MirrorLocal = local
+	opts.State = st
 	return nil
-}
-
-func isLocalState(spec *backends.Spec) bool {
-	return spec == nil || spec.Type == backends.TypeSQLite
-}
-
-func effectiveSurfaceSpecs(p *profile.Profile, _ *Options, stateDBPath string) (state, logs, cache *backends.Spec) {
-	if p != nil {
-		return profileSurfaceSpecs(p, stateDBPath)
-	}
-	return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
 }
 
 func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, cache *backends.Spec) {

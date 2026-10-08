@@ -84,3 +84,16 @@ func (*noopConcurrency) CancelWaiter(_ context.Context, _, _, _ string) (bool, e
 func isCoordinatingPolicy(p string) bool {
 	return p != ""
 }
+
+func splitHolderID(holderID string) (string, string) {
+	for i := len(holderID) - 1; i >= 0; i-- {
+		if holderID[i] == '/' {
+			node := holderID[i+1:]
+			if node == "-" {
+				node = ""
+			}
+			return holderID[:i], node
+		}
+	}
+	return holderID, ""
+}

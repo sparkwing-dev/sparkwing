@@ -45,11 +45,9 @@ type runFlags struct {
 	unknownRunnerFlag string
 	ref               string
 
-	profile  string
-	noUpdate bool
-	verbose  bool
-
-	secrets string
+	profileGiven bool
+	noUpdate     bool
+	verbose      bool
 
 	mode string
 
@@ -180,33 +178,14 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(argument, "--sw-ref="):
 			flags.ref = strings.TrimPrefix(argument, "--sw-ref=")
 			argumentIndex++
-		case argument == "--profile":
-			if argumentIndex+1 < len(args) {
-				flags.profile = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--profile="):
-			flags.profile = strings.TrimPrefix(argument, "--profile=")
+		case argument == "--profile" || strings.HasPrefix(argument, "--profile="):
+			flags.profileGiven = true
 			argumentIndex++
 		case argument == "--sw-no-update":
 			flags.noUpdate = true
 			argumentIndex++
 		case argument == "--sw-verbose", argument == "-v":
 			flags.verbose = true
-			argumentIndex++
-		case argument == "--sw-secrets":
-			if argumentIndex+1 < len(args) {
-				flags.secrets = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-secrets="):
-			flags.secrets = strings.TrimPrefix(argument, "--sw-secrets=")
 			argumentIndex++
 		case argument == "--sw-mode":
 			if argumentIndex+1 < len(args) {

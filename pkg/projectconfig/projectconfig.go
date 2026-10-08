@@ -316,14 +316,6 @@ func (c *Config) normalize() error {
 		return err
 	}
 
-	for _, p := range c.Pipelines {
-		if p.Profile != "" {
-			if _, ok := c.Profiles[p.Profile]; !ok {
-				return fmt.Errorf("pipeline %q: profile %q is not declared in project profiles", p.Name, p.Profile)
-			}
-		}
-	}
-
 	for i, lib := range c.Sparks {
 		if lib.Source == "" {
 			return fmt.Errorf("sparks: entry %d missing 'source'", i)

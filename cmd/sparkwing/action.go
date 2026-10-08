@@ -20,13 +20,16 @@ import (
 )
 
 type Pipeline struct {
-	Name       string                  `json:"name"`
-	Short      string                  `json:"short,omitempty"`
-	Help       string                  `json:"help,omitempty"`
-	Triggers   []string                `json:"triggers,omitempty"`
-	Entrypoint string                  `json:"entrypoint,omitempty"`
-	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
-	Examples   []sparkwing.Example     `json:"examples,omitempty"`
+	Name       string   `json:"name"`
+	Short      string   `json:"short,omitempty"`
+	Help       string   `json:"help,omitempty"`
+	Triggers   []string `json:"triggers,omitempty"`
+	Entrypoint string   `json:"entrypoint,omitempty"`
+	// PinnedProfile is the profile: the pipeline's sparkwing.yaml entry names;
+	// the pipeline runs only through `pipeline trigger --profile` with it.
+	PinnedProfile string                  `json:"pinned_profile,omitempty"`
+	Args          []sparkwing.DescribeArg `json:"args,omitempty"`
+	Examples      []sparkwing.Example     `json:"examples,omitempty"`
 
 	EnvVars []sparkwing.EnvVarDoc `json:"env_vars,omitempty"`
 
@@ -303,9 +306,10 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				continue
 			}
 			a := Pipeline{
-				Name:       p.Name,
-				Entrypoint: p.Entrypoint,
-				Triggers:   summarizeTriggerList(p.On),
+				Name:          p.Name,
+				Entrypoint:    p.Entrypoint,
+				PinnedProfile: p.Profile,
+				Triggers:      summarizeTriggerList(p.On),
 			}
 			if dp, ok := describeByName[p.Name]; ok {
 				a.Short = dp.Short
@@ -388,6 +392,9 @@ func printPipelineDetail(a *Pipeline) {
 	fmt.Printf("name:  %s\n", a.Name)
 	if a.Entrypoint != "" {
 		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
+	}
+	if a.PinnedProfile != "" {
+		fmt.Printf("pinned: profile %s (run with: sparkwing pipeline trigger --profile %s %s)\n", a.PinnedProfile, a.PinnedProfile, a.Name)
 	}
 	if len(a.Risks) > 0 {
 		fmt.Printf("risks: %s\n", strings.Join(a.Risks, ", "))
