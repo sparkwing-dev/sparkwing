@@ -60,71 +60,12 @@ func TestLoopbackShimServesALocalNodesBounceAndAttemptRoutes(t *testing.T) {
 	}
 }
 
-func TestLoopbackShimGrantsSlotsToASpawnedNode(t *testing.T) {
+func TestLoopbackShimGrantsNoSlotsToANode(t *testing.T) {
 	_, shim := startTestLoopbackShim(t)
 	conc := NewHTTPConcurrency(shim.url, nil, shim.token, time.Minute)
-	ctx := context.Background()
-	got, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key: "deploy", HolderID: "run-1/build/linux", RunID: "run-1", NodeID: "build/linux", Capacity: 1, Lease: time.Minute,
-	})
-	if err != nil || got.Kind != store.AcquireGranted {
-		t.Fatalf("acquire on the shim = %+v, %v", got, err)
-	}
-	if holder, err := conc.ObserveSlot(ctx, "deploy", "run-1/build/linux"); err != nil || holder.NodeID != "build/linux" {
-		t.Fatalf("observe = %+v, %v", holder, err)
-	}
-	if _, superseded, err := conc.HeartbeatSlot(ctx, "deploy", "run-1/build/linux", time.Minute); err != nil || superseded {
-		t.Fatalf("heartbeat = %v, %v", superseded, err)
-	}
-	queued, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key: "deploy", HolderID: "run-1/build/darwin", RunID: "run-1", NodeID: "build/darwin", Capacity: 1, Lease: time.Minute,
-	})
-	if err != nil || queued.Kind != store.AcquireQueued {
-		t.Fatalf("second acquire = %+v, %v", queued, err)
-	}
-	if res, err := conc.ResolveWaiter(ctx, "deploy", "run-1", "build/darwin", "", "", "", false); err != nil || res.Status == "" {
-		t.Fatalf("resolve = %+v, %v", res, err)
-	}
-	if cancelled, err := conc.CancelWaiter(ctx, "deploy", "run-1", "build/darwin"); err != nil || !cancelled {
-		t.Fatalf("cancel waiter = %v, %v", cancelled, err)
-	}
-	if _, err := conc.ForceReleaseSuperseded(ctx, "deploy"); err != nil {
-		t.Fatalf("force-release: %v", err)
-	}
-	if err := conc.ReleaseSlot(ctx, "deploy", "run-1/build/linux", "success", "", "", 0); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	if _, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key: "deploy", HolderID: "run-2/build", RunID: "run-2", NodeID: "build", Capacity: 1, Lease: time.Minute,
+	if got, err := conc.AcquireSlot(context.Background(), store.AcquireSlotRequest{
+		Key: "deploy", HolderID: "run-1/build", RunID: "run-1", NodeID: "build", Capacity: 1, Lease: time.Minute,
 	}); err == nil {
-		t.Fatal("the shim granted a slot to another run")
-	}
-}
-
-func TestLoopbackShimRefusesToJoinAnotherHolder(t *testing.T) {
-	st, shim := startTestLoopbackShim(t)
-	ctx := context.Background()
-	held, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "deploy", HolderID: "run-2/build", RunID: "run-2", NodeID: "build", Capacity: 1, Lease: time.Minute,
-	})
-	if err != nil || held.Kind != store.AcquireGranted {
-		t.Fatalf("seed run-2's holder = %+v, %v", held, err)
-	}
-	conc := NewHTTPConcurrency(shim.url, nil, shim.token, time.Minute)
-	for _, inherited := range []string{"run-2/build", "run-1/build"} {
-		if got, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
-			Key: "deploy", HolderID: "run-1/build", InheritedHolderID: inherited, RunID: "run-1", NodeID: "build",
-			Capacity: 1, Lease: time.Hour,
-		}); err == nil {
-			t.Fatalf("joined %s through the shim: %+v", inherited, got)
-		}
-	}
-	state, err := st.GetConcurrencyState(ctx, "deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(state.Holders) != 1 || state.Holders[0].HolderID != "run-2/build" ||
-		!state.Holders[0].LeaseExpiresAt.Equal(held.LeaseExpiresAt) {
-		t.Fatalf("holders after the refused joins = %+v, want run-2's holder untouched", state.Holders)
+		t.Fatalf("the shim granted a slot a local node's dispatcher owns: %+v", got)
 	}
 }
