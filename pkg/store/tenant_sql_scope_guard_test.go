@@ -107,7 +107,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).UnlinkIdentity":                "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
-	"(*Store).lookupSession":                 "resolves the globally unique digest of the presented session before its team is known, and renews only that session",
+	"(*Store).lookupSession":                 "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
+	"(*Store).DeleteSession":                 "ends the one session whose globally unique digest the caller presented, before its team is known",
+	"(*Store).mintCSRFKey":                   "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"(*Store).approveOneOnce":                "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
@@ -159,6 +161,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"gatherRunAnnotations": "reads one run's node and step annotations for the open-time rollup backfill, which names the " +
 		"run from its own scan and predates the team column",
 	"scrubSecretInputHashes": "a schema step that strips secret input hashes from every team's run invocations",
+	"dropPasswordUsers":      "a schema step that ends every team's password sessions along with the table that opened them",
 	"rehashSessions": "a schema step that drops every team's sessions minted under the retired digest, so each signs in " +
 		"again",
 	"duplicateGrantReferences": "a migration check that finds grant references repeated anywhere, because the index it " +
@@ -350,27 +353,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"and its node read follows",
 }
 
-// safety: this list shrinks and never grows; porting a family deletes
-// its entries and lowers unportedSQLSize in the same commit, so an entry
-// cannot be added without a reviewer seeing the number move.
-var unportedSQL = []string{
-	"(*Store).CountUsers",
-	"(*Store).CreateFirstUser",
-	"(*Store).CreateSession",
-	"(*Store).CreateUser",
-	"(*Store).DeleteSession",
-	"(*Store).DeleteUser",
-	"(*Store).ListLegacyAgentClaims",
-	"(*Store).ListUsers",
-	"(*Store).VerifyUser",
-	"(*Store).lookupUser",
-	"(*Store).mintCSRFKey",
-	"livePrefixesForPrincipal",
-}
-
-// safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 12
-
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
 // or a write of that table.
@@ -396,18 +378,14 @@ var onConflictRe = regexp.MustCompile(`(?is)ON\s+CONFLICT\s*(?:\(([^)]*)\))?`)
 // interfaces structurally, so nothing but this test refuses an unscoped
 // statement.
 //
-// There are two exemption lists. reviewedUnscopedSQL holds statements
-// that cross teams on purpose -- a reaper, a sweep, the dispatch and
-// claim path -- each with its reason. unportedSQL is the backlog of
-// families that predate the tenant key and have not moved yet; it
-// shrinks and never grows, and porting a family deletes its entries and
-// lowers unportedSQLSize in the same commit.
+// reviewedUnscopedSQL holds the statements that cross teams on purpose --
+// a reaper, a sweep, the dispatch and claim path -- each with its reason.
 //
-// Both are keyed by receiver and function name, so a method moving from
+// It is keyed by receiver and function name, so a method moving from
 // *Store to *Tenant changes its key and stops being exempt. A function
 // that already holds a team cannot be exempt at all; the next test
 // enforces that. New unscoped work belongs in reviewedUnscopedSQL with
-// its reason, never in the backlog.
+// its reason.
 func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	seen := map[string]bool{}
 	for _, stmt := range tenantSQLStatements(t) {
@@ -441,39 +419,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			t.Errorf("reviewedUnscopedSQL exempts %q, which no longer has an unscoped statement; delete the entry", key)
 		}
 	}
-	for _, key := range unportedSQL {
-		if !seen[key] {
-			t.Errorf("unportedSQL still carries %q, which no longer has an unscoped statement; "+
-				"delete the line and lower unportedSQLSize", key)
-		}
-	}
-}
-
-// The backlog shrinks and never grows, so adding to it costs an edit a
-// reviewer can see: the list and the pinned size have to move together,
-// and a name cannot be on both lists.
-func TestTenantSQLScope_BacklogOnlyShrinks(t *testing.T) {
-	if len(unportedSQL) != unportedSQLSize {
-		t.Fatalf("unportedSQL has %d entries and unportedSQLSize says %d; "+
-			"porting lowers both, and nothing raises them", len(unportedSQL), unportedSQLSize)
-	}
-	seen := map[string]bool{}
-	for _, key := range unportedSQL {
-		if seen[key] {
-			t.Errorf("unportedSQL names %q twice", key)
-		}
-		seen[key] = true
-		if _, ok := reviewedUnscopedSQL[key]; ok {
-			t.Errorf("%q is on both lists; it is either reviewed or un-ported, not both", key)
-		}
-	}
 }
 
 func exemptFromScope(key string) bool {
-	if _, ok := reviewedUnscopedSQL[key]; ok {
-		return true
-	}
-	return slices.Contains(unportedSQL, key)
+	_, ok := reviewedUnscopedSQL[key]
+	return ok
 }
 
 // An exemption is only honest while the function has no team to use. A

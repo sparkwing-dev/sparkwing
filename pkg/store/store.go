@@ -1042,15 +1042,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
--- Dashboard user credentials; pw_hash = argon2id, plaintext never persisted.
-CREATE TABLE IF NOT EXISTS users (
-    name          TEXT PRIMARY KEY,
-    pw_hash       TEXT NOT NULL,
-    created_at    INTEGER NOT NULL,
-    last_login_at INTEGER,
-    scopes        TEXT NOT NULL DEFAULT 'admin'
-);
-
 -- Pipeline secrets; encryption at rest is up to the volume.
 CREATE TABLE IF NOT EXISTS secrets (
     name       TEXT NOT NULL,
@@ -1148,7 +1139,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 94
+const expectedSchemaVersion = 95
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -1949,6 +1940,23 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 // their table; an older binary that still serves that route then fails its lookup rather than verifying.
 const dropGitHubWebhookBindings = `DROP TABLE IF EXISTS github_webhook_bindings`
 
+var sessionTokenCols = map[string]string{"token_prefix": "TEXT NOT NULL DEFAULT ''"}
+
+// safety: sign-in is an identity provider or an operator token, so the password table goes with every
+// session a password opened; the bootstrap latch only serialized the first password user's insert.
+func dropPasswordUsers(ctx context.Context, tx *storeTx) error {
+	for _, stmt := range []string{
+		`DELETE FROM sessions WHERE account_id = '' AND token_prefix = ''`,
+		`DELETE FROM sparkwing_meta WHERE key = 'bootstrap_latch'`,
+		`DROP TABLE IF EXISTS users`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // safety: a version absent from this map must leave an older binary reading and
 // writing the migrated database; a version present here does not, so its names are
 // stamped and that binary refuses the store rather than corrupting it. Nothing below
@@ -2074,7 +2082,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 18:
 		return scrubSecretInputHashes(ctx, tx)
 	case 19:
-		return ensureColumnsSQLite(ctx, tx, "users", usersScopesCols)
+		// safety: v19 widened the password users table that v95 drops, so a database that never held it
+		// skips straight past it.
+		return nil
 	case 20:
 		return ensureColumnsSQLite(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
 	case 21:
@@ -2278,6 +2288,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 94:
 		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
+	case 95:
+		if err := ensureColumnsSQLite(ctx, tx, "sessions", sessionTokenCols); err != nil {
+			return err
+		}
+		return dropPasswordUsers(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2528,7 +2543,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 18:
 		return scrubSecretInputHashes(ctx, tx)
 	case 19:
-		return addColumnsTx(ctx, tx, "users", usersScopesCols)
+		// safety: v19 widened the password users table that v95 drops, so a database that never held it
+		// skips straight past it.
+		return nil
 	case 20:
 		return addColumnsTx(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
 	case 21:
@@ -2757,6 +2774,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 94:
 		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
+	case 95:
+		if err := addColumnsTx(ctx, tx, "sessions", sessionTokenCols); err != nil {
+			return err
+		}
+		return dropPasswordUsers(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3180,10 +3202,6 @@ var nodeDispatchRedactionCols = map[string]string{
 
 var nodeMetricsCPUTimeCols = map[string]string{
 	"cpu_time_nanos": "INTEGER NOT NULL DEFAULT 0",
-}
-
-var usersScopesCols = map[string]string{
-	"scopes": "TEXT NOT NULL DEFAULT 'admin'",
 }
 
 var triggerRepoInheritedCols = map[string]string{

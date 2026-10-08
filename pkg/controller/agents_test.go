@@ -174,7 +174,11 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	if _, err := st.DB().Exec(`UPDATE nodes SET status = 'done', started_at = ?, lease_expires_at = ? WHERE run_id = 'old-run'`, old.UnixNano(), old.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	claims, err := st.ListLegacyAgentClaims(ctx, now.Add(-time.Hour))
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := tenant.ListLegacyAgentClaims(ctx, now.Add(-time.Hour))
 	if err != nil || len(claims) != 1 || claims[0].TokenPrefix == "" || claims[0].TokenPrefix != ownerToken.Prefix {
 		t.Fatalf("stored claim credential matches owner = %t, owner length=%d, claim length=%d, err=%v", len(claims) == 1 && claims[0].TokenPrefix == ownerToken.Prefix, len(ownerToken.Prefix), len(claims[0].TokenPrefix), err)
 	}

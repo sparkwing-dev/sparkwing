@@ -57,7 +57,6 @@ func TestMultiTeamAuth_AnEmptyTokenTableStillRefusesAnonymousCallers(t *testing.
 	srv, st, url := emptyTokenTableServer(t, true)
 	for _, route := range []string{
 		"GET /api/v1/runs",
-		"GET /api/v1/users",
 		"GET /api/v1/tokens",
 	} {
 		method, path, _ := strings.Cut(route, " ")

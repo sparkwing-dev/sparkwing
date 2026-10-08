@@ -16,7 +16,6 @@ import (
 func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 	want := map[string]bool{
 		"GET /api/v1/health":       true,
-		"POST /api/v1/auth/login":  true,
 		"POST /api/v1/auth/logout": true,
 		"GET /api/v1/auth/session": true,
 		"/":                        true,

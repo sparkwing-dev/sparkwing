@@ -584,8 +584,6 @@ func TestRunnerScopes_SecretsReadIsNotAdmin(t *testing.T) {
 	}{
 		{"mint a token", http.MethodPost, "/api/v1/tokens", `{"principal":"mallory","kind":"user","scopes":["admin"]}`},
 		{"list tokens", http.MethodGet, "/api/v1/tokens", ""},
-		{"read users", http.MethodGet, "/api/v1/users", ""},
-		{"create a user", http.MethodPost, "/api/v1/users", `{"name":"mallory","password":"hunter2hunter2"}`},
 		{"list every secret", http.MethodGet, "/api/v1/secrets", ""},
 		{"write a secret", http.MethodPost, "/api/v1/secrets", `{"name":"X","value":"y"}`},
 	} {

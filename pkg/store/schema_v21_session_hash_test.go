@@ -68,7 +68,7 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, csrf, sess, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
+	raw, csrf, sess, err := rootSession(t, st, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestCSRFKey_ReadOnlyStoreResolvesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, csrf, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
+	raw, csrf, _, err := rootSession(t, st, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestCSRFKey_MintingRotatesLiveSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, _, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
+	raw, _, _, err := rootSession(t, st, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestCSRFKey_ExistingKeyKeepsSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, csrf, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
+	raw, csrf, _, err := rootSession(t, st, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestLookupSession_BackendFaultsAreDistinguishable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw, _, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
+			raw, _, _, err := rootSession(t, st, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,4 +286,17 @@ func TestLookupSession_BackendFaultsAreDistinguishable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func rootSession(t *testing.T, st *store.Store, now time.Time) (raw, csrf string, sess *store.Session, err error) {
+	t.Helper()
+	_, tok, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, sess, err = st.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, time.Hour, now)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return raw, sess.CSRFToken, sess, nil
 }

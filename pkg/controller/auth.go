@@ -400,8 +400,6 @@ func authRejection(err error) bool {
 		return true
 	case errors.Is(err, store.ErrUnknownToken), errors.Is(err, store.ErrTokenRevoked), errors.Is(err, store.ErrTokenExpired):
 		return true
-	case errors.Is(err, store.ErrInvalidCredentials):
-		return true
 	default:
 		return false
 	}

@@ -15,7 +15,6 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/agents/{name}` | `admin` |
 | `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
@@ -259,9 +258,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `GET` | `/api/v1/users` | `admin` |
-| `POST` | `/api/v1/users` | `admin` |
-| `DELETE` | `/api/v1/users/{name}` | `admin` |
 | `POST` | `/internal/downloads/charge` | `public` |
 | `POST` | `/internal/egress/totals` | `public` |
 | `POST` | `/internal/storage/commit` | `public` |

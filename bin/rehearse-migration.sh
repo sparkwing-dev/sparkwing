@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Rehearse the store migration a release carries on copies of real data.
 #
-# For each copy it takes a baseline, plants canary credentials (a token, a
-# password user, and plaintext, enc:v1 and enc:v2 secrets), starts the new
+# For each copy it takes a baseline, plants canary credentials (a token and
+# plaintext, enc:v1 and enc:v2 secrets), starts the new
 # controller on it the way an upgrade does, and checks the result: schema
 # version, every baseline row still present, every team column 'default',
 # the canaries still authenticate and decrypt, secrets resealed to enc:v3.
@@ -216,7 +216,6 @@ cli_verify() {
     "secrets get --profile rehearsal --name REHEARSAL_V1"
     "cluster tokens list --profile rehearsal"
     "cluster agents list --profile rehearsal"
-    "cluster users list --profile rehearsal"
   )
   local c i=0
   for c in "${checks[@]}"; do
@@ -250,7 +249,7 @@ rehearse() {
   eval "$snap_baseline"
   "$TOOL" inventory -dialect "$dialect" -dsn "$baseline" > "$WORK/$label/before.json"
   from="$(jq .schema_version "$WORK/$label/before.json")"
-  say "baseline: schema $from, $(jq -r '"runs \(.runs), nodes \(.nodes), tokens \(.tokens) (incl. canary), secrets \(.secrets) (incl. 3 canaries), users \(.users) (incl. canary), last run \(.last_run.id // "none")"' "$WORK/$label/before.json")"
+  say "baseline: schema $from, $(jq -r '"runs \(.runs), nodes \(.nodes), tokens \(.tokens) (incl. canary), secrets \(.secrets) (incl. 3 canaries), last run \(.last_run.id // "none")"' "$WORK/$label/before.json")"
 
   say ""
   say "== $label: first start of the new controller (migrates $from -> $WANT_VERSION, secrets key set)"

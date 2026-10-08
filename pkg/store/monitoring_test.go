@@ -90,7 +90,11 @@ func TestLegacyAgentClaimsUseTheStoreDialect(t *testing.T) {
 		"runner:laptop:1", time.Minute, nil); err != nil {
 		t.Fatal(err)
 	}
-	claims, err := st.ListLegacyAgentClaims(ctx, now.Add(-time.Hour))
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := tenant.ListLegacyAgentClaims(ctx, now.Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

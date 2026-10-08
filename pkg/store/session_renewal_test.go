@@ -8,7 +8,11 @@ import (
 func TestSessionRenewalKeepsLaterExpiryAndRefusesDeletedRow(t *testing.T) {
 	s := newTestStore(t)
 	created := time.Now().UTC().Truncate(time.Second)
-	raw, _, _, err := s.CreateSession(t.Context(), "alice", []string{"runs.read"}, 7*24*time.Hour, created)
+	_, tok, err := s.CreateToken("alice", TokenKindUser, []string{"runs.read"}, 0, created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := s.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, 7*24*time.Hour, created)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,11 +71,6 @@ type Server struct {
 	computeAlarmMu sync.Mutex
 	computeAlarmOn bool
 
-	bootstrapMu     sync.Mutex
-	bootstrapExpiry time.Time
-	bootstrapNeeded bool
-	bootstrapClosed bool
-
 	artifactStore storage.ArtifactStore
 
 	bucketUsageStore storage.ArtifactStore
@@ -451,38 +446,6 @@ func (s *Server) reconcileBeforeRead(h http.HandlerFunc) http.HandlerFunc {
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
 	return s
-}
-
-func (s *Server) bootstrapAllowed() bool {
-	s.bootstrapMu.Lock()
-	defer s.bootstrapMu.Unlock()
-	if s.bootstrapClosed {
-		return false
-	}
-	if !s.bootstrapExpiry.IsZero() && time.Now().Before(s.bootstrapExpiry) {
-		return s.bootstrapNeeded
-	}
-	needed := true
-	if s.store != nil {
-		n, err := s.store.CountUsers()
-		if err == nil && n > 0 {
-			needed = false
-		}
-	}
-	s.bootstrapNeeded = needed
-	s.bootstrapExpiry = time.Now().Add(60 * time.Second)
-	if !needed {
-		s.bootstrapClosed = true
-	}
-	return needed
-}
-
-func (s *Server) markBootstrapClosed() {
-	s.bootstrapMu.Lock()
-	defer s.bootstrapMu.Unlock()
-	s.bootstrapClosed = true
-	s.bootstrapNeeded = false
-	s.bootstrapExpiry = time.Now().Add(60 * time.Second)
 }
 
 func (s *Server) authMiddleware() *Authenticator {
@@ -1212,10 +1175,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))
 	mux.Handle("POST /api/v1/signups/waitlist/approve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleApproveWaitlist)))
 
-	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
-	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
-	mux.Handle("DELETE /api/v1/users/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteUser)))
-
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret), ScopeTeamAdmin))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListSecrets), ScopeTeamAdmin))
 	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimWorkKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
@@ -1238,7 +1197,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
 	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
 	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
-	router.Handle("POST /api/v1/auth/login", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleLogin))))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))

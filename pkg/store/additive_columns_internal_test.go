@@ -27,7 +27,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	16: nil,
 	17: nil,
 	18: nil,
-	19: {usersScopesCols},
+	19: nil,
 	20: {nodeDispatchRedactionCols},
 	23: {secretsSharedCols, triggerClaimOwnerCols},
 	24: {triggerWebhookDeliveryCols},
@@ -189,6 +189,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	93: nil,
 	// safety: v94 adds a consent table older binaries never read or write.
 	94: nil,
+	// safety: v95 adds a defaulted session column an older binary never names and drops the password users
+	// table; that binary fails only the statements naming users, and a token session's empty scopes column
+	// grants it nothing.
+	95: {sessionTokenCols},
 }
 
 func columnSpecMaps() []map[string]string {

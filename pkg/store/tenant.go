@@ -322,7 +322,6 @@ var tenantTables = []string{
 	"uploads",
 	"tokens",
 	"triggers",
-	"users",
 }
 
 // safety: these tables are created after v49 with the team column already

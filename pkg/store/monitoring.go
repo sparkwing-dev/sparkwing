@@ -16,37 +16,6 @@ type LegacyAgentClaim struct {
 	LastSeen    time.Time
 }
 
-// ListLegacyAgentClaims returns claims whose lease falls inside the observation
-// window. Enrolled executor claims are reported through the executor registry.
-func (s *Store) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error) {
-	rows, err := s.query(ctx, `
-SELECT run_id, status, claimed_by, claim_token_prefix,
-       COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
-  FROM nodes
- WHERE claimed_by IS NOT NULL AND claimed_by != ''
-   AND claim_executor = ''
-   AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
-`, since.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []LegacyAgentClaim
-	for rows.Next() {
-		var claim LegacyAgentClaim
-		var started, expires int64
-		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &claim.TokenPrefix, &started, &expires); err != nil {
-			return nil, err
-		}
-		if started > 0 {
-			claim.StartedAt = time.Unix(0, started)
-			claim.LastSeen = claim.StartedAt
-		}
-		out = append(out, claim)
-	}
-	return out, rows.Err()
-}
-
 // RunTrend is the store-owned input to the controller's time buckets.
 type RunTrend struct {
 	RunID      string

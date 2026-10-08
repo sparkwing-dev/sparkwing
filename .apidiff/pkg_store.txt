@@ -772,7 +772,6 @@ var ErrAmbiguousAccount = errors.New("store: more than one account holds that ad
 var ErrAnnotationTooLarge = errors.New("store: an annotation holds at most 64 KiB")
 var ErrAttemptInvalid = errors.New("store: attempt report refused")
 var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
-var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
 var ErrCheckoutNotFound = errors.New("credits: the team holds no checkout for this session")
 var ErrClaimCancelRequested = errors.New("store: the run this claim belongs to is being cancelled")
@@ -807,7 +806,6 @@ var ErrInputUndeclared = errors.New("store: the run's accepted plan declares no 
 var ErrInstallationBoundElsewhere = errors.New("store: this GitHub App installation is connected to another team")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
-var ErrInvalidCredentials = errors.New("invalid username or password")
 var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
 var ErrInvalidEventKind = errors.New("invalid event kind")
 var ErrInvalidInput = errors.New("store: invalid input")
@@ -869,7 +867,6 @@ var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 var ErrUnverifiedEmail = errors.New("store: a sign-in needs a verified email")
-var ErrUserNotFound = errors.New("user not found")
 var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
 type Event struct {
 	RunID   string
@@ -1905,11 +1902,13 @@ type Session struct {
 
 	Team Team
 
-	AccountID  string
-	CSRFToken  string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	LastUsedAt *time.Time
+	AccountID string
+
+	TokenPrefix string
+	CSRFToken   string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	LastUsedAt  *time.Time
 }
 const SessionIDLen = 32
 func SetArgon2MemoryBudget(budget int64) int
@@ -2223,13 +2222,11 @@ func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, err
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
 func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error)
-func (s *Store) CountUsers() (int, error)
 func (s *Store) CreateAccountSession(
 	ctx context.Context, acct Account, team Team, ttl time.Duration, now time.Time,
 ) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
-func (s *Store) CreateFirstUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreateIdentityAccountSession(
 	ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, now time.Time,
 ) (rawSession, csrfToken string, sess *Session, err error)
@@ -2238,16 +2235,15 @@ func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now time.Time) (err error)
 func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig Trigger, r Run) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
-func (s *Store) CreateSession(ctx context.Context, principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
+func (s *Store) CreateTokenSession(ctx context.Context, tokenPrefix, principal string, team Team, ttl time.Duration, now time.Time) (rawSession string, sess *Session, err error)
 func (s *Store) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
 ) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
-func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
@@ -2267,7 +2263,6 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error)
-func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error)
 func (s *Store) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
@@ -2355,7 +2350,6 @@ func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUs
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
-func (s *Store) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
@@ -2373,7 +2367,6 @@ func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]S
 func (s *Store) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error)
 func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
-func (s *Store) ListUsers() ([]User, error)
 func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error)
 func (s *Store) LookupSession(ctx context.Context, rawSession string, now time.Time) (*Session, error)
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error)
@@ -2570,7 +2563,6 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload, error)
 func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) ValidateExecutorClaimReservation(ctx context.Context, claimant ClaimIdentity, runID, nodeID, executorName, reservationID string, slot int, resourceDigest string) error
-func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
@@ -3037,13 +3029,6 @@ type UsageWeek struct {
 	NewTeams                int
 }
 func UsageWeekStart(at time.Time) time.Time
-type User struct {
-	Name        string
-	PWHash      string
-	Scopes      []string
-	CreatedAt   time.Time
-	LastLoginAt *time.Time
-}
 func ValidComputeLimit(name string) bool
 func ValidCreditGrantKind(kind string) bool
 func ValidStoragePrincipal(name string) bool

@@ -69,10 +69,8 @@ tags:
     description: Operator-induced pauses for live debugging.
   - name: tokens
     description: Bearer-token CRUD (admin).
-  - name: users
-    description: Local-account CRUD + bootstrap.
   - name: auth
-    description: Login / logout / session + introspection.
+    description: Logout / session + introspection.
   - name: teams
     description: Signed-in users, their teams, memberships, invitations and runner tokens.
   - name: operator
@@ -2244,104 +2242,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/users:
-    get:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: List local-account users.
-      responses:
-        "200":
-          description: Users.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [users]
-                properties:
-                  users:
-                    type: array
-                    items: {$ref: "#/components/schemas/User"}
-    post:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: Create a user, or bootstrap the first administrator.
-      description: |
-        Answers without a credential while the users table is empty, and
-        goes back to demanding the route's scope once any user exists.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.createUserReq
-              type: object
-              required: [name, password]
-              properties:
-                name: {type: string}
-                password: {type: string}
-                scopes:
-                  type: array
-                  description: >-
-                    Scopes this account's dashboard sessions carry. Omit to grant admin. The bootstrap path honours the set it is given but rejects one that omits admin, so the first account can always reach the rest of the API.
-                  items: {type: string}
-      responses:
-        "201":
-          description: User created.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/User"}
-        "409": {description: Bootstrap race lost.}
-
-  /api/v1/users/{name}:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: {type: string}
-    delete:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: Delete a user.
-      responses:
-        "204": {description: Deleted.}
-
-  /api/v1/auth/login:
-    post:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Exchange username + password for a session id + CSRF token.
-      description: Unauthenticated.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.loginReq
-              type: object
-              required: [username, password]
-              properties:
-                username: {type: string}
-                password: {type: string}
-      responses:
-        "200":
-          description: Session created.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.loginResp
-                type: object
-                required: [session_id, csrf_token, principal, scopes, expires_at]
-                properties:
-                  session_id: {type: string}
-                  csrf_token: {type: string}
-                  principal: {type: string}
-                  scopes:
-                    type: array
-                    items: {type: string}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
 
   /api/v1/auth/logout:
     post:
@@ -8484,24 +8384,6 @@ components:
         bound: {type: boolean, description: Whether the secret is bound to its row.}
         created_at: {type: integer, format: int64, description: Unix seconds.}
         updated_at: {type: integer, format: int64, description: Unix seconds.}
-    User:
-      x-sparkwing-go-type: pkg/controller.userJSON
-      type: object
-      required: [name, created_at]
-      properties:
-        name: {type: string}
-        scopes:
-          type: array
-          description: Scopes this account's dashboard sessions carry.
-          items: {type: string}
-        created_at:
-          type: integer
-          format: int64
-          description: Unix seconds.
-        last_login_at:
-          type: integer
-          format: int64
-          nullable: true
     Agent:
       x-sparkwing-go-type: pkg/controller.Agent
       type: object
