@@ -127,21 +127,6 @@ from the bundled controller).
 {{- end }}
 
 {{/*
-Resolved controller logs URL: explicit override wins; otherwise the
-in-cluster logs Service from the runner-bundle sub-chart (only if
-that sub-chart is enabled and its logs component is enabled). Empty
-string when neither applies, in which case the controller announces
-no logs service and dashboard log panes stay empty.
-*/}}
-{{- define "sparkwing-full.controller.logsURL" -}}
-{{- if .Values.controller.logs.url -}}
-{{- .Values.controller.logs.url -}}
-{{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "logs" "enabled") -}}
-{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.logs.fullname" .) .Release.Namespace -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Resolved controller cache URL: explicit override wins; otherwise the
 in-cluster cache Service from the runner-bundle sub-chart (only if
 that sub-chart is enabled and its cache component is enabled). Empty
@@ -185,10 +170,6 @@ sub-chart's helpers.
 {{- $baseLimit := sub 63 (len $suffix) | int -}}
 {{- $base := include "sparkwing-full.bundle.fullnameBase" .root | trunc $baseLimit | trimSuffix "-" -}}
 {{- printf "%s%s" $base $suffix -}}
-{{- end }}
-
-{{- define "sparkwing-full.bundle.logs.fullname" -}}
-{{- include "sparkwing-full.bundle.componentFullname" (dict "root" . "component" "logs") -}}
 {{- end }}
 
 {{- define "sparkwing-full.bundle.cache.fullname" -}}

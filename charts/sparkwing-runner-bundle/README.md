@@ -1,17 +1,18 @@
 # sparkwing-runner-bundle
 
 Helm chart that deploys the Sparkwing **runner-side bundle** --
-`sparkwing-runner` + `sparkwing-cache` + `sparkwing-logs` -- into a
-customer-owned namespace.
+`sparkwing-runner` + `sparkwing-cache` -- into a customer-owned
+namespace.
 
 This is the chart referenced by architectural decision 0001
 ("data plane lives with the runner"). When you run self-hosted
 runners against a remote controller (Sparkwing Cloud, or a
-self-hosted controller in another cluster), the runner, the git
-cache, and the log store all live next to your compute. Artifacts
-never cross the VPC boundary. The controller sees control-plane
-traffic plus the log reads a signed-in dashboard makes, which it
-forwards to the logs service named by its `--logs-url`.
+self-hosted controller in another cluster), the runner and the git
+cache live next to your compute. Artifacts never cross the VPC
+boundary. The controller sees control-plane traffic plus node logs:
+runners upload each node's log as segments through URLs the
+controller issues, and the dashboard reads them back through the
+controller.
 
 The chart is **not** a full self-host install. It deliberately
 omits:
@@ -26,8 +27,8 @@ If you want the whole stack in one cluster, install
 exists somewhere else and you just need a runner pool.
 
 > **Release blocker:** The checked-in default repositories and
-> `appVersion` do not currently identify a compatible public runner/cache/logs
-> image set. Until a corrected release is published, build or mirror all three
+> `appVersion` do not currently identify a compatible public runner/cache
+> image set. Until a corrected release is published, build or mirror both
 > images from one compatible Sparkwing revision and explicitly set each
 > enabled component's `image.repository` and `image.tag`.
 
@@ -54,14 +55,12 @@ what this renders.
    |   sparkwing-controller    |  <---  (cloud / remote cluster)
    +---------------------------+
               ^   |
-              |   v   /api/v1/* (claim, status, log forwarder)
+              |   v   /api/v1/* (claim, status, log segments)
    +-------------------------------------------+
    |   YOUR CLUSTER (this chart)               |
    |                                           |
    |   sparkwing-runner   ---->  sparkwing-cache (git, go-mod,    |
-   |        |                                   artifacts)        |
-   |        v                                                     |
-   |   sparkwing-logs   <----  pipeline log writes               |
+   |                                            artifacts)        |
    +-------------------------------------------+
 ```
 
@@ -69,15 +68,15 @@ what this renders.
 
 - Kubernetes 1.27+ (the chart targets standard apps/v1, batch/v1,
   rbac.authorization.k8s.io/v1).
-- Explicit repositories and tags for a mutually compatible runner, cache, and
-  logs image set. The current default GHCR/appVersion combination is not a
+- Explicit repositories and tags for a mutually compatible runner and cache
+  image set. The current default GHCR/appVersion combination is not a
   runnable release.
 - A reachable Sparkwing controller URL.
 - A pre-created Secret holding the agent bearer token (see Auth
   below). Optional for single-tenant test installs where the
   controller has auth disabled.
 - A default StorageClass (or an explicit `storageClassName`) for
-  the cache + logs PVCs. Both are RWO.
+  the cache PVC, which is RWO.
 
 ## Install
 
@@ -88,8 +87,6 @@ runner:
   image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
 cache:
   image: {repository: registry.example/sparkwing-cache, tag: <compatible-tag>}
-logs:
-  image: {repository: registry.example/sparkwing-logs, tag: <compatible-tag>}
 ```
 
 ```bash
@@ -120,16 +117,15 @@ The controller the runners claim from needs the same cache token as
 `SPARKWING_CACHE_TOKEN` and the same grant key as
 `SPARKWING_CACHE_GRANT_KEY`.
 
-For a fully unauthenticated test cluster, opt the cache and the logs
-service out of their token requirement explicitly:
+For a fully unauthenticated test cluster, opt the cache out of its
+token requirement explicitly:
 
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
     --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local \
-    --set cache.allowUnauthenticated=true \
-    --set logs.allowUnauthenticated=true
+    --set cache.allowUnauthenticated=true
 ```
 
 ## Values cheat sheet
@@ -164,13 +160,10 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
-| `logs.enabled` | Toggle the log-store sidecar. | `true` |
-| `logs.allowUnauthenticated` | Serve every run's logs without a token. | `false` |
-| `logs.storage.size` | Logs PVC size. | `10Gi` |
 | `runner.automountServiceAccountToken` | Mount the runner pod's API token. Required by the `k8s` and `warm` trigger runners. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
 | `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
-| `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
+| `imagePullSecrets` | Private-registry pull secrets for both images. | `[]` |
 | `runner.jobCeiling.cpu` | Hard CPU ceiling the runner clamps every pipeline pin and measured charge to before it creates a Job pod. Empty means no ceiling. | `""` |
 | `runner.jobCeiling.memory` | Hard memory ceiling for the same. | `""` |
 | `runner.jobDeadline` | Wall-clock bound on one Job pod, as a Go duration of at least a minute, passed as `--deadline`. Empty keeps 6h. | `""` |
@@ -211,17 +204,13 @@ release before enabling it.
 
 The runner reads its bearer token from `controller.tokenSecret`, which the
 chart projects as the file `agent-token` under `--credentials-dir`, and uses it
-for controller claims and writes to the logs service. Mint it with
-`nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
-`logs.write`: enough to claim triggers and nodes, drive the runs it claimed
-from plan to finish, read the secrets its repository owns, and ship logs. It
-needs no `admin`. A warm-pool dispatcher that marks nodes ready for a pool is
-the exception and keeps an `admin` token. Configuring that Secret
-also enables logs-service auth: the logs service forwards each caller's
-incoming Authorization header to the resolved controller's
-`/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. Once a Secret name is configured, its key
-and the Secret itself are required.
+for controller claims and node log uploads. Mint it with `nodes.claim`,
+`triggers.claim`, `runs.state`, and `secrets.read`: enough to claim triggers
+and nodes, drive the runs it claimed from plan to finish, upload their logs,
+and read the secrets its repository owns. It needs no `admin`. A warm-pool
+dispatcher that marks nodes ready for a pool is the exception and keeps an
+`admin` token. Once a Secret name is configured, its key and the Secret
+itself are required.
 
 The chart projects `cache.tokenSecret` and `cache.grantKeySecret` into one
 volume at `/etc/sparkwing/credentials` and passes it as `--credentials-dir`:
@@ -241,13 +230,6 @@ A cache-enabled install without `cache.tokenSecret` fails at render time. Set
 to anything that can reach the Service, which is appropriate only on a
 bootstrap install, before the Secret exists.
 
-A logs-enabled install without it fails the same way, because the logs service
-has no controller to resolve callers against. With the Secret configured the
-chart also passes `--require-auth`, so the pod crashes rather than serving
-open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
-Service read, forge, and delete every run's logs, which is again a bootstrap
-setting to turn back off with the token upgrade.
-
 With `cache.enabled=false` and no `runner.gitcacheUrl`, runners fetch each run's source straight from its host.
 The controller releases the credential for each run: the team's GitHub App
 token when an installation covers the repository, else the git credential
@@ -262,13 +244,12 @@ not a `helm upgrade`.
 
 ## Storage
 
-Both `sparkwing-cache` and `sparkwing-logs` use `ReadWriteOnce`
-PVCs, which bounds them to 1 replica each (`replicas: 1`,
-`strategy: Recreate`). The per-team counts that hold free teams to
-their storage shares live in the controller's database; see
-[Tenant limits](../../docs/limits.md). For an HA log store, point your runners at
-an external S3-backed log service (out of scope for this chart;
-see the full self-host docs).
+`sparkwing-cache` uses a `ReadWriteOnce` PVC, which bounds it to
+1 replica (`replicas: 1`, `strategy: Recreate`). The per-team counts
+that hold free teams to their storage shares live in the controller's
+database; see [Tenant limits](../../docs/limits.md). Node logs live
+with the controller, in its cache bucket or output directory, not in
+this chart.
 
 PVCs are annotated `helm.sh/resource-policy: keep` by default so
 `helm uninstall` doesn't wipe history. Disable per-component with
@@ -277,11 +258,10 @@ PVCs are annotated `helm.sh/resource-policy: keep` by default so
 For an ephemeral test install:
 
 ```bash
---set cache.storage.enabled=false \
---set logs.storage.enabled=false
+--set cache.storage.enabled=false
 ```
 
-Both volumes fall back to `emptyDir` when storage is disabled.
+The volume falls back to `emptyDir` when storage is disabled.
 
 The runner's Sparkwing home is also an `emptyDir`. By default, a short init
 container assigns its mount root to the configured non-root UID and GID before
@@ -328,11 +308,10 @@ leaves the compile to fetch what it needs.
 ## RBAC
 
 The chart creates a namespace-scoped Role + RoleBinding with no rules.
-The runner, cache, and logs servers talk to the controller over HTTP and
-never call the Kubernetes API, so none of them mounts a ServiceAccount
+The runner and cache servers talk to the controller over HTTP and
+never call the Kubernetes API, so neither mounts a ServiceAccount
 token: every pod sets `automountServiceAccountToken: false`, and the
-cache and logs pods run under their own ServiceAccounts rather than the
-runner's.
+cache pod runs under its own ServiceAccount rather than the runner's.
 
 The opt-in `k8s` and `warm` trigger runners call the API to create and inspect
 runner Jobs. Give the runner pod a token when selecting either mode:
@@ -354,10 +333,10 @@ If you don't want the chart-managed Role at all:
 --set serviceAccount.shareAcrossComponents=true
 ```
 
-`serviceAccount.create=false` runs all three pods under that one account.
+`serviceAccount.create=false` runs both pods under that one account.
 The render fails without `shareAcrossComponents=true` so the sharing is a
-recorded choice; the chart never invents `-cache` and `-logs` names you
-have not created.
+recorded choice; the chart never invents a `-cache` name you have not
+created.
 
 ## Image registry
 
@@ -365,7 +344,6 @@ Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-runner:<chart appVersion>`
 - `ghcr.io/sparkwing-dev/sparkwing-cache:<chart appVersion>`
-- `ghcr.io/sparkwing-dev/sparkwing-logs:<chart appVersion>`
 
 These fallbacks describe the intended registry layout, not a compatible public
 release contract for this chart version. Pin repository and tag for every
@@ -388,11 +366,19 @@ helm upgrade runners ./charts/sparkwing-runner-bundle \
 ```
 
 Runner pods rolling-update one at a time; in-flight claims on the
-rolled pod time out and re-queue. Cache + logs use `Recreate`
-because of their RWO PVCs -- expect ~30s of downtime per upgrade.
+rolled pod time out and re-queue. The cache uses `Recreate`
+because of its RWO PVC -- expect ~30s of downtime per upgrade.
 For zero-downtime cache, run a separate cache deployment with
 `cache.enabled=false` here and point runners at it with
 `runner.gitcacheUrl`.
+
+An upgrade from a chart that deployed `sparkwing-logs` removes its
+Deployment, Service and ServiceAccount; runners upload node logs to the
+controller instead. The logs PVC carries `helm.sh/resource-policy: keep`
+by default, so it survives the upgrade: export its logs with the previous
+release's `sparkwing-logs export` before upgrading, then delete it. A
+values file that still sets `logs` fails to render. See the migration
+guide section "Node logs reach the controller as segments".
 
 ## Uninstall
 
@@ -430,14 +416,6 @@ kubectl -n sparkwing logs deploy/runners-runner | grep -i label
 PVC binding failed. Check `kubectl describe pvc runners-cache`. Most
 common: no default StorageClass. Set `cache.storage.storageClassName`
 explicitly.
-
-**Logs pod 500s on read**
-Runner is writing logs but the controller can't read them. Confirm
-the controller has network access to the logs service URL the
-runners report at trigger time. The default URL is
-`http://<release>-logs.<namespace>.svc.cluster.local`, which only
-resolves from inside this cluster -- a remote (cloud) controller
-needs an Ingress or external Service in front of the logs pod.
 
 ## Source
 

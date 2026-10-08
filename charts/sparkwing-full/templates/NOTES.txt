@@ -11,9 +11,6 @@ Sparkwing full self-host installed.
 {{- if index $bundle "cache" "enabled" -}}
 {{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "cache" "image" "tag")) -}}
 {{- end -}}
-{{- if index $bundle "logs" "enabled" -}}
-{{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "logs" "image" "tag")) -}}
-{{- end -}}
 {{- end -}}
 {{- if $unpinnedImages }}
 
@@ -26,7 +23,7 @@ from one compatible Sparkwing revision before treating this as runnable.
 Components:
   Controller and dashboard (1 replica) -> {{ include "sparkwing-full.controller.fullname" . }}
 {{- if index $bundle "enabled" }}
-  Runner-bundle sub-chart -> see `helm get manifest {{ .Release.Name }}` for runner / cache / logs.
+  Runner-bundle sub-chart -> see `helm get manifest {{ .Release.Name }}` for runner / cache.
 {{- else }}
   Runner-bundle: DISABLED -- runners must be deployed separately.
 {{- end }}

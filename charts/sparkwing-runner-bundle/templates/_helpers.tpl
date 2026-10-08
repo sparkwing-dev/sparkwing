@@ -75,7 +75,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 Per-component selector labels. Each Deployment + Service uses
 component=<name> alongside the shared release labels so a single
-release can host all three workloads without selector collisions.
+release can host every workload without selector collisions.
 */}}
 {{- define "sparkwing-runner-bundle.componentSelectorLabels" -}}
 {{ include "sparkwing-runner-bundle.selectorLabels" .root }}
@@ -100,9 +100,9 @@ explicit name is provided, fall back to the fullname.
 {{- end }}
 
 {{/*
-Cache and logs ServiceAccount names. The cache and logs servers never
-call the Kubernetes API, so they get their own unbound ServiceAccounts
-instead of sharing the runner's Role.
+Cache ServiceAccount name. The cache server never calls the
+Kubernetes API, so it gets its own unbound ServiceAccount instead of
+sharing the runner's Role.
 */}}
 {{- define "sparkwing-runner-bundle.cacheServiceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
@@ -112,17 +112,9 @@ instead of sharing the runner's Role.
 {{- end }}
 {{- end }}
 
-{{- define "sparkwing-runner-bundle.logsServiceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- include "sparkwing-runner-bundle.logs.fullname" . }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
-{{- end }}
-
 {{/*
 Per-component fully qualified resource names (Deployments,
-Services, PVCs). Component suffix keeps the three workloads
+Services, PVCs). Component suffix keeps the workloads
 distinct under one release.
 */}}
 {{- define "sparkwing-runner-bundle.runner.fullname" -}}
@@ -144,10 +136,6 @@ component names do, so a long release still yields a valid DNS label.
 
 {{- define "sparkwing-runner-bundle.cache.fullname" -}}
 {{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "cache") }}
-{{- end }}
-
-{{- define "sparkwing-runner-bundle.logs.fullname" -}}
-{{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "logs") }}
 {{- end }}
 
 {{/*

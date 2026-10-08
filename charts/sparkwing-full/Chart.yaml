@@ -3,7 +3,7 @@ name: sparkwing-full
 description: |
   Full self-host Helm chart for Sparkwing -- deploys the complete OSS
   stack into a single cluster: sparkwing-controller (orchestrator and
-  dashboard) + the runner-side bundle (runner + cache + logs) via a
+  dashboard) + the runner-side bundle (runner + cache) via a
   sub-chart dependency.
 
   This is the chart referenced in decision 0001 ("Enterprise
@@ -51,7 +51,7 @@ maintainers:
 # The runner-side bundle is a separate chart so it can also be
 # installed standalone (Cloud + self-hosted-runners topology). Here
 # we pull it in as a sub-chart so one release owns the controller,
-# runner, cache, and logs manifests.
+# runner and cache manifests.
 #
 # repository: file://../sparkwing-runner-bundle
 #   Local sibling-directory dependency. After `helm dep up`, the
@@ -65,7 +65,7 @@ maintainers:
 # work from the in-cluster controller.
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.10"
+    version: "0.1.11"
     repository: "file://../sparkwing-runner-bundle"
     # condition lets operators disable the runner side entirely
     # (e.g. they already have runners deployed elsewhere and just

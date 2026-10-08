@@ -154,14 +154,6 @@ controller:
     # larger bucket.
     measurePages: ""
 
-  logs:
-    # The sparkwing-logs service the controller announces to clients
-    # and reads dashboard log panes from. Empty = auto-generate to point
-    # at the bundled sparkwing-runner-bundle's logs Service; if that
-    # sub-chart or its logs component is disabled, the controller
-    # announces no logs service and the dashboard shows no logs.
-    url: ""
-
   cache:
     # Which sparkwing-cache the controller's gitcache proxy forwards
     # to, so off-cluster callers can clone and seed through

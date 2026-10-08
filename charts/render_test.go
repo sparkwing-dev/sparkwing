@@ -1089,11 +1089,6 @@ func TestControllerDatabaseEnvironmentUsesSecret(t *testing.T) {
 	t.Fatal("controller has no SPARKWING_PG_URL secretKeyRef")
 }
 
-func renderLogs(t *testing.T, sets ...string) string {
-	t.Helper()
-	return helmRender(t, "./sparkwing-runner-bundle", "templates/logs-deployment.yaml", "sparkwing", sets...)
-}
-
 func renderCache(t *testing.T, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing", sets...)
@@ -1297,124 +1292,6 @@ func TestFullChartPointsTheRunnerAtItsController(t *testing.T) {
 	}
 }
 
-func TestFullChartLogsWithoutATokenSecretFailsAtRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=",
-		"sparkwing-runner-bundle.cache.allowUnauthenticated=true")
-	for _, want := range []string{"controller.tokenSecret.name", "logs.allowUnauthenticated=true"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("render error does not name %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestFullChartLeavesLogsAuthOffOnlyWhenTheOperatorOptsOut(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderInNamespace(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=",
-		"sparkwing-runner-bundle.cache.allowUnauthenticated=true",
-		"sparkwing-runner-bundle.logs.allowUnauthenticated=true")
-	args := runnerContainer(t, rendered).Args
-	if containsArg(args, "--controller") || containsArg(args, "--require-auth") {
-		t.Errorf("logs args = %v, want an opted-out logs service to carry no auth flags", args)
-	}
-}
-
-func TestFullChartEnablesLogsAuthAgainstItsController(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderInNamespace(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	args := runnerContainer(t, rendered).Args
-	const controllerURL = "http://sparkwing-sparkwing-full-controller.sparkwing.svc.cluster.local"
-	if !containsArg(args, "--controller") || !containsArg(args, controllerURL) {
-		t.Errorf("logs args = %v, want controller-backed auth at %q", args, controllerURL)
-	}
-	if _, exists := runnerEnv(t, rendered)["SPARKWING_API_TOKEN"]; exists {
-		t.Error("logs received an unused service bearer instead of validating the caller's Authorization header")
-	}
-}
-
-func TestLogsControllerURLAloneDoesNotEnableAuth(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, renderLogs(t,
-		"controller.url=https://controller.example.com",
-		"controller.tokenSecret.name=",
-		"cache.allowUnauthenticated=true",
-		"logs.allowUnauthenticated=true")).Args
-	if containsArg(args, "--controller") {
-		t.Errorf("logs args = %v, want auth disabled without a token Secret", args)
-	}
-}
-
-func TestLogsWithoutATokenSecretFailsAtRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
-		"controller.tokenSecret.name=", "cache.allowUnauthenticated=true")
-	for _, want := range []string{"controller.tokenSecret.name", "logs.allowUnauthenticated=true"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("render error does not name %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestLogsRefusesToStartUnauthenticatedByDefault(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	if args := runnerContainer(t, renderLogs(t)).Args; !containsArg(args, "--require-auth") {
-		t.Errorf("logs args = %v, want --require-auth so an open pod crashes instead of serving", args)
-	}
-	args := runnerContainer(t, renderLogs(t,
-		"controller.tokenSecret.name=",
-		"cache.allowUnauthenticated=true",
-		"logs.allowUnauthenticated=true")).Args
-	if containsArg(args, "--require-auth") {
-		t.Errorf("logs args = %v, want no startup guard once the operator opts out", args)
-	}
-}
-
-func TestLogsQuotaFlagsComeFromValues(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	if args := runnerContainer(t, renderLogs(t)).Args; containsArg(args, "--max-node-bytes") {
-		t.Errorf("logs args = %v, want the binary's own defaults when the operator sets no quota", args)
-	}
-	args := runnerContainer(t, renderLogs(t,
-		"logs.limits.maxNodeBytes=1048576",
-		"logs.limits.maxInflightBytes=0",
-		"logs.limits.retention=168h")).Args
-	for flag, want := range map[string]string{
-		"--max-node-bytes":     "1048576",
-		"--max-inflight-bytes": "0",
-		"--retention":          "168h",
-	} {
-		if !containsArg(args, flag) {
-			t.Errorf("logs args = %v, want %s", args, flag)
-			continue
-		}
-		if got := argValue(args, flag); got != want {
-			t.Errorf("%s = %q, want %q", flag, got, want)
-		}
-	}
-	if containsArg(args, "--max-run-bytes") {
-		t.Errorf("logs args = %v, want no flag for a quota the operator left empty", args)
-	}
-}
-
 func argValue(args []string, flag string) string {
 	for i, a := range args {
 		if a == flag && i+1 < len(args) {
@@ -1563,10 +1440,9 @@ func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			logsURL := "http://" + test.fullname + "-logs.default.svc.cluster.local"
-			controller := containerArgs(t, helmTemplate(t, "sparkwing", test.set))
-			if got, _ := hasFlag(controller, "--logs-url="); got != "--logs-url="+logsURL {
-				t.Errorf("controller logs flag = %q, want nested bundle Service %q", got, logsURL)
+			cacheURL := "http://" + test.fullname + "-cache.default.svc.cluster.local"
+			if got := runnerEnv(t, helmTemplate(t, "sparkwing", test.set))["SPARKWING_CACHE_URL"]; got != cacheURL {
+				t.Errorf("controller SPARKWING_CACHE_URL = %q, want nested bundle Service %q", got, cacheURL)
 			}
 		})
 	}
@@ -1584,32 +1460,25 @@ func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testin
 	assertValidUniqueResourceNames(t, resources)
 
 	controllerService := componentResource(t, resources, "Service", "controller").Metadata.Name
-	logsService := componentResource(t, resources, "Service", "logs").Metadata.Name
 	cacheService := componentResource(t, resources, "Service", "cache").Metadata.Name
-	if len(map[string]bool{
-		controllerService: true,
-		logsService:       true,
-		cacheService:      true,
-	}) != 3 {
-		t.Fatalf("component Service names collide: controller=%q logs=%q cache=%q",
-			controllerService, logsService, cacheService)
+	if controllerService == cacheService {
+		t.Fatalf("component Service names collide: controller=%q cache=%q", controllerService, cacheService)
 	}
 
 	serviceURL := func(name string) string {
 		return "http://" + name + "." + namespace + ".svc.cluster.local"
 	}
 	controllerURL := serviceURL(controllerService)
-	logsURL := serviceURL(logsService)
 	cacheURL := serviceURL(cacheService)
 	runnerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "runner")).Args
-	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL, "--gitcache=" + cacheURL} {
+	for _, want := range []string{"--controller=" + controllerURL, "--gitcache=" + cacheURL} {
 		if !containsArg(runnerArgs, want) {
 			t.Errorf("runner args = %v, want %q", runnerArgs, want)
 		}
 	}
-	controllerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "controller")).Args
-	if !containsArg(controllerArgs, "--logs-url="+logsURL) {
-		t.Errorf("controller args = %v, want logs Service URL %q", controllerArgs, logsURL)
+	controller := resourceContainer(t, componentResource(t, resources, "Deployment", "controller"))
+	if got := containerEnv(controller, "SPARKWING_CACHE_URL"); got != cacheURL {
+		t.Errorf("controller SPARKWING_CACHE_URL = %q, want cache Service URL %q", got, cacheURL)
 	}
 }
 
@@ -1671,16 +1540,24 @@ func TestParentURLsMatchMaximumLengthBundleOverrides(t *testing.T) {
 		"sparkwing-runner-bundle.fullnameOverride="+override)
 	resources := renderedResources(t, rendered)
 	assertValidUniqueResourceNames(t, resources)
-	logsService := componentResource(t, resources, "Service", "logs").Metadata.Name
 	cacheService := componentResource(t, resources, "Service", "cache").Metadata.Name
-	if logsService == cacheService || !strings.HasSuffix(logsService, "-logs") || !strings.HasSuffix(cacheService, "-cache") {
-		t.Fatalf("bundle Service names do not preserve suffixes: logs=%q cache=%q", logsService, cacheService)
+	if !strings.HasSuffix(cacheService, "-cache") {
+		t.Fatalf("bundle cache Service name %q does not preserve its suffix", cacheService)
 	}
-	logsURL := "http://" + logsService + "." + namespace + ".svc.cluster.local"
-	controllerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "controller")).Args
-	if !containsArg(controllerArgs, "--logs-url="+logsURL) {
-		t.Errorf("controller args = %v, want logs Service URL %q", controllerArgs, logsURL)
+	cacheURL := "http://" + cacheService + "." + namespace + ".svc.cluster.local"
+	controller := resourceContainer(t, componentResource(t, resources, "Deployment", "controller"))
+	if got := containerEnv(controller, "SPARKWING_CACHE_URL"); got != cacheURL {
+		t.Errorf("controller SPARKWING_CACHE_URL = %q, want cache Service URL %q", got, cacheURL)
 	}
+}
+
+func containerEnv(c renderedContainer, name string) string {
+	for _, e := range c.Env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
 }
 
 func containsArg(args []string, want string) bool {
@@ -1692,31 +1569,46 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
-func TestControllerAnnouncesTheBundledLogsService(t *testing.T) {
+func TestNeitherChartRendersALogsService(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing")
-	args := containerArgs(t, rendered)
-	got, ok := hasFlag(args, "--logs-url=")
-	if !ok {
-		t.Fatalf("no --logs-url flag in %v; a client with no logs surface would post to the controller, which serves none", args)
-	}
-	const want = "--logs-url=http://sparkwing-sparkwing-runner-bundle-logs.default.svc.cluster.local"
-	if got != want {
-		t.Errorf("logs-url flag = %q, want the bundled logs Service", got)
+	for _, chart := range []string{"./sparkwing-full", "./sparkwing-runner-bundle"} {
+		t.Run(strings.TrimPrefix(chart, "./"), func(t *testing.T) {
+			for _, resource := range renderedResources(t, helmRenderAll(t, chart, "sparkwing", "default")) {
+				if resource.Metadata.Labels["app.kubernetes.io/component"] == "logs" {
+					t.Errorf("rendered %s %s for the removed logs service", resource.Kind, resource.Metadata.Name)
+				}
+				for _, c := range resource.Spec.Template.Spec.Containers {
+					if got, ok := hasFlag(c.Args, "--logs"); ok {
+						t.Errorf("%s %s container %s passes %q; node logs go through the controller",
+							resource.Kind, resource.Metadata.Name, c.Name, got)
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestControllerAnnouncesNoLogsServiceWhenNoneIsDeployed(t *testing.T) {
+func TestRemovedLogsValuesFailTheRender(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
 	}
-	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing",
-		"sparkwing-runner-bundle.logs.enabled=false")
-	args := containerArgs(t, rendered)
-	if got, ok := hasFlag(args, "--logs-url="); ok {
-		t.Errorf("got %q, want no flag when no logs service is deployed", got)
+	for _, test := range []struct {
+		chart, set, value string
+	}{
+		{chart: "./sparkwing-runner-bundle", set: "logs.enabled=true", value: "logs was removed"},
+		{chart: "./sparkwing-full", set: "sparkwing-runner-bundle.logs.allowUnauthenticated=true", value: "logs was removed"},
+		{chart: "./sparkwing-full", set: "controller.logs.url=https://logs.example.com", value: "controller.logs was removed"},
+	} {
+		t.Run(test.set, func(t *testing.T) {
+			out := helmRenderError(t, test.chart, "sparkwing", test.set)
+			for _, want := range []string{test.value, "Node logs reach the controller as segments"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("render error lacks %q:\n%s", want, out)
+				}
+			}
+		})
 	}
 }
 
@@ -1749,7 +1641,7 @@ func TestRunnerBundleMountsNoServiceAccountTokens(t *testing.T) {
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
 		"controller.url=http://controller"))
 	accounts := map[string]string{}
-	for _, component := range []string{"runner", "cache", "logs"} {
+	for _, component := range []string{"runner", "cache"} {
 		deployment := componentResource(t, resources, "Deployment", component)
 		pod := deployment.Spec.Template.Spec
 		if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
@@ -1822,7 +1714,7 @@ func TestRunnerBundleCanRemountTheRunnerToken(t *testing.T) {
 		t.Fatalf("runner automountServiceAccountToken = %v, want true; the k8s trigger runner cannot load its in-cluster config without a token",
 			pod.AutomountServiceAccountToken)
 	}
-	for _, component := range []string{"cache", "logs"} {
+	for _, component := range []string{"cache"} {
 		other := componentResource(t, resources, "Deployment", component).Spec.Template.Spec
 		if other.AutomountServiceAccountToken == nil || *other.AutomountServiceAccountToken {
 			t.Errorf("%s pod automounts a ServiceAccount token when only the runner opts in", component)
@@ -1842,7 +1734,7 @@ func TestRunnerBundleRefusesSilentServiceAccountSharing(t *testing.T) {
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
 		"controller.url=http://controller", "serviceAccount.create=false", "serviceAccount.name=my-existing-sa",
 		"serviceAccount.shareAcrossComponents=true"))
-	for _, component := range []string{"runner", "cache", "logs"} {
+	for _, component := range []string{"runner", "cache"} {
 		pod := componentResource(t, resources, "Deployment", component).Spec.Template.Spec
 		if pod.ServiceAccountName != "my-existing-sa" {
 			t.Errorf("%s serviceAccountName = %q, want the operator's pre-created account", component, pod.ServiceAccountName)
@@ -1908,7 +1800,7 @@ func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	rendered := renderCache(t, "controller.tokenSecret.name=",
-		"cache.allowUnauthenticated=true", "logs.allowUnauthenticated=true")
+		"cache.allowUnauthenticated=true")
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want --allow-unauthenticated", args)
 	}
@@ -2233,7 +2125,6 @@ func TestChartsDefaultToARestrictedRuntime(t *testing.T) {
 		{name: "controller", chart: "./sparkwing-full", template: "templates/controller-deployment.yaml"},
 		{name: "runner", chart: "./sparkwing-runner-bundle", template: "templates/runner-deployment.yaml"},
 		{name: "cache", chart: "./sparkwing-runner-bundle", template: "templates/cache-deployment.yaml"},
-		{name: "logs", chart: "./sparkwing-runner-bundle", template: "templates/logs-deployment.yaml"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rendered := helmRender(t, test.chart, test.template, "sparkwing")
@@ -2408,20 +2299,10 @@ func TestRemovedWebValuesFailTheRender(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "web.logs.url=http://logs.example")
-	for _, want := range []string{"web was removed", "controller.logs.url", "The controller serves the dashboard"} {
+	for _, want := range []string{"web was removed", "The controller serves the dashboard"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render error lacks %q:\n%s", want, out)
 		}
-	}
-}
-
-func TestControllerLogsURLOverrideWins(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := containerArgs(t, helmTemplate(t, "sparkwing", "controller.logs.url=https://logs.example.com"))
-	if got, _ := hasFlag(args, "--logs-url="); got != "--logs-url=https://logs.example.com" {
-		t.Errorf("logs-url flag = %q, want the override", got)
 	}
 }
 
@@ -2955,27 +2836,6 @@ func TestCacheUnauthenticatedFlagSurvivesTheLimitsBlock(t *testing.T) {
 		"cache.limits.maxStoreBytes=1024")).Args
 	if !containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want --allow-unauthenticated alongside the size bounds", args)
-	}
-}
-
-func TestLogsStoreCeilingFlagsComeFromValues(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, renderLogs(t,
-		"logs.limits.maxStoreBytes=107374182400",
-		"logs.limits.maxStoreObjects=500000",
-		"logs.limits.warnStoreBytes=85899345920",
-		"logs.limits.storeReconcile=0")).Args
-	for flag, want := range map[string]string{
-		"--max-store-bytes":   "107374182400",
-		"--max-store-objects": "500000",
-		"--warn-store-bytes":  "85899345920",
-		"--store-reconcile":   "0",
-	} {
-		if got := argValue(args, flag); got != want {
-			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, args)
-		}
 	}
 }
 
