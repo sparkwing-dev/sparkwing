@@ -1148,7 +1148,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 91
+const expectedSchemaVersion = 92
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -2265,6 +2265,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyMetricSampleKindMigration(ctx, tx)
 	case 90:
 		return applyNodeOutputMigration(ctx, tx)
+	case 92:
+		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
+		return err
 	case 91:
 		if err := ensureColumnsSQLite(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols); err != nil {
 			return err
@@ -2735,6 +2738,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyMetricSampleKindMigration(ctx, tx)
 	case 90:
 		return applyNodeOutputMigration(ctx, tx)
+	case 92:
+		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
+		return err
 	case 91:
 		if err := addColumnsTx(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols); err != nil {
 			return err

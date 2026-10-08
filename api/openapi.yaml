@@ -7969,6 +7969,45 @@ paths:
         "413": {description: "Past the output or run limit, or past the team's storage share."}
         "429": {description: The team holds too many uncommitted uploads.}
 
+  /api/v1/team/github-app/automation:
+    delete:
+      x-sparkwing-scope: team.admin
+      summary: Revoke repository-managed event triggers.
+      description: A signed-in team owner removes consent for the numeric repository identity. Manual subscriptions remain unchanged.
+      parameters:
+        - in: query
+          name: repository_id
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        "204": {description: Consent removed.}
+        "400": {description: Invalid query or repository identity.}
+        "403": {description: A team-owner session is required.}
+    get:
+      x-sparkwing-scope: runs.read
+      summary: Preview repository declarations or list enabled repositories.
+      description: With repository=owner/name, reads the covered repository's verified default-head YAML and returns source identity, enabled state, status, error and pipeline filters including manual_override. Discovery never changes consent or executes repository code. Without repository, returns the automation list. A ready preview does not verify worker installation.
+      parameters:
+        - in: query
+          name: repository
+          schema: {type: string}
+      responses:
+        "200": {description: "Preview or enabled-repository list. Missing, invalid, unsupported and unavailable configuration have explicit preview statuses."}
+        "400": {description: Invalid query or repository name.}
+        "404": {description: Repository is not covered by a team-held installation.}
+        "502": {description: GitHub coverage lookup failed or was incomplete.}
+    put:
+      x-sparkwing-scope: team.admin
+      summary: Enable repository-managed event triggers.
+      description: A signed-in team owner sends a JSON object containing repository=owner/name. The controller verifies installation coverage and ready default-head declarations before recording repository consent. Manual subscriptions remain authoritative for their pipeline names.
+      responses:
+        "200": {description: Enabled configuration preview.}
+        "400": {description: Invalid body or repository name.}
+        "403": {description: A team-owner session is required.}
+        "404": {description: Repository is not covered by a team-held installation.}
+        "422": {description: "Configuration is missing, invalid, unsupported or unavailable."}
+        "502": {description: GitHub coverage lookup failed or was incomplete.}
+
 components:
   securitySchemes:
     bearerToken:

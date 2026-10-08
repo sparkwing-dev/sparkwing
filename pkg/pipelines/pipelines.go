@@ -292,14 +292,13 @@ func triggersKnownYAMLFields() map[string]struct{} {
 	}
 }
 
-// PushTrigger records intent for GitHub push events. The controller dispatches
-// the pipeline named by the webhook URL without evaluating Branches or Paths.
+// PushTrigger declares GitHub push events for opted-in repository automation.
+// Operator webhooks select their pipeline from the URL instead.
 type PushTrigger struct {
-	// Branches records the intended push branch globs. It does not gate
-	// webhook dispatch.
+	// Branches filters repository automation with Go path.Match globs.
 	Branches []string `yaml:"branches,omitempty"`
-	// Paths records the intended changed-path globs. It does not gate
-	// webhook dispatch.
+	// Paths requires complete changed-file evidence; repository automation
+	// refuses declarations with this filter.
 	Paths []string `yaml:"paths,omitempty"`
 }
 
@@ -320,24 +319,14 @@ func (p *PushTrigger) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// PullRequestTrigger fires on GitHub pull_request events. The
-// controller dispatches on the opened, synchronize, and reopened
-// actions; other actions (labeled, closed, ...) are acknowledged and
-// ignored. The run checks out the PR head commit, and the pipeline
-// reads the base ref, head ref, and PR number from
-// RunContext.Trigger.PullRequest.
-//
-// Actions and Branches are declarative filters that record intent.
-// Like on.push's branches/paths, the controller does not gate on them
-// today (it applies the default action set and dispatches whichever
-// pipeline the webhook URL names). A pipeline branch guard can gate the
-// checked-out branch, but it does not match the pull request's base branch.
+// PullRequestTrigger declares pull request events for repository automation.
+// Filters use the default-branch configuration, while the run checks out the
+// PR head commit. Operator webhooks retain their own event policy.
 type PullRequestTrigger struct {
-	// Actions records the intended pull_request actions. The controller
-	// applies its opened, synchronize, and reopened set independently.
+	// Actions defaults to opened, synchronize, and reopened. Repository
+	// automation also supports closed and ready_for_review.
 	Actions []string `yaml:"actions,omitempty"`
-	// Branches records the intended pull-request base branch globs. It does
-	// not gate webhook dispatch.
+	// Branches filters the pull request's base branch with Go path.Match globs.
 	Branches []string `yaml:"branches,omitempty"`
 }
 

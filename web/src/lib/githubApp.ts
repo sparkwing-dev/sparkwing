@@ -24,6 +24,69 @@ export interface GitHubAppRepository {
   private: boolean;
 }
 
+export interface AutomationPipeline {
+  pipeline: string;
+  push: boolean;
+  branches: string[];
+  pull_request: boolean;
+  actions: string[];
+  base_branches: string[];
+  manual_override: boolean;
+}
+
+export interface AutomationPreview {
+  repository: string;
+  repository_id: number;
+  installation_id: number;
+  enabled: boolean;
+  default_branch: string;
+  source_sha: string;
+  status: "ready" | "missing" | "invalid" | "unsupported" | "unavailable";
+  error?: string;
+  pipelines: AutomationPipeline[];
+}
+
+export interface RunnerBinding {
+  repository: string;
+  repository_id: number;
+  repository_owner_id: number;
+}
+
+export interface RunnerBindings {
+  bindings: RunnerBinding[];
+  workflow: string;
+}
+
+export async function previewAutomation(repository: string): Promise<AutomationPreview> {
+  const query = new URLSearchParams({ repository });
+  const res = await send("GET", `/api/v1/team/github-app/automation?${query}`, "Read repository declarations");
+  return await res.json() as AutomationPreview;
+}
+
+export async function enableAutomation(repository: string): Promise<AutomationPreview> {
+  const res = await send("PUT", "/api/v1/team/github-app/automation", "Enable repository automation", { repository });
+  return await res.json() as AutomationPreview;
+}
+
+export async function disableAutomation(repositoryID: number): Promise<void> {
+  await send("DELETE", `/api/v1/team/github-app/automation?repository_id=${repositoryID}`, "Disable repository automation");
+}
+
+export async function getRunnerBindings(): Promise<RunnerBindings> {
+  const res = await send("GET", "/api/v1/team/github-runners", "Read GitHub Actions permissions");
+  const body = await res.json() as Partial<RunnerBindings>;
+  return { bindings: body.bindings ?? [], workflow: body.workflow ?? "" };
+}
+
+export async function enableGitHubRunner(repository: string): Promise<RunnerBindings> {
+  const res = await send("POST", "/api/v1/team/github-runners", "Allow GitHub Actions execution", { repository });
+  return await res.json() as RunnerBindings;
+}
+
+export async function disableGitHubRunner(repositoryID: number): Promise<void> {
+  await send("DELETE", `/api/v1/team/github-runners/${repositoryID}`, "Revoke GitHub Actions execution");
+}
+
 export interface GitHubAppSubscription {
   repository: string;
   repository_id: number;

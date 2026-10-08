@@ -1094,6 +1094,14 @@ type GitCredentialRelease struct {
 	Claimant ClaimIdentity
 }
 const GitCredentialSSH = "ssh"
+type GitHubAppAutomation struct {
+	RepositoryID   int64
+	Repository     string
+	InstallationID int64
+	Enabled        bool
+	EnabledBy      string
+	EnabledAt      time.Time
+}
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 type GitHubAppInstallation struct {
 	Team           Team
@@ -2688,6 +2696,7 @@ func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCredit
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error
+func (t *Tenant) DeleteGitHubAppAutomation(ctx context.Context, repository int64) error
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
@@ -2715,6 +2724,8 @@ func (t *Tenant) GitCredentialMachine(ctx context.Context, prefix string) (bool,
 func (t *Tenant) GitCredentialMachines(ctx context.Context) (_ map[string]bool, err error)
 func (t *Tenant) GitCredentialReleases(ctx context.Context, limit int) (_ []GitCredentialRelease, err error)
 func (t *Tenant) GitCredentials(ctx context.Context) (_ []GitCredential, err error)
+func (t *Tenant) GitHubAppAutomation(ctx context.Context, installation, repository int64) (GitHubAppAutomation, error)
+func (t *Tenant) GitHubAppAutomations(ctx context.Context) (_ []GitHubAppAutomation, err error)
 func (t *Tenant) GitHubAppExtraRepoRefs(ctx context.Context, repository string) (_ []GitHubRepo, err error)
 func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repository string) (_ []string, err error)
 func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) (GitHubAppInstallation, error)
@@ -2763,6 +2774,7 @@ func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
+func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
 func (t *Tenant) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
@@ -2780,6 +2792,7 @@ func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string,
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
+func (t *Tenant) RenameGitHubAppAutomation(ctx context.Context, installation, repository int64, name string) error
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error
 func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
@@ -2815,6 +2828,7 @@ func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error
 func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
+func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
 func TierQuota(tier string) (StorageQuota, bool)

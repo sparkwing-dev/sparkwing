@@ -72,7 +72,39 @@ An installation stops being bound when GitHub reports it deleted, when a team ow
 
 ## Runs from GitHub events
 
-A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block. Each additional option defaults to `false`:
+### Repository-managed triggers
+
+In **Team → GitHub**, select a connected repository, review its declared pipelines,
+and choose **Enable declarations**. Connecting an installation alone does not enable
+repository automation. The controller reads `.sparkwing/sparkwing.yaml` at the
+verified default-branch head without compiling or executing repository Go code.
+Subsequent signed deliveries use those declarations; execution stays pinned to the
+event's commit. Feature-branch and PR-head configuration cannot authorize a run.
+
+`GET /api/v1/team/github-app/automation?repository=owner/name` previews the
+configuration, source SHA, default branch, consent state and pipeline filters.
+An owner enables it with `PUT /api/v1/team/github-app/automation {repository}`
+and revokes it with `DELETE /api/v1/team/github-app/automation?repository_id=<id>`.
+GET without a repository lists enabled repositories. Discovery is read-only.
+
+Supported declarations are `on.push.branches` and
+`on.pull_request.actions`/`branches` (the PR base branch). Empty branch filters
+match all branches. Empty PR actions select `opened`, `synchronize` and `reopened`;
+`closed` and `ready_for_review` are also supported. Patterns use Go `path.Match`:
+`*` does not cross `/`. Recursive `**`, negative patterns, changed-path filters
+and unsupported PR actions produce an explicit unsupported status instead of
+broader execution. Other event types remain configured through manual subscriptions.
+
+Missing, invalid, unsupported or unreadable configuration starts no automatic
+runs. The preview explains the problem; refresh discovery after fixing it.
+Temporary discovery failures preserve saved consent. Removing repository access or
+disconnecting its installation revokes consent; reconnecting requires enabling it
+again. Existing manual subscriptions take precedence for their pipeline name,
+including events their filters exclude. The preview marks these manual overrides.
+
+### Manual subscriptions
+
+The **Advanced** section retains explicit subscriptions. A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, as with `POST /webhooks/github/{pipeline}`. Each additional option defaults to `false`:
 
 | Option | Event |
 | --- | --- |

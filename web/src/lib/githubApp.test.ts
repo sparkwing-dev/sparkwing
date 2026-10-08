@@ -86,6 +86,34 @@ describe("githubAppEnabled", () => {
 });
 
 describe("GitHub App calls", () => {
+  it("previews declarations without enabling and encodes repository names", async () => {
+    respond = () => json({ repository: "acme/widgets", enabled: false, status: "ready", pipelines: [] });
+    const preview = await lib.previewAutomation("acme/widgets");
+    assert.equal(preview.enabled, false);
+    assert.equal(calls[0].url, "/api/v1/team/github-app/automation?repository=acme%2Fwidgets");
+    assert.equal(calls[0].method, "GET");
+  });
+
+  it("saves declaration consent and revokes by repository identity", async () => {
+    respond = () => json({ enabled: true });
+    await lib.enableAutomation("acme/widgets");
+    assert.equal(calls[0].method, "PUT");
+    assert.deepEqual(JSON.parse(calls[0].body), { repository: "acme/widgets" });
+    await lib.disableAutomation(9);
+    assert.equal(calls[1].url, "/api/v1/team/github-app/automation?repository_id=9");
+    assert.equal(calls[1].method, "DELETE");
+  });
+
+  it("binds Actions by repository name and preserves the server workflow", async () => {
+    respond = () => json({ bindings: [{ repository: "acme/widgets", repository_id: 9 }], workflow: "--team canonical-slug" });
+    const result = await lib.enableGitHubRunner("acme/widgets");
+    assert.deepEqual(JSON.parse(calls[0].body), { repository: "acme/widgets" });
+    assert.equal(result.workflow, "--team canonical-slug");
+    assert.equal(calls[0].method, "POST");
+    await lib.disableGitHubRunner(9);
+    assert.equal(calls[1].url, "/api/v1/team/github-runners/9");
+    assert.equal(calls[1].method, "DELETE");
+  });
   it("reads the team's App and installations", async () => {
     respond = () => json({ slug: "sparkwing", installations: [installation] });
     const app = await lib.getGitHubApp();

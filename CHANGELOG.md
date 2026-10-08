@@ -22,6 +22,12 @@ unlock.
 
 ### Added
 
+- **controller + web:** Team → GitHub previews repository-declared push and pull request pipelines, with separate owner consent for automatic triggers and GitHub Actions workers
+  The controller reads `.sparkwing/sparkwing.yaml` at the verified default-branch head without executing repository code. Existing manual subscriptions keep precedence. Runner setup resolves GitHub repository and owner identities server-side and supplies a workflow using the team's canonical slug.
+
+- **store:** Schema v92 records repository automation consent
+  Consent is scoped to the team, repository and installation. Revocation, suspension and disconnection prevent delayed automatic dispatch; revoking and enabling again does not authorize an earlier plan.
+
 - **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
   It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
 

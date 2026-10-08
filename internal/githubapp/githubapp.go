@@ -239,9 +239,10 @@ type Installation struct {
 
 // Repository is a repository an installation covers.
 type Repository struct {
-	ID       int64  `json:"id"`
-	FullName string `json:"full_name"`
-	Private  bool   `json:"private"`
+	ID       int64   `json:"id"`
+	FullName string  `json:"full_name"`
+	Private  bool    `json:"private"`
+	Owner    Account `json:"owner"`
 }
 
 // Token is an installation access token.

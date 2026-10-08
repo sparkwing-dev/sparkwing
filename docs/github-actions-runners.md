@@ -26,6 +26,26 @@ The workflow stores no secret. The job requests an ID token with `permissions: i
 
 ## Set up a repository
 
+In **Team → GitHub**, select a repository covered by a connected installation and
+choose **Allow GitHub Actions** as a team owner. The controller resolves the
+repository and owner IDs through GitHub, then returns a workflow with the
+controller URL and canonical team slug filled in. Copy or download the workflow
+and commit it as `.github/workflows/sparkwing.yaml`.
+
+This grants worker permission separately from **Enable declarations**, which
+controls repository-managed triggers. A saved binding does not prove the workflow
+is installed or a worker has run. Other team runners retain their placement policy.
+
+The equivalent owner-session request is:
+
+```bash
+curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
+  -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
+  -d '{"repository":"acme/widgets"}'
+```
+
+When the controller has no GitHub App configured, supply both numeric IDs:
+
 1. Look up the ids:
 
    ```bash

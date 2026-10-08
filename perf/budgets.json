@@ -28,6 +28,17 @@
   },
   "routes": [
     {
+      "route": "/api/v1/team/github-app/automation",
+      "kind": "api",
+      "exempt": "GET preview reads third-party GitHub state; PUT and DELETE change consent. Probing writes would measure rejection rather than the authorized operation. List-only latency is unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/team/github",
+      "kind": "page",
+      "baselines": {}
+    },
+    {
       "route": "/",
       "kind": "page",
       "baselines": {

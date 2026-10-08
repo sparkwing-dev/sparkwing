@@ -224,6 +224,9 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/team/git-credentials/{host}` | `team.admin` |
 | `POST` | `/api/v1/team/git-credentials/{host}/confirm` | `team.admin` |
 | `GET` | `/api/v1/team/github-app` | `runs.read` |
+| `DELETE` | `/api/v1/team/github-app/automation` | `team.admin` |
+| `GET` | `/api/v1/team/github-app/automation` | `runs.read` |
+| `PUT` | `/api/v1/team/github-app/automation` | `team.admin` |
 | `POST` | `/api/v1/team/github-app/connect` | `team.admin` |
 | `POST` | `/api/v1/team/github-app/connect/available` | `team.admin` |
 | `POST` | `/api/v1/team/github-app/connect/complete` | `team.admin` |

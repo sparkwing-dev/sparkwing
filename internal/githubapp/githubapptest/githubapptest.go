@@ -36,6 +36,7 @@ const WebhookSecret = "fake-app-webhook-secret"
 
 // Repo is a repository an installation covers.
 type Repo struct {
+	Owner         githubapp.Account
 	ID            int64
 	FullName      string
 	Private       bool
@@ -640,7 +641,11 @@ func (g *GitHub) handleInstallationRepos(w http.ResponseWriter, r *http.Request)
 	}
 	repos := []map[string]any{}
 	for _, repo := range inst.Repos[min((page-1)*perPage, len(inst.Repos)):min(page*perPage, len(inst.Repos))] {
-		repos = append(repos, map[string]any{"id": repo.ID, "full_name": repo.FullName, "private": repo.Private})
+		owner := repo.Owner
+		if owner.ID == 0 && owner.Login == "" {
+			owner = inst.Account
+		}
+		repos = append(repos, map[string]any{"id": repo.ID, "full_name": repo.FullName, "private": repo.Private, "owner": owner})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(inst.Repos), "repositories": repos})
 }

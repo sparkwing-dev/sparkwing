@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import TeamShell, { Panel, errorText, quietButtonClass } from "@/components/TeamShell";
 import Tooltip from "@/components/Tooltip";
 import { ExtraReposPanel } from "@/components/GitHubAppExtraRepos";
+import GitHubOnboarding from "@/components/GitHubOnboarding";
 import {
   ConnectGitHubForm,
   InstallationRow,
@@ -229,8 +230,11 @@ function ConnectedGitHub({ me }: { me: Me }) {
           </ul>
         )}
       </Panel>
+      {installations.length > 0 && <GitHubOnboarding repositories={choices} canManage={canManage} teamSlug={me.active_team.slug} />}
+      <details className="mb-4">
+      <summary className="cursor-pointer py-3 text-sm">Advanced: manual subscriptions</summary>
       <Panel
-        title="Runs from GitHub"
+        title="Manual subscriptions"
         action={
           <Tooltip content={runsInfo}>
             <button
@@ -278,6 +282,7 @@ function ConnectedGitHub({ me }: { me: Me }) {
           />
         </Panel>
       ) : null}
+      </details>
       {installations.length > 0 ? (
         <ExtraReposPanel repositories={choices} canManage={canManage} />
       ) : null}
