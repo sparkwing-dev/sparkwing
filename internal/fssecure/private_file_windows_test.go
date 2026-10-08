@@ -3,6 +3,7 @@
 package fssecure
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -144,9 +145,15 @@ func TestOpenFileWindowsOwnsFilesUnderAdministratorsDefaultOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = token.Close() }()
-	buffer := make([]byte, 256)
 	var size uint32
-	if err := windows.GetTokenInformation(token, windows.TokenOwner, &buffer[0], uint32(len(buffer)), &size); err != nil {
+	if err := windows.GetTokenInformation(token, windows.TokenOwner, nil, 0, &size); !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+		t.Fatalf("size the token owner: %v", err)
+	}
+	// safety: TOKEN_OWNER starts with a pointer, which the kernel refuses to write
+	// to a byte buffer that is not pointer aligned.
+	word := unsafe.Sizeof(uintptr(0))
+	buffer := make([]uintptr, (uintptr(size)+word-1)/word)
+	if err := windows.GetTokenInformation(token, windows.TokenOwner, (*byte)(unsafe.Pointer(&buffer[0])), size, &size); err != nil {
 		t.Fatal(err)
 	}
 	previous, err := (*struct{ Owner *windows.SID })(unsafe.Pointer(&buffer[0])).Owner.Copy()
