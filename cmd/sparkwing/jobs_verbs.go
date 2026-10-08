@@ -61,27 +61,64 @@ func collectLocalFailures(
 	}
 	defer func() { _ = st.Close() }()
 
-	runs, err := st.ListRuns(ctx, filter)
+	standalone := orchestrator.OpenStandaloneStores(ctx, paths)
+	defer func() { _ = standalone.Close() }()
+	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, error) {
+		runs, err := st.ListRuns(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+		return orchestrator.MergeTaggedRuns(append(orchestrator.TagShared(runs), standalone.ListRuns(ctx, f)...)), nil
+	}
+	var rows []failureRow
+	err = walkRunPages(filter, limit, fetch, keep, func(r orchestrator.TaggedRun) {
+		rows = append(rows, failureRowFor(ctx, standalone, st, r))
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	merged := orchestrator.TagShared(runs)
-
-	standalone := orchestrator.OpenStandaloneStores(ctx, paths)
-	defer func() { _ = standalone.Close() }()
-	merged = orchestrator.MergeTaggedRuns(append(merged, standalone.ListRuns(ctx, filter)...))
-
-	rows := make([]failureRow, 0, len(merged))
-	for _, r := range merged {
-		if limit > 0 && len(rows) == limit {
-			break
-		}
-		if !keep(r.Run) {
-			continue
-		}
-		rows = append(rows, failureRowFor(ctx, standalone, st, r))
-	}
 	return rows, standalone.Notes(), nil
+}
+
+// safety: a client-side filter can reject a whole page, so the walk follows
+// the store cursor until limit rows are kept or a page comes back empty;
+// stopping after one page would hide older matches from every --limit.
+func walkRunPages(
+	filter store.RunFilter,
+	limit int,
+	fetch func(store.RunFilter) ([]orchestrator.TaggedRun, error),
+	keep func(*store.Run) bool,
+	emit func(orchestrator.TaggedRun),
+) error {
+	kept := 0
+	for {
+		page, err := fetch(filter)
+		if err != nil {
+			return err
+		}
+		if filter.Limit > 0 && len(page) > filter.Limit {
+			page = page[:filter.Limit]
+		}
+		if len(page) == 0 {
+			return nil
+		}
+		for _, r := range page {
+			if !keep(r.Run) {
+				continue
+			}
+			emit(r)
+			kept++
+			if limit > 0 && kept == limit {
+				return nil
+			}
+		}
+		last := page[len(page)-1]
+		filter.AfterID = last.ID
+		filter.AfterStartedAt = 0
+		if !last.StartedAt.IsZero() {
+			filter.AfterStartedAt = last.StartedAt.UnixNano()
+		}
+	}
 }
 
 func failureRowFor(
@@ -118,18 +155,16 @@ func failureRowFor(
 
 func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter, limit int, keep func(*store.Run) bool) ([]failureRow, error) {
 	c := client.NewWithToken(controllerURL, nil, token)
-	runs, err := c.ListRuns(ctx, filter)
-	if err != nil {
-		return nil, err
+	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, error) {
+		runs, err := c.ListRuns(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+		return orchestrator.TagShared(runs), nil
 	}
-	rows := make([]failureRow, 0, len(runs))
-	for _, r := range runs {
-		if limit > 0 && len(rows) == limit {
-			break
-		}
-		if !keep(r) {
-			continue
-		}
+	var rows []failureRow
+	err := walkRunPages(filter, limit, fetch, keep, func(tagged orchestrator.TaggedRun) {
+		r := tagged.Run
 		row := failureRow{
 			ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status,
 			Store: orchestrator.SharedStoreLabel,
@@ -148,6 +183,9 @@ func collectRemoteFailures(ctx context.Context, controllerURL, token string, fil
 			row.Message = truncateOneLine(r.Error, 160)
 		}
 		rows = append(rows, row)
+	})
+	if err != nil {
+		return nil, err
 	}
 	return rows, nil
 }

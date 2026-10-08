@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -200,5 +201,32 @@ func TestRunsListGroupByKeepsTheStoresNormalizedSHAMatch(t *testing.T) {
 	})
 	if !strings.Contains(out, "run-sha") {
 		t.Fatalf("failures = %q, want the run the store matched on its trimmed SHA prefix", out)
+	}
+}
+
+func TestWalkRunPagesFindsAMatchBehindFullPagesOfMisses(t *testing.T) {
+	base := time.Now().Add(-time.Hour)
+	var seeded []store.Run
+	for i := 0; i < 7; i++ {
+		seeded = append(seeded, store.Run{ID: fmt.Sprintf("run-%d", i), Pipeline: "build", Status: "failed", StartedAt: base.Add(time.Duration(i) * time.Minute)})
+	}
+	paths := runsFoldHome(t, seeded...)
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, error) {
+		runs, err := st.ListRuns(context.Background(), f)
+		return orchestrator.TagShared(runs), err
+	}
+	var got []string
+	keep := func(r *store.Run) bool { return r.ID == "run-0" || r.ID == "run-1" }
+	err = walkRunPages(store.RunFilter{Limit: 2}, 5, fetch, keep, func(r orchestrator.TaggedRun) { got = append(got, r.ID) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "run-1,run-0" {
+		t.Fatalf("walk kept %v, want the two oldest runs found behind pages of misses", got)
 	}
 }
