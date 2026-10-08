@@ -2,12 +2,13 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,14 +22,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-var heartbeatSeen = make(chan struct{})
+// safety: keyed by run ID, so a repeated test run waits on its own heartbeat.
+var heartbeatSeen sync.Map
 
 type awaitHeartbeatPipe struct{ sparkwing.Base }
 
 func (awaitHeartbeatPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	seen, _ := heartbeatSeen.Load(rc.RunID)
 	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error {
+		ch, ok := seen.(chan struct{})
+		if !ok {
+			return errors.New("no heartbeat channel for this run")
+		}
 		select {
-		case <-heartbeatSeen:
+		case <-ch:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -50,18 +57,22 @@ func TestExecuteClaimedTriggerHeartbeatsWhenAsked(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctrl := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	id := fmt.Sprintf("await-heartbeat-%d", time.Now().UnixNano())
+	seen := make(chan struct{})
+	heartbeatSeen.Store(id, seen)
+	t.Cleanup(func() { heartbeatSeen.Delete(id) })
 	var beats atomic.Int64
 	var once sync.Once
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat") && strings.HasPrefix(r.URL.Path, "/api/v1/triggers/") {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/"+id+"/heartbeat" {
 			beats.Add(1)
-			once.Do(func() { close(heartbeatSeen) })
+			once.Do(func() { close(seen) })
 		}
 		ctrl.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	cli := client.New(srv.URL, nil)
-	if err := st.CreateTrigger(t.Context(), store.Trigger{ID: "await-heartbeat-run", Pipeline: "await-heartbeat", CreatedAt: time.Now()}); err != nil {
+	if err := st.CreateTrigger(t.Context(), store.Trigger{ID: id, Pipeline: "await-heartbeat", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	trig, err := st.ClaimNextTrigger(t.Context(), 0)
