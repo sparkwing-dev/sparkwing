@@ -217,6 +217,8 @@ Set by Sparkwing for pipeline code and node processes.
 |---|---|
 | `SPARKWING_TESTLEAK_HOST` | Marks the re-executed test binary in `internal/testleak`; it crosses exec, so it cannot be a flag. |
 | `SPARKWING_TEST_PG_URL` | Points the store test suite at a PostgreSQL database. |
+| `SPARKWING_TEST_SHELL_BASH` | Names the Git Bash that runs a Windows test's fake `#!/bin/sh` tool; it crosses exec into the stand-in executable, so it cannot be a flag. |
+| `SPARKWING_TEST_SHELL_EXE` | Marks the test binary `internal/testshell` re-executes as a Windows test's fake tool; it crosses exec, so it cannot be a flag. |
 | `SPARKWING_TEST_STORE` | Selects the store backend the store test suite runs against. |
 
 ## Other tools
