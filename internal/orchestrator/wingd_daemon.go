@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -213,11 +214,17 @@ const TypeSafeAPIKeySecret = "TYPESAFE_API_KEY"
 // safety: jev admits without an advisor when it has no key, so a missing or
 // unreadable secret is logged and the daemon still serves.
 func readTypeSafeAPIKey(stateDB string, logf func(string, ...any)) string {
-	value, _, err := localsecrets.StoreSource(stateDB, "").Read(TypeSafeAPIKeySecret)
+	return typeSafeAPIKeyFrom(localsecrets.StoreSource(stateDB, ""), logf)
+}
+
+// safety: a key stored from a file usually ends in a newline, which is not
+// valid in the Authorization header it goes into.
+func typeSafeAPIKeyFrom(src secrets.Source, logf func(string, ...any)) string {
+	value, _, err := src.Read(TypeSafeAPIKeySecret)
 	if err != nil {
 		logf("jev admission needs the %s secret (sparkwing secrets set --name %s --file <path>): %v",
 			TypeSafeAPIKeySecret, TypeSafeAPIKeySecret, err)
 		return ""
 	}
-	return value
+	return strings.TrimSpace(value)
 }
