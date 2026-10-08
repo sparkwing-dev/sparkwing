@@ -177,3 +177,45 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+type ptfSliceInputs struct {
+	Envs []string `flag:"envs" enum:"dev,prod" default:"dev"`
+}
+
+type ptfRegionArgs struct {
+	Regions []string `flag:"regions" enum:"east,west" default:"east"`
+}
+
+type ptfRegionJob struct {
+	sparkwing.Base
+	sparkwing.WithArgs[ptfRegionArgs]
+}
+
+func (j *ptfRegionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", func(context.Context) error { return nil }), nil
+}
+
+type ptfSlicePipe struct{}
+
+func (ptfSlicePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ ptfSliceInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "deploy", &ptfRegionJob{})
+	return nil
+}
+
+func TestParseTypedFlags_SliceEnumChecksEachElement(t *testing.T) {
+	sparkwing.Register[ptfSliceInputs]("ptf-slice-enum", func() sparkwing.Pipeline[ptfSliceInputs] {
+		return ptfSlicePipe{}
+	})
+	out, err := parseTypedFlags("ptf-slice-enum", []string{"--envs", "dev,prod", "--regions", "east,west"})
+	if err != nil {
+		t.Fatalf("valid elements rejected: %v", err)
+	}
+	if out["envs"] != "dev,prod" || out["regions"] != "east,west" {
+		t.Errorf("parsed = %v", out)
+	}
+	for _, args := range [][]string{{"--envs", "dev,qa"}, {"--regions", "east,north"}} {
+		if _, err := parseTypedFlags("ptf-slice-enum", args); err == nil || !contains(err.Error(), "must be one of") {
+			t.Errorf("%v: err = %v, want an enum violation", args, err)
+		}
+	}
+}

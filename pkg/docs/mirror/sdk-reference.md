@@ -391,6 +391,7 @@ type DescribeArg struct {
 }
 ```
 
+- `func (a DescribeArg) CheckEnum(raw string) error` -- CheckEnum reports whether raw is allowed by the arg's enum, checking each comma-separated element of a []string arg.
 
 ### type DescribePipeline
 

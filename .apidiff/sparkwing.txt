@@ -126,6 +126,7 @@ type DescribeArg struct {
 
 	JobID string
 }
+func (a DescribeArg) CheckEnum(raw string) error
 type DescribePipeline struct {
 	Name     string
 	Short    string
