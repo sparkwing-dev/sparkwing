@@ -57,12 +57,12 @@ Reach the dashboard:
 Controller in-cluster URL (for runners / external clients in the same cluster):
   {{ include "sparkwing-full.controller.serviceURL" . }}
 
-{{- if not .Values.controller.secretsKey.name }}
+{{- if not (include "sparkwing-full.controller.hasSecretsKey" .) }}
 {{- if .Values.controller.databaseSecret.name }}
 
 NOTE: controller.secretsKey.name is empty, so this PostgreSQL controller
-refuses to store secrets until it has a key (unless controller.credentialsSecret
-holds a secrets-key). It has stored none yet, so a new key is safe:
+refuses to store secrets until it has a key. It has stored none yet, so a new
+key is safe:
 
   (umask 077 && openssl rand -base64 32 > /tmp/sparkwing-key)
   kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
@@ -72,13 +72,12 @@ holds a secrets-key). It has stored none yet, so a new key is safe:
 {{- else }}
 
 NOTE: controller.secretsKey.name is empty, so on its first secret write this
-SQLite controller generates its own key at /data/secrets.key (unless
-controller.credentialsSecret holds a secrets-key). Every stored secret is
-sealed under that key; a different key cannot open them and the controller
-refuses to start. Back it up once a secret exists:
+SQLite controller generates its own key at /data/secrets.key. Every stored
+secret is sealed under that key; a different key cannot open them and the
+controller refuses to start. Back it up, owner-only, once a secret exists:
 
-  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
-    cat /data/secrets.key > sparkwing-secrets.key
+  (umask 077 && kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
+    cat /data/secrets.key > sparkwing-secrets.key)
 {{- if eq .Values.controller.storage.type "emptyDir" }}
 
   controller.storage.type is emptyDir, so the key and the state DB both go

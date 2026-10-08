@@ -186,6 +186,10 @@ controller:
     # first admin token arrives through the bundle rather than through
     # bootstrapAdminToken below. Bool only.
     holdsBootstrapAdminToken: false
+    # Set true when that Secret has a secrets-key key, so the chart counts
+    # it as the current secrets key, the way it counts secretsKey below.
+    # Bool only.
+    holdsSecretsKey: false
 
   # Secrets-store encryption key, mounted as the secrets-key credential.
   # Without it a SQLite controller creates its own key beside state.db on

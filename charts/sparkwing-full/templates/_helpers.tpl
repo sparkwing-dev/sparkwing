@@ -237,3 +237,14 @@ bootstrapAdminToken or as a key of credentialsSecret; empty otherwise.
 true
 {{- end -}}
 {{- end -}}
+
+{{/*
+"true" when the controller receives a current secrets key, either through
+secretsKey or as a key of credentialsSecret; empty otherwise.
+*/}}
+{{- define "sparkwing-full.controller.hasSecretsKey" -}}
+{{- $c := .Values.controller -}}
+{{- if or $c.secretsKey.name (and $c.credentialsSecret.name (eq $c.credentialsSecret.holdsSecretsKey true)) -}}
+true
+{{- end -}}
+{{- end -}}

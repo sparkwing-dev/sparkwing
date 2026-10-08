@@ -22,8 +22,14 @@
 {{- if and .Values.controller.secretsPreviousKey.name (not .Values.controller.secretsPreviousKey.key) -}}
 {{- fail "sparkwing-full: controller.secretsPreviousKey.key is required when controller.secretsPreviousKey.name is set" -}}
 {{- end -}}
-{{- if and .Values.controller.secretsPreviousKey.name (not .Values.controller.secretsKey.name) -}}
-{{- fail "sparkwing-full: controller.secretsPreviousKey.name without controller.secretsKey.name gives the controller a key to read old values with and none to write new ones under, which it refuses to start on. Set controller.secretsKey.name to the key values are sealed under now" -}}
+{{- if not (kindIs "bool" .Values.controller.credentialsSecret.holdsSecretsKey) -}}
+{{- fail "sparkwing-full: controller.credentialsSecret.holdsSecretsKey must be a bool" -}}
+{{- end -}}
+{{- if and .Values.controller.credentialsSecret.holdsSecretsKey (not .Values.controller.credentialsSecret.name) -}}
+{{- fail "sparkwing-full: controller.credentialsSecret.holdsSecretsKey=true needs controller.credentialsSecret.name, the Secret holding the secrets-key key" -}}
+{{- end -}}
+{{- if and .Values.controller.secretsPreviousKey.name (not (include "sparkwing-full.controller.hasSecretsKey" .)) -}}
+{{- fail "sparkwing-full: controller.secretsPreviousKey.name without a current key gives the controller a key to read old values with and none to write new ones under, which it refuses to start on. Set controller.secretsKey.name to the key values are sealed under now, or put it in controller.credentialsSecret as secrets-key and set controller.credentialsSecret.holdsSecretsKey=true" -}}
 {{- end -}}
 {{- if and .Values.controller.bootstrapAdminToken.name (not .Values.controller.bootstrapAdminToken.key) -}}
 {{- fail "sparkwing-full: controller.bootstrapAdminToken.key is required when controller.bootstrapAdminToken.name is set" -}}

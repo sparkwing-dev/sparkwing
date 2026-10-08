@@ -239,6 +239,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.storageClassName` | Override default StorageClass. | `""` |
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
 | `controller.credentialsSecret.name` | Secret whose keys are [credential file names](../../docs/self-hosting.md#controller-credentials) (`license`, `oidc-key`, `github-app-key`, and the rest), projected whole into the controller's `--credentials-dir`. | `""` |
+| `controller.credentialsSecret.holdsSecretsKey` | Set `true` when that Secret has a `secrets-key` key, so it counts as the current key beside `secretsPreviousKey`. Bool only. | `false` |
 | `controller.credentialsSecret.holdsBootstrapAdminToken` | Set `true` when that Secret has a `bootstrap-admin-token` key, so `requireAuth` accepts it in place of `bootstrapAdminToken`; helm cannot read a Secret's keys. Bool only. | `false` |
 | `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN, mounted as the `pg-url` credential. Empty keeps SQLite. | `""` |
 | `controller.databaseSecret.key` | Key holding the PostgreSQL DSN. | `dsn` |

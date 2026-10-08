@@ -1134,6 +1134,23 @@ func TestControllerBootstrapTokenInTheCredentialsBundleSatisfiesRequireAuth(t *t
 	}
 }
 
+func TestControllerPreviousKeyAcceptsABundledCurrentKey(t *testing.T) {
+	renderController(t,
+		"controller.credentialsSecret.name=sparkwing-credentials",
+		"controller.credentialsSecret.holdsSecretsKey=true",
+		"controller.secretsPreviousKey.name=sparkwing-old-key")
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.credentialsSecret.name=sparkwing-credentials",
+		"controller.secretsPreviousKey.name=sparkwing-old-key")
+	if !strings.Contains(out, "holdsSecretsKey") {
+		t.Fatalf("previous key without a current one = %s, want a refusal naming holdsSecretsKey", out)
+	}
+	out = helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.credentialsSecret.holdsSecretsKey=true")
+	if !strings.Contains(out, "needs controller.credentialsSecret.name") {
+		t.Fatalf("holdsSecretsKey without a Secret = %s, want a refusal", out)
+	}
+}
+
 func renderNotes(t *testing.T, sets ...string) string {
 	t.Helper()
 	helm, err := exec.LookPath("helm")
@@ -1158,7 +1175,7 @@ func renderNotes(t *testing.T, sets ...string) string {
 // secret is sealed under it.
 func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	notes := renderNotes(t)
-	for _, want := range []string{"/data/secrets.key", "never from a\nnew key", "secretsPreviousKey"} {
+	for _, want := range []string{"/data/secrets.key", "never from a\nnew key", "secretsPreviousKey", "(umask 077 && kubectl"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("SQLite notes lack %q:\n%s", want, notes)
 		}
@@ -1172,6 +1189,9 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	}
 	if notes := renderNotes(t, "controller.secretsKey.name=sparkwing-secrets-key"); strings.Contains(notes, "secretsKey.name is empty") {
 		t.Errorf("notes with a key still warn about a missing one:\n%s", notes)
+	}
+	if notes := renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.credentialsSecret.holdsSecretsKey=true"); strings.Contains(notes, "secretsKey.name is empty") {
+		t.Errorf("notes with a bundled key still warn about a missing one:\n%s", notes)
 	}
 }
 
