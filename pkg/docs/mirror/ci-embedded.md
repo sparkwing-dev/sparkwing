@@ -43,9 +43,8 @@ jobs:
 ```
 
 State, cache, and logs destinations come from the resolved profile in
-`~/.config/sparkwing/config.yaml`. Select one with `--profile NAME`
-(or set `defaults.profile` in `.sparkwing/sparkwing.yaml`); there is no
-environment-based auto-selection. See
+`~/.config/sparkwing/config.yaml`. Select one with `--profile NAME`;
+neither the environment nor a project default selects one. See
 [storage backends](backends.md) for the configuration shape.
 
 A pipeline node that fails fails the GHA job (exit code propagates).
@@ -55,7 +54,7 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 1. `--sw-mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
    via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
 2. The orchestrator resolves state, cache, and logs from the active
-   profile (selected by `--profile` or `defaults.profile`) -- e.g. an
+   profile (selected by `--profile` or the pipeline's `profile:`) -- e.g. an
    S3-backed profile.
 3. Run and node state goes to the profile's `state:` surface. A sqlite
    state surface keeps records locally and uploads one
@@ -73,7 +72,7 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | ---- | ------- | ----------- |
 | `--sw-mode=ci-embedded` | (off) | Enables this mode. |
 | `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. A hosted runner has far fewer cores than a workstation, so a value picked for local use over-subscribes it -- pick deliberately. |
-| `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/config.yaml` (override the path with `SPARKWING_CONFIG`). Absent, the pipeline's own `profile:` field applies, then the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
+| `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/config.yaml` (override the path with `SPARKWING_CONFIG`). Absent, the pipeline's own `profile:` field applies. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
 
 State, cache, and logs come from the resolved profile; see
 [storage backends](backends.md) for the configuration shape.

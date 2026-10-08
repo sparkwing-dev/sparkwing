@@ -35,9 +35,8 @@ profiles:
 ```
 
 Select a profile with `--profile NAME`; it applies wholesale. Without
-`--profile`, the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`
-applies, falling back to the built-in local (sqlite + filesystem)
-defaults. `sparkwing configure profiles show` prints which profile resolved and why.
+`--profile`, the built-in local (sqlite + filesystem) defaults apply, unless
+the pipeline names its own `profile:` (below). `sparkwing configure profiles show` prints which profile resolved and why.
 
 ## Backend types
 
@@ -171,9 +170,9 @@ pipelines:
     profile: prod-audit
 ```
 
-The selected profile applies wholesale -- the pipeline's `profile:` when
-set, otherwise the project's `defaults.profile`. Project defaults are
-not layered in per surface; the chosen profile's own surfaces are what
+The selected profile applies wholesale -- `--profile` when given,
+otherwise the pipeline's `profile:`. Profiles are not layered in per
+surface; the chosen profile's own surfaces are what
 apply. Any surface the chosen profile leaves unset falls back to the
 built-in local default (sqlite state, no shared cache or logs), not to
 another profile.

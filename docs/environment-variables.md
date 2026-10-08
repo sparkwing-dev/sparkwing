@@ -203,9 +203,9 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NO_CACHE` | Carries `--sw-no-cache` to the pipeline binary. |
 | `SPARKWING_NO_UPDATE` | Carries `--sw-no-update` to the pipeline binary, which records it with the run's invocation. Setting it by hand changes only that record; `SPARKWING_NO_SPARKS_RESOLVE=1` is the knob that skips sparks resolution. |
 | `SPARKWING_ONLY` | Carries `--sw-only` to the pipeline binary. |
-| `SPARKWING_PROFILE` | Carries `--profile` to the pipeline binary. |
+| `SPARKWING_PROFILE` | Carries `--profile` to the pipeline binary. `sparkwing run` sets it only from the flag and drops an inherited value, and the CLI never reads it, so exporting it selects nothing. |
 | `SPARKWING_REF` | Carries `--sw-ref` to the pipeline binary. |
-| `SPARKWING_SECRETS_PROFILE` | Carries `--sw-secrets` to the pipeline binary. |
+| `SPARKWING_SECRETS_PROFILE` | Carries `--sw-secrets` to the pipeline binary, under the same rule as `SPARKWING_PROFILE`. |
 | `SPARKWING_STOP_AT` | Carries `--sw-stop-at` to the pipeline binary. |
 | `SPARKWING_NODE_SPEC_HASH` | Fences a claimed node to the plan it was claimed under, across the exec into the node process. |
 | `SPARKWING_MODE` | Carries `--sw-mode` to the pipeline binary. |

@@ -11,34 +11,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// safety: every verb resolves one way: --profile, then SPARKWING_PROFILE, then
-// the project defaults.profile, so two readers of one run agree on its store.
+// safety: only the flag selects a profile, so a command without --profile acts
+// on this machine's store whatever the environment or project config holds.
 func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
-	if name == "" {
-		if env := os.Getenv("SPARKWING_PROFILE"); env != "" {
-			p, chain, path, err := resolveProfileChain(env)
-			if chain.Source == profile.ChainSourceFlag {
-				chain.Source = profile.ChainSourceEnv
-			}
-			return p, chain, path, err
-		}
-	}
 	path, err := profile.DefaultPath()
 	if err != nil {
 		return nil, profile.Chain{}, "", err
 	}
+	if name == "" {
+		return nil, profile.Chain{Source: profile.ChainSourceNone}, path, nil
+	}
 	cfg, err := profile.Load(path)
 	if err != nil {
 		return nil, profile.Chain{}, path, err
-	}
-	if name == "" {
-		pp, defName, ok, perr := projectDefaultProfile()
-		if perr != nil {
-			return nil, profile.Chain{}, path, perr
-		}
-		if ok {
-			return pp, profile.Chain{Selected: defName, Source: profile.ChainSourceProjectDefault}, path, nil
-		}
 	}
 	p, chain, err := profile.Resolve(name, cfg)
 	if err != nil {
@@ -72,39 +57,6 @@ func projectProfile(name string) (*profile.Profile, bool, error) {
 		return nil, false, nil
 	}
 	return p, true, nil
-}
-
-func projectDefaultProfile() (*profile.Profile, string, bool, error) {
-	cfg, ok, err := loadProjectConfig()
-	if err != nil {
-		return nil, "", false, err
-	}
-	if !ok || cfg.Defaults.Profile == "" {
-		return nil, "", false, nil
-	}
-	name := cfg.Defaults.Profile
-	if p, ok := cfg.Profiles[name]; ok && p != nil {
-		return p, name, true, nil
-	}
-	p, err := userProfile(name)
-	if err != nil || p == nil {
-		return nil, "", false, err
-	}
-	return p, name, true, nil
-}
-
-// safety: the default may name a connection `sparkwing cloud connect` wrote
-// to the user's config.yaml, which is where its token stays.
-func userProfile(name string) (*profile.Profile, error) {
-	path, err := profile.DefaultPath()
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := profile.Load(path)
-	if err != nil {
-		return nil, err
-	}
-	return cfg.Profiles[name], nil
 }
 
 func loadProjectConfig() (*projectconfig.Config, bool, error) {

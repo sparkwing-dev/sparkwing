@@ -89,57 +89,23 @@ profiles:
 	}
 }
 
-func TestResolveActiveProfile_DefaultProfileFallsBackToTheUserFile(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
-	writeInnerProfiles(t, `
-profiles:
-  cloud:
-    controller: { url: https://api.example.dev, token: swu_secret }
-`)
-	cfg := &projectconfig.Config{Defaults: projectconfig.Defaults{Profile: "cloud"}}
-	p, chain, err := resolveActiveProfile(nil, cfg)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p == nil || p.ControllerURL() != "https://api.example.dev" {
-		t.Fatalf("resolved %#v", p)
-	}
-	if chain == nil || chain.Source != profile.ChainSourceProjectDefault {
-		t.Fatalf("chain = %#v, want the project-default source", chain)
-	}
-}
-
-func TestResolveActiveProfile_DefaultProfileNamesNeitherFile(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
-	writeInnerProfiles(t, "profiles:\n  team: { state: { type: sqlite } }\n")
-	cfg := &projectconfig.Config{Defaults: projectconfig.Defaults{Profile: "ghost"}}
-	_, _, err := resolveActiveProfile(nil, cfg)
-	if err == nil {
-		t.Fatal("expected a default naming nothing to fail")
-	}
-	if !strings.Contains(err.Error(), "ghost") || !strings.Contains(err.Error(), "defaults.profile") {
-		t.Errorf("error should name the default and the profile: %v", err)
-	}
-}
-
-func TestResolveActiveProfile_ProjectProfileWinsOverTheUserFile(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
+func TestResolveActiveProfile_DeclaredProfilesSelectNothingWithoutTheHandoff(t *testing.T) {
+	t.Setenv(ProfileEnv, "")
 	writeInnerProfiles(t, `
 profiles:
   cloud:
     controller: { url: https://user.example.dev }
 `)
 	cfg := &projectconfig.Config{
-		Defaults: projectconfig.Defaults{Profile: "cloud"},
 		Profiles: map[string]*profile.Profile{
 			"cloud": {Name: "cloud", Controller: &profile.ControllerSpec{URL: "https://project.example.dev"}},
 		},
 	}
-	p, _, err := resolveActiveProfile(nil, cfg)
+	p, chain, err := resolveActiveProfile(nil, cfg)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if p.ControllerURL() != "https://project.example.dev" {
-		t.Errorf("resolved %q, want the project's own declaration", p.ControllerURL())
+	if p != nil || chain == nil || chain.Source != profile.ChainSourceNone {
+		t.Fatalf("resolved %#v (chain %#v), want the local store", p, chain)
 	}
 }

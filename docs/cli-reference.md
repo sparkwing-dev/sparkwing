@@ -45,10 +45,9 @@ Three flags go before any verb:
   --profile NAME  select a profile; the verb must accept --profile
   -o FORMAT       pretty | json | plain, for verbs that print a document
 
-Without --profile, verbs that read runs fall back to SPARKWING_PROFILE, then
-the project's defaults.profile. Verbs that change state elsewhere (secrets,
-crons, runs cancel, cluster, and similar) act locally unless --profile names
-the controller.
+Without --profile, every verb acts on this machine's store. Neither the
+environment nor the project config selects a profile, so a command reaches a
+controller or a profile's remote backends only when --profile names it.
 
 ### Examples
 

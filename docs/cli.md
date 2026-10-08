@@ -122,10 +122,11 @@ indexed in [cli-reference.md](cli-reference.md):
   the verb, as in `sparkwing -C ~/code/other runs list`. `-C` works only
   there; it moves the working directory before anything else is read.
 - **Profile addressing.** `--profile NAME` picks the storage/dispatch
-  profile. Without it, verbs that read runs use `SPARKWING_PROFILE`, then
-  the project's `defaults.profile`, then local state (SQLite under
-  `~/.sparkwing/`); verbs that change state elsewhere (secrets, crons,
-  runs cancel and similar) act locally. `sparkwing run` always executes
+  profile. Without it, every verb acts on local state (SQLite under
+  `~/.sparkwing/`); neither the environment nor the project config selects
+  a profile, so a command reaches a controller only when its own command
+  line names one. Every verb that can reach a controller accepts
+  `--profile`. `sparkwing run` always executes
   locally; `sparkwing pipeline trigger` is the verb for remote (cluster)
   execution.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail

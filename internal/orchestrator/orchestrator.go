@@ -1295,10 +1295,10 @@ func buildRunFlags(opts Options) map[string]any {
 		flags["no_update"] = true
 	}
 	if !opts.LocalOnly {
-		if v := os.Getenv("SPARKWING_PROFILE"); v != "" {
+		if v := handoffProfile(); v != "" {
 			flags["profile"] = v
 		}
-		if v := os.Getenv("SPARKWING_SECRETS_PROFILE"); v != "" {
+		if v := handoffSecretsProfile(); v != "" {
 			flags["secrets"] = v
 		}
 	}

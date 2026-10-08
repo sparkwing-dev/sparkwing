@@ -31,8 +31,8 @@ triple (see [Storage backends](backends.md)) -- and applies uniformly to
 SQLite under `~/.sparkwing/state.db`, with per-run logs under
 `~/.sparkwing/runs/<runID>/`. Zero shared
 infrastructure. This is the default behavior -- no profile is selected and
-the built-in local sqlite + filesystem defaults apply -- when no
-`--profile` is given and the project sets no `defaults.profile`.
+the built-in local sqlite + filesystem defaults apply -- whenever the
+command carries no `--profile` (and the pipeline declares no `profile:`).
 
 For: a developer working on pipelines on their own laptop, and the other
 machines that developer owns. `sparkwing run <pipeline> --sw-fleet` hands
@@ -404,13 +404,12 @@ resolve a profile normally again.
 
 ## Selecting a profile
 
-Profile selection is explicit: pass `--profile NAME`, or set
-`defaults.profile` in `.sparkwing/sparkwing.yaml` for the project's
-default. With neither, no profile is active and the built-in local
-defaults (the local path) apply.
-There is no environment-based auto-selection -- a CI job picks its
-profile by passing `--profile` in the run command (see
-[ci-embedded.md](ci-embedded.md)).
+Profile selection is explicit: pass `--profile NAME` on the command that
+should reach the profile. Without it, no profile is active and the built-in
+local defaults (the local path) apply, unless the pipeline names its own
+`profile:` in `.sparkwing/sparkwing.yaml`. Neither the environment nor a
+project-wide default selects a profile -- a CI job picks its profile by
+passing `--profile` in the run command (see [ci-embedded.md](ci-embedded.md)).
 
 ## Choosing a shape
 

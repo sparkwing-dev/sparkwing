@@ -719,16 +719,49 @@ instead of naming its replacement.
   still names a registered repository on `repos`, and an `OWNER/NAME`
   filter on `runs` and `cluster` verbs.
 - `--profile NAME` may also go before the verb, for verbs that accept it.
-  Without `--profile`, verbs that read runs (`runs list/status/logs/stats`,
-  `run`, `pipeline hooks`, `serve`, `pipeline trigger`) use
-  `SPARKWING_PROFILE`, then the project's `defaults.profile`. `runs stats`
-  read the local store unless `--profile` was given; it now follows that
-  chain, so a repository with `defaults.profile` reads its controller. Verbs
-  that change state elsewhere (`secrets`, `crons`, `runs cancel/retry/bounce/prune`,
-  `cluster`) still act locally unless `--profile` is given.
-- `SPARKWING_PROFILE` is set for a pipeline's own process by
-  `sparkwing run --profile P`, so a `sparkwing runs ...` call inside a step
-  now reads P's store.
+  Without it, every verb acts on the local store; see
+  [The default profile is removed](#the-default-profile-is-removed).
+
+## The default profile is removed
+
+A command reaches a controller, or a profile's remote backends, only when
+`--profile` names it on that invocation. Neither the project config nor the
+environment selects a profile, so a script or shell history shows every
+remote it touches.
+
+| Before | After |
+|---|---|
+| `defaults: {profile: prod}` in `.sparkwing/sparkwing.yaml` | Remove the key and pass `--profile prod` to each command that should reach `prod`. The key now fails the config load with `field profile not found in type projectconfig.Defaults`. |
+| `sparkwing cloud connect ... --set-default` | `sparkwing cloud connect ...`, then `--profile NAME` on each command |
+| `export SPARKWING_PROFILE=prod; sparkwing runs list` | `sparkwing --profile prod runs list` |
+| `SPARKWING_PROFILE=prod sparkwing run deploy` | `sparkwing run deploy --profile prod` |
+| `sparkwing runs ...` in a step of a run started with `--profile P` read P | Pass `--profile P` to that call; without it the call reads the local store |
+| `SPARKWING_CONTROLLER_URL=URL sparkwing runs cancel --run ID` | `sparkwing runs cancel --run ID --profile NAME`, with NAME a profile for URL |
+
+- **Readers and writers alike:** `run`, `runs list/status/logs/stats`,
+  `serve`, `pipeline trigger`, `debug`, `secrets`, `crons`, `cluster` and
+  every other verb that accepts `--profile` act on the local store without it.
+  `runs cancel`, `retry`, `bounce` and `prune` without `--profile` reach only
+  the local dashboard that `sparkwing serve` recorded in `dev.env`.
+- **Pipeline process:** `sparkwing run` sets `SPARKWING_PROFILE` and
+  `SPARKWING_SECRETS_PROFILE` for the pipeline binary from `--profile` and
+  `--sw-secrets` alone, and drops values inherited from the shell. A detached
+  run (`--sw-detached`) never carries them to the consumer.
+- **Per-pipeline profiles stay:** a pipeline's own `profile:` field in
+  `sparkwing.yaml` still selects that pipeline's backends, and `--profile`
+  still overrides it.
+- **Hooks and crons:** `pipeline hooks install --profile P` writes
+  `--profile 'P'` into each generated hook line, and a hook installed without
+  it runs `--sw-local-only`. `crons install --profile P` installs the
+  schedules on P's controller; without it the schedules arm this machine's
+  timer. A hook, cron or wrapper script that reached a controller through
+  `defaults.profile` or an exported `SPARKWING_PROFILE` now acts on the local
+  store. Reinstall it with the profile named:
+
+  ```bash
+  sparkwing pipeline hooks install --profile prod
+  sparkwing crons install --profile prod
+  ```
 
 ## Runs verbs fold into status, list and logs
 
@@ -757,10 +790,9 @@ instead of naming its replacement.
 - **Defaults:** `runs find` looked back one hour by default; `runs list` has no
   default lookback, so pass `--since 1h` to keep that window. `runs failures`
   printed one row per failed run; that is `--group-by run`.
-- **Profiles:** `runs get`, `wait`, `last`, `find`, `failures`, `grep` and the
-  views read the local store unless `--profile` was given. Their replacements
-  follow `runs status`: `--profile`, then `SPARKWING_PROFILE`, then the
-  project's `defaults.profile`.
+- **Profiles:** the replacements read the local store unless `--profile` is
+  given, as `runs get`, `wait`, `last`, `find`, `failures`, `grep` and the
+  views did.
 
 ## Pipeline verbs fold into list, plan and hooks status
 

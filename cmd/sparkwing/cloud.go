@@ -8,7 +8,6 @@ import (
 	"io"
 	neturl "net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -21,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -64,7 +62,6 @@ func runCloudConnect(args []string) error {
 	tokenStdin := fs.Bool("token-stdin", false, "read an already-minted user token from stdin")
 	adminStdin := fs.Bool("admin-token-stdin", false, "read an admin token from stdin and mint a user token with it")
 	scopes := fs.String("scope", strings.Join(cloudUserTokenScopes, ","), "comma-separated scopes for the minted token")
-	setDefault := fs.Bool("set-default", false, "set defaults.profile in this project's .sparkwing/sparkwing.yaml")
 	force := fs.Bool("force", false, "replace an existing profile of that name")
 	noProbe := fs.Bool("no-probe", false, "write the profile without contacting the controller")
 	if err := parseAndCheck(cmdCloudConnect, fs, args); err != nil {
@@ -91,13 +88,6 @@ func runCloudConnect(args []string) error {
 		return fmt.Errorf("cloud connect: profile %q already exists in %s; pass --force to replace it, or --name to connect under another name",
 			name, displayConfigPath(path))
 	}
-	var defaultsPath string
-	if *setDefault {
-		if defaultsPath, err = projectConfigPath(); err != nil {
-			return err
-		}
-	}
-
 	supplied := ""
 	if *tokenStdin || *adminStdin {
 		label := fmt.Sprintf("user token for %q", name)
@@ -120,7 +110,7 @@ func runCloudConnect(args []string) error {
 		if *adminStdin {
 			return errors.New("cloud connect: --admin-token-stdin mints on the controller, so it cannot combine with --no-probe; pass --token-stdin")
 		}
-		return writeConnectedProfile(cfg, path, prof, defaultsPath)
+		return writeConnectedProfile(cfg, path, prof)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -141,7 +131,7 @@ func runCloudConnect(args []string) error {
 		fmt.Printf("minted user token %s for %s\n", minted.Prefix, name)
 	}
 
-	if err := writeConnectedProfile(cfg, path, prof, defaultsPath); err != nil {
+	if err := writeConnectedProfile(cfg, path, prof); err != nil {
 		return err
 	}
 
@@ -157,18 +147,12 @@ func runCloudConnect(args []string) error {
 	return nil
 }
 
-func writeConnectedProfile(cfg *profile.Config, path string, prof *profile.Profile, defaultsPath string) error {
+func writeConnectedProfile(cfg *profile.Config, path string, prof *profile.Profile) error {
 	cfg.Profiles[prof.Name] = prof
 	if err := profile.Save(path, cfg); err != nil {
 		return err
 	}
 	fmt.Printf("connected profile %q to %s (%s)\n", prof.Name, prof.ControllerURL(), displayConfigPath(path))
-	if defaultsPath != "" {
-		if err := projectconfig.SetDefaultProfile(defaultsPath, prof.Name); err != nil {
-			return err
-		}
-		fmt.Printf("set defaults.profile: %s in %s\n", prof.Name, defaultsPath)
-	}
 	return nil
 }
 
@@ -422,14 +406,6 @@ func profileNameForController(controllerURL string) string {
 		return "cloud"
 	}
 	return name
-}
-
-func projectConfigPath() (string, error) {
-	dir, err := findSparkwingDir()
-	if err != nil {
-		return "", fmt.Errorf("cloud connect: --set-default needs a sparkwing project: %w", err)
-	}
-	return filepath.Join(dir, projectconfig.Filename), nil
 }
 
 func writeProbeTable(w io.Writer, report profileTestReport) error {

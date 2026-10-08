@@ -23,6 +23,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -675,9 +676,7 @@ func pipelineProofCommand(repoRoot, pipeline, profileName string) (*exec.Cmd, er
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = repoRoot
-	env := removeEnv(os.Environ(), "SPARKWING_PROFILE")
-	env = removeEnv(env, "SPARKWING_SECRETS_PROFILE")
-	cmd.Env = append(env, "SPARKWING_LOG_FORMAT=quiet")
+	cmd.Env = append(handoffProfiles(os.Environ(), "", ""), "SPARKWING_LOG_FORMAT=quiet")
 	return cmd, nil
 }
 
@@ -1127,7 +1126,7 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
 
-		b.WriteString("unset SPARKWING_PROFILE SPARKWING_SECRETS_PROFILE\n")
+		b.WriteString("unset " + orchestrator.ProfileEnv + " " + orchestrator.SecretsProfileEnv + "\n")
 		flag := " --sw-local-only"
 		if profileName != "" {
 			flag = " --profile " + shellSingleQuote(profileName)

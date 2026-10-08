@@ -78,7 +78,7 @@ profiles:
 	}
 }
 
-func TestResolveProfileChain_FlagThenEnvThenProjectDefault(t *testing.T) {
+func TestResolveProfileChain_OnlyTheFlagSelects(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
@@ -91,12 +91,7 @@ profiles:
 		t.Fatalf("flag: %v %+v %v", p, chain, err)
 	}
 	p, chain, _, err = resolveProfileChain("")
-	if err != nil || p.Name != "dev" || chain.Source != "env" {
-		t.Fatalf("env: %v %+v %v", p, chain, err)
-	}
-	t.Setenv("SPARKWING_PROFILE", "")
-	p, chain, _, err = resolveProfileChain("")
 	if err != nil || p != nil || chain.Source != "none" {
-		t.Fatalf("none: %v %+v %v", p, chain, err)
+		t.Fatalf("an exported SPARKWING_PROFILE selected %v %+v %v; only --profile may", p, chain, err)
 	}
 }

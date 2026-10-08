@@ -35,13 +35,13 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 			WithRunnerIdentity(logs.ProcessIdentity("cli"))
 		return c, logc, nil
 	}
-	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
+	ctrlURL := orchestrator.LocalDashboardURL("SPARKWING_CONTROLLER_URL")
 	if ctrlURL == "" {
 		return nil, nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
 			"(start it with `sparkwing serve start`, or pass --profile <profile>)", cmd)
 	}
 	c = client.NewWithToken(ctrlURL, nil, orchestrator.LocalServeToken(ctrlURL))
-	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
+	if logsURL := orchestrator.LocalDashboardURL("SPARKWING_LOGS_URL"); logsURL != "" {
 		logc = sparkwinglogs.New(logsURL, nil, orchestrator.LocalServeToken(logsURL)).
 			WithRunnerIdentity(logs.ProcessIdentity("cli"))
 	}

@@ -433,6 +433,7 @@ func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
 		StandaloneStateDBEnv + "=/tmp/stale/state.db",
 		StandaloneReasonEnv + "=" + standaloneNoDaemon,
 		"SPARKWING_PROFILE=prod",
+		"PATH=/submit/bin",
 	}
 	got := submissionExecutionEnvironment(captured, "/home")
 	for _, entry := range got {
@@ -440,8 +441,11 @@ func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
 			t.Fatalf("the consumer passed %q to its child", entry)
 		}
 	}
-	if !slices.Contains(got, "SPARKWING_PROFILE=prod") {
+	if !slices.Contains(got, "PATH=/submit/bin") {
 		t.Fatalf("the filter dropped an entry it should keep: %v", got)
+	}
+	if slices.Contains(got, "SPARKWING_PROFILE=prod") {
+		t.Fatalf("a profile exported in the submitting shell reached the child: %v", got)
 	}
 	for _, name := range []string{StandaloneStateDBEnv, StandaloneReasonEnv} {
 		if envAllowed(name) {

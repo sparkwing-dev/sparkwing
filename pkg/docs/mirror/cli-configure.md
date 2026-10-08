@@ -170,12 +170,12 @@ Print one profile's config, or the profile a command would select
 With --name, prints all fields of that config.yaml entry. The token is
 redacted unless --show-token is passed.
 
-Without --name, reports the profile a sparkwing command would resolve to and
-the chain that picked it: --profile, then SPARKWING_PROFILE, then the
-project's defaults.profile -- the resolver 'sparkwing run' and 'sparkwing
-pipeline trigger' use, so the answer matches what they would do. --profile
-NAME shows what adding that flag to your next command would select. That
-report never prints tokens.
+Without --name, reports the profile a sparkwing command would resolve to:
+the one --profile names, or this machine's local store when there is no
+flag. It uses the resolver 'sparkwing run' and 'sparkwing pipeline trigger'
+use, so the answer matches what they would do. --profile NAME shows what
+adding that flag to your next command would select. That report never
+prints tokens.
 
 ### Flags
 

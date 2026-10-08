@@ -11,15 +11,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
+// ProfileEnv hands the --profile of a `sparkwing run` invocation to the
+// pipeline process the CLI execs. The CLI writes it only from that flag and
+// clears an inherited value first, so an exported variable never selects a
+// profile.
+const ProfileEnv = "SPARKWING_PROFILE"
+
+// SecretsProfileEnv hands `sparkwing run --sw-secrets` to the pipeline process
+// under the same rule as ProfileEnv.
+const SecretsProfileEnv = "SPARKWING_SECRETS_PROFILE"
+
+func handoffProfile() string { return os.Getenv(ProfileEnv) }
+
+func handoffSecretsProfile() string { return os.Getenv(SecretsProfileEnv) }
+
 func resolveActiveProfile(pipelineYAML *pipelines.Pipeline, projectCfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
-	if name := os.Getenv("SPARKWING_PROFILE"); name != "" {
+	if name := handoffProfile(); name != "" {
 		return resolveNamedProfile(name, projectCfg)
 	}
 	if pipelineYAML != nil && pipelineYAML.Profile != "" {
 		return resolveProjectProfile(pipelineYAML.Profile, projectCfg, "pipeline")
-	}
-	if projectCfg != nil && projectCfg.Defaults.Profile != "" {
-		return resolveDefaultProfile(projectCfg.Defaults.Profile, projectCfg)
 	}
 	return nil, &profile.Chain{Source: profile.ChainSourceNone}, nil
 }
@@ -92,26 +103,6 @@ func resolveUserProfile(name string) (*profile.Profile, *profile.Chain, error) {
 		return nil, nil, fmt.Errorf("--profile %s: %w", name, err)
 	}
 	return p, &chain, nil
-}
-
-// safety: defaults.profile may name a connection `sparkwing cloud connect`
-// wrote to the user's config.yaml, which is where its token stays, so the
-// project block is preferred but not required.
-func resolveDefaultProfile(name string, cfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
-	if cfg != nil && cfg.Profiles != nil {
-		if p, ok := cfg.Profiles[name]; ok && p != nil {
-			return p, &profile.Chain{Selected: name, Source: profile.ChainSourceProjectDefault}, nil
-		}
-	}
-	p, chain, err := resolveUserProfile(name)
-	if err != nil {
-		if !errors.Is(err, profile.ErrProfileNotFound) {
-			return nil, nil, err
-		}
-		return nil, nil, fmt.Errorf("defaults.profile names profile %q, which is declared neither in sparkwing.yaml profiles nor in %s",
-			name, userProfilesPathForError())
-	}
-	return p, &profile.Chain{Selected: chain.Selected, Source: profile.ChainSourceProjectDefault}, nil
 }
 
 func resolveProjectProfile(name string, cfg *projectconfig.Config, origin string) (*profile.Profile, *profile.Chain, error) {

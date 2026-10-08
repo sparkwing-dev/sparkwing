@@ -24,7 +24,8 @@ func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
 	}
 	if os.Getenv("SPARKWING_TEST_BINARIES_CHILD") == "1" {
 		err := compileAndExec(os.Getenv("SPARKWING_TEST_BINARIES_COMPILE_DIR"), nil,
-			append(os.Environ(), "SPARKWING_FLEET=1", "GOWORK=off"), compileOptions{NoUpdate: true})
+			append(os.Environ(), "SPARKWING_FLEET=1", "GOWORK=off"),
+			compileOptions{NoUpdate: true, Profile: os.Getenv("SPARKWING_TEST_BINARIES_PROFILE")})
 		var cliErr *cliError
 		if !errors.As(err, &cliErr) {
 			fmt.Fprintf(os.Stderr, "compileAndExec: %v\n", err)
@@ -55,9 +56,16 @@ func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	code := runCompileChild(t, pipelineDir, profiles, "isolated-binaries")
+	code := runCompileChild(t, pipelineDir, profiles, "isolated-binaries", "")
 	if code != 23 {
 		t.Fatalf("exit code %d: the compile path did not run the binary seeded in cache.binaries (17 means it compiled locally)", code)
+	}
+
+	pipelineDir = writeExitModule(t, "binariesexported", 17)
+	seedArtifactStore(t, storeDir, pipelineDir, 23)
+	code = runCompileChild(t, pipelineDir, profiles, "", "isolated-binaries")
+	if code != 17 {
+		t.Fatalf("exit code %d: an exported SPARKWING_PROFILE selected the profile's binary cache without --profile", code)
 	}
 }
 
@@ -89,7 +97,7 @@ func TestCompileAndExec_TheSubSpecOverridesTheCacheSurface(t *testing.T) {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	code := runCompileChild(t, pipelineDir, profiles, "plain-cache")
+	code := runCompileChild(t, pipelineDir, profiles, "plain-cache", "")
 	if code != 17 {
 		t.Fatalf("exit code %d: the cache surface served the binary the sub-spec was meant to override", code)
 	}
@@ -137,7 +145,7 @@ func seedArtifactStore(t *testing.T, storeDir, pipelineDir string, exitCode int)
 	}
 }
 
-func runCompileChild(t *testing.T, pipelineDir, profiles, profileName string) int {
+func runCompileChild(t *testing.T, pipelineDir, profiles, flagProfile, exportedProfile string) int {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec$")
 	cmd.Env = append(os.Environ(),
@@ -145,7 +153,8 @@ func runCompileChild(t *testing.T, pipelineDir, profiles, profileName string) in
 		"SPARKWING_TEST_BINARIES_COMPILE_DIR="+pipelineDir,
 		"SPARKWING_HOME="+filepath.Join(t.TempDir(), "home"),
 		"SPARKWING_CONFIG="+profiles,
-		"SPARKWING_PROFILE="+profileName,
+		"SPARKWING_TEST_BINARIES_PROFILE="+flagProfile,
+		"SPARKWING_PROFILE="+exportedProfile,
 		"GOWORK=off",
 	)
 	out, err := cmd.CombinedOutput()

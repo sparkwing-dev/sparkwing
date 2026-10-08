@@ -247,9 +247,11 @@ func dispatchRun(args []string) error {
 	}
 	var fleetSnapshot *worktreeSnapshot
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate || flags.fleet,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
+		NoUpdate:       flags.noUpdate || flags.fleet,
+		ExecutionDir:   executionDir,
+		AfterChild:     afterChild,
+		Profile:        flags.profile,
+		SecretsProfile: flags.secrets,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
@@ -306,12 +308,6 @@ func dispatchRun(args []string) error {
 	if flags.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")
 	}
-	if flags.profile != "" {
-		env = setEnv(env, "SPARKWING_PROFILE", flags.profile)
-	}
-	if flags.secrets != "" {
-		env = append(env, "SPARKWING_SECRETS_PROFILE="+flags.secrets)
-	}
 
 	if flags.mode != "" {
 		env = setEnv(env, "SPARKWING_MODE", flags.mode)
@@ -351,6 +347,21 @@ func dispatchRun(args []string) error {
 	}
 	sweepStraySessionsBeforeRun()
 	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
+}
+
+// safety: the pipeline process selects its profile from these variables, so a
+// value inherited from the caller's environment would target a remote the
+// invocation never named.
+func handoffProfiles(env []string, profileName, secretsProfile string) []string {
+	env = removeEnv(env, orchestrator.ProfileEnv)
+	env = removeEnv(env, orchestrator.SecretsProfileEnv)
+	if profileName != "" {
+		env = append(env, orchestrator.ProfileEnv+"="+profileName)
+	}
+	if secretsProfile != "" {
+		env = append(env, orchestrator.SecretsProfileEnv+"="+secretsProfile)
+	}
+	return env
 }
 
 func removeEnv(env []string, key string) []string {
@@ -567,7 +578,7 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
 		repos := multiFlagVar(fs, "repo", "filter by repository owner/name (repeatable)")
 		rootOnly := fs.Bool("root-only", false, "exclude child runs")
 		wait := fs.Bool("wait", false, "block until at least one run matches")
@@ -689,7 +700,7 @@ func runJobs(args []string) error {
 		outputFormat := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
 		view := fs.String("view", "", "render one view of the run: summary|timeline|receipt|errors|tree")
@@ -762,7 +773,7 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")

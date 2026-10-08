@@ -377,10 +377,8 @@ above) unless you pass `--name`. An existing profile of that
 name is replaced only with `--force`, because the token it holds stays live
 until it is revoked.
 
-Add `--set-default` inside a repository to write `defaults.profile` into its
-`.sparkwing/sparkwing.yaml`, so runs in that checkout select the connection
-with no flag. The name resolves against the project's own `profiles:` block
-first and `config.yaml` second, so the token stays out of the checkout.
+Commands reach the connection only when they name it with `--profile`;
+without the flag they act on this machine's store.
 
 ```bash
 sparkwing cloud status --profile prod        # principal, scopes, and probes

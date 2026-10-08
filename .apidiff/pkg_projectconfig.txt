@@ -10,8 +10,6 @@ type Config struct {
 	Sparks    []sparks.Library
 }
 type Defaults struct {
-	Profile string
-
 	Args map[string]string
 
 	Guards pipelines.Guards
@@ -25,5 +23,4 @@ func Load(path string) (*Config, error)
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
 func Parse(raw []byte) (*Config, error)
 func PipelineSource(repoDir, name string) (string, error)
-func SetDefaultProfile(path, name string) error
 func WriteSparksSection(path string, libs []sparks.Library) error

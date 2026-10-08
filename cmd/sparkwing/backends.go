@@ -2,7 +2,6 @@ package main
 
 import (
 	"log/slog"
-	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -10,10 +9,9 @@ import (
 )
 
 // resolveBinaryCacheSpec resolves the backend that serves pipeline
-// binaries under bin/<hash>: the active profile's cache surface, or its
+// binaries under bin/<hash>: the named profile's cache surface, or its
 // binaries sub-spec when it declares one.
-func resolveBinaryCacheSpec() (*backends.Spec, storeurl.ProfileLookup) {
-	name := os.Getenv("SPARKWING_PROFILE")
+func resolveBinaryCacheSpec(name string) (*backends.Spec, storeurl.ProfileLookup) {
 	path, err := profile.DefaultPath()
 	if err != nil {
 		slog.Default().Debug("config.yaml path resolve failed", "err", err)

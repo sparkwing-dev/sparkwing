@@ -37,8 +37,7 @@ const (
 // hand it off. Keeps guards/predicates testable in isolation.
 type GuardContext struct {
 	// ProfileName is the active profile's name. Empty when no
-	// profile is in scope (no --profile, no pipeline.profile, no
-	// defaults.profile).
+	// profile is in scope (no --profile, no pipeline.profile).
 	ProfileName string
 
 	// ProfileIsLocal is true when the active profile routes

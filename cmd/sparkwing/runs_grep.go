@@ -92,7 +92,7 @@ func searchRunLogs(ctx context.Context, paths orchestrator.Paths, fs *flag.FlagS
 	if err != nil {
 		return err
 	}
-	if prof == nil || (profileName == "" && prof.ControllerURL() == "") {
+	if prof == nil {
 		return orchestrator.RunGrepLocal(ctx, paths, opts, os.Stdout)
 	}
 	if err := requireController(prof, "runs logs --grep"); err != nil {

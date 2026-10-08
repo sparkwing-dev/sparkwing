@@ -27,10 +27,9 @@ Three flags go before any verb:
   --profile NAME  select a profile; the verb must accept --profile
   -o FORMAT       pretty | json | plain, for verbs that print a document
 
-Without --profile, verbs that read runs fall back to SPARKWING_PROFILE, then
-the project's defaults.profile. Verbs that change state elsewhere (secrets,
-crons, runs cancel, cluster, and similar) act locally unless --profile names
-the controller.`,
+Without --profile, every verb acts on this machine's store. Neither the
+environment nor the project config selects a profile, so a command reaches a
+controller or a profile's remote backends only when --profile names it.`,
 	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "version", "update", "serve", "doctor", "cloud", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
@@ -243,11 +242,6 @@ turned into a dash, so https://api.sparkwing.example becomes
 api-sparkwing-example. An existing profile of that name is never replaced
 without --force, because the token it holds stays live until it is revoked.
 
---set-default writes defaults.profile into this repository's
-.sparkwing/sparkwing.yaml, so runs in this checkout select the connection with
-no flag. The name resolves against the project's own profiles: block first and
-config.yaml second, so the token stays out of the checkout.
-
 The command closes with the dashboard URL the controller announces and the
 probes 'sparkwing cloud status' runs.
 
@@ -260,22 +254,21 @@ is not up yet, or one that serves unauthenticated (omit both token flags).`,
 		{Name: "admin-token-stdin", Desc: "Read an admin token from stdin and mint a user token with it", ConflictsWith: []string{"token-stdin"}, Group: "Credential"},
 		{Name: "token-stdin", Desc: "Read an already-minted user token from stdin", ConflictsWith: []string{"admin-token-stdin"}, Group: "Credential"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes for the minted token", Default: "runs.read,runs.write,runs.control,triggers.read,logs.read,approvals.write", Group: "Credential"},
-		{Name: "set-default", Desc: "Set defaults.profile in this project's .sparkwing/sparkwing.yaml", Group: "Project"},
 		{Name: "force", Desc: "Replace an existing profile of that name", Group: "Project"},
 		{Name: "no-probe", Desc: "Write the profile without contacting the controller", ConflictsWith: []string{"admin-token-stdin"}, Group: "Project"},
 	},
 	GroupOrder: []string{"Identity", "Credential", "Project", "Other"},
 	Examples: []Example{
 		{"Connect with a one-time admin token", "sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin"},
-		{"Connect and make it this repository's default", "sparkwing cloud connect --controller https://api.sparkwing.example --name prod --admin-token-stdin --set-default"},
 		{"Store a token someone minted for you", "sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin"},
 		{"Register an unauthenticated local controller offline", "sparkwing cloud connect --controller http://127.0.0.1:4344 --name local --no-probe"},
 	},
 }
 
 var cmdCloudStatus = Command{
-	Path:     "sparkwing cloud status",
-	Synopsis: "Report the connection, its principal, and the probes",
+	Path:              "sparkwing cloud status",
+	ReachesController: true,
+	Synopsis:          "Report the connection, its principal, and the probes",
 	Description: `Prints the selected profile, its controller, the principal
 and scopes the controller reports for its token, the announced dashboard URL,
 and the controller, auth, logs and gitcache probes. A profile with no
@@ -569,8 +562,9 @@ With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.`
 
 var cmdQueue = Command{
-	Path:     "sparkwing queue",
-	Synopsis: "Inspect local admission holders, connections, and waiters",
+	Path:              "sparkwing queue",
+	ReachesController: true,
+	Synopsis:          "Inspect local admission holders, connections, and waiters",
 	Description: queueListingDescription + `
 
 'sparkwing queue' and 'sparkwing queue list' print the same listing.`,
@@ -588,8 +582,9 @@ var cmdQueue = Command{
 }
 
 var cmdQueueList = Command{
-	Path:     "sparkwing queue list",
-	Synopsis: "List running and queued work with expected start and finish",
+	Path:              "sparkwing queue list",
+	ReachesController: true,
+	Synopsis:          "List running and queued work with expected start and finish",
 	Description: queueListingDescription + `
 
 This is the same output as 'sparkwing queue'.`,
@@ -981,8 +976,9 @@ into the pod holding the paused node.`,
 }
 
 var cmdDebugRelease = Command{
-	Path:     "sparkwing debug release",
-	Synopsis: "Resume a paused node",
+	Path:              "sparkwing debug release",
+	ReachesController: true,
+	Synopsis:          "Resume a paused node",
 	Description: `Flips the pause row's released_at timestamp so the
 orchestrator's poll loop wakes and continues dispatching past
 the pause point. Local and cluster modes share this surface.`,
@@ -998,8 +994,9 @@ the pause point. Local and cluster modes share this surface.`,
 }
 
 var cmdDebugAttach = Command{
-	Path:     "sparkwing debug attach",
-	Synopsis: "kubectl exec into a paused node's pod (cluster mode)",
+	Path:              "sparkwing debug attach",
+	ReachesController: true,
+	Synopsis:          "kubectl exec into a paused node's pod (cluster mode)",
 	Description: `Looks up the pod holding the paused node's claim-lease from
 the controller's node row, then shells out to kubectl exec -it
 -- bash. Local mode prints a note that attach does not apply
@@ -1016,8 +1013,9 @@ exits 0.`,
 }
 
 var cmdDebugRerun = Command{
-	Path:     "sparkwing debug rerun",
-	Synopsis: "Reproduce a node's dispatch frame in an interactive shell",
+	Path:              "sparkwing debug rerun",
+	ReachesController: true,
+	Synopsis:          "Reproduce a node's dispatch frame in an interactive shell",
 	Description: `Opens an interactive shell using a node's recorded environment and working
 directory. Local execution writes upstream reference outputs beneath the
 run's rerun directory. Cluster execution creates a temporary pod using
@@ -1044,8 +1042,9 @@ Secrets resolve when accessed, and the selected runner image applies.
 }
 
 var cmdDebugReplay = Command{
-	Path:     "sparkwing debug replay",
-	Synopsis: "Re-execute a single node headlessly using its dispatch snapshot",
+	Path:              "sparkwing debug replay",
+	ReachesController: true,
+	Synopsis:          "Re-execute a single node headlessly using its dispatch snapshot",
 	Description: `Mints a new run row linked to the original via replay_of_run_id /
 replay_of_node_id, creates a single nodes row for the target, and
 exec's the pipeline binary to execute that one node. The
@@ -1076,8 +1075,9 @@ registered pipeline factories.`,
 }
 
 var cmdDebugEnv = Command{
-	Path:     "sparkwing debug env",
-	Synopsis: "Print a paused node's environment and working directory + claim holder",
+	Path:              "sparkwing debug env",
+	ReachesController: true,
+	Synopsis:          "Print a paused node's environment and working directory + claim holder",
 	Description: `Prints the environment, working directory, process owner, and state
 captured when a node paused. If the node is not paused, prints a warning
 and exits zero.`,
@@ -1141,8 +1141,9 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 }
 
 var cmdPipelineTrigger = Command{
-	Path:     "sparkwing pipeline trigger",
-	Synopsis: "Submit a pipeline to a profile's controller (remote execution)",
+	Path:              "sparkwing pipeline trigger",
+	ReachesController: true,
+	Synopsis:          "Submit a pipeline to a profile's controller (remote execution)",
 	Description: `Submits a trigger to the controller defined by --profile and
 follows the remote run until it reaches a terminal state.
 
@@ -1422,8 +1423,9 @@ IDs, and similar errors), which makes it a CI gate.`,
 }
 
 var cmdRun = Command{
-	Path:     "sparkwing run",
-	Synopsis: "Invoke a pipeline",
+	Path:              "sparkwing run",
+	ReachesController: true,
+	Synopsis:          "Invoke a pipeline",
 	Description: `Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline.
 
@@ -1552,8 +1554,9 @@ port.`,
 }
 
 var cmdDashboardStart = Command{
-	Path:     "sparkwing serve start",
-	Synopsis: "Start the dashboard, preserving every running instance",
+	Path:              "sparkwing serve start",
+	ReachesController: true,
+	Synopsis:          "Start the dashboard, preserving every running instance",
 	Description: `Detaches a child process that runs the in-process
 dashboard + API + logs server (pkg/localws). PID is written to
 $SPARKWING_HOME/dashboard.pid; stdout/stderr are appended to
@@ -1616,11 +1619,12 @@ An absent service succeeds.`,
 }
 
 var cmdDashboardRestart = Command{
-	Path:        "sparkwing serve restart",
-	Synopsis:    "Replace an owned dashboard and wait for readiness",
-	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
-	Flags:       cmdDashboardStart.Flags,
-	Examples:    []Example{{"Restart with existing options", "sparkwing serve restart"}},
+	Path:              "sparkwing serve restart",
+	ReachesController: true,
+	Synopsis:          "Replace an owned dashboard and wait for readiness",
+	Description:       "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
+	Flags:             cmdDashboardStart.Flags,
+	Examples:          []Example{{"Restart with existing options", "sparkwing serve restart"}},
 }
 
 var cmdDashboardLogs = Command{
@@ -1651,8 +1655,9 @@ missing artifact evidence is unknown.`,
 }
 
 var cmdWorker = Command{
-	Path:     "sparkwing cluster worker",
-	Synopsis: "Claim triggers from a profile's controller and run them in-process",
+	Path:              "sparkwing cluster worker",
+	ReachesController: true,
+	Synopsis:          "Claim triggers from a profile's controller and run them in-process",
 	Description: `Polls the trigger queue at the selected profile's
 controller and executes each claimed trigger in-process on this host.
 For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
@@ -1803,12 +1808,12 @@ var cmdProfilesShow = Command{
 	Description: `With --name, prints all fields of that config.yaml entry. The token is
 redacted unless --show-token is passed.
 
-Without --name, reports the profile a sparkwing command would resolve to and
-the chain that picked it: --profile, then SPARKWING_PROFILE, then the
-project's defaults.profile -- the resolver 'sparkwing run' and 'sparkwing
-pipeline trigger' use, so the answer matches what they would do. --profile
-NAME shows what adding that flag to your next command would select. That
-report never prints tokens.`,
+Without --name, reports the profile a sparkwing command would resolve to:
+the one --profile names, or this machine's local store when there is no
+flag. It uses the resolver 'sparkwing run' and 'sparkwing pipeline trigger'
+use, so the answer matches what they would do. --profile NAME shows what
+adding that flag to your next command would select. That report never
+prints tokens.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name in config.yaml", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Without --name: the resolution --profile NAME would make", ConflictsWith: []string{"name"}, Group: "Input"},
@@ -1859,8 +1864,9 @@ save it before leaving this command.`,
 }
 
 var cmdTokensCreate = Command{
-	Path:     "sparkwing cluster tokens create",
-	Synopsis: "Mint a new API token",
+	Path:              "sparkwing cluster tokens create",
+	ReachesController: true,
+	Synopsis:          "Mint a new API token",
 	Description: `Creates a token of the given --type scoped to --principal.
 Comma-separated --scope lists which API surfaces the token may
 call. The raw token is printed to stdout exactly once; after
@@ -1896,8 +1902,9 @@ existed.`,
 }
 
 var cmdLimitsShow = Command{
-	Path:     "sparkwing cluster limits show",
-	Synopsis: "Print every compute guard and visible runner usage",
+	Path:              "sparkwing cluster limits show",
+	ReachesController: true,
+	Synopsis:          "Print every compute guard and visible runner usage",
 	Description: `Prints each guard with its ceiling, or "unlimited" when nothing set
 one. An operator also sees the cloud runners claimed now in total and per
 principal, and whether runner_alarm has been reached. Team readers see their
@@ -1913,8 +1920,9 @@ own paid runner cap without another team's fleet activity.`,
 }
 
 var cmdLimitsSet = Command{
-	Path:     "sparkwing cluster limits set",
-	Synopsis: "Set one compute guard",
+	Path:              "sparkwing cluster limits set",
+	ReachesController: true,
+	Synopsis:          "Set one compute guard",
 	Description: `Sets one guard to a ceiling, or to zero to remove it. The guards are
 max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
@@ -1937,8 +1945,9 @@ Requires the admin scope.`,
 }
 
 var cmdTokensList = Command{
-	Path:     "sparkwing cluster tokens list",
-	Synopsis: "List token prefixes + metadata",
+	Path:              "sparkwing cluster tokens list",
+	ReachesController: true,
+	Synopsis:          "List token prefixes + metadata",
 	Description: `Prints the non-secret prefix + metadata (type, principal,
 scopes, last-used) for every token. The raw token value is
 never printed by this command.
@@ -1968,8 +1977,9 @@ scope arrays, suitable for piping into jq.
 }
 
 var cmdTokensRevoke = Command{
-	Path:     "sparkwing cluster tokens revoke",
-	Synopsis: "Mark a token revoked",
+	Path:              "sparkwing cluster tokens revoke",
+	ReachesController: true,
+	Synopsis:          "Mark a token revoked",
 	Description: `Subsequent requests using the token receive HTTP 401. Revocation is immediate
 and irreversible.`,
 	Flags: []FlagSpec{
@@ -1982,8 +1992,9 @@ and irreversible.`,
 }
 
 var cmdTokensRotate = Command{
-	Path:     "sparkwing cluster tokens rotate",
-	Synopsis: "Mint a replacement token with a grace window",
+	Path:              "sparkwing cluster tokens rotate",
+	ReachesController: true,
+	Synopsis:          "Mint a replacement token with a grace window",
 	Description: `Creates a new token and schedules the old token for revocation
 after --grace. During the grace window, both tokens work, which
 lets callers cycle credentials without downtime. The controller
@@ -2010,8 +2021,9 @@ profile named by --profile.`,
 }
 
 var cmdUsersAdd = Command{
-	Path:     "sparkwing cluster users add",
-	Synopsis: "Create a dashboard user",
+	Path:              "sparkwing cluster users add",
+	ReachesController: true,
+	Synopsis:          "Create a dashboard user",
 	Description: `Prompts for a password on stdin with echo disabled when stdin
 is a TTY (the password is not shown on-screen or recorded in
 shell history). Passing --password skips the prompt -- useful
@@ -2034,8 +2046,9 @@ admin is refused until one exists.`,
 }
 
 var cmdUsersList = Command{
-	Path:     "sparkwing cluster users list",
-	Synopsis: "Print every user",
+	Path:              "sparkwing cluster users list",
+	ReachesController: true,
+	Synopsis:          "Print every user",
 	Description: `Prints name, scopes, created_at, and last_login_at for every
 user in the controller's users table.`,
 	Flags: []FlagSpec{
@@ -2047,8 +2060,9 @@ user in the controller's users table.`,
 }
 
 var cmdUsersDelete = Command{
-	Path:     "sparkwing cluster users delete",
-	Synopsis: "Remove a dashboard user",
+	Path:              "sparkwing cluster users delete",
+	ReachesController: true,
+	Synopsis:          "Remove a dashboard user",
 	Description: `Deletes the user row, every session that user holds, and
 revokes every token minted under that principal name except the token
 this request authenticates with, in one transaction. The sessions and
@@ -2073,8 +2087,9 @@ Pass --profile NAME to select that profile's backend.`,
 }
 
 var cmdJobsList = Command{
-	Path:     "sparkwing runs list",
-	Synopsis: "List recent pipeline runs",
+	Path:              "sparkwing runs list",
+	ReachesController: true,
+	Synopsis:          "List recent pipeline runs",
 	Description: `Reads runs from the selected backend. Pass --profile NAME to select a
 named profile. Filters compose with AND semantics across flag types
 (pipeline=X AND status=Y), OR
@@ -2161,8 +2176,9 @@ until a run matches (a CI job waiting for the run its push started), and
 }
 
 var cmdJobsStatus = Command{
-	Path:     "sparkwing runs status",
-	Synopsis: "Show one run's status (non-zero exit unless status=success)",
+	Path:              "sparkwing runs status",
+	ReachesController: true,
+	Synopsis:          "Show one run's status (non-zero exit unless status=success)",
 	Description: `Prints a summary of the run (pipeline, status, node states).
 With --follow, polls until the run reaches a terminal status. Pass
 --profile NAME to read from a remote controller.
@@ -2231,8 +2247,9 @@ cancelled, 2 when D elapses first, and 3 when the run cannot be read.
 }
 
 var cmdJobsLogs = Command{
-	Path:     "sparkwing runs logs",
-	Synopsis: "Print a run's logs",
+	Path:              "sparkwing runs logs",
+	ReachesController: true,
+	Synopsis:          "Print a run's logs",
 	Description: `Without --profile, reads logs from the local run directory. Pass --profile
 NAME to read from a remote controller's logs service (profile must
 carry both controller + logs URLs). Line-selection filters
@@ -2302,8 +2319,9 @@ part of the stored log, and JSON output omits it.`,
 }
 
 var cmdJobsStats = Command{
-	Path:     "sparkwing runs stats",
-	Synopsis: "Report run counts, success rate, and duration percentiles",
+	Path:              "sparkwing runs stats",
+	ReachesController: true,
+	Synopsis:          "Report run counts, success rate, and duration percentiles",
 	Description: `Reports per-pipeline counts and durations over the selected run window.
 Running runs contribute to counts and are excluded from duration percentiles.
 
@@ -2342,8 +2360,9 @@ pinned rows, samples, and demand floors.`,
 }
 
 var cmdJobsRetry = Command{
-	Path:     "sparkwing runs retry",
-	Synopsis: "Trigger fresh runs copying pipeline + args from old ones",
+	Path:              "sparkwing runs retry",
+	ReachesController: true,
+	Synopsis:          "Trigger fresh runs copying pipeline + args from old ones",
 	Description: `Issues a new trigger per source run with the same pipeline, args,
 branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
@@ -2448,8 +2467,9 @@ To cancel a queued run instead, use 'sparkwing runs cancel'.`,
 }
 
 var cmdJobsCancel = Command{
-	Path:     "sparkwing runs cancel",
-	Synopsis: "Request cancellation of in-flight runs",
+	Path:              "sparkwing runs cancel",
+	ReachesController: true,
+	Synopsis:          "Request cancellation of in-flight runs",
 	Description: `Sends a cancel request per run to the controller. Each run
 transitions to 'cancelling' and then 'cancelled' once the runner
 acknowledges. Already-finished runs surface a per-id error but
@@ -2474,8 +2494,9 @@ lease root, and the daemon logs the parent resolution.`,
 }
 
 var cmdJobsBounce = Command{
-	Path:     "sparkwing runs bounce",
-	Synopsis: "Restart one running job's process without failing the run",
+	Path:              "sparkwing runs bounce",
+	ReachesController: true,
+	Synopsis:          "Restart one running job's process without failing the run",
 	Description: `Stops the process executing one running job and runs that
 job again, in place. The run keeps going: the job never reaches a
 terminal state, so nothing downstream sees a failure and no other
@@ -2510,8 +2531,9 @@ running; cancel the run and retry it instead.`,
 }
 
 var cmdJobsPrune = Command{
-	Path:     "sparkwing runs prune",
-	Synopsis: "Delete finished runs older than a threshold, or by id",
+	Path:              "sparkwing runs prune",
+	ReachesController: true,
+	Synopsis:          "Delete finished runs older than a threshold, or by id",
 	Description: `Prunes terminal runs (success / failed / cancelled) so the
 controller's SQLite store doesn't grow unbounded. Supply either
 --older-than DUR (batch by age) or one-or-more run ids via --run
@@ -2553,8 +2575,9 @@ them with a warning.`,
 }
 
 var cmdHooksInstall = Command{
-	Path:     "sparkwing pipeline hooks install",
-	Synopsis: "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
+	Path:              "sparkwing pipeline hooks install",
+	ReachesController: true,
+	Synopsis:          "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
 	Description: `Installs managed hooks for declared pre_commit, pre_push, and post_commit
 triggers. Existing unmanaged hooks are preserved and reported.
 
@@ -2658,8 +2681,9 @@ config.env: the daemon imports each file once and leaves it in place.`,
 }
 
 var cmdSecretSet = Command{
-	Path:     "sparkwing secrets set",
-	Synopsis: "Store (or replace) a secret value",
+	Path:              "sparkwing secrets set",
+	ReachesController: true,
+	Synopsis:          "Store (or replace) a secret value",
 	Description: `Stores --value (or the contents of --file) in the local secret store
 when --profile is omitted, or uploads it to the named profile's
 controller. Replaces any existing secret with that name.
@@ -2686,8 +2710,9 @@ shared with every pipeline.`,
 }
 
 var cmdSecretGet = Command{
-	Path:     "sparkwing secrets get",
-	Synopsis: "Print a secret's raw value to stdout",
+	Path:              "sparkwing secrets get",
+	ReachesController: true,
+	Synopsis:          "Print a secret's raw value to stdout",
 	Description: `Reads the local secret store when --profile is omitted, or the
 named profile's controller. Prints only the raw value (no trailing newline)
 so it can be piped into another command. Use 'secrets list' for metadata.`,
@@ -2704,8 +2729,9 @@ so it can be piped into another command. Use 'secrets list' for metadata.`,
 }
 
 var cmdSecretList = Command{
-	Path:     "sparkwing secrets list",
-	Synopsis: "List secret names + metadata",
+	Path:              "sparkwing secrets list",
+	ReachesController: true,
+	Synopsis:          "List secret names + metadata",
 	Description: `Lists secret names and metadata from the local secret store when --profile is
 omitted, or from the named profile's controller. Raw values are never printed by this
 command.`,
@@ -2722,8 +2748,9 @@ command.`,
 }
 
 var cmdSecretDelete = Command{
-	Path:     "sparkwing secrets delete",
-	Synopsis: "Remove a secret",
+	Path:              "sparkwing secrets delete",
+	ReachesController: true,
+	Synopsis:          "Remove a secret",
 	Description: `Deletes the secret from the local secret store when --profile is omitted, or
 from the named profile's controller. Pipelines that reference the name will fail to
 resolve until the secret is re-added.`,
@@ -2740,8 +2767,9 @@ resolve until the secret is re-added.`,
 }
 
 var cmdSecretRotate = Command{
-	Path:     "sparkwing secrets rotate",
-	Synopsis: "Re-encrypt every stored secret under the current key",
+	Path:              "sparkwing secrets rotate",
+	ReachesController: true,
+	Synopsis:          "Re-encrypt every stored secret under the current key",
 	Description: `Reads every secret the named profile's controller holds, or the local
 store without --profile, and writes it back sealed under the key that
 controller or this machine's daemon is running with now, in one
@@ -2784,8 +2812,9 @@ Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.`,
 }
 
 var cmdTriggersList = Command{
-	Path:     "sparkwing cluster triggers list",
-	Synopsis: "List pending / claimed / done / failed triggers",
+	Path:              "sparkwing cluster triggers list",
+	ReachesController: true,
+	Synopsis:          "List pending / claimed / done / failed triggers",
 	Description: `Queries GET /api/v1/triggers on the selected profile's
 controller. Empty filters return the most recent 20 entries
 across all statuses.
@@ -2815,8 +2844,9 @@ an older entry is not reported.`,
 }
 
 var cmdTriggersGet = Command{
-	Path:     "sparkwing cluster triggers get",
-	Synopsis: "Inspect one trigger's full metadata by id",
+	Path:              "sparkwing cluster triggers get",
+	ReachesController: true,
+	Synopsis:          "Inspect one trigger's full metadata by id",
 	Description: `Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
 git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
 json emits the raw response.`,
@@ -2862,8 +2892,9 @@ about.`,
 }
 
 var cmdRunnersAdd = Command{
-	Path:     "sparkwing cluster runners add",
-	Synopsis: "Mint a runner token, write the config, start the service",
+	Path:              "sparkwing cluster runners add",
+	ReachesController: true,
+	Synopsis:          "Mint a runner token, write the config, start the service",
 	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
 runs.state, secrets.read and logs.write against the profile's controller,
 writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
@@ -2909,8 +2940,9 @@ reaches only config.yaml.`,
 }
 
 var cmdRunnersRemove = Command{
-	Path:     "sparkwing cluster runners remove",
-	Synopsis: "Stop the runner service and revoke its token",
+	Path:              "sparkwing cluster runners remove",
+	ReachesController: true,
+	Synopsis:          "Stop the runner service and revoke its token",
 	Description: `Reads the token out of the agent config, stops and removes the
 user service, then revokes that token on the profile's controller. The service
 stops first, so a claim in flight finishes against a credential that still
@@ -2933,8 +2965,9 @@ replaces it.`,
 }
 
 var cmdAgentsEnroll = Command{
-	Path:     "sparkwing cluster agents enroll",
-	Synopsis: "Enroll or update a trusted executor",
+	Path:              "sparkwing cluster agents enroll",
+	ReachesController: true,
+	Synopsis:          "Enroll or update a trusted executor",
 	Description: `Binds one exact runner or service token prefix to an
 operator-owned executor envelope. The token must be live and carry
 nodes.claim; its stored principal becomes audit metadata. Re-enrollment
@@ -2965,8 +2998,9 @@ controller accepts at most 256 enrolled executors. Adding another returns ` + "`
 }
 
 var cmdAgentsList = Command{
-	Path:     "sparkwing cluster agents list",
-	Synopsis: "Print the controller's known agents",
+	Path:              "sparkwing cluster agents list",
+	ReachesController: true,
+	Synopsis:          "Print the controller's known agents",
 	Description: `Fetches /api/v1/agents and renders a table of fleet members.
 Registered executors report their operator-assigned identity,
 kind, trusted placement location, capabilities, concurrency limit, and
@@ -3035,8 +3069,9 @@ that home to keep it there.`,
 }
 
 var cmdClusterConcurrency = Command{
-	Path:     "sparkwing cluster concurrency",
-	Synopsis: "Inspect a single concurrency namespace: holders + queue",
+	Path:              "sparkwing cluster concurrency",
+	ReachesController: true,
+	Synopsis:          "Inspect a single concurrency namespace: holders + queue",
 	Description: `Shows who holds a concurrency namespace's slots
 and the queue of waiters behind it, each with its admission-rank
 position. Weighted admission can run a later fitting waiter before
@@ -3092,8 +3127,9 @@ default.`,
 }
 
 var cmdClusterObjectStoreStatus = Command{
-	Path:     "sparkwing cluster object-store status",
-	Synopsis: "Show the controller's object-store request budget",
+	Path:              "sparkwing cluster object-store status",
+	ReachesController: true,
+	Synopsis:          "Show the controller's object-store request budget",
 	Description: `Prints each request class with its per-minute rate, its per-day budget,
 how much of each window the controller has spent, how many times the
 class has tripped, and whether it is refusing requests now, followed by
@@ -3113,8 +3149,9 @@ controller, which needs an admin-scoped token.`,
 }
 
 var cmdClusterObjectStoreResetBreaker = Command{
-	Path:     "sparkwing cluster object-store reset-breaker",
-	Synopsis: "Clear a tripped object-store budget or ceiling freeze",
+	Path:              "sparkwing cluster object-store reset-breaker",
+	ReachesController: true,
+	Synopsis:          "Clear a tripped object-store budget or ceiling freeze",
 	Description: `Clears every tripped request class on the selected controller, resets
 its per-minute and per-day window counters, and thaws a frozen bucket
 ceiling, then prints the budget as it stands. Lifetime request and trip
@@ -3359,8 +3396,9 @@ module replacement.
 }
 
 var cmdApprove = Command{
-	Path:     "sparkwing runs approvals approve",
-	Synopsis: "Approve a pending approval-gate node",
+	Path:              "sparkwing runs approvals approve",
+	ReachesController: true,
+	Synopsis:          "Approve a pending approval-gate node",
 	Description: `Resolves the named approval gate as 'approved'. The gate's
 downstream nodes begin dispatching on the next orchestrator
 poll (roughly 500ms). The approver is recorded from the
@@ -3383,8 +3421,9 @@ or was already resolved (409).`,
 }
 
 var cmdDeny = Command{
-	Path:     "sparkwing runs approvals deny",
-	Synopsis: "Deny a pending approval-gate node",
+	Path:              "sparkwing runs approvals deny",
+	ReachesController: true,
+	Synopsis:          "Deny a pending approval-gate node",
 	Description: `Resolves the named approval gate as 'denied'. The gated node
 fails; downstream nodes see the failure and propagate per
 their ContinueOnError / Optional settings.`,
@@ -3411,8 +3450,9 @@ gate across all runs; with --run returns one run's full history
 }
 
 var cmdApprovalsList = Command{
-	Path:     "sparkwing runs approvals list",
-	Synopsis: "List pending approvals (or one run's history)",
+	Path:              "sparkwing runs approvals list",
+	ReachesController: true,
+	Synopsis:          "List pending approvals (or one run's history)",
 	Description: `Prints a table of approval rows. Without --run the list is the
 cross-run pending queue; with --run it's every approval for that
 run, both pending and resolved.`,
@@ -3442,8 +3482,9 @@ without going through the SDK.`,
 }
 
 var cmdAnnotationsList = Command{
-	Path:     "sparkwing runs annotations list",
-	Synopsis: "List annotations on a run",
+	Path:              "sparkwing runs annotations list",
+	ReachesController: true,
+	Synopsis:          "List annotations on a run",
 	Description: `Prints node-level annotations by default. Pass --steps to also
 include per-step annotations as separate rows; passing --step
 implies step-scope and limits to the matching step.`,
@@ -3464,8 +3505,9 @@ implies step-scope and limits to the matching step.`,
 }
 
 var cmdAnnotationsAdd = Command{
-	Path:     "sparkwing runs annotations add",
-	Synopsis: "Append an annotation to a node or step",
+	Path:              "sparkwing runs annotations add",
+	ReachesController: true,
+	Synopsis:          "Append an annotation to a node or step",
 	Description: `Appends one message to the annotations list on a node, or on a
 step when --step is given. Annotations are append-only; the same
 message string can be added more than once and the order is
@@ -3687,8 +3729,9 @@ trigger the cluster clones and runs.`,
 }
 
 var cmdCronsInstall = Command{
-	Path:     "sparkwing crons install",
-	Synopsis: "Arm a repo's declared schedules on this host and install the OS timer",
+	Path:              "sparkwing crons install",
+	ReachesController: true,
+	Synopsis:          "Arm a repo's declared schedules on this host and install the OS timer",
 	Description: `Reads .sparkwing/sparkwing.yaml, records every on.schedule
 entry that declares "where: local" against this home, and ensures the OS timer
 that runs the tick. An entry declaring "where: controller" is reported and left
@@ -3743,8 +3786,9 @@ runs. Re-running the push is the explicit update, and it moves the pin.`,
 }
 
 var cmdCronsUninstall = Command{
-	Path:     "sparkwing crons uninstall",
-	Synopsis: "Disarm a repo's schedules, and remove the timer when nothing is left",
+	Path:              "sparkwing crons uninstall",
+	ReachesController: true,
+	Synopsis:          "Disarm a repo's schedules, and remove the timer when nothing is left",
 	Description: `Deletes every schedule of one checkout, and its fire history,
 from this home. When no schedule remains armed anywhere, the OS timer goes
 too: the timer exists to serve armed schedules and nothing else.
@@ -3773,8 +3817,9 @@ naming the repo by its git origin, or with --name the one schedule.`,
 }
 
 var cmdCronsSet = Command{
-	Path:     "sparkwing crons set",
-	Synopsis: "Override a declared cadence on this host",
+	Path:              "sparkwing crons set",
+	ReachesController: true,
+	Synopsis:          "Override a declared cadence on this host",
 	Description: `Lays this host's own value over what the repo declares, for
 the cron expression, the zone, the overlap policy, the catch-up window and the
 launch's arguments. Everything left unnamed keeps the declared value, and a
@@ -3835,8 +3880,9 @@ value side by side.`,
 }
 
 var cmdCronsList = Command{
-	Path:     "sparkwing crons list",
-	Synopsis: "List the schedules armed on this host",
+	Path:              "sparkwing crons list",
+	ReachesController: true,
+	Synopsis:          "List the schedules armed on this host",
 	Description: `One row per schedule: its id, its repo/pipeline name, the
 cron expression and zone it is read in, when it next fires, when it last
 fired, that fire's outcome, and whether it is armed, paused, or undeclared.
@@ -3874,8 +3920,9 @@ configured zone; ` + "`crons show NAME --next N`" + ` reads one schedule.`,
 }
 
 var cmdCronsShow = Command{
-	Path:     "sparkwing crons show",
-	Synopsis: "Show one schedule's full record and its recent fires",
+	Path:              "sparkwing crons show",
+	ReachesController: true,
+	Synopsis:          "Show one schedule's full record and its recent fires",
 	Description: `Prints every stored field with absolute times, then the
 instants that have resolved, newest first: when each was due, when the tick
 decided it, what it decided, the run it launched and that run's current
@@ -3904,8 +3951,9 @@ zone, instead of the record.`,
 }
 
 var cmdCronsRun = Command{
-	Path:     "sparkwing crons run",
-	Synopsis: "Launch a schedule's pipeline now",
+	Path:              "sparkwing crons run",
+	ReachesController: true,
+	Synopsis:          "Launch a schedule's pipeline now",
 	Description: `Runs the pipeline immediately, whatever the cadence says and
 whether or not the schedule is paused, and records the launch in the
 schedule's history as a manual fire.

@@ -24,6 +24,16 @@ func ResolveDevEnvURL(key string) string {
 	return devEnvFile()[key]
 }
 
+// LocalDashboardURL returns the address the local dashboard wrote to dev.env
+// under key, ignoring the process environment, so a CLI verb without
+// --profile reaches only this machine's dashboard.
+func LocalDashboardURL(key string) string {
+	if os.Getenv(DevEnvDisableEnv) != "" {
+		return ""
+	}
+	return devEnvFile()[key]
+}
+
 // LocalServeToken returns the local dashboard's bearer when url is an
 // address that dashboard wrote to dev.env, and "" for any other URL, so the
 // token never travels to a server the dashboard did not name.

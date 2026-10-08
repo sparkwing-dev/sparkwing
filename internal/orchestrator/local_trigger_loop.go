@@ -262,7 +262,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
-		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
+		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, ProfileEnv: {}, SecretsProfileEnv: {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
 		PriorityEnv:                    {},
 		AdmissionClassEnv:              {},

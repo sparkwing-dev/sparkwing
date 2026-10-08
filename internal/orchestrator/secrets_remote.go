@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -16,7 +15,7 @@ func applySecretsProfileOverride(opts *Options) error {
 	if opts.LocalOnly {
 		return nil
 	}
-	prof := os.Getenv("SPARKWING_SECRETS_PROFILE")
+	prof := handoffSecretsProfile()
 	if prof == "" {
 		return nil
 	}
