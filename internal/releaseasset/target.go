@@ -13,7 +13,6 @@ const (
 	Sparkwing           Binary = "sparkwing"
 	SparkwingCache      Binary = "sparkwing-cache"
 	SparkwingController Binary = "sparkwing-controller"
-	SparkwingLogs       Binary = "sparkwing-logs"
 	SparkwingRunner     Binary = "sparkwing-runner"
 )
 
@@ -21,7 +20,6 @@ var supportedPlatforms = map[Binary]map[string]map[string]bool{
 	Sparkwing:           releasePlatforms(true),
 	SparkwingCache:      releasePlatforms(false),
 	SparkwingController: releasePlatforms(false),
-	SparkwingLogs:       releasePlatforms(false),
 	SparkwingRunner:     releasePlatforms(true),
 }
 

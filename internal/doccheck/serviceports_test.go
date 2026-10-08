@@ -10,7 +10,6 @@ func writeFakeServiceMains(t *testing.T, root, controllerPort string) {
 	t.Helper()
 	mains := map[string]string{
 		"sparkwing-controller": controllerPort,
-		"sparkwing-logs":       "4345",
 	}
 	for name, port := range mains {
 		dir := filepath.Join(root, "cmd", name)
@@ -29,8 +28,7 @@ func TestCheckServicePorts_PassesWhenTableMatchesCode(t *testing.T) {
 	writeFakeServiceMains(t, root, "4344")
 	content := t.TempDir()
 	writeDoc(t, content, "architecture.md",
-		"| Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 4344 |\n"+
-			"| Logs | `sparkwing-logs.sparkwing.svc.cluster.local` | 80 -> 4345 |\n")
+		"| Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 4344 |\n")
 	if !checkServicePorts(content, root) {
 		t.Fatal("expected pass: every documented target port matches the binary --addr default")
 	}
