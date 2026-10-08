@@ -18,9 +18,15 @@ func clientSideFilter(f orchestrator.CompiledFilter) bool {
 	return f.HasAny()
 }
 
+// safety: the grouped view renders the page the ordinary listing selects,
+// so filters, paging, dedupe across stores and old-controller handling are
+// the listing's own; grouping happens on that page.
 func listFailures(ctx context.Context, paths orchestrator.Paths, opts orchestrator.ListOpts, groupBy string, asJSON bool) error {
 	if len(opts.Statuses) != 1 || opts.Statuses[0] != "failed" {
 		return errors.New("runs list: --group-by reads failed runs; pass --status failed")
+	}
+	if opts.ByPipeline {
+		return errors.New("runs list: --group-by and --by-pipeline pick different views; pass one")
 	}
 	switch groupBy {
 	case "run":
@@ -29,44 +35,18 @@ func listFailures(ctx context.Context, paths orchestrator.Paths, opts orchestrat
 	default:
 		return fmt.Errorf("runs list: --group-by must be run|step|node, got %q", groupBy)
 	}
-	filter := store.RunFilter{
-		Statuses:       []string{"failed"},
-		Pipelines:      opts.Pipelines,
-		GitSHAPrefixes: opts.Filter.SHAPrefixes,
-		GitBranches:    opts.Filter.Branches,
-		DeclaredRepos:  opts.Repos,
-		RootOnly:       opts.RootOnly,
-		Limit:          opts.Limit,
+	opts.RenderRows = func(rows []orchestrator.TaggedRun, nodes func(orchestrator.TaggedRun) ([]*store.Node, error)) error {
+		failures := make([]failureRow, 0, len(rows))
+		for _, r := range rows {
+			found, err := nodes(r)
+			if err != nil {
+				found = nil
+			}
+			failures = append(failures, failureRowFromNodes(r, found))
+		}
+		return renderFailures(failures, groupBy, asJSON)
 	}
-	if opts.Since > 0 {
-		filter.Since = time.Now().Add(-opts.Since)
-	}
-	// safety: the error, search, exclusion and date filters apply after the
-	// fetch, so the fetch reads a full page to fill --limit with matches.
-	if clientSideFilter(opts.Filter) {
-		filter.Limit = store.MaxRunListLimit
-	}
-	// safety: the store already applied (and normalized) the branch and SHA
-	// includes, so the client-side pass checks only what the store cannot.
-	post := opts.Filter
-	post.Branches, post.SHAPrefixes = nil, nil
-	keep := post.Matches
-	var rows []failureRow
-	var notes []string
-	var err error
-	if opts.Profile != nil && opts.Profile.ControllerURL() != "" {
-		rows, err = collectRemoteFailures(ctx, opts.Profile.ControllerURL(), opts.Profile.ControllerToken(), filter, opts.Limit, keep)
-	} else {
-		rows, notes, err = collectLocalFailures(ctx, paths, filter, opts.Limit, keep)
-	}
-	if err != nil {
-		return err
-	}
-	if err := renderFailures(rows, groupBy, asJSON); err != nil {
-		return err
-	}
-	orchestrator.WriteStandaloneNotes(os.Stderr, notes)
-	return nil
+	return orchestrator.ListJobs(ctx, paths, opts, os.Stdout)
 }
 
 func waitForMatchingRun(ctx context.Context, paths orchestrator.Paths, opts orchestrator.ListOpts, timeout time.Duration) error {

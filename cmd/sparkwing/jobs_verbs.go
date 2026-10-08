@@ -45,166 +45,21 @@ func (f failureRow) clusterKey(groupBy string) string {
 	}
 }
 
-func collectLocalFailures(
-	ctx context.Context,
-	paths orchestrator.Paths,
-	filter store.RunFilter,
-	limit int,
-	keep func(*store.Run) bool,
-) ([]failureRow, []string, error) {
-	if err := paths.EnsureRoot(); err != nil {
-		return nil, nil, err
-	}
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = st.Close() }()
-
-	standalone := orchestrator.OpenStandaloneStores(ctx, paths)
-	defer func() { _ = standalone.Close() }()
-	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
-		runs, err := st.ListRuns(ctx, f)
-		if err != nil {
-			return nil, false, err
-		}
-		others := standalone.ListRuns(ctx, f)
-		exhausted := f.Limit > 0 && len(runs) < f.Limit && len(others) < f.Limit
-		return orchestrator.MergeTaggedRuns(append(orchestrator.TagShared(runs), others...)), exhausted, nil
-	}
-	kept, err := walkRunPages(filter, limit, fetch, keep)
-	if err != nil {
-		return nil, nil, err
-	}
-	rows := make([]failureRow, 0, len(kept))
-	for _, r := range kept {
-		rows = append(rows, failureRowFor(ctx, standalone, st, r))
-	}
-	return rows, standalone.Notes(), nil
-}
-
-// safety: a client-side filter can reject a whole page, so the walk follows
-// the store cursor until limit rows are kept or the store runs out; a page
-// shorter than the ask ends it without a cursor request an older controller
-// would refuse.
-func walkRunPages(
-	filter store.RunFilter,
-	limit int,
-	fetch func(store.RunFilter) (page []orchestrator.TaggedRun, exhausted bool, err error),
-	keep func(*store.Run) bool,
-) ([]orchestrator.TaggedRun, error) {
-	var kept []orchestrator.TaggedRun
-	// safety: a run held in the shared and a standalone store under different
-	// start times lands on two pages; the walk keeps one row per id, the
-	// shared copy when both appear, as one merged page would.
-	at := map[string]int{}
-	for {
-		page, exhausted, err := fetch(filter)
-		if err != nil {
-			return nil, err
-		}
-		if filter.Limit > 0 && len(page) > filter.Limit {
-			page = page[:filter.Limit]
-		}
-		if len(page) == 0 {
-			return kept, nil
-		}
-		for _, r := range page {
-			if !keep(r.Run) {
-				continue
-			}
-			if i, seen := at[r.ID]; seen {
-				if kept[i].Store != orchestrator.SharedStoreLabel && r.Store == orchestrator.SharedStoreLabel {
-					kept[i] = r
-				}
-				continue
-			}
-			at[r.ID] = len(kept)
-			kept = append(kept, r)
-			if limit > 0 && len(kept) == limit {
-				return kept, nil
-			}
-		}
-		if exhausted {
-			return kept, nil
-		}
-		last := page[len(page)-1]
-		filter.AfterID = last.ID
-		filter.AfterStartedAt = 0
-		if !last.StartedAt.IsZero() {
-			filter.AfterStartedAt = last.StartedAt.UnixNano()
-		}
-	}
-}
-
-func failureRowFor(
-	ctx context.Context,
-	standalone *orchestrator.StandaloneStores,
-	shared *store.Store,
-	r orchestrator.TaggedRun,
-) failureRow {
+func failureRowFromNodes(r orchestrator.TaggedRun, nodes []*store.Node) failureRow {
 	row := failureRow{
 		ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status, Store: r.Store,
 	}
-	holder := shared
-	if r.Store != orchestrator.SharedStoreLabel {
-		st, ok := standalone.StoreFor(r.Store)
-		if !ok {
-			return row
-		}
-		holder = st
-	}
-	if nodes, err := holder.ListNodes(ctx, r.ID); err == nil {
-		for _, n := range nodes {
-			if n.Outcome == "failed" && n.Error != "" && n.Error != "upstream-failed" {
-				row.Step = n.NodeID
-				row.Message = truncateOneLine(n.Error, 160)
-				break
-			}
+	for _, n := range nodes {
+		if n.Outcome == "failed" && n.Error != "" && n.Error != "upstream-failed" {
+			row.Step = n.NodeID
+			row.Message = truncateOneLine(n.Error, 160)
+			break
 		}
 	}
 	if row.Message == "" && r.Error != "" {
 		row.Message = truncateOneLine(r.Error, 160)
 	}
 	return row
-}
-
-func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter, limit int, keep func(*store.Run) bool) ([]failureRow, error) {
-	c := client.NewWithToken(controllerURL, nil, token)
-	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
-		runs, err := c.ListRuns(ctx, f)
-		if err != nil {
-			return nil, false, err
-		}
-		return orchestrator.TagShared(runs), f.Limit > 0 && len(runs) < f.Limit, nil
-	}
-	kept, err := walkRunPages(filter, limit, fetch, keep)
-	if err != nil {
-		return nil, err
-	}
-	rows := make([]failureRow, 0, len(kept))
-	for _, tagged := range kept {
-		r := tagged.Run
-		row := failureRow{
-			ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status,
-			Store: orchestrator.SharedStoreLabel,
-		}
-		nodes, err := c.ListNodes(ctx, r.ID)
-		if err == nil {
-			for _, n := range nodes {
-				if n.Outcome == "failed" && n.Error != "" && n.Error != "upstream-failed" {
-					row.Step = n.NodeID
-					row.Message = truncateOneLine(n.Error, 160)
-					break
-				}
-			}
-		}
-		if row.Message == "" && r.Error != "" {
-			row.Message = truncateOneLine(r.Error, 160)
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
 }
 
 func renderFailures(rows []failureRow, groupBy string, asJSON bool) error {

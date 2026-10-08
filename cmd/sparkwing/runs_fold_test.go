@@ -206,42 +206,45 @@ func TestRunsListGroupByKeepsTheStoresNormalizedSHAMatch(t *testing.T) {
 	}
 }
 
-func TestWalkRunPagesFindsAMatchBehindFullPagesOfMisses(t *testing.T) {
+func TestRunsListGroupByFindsAnOlderMatchBehindNewerMisses(t *testing.T) {
 	base := time.Now().Add(-time.Hour)
 	var seeded []store.Run
-	for i := 0; i < 7; i++ {
-		seeded = append(seeded, store.Run{ID: fmt.Sprintf("run-%d", i), Pipeline: "build", Status: "failed", StartedAt: base.Add(time.Duration(i) * time.Minute)})
+	for i := 0; i < 5; i++ {
+		seeded = append(seeded, store.Run{ID: fmt.Sprintf("run-%d", i), Pipeline: "build", Status: "running", StartedAt: base.Add(time.Duration(i) * time.Minute)})
 	}
 	paths := runsFoldHome(t, seeded...)
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
-	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
-		runs, err := st.ListRuns(context.Background(), f)
-		return orchestrator.TagShared(runs), len(runs) < f.Limit, err
+	for i := 0; i < 5; i++ {
+		msg := "flaky network"
+		if i == 0 {
+			msg = "permission denied"
+		}
+		if err := st.FinishRun(context.Background(), fmt.Sprintf("run-%d", i), "failed", msg); err != nil {
+			t.Fatal(err)
+		}
 	}
-	keep := func(r *store.Run) bool { return r.ID == "run-0" || r.ID == "run-1" }
-	kept, err := walkRunPages(store.RunFilter{Limit: 2}, 5, fetch, keep)
-	if err != nil {
+	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, r := range kept {
-		got = append(got, r.ID)
-	}
-	if strings.Join(got, ",") != "run-1,run-0" {
-		t.Fatalf("walk kept %v, want the two oldest runs found behind pages of misses", got)
+	out := captureStdout(t, func() {
+		if err := runJobs([]string{"list", "--status", "failed", "--group-by", "run", "--error", "permission", "--limit", "1", "-o", "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, `"run-0"`) || strings.Contains(out, `"run-4"`) {
+		t.Fatalf("grouped page = %q, want the oldest run, the only --error match", out)
 	}
 }
 
-func TestRemoteFailuresStopOnAShortPageWithoutACursor(t *testing.T) {
+func TestRunsListGroupByReadsAControllerWithoutCursorPaging(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/runs" {
 			if r.URL.Query().Get("after_id") != "" {
-				t.Errorf("walk sent a cursor after a short page: %s", r.URL.RawQuery)
+				t.Errorf("listing sent a cursor to a controller that cannot page: %s", r.URL.RawQuery)
 			}
 			w.Header().Set("X-Sparkwing-Run-Filter-Version", "1")
 			_, _ = w.Write([]byte(`{"runs":[{"id":"run-old","pipeline":"build","status":"failed"}]}`))
@@ -250,41 +253,14 @@ func TestRemoteFailuresStopOnAShortPageWithoutACursor(t *testing.T) {
 		_, _ = w.Write([]byte(`{"nodes":[]}`))
 	}))
 	t.Cleanup(srv.Close)
-	rows, err := collectRemoteFailures(context.Background(), srv.URL, "", store.RunFilter{Statuses: []string{"failed"}, Limit: 20}, 20,
-		func(*store.Run) bool { return true })
-	if err != nil {
-		t.Fatalf("a cursorless controller with one failure: %v", err)
-	}
-	if len(rows) != 1 || rows[0].ID != "run-old" {
-		t.Fatalf("rows = %+v, want the one failed run", rows)
-	}
-}
-
-func TestWalkRunPagesKeepsOneRowPerRunPreferringTheSharedCopy(t *testing.T) {
-	now := time.Now()
-	row := func(id, label string, at time.Time) orchestrator.TaggedRun {
-		return orchestrator.TaggedRun{Run: &store.Run{ID: id, StartedAt: at}, Store: label}
-	}
-	for name, pages := range map[string][][]orchestrator.TaggedRun{
-		"shared copy first": {{row("run-x", orchestrator.SharedStoreLabel, now)}, {row("run-x", "standalone/a", now.Add(-time.Minute))}},
-		"shared copy later": {{row("run-x", "standalone/a", now)}, {row("run-x", orchestrator.SharedStoreLabel, now.Add(-time.Minute))}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			call := 0
-			fetch := func(store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
-				if call >= len(pages) {
-					return nil, true, nil
-				}
-				call++
-				return pages[call-1], false, nil
-			}
-			kept, err := walkRunPages(store.RunFilter{Limit: 1}, 10, fetch, func(*store.Run) bool { return true })
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(kept) != 1 || kept[0].Store != orchestrator.SharedStoreLabel {
-				t.Fatalf("kept %+v, want the run once, from the shared store", kept)
-			}
-		})
+	runsFoldHome(t)
+	setProfilesFixture(t, fmt.Sprintf("profiles:\n  old: {controller: {url: %q}}\n", srv.URL))
+	out := captureStdout(t, func() {
+		if err := runJobs([]string{"list", "--status", "failed", "--group-by", "run", "--profile", "old", "-o", "json"}); err != nil {
+			t.Fatalf("grouped listing against a version-1 controller: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"run-old"`) {
+		t.Fatalf("grouped page = %q, want the one failed run", out)
 	}
 }

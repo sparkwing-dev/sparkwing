@@ -2107,8 +2107,10 @@ refused: this listing serves pages, so a page of zero has no meaning.
 a kind:summary record carrying truncated and, where it stopped short,
 reason, in place of a kind:page record.
 
---status failed --group-by run lists each failed run with its failing step
-and error; --group-by step or node clusters those failures. --wait blocks
+--status failed --group-by run prints the page this listing selects as
+failures, each run with its failing step and error; --group-by step or node
+clusters that page's failures. Filters, --limit, --cursor and the page record
+work as they do for the table. --wait blocks
 until a run matches (a CI job waiting for the run its push started), and
 --watch keeps printing each newer matching run. Both match on --pipeline,
 --status, --branch, --sha, --repo, --root-only and --since.`,

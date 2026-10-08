@@ -39,7 +39,6 @@ var defaultTeamCallers = map[string]string{
 	"cmd/sparkwing.addLocalAnnotation":                                      defaultTeamCli,
 	"cmd/sparkwing.cancelQueuedLocalRuns":                                   defaultTeamCli,
 	"cmd/sparkwing.existingSubmissionResult":                                defaultTeamCli,
-	"cmd/sparkwing.failureRowFor":                                           defaultTeamCli,
 	"cmd/sparkwing.findExistingSubmission":                                  defaultTeamCli,
 	"cmd/sparkwing.listLocalAnnotations":                                    defaultTeamCli,
 	"cmd/sparkwing.listLocalApprovals":                                      defaultTeamCli,

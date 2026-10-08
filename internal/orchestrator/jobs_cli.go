@@ -51,6 +51,11 @@ type ListOpts struct {
 	Pivot      PivotOpts
 
 	Cursor string
+
+	// RenderRows, when set, receives the page the listing would print and
+	// renders it in place of the run table; the page record still follows.
+	// nodes reads a row's nodes from the store that holds it.
+	RenderRows func(rows []TaggedRun, nodes func(TaggedRun) ([]*store.Node, error)) error
 }
 
 // LatestRuns returns up to n of the newest runs the server-side part of
@@ -116,8 +121,9 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	rows := TagShared(runs)
 	var lister runLister = b
 	var merged bool
+	var standalone *StandaloneStores
 	if mergesStandalone(b, paths, opts.Profile) {
-		standalone := OpenStandaloneStores(ctx, paths)
+		standalone = OpenStandaloneStores(ctx, paths)
 		defer func() { _ = standalone.Close() }()
 		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
 		lister = mergedLister{backend: b, standalone: standalone}
@@ -151,6 +157,22 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 
 	rows, page := pager.page(rows, resume, sourceMore, filter.Since)
 	page.Total = totalMatching(ctx, b, filter, clientFilter, merged)
+	if opts.RenderRows != nil {
+		nodes := func(r TaggedRun) ([]*store.Node, error) {
+			if r.Store == SharedStoreLabel {
+				return b.ListNodes(ctx, r.ID)
+			}
+			held, ok := standalone.StoreFor(r.Store)
+			if !ok {
+				return nil, fmt.Errorf("standalone store %s is not open", r.Store)
+			}
+			return backend.NewStoreBackend(held, paths, nil).ListNodes(ctx, r.ID)
+		}
+		if err := opts.RenderRows(rows, nodes); err != nil {
+			return err
+		}
+		return page.write(opts.JSON && !opts.Quiet, out, os.Stderr)
+	}
 	admissionStatus := func(runID string) (admissionWaitDetail, bool) {
 		return latestAdmissionWait(ctx, b, runID)
 	}
