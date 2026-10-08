@@ -197,6 +197,9 @@ email or a token) and `team`. These also get an `audit` record:
 - reads of secrets, tokens and operator routes (`/api/v1/secrets`,
   `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
   `/api/v1/operator/...`);
+- the dashboard's own sign-in and logout routes, and the redirect that finishes
+  a browser flow: a completed OAuth sign-in, identity link or GitHub App
+  connection, recorded with the account it signed in or acted for;
 - every `401` and `403`, whatever the method. A refused bearer shaped like a
   Sparkwing token adds `attempted_prefix`, the prefix that names the token
   without granting it.

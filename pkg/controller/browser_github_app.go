@@ -278,6 +278,7 @@ func (s *Server) handleGitHubAppComplete(w http.ResponseWriter, r *http.Request)
 		s.renderGitHubAppRefusal(w, err)
 		return
 	}
+	noteAuditWrite(r.Context())
 	connected := url.URL{Path: githubAppSettingsPath, RawQuery: url.Values{"connected": {bound.AccountLogin}}.Encode()}
 	http.Redirect(w, r, connected.String(), http.StatusSeeOther)
 }

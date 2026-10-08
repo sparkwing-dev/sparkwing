@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -63,5 +64,34 @@ func TestOAuthStartRefusesAnUnknownProvider(t *testing.T) {
 	f := newIdentityFixture(t)
 	if code := f.browserGet("/auth/okta/start").StatusCode; code != http.StatusNotFound {
 		t.Fatalf("unknown provider = %d, want 404", code)
+	}
+}
+
+func TestOAuthSignInAuditNamesTheAccount(t *testing.T) {
+	logs := &syncBuffer{}
+	raw, pub := multiTeamLicense(t)
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, logger: slog.New(slog.NewTextHandler(logs, nil))})
+	p := person("g-audit", "audit@example.com", "Audit")
+	start := f.browserGet("/auth/google/start")
+	flow := responseCookie(start, "__Host-sw_oauth")
+	authorize, err := url.Parse(start.Header.Get("Location"))
+	if flow == nil || err != nil {
+		t.Fatalf("start = %d", start.StatusCode)
+	}
+	done := f.browserGet("/auth/google/callback?"+url.Values{
+		"code":  {f.google.Code(p, flowVerifier(t, flow), dashRedirect)},
+		"state": {authorize.Query().Get("state")},
+	}.Encode(), flow)
+	session := responseCookie(done, "__Host-sw_session")
+	if done.StatusCode != http.StatusOK || session == nil {
+		t.Fatalf("callback = %d", done.StatusCode)
+	}
+	var me exchangeBody
+	if code := f.call("GET", "/api/v1/me", sessionAuth(session.Value), nil, &me); code != http.StatusOK {
+		t.Fatalf("me = %d", code)
+	}
+	line := auditLine(logs.String(), done.Header.Get("X-Request-Id"))
+	if !strings.Contains(line, "route=/auth/{provider}/callback") || !strings.Contains(line, "principal_id="+me.User.ID) {
+		t.Fatalf("sign-in audit record does not name account %s: %q", me.User.ID, line)
 	}
 }

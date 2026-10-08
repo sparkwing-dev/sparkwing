@@ -199,7 +199,7 @@ func (s *Server) handleBootstrapSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginPage(w, r, data, status)
 		return
 	}
-	raw, sess, _, err := s.passwordLogin(r, user, pass)
+	raw, sess, u, err := s.passwordLogin(r, user, pass)
 	if err != nil {
 		s.renderLoginPage(w, r, loginPageData{
 			Next:  next,
@@ -207,6 +207,7 @@ func (s *Server) handleBootstrapSubmit(w http.ResponseWriter, r *http.Request) {
 		}, http.StatusOK)
 		return
 	}
+	noteAuditPrincipal(r.Context(), &Principal{Name: u.Name, Kind: store.TokenKindUser, Team: sess.Team})
 	s.endPriorSession(r, raw)
 	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
 	http.Redirect(w, r, next, http.StatusSeeOther)

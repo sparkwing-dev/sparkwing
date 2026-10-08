@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -295,4 +296,28 @@ func auditLine(logs, requestID string) string {
 		}
 	}
 	return ""
+}
+
+func TestBrowserBootstrapAuditNamesTheFirstAdmin(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	logs := &syncBuffer{}
+	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).WithDashboard(controller.Dashboard{})
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	f := &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), logs: logs}
+
+	csrf, _ := f.loginPage("/")
+	rec := f.postForm("/login/bootstrap", url.Values{
+		"username": {"admin"}, "password": {"correct-horse"}, "csrf_token": {csrf},
+	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("bootstrap = %d", rec.Code)
+	}
+	line := auditLine(logs.String(), rec.Header().Get("X-Request-Id"))
+	if !strings.Contains(line, "route=/login/bootstrap") || !strings.Contains(line, "principal_id=admin") {
+		t.Fatalf("bootstrap audit record does not name the first admin: %q", line)
+	}
 }

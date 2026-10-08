@@ -119,6 +119,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noteAuditPrincipal(r.Context(), &Principal{Kind: store.TokenKindUser, AccountID: sess.AccountID, Team: sess.Team})
+	noteAuditWrite(r.Context())
 	s.endPriorSession(r, raw)
 	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
 	renderPage(w, http.StatusOK, signedInTmpl, safeNext(flow.Next))
@@ -274,5 +275,6 @@ func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Reque
 		s.refuseIdentityLink(w, r, name, err)
 		return
 	}
+	noteAuditWrite(r.Context())
 	redirectToSignIns(w, r, url.Values{"linked": {name}})
 }
