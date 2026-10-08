@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** `daemon explain --run ID` is `daemon events --run ID --explain`
+  Same sentences, the same JSON records with `-o json`, and the same refusal to start the daemon. `--explain` refuses the list filters (`--since`, `--kind`, `--incarnation`, `--limit`, `--offset`) because it reads every record of the run. See [migration guide](docs/migrations/_unreleased.md#daemon-explain-moves-to-daemon-events---explain).
+
 - **cli (Breaking):** Move `configure xrepo` and `update --sdk` under `repos`, and drop the bare `repos` listing
   `configure xrepo add|remove|prune` are `repos add|remove|prune`; `configure xrepo list [--pipelines=false]` is `repos list --checkouts [--pipelines=false]`; `update --sdk [--check] [--version V]` is `repos update --in-place [--check] [--version V]`, which keeps the same go get and go mod tidy, update receipt, check record and exit codes. Bare `sparkwing repos` printed the same table as `repos list` and now prints the group's help. `update` keeps `--cli` as an optional name for its only target. See [migration guide](docs/migrations/_unreleased.md#repository-verbs-gather-under-repos).
 

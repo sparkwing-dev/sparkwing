@@ -54,7 +54,7 @@ daemon and launches no successor. The supervisor keeps a daemon whose heartbeat
 counter advances during failed health probes. A whole-machine pause restarts the
 stale window when the supervisor resumes. See [Diagnosing admission](diagnosing-admission.md)
 for event records and dump paths.`,
-	SubcommandOrder: []string{"status", "events", "explain", "restart", "stop", "recover-state"},
+	SubcommandOrder: []string{"status", "events", "restart", "stop", "recover-state"},
 	Examples: []Example{
 		{"Machine-readable status", "sparkwing daemon status -o json"},
 		{"Refresh only if already running", "sparkwing daemon restart"},
@@ -64,18 +64,10 @@ for event records and dump paths.`,
 
 var cmdDaemonEvents = Command{
 	Path: "sparkwing daemon events", Synopsis: "Read retained admission events without starting the daemon",
-	Description: "Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.",
-	Flags:       []FlagSpec{{Name: "run", Argument: "ID", Desc: "Filter by run ID", Group: "Input"}, {Name: "since", Argument: "DURATION", Desc: "Lookback duration", Group: "Input"}, {Name: "kind", Argument: "KIND", Desc: "Record kind (repeatable)", Group: "Input"}, {Name: "incarnation", Argument: "N", Desc: "Daemon incarnation", Group: "Input"}, {Name: "limit", Argument: "N", Desc: "Maximum records (default 50; 0 for all)", Group: "Input"}, {Name: "offset", Argument: "N", Desc: "Matching records to skip from newest", Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
+	Description: "Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.\n\n--explain --run ID explains that run's admission history in sentences instead, including descendant node slots and attached children; JSON output keeps the structured records.",
+	Flags:       []FlagSpec{{Name: "run", Argument: "ID", Desc: "Filter by run ID", Group: "Input"}, {Name: "since", Argument: "DURATION", Desc: "Lookback duration", Group: "Input"}, {Name: "kind", Argument: "KIND", Desc: "Record kind (repeatable)", Group: "Input"}, {Name: "incarnation", Argument: "N", Desc: "Daemon incarnation", Group: "Input"}, {Name: "limit", Argument: "N", Desc: "Maximum records (default 50; 0 for all)", Group: "Input"}, {Name: "offset", Argument: "N", Desc: "Matching records to skip from newest", Group: "Input"}, {Name: "explain", Desc: "With --run, explain the run's admission history in sentences", RequiresFlags: []string{"run"}, Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
 	GroupOrder:  []string{"Input", "Output", "Other"},
-	Examples:    []Example{{"Events for one run", "sparkwing daemon events --run abc -o json"}},
-}
-
-var cmdDaemonExplain = Command{
-	Path: "sparkwing daemon explain", Synopsis: "Explain one run's admission history from retained events",
-	Description: "Explains a run's admission history in sentences, including descendant node slots and attached children, without starting the daemon. Unreadable records are skipped and counted on stderr. JSON output retains the structured records.",
-	Flags:       []FlagSpec{{Name: "run", Argument: "ID", Desc: "Run ID to explain", Required: true, Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
-	GroupOrder:  []string{"Input", "Output", "Other"},
-	Examples:    []Example{{"Explain a run", "sparkwing daemon explain --run abc"}},
+	Examples:    []Example{{"Events for one run", "sparkwing daemon events --run abc -o json"}, {"Explain one run's admission history", "sparkwing daemon events --run abc --explain"}},
 }
 
 var cmdDaemonStop = Command{

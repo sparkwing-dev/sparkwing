@@ -15,7 +15,7 @@ import (
 )
 
 var allCommands = []*Command{
-	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdDaemonExplain, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun,
+	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun,
 	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsSearch, &cmdDocsMigrations,
 	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,

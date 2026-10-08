@@ -16,8 +16,8 @@ incarnation.
 ```sh
 sparkwing daemon events --run RUN_ID -o json
 sparkwing daemon events --since 30m --kind replacement
-sparkwing daemon explain --run RUN_ID
-sparkwing daemon explain --run RUN_ID -o json
+sparkwing daemon events --run RUN_ID --explain
+sparkwing daemon events --run RUN_ID --explain -o json
 ```
 
 Both commands read files directly, even when the daemon is down. `events` can
@@ -28,7 +28,7 @@ reads. Unreadable records are skipped, and their count is printed on stderr.
 Records are ordered by timestamp, incarnation, then sequence. JSON output is
 one record per line and is the default when piped; a terminal gets human output.
 With no retained journal, human `events` output prints the directory it checked.
-`explain` renders a run's admission timeline in sentences, including descendant
+`--explain` renders a run's admission timeline in sentences, including descendant
 node slot requests and attached children owned by that run. Its JSON output
 preserves the structured records. A retained record carries a timestamp, source,
 incarnation, sequence, kind, run identity where known, and decision inputs in

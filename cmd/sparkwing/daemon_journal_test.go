@@ -66,12 +66,12 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 		}
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	plain := captureDaemonOutput(t, func() error { return runDaemonExplain([]string{"--run", "run-1", "-o", "plain"}) })
+	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
 	if !strings.Contains(plain, "Queued behind run run-0: cores") || !strings.Contains(plain, "Admitted after 350ms") {
 		t.Fatalf("timeline: %s", plain)
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	jsonExplain := captureDaemonOutput(t, func() error { return runDaemonExplain([]string{"--run", "run-1"}) })
+	jsonExplain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1"}) })
 	if strings.Count(jsonExplain, "\n") != 3 || !strings.Contains(jsonExplain, `"kind":"request"`) {
 		t.Fatalf("piped explanation: %s", jsonExplain)
 	}
@@ -122,7 +122,7 @@ func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
 		}
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	plain := captureDaemonOutput(t, func() error { return runDaemonExplain([]string{"--run", "run-1", "-o", "plain"}) })
+	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
 	for _, fragment := range []string{"node-slot: Requested 0.2 cores", "node-slot: Admitted after 12.4s (backfill)", "child-1: Attached child", "child-2: Request rejected: parent lease missing", "refused-slot: Request rejected: draining", "node-slot: Released lease-1"} {
 		if !strings.Contains(plain, fragment) {
 			t.Errorf("missing %q in %s", fragment, plain)
@@ -148,7 +148,7 @@ func TestDaemonExplainFollowsDescendantsTransitively(t *testing.T) {
 	}
 	output := captureDaemonOutput(t, func() error {
 		t.Setenv("SPARKWING_HOME", home)
-		return runDaemonExplain([]string{"--run", "root", "-o", "json"})
+		return runDaemonEvents([]string{"--explain", "--run", "root", "-o", "json"})
 	})
 	if strings.Count(output, `"run_id":"grandchild"`) != 2 || !strings.Contains(output, `"run_id":"child"`) || strings.Contains(output, `"run_id":"unrelated"`) {
 		t.Fatalf("transitive timeline: %s", output)
@@ -174,7 +174,7 @@ func TestDaemonJournalReportsSkippedRecords(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	for _, run := range []func() error{
 		func() error { return runDaemonEvents([]string{"-o", "json"}) },
-		func() error { return runDaemonExplain([]string{"--run", "run-1", "-o", "json"}) },
+		func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "json"}) },
 	} {
 		warning := captureDaemonErrorOutput(t, func() error {
 			_ = captureDaemonOutput(t, run)

@@ -77,8 +77,6 @@ func runDaemon(args []string) error {
 		return runDaemonRecoverState(args[1:])
 	case "events":
 		return runDaemonEvents(args[1:])
-	case "explain":
-		return runDaemonExplain(args[1:])
 	default:
 		PrintHelp(cmdDaemon, os.Stderr)
 		return fmt.Errorf("daemon: unknown subcommand %q", args[0])
@@ -108,11 +106,23 @@ func runDaemonEvents(args []string) error {
 	limit := fs.Int("limit", 50, "maximum records (0 for all)")
 	offset := fs.Int("offset", 0, "matching records to skip from newest")
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
+	explain := fs.Bool("explain", false, "with --run, explain the run's admission history in sentences")
 	if err := parseAndCheck(cmdDaemonEvents, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
+	}
+	if *explain {
+		for _, name := range []string{"since", "kind", "incarnation", "limit", "offset"} {
+			if fs.Changed(name) {
+				return fmt.Errorf("daemon events --explain: --%s filters the event list; --explain reads every record of the run", name)
+			}
+		}
+		if *run == "" {
+			return errors.New("daemon events --explain: --run is required")
+		}
+		return explainRunAdmission(*run, *output)
 	}
 	if *since < 0 {
 		return errors.New("daemon events: --since must be nonnegative")
@@ -177,20 +187,8 @@ func runDaemonEvents(args []string) error {
 	return nil
 }
 
-func runDaemonExplain(args []string) error {
-	fs := flag.NewFlagSet(cmdDaemonExplain.Path, flag.ContinueOnError)
-	run := fs.String("run", "", "run ID to explain")
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	if err := parseAndCheck(cmdDaemonExplain, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *run == "" {
-		return errors.New("daemon explain: --run is required")
-	}
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonExplain.Path)
+func explainRunAdmission(runID, output string) error {
+	format, err := resolveTTYAwareOutput(output, cmdDaemonEvents.Path)
 	if err != nil {
 		return err
 	}
@@ -200,9 +198,9 @@ func runDaemonExplain(args []string) error {
 	}
 	reportSkippedJournalRecords(skipped)
 	children := make(map[string][]string)
-	related := map[string]bool{*run: true}
+	related := map[string]bool{runID: true}
 	for _, r := range records {
-		if r.DisplayRunID == *run && r.RunID != "" {
+		if r.DisplayRunID == runID && r.RunID != "" {
 			related[r.RunID] = true
 		}
 		if r.RunID == "" {
@@ -237,7 +235,7 @@ func runDaemonExplain(args []string) error {
 	}
 	found := false
 	for _, r := range records {
-		if !related[r.RunID] && r.DisplayRunID != *run {
+		if !related[r.RunID] && r.DisplayRunID != runID {
 			continue
 		}
 		found = true
@@ -248,17 +246,17 @@ func runDaemonExplain(args []string) error {
 			continue
 		}
 		label := ""
-		if r.RunID != "" && r.RunID != *run {
+		if r.RunID != "" && r.RunID != runID {
 			name := r.RunID
 			if shown := display[r.RunID]; shown != "" {
-				name = strings.TrimPrefix(shown, *run+"/")
+				name = strings.TrimPrefix(shown, runID+"/")
 			}
 			label = name + ": "
 		}
 		fmt.Fprintf(os.Stdout, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r))
 	}
 	if !found && format != "json" {
-		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", *run)
+		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", runID)
 	}
 	return nil
 }

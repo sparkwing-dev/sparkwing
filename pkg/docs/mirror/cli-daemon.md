@@ -21,7 +21,6 @@ for event records and dump paths.
 
 - `status` -- Report whether wingd is running and which build it serves
 - `events` -- Read retained admission events without starting the daemon
-- `explain` -- Explain one run's admission history from retained events
 - `restart` -- Refresh an answering wingd to this installed build
 - `stop` -- Drain an answering wingd and leave it stopped
 - `recover-state` -- Preserve unreadable daemon state after its holders stop
@@ -45,6 +44,8 @@ Read retained admission events without starting the daemon
 
 Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.
 
+--explain --run ID explains that run's admission history in sentences instead, including descendant node slots and attached children; JSON output keeps the structured records.
+
 ### Flags
 
 | Flag | Description |
@@ -55,6 +56,7 @@ Reads the size-capped journal in the daemon directory. Lists the newest 50 match
 | `--incarnation N` | Daemon incarnation |
 | `--limit N` | Maximum records (default 50; 0 for all) |
 | `--offset N` | Matching records to skip from newest |
+| `--explain` | With --run, explain the run's admission history in sentences |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -62,26 +64,9 @@ Reads the size-capped journal in the daemon directory. Lists the newest 50 match
 ```sh
 # Events for one run
 sparkwing daemon events --run abc -o json
-```
 
-## `sparkwing daemon explain`
-
-Explain one run's admission history from retained events
-
-Explains a run's admission history in sentences, including descendant node slots and attached children, without starting the daemon. Unreadable records are skipped and counted on stderr. JSON output retains the structured records.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--run ID` | Run ID to explain (required) |
-| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Explain a run
-sparkwing daemon explain --run abc
+# Explain one run's admission history
+sparkwing daemon events --run abc --explain
 ```
 
 ## `sparkwing daemon recover-state`

@@ -705,3 +705,11 @@ instead of naming its replacement.
   is available, 2 unknown, diverged or a failed check.
 - `sparkwing update` updates the CLI only. `--cli` still names that target;
   `--force` and `--override-hold` are unchanged.
+
+## daemon explain moves to daemon events --explain
+
+| Before | After |
+|---|---|
+| `sparkwing daemon explain --run ID [-o json]` | `sparkwing daemon events --run ID --explain [-o json]` |
+
+The output and exit codes are unchanged.
