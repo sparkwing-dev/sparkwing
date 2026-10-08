@@ -129,8 +129,8 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 	if err := nodeLog.Close(); err != nil {
 		t.Fatalf("close remote log: %v", err)
 	}
-	if got := requests.Load(); got != 4 {
-		t.Fatalf("normal child made %d controller request(s), want secrets, cache, a log line and its seal", got)
+	if got := requests.Load(); got != 5 {
+		t.Fatalf("normal child made %d controller request(s), want secrets, cache, capabilities, a log line and its seal", got)
 	}
 }
 

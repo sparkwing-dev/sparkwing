@@ -2,15 +2,17 @@ package orchestrator_test
 
 import (
 	"context"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -79,29 +81,32 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	}
 }
 
-func TestRunLocal_RefusesAControllerThatAnnouncesNoLogsService(t *testing.T) {
+// A run whose state lives on a controller that keeps segments needs no
+// logs service: the node's log reaches the controller from this process.
+func TestRunLocal_KeepsNodeLogsAsSegmentsWithoutALogsService(t *testing.T) {
 	registerRemotePipelines(t)
 	ctrlStore, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatalf("controller store: %v", err)
 	}
 	t.Cleanup(func() { _ = ctrlStore.Close() })
-	srv := orchestrator.NewControllerServer(t, ctrlStore, nil)
+	srv := httptest.NewServer(controller.New(ctrlStore, nil).Handler())
 	t.Cleanup(srv.Close)
+	c := client.NewWithToken(srv.URL, nil, "")
 
-	_, err = orchestrator.RunLocal(context.Background(), newPaths(t), orchestrator.Options{
+	res, err := orchestrator.RunLocal(context.Background(), newPaths(t), orchestrator.Options{
 		Pipeline: "remote-ok",
-		State:    client.NewWithToken(srv.URL, nil, ""),
+		State:    c,
 	})
-	if err == nil || !strings.Contains(err.Error(), "announces no logs service") {
-		t.Fatalf("RunLocal err = %v, want a refusal naming the missing logs service", err)
+	if err != nil || res.Status != "success" {
+		t.Fatalf("RunLocal = %+v, %v; want success", res, err)
 	}
-	runs, err := ctrlStore.ListRuns(context.Background(), store.RunFilter{})
+	got, err := c.NodeLogs().Read(context.Background(), res.RunID, "remote-ok", storage.ReadOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 0 {
-		t.Fatalf("the controller recorded %d run(s) for a refused start", len(runs))
+	if !strings.Contains(string(got), "node_end") {
+		t.Fatalf("node log read through the controller = %q", got)
 	}
 }
 
