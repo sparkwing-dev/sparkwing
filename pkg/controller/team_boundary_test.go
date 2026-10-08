@@ -7,7 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,7 +17,70 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
+
+func openPostgresStore(t *testing.T) *store.Store {
+	t.Helper()
+	base := os.Getenv("SPARKWING_TEST_PG_URL")
+	if strings.TrimSpace(base) == "" {
+		if os.Getenv("SPARKWING_REQUIRE_PG") != "" {
+			t.Fatal("SPARKWING_REQUIRE_PG is set, so SPARKWING_TEST_PG_URL must name a reachable Postgres")
+		}
+		t.Skip("SPARKWING_TEST_PG_URL not set; skipping the Postgres dialect")
+	}
+	schema := "cw_" + strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + 32
+		}
+		return '_'
+	}, t.Name())
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	admin, err := store.OpenPostgres(ctx, base)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	if _, err := admin.DB().ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
+		_ = admin.Close()
+		t.Fatalf("create schema %s: %v", schema, err)
+	}
+	_ = admin.Close()
+	t.Cleanup(func() {
+		cleanup, err := store.OpenPostgres(context.Background(), base)
+		if err != nil {
+			t.Errorf("open postgres to drop schema %s: %v", schema, err)
+			return
+		}
+		if _, err := cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`); err != nil {
+			t.Errorf("drop schema %s: %v", schema, err)
+		}
+		_ = cleanup.Close()
+	})
+	sep := "?"
+	if strings.Contains(base, "?") {
+		sep = "&"
+	}
+	st, err := store.OpenPostgres(ctx, base+sep+"search_path="+schema)
+	if err != nil {
+		t.Fatalf("open postgres schema %s: %v", schema, err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+func openSQLiteStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
 
 type tenancyFixture struct {
 	t     *testing.T
@@ -35,8 +99,6 @@ type tenancyFixture struct {
 	victim string
 }
 
-var digestHex = strings.Repeat("ab", 32)
-
 var everyScope = []string{
 	controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsControl,
 	controller.ScopeNodesClaim, controller.ScopeLogsRead, controller.ScopeLogsWrite,
@@ -51,12 +113,8 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
 		t.Fatal(err)
 	}
-	art := &fakeArtifactStore{objects: map[string][]byte{
-		"runs/run-team-a/state.ndjson":     []byte("team-a-state"),
-		"artifacts/manifests/" + digestHex: []byte("team-a-manifest"),
-	}}
 	raw, pub := multiTeamLicense(t)
-	srv := controller.New(st, nil).EnableAuthFromStore().WithArtifactStore(art).
+	srv := controller.New(st, nil).EnableAuthFromStore().
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -90,7 +148,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if err := st.CreateNode(ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateApproval(ctx, store.Approval{RunID: f.runA, NodeID: "n1", RequestedAt: now}); err != nil {
+	if err := f.teamA.CreateApproval(ctx, store.Approval{RunID: f.runA, NodeID: "n1", RequestedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.teamA.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
@@ -195,8 +253,8 @@ func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
 		name string
 		open func(*testing.T) *store.Store
 	}{
-		{name: "sqlite", open: openSQLiteBindingStore},
-		{name: "postgres", open: openPostgresBindingStore},
+		{name: "sqlite", open: openSQLiteStore},
+		{name: "postgres", open: openPostgresStore},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			run(t, newTenancyFixture(t, tc.open(t)))
@@ -398,7 +456,7 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 		if run.Status != "running" {
 			t.Errorf("team B's requests moved team A's run to %q", run.Status)
 		}
-		approval, err := f.st.GetApproval(ctx, f.runA, "n1")
+		approval, err := f.teamA.GetApproval(ctx, f.runA, "n1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -647,29 +705,6 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 		}
 		if run.Status != "success" {
 			t.Errorf("team B's run finished as %q, want success", run.Status)
-		}
-	})
-}
-
-// The artifact store is shared by every team. A run's own keys are read only
-// by its team, and a content-addressed key, which names no run, only by the
-// operator.
-func TestTeamBoundary_ArtifactsStayWithTheirRunsTeam(t *testing.T) {
-	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		runKey := "/api/v1/artifacts/" + url.PathEscape("runs/"+f.runA+"/state.ndjson")
-		blobKey := "/api/v1/artifacts/" + url.PathEscape("artifacts/manifests/"+digestHex)
-		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
-			for _, key := range []string{runKey, blobKey} {
-				if code, body := f.do("GET", key, other.auth, nil); code != http.StatusNotFound || strings.Contains(body, "team-a") {
-					t.Errorf("GET %s as %s = %d want 404: %s", key, other.name, code, body)
-				}
-			}
-		}
-		if code, body := f.do("GET", runKey, f.readerA, nil); code != http.StatusOK || body != "team-a-state" {
-			t.Errorf("team A's reader cannot read its run's artifact: %d %s", code, body)
-		}
-		if code, _ := f.do("GET", blobKey, f.ownerA, nil); code != http.StatusNotFound {
-			t.Errorf("a team owner read a content-addressed key: %d", code)
 		}
 	})
 }

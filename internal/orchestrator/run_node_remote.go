@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
@@ -249,8 +250,13 @@ func runNodeChild(
 	cmd.Dir = dir
 	cmd.Env = childEnv
 	cmd.Stdin = strings.NewReader(broker.capability + "\n")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	values, err := secrets.ShareWithChild(cmd)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	defer values.Close()
+	cmd.Stdout = values.Writer(os.Stdout)
+	cmd.Stderr = values.Writer(os.Stderr)
 
 	outcome, startErr := runAssistedChildProcess(ctx, cmd, logger)
 	broker.sealChildLogs(ctx, outcome, startErr, logger)
@@ -331,9 +337,6 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_NODE_CLAIM_GENERATION":    true,
 	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
 	"SPARKWING_NODE_CLAIM_RESERVATION":   true,
-	"SPARKWING_TRIGGER_CLAIM_GENERATION": true,
-	"SPARKWING_TRIGGER_GENERATION":       true,
-	"SPARKWING_ATTEMPT_ORDINAL":          true,
 }
 
 // ErrRepoNotAllowed marks a run whose repository this machine's owner did not

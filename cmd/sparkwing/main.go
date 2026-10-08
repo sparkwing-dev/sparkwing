@@ -14,6 +14,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -259,6 +260,13 @@ func dispatchRun(args []string) error {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
 	var fleetSnapshot *worktreeSnapshot
+	run := newPipelineRun(dir, compileOptions{
+		NoUpdate:     flags.noUpdate || flags.fleet,
+		ExecutionDir: executionDir,
+		AfterChild:   afterChild,
+	})
+	defer run.stop()
+	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
 	if flags.fleet {
 		configPath, err := userconfig.Path()
 		if err != nil {
@@ -277,7 +285,7 @@ func dispatchRun(args []string) error {
 		// safety: the orchestrator takes its fleet config path from this variable
 		// alone, so it reads the file validated here.
 		env = setEnv(env, userconfig.PathEnv, configPath)
-		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
+		if err := resolveSparks(run.ctx, dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 			return err
 		}
 		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir), flags.allowSecretFiles)
@@ -331,12 +339,9 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, orchestrator.PriorityEnv, priority)
 	}
 
-	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate || flags.fleet,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
-	})
-	defer run.stop()
+	run.sparkwingDir = dir
+	run.opts.ExecutionDir = executionDir
+	run.opts.AfterChild = afterChild
 	if err := run.materialize(env); err != nil {
 		return run.finish(err)
 	}
@@ -531,8 +536,6 @@ func runCluster(args []string) error {
 		return runComputeLimits(args[1:])
 	case "image":
 		return runImage(args[1:])
-	case "webhooks":
-		return runWebhooks(args[1:])
 	case "concurrency":
 		return runConcurrency(args[1:])
 	case "object-store":

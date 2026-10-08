@@ -82,8 +82,6 @@ func PathsAt(root string) Paths { return Paths{Root: root} }
 
 func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
-func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
-
 // SessionLedgerDir holds one record per step command still running, written
 // by the node that started it, so a sweep can end sessions whose node died
 // without reaping them.

@@ -55,7 +55,7 @@ func requestBundle(t *testing.T, bundle fs.FS, target string, header http.Header
 		}
 	}
 	rec := httptest.NewRecorder()
-	HandlerFromOptionsWithBundle(HandlerOptions{}, bundle).ServeHTTP(rec, req)
+	SecurityHeaders(false, Pages(bundle)).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -189,7 +189,7 @@ func TestGeneratedPagesAreGzipEncoded(t *testing.T) {
 func TestEachBundleAssetIsEncodedOnce(t *testing.T) {
 	reads := map[string]*atomic.Int64{compressibleChunkPath: {}}
 	bundle := countingFS{FS: compressionBundle(), reads: reads}
-	handler := HandlerFromOptionsWithBundle(HandlerOptions{}, bundle)
+	handler := SecurityHeaders(false, Pages(bundle))
 
 	const requests = 5
 	for range requests {
@@ -217,8 +217,10 @@ func TestEventStreamsAreNeverEncoded(t *testing.T) {
 		getRun:     func(string) (*store.Run, error) { return &store.Run{ID: "r1", Status: "success"}, nil },
 		listEvents: func(string, int64, int) ([]store.Event, error) { return nil, nil },
 	}
-	srv := httptest.NewServer(HandlerFromOptionsWithBundle(
-		HandlerOptions{Backend: backend}, compressionBundle()))
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/runs/{id}/events/stream", EventsStreamHandler(backend))
+	mux.Handle("/", Pages(compressionBundle()))
+	srv := httptest.NewServer(SecurityHeaders(false, mux))
 	t.Cleanup(srv.Close)
 
 	client := &http.Client{Timeout: 10 * time.Second}

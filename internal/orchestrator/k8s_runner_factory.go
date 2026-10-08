@@ -52,7 +52,7 @@ type K8sRunnerFactoryConfig struct {
 
 func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Trigger) runner.Runner, error) {
 	if cfg.Image == "" {
-		return nil, fmt.Errorf("--image (or SPARKWING_RUNNER_IMAGE) is required with --runner k8s")
+		return nil, fmt.Errorf("--image is required with --runner k8s")
 	}
 	if cfg.Namespace == "" {
 		return nil, fmt.Errorf("--namespace (or POD_NAMESPACE) is required with --runner k8s")
@@ -62,7 +62,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 	}
 	// safety: an empty name silently lands runner pods on the namespace default SA
 	if cfg.ServiceAccount == "" {
-		return nil, fmt.Errorf("--runner-sa (or SPARKWING_RUNNER_SA) is required with --runner k8s")
+		return nil, fmt.Errorf("--runner-sa is required with --runner k8s")
 	}
 	pullPolicy, err := k8srunner.ParsePullPolicy(cfg.ImagePullPolicy)
 	if err != nil {

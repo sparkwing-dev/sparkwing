@@ -34,24 +34,18 @@ func TestCreditsGrant_FundsTheTeamTheOperatorNames(t *testing.T) {
 		t.Fatalf("a grant to %s = %d want 201", team, code)
 	}
 
-	var named, own, operator creditBalance
-	if code := f.call("GET", "/api/v1/credits/teams/"+team, admin, nil, &named); code != http.StatusOK {
-		t.Fatalf("operator read of %s = %d", team, code)
-	}
+	var own, operator creditBalance
 	if code := f.call("GET", "/api/v1/credits", sessionAuth(signed.SessionID), nil, &own); code != http.StatusOK {
 		t.Fatalf("team read of its own balance = %d", code)
 	}
 	if code := f.call("GET", "/api/v1/credits", admin, nil, &operator); code != http.StatusOK {
 		t.Fatalf("operator read of default = %d", code)
 	}
-	if named.BalanceMicro != 5_000_000 || own.BalanceMicro != 5_000_000 {
-		t.Errorf("%s balance: operator read %d, team read %d; want 5000000 each", team, named.BalanceMicro, own.BalanceMicro)
+	if own.BalanceMicro != 5_000_000 {
+		t.Errorf("%s balance: team read %d, want 5000000", team, own.BalanceMicro)
 	}
 	if operator.BalanceMicro != 0 {
 		t.Errorf("the default team gained %d from a grant to %s", operator.BalanceMicro, team)
-	}
-	if code := f.call("GET", "/api/v1/credits/teams/"+team, sessionAuth(signed.SessionID), nil, nil); code != http.StatusForbidden {
-		t.Errorf("a team owner read the operator's per-team balance route: %d", code)
 	}
 }
 

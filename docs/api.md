@@ -81,25 +81,15 @@ legacy cache binaries when direct uploads are active. See
 
 ## Webhooks
 
-`POST /webhooks/github/{pipeline}` ingests GitHub deliveries. It is
-verified by HMAC (`X-Hub-Signature-256`) rather than a bearer token,
-since GitHub can't carry one; the handler acts on `push` and
-`pull_request` (opened/synchronize/reopened) and answers `ping`. A pull
-request from a fork is acknowledged as ignored and starts nothing. An accepted
-delivery stores its pending run with the trigger, so its claimed runner can
-fetch a signed binary before starting the pipeline. A run-limit refusal
-answers `429` without consuming the delivery, so GitHub can retry it. A
-delivery naming a repository the pipeline is not bound to answers `404`,
-re-sending a body the controller already accepted answers `409` with the
-run the first delivery produced, and a delivery with no
-`X-GitHub-Delivery` header answers `400`. See [security.md](security.md).
-
-`POST /api/v1/webhooks/github/bindings` (scope `admin`) stores the secret one
-repository's deliveries to one pipeline are signed with and allows that
-repository for the pipeline; `DELETE` on the same path removes it. Stored
-bindings add to the `GITHUB_WEBHOOK_BINDINGS` document rather than replacing
-it. `sparkwing cluster webhooks connect` drives both sides; see
-[hooks.md](hooks.md).
+`POST /webhooks/github-app` ingests the [GitHub App](github-app.md)'s
+deliveries, the only signed GitHub trigger. It is verified by HMAC
+(`X-Hub-Signature-256`) against the App's webhook secret rather than a bearer
+token, since GitHub can't carry one, and answers `401` when the signature does
+not verify. The installation a delivery names picks the team, and the team's
+subscriptions pick the pipelines; a pull request from a fork starts nothing. A
+redelivery answers `duplicate` with the runs it already started, and a
+delivery with no `X-GitHub-Delivery` header answers `400`. See
+[security.md](security.md).
 
 ## Logs service
 

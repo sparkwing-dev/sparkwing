@@ -66,7 +66,7 @@ func TestPreReleaseWorkKeepsEveryCheckInOrder(t *testing.T) {
 
 	want := []string{
 		"no-replace", "no-go-work", "module-tidy", "sparkwing-pin",
-		"version-freshness", "pre-v1-policy", "gofmt", "lint", "race",
+		"version-freshness", "go-directives", "pre-v1-policy", "gofmt", "lint", "race",
 		"race-store", "store-postgres", "chaos", "release-vulnerability", "shell-portability",
 		"hosted-mutation-guard", "vulnerability-script", "schema-parity-script",
 		"changelog-script",

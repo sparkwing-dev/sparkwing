@@ -23,7 +23,7 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 )
 
 const bucket = "teamblob-test"
@@ -426,7 +426,7 @@ func TestFailingBucketCostsBoundedAttempts(t *testing.T) {
 	t.Setenv("SPARKWING_OBJECT_STORE_BREAKER", "off")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	client, b, prefix, err := storeurl.OpenS3(ctx, "s3://"+bucket+"/svc")
+	client, b, prefix, err := s3store.Open(ctx, "s3://"+bucket+"/svc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,8 +438,8 @@ func TestFailingBucketCostsBoundedAttempts(t *testing.T) {
 	if err == nil {
 		t.Fatal("a put against a failing bucket succeeded")
 	}
-	if got := hits.Load(); got < 2 || got > storeurl.SDKMaxAttempts {
-		t.Fatalf("one put cost %d requests, want 2..%d", got, storeurl.SDKMaxAttempts)
+	if got := hits.Load(); got < 2 || got > s3store.SDKMaxAttempts {
+		t.Fatalf("one put cost %d requests, want 2..%d", got, s3store.SDKMaxAttempts)
 	}
 }
 

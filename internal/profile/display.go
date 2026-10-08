@@ -1,9 +1,6 @@
 package profile
 
 import (
-	"os"
-	"strings"
-
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -53,17 +50,4 @@ func (p *Profile) SurfaceStrings() (state, logs, cache string) {
 		state = "sqlite"
 	}
 	return state, SpecString(surf.Logs), SpecString(surf.Cache)
-}
-
-func DisplayDefaultPath() string {
-	path, err := DefaultPath()
-	if err != nil || path == "" {
-		return "config.yaml"
-	}
-	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
-		if rest, ok := strings.CutPrefix(path, home+"/"); ok {
-			return "~/" + rest
-		}
-	}
-	return path
 }

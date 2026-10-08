@@ -293,7 +293,6 @@ func triggersKnownYAMLFields() map[string]struct{} {
 }
 
 // PushTrigger declares GitHub push events for opted-in repository automation.
-// Operator webhooks select their pipeline from the URL instead.
 type PushTrigger struct {
 	// Branches filters repository automation with Go path.Match globs.
 	Branches []string `yaml:"branches,omitempty"`
@@ -321,7 +320,7 @@ func (p *PushTrigger) UnmarshalYAML(node *yaml.Node) error {
 
 // PullRequestTrigger declares pull request events for repository automation.
 // Filters use the default-branch configuration, while the run checks out the
-// PR head commit. Operator webhooks retain their own event policy.
+// PR head commit.
 type PullRequestTrigger struct {
 	// Actions defaults to opened, synchronize, and reopened. Repository
 	// automation also supports closed and ready_for_review.
@@ -776,8 +775,7 @@ func (c *Config) Names() []string {
 }
 
 // EntrypointsByName returns a map of pipeline name -> entrypoint type
-// name. Convenient for matching against sparkwing.TypeName of
-// registered instances.
+// name.
 func (c *Config) EntrypointsByName() map[string]string {
 	out := make(map[string]string, len(c.Pipelines))
 	for _, p := range c.Pipelines {

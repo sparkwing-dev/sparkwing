@@ -5,8 +5,13 @@
 {{- if and (index $bundle "enabled") (or .Values.nameOverride .Values.fullnameOverride) (not (index $bundle "controller" "url")) -}}
 {{- fail "sparkwing-full: nameOverride/fullnameOverride changes the controller Service name; set sparkwing-runner-bundle.controller.url explicitly" -}}
 {{- end -}}
-{{- if and .Values.controller.githubWebhookSecret.name (not .Values.controller.githubWebhookSecret.key) -}}
-{{- fail "sparkwing-full: controller.githubWebhookSecret.key is required when controller.githubWebhookSecret.name is set" -}}
+{{- range $value := list "githubWebhookSecret" "githubStatusToken" -}}
+{{- if (get (get $.Values.controller $value | default dict) "name") -}}
+{{- fail (printf "sparkwing-full: controller.%s was removed with the per-pipeline GitHub webhook; GitHub triggers come from the GitHub App now. Unset it and follow the migration guide section \"Per-pipeline GitHub webhooks are removed\"" $value) -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.web -}}
+{{- fail "sparkwing-full: web was removed with the sparkwing-web Deployment; the controller serves the dashboard now. Unset web (move web.logs.url to controller.logs.url) and follow the migration guide section \"The controller serves the dashboard\"" -}}
 {{- end -}}
 {{- if and .Values.controller.databaseSecret.name (not .Values.controller.databaseSecret.key) -}}
 {{- fail "sparkwing-full: controller.databaseSecret.key is required when controller.databaseSecret.name is set" -}}
@@ -29,17 +34,14 @@
 {{- if and .Values.controller.requireAuth (not .Values.controller.bootstrapAdminToken.name) (ne .Values.controller.allowOpenBootstrap true) -}}
 {{- fail "sparkwing-full: controller.requireAuth=true without controller.bootstrapAdminToken.name leaves a fresh controller no way to mint its first token. Set controller.bootstrapAdminToken.name to a Secret holding the first admin token, or set controller.allowOpenBootstrap=true to start without one: an empty tokens table then serves every route, token minting included, unauthenticated to anything that reaches the Service until a token exists and the controller restarts" -}}
 {{- end -}}
-{{- if and .Values.web.tokenSecret.name (not .Values.web.tokenSecret.key) -}}
-{{- fail "sparkwing-full: web.tokenSecret.key is required when web.tokenSecret.name is set" -}}
-{{- end -}}
 {{- if not (kindIs "bool" .Values.ingress.allowInsecure) -}}
-{{- fail "sparkwing-full: ingress.allowInsecure must be a bool. A quoted value such as 'false' reads as true to the template, which would silently drop the published-dashboard guard" -}}
+{{- fail "sparkwing-full: ingress.allowInsecure must be a bool. A quoted value such as 'false' reads as true to the template, which would silently drop the published-controller guard" -}}
 {{- end -}}
 {{- if and .Values.ingress.enabled (ne .Values.ingress.allowInsecure true) -}}
 {{- if not .Values.ingress.tls -}}
-{{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the dashboard and its session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also drops the Secure attribute from the session cookies so the login gate still works" -}}
+{{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the controller API, its tokens and the dashboard's session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also passes --insecure-cookies so a browser keeps its session" -}}
 {{- end -}}
-{{- if not .Values.web.requireLogin -}}
-{{- fail "sparkwing-full: ingress.enabled=true with web.requireLogin=false publishes a dashboard that anyone reaching the Ingress can drive. Set web.requireLogin=true once the admin user exists, or set ingress.allowInsecure=true to publish it open anyway" -}}
+{{- if or (not .Values.controller.requireAuth) (and .Values.controller.allowOpenBootstrap (not .Values.controller.bootstrapAdminToken.name)) -}}
+{{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name, publishes the whole controller API: while its tokens table is empty, anyone reaching the Ingress can mint an admin token and drive every route. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to publish it open anyway" -}}
 {{- end -}}
 {{- end -}}

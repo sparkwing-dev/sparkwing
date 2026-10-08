@@ -7,10 +7,7 @@
 //
 // # Selection at process start
 //
-//  1. Per-target overlay (a pipeline's targets.<name>.backend, applied
-//     via [LayerSurfaces])
-//  2. The resolved profile's state / cache / logs specs
-//
+// The resolved profile's state / cache / logs specs decide each surface.
 // A profile is selected explicitly (--profile NAME) or via the project's
 // defaults.profile; there is no environment-based auto-selection.
 //

@@ -2,6 +2,7 @@ package otelutil
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -33,10 +34,14 @@ type Config struct {
 
 	Version string
 
-	RegisterMetrics func(metric.Meter)
+	// Prometheus installs a meter provider whose instruments Telemetry.PromHandler
+	// serves. A service that mounts no /metrics for it leaves this false.
+	Prometheus bool
 }
 
 type Telemetry struct {
+	// PromHandler serves the meter provider's instruments; it is nil unless
+	// Config.Prometheus was set.
 	PromHandler http.Handler
 
 	shutdowns []func(context.Context) error
@@ -51,29 +56,6 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func ContextFromEnv(ctx context.Context) context.Context {
-	tp := os.Getenv("TRACEPARENT")
-	if tp == "" {
-		return ctx
-	}
-	carrier := propagation.MapCarrier{"traceparent": tp}
-	return propagation.TraceContext{}.Extract(ctx, carrier)
-}
-
-func TraceParentEnv(ctx context.Context) string {
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.IsValid() {
-		return ""
-	}
-	carrier := propagation.MapCarrier{}
-	propagation.TraceContext{}.Inject(ctx, carrier)
-	tp := carrier["traceparent"]
-	if tp == "" {
-		return ""
-	}
-	return "TRACEPARENT=" + tp
-}
-
 func Tracer(name string) trace.Tracer {
 	return otel.Tracer(name)
 }
@@ -82,7 +64,7 @@ func Meter(name string) metric.Meter {
 	return otel.Meter(name)
 }
 
-func Init(ctx context.Context, cfg Config) *Telemetry {
+func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	t := &Telemetry{}
 
 	serviceName := cfg.ServiceName
@@ -102,20 +84,21 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		res = resource.Default()
 	}
 
-	registry := promclient.NewRegistry()
-	promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
-	if err != nil {
-		log.Printf("warning: otel prometheus exporter failed: %v", err)
-		t.PromHandler = http.NotFoundHandler()
+	if cfg.Prometheus {
+		registry := promclient.NewRegistry()
+		promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
+		if err != nil {
+			return nil, fmt.Errorf("otel prometheus exporter: %w", err)
+		}
+		t.PromHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+		mp := sdkmetric.NewMeterProvider(
+			sdkmetric.WithResource(res),
+			sdkmetric.WithReader(promExporter),
+		)
+		otel.SetMeterProvider(mp)
+		t.shutdowns = append(t.shutdowns, mp.Shutdown)
+		log.Printf("otel: metrics enabled (prometheus /metrics)")
 	}
-	t.PromHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
-
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(promExporter),
-	)
-	otel.SetMeterProvider(mp)
-	t.shutdowns = append(t.shutdowns, mp.Shutdown)
 
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") != "" {
 		traceCtx, traceCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -167,13 +150,7 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		propagation.Baggage{},
 	))
 
-	if cfg.RegisterMetrics != nil {
-		cfg.RegisterMetrics(otel.Meter(cfg.ServiceName))
-	}
-
-	log.Printf("otel: metrics enabled (prometheus /metrics)")
-
-	return t
+	return t, nil
 }
 
 // Go's built-in slog handler writes through log.Default, and slog.SetDefault

@@ -14,13 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// StorageTierResponse is the body of PUT /api/v1/storage/teams/{team}/free-slot.
-type StorageTierResponse struct {
-	Team           string            `json:"team"`
-	Tier           storagequota.Tier `json:"tier"`
-	AllowanceBytes int64             `json:"allowance_bytes"`
-}
-
 // Default per-team daily download caps, by whether the team pays.
 const (
 	DefaultTeamDailyDownloadFreeBytes   int64 = 5 << 30
@@ -286,29 +279,6 @@ func (s *Server) handleEgressTotals(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, got)
 	}
-}
-
-func (s *Server) handleGrantFreeSlot(w http.ResponseWriter, r *http.Request) {
-	team := store.Team(r.PathValue("team"))
-	err := s.store.GrantFreeSlot(r.Context(), team, time.Now())
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, err)
-		return
-	case errors.Is(err, store.ErrInvalidSlug), errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-		return
-	case err != nil:
-		s.writeInternalError(w, r, "grant free slot", err)
-		return
-	}
-	s.logger.Info("free-tier slot granted", "team", team)
-	got, err := s.store.StorageStandingFor(r.Context(), team)
-	if err != nil {
-		s.writeInternalError(w, r, "read storage tier", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, StorageTierResponse{Team: string(team), Tier: storagequota.Tier(got.Tier), AllowanceBytes: got.AllowanceBytes})
 }
 
 // safety: a signed-up team reads its own standing and nothing of any other

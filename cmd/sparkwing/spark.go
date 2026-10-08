@@ -14,6 +14,7 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -97,11 +98,16 @@ func runSparksList(args []string) error {
 	}
 	entries := []sparkListEntry{}
 	if m != nil {
-		ctx := context.Background()
+		ctx := gotoolchain.WithSession(context.Background(), nil, nil)
+		var resolver *sparks.Resolver
+		if !*noResolve {
+			resolver = sparks.NewResolverFromEnv()
+			resolver.Dir = sparkwingDir
+		}
 		for _, lib := range m.Libraries {
 			e := sparkListEntry{Name: lib.Name, Source: lib.Source, Declared: lib.Version}
 			if !*noResolve {
-				resolved, rerr := sparks.Resolve(ctx, &sparks.Manifest{Libraries: []sparks.Library{lib}})
+				resolved, rerr := resolver.Resolve(ctx, &sparks.Manifest{Libraries: []sparks.Library{lib}})
 				if rerr != nil {
 					e.Error = rerr.Error()
 				} else {
@@ -582,7 +588,7 @@ func runSparksWarmup(args []string) error {
 		sparkwingDir = defaultSparkwingDir()
 	}
 
-	ctx := context.Background()
+	ctx := gotoolchain.WithSession(context.Background(), nil, nil)
 	if _, err := sparksResolveAndWrite(ctx, sparkwingDir); err != nil {
 		return fmt.Errorf("spark warmup: resolve: %w", err)
 	}

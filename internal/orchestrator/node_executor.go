@@ -282,9 +282,11 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	}
 	noteEvent(ctx, r.backends.State, runID, node.ID(), "node_started", nil)
 
+	finishAccounting := func() {}
 	nodeStartTS := time.Now()
 	emitNodeStart(nlog, nodeStartTS, r.backends.DiskRoot, nil)
 	emitNodeEnd := func(outcome sparkwing.Outcome, errMsg string) {
+		finishAccounting()
 		attrs := map[string]any{
 			"outcome":     string(outcome),
 			"duration_ms": time.Since(nodeStartTS).Milliseconds(),
@@ -301,8 +303,8 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		handOverNodeLog(ctx, nlog)
 	}
 
-	metricErrors := make(chan error, 1)
-	ctx = context.WithValue(ctx, metricErrorsKey{}, metricErrors)
+	loss := &sampleLoss{}
+	ctx = context.WithValue(ctx, sampleLossKey{}, loss)
 	stamps := &metricStamps{}
 	sink := stateMetricsSink{
 		backend: r.backends.State,
@@ -310,17 +312,74 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		nodeID:  node.ID(),
 		stamps:  stamps,
 	}
-	finishSamples := func() error { return nil }
+	finishSamples := func() (nodemetrics.Delivery, error) { return nodemetrics.Delivery{}, nil }
 	if ownsProcessNode(ctx, runID, node.ID()) {
 		finishSamples = nodemetrics.Attach(ctx, sink)
-	} else if err := sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}); err != nil {
-		return nil, fmt.Errorf("record unknown node accounting: %w", err)
+	} else {
+		loss.record(sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}), true)
 	}
-	defer func() {
-		if err := finishSamples(); err != nil {
-			sparkwing.Debug(ctx, "finish node resource sampling: %v", err)
-		}
-	}()
+	var finishOnce sync.Once
+	finishAccounting = func() {
+		finishOnce.Do(func() {
+			delivery, err := finishSamples()
+			loss.mu.Lock()
+			loss.attempted += delivery.Attempted
+			loss.lost += delivery.Lost
+			loss.mark = loss.mark || delivery.LostInvalid > 0
+			if loss.first == nil {
+				loss.first = err
+			}
+			first, mark, lost, attempted := loss.first, loss.mark, loss.lost, loss.attempted
+			loss.mu.Unlock()
+			if first == nil {
+				return
+			}
+			excluding := mark
+			incomplete := mark || lost*100 > attempted*maxSampleLossPercent
+			var markerErr error
+			if incomplete {
+				markerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				markerKind := store.MetricPartial
+				if mark {
+					markerKind = store.MetricUnknown
+				}
+				markerErr = sink.backend.AddNodeMetricSample(markerCtx, runID, node.ID(), store.MetricSample{Kind: markerKind, TS: stamps.next(time.Now())})
+				if markerErr != nil && markerKind == store.MetricPartial {
+					// safety: a backend that refuses the partial kind would otherwise learn from the
+					// measurement unrestricted; every backend accepts the exclusion marker.
+					markerKind = store.MetricUnknown
+					markerErr = sink.backend.AddNodeMetricSample(markerCtx, runID, node.ID(), store.MetricSample{Kind: markerKind, TS: stamps.next(time.Now())})
+				}
+				cancel()
+				mark = markerKind == store.MetricUnknown
+			}
+			kind := "metrics_partial"
+			message := fmt.Sprintf("resource samples partially recorded for %s: %d of %d not recorded (%v)", node.ID(), lost, attempted, first)
+			if incomplete {
+				kind = "resource_samples_incomplete"
+				switch {
+				case markerErr != nil:
+					message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v), and the marker that restricts capacity learning was not recorded either (%v); learning may use this measurement unrestricted", node.ID(), lost, attempted, first, markerErr)
+				case excluding:
+					message = fmt.Sprintf("resource samples incomplete for %s: a sample that excludes this measurement was not recorded (%v); the exclusion was recorded at finish, so capacity learning skips this measurement", node.ID(), first)
+				case mark:
+					message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v); the backend refused the partial marker, so capacity learning skips this measurement", node.ID(), lost, attempted, first)
+				default:
+					message = fmt.Sprintf("resource samples incomplete for %s: %d of %d not recorded (%v); capacity learning only raises this job's profile from it", node.ID(), lost, attempted, first)
+				}
+				nlog.Log("warn", message)
+			}
+			payload, err := json.Marshal(map[string]any{"lost": lost, "attempted": attempted, "message": message})
+			if err != nil {
+				sparkwing.Debug(ctx, "encode resource sample loss: %v", err)
+				return
+			}
+			writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			noteEvent(writeCtx, r.backends.State, runID, node.ID(), kind, payload)
+		})
+	}
+	defer finishAccounting()
 
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {
@@ -334,14 +393,18 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
 	nodeCtx = sparkwing.WithToolSlotProvider(nodeCtx, r.toolSlotProvider(runID, node.ID(), delegate))
 	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
-		err := r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
+		// safety: the write sits inside the command's timed execution, so a stalled backend
+		// must not outlast the sampler's own bound.
+		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		err := r.backends.State.AddNodeMetricSample(writeCtx, runID, node.ID(), store.MetricSample{
 			Kind:          store.MetricCommand,
 			TS:            stamps.next(time.Now()),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
 			CPUTime:       s.CPUTime,
 		})
-		retainMetricError(ctx, err)
+		loss.record(err, false)
 	})
 
 	if err := r.writeDispatchSnapshot(nodeCtx, runID, node); err != nil {
@@ -366,6 +429,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		noteEvent(ctx, r.backends.State, runID, node.ID(), "artifacts_staged", payload)
 	}
 
+	dirCaches := restoreDirCaches(nodeCtx, node)
 	for i, hook := range node.BeforeRunHooks() {
 		sparkwing.Debug(nodeCtx, "hook: BeforeRun[%d] firing", i)
 		if err := callBeforeRun(nodeCtx, hook); err != nil {
@@ -430,9 +494,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			return nil, fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), invocationBudget)
 		}
 	} else if localOnly && errors.Is(err, store.ErrNotFound) {
-		if err := sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}); err != nil {
-			return nil, fmt.Errorf("record unknown execution accounting: %w", err)
-		}
+		loss.record(sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}), true)
 		localExecutor = ""
 		attemptRecorder = nil
 	} else if attemptRecorder != nil || !errors.Is(err, store.ErrNotFound) {
@@ -535,15 +597,9 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			}
 			if err := attemptRecorder.AcknowledgeNodeExecutionStart(attemptCtx, runID, node.ID(), start); err != nil {
 				if localOnly {
-					if err := sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}); err == nil {
-						localExecutor = ""
-						attemptRecorder = nil
-					} else {
-						for i := len(cancels) - 1; i >= 0; i-- {
-							cancels[i]()
-						}
-						return nil, fmt.Errorf("record unknown execution accounting: %w", err)
-					}
+					loss.record(sink.Push(ctx, nodemetrics.Sample{TS: time.Now()}), true)
+					localExecutor = ""
+					attemptRecorder = nil
 				} else {
 					for i := len(cancels) - 1; i >= 0; i-- {
 						cancels[i]()
@@ -650,6 +706,7 @@ done:
 		sparkwing.Debug(nodeCtx, "hook: AfterRun[%d] firing (err=%v)", i, lastErr)
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
+	saveDirCaches(nodeCtx, dirCaches, lastErr)
 	if err := flushNodeLogExecutionAttempt(nlog); err != nil && lastErr == nil && nodeLogFatal(nlog) == nil {
 		lastErr = err
 	}
@@ -746,14 +803,6 @@ done:
 		noteEvent(ctx, r.backends.State, runID, node.ID(), "artifacts_published", payload)
 	}
 
-	if err := finishSamples(); err != nil {
-		return nil, fmt.Errorf("finish node accounting: %w", err)
-	}
-	select {
-	case err := <-metricErrors:
-		return nil, fmt.Errorf("record node accounting: %w", err)
-	default:
-	}
 	emitNodeEnd(sparkwing.Success, "")
 	if fatal := nodeLogFatal(nlog); fatal != nil {
 		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)

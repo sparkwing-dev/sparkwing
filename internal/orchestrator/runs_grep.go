@@ -12,7 +12,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -98,14 +97,10 @@ func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, op
 		return errors.New("runs grep: profile must carry a controller URL")
 	}
 	if logsURL == "" {
-		services, err := discovery.ServicesFor(ctx, controllerURL, token)
-		if err != nil {
-			return fmt.Errorf("runs grep: discover logs service: %w", err)
+		var err error
+		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
+			return fmt.Errorf("runs grep: %w", err)
 		}
-		if services.Logs == "" {
-			return errors.New("runs grep: controller announces no logs service; configure the profile's logs URL")
-		}
-		logsURL = services.Logs
 	}
 	c := client.NewWithToken(controllerURL, nil, token)
 	logc := logs.NewClientWithToken(logsURL, nil, token).

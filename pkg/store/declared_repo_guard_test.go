@@ -17,8 +17,6 @@ var declaredRepoReaders = map[string]string{
 	"pkg/store/agent_loss_recovery.go":           "copies the column forward when an agent loss retries a run",
 	"pkg/store/runfilter_http.go":                "parses the ?repo= list filter off a request",
 	"pkg/controller/handlers.go":                 "copies the trigger's repository onto the run row for display",
-	"pkg/controller/retry.go":                    "passes the source run's repository into the retry's dispatch",
-	"pkg/controller/webhook_github.go":           "copies the webhook's repository onto the pending run row for display",
 	"pkg/controller/github_app_webhook.go":       "copies the installation's repository onto the pending run row for display",
 	"pkg/controller/client/client.go":            "sends the ?repo= list filter",
 	"pkg/storage/s3state/cas.go":                 "copies a parent run's repository onto a child trigger",

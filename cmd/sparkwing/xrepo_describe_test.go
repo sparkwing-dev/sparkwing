@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
 
 func TestXrepoListDescribesEachRepositoryOnce(t *testing.T) {
@@ -42,8 +40,6 @@ func main(){ f,err:=os.OpenFile(os.Getenv("SPARKWING_TEST_DESCRIBES"),os.O_CREAT
 		fmt.Fprintf(&registry, "  - path: %s\n", root)
 	}
 	writeRegistry(t, filepath.Join(t.TempDir(), "config.yaml"), registry.String())
-	repos.InvalidateCache()
-	t.Cleanup(repos.InvalidateCache)
 	out := captureStdout(t, func() {
 		if err := runXrepoList([]string{"-o", "json"}); err != nil {
 			t.Fatal(err)

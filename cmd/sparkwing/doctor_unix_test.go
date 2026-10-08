@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -19,77 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func holdFlock(t *testing.T, path, body string) {
-	t.Helper()
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	if _, err := f.WriteString(body); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatalf("flock %s: %v", path, err)
-	}
-	t.Cleanup(func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() })
-}
-
-func TestDiagnose_ReportsLiveLegacyHolderWithoutDeleting(t *testing.T) {
-	p := doctorHome(t)
-	ctx := context.Background()
-	boxDir := p.BoxSlotDir()
-	if err := os.MkdirAll(boxDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	staleName := "holder-pid99999-1700000000000000000-1.lock"
-	if err := os.WriteFile(filepath.Join(boxDir, staleName), []byte("pid=99999\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	liveName := "holder-pid4242-1800000000000000000-1.lock"
-	holdFlock(t, filepath.Join(boxDir, liveName), "pid=4242\nrun=run-legacy\n")
-
-	rep, err := diagnose(ctx, p, p.Root, false)
-	if err != nil {
-		t.Fatalf("diagnose: %v", err)
-	}
-	if len(rep.LiveLegacyHolders) != 1 || rep.LiveLegacyHolders[0].PID != 4242 {
-		t.Fatalf("LiveLegacyHolders = %+v, want one row for pid 4242", rep.LiveLegacyHolders)
-	}
-	if rep.LegacyBoxSlotFilesRemoved != 0 {
-		t.Fatalf("removed %d files while a holder is live, want 0", rep.LegacyBoxSlotFilesRemoved)
-	}
-	if _, err := os.Stat(filepath.Join(boxDir, liveName)); err != nil {
-		t.Fatalf("live holder marker removed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(boxDir, staleName)); err != nil {
-		t.Fatalf("stale marker removed while a holder is live: %v", err)
-	}
-}
-
-func TestDiagnose_PurgesIdleLegacyBoxSlots(t *testing.T) {
-	p := doctorHome(t)
-	ctx := context.Background()
-	boxDir := p.BoxSlotDir()
-	if err := os.MkdirAll(boxDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"holder-pid99999-1700000000000000000-1.lock", "coord.lock", "cap.control"} {
-		if err := os.WriteFile(filepath.Join(boxDir, name), []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rep, err := diagnose(ctx, p, p.Root, false)
-	if err != nil {
-		t.Fatalf("diagnose: %v", err)
-	}
-	if rep.LegacyBoxSlotFilesRemoved != 2 {
-		t.Fatalf("LegacyBoxSlotFilesRemoved = %d, want 2", rep.LegacyBoxSlotFilesRemoved)
-	}
-	if _, err := os.Stat(filepath.Join(boxDir, "coord.lock")); err != nil {
-		t.Fatalf("coordination lock did not survive purge: %v", err)
-	}
-}
 
 func TestDiagnose_ReportsAndRepairsPermissiveLegacyHome(t *testing.T) {
 	p := doctorHome(t)
@@ -330,7 +258,7 @@ func TestDiagnose_RefusesKnownPathSymlinksWithoutTouchingTargets(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	for _, name := range []string{"runs", "box-slots", "state.db"} {
+	for _, name := range []string{"runs", "state.db"} {
 		t.Run(name, func(t *testing.T) {
 			p := doctorHome(t)
 			withStore(t, p, func(_ *store.Store) {})
@@ -341,15 +269,6 @@ func TestDiagnose_RefusesKnownPathSymlinksWithoutTouchingTargets(t *testing.T) {
 				link = p.RunsDir()
 				target = filepath.Join(targetRoot, "runs")
 				if err := os.MkdirAll(filepath.Join(target, "run-outside"), 0o777); err != nil {
-					t.Fatal(err)
-				}
-			case "box-slots":
-				link = p.BoxSlotDir()
-				target = filepath.Join(targetRoot, "box-slots")
-				if err := os.MkdirAll(target, 0o777); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(target, "victim.lock"), []byte("outside"), 0o666); err != nil {
 					t.Fatal(err)
 				}
 			case "state.db":

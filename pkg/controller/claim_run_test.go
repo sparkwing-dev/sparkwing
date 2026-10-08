@@ -82,7 +82,7 @@ func TestClaimRun_PodRoutesServeOnlyTheirOwnClaim(t *testing.T) {
 			t.Errorf("POST %s with a plan claim = %d, want refused", path, code)
 		}
 	}
-	if err := f.store.RequestCancel(context.Background(), "run-pod"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(context.Background(), "run-pod"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("POST", "/api/v1/runs/run-pod/nodes/plan/heartbeat", plan, map[string]int{}, &beat); code != http.StatusOK || !beat.Cancel {
@@ -126,7 +126,7 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if code := f.call("POST", "/api/v1/runs/run-parent/children", work, map[string]any{"ordinal": 0, "pipeline": "deploy"}, &out); code != http.StatusAccepted || out.RunID != childID {
 		t.Fatalf("retried enqueue = %d %s, want %s", code, out.RunID, childID)
 	}
-	child, err := f.store.GetTrigger(context.Background(), childID)
+	child, err := f.teamOf(olga).GetTrigger(context.Background(), childID)
 	if err != nil || child.GitSHA != headSHA || child.ParentRunID != "run-parent" || child.ParentNodeID != "a" {
 		t.Fatalf("child trigger = %+v %v", child, err)
 	}
@@ -134,7 +134,11 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	if err := f.store.DB().QueryRow(`SELECT github_repo_id FROM triggers WHERE id = ?`, childID).Scan(&repoID); err != nil || repoID != 701 {
 		t.Fatalf("child repository id = %d %v, want the parent's 701", repoID, err)
 	}
-	if _, err := f.store.GetNode(context.Background(), childID, store.PlanNodeID); err != nil {
+	team, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := team.GetNode(context.Background(), childID, store.PlanNodeID); err != nil {
 		t.Fatalf("the child of an opted-in repository has no planning node: %v", err)
 	}
 	for body, want := range map[string]int{
@@ -231,7 +235,11 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN", work, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("a secret read naming no run = %d, want 403", code)
 	}
-	events, err := f.store.ListEventsAfter(context.Background(), "run-sec", 0, 100)
+	secTeam, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := secTeam.ListEventsAfter(context.Background(), "run-sec", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +252,7 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	if released != 1 {
 		t.Fatalf("recorded %d secret releases, want 1: %+v", released, events)
 	}
-	if err := f.store.RequestCancel(context.Background(), "run-sec"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(context.Background(), "run-sec"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, nil); code != http.StatusForbidden {
@@ -345,7 +353,7 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 			t.Fatalf("team %s holds %d slots of deploy, want %d", team, held, want)
 		}
 	}
-	if err := f.store.RequestCancel(ctx, "run-slot"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(ctx, "run-slot"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", wk, body("run-slot", "a", "queue", 0), nil); code != http.StatusForbidden {
@@ -544,17 +552,21 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 			t.Errorf("%s = %d from %s, want %d", what, code, in.RunID, c.want)
 		}
 	}
+	team, err := f.store.ForTeam(ctx, store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
 	copied := func(node string, from store.ClaimInputRequest) (int, *store.Node) {
 		t.Helper()
 		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/attempt", tokens[node],
 			map[string]any{"outcome": "cached", "output_from": from}, nil)
-		n, _ := f.store.GetNode(ctx, "run-in", node)
+		n, _ := team.GetNode(ctx, "run-in", node)
 		return code, n
 	}
 	if code, _ := copied("r", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusUnprocessableEntity {
 		t.Errorf("a report copying an input its node does not declare = %d, want 422", code)
 	}
-	origin, _ := f.store.GetNode(ctx, "run-origin", "m")
+	origin, _ := team.GetNode(ctx, "run-origin", "m")
 	if code, n := copied("m", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusOK || n.OutputRef == nil || *n.OutputRef != *origin.OutputRef {
 		t.Errorf("a cache hit's report = %d with ref %+v, want the origin's %+v", code, n.OutputRef, origin.OutputRef)
 	}
@@ -682,7 +694,6 @@ func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
 		{"POST", "/release", map[string]any{"holder_id": "run-own/b", "outcome": "success"}},
 		{"GET", "/holder?holder_id=run-own%2Fb", nil},
 		{"GET", "/resolve?run_id=run-own&node_id=b", nil},
-		{"GET", "/notify?run_id=run-own&node_id=b", nil},
 	} {
 		if !siblingHeld() {
 			seed()
@@ -723,4 +734,26 @@ func TestClaimRun_EveryConcurrencyRouteHoldsTheClaimToItsOwnNode(t *testing.T) {
 	if code := f.call("POST", base+"/acquire", wk, plain, nil); code != http.StatusOK {
 		t.Errorf("its own plain acquire = %d, want 200", code)
 	}
+}
+
+func (f *appFixture) teamOf(u signedIn) *store.Tenant {
+	f.t.Helper()
+	tn, err := f.store.ForTeam(context.Background(), store.Team(u.team))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return tn
+}
+
+func (f *appFixture) trigger(id string) (*store.Trigger, error) {
+	f.t.Helper()
+	team, err := f.store.AsOperator().RunTeam(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	tn, err := f.store.ForTeam(context.Background(), team)
+	if err != nil {
+		return nil, err
+	}
+	return tn.GetTrigger(context.Background(), id)
 }

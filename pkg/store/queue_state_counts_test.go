@@ -284,7 +284,7 @@ func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 		t.Errorf("settled seconds = %d once the window had 10s left, want near the consumed minute", afterWait)
 	}
 
-	if _, err := s.ChargeNodeCredits(ctx, "run-mono", "node-a", claimant.TokenPrefix, time.Now()); err != nil {
+	if _, err := store.ChargeNodeCreditsForTest(ctx, s, "run-mono", "node-a", claimant.TokenPrefix, time.Now()); err != nil {
 		t.Fatalf("heartbeat charge: %v", err)
 	}
 	sample("heartbeat")

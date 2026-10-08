@@ -24,6 +24,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const webhookBodyLimit = 1 << 20
+
+var defaultPullRequestActions = map[string]struct{}{
+	"opened":      {},
+	"synchronize": {},
+	"reopened":    {},
+}
+
 type githubAppRepoRef struct {
 	ID            int64  `json:"id"`
 	FullName      string `json:"full_name"`
@@ -1058,9 +1066,6 @@ func (s *Server) startGitHubAppRun(
 	ctx := r.Context()
 	pipeline, in := plan.pipeline, plan.intake
 	replayKey := githubAppReplayKey(tenant.Team(), pipeline, body)
-	if existing, err := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); err == nil && existing != nil {
-		return githubAppRun{Pipeline: pipeline, RunID: existing.ID, Status: "duplicate"}, nil
-	}
 	runID := newRunID()
 	triggerEnv := map[string]string{"GITHUB_DELIVERY": delivery}
 	for k, v := range in.env {
@@ -1100,12 +1105,6 @@ func (s *Server) startGitHubAppRun(
 		return githubAppRun{}, fmt.Errorf("persist trigger: %w", err)
 	}
 	s.recordQueueActivity(time.Now())
-	if err := s.dispatcher.Dispatch(ctx, RunRequest{
-		RunID: runID, Pipeline: pipeline, Trigger: trigger,
-		Git: &sparkwing.Git{Branch: in.branch, SHA: in.sha, Repo: repo.Slug()},
-	}); err != nil {
-		return githubAppRun{}, err
-	}
 	s.reportGitHubRunState(context.WithoutCancel(ctx), runID, "pending")
 	return githubAppRun{Pipeline: pipeline, RunID: runID, Status: "dispatched"}, nil
 }

@@ -153,7 +153,11 @@ func setupSSH() error {
 		}
 	}
 
-	if err := os.Setenv("GIT_SSH_COMMAND", "ssh -i "+filepath.Join(sshDir, "id_ed25519")+" -o UserKnownHostsFile="+filepath.Join(sshDir, "known_hosts")+" -o StrictHostKeyChecking=yes"); err != nil {
+	if os.Getenv("GIT_SSH_COMMAND") != "" {
+		log.Printf("SSH key staged from %s; GIT_SSH_COMMAND from the environment chooses the key", sshKeyDir)
+		return nil
+	}
+	if err := os.Setenv("GIT_SSH_COMMAND", "ssh -i "+filepath.Join(sshDir, "id_ed25519")+" -o UserKnownHostsFile="+filepath.Join(sshDir, "known_hosts")+" -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"); err != nil {
 		return fmt.Errorf("cache: stage SSH key: set GIT_SSH_COMMAND: %w", err)
 	}
 	log.Printf("SSH key configured from %s", sshKeyDir)
@@ -567,26 +571,6 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	writeJSONBody(w, r, resp)
-}
-
-func handleRepos(w http.ResponseWriter, r *http.Request) {
-	entries, _ := os.ReadDir(repoDir)
-	type repoInfo struct {
-		Hash string `json:"hash"`
-		Size int64  `json:"size_bytes"`
-	}
-	var repos []repoInfo
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".git") {
-			info, _ := e.Info()
-			repos = append(repos, repoInfo{
-				Hash: strings.TrimSuffix(e.Name(), ".git"),
-				Size: info.Size(),
-			})
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	writeJSONBody(w, r, repos)
 }
 
 func sshHint(output string) string {

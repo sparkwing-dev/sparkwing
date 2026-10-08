@@ -549,3 +549,34 @@ func TestStorageQuotaAcceptsThePrincipalsTokensCarry(t *testing.T) {
 		}
 	}
 }
+
+// A manifest aimed at another team's node is refused before it is charged,
+// so it spends none of the caller's object quota.
+func TestChargedManifestOnAnotherTeamsNodeChargesNothing(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	globex := tenantFor(t, st, "globex")
+	seedTenantRun(t, acme, "run-a", "deploy")
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{Principal: "team:globex", MaxObjectsPerRun: 1}); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	err := globex.SetNodeArtifactManifestCharged(ctx, "team:globex", "run-a", "build", "sha256:x")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("globex's manifest on acme's node = %v, want ErrNotFound", err)
+	}
+	usage, err := st.StorageUsageFor(ctx, "team:globex", "run-a", store.StorageMonth(time.Now().UTC()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.RunObjects != 0 || usage.MonthObjects != 0 {
+		t.Fatalf("a refused manifest was charged: %+v", usage)
+	}
+	n, err := acme.GetNode(ctx, "run-a", "build")
+	if err != nil || n.ArtifactManifest != "" {
+		t.Fatalf("acme's node = %+v, %v; want it unchanged", n, err)
+	}
+}

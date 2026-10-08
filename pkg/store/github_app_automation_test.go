@@ -67,7 +67,7 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	}
 }
 
-func TestV92GitHubAutomationUpgradesSQLite(t *testing.T) {
+func TestV94GitHubAutomationUpgradesSQLite(t *testing.T) {
 	assertAutomationUpgrade(t, storetest.NewSQLite(t))
 }
 
@@ -112,7 +112,7 @@ func TestGitHubAppAutomationAdmissionChecksConsentGeneration(t *testing.T) {
 	}
 }
 
-func TestV92GitHubAutomationUpgradesPostgres(t *testing.T) {
+func TestV94GitHubAutomationUpgradesPostgres(t *testing.T) {
 	assertAutomationUpgrade(t, storetest.NewPostgres(t))
 }
 
@@ -122,7 +122,7 @@ func assertAutomationUpgrade(t *testing.T, target *storetest.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, sql := range []string{`DROP TABLE github_app_automation`, `DELETE FROM sparkwing_schema_version WHERE version = 92`} {
+	for _, sql := range []string{`DROP TABLE github_app_automation`, `DELETE FROM sparkwing_schema_version WHERE version >= 94`} {
 		if _, err := st.DB().ExecContext(t.Context(), sql); err != nil {
 			t.Fatal(err)
 		}

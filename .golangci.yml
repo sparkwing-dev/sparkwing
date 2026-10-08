@@ -96,7 +96,6 @@ linters:
           list-mode: lax
           files:
             - "**/cmd/sparkwing-logs/**"
-            - "**/cmd/sparkwing-web/**"
             - "**/cmd/sparkwing-cache/**"
             - "**/cmd/sparkwing-controller/**"
             - "**/internal/backend/**"

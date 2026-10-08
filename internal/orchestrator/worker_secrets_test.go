@@ -97,7 +97,7 @@ func TestClaimedTriggerSecretCoercionKeepsValuesOutOfRunErrors(t *testing.T) {
 			defer srv.Close()
 			c := client.NewWithToken(srv.URL, srv.Client(), "scoped-agent")
 			orchestrator.ExecuteClaimedTrigger(t.Context(), orchestrator.WorkerOptions{Logger: rig.logger},
-				orchestrator.RemoteBackends(c, nil, nil, srv.Client(), store.DefaultConcurrencyLease), c, trig)
+				orchestrator.RemoteBackends(c, testLogBackend(t), nil, srv.Client(), store.DefaultConcurrencyLease), c, trig)
 			stored := mustRun(t, rig.st, trig.ID)
 			served, err := rig.client.GetRun(t.Context(), trig.ID)
 			if err != nil {
@@ -175,7 +175,7 @@ func TestClaimedTriggerResolvesRunScopedTypedSecrets(t *testing.T) {
 			defer srv.Close()
 			c := client.NewWithToken(srv.URL, srv.Client(), "scoped-agent")
 			orchestrator.ExecuteClaimedTrigger(context.Background(), orchestrator.WorkerOptions{Logger: rig.logger},
-				orchestrator.RemoteBackends(c, nil, nil, srv.Client(), store.DefaultConcurrencyLease), c, trig)
+				orchestrator.RemoteBackends(c, testLogBackend(t), nil, srv.Client(), store.DefaultConcurrencyLease), c, trig)
 			run := mustRun(t, rig.st, trig.ID)
 			if tc.want == "" {
 				if run.Status != "success" || body.Load() != 1 {

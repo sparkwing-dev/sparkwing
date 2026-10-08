@@ -284,3 +284,9 @@ func TestJournalWriterPersistsAcrossEvents(t *testing.T) {
 		}
 	}
 }
+
+// Read returns all retained records, including records written by the supervisor.
+func Read(dir string) ([]Record, error) {
+	records, _, err := ReadWithStats(dir)
+	return records, err
+}

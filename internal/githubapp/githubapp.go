@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
+
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 )
 
@@ -255,43 +257,25 @@ type Token struct {
 // it belongs to. The user's token is used for the membership check the
 // caller names in check and then dropped, so it is never stored.
 func (c *Client) ExchangeUserCode(ctx context.Context, code, verifier, redirectURI string, check func(ctx context.Context, userToken string, u User) error) (User, error) {
-	form := url.Values{
-		"client_id":     {c.cfg.ClientID},
-		"client_secret": {c.cfg.ClientSecret},
-		"code":          {code},
-		"code_verifier": {verifier},
-		"redirect_uri":  {redirectURI},
+	accessToken, err := githubauth.New(githubauth.Config{
+		ClientID: c.cfg.ClientID, ClientSecret: c.cfg.ClientSecret,
+		TokenURL: c.cfg.WebURL + "/login/oauth/access_token", HTTP: c.cfg.HTTP,
+	}).RedeemCode(ctx, code, verifier, redirectURI)
+	if errors.Is(err, githubauth.ErrRejected) {
+		return User{}, fmt.Errorf("%w: the authorization code did not redeem: %w", ErrRejected, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.WebURL+"/login/oauth/access_token",
-		strings.NewReader(form.Encode()))
 	if err != nil {
 		return User{}, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	var tok struct {
-		AccessToken string `json:"access_token"`
-		Error       string `json:"error"`
-	}
-	status, err := c.do(req, &tok)
-	if err != nil {
-		return User{}, err
-	}
-	if tok.Error != "" || status == http.StatusBadRequest || status == http.StatusUnauthorized {
-		return User{}, fmt.Errorf("%w: the authorization code did not redeem: %s", ErrRejected, tok.Error)
-	}
-	if status != http.StatusOK || tok.AccessToken == "" {
-		return User{}, fmt.Errorf("githubapp: token endpoint answered %d", status)
 	}
 	var u User
-	if err := c.getJSON(ctx, "/user", "Bearer "+tok.AccessToken, &u); err != nil {
+	if err := c.getJSON(ctx, "/user", "Bearer "+accessToken, &u); err != nil {
 		return User{}, err
 	}
 	if u.ID <= 0 {
 		return User{}, fmt.Errorf("%w: github returned no user id", ErrRejected)
 	}
 	if check != nil {
-		if err := check(ctx, tok.AccessToken, u); err != nil {
+		if err := check(ctx, accessToken, u); err != nil {
 			return User{}, err
 		}
 	}
@@ -442,31 +426,10 @@ const maxRepositoryPages = 10
 // token that can read nothing but metadata. For an installation covering more
 // than 1000 it returns the first 1000 with [ErrTooManyRepositories].
 func (c *Client) InstallationRepositories(ctx context.Context, installation int64) ([]Repository, error) {
-	jwt, err := c.appJWT(time.Now())
+	permissions := map[string]string{"metadata": "read"}
+	tok, err := c.mintToken(ctx, installation, map[string]any{"permissions": permissions}, permissions)
 	if err != nil {
 		return nil, err
-	}
-	body, err := json.Marshal(map[string]any{"permissions": map[string]string{"metadata": "read"}})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.cfg.APIURL+"/app/installations/"+strconv.FormatInt(installation, 10)+"/access_tokens", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	c.apiHeaders(req, "Bearer "+jwt)
-	req.Header.Set("Content-Type", "application/json")
-	var tok Token
-	status, err := c.do(req, &tok)
-	if err != nil {
-		return nil, err
-	}
-	if status == http.StatusNotFound {
-		return nil, ErrNotInstalled
-	}
-	if status != http.StatusCreated && status != http.StatusOK || tok.Token == "" {
-		return nil, fmt.Errorf("githubapp: metadata token answered %d", status)
 	}
 	var out []Repository
 	for page := 1; page <= maxRepositoryPages; page++ {

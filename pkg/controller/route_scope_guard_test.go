@@ -15,20 +15,13 @@ import (
 
 func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 	want := map[string]bool{
-		"GET /api/v1/health":                true,
-		"POST /api/v1/auth/login":           true,
-		"POST /api/v1/auth/logout":          true,
-		"GET /api/v1/auth/session":          true,
-		"GET /api/v1/auth/bootstrap-needed": true,
-		"POST /webhooks/github/{pipeline}":  true,
-		"/":                                 true,
+		"GET /api/v1/health":       true,
+		"POST /api/v1/auth/login":  true,
+		"POST /api/v1/auth/logout": true,
+		"GET /api/v1/auth/session": true,
+		"/":                        true,
 		// safety: a signed-out browser draws the sign-in page from it; it reports only teams and providers.
 		"GET /api/v1/capabilities": true,
-		// safety: sign-in has no session yet; both answer 404 without a license and a Google client.
-		"POST /api/v1/auth/oauth/google/start":    true,
-		"POST /api/v1/auth/oauth/google/exchange": true,
-		"POST /api/v1/auth/oauth/github/start":    true,
-		"POST /api/v1/auth/oauth/github/exchange": true,
 		// safety: a GitHub Actions job proves itself with its signed ID token; it answers 404 without an external URL.
 		"POST /api/v1/runners/github/exchange": true,
 		// safety: a GitHub App delivery proves itself with its signature; it answers 404 without an App.
@@ -66,16 +59,14 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 		"GET /api/v1/services":    true,
 		// safety: these act on the caller's own memberships, so accountPrincipal inside each handler
 		// is the gate, and it refuses every caller that is not a signed-in account.
-		"GET /api/v1/me":                                      true,
-		"DELETE /api/v1/me":                                   true,
-		"GET /api/v1/me/team-deletions":                       true,
-		"POST /api/v1/me/active-team":                         true,
-		"GET /api/v1/me/identities":                           true,
-		"POST /api/v1/me/identities/{provider}/link":          true,
-		"POST /api/v1/me/identities/{provider}/link/complete": true,
-		"DELETE /api/v1/me/identities/{provider}":             true,
-		"POST /api/v1/teams":                                  true,
-		"POST /api/v1/invitations/{id}/accept":                true,
+		"GET /api/v1/me":                          true,
+		"DELETE /api/v1/me":                       true,
+		"GET /api/v1/me/team-deletions":           true,
+		"POST /api/v1/me/active-team":             true,
+		"GET /api/v1/me/identities":               true,
+		"DELETE /api/v1/me/identities/{provider}": true,
+		"POST /api/v1/teams":                      true,
+		"POST /api/v1/invitations/{id}/accept":    true,
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "server.go", nil, 0)

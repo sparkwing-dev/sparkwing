@@ -121,7 +121,7 @@ func TestArtifacts_StagedInDistributedMode(t *testing.T) {
 	run := func(ws string) *orchestrator.Result {
 		setWorkDir(t, ws)
 		res, err := orchestrator.Run(ctx,
-			orchestrator.RemoteBackends(c, nil, art, nil, store.DefaultConcurrencyLease),
+			orchestrator.RemoteBackends(c, testLogBackend(t), art, nil, store.DefaultConcurrencyLease),
 			orchestrator.Options{Pipeline: "artifact-aggregate"})
 		if err != nil || res.Status != "success" {
 			t.Fatalf("distributed run: status=%v err=%v", res.Status, err)

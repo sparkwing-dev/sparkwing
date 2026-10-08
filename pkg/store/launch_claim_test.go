@@ -221,7 +221,7 @@ func TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched(t *testing.T) {
 	if claimed, err := st.ClaimNextTriggerFor(ctx, runner, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the retry's trigger was claimable: %+v %v", claimed, err)
 	}
-	nodes, err := st.ListNodes(ctx, "run-retry")
+	nodes, err := alpha.ListNodes(ctx, "run-retry")
 	if err != nil || len(nodes) != 1 || nodes[0].NodeID != store.PlanNodeID {
 		t.Fatalf("retry nodes = %+v %v, want the plan node", nodes, err)
 	}

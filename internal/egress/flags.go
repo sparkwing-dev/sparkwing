@@ -87,13 +87,6 @@ const (
 	EnvMaxDownloads    = "MAX_DOWNLOADS"
 )
 
-// Bind registers svc's egress budget flags on fs and returns the reader
-// that turns the parsed values into a [Config]. Every budget defaults to
-// its own environment fallback, and to unlimited when that is unset, so
-// a service given no budget serves exactly what it served before.
-//
-// The reader reports a malformed environment fallback and a negative
-// flag value rather than serving a budget the operator did not mean.
 // Named reports which budgets the operator set themselves, on the command line
 // or in the environment. A caller filling unset budgets from a profile needs it
 // to tell a budget nobody named from one deliberately set to zero, which is
@@ -104,6 +97,14 @@ type Named struct {
 	MaxDownloads    bool
 }
 
+// Bind registers svc's egress budget flags on fs and returns the reader
+// that turns the parsed values into a [Config]. Every budget defaults to
+// its own environment fallback when getenv is non-nil, and to unlimited
+// otherwise, so a service given no budget serves exactly what it served
+// before. A nil getenv reads flags alone.
+//
+// The reader reports a malformed environment fallback and a negative
+// flag value rather than serving a budget the operator did not mean.
 func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Surfaces) func() (Config, Named, error) {
 	names := FlagNames{
 		DailyAlarmBytes: FlagDailyAlarmBytes,
@@ -118,6 +119,9 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		EnvMaxDownloads:    &named.MaxDownloads,
 	}
 	read := func(suffix string) *int64 {
+		if getenv == nil {
+			return new(int64)
+		}
 		name := EnvName(svc, suffix)
 		if strings.TrimSpace(getenv(name)) != "" {
 			*fromEnv[suffix] = true
@@ -128,12 +132,18 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		}
 		return &v
 	}
+	envNote := func(suffix string) string {
+		if getenv == nil {
+			return ""
+		}
+		return " (env: " + EnvName(svc, suffix) + ")"
+	}
 
 	daily := read(EnvDailyAlarmBytes)
 	dailyFlag := fs.Int64("egress-daily-alarm-bytes", *daily,
 		"bytes this process may send in a UTC day before it raises the egress alarm, which "+
 			"the health route and the metrics report and the log carries at warn level. It refuses "+
-			"nothing. 0, the default, disables the alarm (env: "+EnvName(svc, EnvDailyAlarmBytes)+")")
+			"nothing. 0, the default, disables the alarm"+envNote(EnvDailyAlarmBytes))
 
 	var downloadsFlag, streamsFlag *int64
 	if surfaces.PerPrincipal {
@@ -141,13 +151,13 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		downloadsFlag = fs.Int64("egress-max-downloads", *downloads,
 			"metered downloads one principal may hold open at once; a further one is refused "+
 				"with 429. Every pod sharing a bearer counts against the same cap. 0, the "+
-				"default, is unlimited (env: "+EnvName(svc, EnvMaxDownloads)+")")
+				"default, is unlimited"+envNote(EnvMaxDownloads))
 	}
 	if surfaces.LogStreams {
 		streams := read(EnvMaxLogStreams)
 		streamsFlag = fs.Int64("egress-max-log-streams", *streams,
 			"live log streams one principal may hold open at once; a further one is refused "+
-				"with 429. 0, the default, is unlimited (env: "+EnvName(svc, EnvMaxLogStreams)+")")
+				"with 429. 0, the default, is unlimited"+envNote(EnvMaxLogStreams))
 	}
 
 	return func() (Config, Named, error) {

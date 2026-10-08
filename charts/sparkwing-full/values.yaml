@@ -8,18 +8,18 @@
 # is published.
 #
 # Sections, in roughly the order operators care about:
-#   1. controller.*               -- the orchestrator
-#   2. web.*                      -- the dashboard SPA host
-#   3. ingress.*                  -- optional public ingress for the dashboard
-#   4. serviceAccount / rbac      -- shared identity / permissions
-#   5. secrets.*                  -- references to pre-created Secrets
-#   6. imagePullSecrets / security defaults
-#   7. sparkwing-runner-bundle.*  -- sub-chart pass-through
+#   1. controller.*               -- the orchestrator and dashboard
+#   2. ingress.*                  -- optional public ingress for the controller
+#   3. serviceAccount             -- the controller's identity
+#   4. imagePullSecrets
+#   5. security defaults
+#   6. sparkwing-runner-bundle.*  -- sub-chart pass-through
 
 # -----------------------------------------------------------------------
 # 1. Controller. Single-instance orchestrator: owns the state DB,
-#    serves /api/v1/*, hosts webhooks. HA-multi-instance lives in the
-#    paid feature pack; the OSS posture is one pod.
+#    serves /api/v1/*, the dashboard and its sign-in pages, and hosts
+#    webhooks. HA-multi-instance lives in the paid feature pack; the
+#    OSS posture is one pod.
 # -----------------------------------------------------------------------
 controller:
   # Single-instance is the OSS posture (decision 0001). Don't bump
@@ -46,31 +46,6 @@ controller:
   # without a bearer, so only an in-cluster scraper reaches it.
   metricsPort: 0
 
-  # The controller's warm-PVC pool feature (creates ephemeral
-  # warmer pods to pre-pull images onto PVCs). Requires K8s API
-  # access in the install namespace; rbac.create must be true.
-  pool:
-    enabled: true
-    # Empty = use install namespace. Override only if the controller
-    # should manage a pool in a *different* namespace.
-    namespace: ""
-
-  # Webhook signing. Enables HMAC verification on
-  # POST /webhooks/github/{pipeline}. Reference an existing Secret
-  # (rotation = kubectl edit secret + rollout restart, no helm
-  # upgrade needed).
-  githubWebhookSecret:
-    # Empty name disables the env var injection (webhooks accept
-    # without HMAC verification -- fine for kind/dev, not prod).
-    name: ""
-    key: webhook-secret
-
-  # GitHub commit statuses for pull_request webhook runs. The token
-  # needs commit-status write access to every repository whose webhook
-  # reaches this controller. Empty name disables status reporting.
-  githubStatusToken:
-    name: ""
-    key: token
 
   # Memory ceiling in MiB for concurrent argon2id password and token
   # hashing. Each hash holds 64 MiB while it runs, so the default
@@ -94,13 +69,14 @@ controller:
   # live for the hold above. Empty keeps the controller default of 30s.
   placementLiveness: ""
 
-  # Runs one principal may create in a rolling hour. A webhook delivery counts
-  # against the repository it names. Past the cap the controller answers 429
+  # Runs one principal may create in a rolling hour. Each run a GitHub App
+  # delivery creates counts against the team the installation is bound to.
+  # Past the cap the controller answers 429
   # with a Retry-After. The budget lives in controller memory, so a restart
   # refills every principal. 0 is unlimited.
   maxRunsPerPrincipalHour: 0
 
-  # Pending-trigger depth of one team past which that team's new webhook
+  # Pending-trigger depth of one team past which that team's new GitHub App
   # deliveries and API submissions are shed with 503 and a Retry-After rather
   # than queued. 0 never sheds.
   shedQueueDepth: 0
@@ -177,6 +153,14 @@ controller:
     # default of 1000 bounds a measurement at a million; raise it for a
     # larger bucket.
     measurePages: ""
+
+  logs:
+    # The sparkwing-logs service the controller announces to clients
+    # and reads dashboard log panes from. Empty = auto-generate to point
+    # at the bundled sparkwing-runner-bundle's logs Service; if that
+    # sub-chart or its logs component is disabled, the controller
+    # announces no logs service and the dashboard shows no logs.
+    url: ""
 
   cache:
     # Which sparkwing-cache the controller's gitcache proxy forwards
@@ -276,84 +260,12 @@ controller:
   #   value: http://tempo.monitoring.svc.cluster.local:4318/v1/traces
 
 # -----------------------------------------------------------------------
-# 2. Web. Thin SPA host that proxies /api/v1/* to the controller.
-#    Stateless; the embedded Next.js bundle ships in the binary.
-# -----------------------------------------------------------------------
-web:
-  # Web is stateless -- a 2-replica deployment is fine if you want
-  # zero-downtime rollouts. Default 1 to match the OSS single-pod
-  # posture.
-  replicas: 1
-
-  image:
-    # Pin this with the controller and runner-bundle images; the
-    # appVersion fallback is not a runnable public release default.
-    repository: ghcr.io/sparkwing-dev/sparkwing-web
-    tag: ""
-    pullPolicy: IfNotPresent
-
-  # Bind addr. Service maps :80 -> :4343.
-  port: 4343
-
-  # Address sparkwing-web binds. Empty = 0.0.0.0:<port>, which the
-  # Service needs. Set "127.0.0.1:4343" to keep a token-backed
-  # dashboard off the pod network; the Service then reaches nothing,
-  # so this is for a kubectl port-forward or a sidecar only.
-  addr: ""
-
-  controller:
-    # Where the web pod proxies /api/v1/* to. Empty = auto-generate
-    # to point at the in-cluster controller Service. Override if
-    # you're running the controller out-of-cluster or in another
-    # namespace.
-    url: ""
-
-  logs:
-    # Where the web pod proxies log reads to. Empty = auto-generate
-    # to point at the bundled sparkwing-runner-bundle's logs
-    # Service. Set explicitly if logs live elsewhere.
-    url: ""
-
-  # Bearer token the web pod uses when proxying to the controller
-  # (so the controller's /api/v1/auth checks pass) and when reading
-  # from an authenticated logs service. Reference an existing Secret;
-  # the chart does NOT create it. Empty falls back to
-  # sparkwing-runner-bundle.controller.tokenSecret, so an install that
-  # names only that Secret still gets working log panes; set a name
-  # here to give the dashboard its own narrower token.
-  tokenSecret:
-    name: ""
-    key: token
-
-  # Force unauthenticated browsers to /login. Leave false on a
-  # fresh install (the tokens table is empty so login would loop);
-  # turn on after bootstrapping the admin user.
-  requireLogin: false
-
-  # Accept a token-backed dashboard that anyone reaching the service
-  # port can drive. Required when the token secret is set and
-  # requireLogin is false; the dashboard refuses to start otherwise.
-  allowUnauthenticatedRemote: false
-
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 500m
-      memory: 128Mi
-
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-
-  extraEnv: []
-
-# -----------------------------------------------------------------------
-# 3. Ingress. Optional public ingress for the dashboard. Disabled by
-#    default -- many self-host operators front the dashboard with
-#    their own Ingress / Gateway / cloud LB and don't want this chart
-#    to manage one.
+# 2. Ingress. Optional public ingress to the controller Service, which
+#    serves the dashboard and the API on one port. Disabled by default
+#    -- many self-host operators front the controller with their own
+#    Ingress / Gateway / cloud LB and don't want this chart to manage
+#    one. A console host and an API host may both point at the
+#    controller Service; a proxy in front can still split them.
 # -----------------------------------------------------------------------
 ingress:
   enabled: false
@@ -370,30 +282,30 @@ ingress:
   # The render check on this list is presence-only: one entry is enough,
   # and an entry without `secretName` leaves the ingress controller's
   # default certificate to terminate TLS, which is the operator's call.
-  # Any entry also passes `--hsts` to the dashboard, which then sends
-  # Strict-Transport-Security, builds https OAuth redirect URIs and
-  # requires an https Origin on unsafe requests.
+  # Any entry also passes `--hsts` to the controller, which then sends
+  # Strict-Transport-Security and requires an https Origin on
+  # cookie-authenticated writes.
   tls: []
   # - hosts:
   #     - sparkwing.example.com
   #   secretName: sparkwing-tls
 
-  # Publish the dashboard without TLS or without a login gate. An
-  # Ingress exists to expose the dashboard beyond the cluster, so the
-  # render fails on `tls: []` or `web.requireLogin: false` until this
-  # says the exposure is deliberate. Must be a bool: a quoted string
-  # fails the render rather than reading as an opt-out. With `tls: []`
-  # the web Deployment also gets `SPARKWING_WEB_INSECURE_COOKIES=1` and
-  # `--allow-insecure-cookies-remote`, so a browser can hold a session
-  # over plain HTTP.
+  # Publish the controller without TLS or without --require-auth. An
+  # Ingress exposes the whole controller API and dashboard beyond the
+  # cluster, so the render fails on `tls: []`, on
+  # `controller.requireAuth: false`, or on `controller.allowOpenBootstrap:
+  # true` without a bootstrap token, until this says the exposure is
+  # deliberate. Must be a bool: a quoted string fails the render rather
+  # than reading as an opt-out. With `tls: []` the controller also gets
+  # `--insecure-cookies`, so a browser can hold a session over plain
+  # HTTP.
   allowInsecure: false
 
 # -----------------------------------------------------------------------
-# 4. ServiceAccount + RBAC for the controller. The controller needs
-#    K8s API access for its warm-PVC pool: namespaces/get, PVC CRUD,
-#    pods CRUD, configmaps/events read, plus a small ClusterRole on
-#    storage.k8s.io/storageclasses for the startup default-class
-#    probe.
+# 3. ServiceAccount for the controller. The controller makes no
+#    Kubernetes API calls, so the chart grants it no Role and mounts no
+#    API token; the account exists to carry IRSA / Workload Identity
+#    annotations for S3 and similar cloud access.
 #
 #    The runner-side SA + RBAC is managed by the sparkwing-runner-bundle
 #    sub-chart -- see `sparkwing-runner-bundle.serviceAccount` /
@@ -410,28 +322,15 @@ serviceAccount:
   # ECR pulls, S3 backups, etc.
   annotations: {}
 
-rbac:
-  # Create the namespace-scoped Role + RoleBinding for the
-  # controller's pool feature. Set false to drop the chart-managed
-  # RBAC (e.g. you've pre-applied your own).
-  create: true
-  # Cluster-scoped read on storage.k8s.io/storageclasses for the
-  # startup default-class probe. Without it the controller logs a
-  # one-line "skipped: list StorageClasses: forbidden" warning at
-  # boot but otherwise functions. Set false in clusters where you
-  # can't grant ClusterRole.
-  clusterStorageClasses: true
-
 # -----------------------------------------------------------------------
-# 5. Image pull secrets applied to controller + web. The runner-side
+# 4. Image pull secrets applied to the controller. The runner-side
 #    bundle has its own (`sparkwing-runner-bundle.imagePullSecrets`).
 # -----------------------------------------------------------------------
 imagePullSecrets: []
 # - name: ghcr-pull-secret
 
 # -----------------------------------------------------------------------
-# 6. Pod-level security defaults. Applied to controller + web
-#    unless a per-component override sets its own.
+# 5. Pod-level security defaults applied to the controller.
 # -----------------------------------------------------------------------
 podSecurityContext:
   runAsNonRoot: true
@@ -445,7 +344,7 @@ podSecurityContext:
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  # Every path the controller and web pods write lives on a mounted
+  # Every path the controller pod writes lives on a mounted
   # volume: /data, the /tmp scratch emptyDir, and SPARKWING_HOME
   # inside it. Set false only for an image that writes to its own
   # layer.
@@ -459,7 +358,7 @@ volumePermissions:
   enabled: true
 
 # -----------------------------------------------------------------------
-# 7. Sub-chart: sparkwing-runner-bundle. All values nested here are
+# 6. Sub-chart: sparkwing-runner-bundle. All values nested here are
 #    forwarded as the sub-chart's `.Values`. Defaults below override
 #    the sub-chart's own defaults so the runner immediately claims
 #    work from the in-cluster controller installed by THIS chart.
@@ -468,7 +367,7 @@ volumePermissions:
 # -----------------------------------------------------------------------
 sparkwing-runner-bundle:
   # Toggles whether this chart deploys the runner side at all. Off
-  # if operators want only controller+web in this release (e.g.
+  # if operators want only the controller in this release (e.g.
   # they're running runners in another cluster).
   enabled: true
 

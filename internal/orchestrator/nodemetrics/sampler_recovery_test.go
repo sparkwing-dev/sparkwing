@@ -23,29 +23,25 @@ func TestAttachRecoversWithoutBridgingMissingReadings(t *testing.T) {
 				for i, ok := range tc.available {
 					readings = append(readings, reading{start.Add(time.Duration(i) * time.Second), time.Duration(i) * time.Second, 100, ok, nil})
 				}
-				fixedReadings(t, readings...)
+				read := fixedReadings(t, readings...)
 				t.Cleanup(SetIntervalForTest(time.Millisecond))
 				samples := make(chan Sample, 32)
-				finish := Attach(t.Context(), sinkFunc(func(_ context.Context, s Sample) error {
+				finish := attach(t.Context(), sinkFunc(func(_ context.Context, s Sample) error {
 					select {
 					case samples <- s:
 					default:
 					}
 					return nil
-				}))
+				}), read)
 				defer func() {
-					if err := finish(); err != nil {
+					if _, err := finish(); err != nil {
 						t.Error(err)
 					}
 				}()
 				for i, want := range tc.want {
-					select {
-					case got := <-samples:
-						if got.Valid != want || (got.CPUMillicores > 0) != want {
-							t.Errorf("sample%d=%+v; want valid/positive=%t", i, got, want)
-						}
-					case <-time.After(time.Second):
-						t.Fatal("sample deadline")
+					got := <-samples
+					if got.Valid != want || (got.CPUMillicores > 0) != want {
+						t.Errorf("sample%d=%+v; want valid/positive=%t", i, got, want)
 					}
 				}
 			})

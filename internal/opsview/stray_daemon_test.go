@@ -105,7 +105,7 @@ func TestRenderDoctorPretty_ShowsAStrayDaemonOnAnOtherwiseHealthyHome(t *testing
 		t.Fatal("a report holding only a stray daemon should read clean for its own home")
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -154,7 +154,7 @@ func TestRenderDoctorPretty_ExplainsTheStrayDaemonTell(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -233,7 +233,7 @@ func TestRenderDoctorPretty_ShowsAPeerWhoseProbeFailed(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()

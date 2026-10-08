@@ -101,20 +101,6 @@ func DirectRepoURLFromGitHub(fullName string) string {
 	return "https://github.com/" + fullName + ".git"
 }
 
-// FetchPipelineSourceDirect checks out repoURL at sha under workDir and
-// returns the checkout's .sparkwing directory. With a credential the fetch
-// presents only that credential and reads none of this machine's git config,
-// ssh agent or keys; the zero credential fetches with this process's own git
-// config and credentials, which only an owner-fenced runner may do. Fetched
-// objects stay in a mirror under the Sparkwing home keyed by the remote, so a
-// later run of the same repository fetches only what it lacks. An empty sha
-// takes the tip of branch.
-func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
-	opts := defaultDirectOptions()
-	opts.cred = cred
-	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
-}
-
 // safety: Only loopback tests may skip address validation; production fetches keep it and both caps.
 // A zero timeout leaves ctx in charge, while the byte cap covers all mirrors under one home.
 type directOptions struct {
@@ -441,7 +427,7 @@ func directLocalGitEnv(fetchEnv []string) []string {
 // GITHUB_REPOSITORY and github_owner/github_repo. They must all name one
 // repository (sourceurl.TriggerRepository), so the cache path and the direct
 // path fetch the same one and differ only in the form their transport needs:
-// the git cache names a GitHub repository by the ssh form its webhook binding
+// the git cache names a GitHub repository by the ssh form a GitHub-sourced run
 // registers, and a direct fetch uses the recorded clone URL, else the GitHub
 // name's https form, fitted by DirectFetchURL to the identities this process
 // holds. An empty result means the trigger names no repository.
@@ -529,6 +515,44 @@ func directEnforceCaps(root, own string, opts directOptions, git func(...string)
 }
 
 // safety: Keep a mirror's lock file while another checkout may wait on it, or a third process could bypass that lock.
+// SweepDirectMirrors removes the direct-fetch mirrors in dir that no fetch has
+// used since cutoff, skipping one a fetch holds or a checkout still uses. It
+// reports how many it removed and the bytes they held.
+func SweepDirectMirrors(ctx context.Context, dir string, cutoff time.Time) (removed int, freed int64) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.git"))
+	if err != nil {
+		return 0, 0
+	}
+	env := directLocalGitEnv(directGitEnv(os.Environ()))
+	git := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	for _, mirror := range paths {
+		if ctx.Err() != nil {
+			break
+		}
+		fi, err := os.Stat(mirror)
+		if err != nil || !fi.IsDir() || !fi.ModTime().Before(cutoff) {
+			continue
+		}
+		size, err := directDirSize(mirror)
+		if err != nil {
+			continue
+		}
+		if directEvict(mirror, git) {
+			removed++
+			freed += size
+		}
+	}
+	return removed, freed
+}
+
 func directEvict(mirror string, git func(...string) (string, error)) bool {
 	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {

@@ -285,13 +285,6 @@ func (r *Runner) fleetFullWait() time.Duration {
 	return FleetFullWait
 }
 
-// safety: an unschedulable pod would otherwise sit until the Job deadline hours
-// later with nothing saying why, so the scheduler's own message is what the
-// node fails with.
-func (r *Runner) observeUnschedulable(ctx context.Context, jobName string) string {
-	return unschedulableMessage(r.unschedulablePod(ctx, jobName))
-}
-
 func (r *Runner) unschedulablePod(ctx context.Context, jobName string) *corev1.Pod {
 	pods, err := r.client.CoreV1().Pods(r.cfg.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("batch.kubernetes.io/job-name=%s", jobName),

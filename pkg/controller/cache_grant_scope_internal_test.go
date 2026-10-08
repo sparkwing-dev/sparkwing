@@ -35,7 +35,7 @@ func TestCacheGrantCarriesTheRunsRepositoryAndRefs(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := s.store.DB().ExecContext(t.Context(),
-			`UPDATE triggers SET git_branch = 'ignored', repo = 'app', repo_url = 'https://GitHub.com/acme/app.git', trigger_source = ?, trigger_env = ? WHERE id = 'run-1'`,
+			`UPDATE triggers SET git_branch = 'ignored', repo = 'app', repo_url = 'https://GitHub.com/acme/app.git', github_repo_id = 701, trigger_source = ?, trigger_env = ? WHERE id = 'run-1'`,
 			source, raw); err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +133,7 @@ func TestCacheGrantWritesUnderTheRealRefOnlyWhenTheServerHoldsIt(t *testing.T) {
 		trig store.Trigger
 		want string
 	}{
-		{store.Trigger{ID: "push-1", TriggerSource: oidcWebhookSource, GitBranch: "main", GitSHA: sha, TriggerEnv: push}, "refs/heads/main"},
+		{store.Trigger{ID: "push-1", TriggerSource: oidcWebhookSource, GithubRepoID: 701, GitBranch: "main", GitSHA: sha, TriggerEnv: push}, "refs/heads/main"},
 		{store.Trigger{ID: "retry-1", TriggerSource: "retry", RetryOf: "push-1", GitBranch: "main", GitSHA: sha}, "refs/heads/main"},
 		{store.Trigger{ID: "child-1", TriggerSource: "api", ParentRunID: "retry-1", GitBranch: "main", GitSHA: sha}, "refs/heads/main"},
 		{store.Trigger{ID: "retry-other", TriggerSource: "retry", RetryOf: "push-1", GitBranch: "main", GitSHA: other}, "manual:refs/heads/main"},
@@ -228,7 +228,7 @@ func TestCacheGrantLineageVouchesOnlyForTheRootsRepository(t *testing.T) {
 	const sha = "1111111111111111111111111111111111111111"
 	push := store.Trigger{
 		ID: "push-a", Pipeline: "demo", CreatedAt: time.Now(), RepoURL: "https://github.com/acme/attacker.git",
-		GitBranch: "main", GitSHA: sha, TriggerSource: oidcWebhookSource,
+		GitBranch: "main", GitSHA: sha, TriggerSource: oidcWebhookSource, GithubRepoID: 701,
 		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push", "GITHUB_REF": "refs/heads/main"},
 	}
 	retry := store.Trigger{
@@ -261,7 +261,7 @@ func TestCacheGrantRetryOfAPullRequestKeepsItsScope(t *testing.T) {
 	const sha = "1111111111111111111111111111111111111111"
 	pr := store.Trigger{
 		ID: "pr-source", Pipeline: "demo", CreatedAt: time.Now(), RepoURL: "https://github.com/acme/app.git",
-		GitBranch: "feature", GitSHA: sha, TriggerSource: oidcWebhookSource,
+		GitBranch: "feature", GitSHA: sha, TriggerSource: oidcWebhookSource, GithubRepoID: 701,
 		TriggerEnv: map[string]string{
 			sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "7",
 			"GITHUB_REF": "refs/pull/7/head", sparkwing.EnvPRBaseRef: "main", EnvDefaultBranch: "main",
@@ -276,7 +276,7 @@ func TestCacheGrantRetryOfAPullRequestKeepsItsScope(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runretry.Create(t.Context(), s.store, pr.ID, "pr-retry", false, time.Now()); err != nil {
+	if _, err := runretry.Create(t.Context(), s.store, team, pr.ID, "pr-retry", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	source, err := s.cacheGrantScope(t.Context(), "team-a", pr.ID)

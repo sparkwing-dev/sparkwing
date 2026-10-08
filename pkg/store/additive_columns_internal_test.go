@@ -183,8 +183,12 @@ var additiveColumnSources = map[int][]map[string]string{
 	// binary never names and an index, and its rows use keys an older binary
 	// never looks up, so an older binary keeps writing the migrated database.
 	91: {githubAppDeliveryEventCols},
-	// safety: v92 adds a consent table older binaries never read or write.
+	// safety: v92 drops github_webhook_bindings and adds nothing; an older binary
+	// keeps every other table and fails only the statements that name that one.
 	92: nil,
+	93: nil,
+	// safety: v94 adds a consent table older binaries never read or write.
+	94: nil,
 }
 
 func columnSpecMaps() []map[string]string {

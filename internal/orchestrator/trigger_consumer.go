@@ -661,13 +661,21 @@ func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlig
 			logger.Warn("closed stale claim whose run ended under it", "trigger_id", id)
 			continue
 		}
-		run, gerr := st.GetRun(ctx, id)
+		// safety: the sweep lists every team's lapsed claims, so each is judged
+		// and requeued in the team that owns it; the default team's handle
+		// would read another team's run as absent and requeue nothing.
+		owner, terr := claimOwner(ctx, st, id)
+		if terr != nil {
+			logger.Warn("resolve stale claim's team", "trigger_id", id, "err", terr)
+			continue
+		}
+		run, gerr := owner.GetRun(ctx, id)
 		if gerr == nil && run != nil && run.Status != "pending" {
 			logger.Debug("leaving a started run to the orphan reaper",
 				"trigger_id", id, "status", run.Status)
 			continue
 		}
-		requeued, rerr := st.RequeueUnstartedClaim(ctx, id)
+		requeued, rerr := owner.RequeueUnstartedClaim(ctx, id)
 		if rerr != nil {
 			logger.Warn("requeue stale claim", "trigger_id", id, "err", rerr)
 			continue
@@ -676,6 +684,14 @@ func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlig
 			logger.Warn("requeued a claim whose run never started", "trigger_id", id)
 		}
 	}
+}
+
+func claimOwner(ctx context.Context, st *store.Store, id string) (*store.Tenant, error) {
+	team, err := st.AsOperator().TriggerTeam(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return st.ForTeam(ctx, team)
 }
 
 type inFlightSet struct {

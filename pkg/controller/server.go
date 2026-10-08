@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -32,15 +33,12 @@ import (
 // dispatcher. A single Server instance services all concurrent HTTP
 // requests; the store itself serializes writes.
 type Server struct {
-	store      *store.Store
-	dispatcher Dispatcher
-	logger     *slog.Logger
+	store  *store.Store
+	logger *slog.Logger
 
 	hostKeyScan        func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	gitCredentialLimit perMinuteLimiter
 	identityLinkLimit  perMinuteLimiter
-
-	pool *poolBinding
 
 	auth *Authenticator
 
@@ -56,10 +54,6 @@ type Server struct {
 	idlePolls         *ratelimit.Limiter
 	idlePollsEnforced bool
 	lastClaimAward    atomic.Int64
-
-	githubWebhookSecret  string
-	githubWebhook        GitHubWebhookConfig
-	githubCommitStatuses *githubCommitStatusReporter
 
 	queueTimeout    time.Duration
 	attentionCursor [2]string
@@ -154,6 +148,10 @@ type Server struct {
 	githubApp *githubAppState
 	checkout  *billingCheckout
 	operators atomic.Pointer[map[string]bool]
+
+	dashboard         *Dashboard
+	forwardedLogsOnce sync.Once
+	forwardedLogs     storage.LogStore
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -235,9 +233,9 @@ func (s *Server) assistedPathAllowed(method, path string) bool {
 	return false
 }
 
-// New constructs a Server bound to the given store. A nil dispatcher
-// defaults to NoopDispatcher (triggers are recorded but no run is
-// launched). Callers own the store's lifecycle; New never closes it.
+// New constructs a Server bound to the given store. A trigger it accepts is
+// recorded for a runner to claim. Callers own the store's lifecycle; New
+// never closes it.
 func New(st *store.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -245,7 +243,6 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	srv := &Server{
 		store:               st,
 		outputSigner:        newOutputSigner(),
-		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
 		loginLimit:          newLoginLimiter(),
 		queueTimeout:        15 * time.Minute,
@@ -321,10 +318,9 @@ func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
 	return s
 }
 
-// WithArtifactStore enables in-process artifact serving at
-// /api/v1/artifacts/{key}. The route is registered only when this
-// option is set (laptop mode). Cluster mode serves artifacts from a
-// dedicated process and leaves this nil.
+// WithArtifactStore names the artifact store the bucket ceiling measures
+// when no bucket usage store is set (laptop mode). Cluster mode leaves it
+// nil.
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 	s.artifactStore = a
 	return s
@@ -796,14 +792,6 @@ func (s *Server) WithTrustedProxyAddr(addr string) *Server {
 	return s
 }
 
-// WithDispatcher returns a Server that invokes the given dispatcher
-// when a trigger arrives. Separate from New so the dispatcher can
-// close over the Server itself.
-func (s *Server) WithDispatcher(d Dispatcher) *Server {
-	s.dispatcher = d
-	return s
-}
-
 // EnableAuthFromStore wires the Authenticator against the server's
 // tokens table IF the table has any non-revoked rows. Empty table =
 // auth stays disabled (pass-through), and the server logs a loud
@@ -892,7 +880,11 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //   - When the Authenticator is disabled, middleware + requireScope are
 //     pass-through.
 func (s *Server) Handler() http.Handler {
-	return s.handler(s.handleFinishRun)
+	api := s.handler(s.handleFinishRun)
+	if s.dashboard == nil {
+		return api
+	}
+	return s.browserHandler(api)
 }
 
 // DaemonHandler leaves profile recording to the host orchestrator. Clients
@@ -960,6 +952,15 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeLiveLog)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/logs", requireScope(ScopeLogsRead, s.metered(egress.ClassLog, s.dashboardRead(web.RunLogsHandler))))
+	mux.Handle("GET /api/v1/runs/{id}/logs/search", requireScope(ScopeLogsRead, s.dashboardRead(web.RunLogsSearchHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", requireScope(ScopeLogsRead, s.metered(egress.ClassLog, s.dashboardRead(web.NodeLogsHandler))))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", requireScope(ScopeLogsRead, s.meteredStream(egress.ClassLogStream, s.dashboardRead(web.NodeLogStreamHandler))))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", requireScope(ScopeLogsRead, s.dashboardRead(web.NodeLogCompletenessHandler)))
+	mux.Handle("GET /api/v1/runs/grep", requireScope(ScopeLogsRead, s.dashboardRead(web.RunsGrepHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/events/stream", requireScope(ScopeRunsRead, s.dashboardRead(web.EventsStreamHandler)))
+	mux.Handle("GET /api/v1/capacity/profiles", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityProfilesHandler)))
+	mux.Handle("GET /api/v1/capacity/profiles/explain", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityExplainHandler)))
 	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
@@ -1040,7 +1041,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/concurrency/{key}/holder", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot)))))
 	mux.Handle("GET /api/v1/concurrency/{key}/state", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotOwnKey, http.HandlerFunc(s.handleConcurrencyState))).orElse(requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState))))
 	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
-	mux.Handle("GET /api/v1/concurrency/{key}/notify", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleWaiterNotify))).orElse(requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify))))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", newClaimSensitiveRoute(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter)))))
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter)))))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
@@ -1051,7 +1051,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	if s.metricsAddr == "" {
 		mux.Handle("GET /metrics", requireScope(ScopeAdmin, metricsHandler()))
 	}
-	mux.Handle("GET /api/v1/egress", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEgressState)))
 
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
@@ -1107,17 +1106,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
-	if s.pool != nil {
-		mux.Handle("GET /api/v1/pool", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePoolList)))
-		mux.Handle("POST /api/v1/pool/checkout", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolCheckout)))
-		mux.Handle("POST /api/v1/pool/return", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolReturn)))
-		mux.Handle("POST /api/v1/pool/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolHeartbeat)))
-	}
-
-	if s.artifactStore != nil {
-		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, s.metered(egress.ClassArtifact, http.HandlerFunc(s.handleArtifactGet))))
-	}
-
 	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
 	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))
 	mux.Handle("GET /api/v1/tokens/{prefix}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleLookupTokenByPrefix)))
@@ -1130,8 +1118,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
 	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
 	mux.Handle("GET /api/v1/me/identities", http.HandlerFunc(s.handleIdentities))
-	mux.Handle("POST /api/v1/me/identities/{provider}/link", http.HandlerFunc(s.handleIdentityLinkStart))
-	mux.Handle("POST /api/v1/me/identities/{provider}/link/complete", http.HandlerFunc(s.handleIdentityLinkComplete))
 	mux.Handle("DELETE /api/v1/me/identities/{provider}", http.HandlerFunc(s.handleIdentityUnlink))
 	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
 	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
@@ -1161,10 +1147,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
 	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
 	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
-	mux.Handle("POST /api/v1/team/github-app/connect", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnect)))
-	mux.Handle("POST /api/v1/team/github-app/connect/complete", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnectComplete)))
-	mux.Handle("POST /api/v1/team/github-app/connect/available", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAvailable)))
-	mux.Handle("POST /api/v1/team/github-app/connect/select", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppSelect)))
 	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
 	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
 	mux.Handle("GET /api/v1/team/github-app/triggers", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppTriggers)))
@@ -1187,7 +1169,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
-	mux.Handle("PUT /api/v1/storage/teams/{team}/free-slot", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGrantFreeSlot)))
 
 	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
 	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
@@ -1206,7 +1187,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/credits/card-refunds", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
 	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/payments/{reference}", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
-	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
@@ -1219,7 +1199,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetRepoDispatch)))
 	mux.Handle("POST /api/v1/launcher/claim", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLaunchClaim)))
 	mux.Handle("POST /api/v1/launcher/sync", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLauncherSync)))
-	mux.Handle("GET /api/v1/operator/session", s.requireOperator(s.handleOperatorSession))
 	mux.Handle("GET /api/v1/operator/teams", s.requireOperator(s.handleOperatorTeams))
 	mux.Handle("GET /api/v1/operator/teams/{team}", s.requireOperator(s.handleOperatorTeam))
 	mux.Handle("POST /api/v1/operator/teams/{team}/trust", s.requireOperator(s.handleBillingTrustSet))
@@ -1243,11 +1222,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
-	// safety: nothing proves a team controls the repository it would bind, and a
-	// binding lets its secret sign for that repository, so binding is the operator's.
-	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook)))
-	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook)))
-
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its operator token and the logs
@@ -1267,13 +1241,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.Handle("POST /api/v1/auth/login", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleLogin))))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
-	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
-	router.Handle("POST /api/v1/auth/oauth/google/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleStart)))
-	router.Handle("POST /api/v1/auth/oauth/google/exchange", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange))))
-	router.Handle("POST /api/v1/auth/oauth/github/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubStart)))
-	router.Handle("POST /api/v1/auth/oauth/github/exchange", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange))))
-	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
 	router.Handle("POST /api/v1/runners/github/exchange", noStore(http.HandlerFunc(s.handleGitHubRunnerExchange)))
@@ -1317,6 +1285,13 @@ func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handl
 	return noStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if raw, route := claimRouteFor(mux, r); route != nil {
 			s.serveClaim(w, r, raw, route, next)
+			return
+		}
+		if sess := browserSessionFrom(r.Context()); sess != nil {
+			observeRequestPrincipal(sess.principal.Kind)
+			ctx := contextWithPrincipal(r.Context(), sess.principal)
+			stampPrincipal(ctx, sess.principal)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 		// safety: a session is resolved even while bearer auth is off, because
@@ -1390,25 +1365,14 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 	return false
 }
 
-// Serve starts the HTTP listener and blocks until ctx is done. On
-// ctx cancellation the server gracefully drains in-flight requests
-// up to shutdownTimeout. Also spawns the reaper goroutine that
-// re-queues triggers whose runner lease expired, and -- when a pool
-// has been attached via Server.AttachPool -- the pool's reconcile
-// and warming loops.
-func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error {
-	return ServeWith(ctx, New(st, logger), addr)
-}
-
-// ServeWith runs a pre-built Server (configured with WithDispatcher /
-// AttachPool) at addr. Split from Serve so the controller pod main can
-// wire in an in-cluster k8s client without passing options through
-// Serve.
 // safety: the HTTP drain and the commit-status drain each get this whole
 // budget, so a request still folding a run's profiles is not cut off by
 // time the listener's own shutdown already spent.
 const controllerShutdownBudget = 5 * time.Second
 
+// ServeWith runs a pre-built Server (configured with its With options)
+// at addr. Split from Serve so the controller pod
+// main can configure the server without passing options through Serve.
 func ServeWith(ctx context.Context, s *Server, addr string) error {
 	listener := func(addr string, h http.Handler) *http.Server {
 		return &http.Server{
@@ -1442,10 +1406,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runCardBilling(ctx, CardBillingInterval)
-
-	if s.pool != nil {
-		go s.pool.run(ctx, s.logger)
-	}
 
 	errCh := make(chan error, 1+len(servers))
 
@@ -1491,10 +1451,10 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 				s.logger.Warn("controller HTTP shutdown incomplete", "addr", l.Addr, "err", err)
 			}
 		}
-		s.drainGitHubCommitStatuses()
+		s.drainGitHubChecks(ctx)
 		return nil
 	case err := <-errCh:
-		s.drainGitHubCommitStatuses()
+		s.drainGitHubChecks(ctx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -1502,28 +1462,55 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 }
 
-// safety: the queue holds the terminal status a finished run has no other
+// safety: the queue holds the terminal check run a finished run has no other
 // producer for, so its drain owns a budget rather than inheriting whatever
 // the listener's shutdown left of one.
-func (s *Server) drainGitHubCommitStatuses() {
-	ctx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
+func (s *Server) drainGitHubChecks(parent context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), controllerShutdownBudget)
 	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {
-		s.logger.Warn("github commit status shutdown incomplete", "err", err)
+		s.logger.Warn("github check run shutdown incomplete", "err", err)
 	}
 }
 
 // Shutdown drains server-owned background work until ctx expires. ServeWith
 // calls Shutdown automatically; callers serving Handler directly must call it.
 func (s *Server) Shutdown(ctx context.Context) error {
-	var errs []error
-	if s.githubCommitStatuses != nil {
-		errs = append(errs, s.githubCommitStatuses.shutdown(ctx))
+	if s.githubApp == nil {
+		return nil
 	}
-	if s.githubApp != nil {
-		errs = append(errs, s.githubApp.checks.shutdown(ctx))
+	return s.githubApp.checks.shutdown(ctx)
+}
+
+// WithExternalURL declares the base URL this controller answers on from
+// outside the cluster. Signed filesystem output URLs use that address.
+// Empty uses the address each request arrived at.
+func (s *Server) WithExternalURL(rawURL string) *Server {
+	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	return s
+}
+
+func (s *Server) externalBaseURL(r *http.Request) string {
+	base := s.externalURL
+	if base == "" {
+		base = requestBaseURL(r)
 	}
-	return errors.Join(errs...)
+	return base
+}
+
+// safety: a controller behind TLS termination sees a plain listener, so the
+// forwarded scheme is the only thing that tells the caller's URL from the hop's.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded != "" {
+		if proto, _, _ := strings.Cut(forwarded, ","); proto != "" {
+			scheme = strings.TrimSpace(proto)
+		}
+	}
+	return scheme + "://" + r.Host
 }
 
 // safety: a run-level heartbeat this old means no orchestrator is driving the
@@ -1534,7 +1521,15 @@ const runHeartbeatStaleAfter = 3 * time.Minute
 // has executed yet belongs to the next claimant rather than to this sweep; the
 // queue-deadline sweep is what ends it when no claimant comes.
 func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
-	run, err := s.store.GetRun(ctx, id)
+	var tenant *store.Tenant
+	var run *store.Run
+	team, err := s.store.AsOperator().TriggerTeam(ctx, id)
+	if err == nil {
+		tenant, err = s.tenantForTeam(ctx, team)
+	}
+	if err == nil {
+		run, err = tenant.GetRun(ctx, id)
+	}
 	switch {
 	case err != nil:
 	case run.FinishedAt != nil:
@@ -1542,7 +1537,7 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 		s.logger.Warn("released stale claim; run waits for the next claimant",
 			"trigger_id", id)
 	default:
-		if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
+		if ferr := tenant.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
 			s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
 		} else {
 			s.reportGitHubRunState(ctx, id, "failed")
@@ -1571,7 +1566,7 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 // queue after a claim. A runner that claimed the trigger between the reap and
 // this read owns the run too, and requiring the queued state would fail it.
 func (s *Server) triggerAwaitsClaimant(ctx context.Context, id string) bool {
-	trig, err := s.store.GetTrigger(ctx, id)
+	trig, err := s.triggerAcrossTeams(ctx, id)
 	if err != nil {
 		return false
 	}
@@ -1784,6 +1779,12 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// safety: a stream sets its own write deadline through http.ResponseController, which reaches the connection only
+// through Unwrap; without it the listener's WriteTimeout ends every stream.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 type flushingStatusRecorder struct {

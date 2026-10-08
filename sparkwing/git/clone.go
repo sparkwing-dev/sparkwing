@@ -159,9 +159,6 @@ func inheritedConfigCount(value string) int {
 }
 
 func configuredGitcache() string {
-	if v := strings.TrimRight(os.Getenv("SPARKWING_GITCACHE"), "/"); v != "" {
-		return v
-	}
 	return strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/")
 }
 

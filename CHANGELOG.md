@@ -25,8 +25,17 @@ unlock.
 - **controller + web:** Team → GitHub previews repository-declared push and pull request pipelines, with separate owner consent for automatic triggers and GitHub Actions workers
   The controller reads `.sparkwing/sparkwing.yaml` at the verified default-branch head without executing repository code. Existing manual subscriptions keep precedence. Runner setup resolves GitHub repository and owner identities server-side and supplies a workflow using the team's canonical slug.
 
-- **store:** Schema v92 records repository automation consent
+- **store:** Schema v94 records repository automation consent
   Consent is scoped to the team, repository and installation. Revocation, suspension and disconnection prevent delayed automatic dispatch; revoking and enabling again does not authorize an earlier plan.
+- **client:** `pkg/controller/client` gains the token, user and compute-limit admin calls
+  `CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`, `CreateUser`, `ListUsers`, `DeleteUser`, `ComputeLimits` and `SetComputeLimits` wrap the existing `/api/v1/tokens`, `/api/v1/users` and `/api/v1/compute-limits` routes. `sparkwing cluster tokens`, `users`, `limits`, `runners add/remove` and `cloud connect/disconnect` now use them, so those commands retry a shed request, escape query and path values, and report errors in the client's form.
+- **controller:** The controller serves the dashboard, browser sign-in and the dashboard's log, event and capacity reads on its own listener
+  `Server.WithDashboard` attaches the surface; `sparkwing-controller` always attaches it. A `__Host-sw_session` cookie authenticates a request that carries no `Authorization` header, and a cookie-authenticated write must pass the same-origin check and send the session's CSRF token in `X-CSRF-Token`, matching the `__Host-sw_csrf` cookie. Bearer, claim-token and `Session` requests are unchanged, and a browser write from another site is refused. Pages need a signed-in browser whenever the controller authenticates its API. New routes: `GET /api/v1/runs/{id}/logs`, `/logs/search`, `/logs/{node}`, `/logs/{node}/stream`, `/logs/{node}/completeness`, `GET /api/v1/runs/grep`, `GET /api/v1/runs/{id}/events/stream` and `GET /api/v1/capacity/profiles` and `/explain`; log reads go through the logs service named by `--logs-url` with the caller's own credential. New flags `--hsts` and `--insecure-cookies`. `GET /api/v1/capabilities` adds `mode`, `storage`, `features` and `read_only` when a dashboard is attached. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
+- **sdk + runner:** The node protocol between the engine and a pipeline process is a versioned contract, `docs/node-protocol.md`
+  It names the environment a node process reads, every node-facing route with its request and response, the describe and plan documents (`docs/schemas/describe.schema.json`) and the log record (`docs/schemas/log-record.schema.json`), and marks which parts the engine-hosted model still needs. Node requests carry `Sparkwing-Node-Protocol: 1`; the local loopback controller and the execution broker log one warning per listener for a request that names another version or none, and serve it. The broker's allowlist is now one route table, and it refuses paths outside that table that it forwarded before, which no upstream route served. An empty plan's `plan --json` and `--explain` document writes `"nodes": []` rather than `null`.
+
+- **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
+  It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
 
 - **controller:** `GET /api/v1/credits/payments/{reference}` reads the team a paid grant funded, on the `credits.grant` scope
   It writes nothing and answers 404 with code `unknown_payment` when no paid grant carries the reference. The units route names `paid-grant-lookup-v1` in `capabilities`. The checkout service asks it before refunding a refused card, so a settled payment whose grant reply or receipt was lost keeps its grant.
@@ -35,6 +44,17 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
+- **storage (Breaking):** `storeurl.OpenS3`, `storeurl.SDKMaxAttempts` and `storeurl.SDKMaxBackoff` move to `pkg/storage/s3` as `Open`, `SDKMaxAttempts` and `SDKMaxBackoff`
+  `pkg/storage/s3` also gains `ParseURL` and `NewClient`, the one S3 client constructor. `sparkwing-logs` and `sparkwing-cache` no longer link `storeurl`, which took the controller client, the cron scheduler and the toolchain fetcher with it. See the [migration guide](docs/migrations/_unreleased.md#storage-and-store-names-that-moved).
+
+- **runner:** A run's trigger claim gets one heartbeat, from the process that claimed it
+  The runner's trigger loop and the `handle-trigger` child it starts each posted `/api/v1/triggers/{id}/heartbeat`, every 3 and 5 seconds. The child now heartbeats only when its parent passes `--heartbeat`, as `sparkwing cluster worker` does; the trigger loop, which holds the claim, stays the only one beating for the runs it starts. An older pipeline binary under a newer runner still beats as before.
+
+- **helm chart (Breaking):** `sparkwing-full` routes its Ingress to the controller Service and drops the `web` values, Deployment and Service
+  A values file that sets `web` fails to render; `web.logs.url` moves to `controller.logs.url`. `ingress.tls` passes `--hsts` and `ingress.allowInsecure=true` without TLS passes `--insecure-cookies` to the controller. Because the Ingress now publishes the whole controller API, the render refuses an Ingress in front of a controller that would start open (`controller.requireAuth=false`, or `controller.allowOpenBootstrap=true` without `controller.bootstrapAdminToken.name`) unless `ingress.allowInsecure=true`. `sparkwing-runner-bundle` 0.1.10 drops `networkPolicy.webPodSelector`. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
+- **sdk + orchestrator:** The engine restores and saves `CacheDir` directories instead of hidden node hooks
+  The node host restores each declared directory before the node's `BeforeRun` hooks and saves it after its `AfterRun` hooks; before, the restore and save ran as hooks in declaration order among the author's own. Keys, archive format and backends are unchanged. The plan snapshot lists each node's caches under `dir_caches`, and a node whose only hooks came from `CacheDir` no longer reports `has_before_run` or `has_after_run`.
+
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
   service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own
@@ -57,6 +77,30 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+- **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
+- **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
+- **Child runs:** A controller-dispatched node's child run checks its ancestry in the claim's team, and the run profile fold reads node samples in the run's team, rather than in the default team.
+
+- **runner + cli:** The warm-root sweep removes direct-fetch git mirrors unused for 7 days
+  `sparkwing cluster gc` and the warm runner's startup sweep aged out `<root>/git`, which nothing writes, and never reached `<root>/source-direct`, where direct-fetch runners keep their mirrors. They now sweep `source-direct/` with the same 7-day rule, skipping a mirror a fetch holds or a checkout still uses.
+
+- **cache:** The cache keeps an operator's `GIT_SSH_COMMAND` and its own offers only the staged key
+  It used to replace the environment's `GIT_SSH_COMMAND` with one that dropped `IdentitiesOnly=yes`, so ssh could also offer agent or default keys to the mirror's host.
+
+- **orchestrator + cli:** A run against a controller that announces no logs service refuses to start instead of posting its logs to the controller
+  `RemoteBackends` used to fall back to the controller's own URL, which serves no `/api/v1/logs` route. The error names the controller and asks for the profile's `logs.url`, `SPARKWING_LOGS_URL` or the controller's `--logs-url`. `sparkwing pipeline trigger` follows logs, and `sparkwing cluster worker` hands its runs a logs URL, from the profile's logs URL or the announced one instead of the controller URL; the worker refuses to start when neither exists. The local dashboard announces itself as the logs service.
+
+- **controller + logs + cache + web + runner:** A service whose Prometheus exporter cannot be built refuses to start with the cause
+  It used to log a warning and hand the meter provider a nil reader.
+
+- **controller:** Server-sent event streams outlive the listener's 30-second write timeout
+  The request log's response writer now exposes the connection to `http.ResponseController`, so a live log stream extends its own write deadline instead of ending 30 seconds after it opened.
+- **runner:** Lost resource samples no longer fail or retry successful work or block spawned children
+  Capacity learning tolerates losses up to 1%; larger losses produce one warning and can only raise the resource profile. Exact exit accounting remains usable.
+
+- **cli:** Build the pipeline module with the Go version its `go.mod` requires when a fixed `GOTOOLCHAIN` pins an older version
+  Resolution and compilation select the required toolchain; pipeline steps retain the original pin. `GOTOOLCHAIN=local` errors name the running version, required floor, setting source, and fix, including when a dependency raises the requirement. These errors no longer suggest `--sw-no-update`.
+
 - **Dashboard build:** Update `sharp` to 0.35.5 so `pnpm audit` passes GHSA-wq5f-xc86-pv6w; the static dashboard export never runs it at serve time.
 
 - **controller:** A pay-now payment by a card with a fraud warning on another payment repays the debt
@@ -99,6 +143,70 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+- **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
+  Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
+
+- **sdk (Breaking):** Remove the `SPARKWING_GITCACHE` alias
+  The SDK's clone helper reads `SPARKWING_GITCACHE_URL` alone, and four child-environment strip-list names that nothing set or read are gone from the code. See [migration guide](docs/migrations/_unreleased.md#leftover-variable-names-are-removed).
+
+- **runner (Breaking):** `sparkwing-runner runner` and `launch` read their token from `--credentials-dir`, and the Job ceilings become runner flags
+  The bearer is the file `agent-token` under `--credentials-dir`; `--token` and `SPARKWING_AGENT_TOKEN` are gone for both commands, and the token Sparkwing hands a Job or trigger child is unchanged. `runner` gains `--cpu-ceiling`, `--memory-ceiling`, `--deadline` and `--team-nodes`, the launcher's names, in place of `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING`, `SPARKWING_K8S_JOB_DEADLINE` and `SPARKWING_RUNNER_TEAM_NODES`, which `handle-trigger` no longer reads; it also ignores `SPARKWING_CONTROLLER_URL`, `SPARKWING_LOGS_URL`, `SPARKWING_GITCACHE_URL`, `SPARKWING_RUNNER_SA`, `SPARKWING_CACHE_URL`, `SPARKWING_DEPENDENCY_PROXY_URL`, `SPARKWING_IMAGE_PULL_POLICY`, `SPARKWING_WARM_MODULES`, `SPARKWING_LOCAL_RESERVE` and `SPARKWING_TEAM` in favour of their flags. The dashboard's connect command writes the token file before starting the runner, and the runner-bundle chart mounts the token, passes the ceilings, and gains `runner.jobDeadline` and `runner.teamNodes` for the other two flags; an external gitcache moves to `runner.gitcacheUrl`. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-reads-flags-and-a-credentials-directory).
+
+- **cache (Breaking):** `sparkwing-cache` reads settings from flags and its secrets from `--credentials-dir`
+  The operator token and grant key are the files `cache-token` and `cache-grant-key` under `--credentials-dir`; `SPARKWING_API_TOKEN`, `SPARKWING_CACHE_GRANT_KEY`, `--api-token` and `--grant-key` are gone. The cache ignores the 25 environment variables that used to seed its other flags, including the unprefixed `PORT`, `PORT_ADDR`, `DATA_DIR`, `PROXY_CACHE_DIR`, `PROXY_CACHE_TTL`, `PROXY_MAX_AGE`, `FETCH_INTERVAL`, `FETCH_FRESH_WINDOW`, `RECLONE_COOLDOWN`, `GITCACHE_REPOS` and `SSH_KEY_DIR`; pass the matching flag. A malformed value, which the cache used to ignore and start on its default, now stops it at startup naming the flag. The runner-bundle chart mounts both secrets and passes the flags. See [migration guide](docs/migrations/_unreleased.md#sparkwing-cache-reads-flags-and-a-credentials-directory).
+
+- **logs (Breaking):** `sparkwing-logs` no longer reads environment variables in place of its flags
+  `SPARKWING_CONTROLLER_URL`, `SPARKWING_REQUIRE_AUTH`, `SPARKWING_LOGS_ARCHIVE_STORE`, `SPARKWING_LOGS_ARCHIVE_IDLE`, the fifteen `SPARKWING_LOGS_*` limit variables and the three `SPARKWING_LOGS_EGRESS_*` budgets are ignored; pass `--controller`, `--require-auth`, `--archive-store`, `--archive-idle`, the matching limit flag or `--egress-*` instead. A malformed flag value stops the service at startup naming the flag. The chart already passed flags. See [migration guide](docs/migrations/_unreleased.md#sparkwing-logs-reads-flags-only).
+- **web + helm chart (Breaking):** `sparkwing-web` and its image are gone; the controller serves the dashboard
+  The controller serves the dashboard pages, browser sign-in, session cookies and the log, event and capacity reads on its own listener. Point the console host at the controller Service and delete the web Deployment. The web flags map as follows: `--require-login` follows the controller's own authentication, `--hsts` and `--trusted-proxy-addr` are controller flags, `SPARKWING_WEB_INSECURE_COOKIES` and `--allow-insecure-cookies-remote` become the controller's `--insecure-cookies`, and `--controller`, `--logs`, `--token`, `--allow-unauthenticated-remote`, `--allow-origin` and the `--*-spec` and `--profile` flags have no replacement. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
+
+- **controller (Breaking):** The JSON halves of the browser sign-in and connect flows are gone; the controller's browser surface runs those flows itself
+  `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`, `POST /api/v1/me/identities/{provider}/link` and `/link/complete`, `POST /api/v1/team/github-app/connect`, `/connect/available`, `/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and `GET /api/v1/auth/bootstrap-needed` answer 404. The dashboard's `/login`, `/auth/{provider}/...` and `/github/app/...` pages on the controller replace them. `POST /api/v1/auth/login`, `GET /api/v1/auth/session` and `POST /api/v1/auth/logout` remain for API clients.
+- **sdk (Breaking):** Remove six exported SDK names nothing called and no guide documented
+  `sparkwing.Cache`, `sparkwing.Logs` and `sparkwing.State` (aliases for `pkg/storage.ArtifactStore`, `LogStore` and `StateStore`), `sparkwing.TypeName`, `sparkwing.FailureFromContext` and `(*SpawnSpec).ResolvedID` are gone. Import `pkg/storage` for the store interfaces, and read the `Failure` an `OnFailure` handler receives as its second argument. `ResolvedID` always returned an empty string because the engine never set it. See [migration guide](docs/migrations/_unreleased.md#six-unused-sdk-names-are-removed).
+
+- **controller (Breaking):** Remove `controller.Dispatcher`, `RunRequest`, `NoopDispatcher` and `Server.WithDispatcher`
+  Every build installed the no-op dispatcher, so a trigger was already only recorded for runners to claim by polling. A program embedding the controller drops its `WithDispatcher` call; a run it wants started is claimed from the trigger queue. See the [migration guide](docs/migrations/_unreleased.md#the-controllers-dispatcher-hook-is-removed).
+
+- **store (Breaking):** Remove `Store.ChargeNodeCredits`
+  Nothing in the engine called it; a node's renewal, finish and launch settlement bill through the same charge inside their own transactions. A Go program that billed a node directly calls `FinalizeNodeCredits` to settle it.
+
+- **release (Breaking):** Remove `cmd/sign-manifest`
+  Release assets are signed by `cmd/verify-release`, and nothing invoked the older helper. Generate a signing seed with `openssl rand -base64 32`, and print its public key with `SPARKWING_RELEASE_SIGNING_KEY=<seed> go run ./cmd/verify-release --public-key`. See the [migration guide](docs/migrations/_unreleased.md#cmdsign-manifest-is-removed).
+
+- **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
+  `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).
+
+- **runner + cache + cli (Breaking):** Twelve environment variables that only mirrored a flag are no longer read
+  `SPARKWING_TRIGGER_RUNNER`, `SPARKWING_RUNNER_IMAGE`, `SPARKWING_IMAGE_PULL_SECRET`, `SPARKWING_RUNNER_CONTROLLER_URL`, `SPARKWING_RUNNER_LOGS_URL`, `SPARKWING_RUNNER_NODE_SELECTOR` and `SPARKWING_RUNNER_TOLERATION` give way to the `sparkwing-runner runner --trigger-runner*` flags; `SPARKWING_GITCACHE_CONCURRENCY` to `sparkwing-cache --git-fork-limit`; `SPARKWING_WINGD_VERSION` to `sparkwing wingd run --version`; `SPARKWING_FORCE_COLOR` to `CLICOLOR_FORCE=1`. `SPARKWING_BAKED_BINARY` and its fallback are gone: a trigger with no repository fails with that reason instead of running an in-image binary the runner image never shipped. `SPARKWING_CHAOS_KEEP` was a test knob. See [migration guide](docs/migrations/_unreleased.md#flag-mirror-environment-variables-are-no-longer-read).
+
+- **controller + charts (Breaking):** Remove the warm-PVC pool
+  The controller no longer creates, warms or hands out Docker-cache PVCs, and no longer serves `GET /api/v1/pool` or
+  `POST /api/v1/pool/{checkout,return,heartbeat}`. Nothing Sparkwing ships mounted a pool PVC, so the pool held
+  Kubernetes PVC and pod create rights and ran privileged warmer pods for no consumer. `sparkwing-controller` drops
+  `--pool`, `--pool-namespace`, `--warmer-service-account` and `--kubeconfig`, so a controller started with any of
+  them exits with an unknown-flag error, and it no longer links a Kubernetes client. `sparkwing-full` drops
+  `controller.pool.*` and `rbac.*`, renders no Role, ClusterRole or warmer ServiceAccount for the controller, and
+  stops mounting an API token in its pod. `sparkwing cluster status` drops its `pool` probe, and the
+  `sparkwing.pool.*` metrics are gone. See
+  [The warm-PVC pool is removed](docs/migrations/_unreleased.md#the-warm-pvc-pool-is-removed).
+- **controller (Breaking):** Remove the concurrency waiter event stream
+  `GET /api/v1/concurrency/{key}/notify` answers 404. The SDK, the CLI and the dashboard never opened it; a waiter
+  learns its outcome from `GET /api/v1/concurrency/{key}/resolve`, which they already poll. Removing it drops a
+  30-minute stream a claim token could hold open. See
+  [The concurrency notify stream is removed](docs/migrations/_unreleased.md#the-concurrency-notify-stream-is-removed).
+- **controller (Breaking):** Remove the controller's artifact read route
+  `GET /api/v1/artifacts/{key}` answers 404 on the controller, the local daemon and the loopback. No CLI, SDK or
+  dashboard code read it; nodes stage artifacts through the cache's `/bin` routes or the direct data store.
+  See [The controller artifact route is removed](docs/migrations/_unreleased.md#the-controller-artifact-route-is-removed).
+- **controller + cache (Breaking):** Remove four operator routes nothing called
+  The controller no longer serves `GET /api/v1/egress`, `GET /api/v1/credits/teams/{team}` or
+  `PUT /api/v1/storage/teams/{team}/free-slot`, and `sparkwing-cache` no longer serves `GET /repos`. Neither the CLI,
+  the dashboard nor `sparkwing-ops` called them. `pkg/controller.StorageTierResponse` is gone. See
+  [Four operator routes are removed](docs/migrations/_unreleased.md#four-operator-routes-are-removed).
+- **controller + cli + helm chart (Breaking):** Remove the per-pipeline GitHub webhook; the GitHub App is the only signed GitHub trigger
+  `POST /webhooks/github/{pipeline}`, `POST` and `DELETE /api/v1/webhooks/github/bindings`, `sparkwing cluster webhooks` (`connect`, `disconnect`, `list`, `deliveries`, `replay`), the `GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_BINDINGS` and `GITHUB_TOKEN` controller settings, the commit-status reporter `GITHUB_TOKEN` drove, the chart's `controller.githubWebhookSecret` and `controller.githubStatusToken`, and `client.ConnectGitHubWebhook` / `DisconnectGitHubWebhook` are gone. Schema v92 drops `github_webhook_bindings` with the sealed secrets it held, and the store's `GitHubWebhookBinding` API and the unscoped `Store.FindTriggerByWebhookReplay` go with it. A delivery to the old URL answers `404`, so the webhook on GitHub shows the failure in its Recent Deliveries. A run whose trigger names a GitHub event without a repository id, which only this path created, now mints an OIDC token with `trigger:manual`. Install the GitHub App and subscribe each pipeline to its repository; see [migration guide](docs/migrations/_unreleased.md#per-pipeline-github-webhooks-are-removed).
+  The `sparkwing-full` chart refuses to render while `controller.githubWebhookSecret.name` or `controller.githubStatusToken.name` is still set, naming the value and the migration guide section, so a `helm upgrade --reuse-values` that carries them fails at render time instead of leaving deliveries to 404.
 - **web:** The dashboard's unlinked `/guide`, `/learn`, `/features` and `/pipeline-overview` pages and its static `/health` file
   Nothing in the dashboard linked to them, and the pages taught commands that no longer exist. Those paths now load the dashboard home. `sparkwing docs` holds the guides, `/runs?view=pipelines` the pipeline overview, and `/api/health` stays the dashboard's probe.
 - **backends (Breaking):** The `gcs`, `azure-blob` and `mysql` backend types and the `pkg/backends` constants `TypeGCS`, `TypeAzureBlob` and `TypeMySQL`
@@ -119,7 +227,25 @@ unlock.
   controller mints one. See
   [Cache grants need a claim and a scope](docs/migrations/_unreleased.md#cache-grants-need-a-claim-and-a-scope).
 
+- **cli (Breaking):** `sparkwing doctor` and `sparkwing queue` no longer look for box-slot locks from pipelines pinned before v0.16
+  Nothing has taken a box slot since v0.16, and a binary that old refuses the current store. `doctor -o json` drops `legacy_box_slot_files_removed` and `live_legacy_holders`, `-o plain` drops their rows, and the legacy-pinned warning is gone. See [migration guide](docs/migrations/_unreleased.md#doctor-no-longer-reports-box-slot-locks).
+
+- **pkg (Breaking):** Remove nine exported functions nothing in Sparkwing calls
+  `controller.Serve`, `controller.AuditFields`, `logs.Serve`, `logs.ServeWithTokens`, `logs.ServePrivateWithTokens`, `sparkwinglogs.FromClient`, `store.DetectDialect`, `store.SetArgon2AcquireTimeout` and `backends.LayerSurfaces` are gone. See [migration guide](docs/migrations/_unreleased.md#unused-pkg-functions-are-removed).
+
 ### Security
+- **sdk + orchestrator (Breaking):** Commands a pipeline starts no longer inherit `SPARKWING_AGENT_TOKEN`
+  The pipeline binary moves the token out of its environment when it starts and masks it in node output, so a step's `sparkwing.Exec`, `os/exec` child or shell cannot read the runner's bearer from its environment or print it. The dependency cache (`.CacheDir`) authenticates only with `SPARKWING_CACHE_GRANT` or `SPARKWING_CACHE_TOKEN` and no longer falls back to the agent token. See the [migration guide](docs/migrations/_unreleased.md#pipeline-steps-no-longer-see-sparkwing_agent_token).
+
+- **orchestrator:** Mask a pipeline process's raw stdout and stderr in the process that starts it
+  The claim launcher, the remote runner and the local runner now read the pipeline process's output through
+  pipes and mask each line with every value that process registered, which it hands over on an inherited
+  descriptor before the value can be printed. Output that bypasses the SDK, a child process inheriting its stdio,
+  and the runtime's report of an unrecovered panic no longer reach container logs or run logs with a secret in
+  the clear. An unterminated progress line now appears once its newline or the process's exit arrives, and a
+  line longer than 1 MiB is replaced by a `[line over 1 MiB dropped]` marker instead of being truncated. Windows
+  keeps only the pipeline process's own masking, and a pipeline built against an earlier SDK hands over no values.
+
 - **controller:** Refuse a cache grant to a runner token that sends no live node or trigger claim fence
   `POST /api/v1/runs/{id}/cache-grant` answers `403 claim_required` instead of minting a six-hour grant with no
   claim, which the cache honored after the token's member was removed and after the run finished. Sparkwing's
@@ -146,6 +272,7 @@ unlock.
 - **Runner tokens:** Recheck the minter's role inside the mint, so a removal or demotion that commits during a mint request leaves no live runner token.
 - **Token mints:** Make CLI and runner token mints wait on an in-flight account deletion on PostgreSQL, so a mint racing the deletion cannot leave a live token.
 - **Compute limits:** Record a claim's compute-limit refusal only on a run of the claimant's team; `Store.OldestWaitingReadyNodeForPrincipal` moves to `Tenant`.
+- **Store tenant scoping:** Scope every store statement on a tenant table, and each of its subqueries, to one team, or record why it crosses teams; node reads take their output and pipeline from the node's own team. `Operator.RunTeam` and `Operator.TriggerTeam` name the team that owns a run id or a trigger id, looked up apart. `Store.MarkNodeReady` opens a node in its run's own team. These `Store` methods now act on the default team only, and their `Tenant` methods of the same name serve every team: `CreateDebugPause`, `GetActiveDebugPause`, `ListDebugPauses`, `ReleaseDebugPause`, `CreateApproval`, `GetApproval`, `ResolveApproval`, `ListApprovalsForRun`, `ListPendingApprovals`, `WriteNodeDispatch`, `GetNodeDispatch`, `ListNodeDispatches`, `StartNode`, `SetNodeStatus`, `UpdateNodeDeps`, `UpdateNodeActivity`, `TouchNodeHeartbeat`, `AppendNodeAnnotation`, `SetNodeSummary`, `SetNodeArtifactManifest`, `AddNodeUsage`, `GetNode`, `ListNodes`, `StartNodeStep`, `FinishNodeStep`, `SkipNodeStep`, `AppendStepAnnotation`, `SetStepSummary`, `ListNodeSteps`, `ListEventsAfter`, `AppendEventOnce`, `GetRun`, `TouchRunHeartbeat`, `FinishRunsIfActive`, `DeleteRun`, `SetRetriedAs`, `RequestCancel`, `CancelPendingTrigger`, `FinishRunAtGeneration`, `RunExceedsWallClock`, `GetTrigger`, `FinishTrigger`, `FinishTriggerAtGeneration`, `HeartbeatTrigger`, `ReleaseClaimAtGeneration`, `RequeueUnstartedClaim`, `TriggerClaimant`, `TriggerClaimGeneration`, `FindSpawnedChildTriggerID`, `ListPendingTriggersForParent`, `ListSpawnedChildrenByRun`, `FindTriggerByIdempotencyKey`, `FindTriggerByWebhookReplay`, `CountPendingTriggers`, `CacheExcludedCounts`, `ListCreditGrants`, `ListCreditCharges`, `AddNodeMetricSample`, `ListNodeMetricsPage`, `RequestNodeBounce`, `PendingNodeBounce`, `ConsumeNodeBounce`, `ListNodeBounces`, `AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `MarkNodeReady`, `ResetNodeForAutoRetry`, `RevokeNodeReady`, `SetNodeArtifactManifestCharged`, `FinishNodeWithOutputRef`, `ListNodeMetrics`, `NodeSettlement`.
 - **Live logs:** Read only bytes appended since the previous poll when streaming a node log, instead of rereading every attributed file each 200 ms.
 - **Log reads:** Serve node logs and their head, tail, range and grep filters from the files incrementally instead of buffering every attempt file in memory; a read that fails after the response starts now aborts the connection.
 - **Source bundles:** Apply the direct-source directory checks before compiling a bundled pipeline, including refusal of a symlinked `.sparkwing` directory.
@@ -164,6 +291,9 @@ unlock.
 - **Helm chart:** Pass `--hsts` to the dashboard when the Ingress has a TLS entry, so it sends Strict-Transport-Security and builds https OAuth redirect URIs
 
 ### Docs
+
+- **docs:** [Environment variables](docs/environment-variables.md) lists every variable the code reads, as configuration, runtime, plumbing, test, other tools or undecided, with the page that describes each
+  The docs contract test now fails when a variable is missing from that page or the page lists one nothing reads. It follows reads through an injected `os.Getenv`, scans of an environment slice and names without the `SPARKWING_` prefix, which added the object-store budgets, the controller's egress budgets, the GitHub App secrets, `SPARKWING_SUBMIT_ENV_ALLOW`, `CACHE_POD_URL` and the names other tools define.
 
 - **security:** Record the accepted trust facts: editors can read masked secrets through a runner token they mint, the launcher token reaches every team's claim tokens, a run's plan declares its own secrets, pipeline stdout outside the exec helper is unmasked in container logs, and `docker -e K=V` is visible in a shared host's process table
 

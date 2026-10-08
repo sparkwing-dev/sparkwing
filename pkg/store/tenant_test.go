@@ -23,6 +23,19 @@ func tenantFor(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	return tn
 }
 
+func runTeam(ctx context.Context, t *testing.T, st *store.Store, runID string) *store.Tenant {
+	t.Helper()
+	team, err := st.AsOperator().RunTeam(ctx, runID)
+	if err != nil {
+		t.Fatalf("RunTeam(%s): %v", runID, err)
+	}
+	tn, err := st.ForTeam(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tn
+}
+
 func seedTenantRun(t *testing.T, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
 	if err := tn.CreateRun(context.Background(), store.Run{
@@ -307,4 +320,32 @@ func runIDs(runs []*store.Run) []string {
 		out[i] = r.ID
 	}
 	return out
+}
+
+// Two teams may each hold one of a run and a trigger under the same id; the
+// run's owner and the trigger's owner are answered apart.
+func TestOwnerLookupsKeepARunAndATriggerSharingAnIDApart(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	op := st.AsOperator()
+	alpha := tenantFor(t, st, "alpha")
+	beta := tenantFor(t, st, "beta")
+
+	seedTenantRun(t, alpha, "shared", "build")
+	if err := beta.CreateTrigger(ctx, store.Trigger{ID: "shared", Pipeline: "build", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+
+	if team, err := op.RunTeam(ctx, "shared"); err != nil || team != "alpha" {
+		t.Errorf("RunTeam = %q, %v; want alpha", team, err)
+	}
+	if team, err := op.TriggerTeam(ctx, "shared"); err != nil || team != "beta" {
+		t.Errorf("TriggerTeam = %q, %v; want beta", team, err)
+	}
+	if _, err := op.RunTeam(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("RunTeam(missing) = %v, want ErrNotFound", err)
+	}
+	if _, err := op.TriggerTeam(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("TriggerTeam(missing) = %v, want ErrNotFound", err)
+	}
 }

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -259,39 +258,26 @@ func TestAStreamingRouteOutlivesTheRequestBound(t *testing.T) {
 	httpClient := apiHTTPClient(sock)
 	c := client.New(apiBaseURL, httpClient)
 	seedRun(t, c, "r1", "n1")
-	seedRun(t, c, "r2", "n2")
-
-	conc := NewHTTPConcurrency(apiBaseURL, httpClient, "", 30*time.Second)
-	ctx := context.Background()
-	if _, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key: "memo:m1", RunID: "r1", NodeID: "n1", HolderID: "h1",
-		Policy: "memoize", Lease: 30 * time.Second,
-	}); err != nil {
-		t.Fatalf("AcquireSlot for the holder: %v", err)
-	}
-	if _, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key: "memo:m1", RunID: "r2", NodeID: "n2", HolderID: "h2",
-		Policy: "memoize", Lease: 30 * time.Second,
-	}); err != nil {
-		t.Fatalf("AcquireSlot for the waiter: %v", err)
+	if err := c.AppendNodeLiveLog(context.Background(), "r1", "n1", []byte("building\n")); err != nil {
+		t.Fatalf("append a live log line: %v", err)
 	}
 
 	stream := &http.Client{Transport: httpClient.Transport}
-	resp, err := stream.Get(apiBaseURL + "/api/v1/concurrency/" + url.PathEscape("memo:m1") + "/notify?run_id=r2&node_id=n2")
+	resp, err := stream.Get(apiBaseURL + "/api/v1/runs/r1/nodes/n1/logs/stream")
 	if err != nil {
-		t.Fatalf("open the notify stream: %v", err)
+		t.Fatalf("open the live log stream: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the notify stream answered %d, want 200", resp.StatusCode)
+		t.Fatalf("the live log stream answered %d, want 200", resp.StatusCode)
 	}
 	reader := bufio.NewReader(resp.Body)
 	if _, err := reader.ReadString('\n'); err != nil {
 		t.Fatalf("read the stream preamble: %v", err)
 	}
 
-	// safety: the waiter stays waiting, so a live stream sends nothing and a
-	// truncated one closes; only the closed case is a failure.
+	// safety: the node stays running, so a live stream holds its connection
+	// and a truncated one closes; only the closed case is a failure.
 	closed := make(chan error, 1)
 	go func() {
 		for {
@@ -305,7 +291,7 @@ func TestAStreamingRouteOutlivesTheRequestBound(t *testing.T) {
 	}()
 	select {
 	case err := <-closed:
-		t.Fatalf("the notify stream ended after opening, inside the %s request bound: %v", bound, err)
+		t.Fatalf("the live log stream ended after opening, inside the %s request bound: %v", bound, err)
 	case <-time.After(5 * bound):
 	}
 }

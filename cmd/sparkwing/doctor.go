@@ -11,7 +11,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -75,6 +77,7 @@ func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doc
 	if err != nil {
 		return report, err
 	}
+	report.GoToolchain = diagnoseGoToolchain(ctx)
 	report.ShadowedHooks = shadowedHooks(runGit)
 	surveyed, err := surveyFleet(runGit)
 	if err != nil {
@@ -99,5 +102,34 @@ func shadowedHooks(git githooks.Git) *githooks.Shadow {
 }
 
 func renderDoctor(w io.Writer, r doctorReport, format string) error {
-	return opsview.RenderDoctor(w, r, format, legacyWarningLine(len(r.LiveLegacyHolders)))
+	return opsview.RenderDoctor(w, r, format)
+}
+
+func diagnoseGoToolchain(ctx context.Context) *opsview.DoctorGoToolchain {
+	dir, err := findSparkwingDir()
+	if err != nil {
+		return nil
+	}
+	return inspectDoctorGoToolchain(ctx, dir, os.Environ())
+}
+
+func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *opsview.DoctorGoToolchain {
+	overlay := bincache.EffectiveOverlay(dir)
+	report, err := gotoolchain.Inspect(ctx, dir, env, overlay)
+	finding := &opsview.DoctorGoToolchain{
+		Current: report.Current, Setting: report.Setting, Source: report.Source,
+		Floor: report.Floor, Module: report.Module, Override: report.Override, Verdict: "ok",
+	}
+	if report.Override != "" {
+		finding.Verdict = "sparkwing will build with " + report.Override
+	}
+	if err != nil {
+		finding.Verdict = "unverified"
+		var toolchainErr *gotoolchain.Error
+		if errors.As(err, &toolchainErr) {
+			finding.Verdict = "blocked by GOTOOLCHAIN=local"
+		}
+		finding.Error = err.Error()
+	}
+	return finding
 }

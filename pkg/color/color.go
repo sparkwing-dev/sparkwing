@@ -13,7 +13,7 @@ var enabled atomic.Bool
 func init() { enabled.Store(detectEnabled()) }
 
 func detectEnabled() bool {
-	if os.Getenv("CLICOLOR_FORCE") == "1" || os.Getenv("SPARKWING_FORCE_COLOR") == "1" {
+	if os.Getenv("CLICOLOR_FORCE") == "1" {
 		return true
 	}
 	if v, ok := os.LookupEnv("NO_COLOR"); ok && v != "" {

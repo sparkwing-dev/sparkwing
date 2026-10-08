@@ -12,10 +12,9 @@ Inspects local state and repairs entries whose owners have stopped.
 --dry-run reports proposed repairs. The command preserves live processes,
 active daemon state, and cluster-scoped records.
 
-Repairs cover home permissions, abandoned local run records, abandoned
-box-slot locks, ended local concurrency records, and orphaned run directories.
-Run-record repair requires a reachable daemon so held runs remain protected.
-A held box-slot lock is reported with guidance to update the pipeline SDK.
+Repairs cover home permissions, abandoned local run records, ended local
+concurrency records, and orphaned run directories. Run-record repair requires
+a reachable daemon so held runs remain protected.
 
 Run-directory removal requires a local store with recorded runs and profiles
 that all use that store. Directories written within the grace period remain.
@@ -28,6 +27,11 @@ following them. Windows access permissions are reported as unverified.
 The report includes daemon reachability, repeated admission rejections,
 version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
+
+In a project, the Go toolchain finding reports the running Go version,
+GOTOOLCHAIN and its source, and the .sparkwing module's Go floor. It identifies
+fixed pins sparkwing will raise for builds and a blocking GOTOOLCHAIN=local,
+with the installation or unpinning command needed to proceed.
 
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.

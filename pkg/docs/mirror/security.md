@@ -127,9 +127,9 @@ compatibility boundary on its own.
 run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
-`sparkwing cluster worker --runner k8s` gives nodes separate Job pods, while
-its planning process still has the runner-token authority described above.
-See [warm-pool.md](warm-pool.md) for that execution mode.
+`sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
+separate Job pods, while its planning process still has the runner-token
+authority described above.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`
 combines the caller's filters with the authenticated team. A team reader can
@@ -148,8 +148,13 @@ every team's run secrets, source tokens and cache grants; keep it
 operator-only. Which secrets a run may read through a claim token is declared
 by that run's own plan, so the boundary is the secret's pipeline or shared
 scope, not the declaration. The masker covers step output that goes through
-the exec helper and the node log; anything else a pipeline process prints to
-its own stdout reaches the operator's container logs unmasked. `docker run -e
+the exec helper and the node log, and the process that starts a pipeline
+process masks that process's raw stdout and stderr line by line with every
+value it registered: output printed without the SDK, from a child process that
+inherits its stdio, and the runtime's report of an unrecovered panic. On
+Windows only the pipeline process's own masking applies. Masking matches the
+literal value and its common encodings, so a transformed secret still prints
+in the clear. `docker run -e
 K=V`, which the SDK's docker and services helpers use, puts the value on the
 docker CLI's command line, which every account on a
 shared self-hosted host can read in the process table.
@@ -192,6 +197,9 @@ email or a token) and `team`. These also get an `audit` record:
 - reads of secrets, tokens and operator routes (`/api/v1/secrets`,
   `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
   `/api/v1/operator/...`);
+- the dashboard's own sign-in and logout routes, and the redirect that finishes
+  a browser flow: a completed OAuth sign-in, identity link or GitHub App
+  connection, recorded with the account it signed in or acted for;
 - every `401` and `403`, whatever the method. A refused bearer shaped like a
   Sparkwing token adds `attempted_prefix`, the prefix that names the token
   without granting it.
@@ -252,7 +260,7 @@ message and the detail goes to the controller log.
 
 Login throttling keys on the TCP peer. Only a request accepted on the
 controller's `--trusted-proxy-addr` listener counts against the budget of its
-`X-Real-IP`, so keep that port reachable by the ingress and the dashboard alone.
+`X-Real-IP`, so keep that port reachable by the ingress alone.
 Without it every browser shares the proxy's budget, which stays safe and turns
 coarse. [auth.md](auth.md) covers the setup.
 
@@ -327,10 +335,10 @@ what it always did.
 `--max-runs-per-principal-hour N` (chart
 `controller.maxRunsPerPrincipalHour`) caps the runs one principal may
 create in a rolling hour. An authenticated submission spends its own
-token's budget, or its team's for any team but the operator's; a webhook
-delivery carries no principal, so it spends the budget of the team whose
-binding signed it and the repository it names. A [GitHub App](github-app.md)
-delivery spends its team's budget once for every run it creates. Past the cap the controller answers
+token's budget, or its team's for any team but the operator's. A
+[GitHub App](github-app.md) delivery carries no principal, so it spends
+the budget of the team its installation is bound to, once for every run
+it creates. Past the cap the controller answers
 `429` with a `Retry-After` naming the real refill delay, which lengthens
 while a caller keeps knocking at an empty budget. The budget lives in
 controller memory, so a restart or a rollout refills every principal;
@@ -348,15 +356,12 @@ answers a content-identical `POST /api/v1/triggers` submission inside D
 with `409` and the run the first one started. The digest covers the
 submitting principal, so a `409` naming a run id only ever reaches the
 principal that owns that run and two tenants submitting the same body get
-a run each. A GitHub redelivery is deduped regardless: the store holds
-one trigger per delivery id and one per body digest, so a retried
-delivery answers `409` naming the original run whatever this window says.
-The body digest is also kept for 90 days apart from the run, so a
-signed push or pull request delivered again after its run was deleted
-answers `409` with no run id instead of starting the commit again. Past
-those 90 days a legacy webhook delivery is accepted again; GitHub App
-deliveries carry an event time and are refused once it is that old (see
-[GitHub App](github-app.md)).
+a run each. A GitHub App redelivery is deduped regardless: the
+controller keeps the digest of every signed body that started runs for
+90 days, apart from the runs, so a retried delivery answers `duplicate`
+with the runs it already started whatever this window says, and one
+whose runs were deleted starts nothing. A delivery whose event is older
+than those 90 days is refused (see [GitHub App](github-app.md)).
 
 Deduplication runs before the shed and the cap, so a redelivery is
 answered with its original run rather than a refusal, and retrying one
@@ -538,73 +543,20 @@ hosted controller is one flag beside the profile rather than a fork of
 it. `sparkwing cluster limits show` prints the budgets in force beside
 the stored compute guards.
 
-## Webhooks
+## GitHub webhooks
 
-GitHub webhook deliveries are verified by the controller: it checks the
-`X-Hub-Signature-256` HMAC with a constant-time compare before doing any
-work. The handler acts on `push` and on `pull_request` (opened /
-synchronize / reopened, against the PR head), and answers `ping`; other
-event types and other `pull_request` actions are accepted and ignored.
-
-`GITHUB_WEBHOOK_SECRET` is one value every configured repository holds,
-so on its own it says only that *some* holder signed the body -- any
-holder could then drive any pipeline against any repository. Bind the
-intake with `GITHUB_WEBHOOK_BINDINGS`, a JSON document:
-
-```json
-{
-  "pipelines": {
-    "sample-app-build": {"repos": ["acme/sample-app"], "secret": "..."}
-  },
-  "repo_secrets": {"acme/sample-app": "..."}
-}
-```
-
-`pipelines` is keyed by the `{pipeline}` path segment and `repo_secrets`
-by repository slug. A slug is lowercased once, when the delivery is
-read, and that one value picks the secret and answers the binding, so
-no case fold can send the two decisions to different repositories; a
-`repository.full_name` that is not an ASCII `owner/name` slug is refused
-outright. A pipeline with a `repos` list refuses any delivery naming a
-repository outside it, so a repository owner reaches only the pipelines
-you bound to them. A `repos` list that is present but empty refuses
-every repository; omit the key, or the pipeline entry, to leave the
-delivery's repository unchecked. The controller logs the resolved
-counts at startup, so an installed document that parsed to nothing is
-visible in the log.
-
-The signing secret resolves most specific first -- the pipeline's own
-secret, then the named repository's secret, then
-`GITHUB_WEBHOOK_SECRET`. Give every bound repository a secret of its own
-to isolate them completely: a repository left without one is verified
-with the shared secret its peers also hold. In the chart, pass the
-document through `controller.extraEnv` from a Kubernetes secret.
-
-A refusal does not say which of these rules it failed. An unbound
-repository answers `404`, the same as a pipeline that does not exist,
-and once any pipeline or repository carries a secret of its own, a
-delivery resolving to no secret answers `401` like a bad signature
-rather than `503`. Otherwise the status code alone would enumerate the
-binding table and the `repo_secrets` key set, one guess per request.
-`503` remains the answer when no secret is configured anywhere.
-
-Each delivery is recorded under two unique constraints: the
-`X-GitHub-Delivery` id, store-wide, and a digest of the material the
-signature covered -- the pipeline and the request body. The digest is
-what closes replay: `X-GitHub-Delivery` is a header the sender picks and
-the HMAC does not cover, so keying on it alone would let anyone who
-captured one delivery re-send it under an id of their own. Re-sending a
-body the controller already accepted answers `409` whatever header rides
-with it, and the response names the run the first delivery produced, so
-a redelivery from the GitHub side resolves to that run instead of a dead
-end. A delivery arriving without the header answers `400`.
-
-When `GITHUB_TOKEN` is set, the controller uses it only for outbound
-commit-status requests for `pull_request` webhook runs. Prefer a
-fine-grained token limited to the served repositories with **Commit
-statuses: Read and write**. The token never enters trigger environment,
-run state, logs, or the dashboard. An empty token disables outbound
-status reporting.
+The [GitHub App](github-app.md) is the only signed GitHub trigger. Its
+deliveries arrive at `POST /webhooks/github-app`, which checks the
+`X-Hub-Signature-256` HMAC against the App's webhook secret with a
+constant-time compare before doing any work and answers `401` when it
+does not verify. The installation the delivery names picks the team it
+runs in, and GitHub's own record of which installation covers the
+repository is read on every delivery that would start a run, so a
+delivery runs only pipelines a team owner subscribed to a repository
+that owner's installation covers. A pull request from a fork starts
+nothing. Replay is closed by the body digest described above, which
+covers the signed body rather than the `X-GitHub-Delivery` header the
+sender picks.
 
 ## Secrets at rest
 
@@ -740,13 +692,13 @@ the published images are known bad.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token (`--api-token`, falling back to
-`$SPARKWING_API_TOKEN`) on every route that touches repository content: git
-clone and registration, the repo listing, the binary and dependency-archive
-blob routes, and the admin routes. The cache serves no source archives, single
+`sparkwing-cache` requires a bearer token (the file `cache-token` in its
+`--credentials-dir`) on every route that touches repository content: git
+clone and registration, the binary and dependency-archive blob routes, and
+the admin routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
 refuses to start without one unless the operator passes
-`--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
+`--allow-unauthenticated`, which
 logs a startup warning. The guard has no network-location exemption: an
 in-cluster caller, a port-forward, and an ingress request are all rejected
 without the bearer, because a caller-controlled header cannot prove where a
@@ -769,10 +721,7 @@ Off-cluster runners read Git through
 live claim on the named run, and the repository recorded on its trigger. The
 unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
 drops the caller's bearer and presents its own cache credential upstream, and
-permits only registration and upload-pack reads. A login-enabled dashboard
-exposes those paths to machine bearers without accepting browser sessions:
-the mount rejects a request carrying no bearer before it extends the half-hour
-stream deadline or proxies anything, and caps concurrent Git streams. A
+permits only registration and upload-pack reads. A
 direct cache receives the run's cache grant instead, which opens only that
 team's blob trees. Every grant names the live claim that asked for it and the
 run's repository and refs; the cache refuses one that names neither, so no
@@ -809,7 +758,7 @@ records, not by the cache.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's
-runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+runner and controller pods plus the Job pods the Kubernetes runner
 backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
 render a non-`ClusterIP` cache Service unless a token Secret is configured. A
 controller or runner pool outside the cluster reaches the cache through
@@ -883,12 +832,9 @@ isolation.
 
 The Helm charts run the long-lived services as non-root with explicit
 `securityContext` settings (the controller as uid 65534, privilege
-escalation disabled, all Linux capabilities dropped). The one exception
-is the warm-pool warmer: when the pool is enabled the controller
-launches an ephemeral `docker:27-dind` pod with `privileged: true` so
-it can run dockerd and pre-pull images into a warm PVC. It is
-short-lived, single-container, and the only privileged workload
-sparkwing creates. See [warm-pool.md](warm-pool.md).
+escalation disabled, all Linux capabilities dropped). The controller
+makes no Kubernetes API calls, so `sparkwing-full` binds it to no Role and
+mounts no API token in its pod.
 
 ## Runner Job placement
 
@@ -932,8 +878,8 @@ post-install mismatch restores the prior binary and fails loudly.
 
 The signing key is release machinery, not per-user configuration:
 
-- Generate a base64-encoded 32-byte Ed25519 seed and store it as the
-  `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
+- Generate a base64-encoded 32-byte Ed25519 seed (`openssl rand -base64 32`)
+  and store it as the `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
 - Add its public key to `internal/releaseauth.TrustedPublicKeys`. The
   release verifier refuses publication unless the secret-derived key is
   in the updater trust set.
@@ -1024,12 +970,11 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   `controller.bootstrapAdminToken.name`) before revoking, or mint a
   replacement admin token first so the table still holds a live one.
 - **Point the logs service at a controller.** Without `--controller`
-  (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
+  `sparkwing-logs` resolves no tokens, so
   anything that reaches its Service can read, forge, and delete every
   run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
-  and `sparkwing cluster status` flags the logs probe as a warning. Set
-  `SPARKWING_REQUIRE_AUTH=1` (or `--require-auth`) so the pod refuses to
-  start without an absolute `http(s)` controller URL, which keeps a
+  and `sparkwing cluster status` flags the logs probe as a warning. Pass
+  `--require-auth` so the pod refuses to start without an absolute `http(s)` controller URL, which keeps a
   typo from advertising `"auth": "enabled"` on a service whose every
   token lookup fails. The runner-bundle chart wires the controller URL
   from `controller.tokenSecret`, and a logs-enabled install without that
@@ -1039,26 +984,26 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   announced logs URL, a health body with no `auth` field (an image
   older than the report), or a degraded service.
 - **Size the logs service's quotas for your volume.** `sparkwing-logs`
-  caps what one authenticated runner can spend. Each flag below reads an
-  environment variable of the same meaning, and `0` turns that bound off.
+  caps what one authenticated runner can spend. The service reads these
+  as flags only, and `0` turns that bound off.
 
-  | Flag (env) | Default | Effect |
+  | Flag | Default | Effect |
   |------------|---------|--------|
-  | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
-  | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
-  | `--max-inflight-bytes` (`SPARKWING_LOGS_MAX_INFLIGHT_BYTES`) | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
-  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
-  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off); 2160h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 90 days unless the operator names another value, zero included. A run of a team without credits keeps its archived logs 30 days at most. |
-  | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
-  | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
-  | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
-  | `--max-line-bytes` (`SPARKWING_LOGS_MAX_LINE_BYTES`) | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
-  | `--binary-ratio` (`SPARKWING_LOGS_BINARY_RATIO`) | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
-  | `--max-store-bytes` (`SPARKWING_LOGS_MAX_STORE_BYTES`) | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
-  | `--max-store-objects` (`SPARKWING_LOGS_MAX_STORE_OBJECTS`) | 0 (off) | Same ceiling counted in log files. |
-  | `--warn-store-bytes` (`SPARKWING_LOGS_WARN_STORE_BYTES`) | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
-  | `--warn-store-objects` (`SPARKWING_LOGS_WARN_STORE_OBJECTS`) | 0 (off) | Same warning counted in log files. |
-  | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
+  | `--max-node-bytes` | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
+  | `--max-run-bytes` | 1GiB | Same cap across every node log in one run. |
+  | `--max-inflight-bytes` | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
+  | `--min-free-bytes` | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
+  | `--retention` | 0 (off); 2160h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 90 days unless the operator names another value, zero included. A run of a team without credits keeps its archived logs 30 days at most. |
+  | `--sweep-interval` | 1h | How often the sweeper runs. |
+  | `--search-max-bytes` | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
+  | `--search-timeout` | 10s | How long one search may scan. |
+  | `--max-line-bytes` | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
+  | `--binary-ratio` | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
+  | `--max-store-bytes` | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
+  | `--max-store-objects` | 0 (off) | Same ceiling counted in log files. |
+  | `--warn-store-bytes` | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
+  | `--warn-store-objects` | 0 (off) | Same warning counted in log files. |
+  | `--store-reconcile` | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
   the matches it found with `"truncated": true` and a `reason` naming the
@@ -1085,8 +1030,6 @@ scanner failure on `main` is what holds a release back, before the tag exists.
 - **Encrypt etcd / your secret store.** Kubernetes Secrets are
   base64, not encrypted, unless the cluster enables it.
 - **Rotate the GitHub credentials and cache SSH key** periodically.
-- **Limit the status token.** Give the controller's `GITHUB_TOKEN` commit-status
-  write access only to repositories whose pull requests Sparkwing reports.
 
 ## Controller client redirects
 

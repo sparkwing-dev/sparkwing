@@ -30,7 +30,7 @@ func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, 
 	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
-	ctrl := controller.New(s, nil).EnableAuthFromStore()
+	ctrl := controller.New(s, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{})
 	srv := httptest.NewServer(ctrl.Handler())
 	return srv.URL, admin, s, func() {
 		srv.Close()
@@ -347,14 +347,13 @@ func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
 }
 
 func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
-	base := newServerWithArtifacts(t, &fakeArtifactStore{})
+	base := newPlainServer(t)
 
 	for _, path := range []string{
 		"/api/v1/concurrency/prom-key-alpha/state",
 		"/api/v1/concurrency/prom-key-beta/state",
 		"/api/v1/concurrency/prom-key-gamma/state",
-		"/api/v1/artifacts/prom-digest-aaa",
-		"/api/v1/artifacts/prom-digest-bbb",
+		"/api/v1/runs/prom-run-2/approvals/prom-node-2",
 		"/api/v1/runs/prom-run-1/approvals/prom-node-1",
 		"/api/v1/prom-unrouted-path",
 	} {
@@ -366,7 +365,6 @@ func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
 
 	for _, want := range []string{
 		`route="/api/v1/concurrency/{key}/state"`,
-		`route="/api/v1/artifacts/{key}"`,
 		`route="/api/v1/runs/{id}/approvals/{nodeID}"`,
 		`route="other"`,
 	} {
@@ -376,7 +374,7 @@ func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
 	}
 	for _, leaked := range []string{
 		"prom-key-alpha", "prom-key-beta", "prom-key-gamma",
-		"prom-digest-aaa", "prom-digest-bbb",
+		"prom-run-2", "prom-node-2",
 		"prom-run-1", "prom-node-1", "prom-unrouted-path",
 	} {
 		if strings.Contains(body, leaked) {

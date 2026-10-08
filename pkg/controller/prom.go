@@ -3,7 +3,6 @@ package controller
 import (
 	"maps"
 	"net/http"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -251,37 +250,6 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	initZeroSeries()
-}
-
-var describedNameRE = regexp.MustCompile(`fqName: "([^"]+)".*variableLabels: \{([^}]*)\}`)
-
-// safety: read from the collectors the registry serves rather than from the
-// exposition, so a metric that has minted no child yet is still checked.
-func describedMetrics() map[string][]string {
-	descs := make(chan *prometheus.Desc, 64)
-	out := map[string][]string{}
-	for _, c := range sparkwingCollectors {
-		go func() {
-			c.Describe(descs)
-			close(descs)
-		}()
-		for d := range descs {
-			m := describedNameRE.FindStringSubmatch(d.String())
-			if m == nil {
-				continue
-			}
-			var labels []string
-			for _, l := range strings.Split(m[2], ",") {
-				if l = strings.TrimSpace(l); l != "" {
-					labels = append(labels, l)
-				}
-			}
-			slices.Sort(labels)
-			out[m[1]] = labels
-		}
-		descs = make(chan *prometheus.Desc, 64)
-	}
-	return out
 }
 
 // safety: a series that appears only after the first event reads as a gap in

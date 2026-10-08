@@ -29,13 +29,6 @@ info:
     functional options the process wires into the
     [pkg/controller.Server][1] instance.
 
-    Mode-conditional routes are marked in each operation's `description`:
-
-    - **cluster-only** -- wired when the process calls `AttachPool`
-      (warm-PVC pool routes under `/api/v1/pool/*`).
-    - **laptop-only** -- wired when the process calls `WithArtifactStore`
-      (`GET /api/v1/artifacts/{key}`).
-
     See [VERSIONING.md][2] for stability promises around this surface:
     JSON field renames and behavioral changes are tracked under module
     semver. The Go client lives at `pkg/controller/client/`.
@@ -56,6 +49,8 @@ servers:
     description: Default laptop-mode `sparkwing serve start` bind address.
 
 tags:
+  - name: dashboard
+    description: The dashboard's log, event and capacity reads, served beside the API on the same listener.
   - name: runs
     description: Run lifecycle and read paths.
   - name: nodes
@@ -72,10 +67,6 @@ tags:
     description: Distributed mutual exclusion + coalescing.
   - name: debug-pauses
     description: Operator-induced pauses for live debugging.
-  - name: pool
-    description: Warm-PVC pool (cluster-only).
-  - name: artifacts
-    description: Content-addressed blob reads (laptop-only).
   - name: tokens
     description: Bearer-token CRUD (admin).
   - name: users
@@ -1587,63 +1578,6 @@ paths:
               schema: {$ref: "#/components/schemas/ConcurrencyState"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/concurrency/{key}/notify:
-    parameters:
-      - in: path
-        name: key
-        required: true
-        schema: {type: string}
-      - in: query
-        name: run_id
-        required: true
-        schema: {type: string}
-      - in: query
-        name: node_id
-        required: false
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: claim or runs.read
-      tags: [concurrency]
-      summary: Server-sent event stream of waiter resolution events.
-      description: |
-        Streams Server-Sent Events for a single (run_id, node_id)
-        waiter on this concurrency key. The server polls the
-        concurrency state at 250ms cadence and emits exactly one
-        terminal event per stream, then closes:
-
-        - `event: ready` -- the caller is now a holder of the slot.
-        - `event: superseded` -- the caller is no longer a waiter
-          (slot acquired elsewhere, run cancelled, etc.).
-        - `event: stream_end` -- fail-safe timeout (max 30 minutes
-          per stream) or the concurrency key no longer exists; the
-          event payload carries a `reason` field
-          (`"max_wait"` or `"key_not_found"`).
-
-        Every event payload also carries the `key` and `run_id`
-        fields, plus `node_id` when one was supplied. The stream
-        opens with a `: open` comment line so proxies don't buffer.
-      responses:
-        "200":
-          description: |
-            SSE stream of resolution events. The response is
-            `text/event-stream`; clients consume it line-by-line
-            until the terminal event arrives.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: |
-                  SSE frames. Each event has the form
-
-                  ```
-                  event: ready|superseded|stream_end
-                  data: {"key":"...","run_id":"...","node_id":"...","reason":"..."}
-                  ```
-
-                  `node_id` is present when the request supplied one;
-                  `reason` is present only on `stream_end`.
-        "400": {$ref: "#/components/responses/BadRequest"}
-
   /api/v1/concurrency/{key}/holder:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
@@ -1675,7 +1609,7 @@ paths:
       description: |
         Answers where the caller sits in the queue and what the leader it
         coalesced behind produced. `bypass_read=true` skips the cache
-        lookup. The polling counterpart to the `notify` stream.
+        lookup.
       parameters:
         - in: query
           name: run_id
@@ -1915,92 +1849,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
-
-  /api/v1/pool:
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [pool]
-      summary: List warm-PVC pool. **cluster-only** (requires `AttachPool`).
-      responses:
-        "200":
-          description: Pool snapshot.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PoolListResponse"}
-        "503": {description: Pool not ready.}
-
-  /api/v1/pool/checkout:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Check out a clean PVC. **cluster-only**.
-      parameters:
-        - in: query
-          name: job_id
-          required: true
-          schema: {type: string}
-      responses:
-        "200":
-          description: Checked-out PVC name.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [pvc]
-                properties:
-                  pvc: {type: string}
-        "409": {description: No clean PVC available -- fall back to cache-less build.}
-
-  /api/v1/pool/return:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Return a PVC to the pool (marks it dirty). **cluster-only**.
-      parameters:
-        - in: query
-          name: pvc
-          required: true
-          schema: {type: string}
-      responses:
-        "204": {description: Returned.}
-
-  /api/v1/pool/heartbeat:
-    post:
-      x-sparkwing-scope: admin
-      tags: [pool]
-      summary: Keep ownership of an in-use PVC alive. **cluster-only**.
-      parameters:
-        - in: query
-          name: pvc
-          required: true
-          schema: {type: string}
-        - in: query
-          name: job_id
-          required: true
-          schema: {type: string}
-      responses:
-        "204": {description: Renewed.}
-        "409": {description: Heartbeat lost (job_id mismatch or PVC expired).}
-
-  /api/v1/artifacts/{key}:
-    parameters:
-      - in: path
-        name: key
-        required: true
-        schema: {type: string}
-        description: Content-addressed artifact key.
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [artifacts]
-      summary: Stream an artifact's bytes. **laptop-only** (requires `WithArtifactStore`).
-      responses:
-        "200":
-          description: Artifact bytes.
-          content:
-            application/octet-stream:
-              schema: {type: string, format: binary}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/tokens:
     post:
@@ -2580,23 +2428,6 @@ paths:
                     description: The signed-in user's role in `team`. Absent for a token or a password session.
         "401": {$ref: "#/components/responses/Unauthorized"}
 
-  /api/v1/auth/bootstrap-needed:
-    get:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Whether the users table is empty (first-run probe).
-      security: []
-      responses:
-        "200":
-          description: "Cached check (one-way: once false, stays false)."
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                properties:
-                  needed: {type: boolean}
-
   /api/v1/secrets:
     post:
       x-sparkwing-scope: admin or team.admin
@@ -2911,32 +2742,6 @@ paths:
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
 
-  /webhooks/github/{pipeline}:
-    parameters:
-      - in: path
-        name: pipeline
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: public
-      tags: [webhooks]
-      summary: GitHub webhook intake. HMAC-verified; no bearer auth.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: GitHub webhook payload (push, pull_request, ...).
-      responses:
-        "202": {description: Accepted; trigger queued.}
-        "400": {description: Missing X-GitHub-Delivery header or undecodable payload.}
-        "401": {description: "Invalid HMAC signature, or no secret covers the named repository."}
-        "404": {description: The repository is not bound to this pipeline.}
-        "409": {description: This body was already accepted; the run it produced is in run_id.}
-        "503": {description: GitHub webhook secret not configured anywhere.}
-
   /api/v1/services:
     get:
       x-sparkwing-scope: authenticated
@@ -3149,6 +2954,7 @@ paths:
         this pipeline are charged. An empty `node` targets the pipeline
         rollup. A `contended` observation feeds the demand floor only, and
         carries `floor_cores` and `floor_memory_bytes` rather than peaks.
+        A `partial` observation may only raise resource dimensions or the floor.
       parameters:
         - in: query
           name: node
@@ -3168,6 +2974,7 @@ paths:
                 cpu_measured: {type: boolean}
                 plan_hash: {type: string}
                 contended: {type: boolean}
+                partial: {type: boolean}
                 floor_cores: {type: number}
                 floor_memory_bytes: {type: integer, format: int64}
       responses:
@@ -4616,61 +4423,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/webhooks/github/bindings:
-    delete:
-      x-sparkwing-scope: admin
-      tags: [webhooks]
-      summary: Disconnect one repository from one pipeline.
-      description: |
-        Removes the stored binding, so deliveries from that repository are
-        verified against the `GITHUB_WEBHOOK_BINDINGS` document and the
-        shared secret again, and refused where neither covers them. Delete
-        the webhook on GitHub first; `sparkwing cluster webhooks disconnect`
-        does both in that order.
-      parameters:
-        - in: query
-          name: pipeline
-          required: true
-          schema: {type: string}
-          description: Pipeline the binding fires.
-        - in: query
-          name: repo
-          required: true
-          schema: {type: string}
-          description: Repository slug, owner/name.
-      responses:
-        "200":
-          description: Whether a binding was there to remove.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/GitHubWebhookDisconnectResponse"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-    post:
-      x-sparkwing-scope: admin
-      tags: [webhooks]
-      summary: Connect one repository to one pipeline.
-      description: |
-        Stores the secret deliveries from this repository to this pipeline
-        are signed with, and adds the repository to that pipeline's
-        allow-list. The binding takes precedence over the
-        `GITHUB_WEBHOOK_BINDINGS` document for the same pipeline and
-        repository, and adds to it everywhere else. Posting again replaces
-        the secret, which is how a connect rotates it. The secret is sealed
-        with the controller's secrets key when one is configured, and no
-        route reads it back.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/GitHubWebhookBindingRequest"}
-      responses:
-        "201":
-          description: The stored binding and the URL GitHub must deliver to.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/GitHubWebhookBindingResponse"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-
   /api/v1/storage:
     get:
       x-sparkwing-scope: runs.read
@@ -4762,37 +4514,6 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/teams/{team}/free-slot:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    put:
-      x-sparkwing-scope: admin
-      tags: [storage]
-      summary: Grant a team a free-tier slot.
-      description: |
-        Admits a team without credits to the free tier whether or not a slot
-        is left, which is how an operator admits a team once every one of
-        `--free-team-slots` is taken. The slot lasts until the team is
-        deleted. The answer is the team's tier and the allowance its
-        per-store shares are cut from.
-      responses:
-        "200":
-          description: The team's storage tier.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/controller.StorageTierResponse
-                properties:
-                  team: {type: string}
-                  tier: {type: string, enum: [funded, free, none]}
-                  allowance_bytes: {type: integer, format: int64}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
   /api/v1/storage/settings:
     put:
       x-sparkwing-scope: admin
@@ -4855,28 +4576,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/UsageMetrics"}
         "400": {description: weeks is outside 1 to 104.}
-
-  /api/v1/egress:
-    get:
-      x-sparkwing-scope: admin
-      tags: [cluster]
-      summary: Read the controller's egress budgets and top consumers.
-      description: |
-        Reports the per-principal monthly download budget, the global daily
-        alarm threshold, what the process has sent today and this month,
-        whether the alarm is up, and the principals that have downloaded the
-        most this month. Changes nothing.
-      responses:
-        "200":
-          description: The egress meter as it stands.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: "none"
-                properties:
-                  enabled: {type: boolean}
-                  egress: {type: object}
 
   /api/v1/compute-limits:
     get:
@@ -5031,6 +4730,17 @@ paths:
                 type: object
                 required: [teams, billing, auth, claims]
                 properties:
+                  mode: {type: string, description: "The dashboard's mode, such as cluster or local. Absent from a controller serving no dashboard."}
+                  storage:
+                    x-sparkwing-go-type: internal/backend.CapabilitiesStorage
+                    type: object
+                    description: Which surface holds artifacts, logs and runs. Absent from a controller serving no dashboard.
+                    properties:
+                      artifacts: {type: string}
+                      logs: {type: string}
+                      runs: {type: string}
+                  features: {type: array, items: {type: string}, description: The dashboard features this deployment serves.}
+                  read_only: {type: boolean, description: True when the dashboard refuses writes.}
                   teams:
                     x-sparkwing-go-type: pkg/controller.capabilitiesTeams
                     type: object
@@ -5066,88 +4776,6 @@ paths:
                     properties:
                       slug: {type: string, description: "The App's name in https://github.com/apps/<slug>."}
                       source_tokens: {type: boolean, description: "A runner holding a claim may ask POST /api/v1/runs/{id}/source-token for a fetch credential."}
-
-  /api/v1/auth/oauth/google/start:
-    post:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Begin a Google sign-in and return the authorization URL with its state and PKCE verifier.
-      description: >-
-        The controller stores nothing. The caller keeps `state` and `verifier` in a short-lived `__Host-` cookie on the browser that started the flow and checks `state` against it at the callback. `redirect_uri` must be on the controller's `--oauth-redirect-uris` allowlist. Answers 404 unless Google sign-in is offered.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.oauthStartReq
-              type: object
-              required: [redirect_uri]
-              properties:
-                redirect_uri: {type: string, description: "Dashboard callback URL, such as https://app.example.com/auth/google/callback."}
-      responses:
-        "200":
-          description: Flow started.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.oauthStartResp
-                type: object
-                required: [authorize_url, state, verifier]
-                properties:
-                  authorize_url: {type: string}
-                  state: {type: string}
-                  verifier: {type: string, description: PKCE code verifier. The authorize URL carries only its S256 challenge.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/auth/oauth/google/exchange:
-    post:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Finish a Google sign-in and open a session.
-      description: >-
-        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified and that user has no other Google identity. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. A new user the sign-up gate waitlists gets none, and `waitlisted` says so. The session opens in the user's active team.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.oauthExchangeReq
-              type: object
-              required: [code, verifier, redirect_uri]
-              properties:
-                code: {type: string}
-                verifier: {type: string}
-                redirect_uri: {type: string}
-      responses:
-        "200":
-          description: Signed in.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.oauthExchangeResp
-                type: object
-                required: [session_id, csrf_token, expires_at, user, active_team]
-                properties:
-                  session_id: {type: string, description: "Send as `Authorization: Session <id>`."}
-                  csrf_token: {type: string}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-                  user: {$ref: "#/components/schemas/IdentityUser"}
-                  active_team:
-                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
-                    nullable: true
-                    description: Null for a new user the sign-up gate placed on the waitlist.
-                  waitlisted:
-                    type: boolean
-                    description: True while the user waits for admission; it holds no personal space and may only accept invitations.
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403":
-          description: Google has not verified the account's email address.
-        "404": {$ref: "#/components/responses/NotFound"}
-        "502": {description: Google could not be reached.}
 
   /api/v1/me:
     get:
@@ -5318,87 +4946,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: "It is the account's only sign-in method (`error: last_sign_in_method`)."}
 
-  /api/v1/me/identities/{provider}/link:
-    parameters:
-      - in: path
-        name: provider
-        required: true
-        schema: {type: string, enum: [google, github]}
-    post:
-      x-sparkwing-scope: authenticated
-      tags: [teams]
-      summary: Begin adding a provider's sign-in to the signed-in user's account.
-      description: >-
-        Needs an identity-provider session signed in within the last 10 minutes. Returns the provider's authorization URL, a state the controller signs and binds to the account, the session and the provider for ten minutes, and a PKCE verifier. The caller keeps `state` and `verifier` on the browser that started the flow. `redirect_uri` must be on the controller's `--oauth-redirect-uris` allowlist; the dashboard uses its sign-in callback. An account holds at most ten link attempts, starts and completions together, a minute. Answers 404 unless the provider's sign-in is offered.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.oauthStartReq
-              type: object
-              required: [redirect_uri]
-              properties:
-                redirect_uri: {type: string, description: "Dashboard callback URL, such as https://app.example.com/auth/github/callback."}
-      responses:
-        "200":
-          description: Flow started.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.oauthStartResp
-                type: object
-                required: [authorize_url, state, verifier]
-                properties:
-                  authorize_url: {type: string}
-                  state: {type: string}
-                  verifier: {type: string, description: PKCE code verifier. The authorize URL carries only its S256 challenge.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`)."}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The account already has a sign-in from this provider (`error: provider_already_linked`); unlink it first."}
-        "429": {description: "Too many link attempts this minute (`error: rate_limited`); `Retry-After` says when to try again."}
-
-  /api/v1/me/identities/{provider}/link/complete:
-    parameters:
-      - in: path
-        name: provider
-        required: true
-        schema: {type: string, enum: [google, github]}
-    post:
-      x-sparkwing-scope: authenticated
-      tags: [teams]
-      summary: Finish adding a provider's sign-in to the signed-in user's account.
-      description: >-
-        Attaches the provider account, keyed by the provider's stable subject (Google's `sub`, GitHub's numeric id), when the state is this controller's, unexpired, unused, and names the caller's account, session and this provider, and the verifier matches it. The provider's email plays no part and the account's email does not change. A provider account already attached to any account, this one included, is refused and nothing changes. Every refusal carries `error` (a code) and `message`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.identityLinkCompleteReq
-              type: object
-              required: [state, verifier, code, redirect_uri]
-              properties:
-                state: {type: string}
-                verifier: {type: string}
-                code: {type: string, description: The code the provider returned to the callback.}
-                redirect_uri: {type: string}
-      responses:
-        "201":
-          description: Linked.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/LinkedIdentity"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {description: "No account session, or the provider did not confirm the sign-in (`error: provider_rejected`)."}
-        "403": {description: "The state is invalid, expired, used, or another account's or session's (`error: link_state_invalid`), or the provider has not verified the account's email (`error: provider_unverified`)."}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The provider account is attached to another account (`error: identity_linked_elsewhere`) or to this one (`error: identity_already_linked`), or this account already has a sign-in from the provider (`error: provider_already_linked`)."}
-        "429": {description: "Too many link attempts this minute (`error: rate_limited`)."}
-        "502": {description: "The provider could not be reached (`error: provider_unreachable`)."}
-
   /api/v1/teams:
     post:
       x-sparkwing-scope: authenticated
@@ -5449,19 +4996,6 @@ paths:
         schema: {type: string}
     get:
       x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
-  /api/v1/credits/teams/{team}:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: admin
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -5980,88 +5514,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/auth/oauth/github/start:
-    post:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Begin a GitHub sign-in and return the authorization URL with its state and PKCE verifier.
-      description: >-
-        Mirrors the Google start. The authorize URL asks for `read:user user:email` only. `redirect_uri` must be on the `--oauth-redirect-uris` allowlist. Answers 404 unless GitHub sign-in is offered.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.oauthStartReq
-              type: object
-              required: [redirect_uri]
-              properties:
-                redirect_uri: {type: string}
-      responses:
-        "200":
-          description: Flow started.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.oauthStartResp
-                type: object
-                required: [authorize_url, state, verifier]
-                properties:
-                  authorize_url: {type: string}
-                  state: {type: string}
-                  verifier: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/auth/oauth/github/exchange:
-    post:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Finish a GitHub sign-in and open a session.
-      description: >-
-        Redeems `code`, reads the account's numeric id, which keys the identity so a renamed login keeps its account, and the primary email GitHub has verified from `/user/emails`; the profile's public email is never used. A GitHub identity joins an existing user only when that user holds the same email verified and has no other GitHub identity. Otherwise it behaves as the Google exchange.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.oauthExchangeReq
-              type: object
-              required: [code, verifier, redirect_uri]
-              properties:
-                code: {type: string}
-                verifier: {type: string}
-                redirect_uri: {type: string}
-      responses:
-        "200":
-          description: Signed in.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.oauthExchangeResp
-                type: object
-                required: [session_id, csrf_token, expires_at, user, active_team]
-                properties:
-                  session_id: {type: string}
-                  csrf_token: {type: string}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-                  user: {$ref: "#/components/schemas/IdentityUser"}
-                  active_team:
-                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
-                    nullable: true
-                    description: Null for a new user the sign-up gate placed on the waitlist.
-                  waitlisted:
-                    type: boolean
-                    description: True while the user waits for admission; it holds no personal space and may only accept invitations.
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403":
-          description: The GitHub account has no primary email address GitHub has verified.
-        "404": {$ref: "#/components/responses/NotFound"}
-        "502": {description: GitHub could not be reached.}
-
   /api/v1/runners/github/exchange:
     post:
       x-sparkwing-scope: public
@@ -6212,153 +5664,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/team/github-app/connect:
-    post:
-      x-sparkwing-scope: team.admin
-      tags: [teams]
-      summary: Start connecting a GitHub App installation to the active team.
-      description: >-
-        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie. To install, it sends the browser to `install_url`, then sends the setup return to `authorize_url`. To connect an existing installation, it sends the browser straight to `authorize_url` and calls connect/available after GitHub returns. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.githubAppConnectReq
-              type: object
-              required: [redirect_uri]
-              properties:
-                redirect_uri: {type: string, description: "Such as https://app.example.com/github/app/callback."}
-      responses:
-        "200":
-          description: Flow started.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.githubAppConnectResp
-                type: object
-                required: [install_url, authorize_url, state, verifier]
-                properties:
-                  install_url: {type: string}
-                  authorize_url: {type: string}
-                  state: {type: string, description: Signed; names the account and team and expires in ten minutes.}
-                  verifier: {type: string, description: PKCE verifier; the browser keeps it and returns it to connect/complete.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/team/github-app/connect/available:
-    post:
-      x-sparkwing-scope: team.admin
-      tags: [teams]
-      summary: List existing App installations the authorized user administers.
-      description: >-
-        Owner only. Redeems the GitHub authorization code with PKCE and checks the linked GitHub identity. Reads GET /user/installations with the user token and returns only this App's installations whose accounts the user administers. The encrypted authorization proof expires with the signed state. An installation bound to another team is marked without naming that team.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.githubAppAvailableReq
-              type: object
-              required: [state, verifier, code, redirect_uri]
-              properties:
-                state: {type: string}
-                verifier: {type: string}
-                code: {type: string}
-                redirect_uri: {type: string}
-      responses:
-        "200":
-          description: Administered installations and a proof for selecting one.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.githubAppAvailableResp
-                type: object
-                required: [authorization, installations]
-                properties:
-                  authorization: {type: string, description: Encrypted proof bound to the state.}
-                  installations:
-                    type: array
-                    items:
-                      x-sparkwing-go-type: pkg/controller.githubAppAvailableInstallation
-                      type: object
-                      required: [installation_id, account_login, account_type]
-                      properties:
-                        installation_id: {type: integer, format: int64}
-                        account_login: {type: string}
-                        account_type: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/team/github-app/connect/complete:
-    post:
-      x-sparkwing-scope: team.admin
-      tags: [teams]
-      summary: Finish connecting a GitHub App installation to the active team.
-      description: >-
-        Owner only. Binds the installation when the state is this controller's, unexpired, unused, and names the caller's account and active team; the verifier matches the state; the code redeems for the GitHub user linked to the caller's account; and that user administers the installation's account (is the account, or an active owner of the organization). Answers 403 for any of those failing, 404 when GitHub reports no such installation, 409 when another team holds it, and 502 when GitHub cannot be reached. Reconnecting an installation the team holds refreshes it.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.githubAppCompleteReq
-              type: object
-              required: [state, verifier, code, installation_id, redirect_uri]
-              properties:
-                state: {type: string}
-                verifier: {type: string}
-                code: {type: string, description: The code GitHub returned to the callback.}
-                installation_id: {type: integer, format: int64, description: From the setup redirect.}
-                redirect_uri: {type: string}
-      responses:
-        "201":
-          description: Bound.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Another team holds the installation.}
-
-  /api/v1/team/github-app/connect/select:
-    post:
-      x-sparkwing-scope: team.admin
-      tags: [teams]
-      summary: Bind one existing installation to the active team.
-      description: >-
-        Owner only. Checks the signed state, PKCE verifier, linked GitHub identity, encrypted authorization proof, and live GitHub administration of the chosen installation. Consumes the state once in the store before binding. Answers 409 when another team holds the installation without naming that team.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.githubAppSelectReq
-              type: object
-              required: [state, verifier, authorization, installation_id]
-              properties:
-                state: {type: string}
-                verifier: {type: string}
-                authorization: {type: string}
-                installation_id: {type: integer, format: int64}
-      responses:
-        "201":
-          description: Bound.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Another team holds the installation.}
 
   /api/v1/team/github-app/installations/{installation_id}:
     parameters:
@@ -7494,29 +6799,6 @@ paths:
         "422": {description: "The report was refused; the error names the reason."}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/operator/session:
-    get:
-      x-sparkwing-scope: operator
-      security:
-        - sessionAuth: []
-      tags: [operator]
-      summary: Confirm the caller is a listed operator signed in with its own account.
-      description: >-
-        The dashboard serves the operator console only when this answers 200. No token reaches any operator route.
-      responses:
-        "200":
-          description: The operator's account.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                properties:
-                  account_id: {type: string}
-                  name: {type: string}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /api/v1/operator/teams:
     get:
       x-sparkwing-scope: operator
@@ -8007,6 +7289,138 @@ paths:
         "404": {description: Repository is not covered by a team-held installation.}
         "422": {description: "Configuration is missing, invalid, unsupported or unavailable."}
         "502": {description: GitHub coverage lookup failed or was incomplete.}
+
+  /api/v1/capacity/profiles:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [dashboard]
+      summary: Read every pipeline's learned capacity profile.
+      description: >-
+        A host's own dashboard reads the profiles its runs store learned. A cluster controller keeps no machine-wide profiles and answers 501.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/capacity/profiles/explain:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [dashboard]
+      summary: Explain how one pipeline's charge was resolved.
+      description: >-
+        Takes `pipeline` as a query value; an unknown pipeline answers 404. A cluster controller answers 501.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/grep:
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Search the logs of the caller's team's runs.
+      description: >-
+        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/events/stream:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [dashboard]
+      summary: Stream a run's events as server-sent events.
+      description: >-
+        Resumes after the `Last-Event-ID` header. The stream ends with a `stream_end` event once the run is terminal and no events remain.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Read every node log of a run.
+      description: >-
+        Renders each record as plain text, ANSI text or raw NDJSON by the `format` query value or the Accept header. Reads through the logs service with the caller's own credential when one is configured.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/search:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Search one run's node logs.
+      description: >-
+        Takes `q` and an optional `limit` of at most 5000 matches.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/{node}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: node
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Read one node's log.
+      description: >-
+        Renders by the `format` query value or the Accept header, as the whole-run read does.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/{node}/completeness:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: node
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Report whether a node's log is whole.
+      description: >-
+        Answers the verdict the logs surface's seals support, or `unknown` when it keeps none.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/logs/{node}/stream:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: node
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read
+      tags: [dashboard]
+      summary: Stream one node's log as server-sent events.
+      description: >-
+        Streams the durable log when the logs surface has a live read, and the controller's in-memory live buffer otherwise; with neither it answers 501.
+      responses:
+        default: {description: Undescribed.}
 
 components:
   securitySchemes:
@@ -8501,8 +7915,9 @@ components:
       description: |
         One resource reading for a node. Kind identifies an interval reading or
         a completed command. An empty kind means the source is unknown.
+        A partial marker makes capacity learning raise-only.
       properties:
-        kind: {type: string, enum: ["", interval, command]}
+        kind: {type: string, enum: ["", interval, command, partial]}
         ts: {type: string, format: date-time}
         cpu_millicores: {type: integer, format: int64}
         memory_bytes: {type: integer, format: int64}
@@ -8994,39 +8409,6 @@ components:
         charges:
           type: array
           items: {$ref: "#/components/schemas/CreditCharge"}
-    GitHubWebhookBindingRequest:
-      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingRequest
-      type: object
-      required: [pipeline, repo, secret]
-      properties:
-        pipeline: {type: string, description: Pipeline the deliveries fire.}
-        repo: {type: string, description: Repository slug (owner/name) stored folded to lower case.}
-        secret: {type: string, description: HMAC secret the repository's deliveries are signed with.}
-        events: {type: array, items: {type: string}, description: GitHub events the webhook subscribes to.}
-        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub.}
-    GitHubWebhookBindingResponse:
-      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingResponse
-      type: object
-      description: One stored binding. It never carries the secret.
-      required: [pipeline, repo, delivery_url, created_at, updated_at]
-      properties:
-        pipeline: {type: string}
-        repo: {type: string}
-        events: {type: array, items: {type: string}}
-        hook_id: {type: integer, format: int64}
-        delivery_url: {type: string, description: Where GitHub posts this pipeline's deliveries.}
-        created_at: {type: integer, format: int64, description: Unix seconds.}
-        updated_at: {type: integer, format: int64, description: Unix seconds.}
-    GitHubWebhookDisconnectResponse:
-      x-sparkwing-go-type: pkg/controller.GitHubWebhookDisconnectResponse
-      type: object
-      required: [pipeline, repo, removed, delivery_url]
-      properties:
-        pipeline: {type: string}
-        repo: {type: string}
-        removed: {type: boolean, description: False when the controller held no such binding.}
-        delivery_url: {type: string, description: Where the removed binding's deliveries were posted.}
-        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub the binding recorded.}
     CreateGrantRequest:
       x-sparkwing-go-type: pkg/controller.createGrantReq
       type: object
@@ -9545,29 +8927,8 @@ components:
         size: {type: integer, format: int64}
         expires: {type: string, format: date-time}
         source_run_id: {type: string, description: The run the output was read from.}
-    PoolListResponse:
-      x-sparkwing-go-type: none
-      type: object
-      description: Snapshot of the warm-PVC pool (cluster-only).
-      properties:
-        pool_size: {type: integer}
-        pvc_size: {type: string}
-        pvcs:
-          type: array
-          items:
-            type: object
-            x-sparkwing-go-type: none
-            required: [name]
-            properties:
-              name: {type: string}
-              state:
-                type: string
-                enum: [clean, in-use, dirty, warming, unknown]
-              warmed_at: {type: string}
-              checked_out_by: {type: string}
-              checked_out_at: {type: string}
     CronTimerState:
-      x-sparkwing-go-type: internal/crons.TimerStateView
+      x-sparkwing-go-type: internal/api.TimerStateView
       type: object
       description: |
         The OS timer that calls the tick. A controller reports its own
@@ -9581,7 +8942,7 @@ components:
         binary: {type: string}
         detail: {type: string}
     CronTick:
-      x-sparkwing-go-type: internal/crons.TickView
+      x-sparkwing-go-type: internal/api.TickView
       type: object
       description: The last tick recorded against the store; `at` is empty until one has landed.
       properties:
@@ -9590,7 +8951,7 @@ components:
         version: {type: string}
         error: {type: string}
     CronHealth:
-      x-sparkwing-go-type: internal/crons.HealthView
+      x-sparkwing-go-type: internal/api.HealthView
       type: object
       description: Whether the evaluator is running, and what it holds.
       properties:
@@ -9609,7 +8970,7 @@ components:
         detail: {type: string}
         remedy: {type: string}
     CronLock:
-      x-sparkwing-go-type: internal/crons.LockView
+      x-sparkwing-go-type: internal/api.LockView
       type: object
       description: |
         What a schedule runs. `state` is one of `follows`, `pinned`, `ahead`,
@@ -9621,7 +8982,7 @@ components:
         digest: {type: string}
         state: {type: string, enum: [follows, pinned, ahead, dirty, missing]}
     CronOverrideState:
-      x-sparkwing-go-type: internal/crons.OverrideView
+      x-sparkwing-go-type: internal/api.OverrideView
       type: object
       description: |
         Which declared fields the evaluating side has overridden, and the
@@ -9637,7 +8998,7 @@ components:
         catch_up_ns: {type: integer, format: int64}
         args: {type: object, additionalProperties: {type: string}}
     CronEffective:
-      x-sparkwing-go-type: internal/crons.EffectiveView
+      x-sparkwing-go-type: internal/api.EffectiveView
       type: object
       description: The cadence the schedule actually runs, after any override.
       properties:
@@ -9647,7 +9008,7 @@ components:
         catch_up_ns: {type: integer}
         args: {type: object, additionalProperties: {type: string}}
     CronSchedule:
-      x-sparkwing-go-type: internal/crons.ScheduleView
+      x-sparkwing-go-type: internal/api.ScheduleView
       type: object
       description: |
         One schedule. `name` is the display name; `git_branch` is set only on a
@@ -9679,7 +9040,7 @@ components:
         last_outcome: {type: string}
         next_due_at: {type: string, nullable: true}
     CronFire:
-      x-sparkwing-go-type: internal/crons.FireView
+      x-sparkwing-go-type: internal/api.FireView
       type: object
       description: |
         One resolved due instant. `run_status` is empty when the fire launched
@@ -9695,14 +9056,14 @@ components:
         args: {type: object, additionalProperties: {type: string}}
         run_status: {type: string}
     CronsOverview:
-      x-sparkwing-go-type: internal/crons.OverviewView
+      x-sparkwing-go-type: internal/api.OverviewView
       type: object
       description: The evaluator's health and every schedule it holds.
       properties:
         health: {$ref: "#/components/schemas/CronHealth"}
         schedules: {type: array, items: {$ref: "#/components/schemas/CronSchedule"}}
     CronDetail:
-      x-sparkwing-go-type: internal/crons.DetailView
+      x-sparkwing-go-type: internal/api.DetailView
       type: object
       description: One schedule, its fires newest first, and the instants it matches next.
       properties:
@@ -9766,13 +9127,13 @@ components:
         tripped_at: {type: string, format: date-time}
         tripped_window: {type: string, enum: [minute, day]}
     CronScheduleEnvelope:
-      x-sparkwing-go-type: internal/crons.ScheduleEnvelope
+      x-sparkwing-go-type: internal/api.ScheduleEnvelope
       type: object
       description: What a write to one schedule returns.
       properties:
         schedule: {$ref: "#/components/schemas/CronSchedule"}
     CronRunEnvelope:
-      x-sparkwing-go-type: internal/crons.RunEnvelope
+      x-sparkwing-go-type: internal/api.RunEnvelope
       type: object
       description: What a launch returns.
       properties:

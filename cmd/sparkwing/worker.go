@@ -12,6 +12,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -64,6 +65,12 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 		prof.Name, prof.ControllerURL(), poll)
 
 	token := prof.ControllerToken()
+	logsURL := prof.ExplicitLogsURL()
+	if logsURL == "" {
+		if logsURL, err = orchestrator.DiscoverLogsURL(ctx, prof.ControllerURL(), token); err != nil {
+			return fmt.Errorf("worker: %w", err)
+		}
+	}
 	cli := client.NewWithToken(prof.ControllerURL(), nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("worker"))
 	shed := client.NewShedLog(client.ShedWarnInterval)
@@ -111,20 +118,12 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), prof.ControllerURL(), token, heartbeat)
+		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), logsURL, token, heartbeat)
 	}
 }
 
 func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, logsURL, token string, heartbeat time.Duration) {
-	args := []string{
-		"handle-trigger",
-		triggerID,
-		"--controller", controllerURL,
-		"--heartbeat", heartbeat.String(),
-	}
-	if logsURL != "" {
-		args = append(args, "--logs", logsURL)
-	}
+	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(triggerID, controllerURL, logsURL, heartbeat)...)
 	cmd := exec.CommandContext(ctx, self, args...)
 	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
 	cmd.Env = os.Environ()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -200,22 +201,6 @@ func (r *githubCheckReporter) finish(runID string, sent githubCheckPhase) {
 	r.signalLocked()
 }
 
-func (r *githubCheckReporter) idle(ctx context.Context) error {
-	for {
-		r.mu.Lock()
-		empty, changed := len(r.jobs) == 0, r.changed
-		r.mu.Unlock()
-		if empty {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-changed:
-		}
-	}
-}
-
 func (r *githubCheckReporter) shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.accepting = false
@@ -325,7 +310,7 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 	if err != nil {
 		return err
 	}
-	check := r.checkRun(ctx, u)
+	check := r.checkRun(ctx, tenant, u)
 	if id != 0 {
 		return r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
 	}
@@ -359,12 +344,12 @@ func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubChe
 	})
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, u githubCheckUpdate) githubapp.CheckRun {
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) githubapp.CheckRun {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
 	}
-	run, err := r.store.GetRun(ctx, u.runID)
+	run, err := tenant.GetRun(ctx, u.runID)
 	if err != nil {
 		run = nil
 	}
@@ -388,7 +373,7 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, u githubCheckUpdate)
 		check.CompletedAt = &completed
 		var nodes []*store.Node
 		if run != nil {
-			if nodes, err = r.store.ListNodes(ctx, u.runID); err != nil {
+			if nodes, err = tenant.ListNodes(ctx, u.runID); err != nil {
 				nodes = nil
 			}
 		}
@@ -460,4 +445,66 @@ func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link st
 		summary.WriteString(".")
 	}
 	return summary.String()
+}
+
+const githubStatusTimeout = 10 * time.Second
+
+type githubCommitStatusRequest struct {
+	State       string `json:"state"`
+	TargetURL   string `json:"target_url,omitempty"`
+	Description string `json:"description"`
+	Context     string `json:"context"`
+}
+
+func githubCommitState(runStatus string) (state, description string) {
+	switch runStatus {
+	case "pending":
+		return "pending", "Sparkwing pipeline is running"
+	case "success":
+		return "success", "Sparkwing pipeline passed"
+	case "failed", "timed_out":
+		return "failure", "Sparkwing pipeline failed"
+	default:
+		return "error", "Sparkwing pipeline could not complete"
+	}
+}
+
+func githubRunTargetURL(baseURL, runID string) string {
+	if baseURL == "" {
+		return ""
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if (scheme != "http" && scheme != "https") ||
+		u.Hostname() == "" ||
+		u.User != nil ||
+		u.RawQuery != "" ||
+		u.ForceQuery ||
+		u.Fragment != "" ||
+		strings.Contains(baseURL, "#") {
+		return ""
+	}
+	u.Scheme = scheme
+	u.Path = strings.TrimRight(u.Path, "/") + "/runs"
+	u.RawPath = ""
+	q := url.Values{}
+	q.Set("run", runID)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus string) {
+	if s.githubApp == nil {
+		return
+	}
+	trigger, err := s.runTrigger(ctx, runID)
+	if err != nil || trigger.TriggerEnv[envGitHubAppInstallation] == "" {
+		return
+	}
+	if update, ok := s.githubAppCheckUpdate(ctx, trigger, runStatus); ok {
+		s.githubApp.checks.enqueue(s.logger, update)
+	}
 }

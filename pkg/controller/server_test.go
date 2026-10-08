@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func(
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	ctrl := controller.New(s, nil)
+	ctrl := controller.New(s, nil).WithDashboard(controller.Dashboard{})
 	srv := httptest.NewServer(ctrl.Handler())
 	return srv.URL, s, func() {
 		srv.Close()
@@ -143,85 +143,6 @@ func TestController_HealthDoesNotExposeClaimedTriggers(t *testing.T) {
 	}
 	if body.Status != "ok" || len(body.Problems) != 0 {
 		t.Fatalf("public health exposed trigger activity: %+v", body)
-	}
-}
-
-func TestController_WaiterNotifyPromotesOrphanedQueue(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "notify-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	}); err != nil {
-		t.Fatalf("acquire leader: %v", err)
-	}
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "notify-slot", HolderID: "waiter", RunID: "waiter", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	}); err != nil {
-		t.Fatalf("acquire waiter: %v", err)
-	}
-	if _, err := st.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
-		"notify-slot", "leader"); err != nil {
-		t.Fatalf("manual drop: %v", err)
-	}
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(base + "/api/v1/concurrency/notify-slot/notify?run_id=waiter&node_id=n")
-	if err != nil {
-		t.Fatalf("notify: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("notify status=%d want 200", resp.StatusCode)
-	}
-	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
-		t.Errorf("notify stream Cache-Control = %q, want no-store", got)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read notify: %v", err)
-	}
-	if !bytes.Contains(body, []byte("event: ready")) {
-		t.Fatalf("notify body = %q, want ready event", string(body))
-	}
-	state, err := st.GetConcurrencyState(ctx, "notify-slot")
-	if err != nil {
-		t.Fatalf("state: %v", err)
-	}
-	if len(state.Holders) != 1 || state.Holders[0].HolderID != "waiter" {
-		t.Fatalf("holders = %+v", state.Holders)
-	}
-}
-
-func TestController_WaiterNotifyMissingKeyEndsStream(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(base + "/api/v1/concurrency/missing-slot/notify?run_id=waiter&node_id=n")
-	if err != nil {
-		t.Fatalf("notify: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("notify status=%d want 200", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read notify: %v", err)
-	}
-	if !bytes.Contains(body, []byte("event: stream_end")) || !bytes.Contains(body, []byte(`"reason":"key_not_found"`)) {
-		t.Fatalf("notify body = %q, want key_not_found stream_end", string(body))
 	}
 }
 

@@ -102,7 +102,11 @@ func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (rep
 	if grant.Claim.Kind != authwire.CacheClaimToken {
 		return "", "", []string{""}, nil
 	}
-	trigger, err := s.store.GetTrigger(ctx, grant.Run)
+	tenant, err := s.tenantForTeam(ctx, store.Team(grant.Team))
+	if err != nil {
+		return "", "", nil, err
+	}
+	trigger, err := tenant.GetTrigger(ctx, grant.Run)
 	if err != nil {
 		return "", "", nil, err
 	}

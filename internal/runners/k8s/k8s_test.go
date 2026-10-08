@@ -1452,3 +1452,10 @@ func TestBuildJob_OnlyABandJobRefusesDisruption(t *testing.T) {
 		t.Fatal("an off-band pod carries do-not-disrupt, which would pin a shared node")
 	}
 }
+
+// safety: an unschedulable pod would otherwise sit until the Job deadline hours
+// later with nothing saying why, so the scheduler's own message is what the
+// node fails with.
+func (r *Runner) observeUnschedulable(ctx context.Context, jobName string) string {
+	return unschedulableMessage(r.unschedulablePod(ctx, jobName))
+}

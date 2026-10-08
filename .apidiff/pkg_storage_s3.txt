@@ -37,4 +37,9 @@ func (s *LogStore) Read(ctx context.Context, runID, nodeID string, opts storage.
 func (s *LogStore) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (s *LogStore) Stream(context.Context, string, string) (io.ReadCloser, error)
 func NewArtifactStore(bucket, prefix string, client API) *ArtifactStore
+func NewClient(ctx context.Context, optFns ...func(*awss3.Options)) (*awss3.Client, error)
 func NewLogStore(bucket, prefix string, client API) *LogStore
+func Open(ctx context.Context, raw string) (client *awss3.Client, bucket, prefix string, err error)
+func ParseURL(raw string) (bucket, prefix string, err error)
+const SDKMaxAttempts = 4
+const SDKMaxBackoff = 5 * time.Second

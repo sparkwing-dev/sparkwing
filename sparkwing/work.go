@@ -729,11 +729,10 @@ func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup {
 // orchestrator walks every Work's spawns at Plan-time and recursively
 // materializes each target Job's own Work.
 type SpawnSpec struct {
-	id         string
-	job        Workable
-	needs      []string
-	skipIf     []SkipPredicate
-	resolvedID string
+	id     string
+	job    Workable
+	needs  []string
+	skipIf []SkipPredicate
 
 	mu       sync.Mutex
 	resolved bool
@@ -757,12 +756,6 @@ func (s *SpawnSpec) DepIDs() []string {
 
 // SkipPredicates returns the spawn's registered predicates.
 func (s *SpawnSpec) SkipPredicates() []SkipPredicate { return s.skipIf }
-
-func (s *SpawnSpec) setResolvedID(id string) { s.resolvedID = id }
-
-// ResolvedID returns the assigned Plan node id, populated after the
-// spawn fires. Empty before then.
-func (s *SpawnSpec) ResolvedID() string { return s.resolvedID }
 
 func (s *SpawnSpec) markDone(out any) {
 	s.mu.Lock()

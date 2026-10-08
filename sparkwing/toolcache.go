@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
@@ -40,8 +40,8 @@ func ToolCacheDir(tool string) string {
 	sum := sha256.Sum256([]byte(scope))
 	dir := filepath.Join(
 		toolCacheHome(),
-		cacheSegment(tool, "tool"),
-		cacheSegment(filepath.Base(scope), "workdir")+"-"+hex.EncodeToString(sum[:6]),
+		depcache.Segment(tool, "tool"),
+		depcache.Segment(filepath.Base(scope), "workdir")+"-"+hex.EncodeToString(sum[:6]),
 	)
 	_ = os.MkdirAll(dir, 0o700) //nolint:errcheck // the tool that needs the directory reports its own cache errors.
 	return dir
@@ -53,21 +53,4 @@ func toolCacheHome() string {
 		panic(fmt.Sprintf("sparkwing: resolve tool cache home: %v", err))
 	}
 	return filepath.Join(p.Root, toolCacheRoot)
-}
-
-func cacheSegment(s, fallback string) string {
-	safe := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			return r
-		case r == '-', r == '_':
-			return r
-		default:
-			return '-'
-		}
-	}, s)
-	if safe = strings.Trim(safe, "-"); safe == "" {
-		return fallback
-	}
-	return safe
 }

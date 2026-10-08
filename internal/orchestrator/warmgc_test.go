@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -55,16 +56,10 @@ func TestGCWarmRoot_SweepsByAge(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 
-	oldGit := filepath.Join(root, "git", "old-repo")
-	mustTouch(t, filepath.Join(oldGit, "HEAD"), "ref: refs/heads/main\n", now.Add(-30*24*time.Hour))
-	if err := os.Chtimes(oldGit, now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	freshGit := filepath.Join(root, "git", "fresh-repo")
-	mustTouch(t, filepath.Join(freshGit, "HEAD"), "ref: refs/heads/main\n", now.Add(-1*time.Hour))
-	if err := os.Chtimes(freshGit, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	oldGit := bareMirror(t, filepath.Join(root, "source-direct", "old.git"), now.Add(-30*24*time.Hour))
+	freshGit := bareMirror(t, filepath.Join(root, "source-direct", "fresh.git"), now.Add(-time.Hour))
+	unswept := filepath.Join(root, "git", "old-repo")
+	mustTouch(t, filepath.Join(unswept, "HEAD"), "ref: refs/heads/main\n", now.Add(-30*24*time.Hour))
 
 	mustTouch(t, filepath.Join(root, "tmp", "old.log"), "stale data", now.Add(-48*time.Hour))
 	mustTouch(t, filepath.Join(root, "tmp", "fresh.log"), "recent data", now.Add(-1*time.Hour))
@@ -89,12 +84,26 @@ func TestGCWarmRoot_SweepsByAge(t *testing.T) {
 	if _, err := os.Stat(freshGit); err != nil {
 		t.Errorf("fresh git dir should remain: %v", err)
 	}
+	if _, err := os.Stat(unswept); err != nil {
+		t.Errorf("the sweep reached outside source-direct: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(root, "tmp", "old.log")); !os.IsNotExist(err) {
 		t.Errorf("old tmp file should be gone; stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "tmp", "fresh.log")); err != nil {
 		t.Errorf("fresh tmp file should remain: %v", err)
 	}
+}
+
+func bareMirror(t *testing.T, dir string, used time.Time) string {
+	t.Helper()
+	if out, err := exec.Command("git", "init", "--bare", "--quiet", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.Chtimes(dir, used, used); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func TestGCWarmRoot_RemovesTerminalRunDirs(t *testing.T) {

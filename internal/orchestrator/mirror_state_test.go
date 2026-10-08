@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -272,10 +273,15 @@ func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = local.Close() })
 
+	logStore, err := fsstore.NewLogStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := RunLocal(context.Background(), paths, Options{
 		Pipeline:    "mirror-ok",
 		State:       client.NewWithToken(srv.URL, nil, ""),
 		MirrorLocal: local,
+		LogStore:    logStore,
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

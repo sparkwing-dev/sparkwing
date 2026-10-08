@@ -73,12 +73,10 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
-func (c *Client) ClearCronOverride(ctx context.Context, name string) (*crons.ScheduleView, error)
+func (c *Client) ClearCronOverride(ctx context.Context, name string) (*api.ScheduleView, error)
 func (c *Client) Close() error
+func (c *Client) ComputeLimits(ctx context.Context) (json.RawMessage, error)
 func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
-func (c *Client) ConnectGitHubWebhook(
-	ctx context.Context, req controller.GitHubWebhookBindingRequest,
-) (*controller.GitHubWebhookBindingResponse, error)
 func (c *Client) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
@@ -86,15 +84,15 @@ func (c *Client) CreateNode(ctx context.Context, n store.Node) error
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error
 func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipeline string, masked, shared bool) error
+func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
+func (c *Client) CreateUser(ctx context.Context, name, password string, scopes []string) error
 func (c *Client) DeleteCronRepo(ctx context.Context, repoURL string) (*CronRepoDeleteResponse, error)
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
 func (c *Client) DeleteSecretForPipeline(ctx context.Context, name, pipeline string) error
-func (c *Client) DisarmCron(ctx context.Context, name string) (*crons.ScheduleView, error)
-func (c *Client) DisconnectGitHubWebhook(
-	ctx context.Context, pipeline, repo string,
-) (*controller.GitHubWebhookDisconnectResponse, error)
+func (c *Client) DeleteUser(ctx context.Context, name string) error
+func (c *Client) DisarmCron(ctx context.Context, name string) (*api.ScheduleView, error)
 func (c *Client) EnqueueChildRun(ctx context.Context, runID string, child ChildRun) (string, error)
 func (c *Client) EnqueueTrigger(
 	ctx context.Context,
@@ -134,7 +132,7 @@ func (c *Client) GetActiveDebugPause(ctx context.Context, runID, nodeID string) 
 func (c *Client) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
 func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error)
 func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store.Run, error)
-func (c *Client) GetCron(ctx context.Context, name string) (*crons.DetailView, error)
+func (c *Client) GetCron(ctx context.Context, name string) (*api.DetailView, error)
 func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
 func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
@@ -154,7 +152,7 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
 func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error)
 func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error)
-func (c *Client) ListCrons(ctx context.Context) (*crons.OverviewView, error)
+func (c *Client) ListCrons(ctx context.Context) (*api.OverviewView, error)
 func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 func (c *Client) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
 func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
@@ -165,13 +163,16 @@ func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, e
 func (c *Client) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
 func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
+func (c *Client) ListTokens(ctx context.Context, kind string, includeRevoked bool) ([]TokenInfo, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
+func (c *Client) ListUsers(ctx context.Context) ([]User, error)
+func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
 func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
 func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
-func (c *Client) PauseCron(ctx context.Context, name string) (*crons.ScheduleView, error)
+func (c *Client) PauseCron(ctx context.Context, name string) (*api.ScheduleView, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) PollAdvice() time.Duration
 func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
@@ -189,13 +190,16 @@ func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
-func (c *Client) ResumeCron(ctx context.Context, name string) (*crons.ScheduleView, error)
+func (c *Client) ResumeCron(ctx context.Context, name string) (*api.ScheduleView, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
+func (c *Client) RevokeToken(ctx context.Context, prefix string) error
 func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error)
-func (c *Client) RunCronNow(ctx context.Context, name string) (*crons.RunEnvelope, error)
+func (c *Client) RotateToken(ctx context.Context, prefix string, grace, ttl time.Duration) (*RotatedToken, error)
+func (c *Client) RunCronNow(ctx context.Context, name string) (*api.RunEnvelope, error)
 func (c *Client) RunnerIdentity() string
-func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*crons.ScheduleView, error)
+func (c *Client) SetComputeLimits(ctx context.Context, limits map[string]int64) (json.RawMessage, error)
+func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*api.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
@@ -228,6 +232,16 @@ type ConcurrencyState struct {
 	Holders           []WaiterHolder
 	Waiters           []StateWaiter
 }
+type CreateTokenRequest struct {
+	Kind      string
+	Principal string
+	Scopes    []string
+	TTLSecs   int64
+}
+type CreatedToken struct {
+	Token    string
+	Metadata json.RawMessage
+}
 type CronOverrideRequest struct {
 	Cron    string
 	TZ      string
@@ -257,7 +271,7 @@ type CronRepoSchedule struct {
 	Args     map[string]string
 }
 type CronReposResponse struct {
-	Schedules []crons.ScheduleView
+	Schedules []api.ScheduleView
 	Withdrawn []string
 }
 const DeadTokenRetry = time.Hour
@@ -385,6 +399,12 @@ type RateLimitedError struct {
 }
 func (e *RateLimitedError) Error() string
 func (e *RateLimitedError) Unwrap() error
+type RotatedToken struct {
+	Token         string
+	New           json.RawMessage
+	OldRevokedAt  int64
+	OldReplacedBy string
+}
 type Secret struct {
 	Name      string
 	Value     string
@@ -428,6 +448,15 @@ type TokenDeadError struct {
 }
 func (e *TokenDeadError) Error() string
 func (e *TokenDeadError) Explain(token, remedy string) string
+type TokenInfo struct {
+	Prefix     string
+	Kind       string
+	Principal  string
+	Scopes     []string
+	Metered    bool
+	LastUsedAt *int64
+	RevokedAt  *int64
+}
 func TokenPrefix(token string) string
 type TriggerMeta struct {
 	Source string
@@ -458,6 +487,12 @@ type UnavailableError struct {
 func (e *UnavailableError) Error() string
 func (e *UnavailableError) Unwrap() error
 const UnavailableRetries = 3
+type User struct {
+	Name        string
+	Scopes      []string
+	CreatedAt   int64
+	LastLoginAt *int64
+}
 type WaiterHolder struct {
 	HolderID       string
 	RunID          string

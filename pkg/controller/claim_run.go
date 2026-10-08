@@ -32,11 +32,15 @@ func (s *Server) handleClaimHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	beat, err := s.store.HeartbeatClaim(r.Context(), tok, time.Duration(req.LeaseSecs)*time.Second, time.Now())
 	if beat.Charge.Cancel {
-		if _, aerr := s.store.AppendEventOnce(r.Context(), tok.RunID, tok.NodeID, store.EventKindCreditsExhausted, nil); aerr != nil {
-			s.logger.Warn("recording an exhausted-credit cancellation failed", "run_id", tok.RunID, "err", aerr)
-		}
-		if cerr := s.store.RequestCancel(r.Context(), tok.RunID); cerr != nil {
-			s.logger.Error("cancelling a run for exhausted credits failed", "run_id", tok.RunID, "err", cerr)
+		if tenant, terr := s.tenantForTeam(r.Context(), tok.Team); terr != nil {
+			s.logger.Error("cancelling a run for exhausted credits failed", "run_id", tok.RunID, "err", terr)
+		} else {
+			if _, aerr := tenant.AppendEventOnce(r.Context(), tok.RunID, tok.NodeID, store.EventKindCreditsExhausted, nil); aerr != nil {
+				s.logger.Warn("recording an exhausted-credit cancellation failed", "run_id", tok.RunID, "err", aerr)
+			}
+			if cerr := tenant.RequestCancel(r.Context(), tok.RunID); cerr != nil {
+				s.logger.Error("cancelling a run for exhausted credits failed", "run_id", tok.RunID, "err", cerr)
+			}
 		}
 	}
 	switch {
@@ -81,7 +85,11 @@ func (s *Server) handleEnqueueChildRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	parent, err := s.store.GetTrigger(r.Context(), tok.RunID)
+	var parent *store.Trigger
+	tenant, err := s.tenantForTeam(r.Context(), tok.Team)
+	if err == nil {
+		parent, err = tenant.GetTrigger(r.Context(), tok.RunID)
+	}
 	if err != nil || store.NormalizeTeam(parent.Team) != tok.Team {
 		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
 		return
@@ -91,7 +99,7 @@ func (s *Server) handleEnqueueChildRun(w http.ResponseWriter, r *http.Request) {
 			errors.New("a controller-dispatched node starts children of its own repository and commit only"))
 		return
 	}
-	ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), tok.RunID)
+	ancestors, err := tenant.GetRunAncestorPipelines(r.Context(), tok.RunID)
 	if err != nil {
 		s.writeInternalError(w, r, "ancestor walk", err)
 		return
@@ -141,7 +149,11 @@ func (s *Server) handleGetChildRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	run, err := s.store.GetRun(r.Context(), childID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	run, err := tenant.GetRun(r.Context(), childID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, runNotFound(childID))
 		return

@@ -409,7 +409,6 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 		{method: http.MethodGet, path: "/bin/deadbeef-cafebabe", guarded: true},
 		{method: http.MethodPut, path: "/bin/deadbeef-cafebabe", guarded: true},
 		{method: http.MethodPut, path: "/cache/lint", guarded: true},
-		{method: http.MethodGet, path: "/repos", guarded: true},
 		{method: http.MethodGet, path: "/cache/lint", guarded: true},
 		{method: http.MethodPost, path: "/admin/store-ceiling/thaw", guarded: true},
 		{method: http.MethodPost, path: "/admin/store-ceiling/measure", guarded: true},
@@ -541,7 +540,7 @@ func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
 func TestEveryResponseCarriesNosniff(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 
-	for _, path := range []string{"/health", "/repos", "/metrics"} {
+	for _, path := range []string{"/health", "/bin/deadbeef-cafebabe", "/metrics"} {
 		resp, err := srv.Client().Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -781,6 +780,38 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stage SSH key") {
 		t.Fatalf("err = %v, want it to name the staging step", err)
+	}
+}
+
+func TestSetupSSHKeepsTheOperatorsGitSSHCommand(t *testing.T) {
+	saved := sshKeyDir
+	t.Cleanup(func() { sshKeyDir = saved })
+	root := t.TempDir()
+	sshKeyDir = filepath.Join(root, "key")
+	if err := os.MkdirAll(sshKeyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sshKeyDir, "id_ed25519"), []byte("private-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	const operator = "ssh -i /etc/ssh-key/id_ed25519 -o IdentitiesOnly=yes"
+	t.Setenv("GIT_SSH_COMMAND", operator)
+	if err := setupSSH(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GIT_SSH_COMMAND"); got != operator {
+		t.Fatalf("GIT_SSH_COMMAND = %q, want the operator's %q", got, operator)
+	}
+
+	t.Setenv("GIT_SSH_COMMAND", "")
+	if err := setupSSH(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GIT_SSH_COMMAND"); !strings.Contains(got, "-o IdentitiesOnly=yes") {
+		t.Fatalf("GIT_SSH_COMMAND = %q, want it to offer only the staged key", got)
 	}
 }
 

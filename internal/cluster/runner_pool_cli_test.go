@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -191,7 +192,6 @@ func TestRunRunnerCLI_TriggerRunnerRequiresTriggerLoop(t *testing.T) {
 }
 
 func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
-	t.Setenv("SPARKWING_RUNNER_SA", "")
 	err := runRunnerCLI([]string{
 		"--controller=http://controller",
 		"--metrics-addr=",
@@ -200,13 +200,12 @@ func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
 		"--trigger-runner=k8s",
 		"--trigger-runner-image=img",
 	}, "")
-	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=k8s") {
+	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa is required with --trigger-runner=k8s") {
 		t.Fatalf("runRunnerCLI() error = %v, want the same rejection BuildK8sRunnerFactory returns", err)
 	}
 }
 
 func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T) {
-	t.Setenv("SPARKWING_RUNNER_SA", "")
 	err := runRunnerCLI([]string{
 		"--controller=http://controller",
 		"--metrics-addr=",
@@ -216,8 +215,28 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 		"--trigger-runner=warm",
 		"--trigger-runner-image=img",
 	}, "")
-	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=warm") {
+	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa is required with --trigger-runner=warm") {
 		t.Fatalf("runRunnerCLI() error = %v, want warm fallback service-account validation", err)
+	}
+}
+
+func TestRunRunnerCLI_RefusesAJobBoundEveryClaimWouldReject(t *testing.T) {
+	for _, flag := range []string{"--cpu-ceiling=eight", "--memory-ceiling=lots", "--deadline=30s"} {
+		err := runRunnerCLI([]string{"--controller=http://controller", "--metrics-addr=", flag}, "")
+		name := strings.SplitN(flag, "=", 2)[0]
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("runRunnerCLI(%s) error = %v, want a refusal naming %s", flag, err, name)
+		}
+	}
+}
+
+func TestRunRunnerCLI_RefusesACredentialsDirThatIsMissing(t *testing.T) {
+	err := runRunnerCLI([]string{
+		"--controller=http://controller", "--metrics-addr=",
+		"--credentials-dir=" + filepath.Join(t.TempDir(), "missing"),
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "--credentials-dir") {
+		t.Fatalf("runRunnerCLI() error = %v, want a refusal naming --credentials-dir", err)
 	}
 }
 

@@ -28,6 +28,25 @@ func TestBindDefaultsToUnlimited(t *testing.T) {
 	}
 }
 
+func TestBindWithoutAnEnvironmentReadsOnlyFlags(t *testing.T) {
+	t.Setenv(egress.EnvName(egress.ServiceLogs, egress.EnvDailyAlarmBytes), "not a number")
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	read := egress.Bind(fs, nil, egress.ServiceLogs, egress.LogsSurfaces)
+	if err := fs.Parse([]string{"--egress-max-downloads=2"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, named, err := read()
+	if err != nil {
+		t.Fatalf("read = %v, want the environment ignored", err)
+	}
+	if cfg.GlobalDailyAlarmBytes != 0 || cfg.MaxDownloadsPerPrincipal != 2 {
+		t.Fatalf("config = %+v, want only the flag applied", cfg)
+	}
+	if named.DailyAlarmBytes || !named.MaxDownloads {
+		t.Fatalf("named = %+v, want only the flag named", named)
+	}
+}
+
 func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 	env := envOf(map[string]string{
 		egress.EnvName(egress.ServiceController, egress.EnvDailyAlarmBytes): "900",

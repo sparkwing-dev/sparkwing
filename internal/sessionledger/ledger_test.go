@@ -173,3 +173,6 @@ func TestSweepOfAMissingLedgerIsEmpty(t *testing.T) {
 		t.Fatalf("sweep = %+v, %v", out, err)
 	}
 }
+
+// OpenWithProbe returns the ledger at dir with a caller-supplied probe.
+func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, probe: probe} }

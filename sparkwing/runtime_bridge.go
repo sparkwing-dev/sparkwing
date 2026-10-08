@@ -1,6 +1,10 @@
 package sparkwing
 
-import "context"
+import (
+	"context"
+
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+)
 
 type runtimePlumbingKeys struct {
 	DryRun            any
@@ -22,13 +26,13 @@ type runtimePlumbingKeys struct {
 }
 
 type runtimePlumbingFns struct {
-	PlanInsertChild        func(p *Plan, child *JobNode) error
-	PlanInsertExpanded     func(p *Plan, source *JobNode, children []*JobNode) error
-	JobGroupFinalize       func(g *JobGroup, members []*JobNode, err error)
-	WorkStepFn             func(s *WorkStep) func(ctx context.Context) (any, error)
-	WorkStepMarkDone       func(s *WorkStep, out any)
-	SpawnSpecSetResolvedID func(s *SpawnSpec, id string)
-	SpawnSpecMarkDone      func(s *SpawnSpec, out any)
+	PlanInsertChild    func(p *Plan, child *JobNode) error
+	PlanInsertExpanded func(p *Plan, source *JobNode, children []*JobNode) error
+	JobGroupFinalize   func(g *JobGroup, members []*JobNode, err error)
+	WorkStepFn         func(s *WorkStep) func(ctx context.Context) (any, error)
+	WorkStepMarkDone   func(s *WorkStep, out any)
+	SpawnSpecMarkDone  func(s *SpawnSpec, out any)
+	NodeDirCaches      func(n *JobNode) []depcache.Spec
 }
 
 // RuntimePlumbing exposes context keys and runtime-mutator function
@@ -63,12 +67,12 @@ var RuntimePlumbing = struct {
 		OIDCTokenSource:   oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
-		PlanInsertChild:        (*Plan).insertChild,
-		PlanInsertExpanded:     (*Plan).insertExpanded,
-		JobGroupFinalize:       (*JobGroup).finalize,
-		WorkStepFn:             func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
-		WorkStepMarkDone:       (*WorkStep).markDone,
-		SpawnSpecSetResolvedID: (*SpawnSpec).setResolvedID,
-		SpawnSpecMarkDone:      (*SpawnSpec).markDone,
+		PlanInsertChild:    (*Plan).insertChild,
+		PlanInsertExpanded: (*Plan).insertExpanded,
+		JobGroupFinalize:   (*JobGroup).finalize,
+		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
+		WorkStepMarkDone:   (*WorkStep).markDone,
+		SpawnSpecMarkDone:  (*SpawnSpec).markDone,
+		NodeDirCaches:      dirCacheSpecs,
 	},
 }

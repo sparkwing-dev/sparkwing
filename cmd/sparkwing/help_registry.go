@@ -196,14 +196,14 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Inspect controller health, executors, admission, users, tokens, images,
-and webhooks. Select the controller with --profile NAME.
+	Description: `Inspect controller health, executors, admission, users, tokens and
+images. Select the controller with --profile NAME.
 Configure profiles with 'sparkwing configure profiles'.
 
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -1684,6 +1684,11 @@ var cmdRun = Command{
 	Description: `Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline.
 
+Pipeline-module builds honor the highest go directive in go.mod and an active
+resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
+for the build only. GOTOOLCHAIN=local refuses with installation or unpinning
+guidance. Pipeline steps retain the original environment.
+
 Runner options use the --sw- prefix. Unknown --sw- options fail before
 execution setup. Other arguments pass to the pipeline. Put -- before
 pipeline arguments that resemble runner options; every argument after the
@@ -1937,7 +1942,8 @@ var cmdWorker = Command{
 	Synopsis: "Claim triggers from a profile's controller and run them in-process",
 	Description: `Polls the trigger queue at the selected profile's
 controller and executes each claimed trigger in-process on this host.
-Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
+For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
+--trigger-runner k8s|warm, which carries the image and service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing serve start' via --profile local.`,
@@ -1962,7 +1968,8 @@ so operators can trigger it against a running pod via kubectl
 exec during incident response.
 
 When --profile is omitted, the run-directory sweep is skipped; the
-mtime-based git/ and tmp/ sweeps still run and free disk. Supply
+mtime-based sweeps of source-direct/ git mirrors unused for 7 days and
+tmp/ entries older than a day still run and free disk. Supply
 --profile to enable the full sweep.`,
 	Flags: []FlagSpec{
 		{Name: "root", Argument: "DIR", Desc: "Warm-PVC root (default: $SPARKWING_HOME resolution)", Group: "Input"},
@@ -1982,10 +1989,9 @@ var cmdDoctor = Command{
 --dry-run reports proposed repairs. The command preserves live processes,
 active daemon state, and cluster-scoped records.
 
-Repairs cover home permissions, abandoned local run records, abandoned
-box-slot locks, ended local concurrency records, and orphaned run directories.
-Run-record repair requires a reachable daemon so held runs remain protected.
-A held box-slot lock is reported with guidance to update the pipeline SDK.
+Repairs cover home permissions, abandoned local run records, ended local
+concurrency records, and orphaned run directories. Run-record repair requires
+a reachable daemon so held runs remain protected.
 
 Run-directory removal requires a local store with recorded runs and profiles
 that all use that store. Directories written within the grace period remain.
@@ -1998,6 +2004,11 @@ following them. Windows access permissions are reported as unverified.
 The report includes daemon reachability, repeated admission rejections,
 version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
+
+In a project, the Go toolchain finding reports the running Go version,
+GOTOOLCHAIN and its source, and the .sparkwing module's Go floor. It identifies
+fixed pins sparkwing will raise for builds and a blocking GOTOOLCHAIN=local,
+with the installation or unpinning command needed to proceed.
 
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.
@@ -2349,7 +2360,7 @@ var cmdUsers = Command{
 	Path:     "sparkwing cluster users",
 	Synopsis: "Manage dashboard login users",
 	Description: `Seeds admin credentials in the controller's users table, used
-by the web pod's login flow. Connection info comes from the
+by the dashboard's password sign-in. Connection info comes from the
 profile named by --profile.`,
 	SubcommandOrder: []string{"add", "list", "delete"},
 }
@@ -3543,19 +3554,19 @@ var cmdHealth = Command{
 	Synopsis: "Connectivity + fleet + queue health check against a remote cluster",
 	Description: `Answers "is this cluster alive?" in one command. Runs the
 connectivity / auth probes from 'profiles test' plus cluster-
-state probes that hit /api/v1/agents, /api/v1/pool,
-/api/v1/triggers (status=claimed), and /api/v1/runs?since=24h.
+state probes that hit /api/v1/agents, /api/v1/triggers
+(status=claimed), and /api/v1/runs?since=24h.
 
 Sections:
 
   CONNECTIVITY  controller / auth / logs / gitcache
-  FLEET         agents (connected vs stale) + warm-runner pool
+  FLEET         agents (connected vs stale)
   QUEUE         stuck triggers + recent-run success rate
 
 Exit 0 when every probe is ok or warn; exit 1 when any probe
 fails (auth reject, controller down, HTTP 5xx). Warnings are
-informational -- low success rate, empty pool, stale agents --
-and don't change the exit code so scripts can still condition
+informational -- low success rate, stale agents -- and don't
+change the exit code so scripts can still condition
 on "is the cluster reachable at all?".`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -3565,132 +3576,6 @@ on "is the cluster reachable at all?".`,
 	Examples: []Example{
 		{"Quick-check prod", "sparkwing cluster status --profile prod"},
 		{"Structured output for a status dashboard", "sparkwing cluster status --profile prod -o json"},
-	},
-}
-
-var cmdWebhooks = Command{
-	Path:     "sparkwing cluster webhooks",
-	Synopsis: "Connect, inspect, and replay GitHub webhooks",
-	Description: `Manage GitHub webhooks through the installed 'gh' command and its
-credentials. 'connect' registers a repository against a pipeline on both
-sides and 'disconnect' removes it; the deliveries view joins delivery
-records with Sparkwing triggers and run outcomes.`,
-	SubcommandOrder: []string{"connect", "disconnect", "list", "deliveries", "replay"},
-	Examples: []Example{
-		{"Connect a repository to a pipeline", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
-	},
-}
-
-var cmdWebhooksConnect = Command{
-	Path:     "sparkwing cluster webhooks connect",
-	Synopsis: "Connect a GitHub repository to a pipeline",
-	Description: `Registers both sides of a webhook in one command. It generates a
-signing secret, stores the binding on the controller, creates or
-updates the repository's webhook through 'gh' so it posts to the
-controller's delivery URL for this pipeline, and asks GitHub for a
-ping so the answer the controller gave is part of the output.
-
-The secret is never printed and never passed in a command line; the
-controller stores it and verifies every delivery's HMAC against it.
-Re-running the command rotates the secret on both sides.
-
-The delivery URL comes from the controller: its --external-url when
-it announces one, and otherwise the URL this command reached it at.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the deliveries fire", Required: true, Group: "Input"},
-		{Name: "events", Argument: "LIST", Desc: "Comma-separated GitHub events", Default: defaultWebhookEvents, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller that stores the binding)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Connect push and pull-request triggers", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
-		{"Connect pushes only", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push"},
-	},
-}
-
-var cmdWebhooksDisconnect = Command{
-	Path:     "sparkwing cluster webhooks disconnect",
-	Synopsis: "Remove a repository's webhook and its controller binding",
-	Description: `Removes the binding the controller verifies deliveries against, then
-deletes the webhook on GitHub through 'gh'. The controller answers with
-the webhook it was bound to, so a repository connected to two
-controllers under the same pipeline name loses only this one. A webhook
-written by hand is matched by its pipeline path instead, and every
-deleted hook is printed with its URL.
-
-Either side already being absent is reported rather than failing, so a
-half-finished connect is cleaned up by running this once.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the webhook fires", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller holding the binding)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Disconnect a repository", "sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build"},
-	},
-}
-
-var cmdWebhooksList = Command{
-	Path:     "sparkwing cluster webhooks list",
-	Synopsis: "List GitHub hooks configured on a repo",
-	Description: `Calls 'gh api /repos/OWNER/NAME/hooks' and prints id, derived
-pipeline, active flag, last-delivery status, and URL.
-
-The PIPELINE column is parsed from the hook URL path
-(/webhooks/github/<pipeline>). Hooks posting to the older
-unscoped /webhooks/github endpoint render as "(unscoped)"
-so operators can spot them for cleanup. Non-sparkwing hooks
-render as "(non-sparkwing)".`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-	},
-	GroupOrder: []string{"Input", "Output", "System", "Other"},
-	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-	},
-}
-
-var cmdWebhooksDeliveries = Command{
-	Path:     "sparkwing cluster webhooks deliveries",
-	Synopsis: "List recent deliveries for a hook, joined with trigger state",
-	Description: `Fetches recent deliveries via 'gh api' and, for each one,
-looks up the matching sparkwing trigger by GITHUB_DELIVERY env
-stamp. Surfaces TRIGGER_ID + RUN_STATUS columns so operators
-see GitHub-side status alongside the run it produced.
-
---since filters deliveries client-side (GitHub's API does not
-take a time filter). Default: 24h.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "hook", Argument: "N", Desc: "GitHub hook id from 'webhooks list'", Required: true, Group: "Input"},
-		{Name: "since", Argument: "DURATION", Desc: "Only deliveries newer than this", Default: "24h", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
-	},
-}
-
-var cmdWebhooksReplay = Command{
-	Path:     "sparkwing cluster webhooks replay",
-	Synopsis: "Queue a redelivery of a specific delivery UUID",
-	Description: `Requests another attempt for the selected GitHub webhook delivery.
-Read the hook's deliveries to inspect the resulting attempt.`,
-	Flags: []FlagSpec{
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
-		{Name: "hook", Argument: "N", Desc: "GitHub hook id", Required: true, Group: "Input"},
-		{Name: "delivery", Argument: "UUID", Desc: "Delivery GUID to redeliver", Required: true, Group: "Input"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --delivery 00000000-0000-4000-8000-000000000001"},
 	},
 }
 

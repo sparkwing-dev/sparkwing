@@ -48,8 +48,6 @@ type reading struct {
 	processes map[int]processSample
 }
 
-var usageReader = func() reading { return processTreeUsage(os.Getpid()) }
-
 func intervalSample(previous, current reading) Sample {
 	sample := Sample{TS: current.at}
 	if current.valid && current.memory >= 0 {
@@ -63,27 +61,60 @@ func intervalSample(previous, current reading) Sample {
 }
 
 // Attach samples a dedicated node process until finish collects its final reading.
-// Finish joins collection and returns the first delivery error, including on repeated calls.
-func Attach(ctx context.Context, sink Sink) (finish func() error) {
-	previous := usageReader()
+// Finish joins collection and returns delivery counts and the first loss on every call.
+func Attach(ctx context.Context, sink Sink) (finish func() (Delivery, error)) {
+	return attach(ctx, sink, func() reading { return processTreeUsage(os.Getpid()) })
+}
+
+// Delivery reports attempted and lost samples, excluding a full sink.
+// LostInvalid counts lost samples that marked the measurement invalid; losing
+// one loses an exclusion, not just a reading.
+type Delivery struct {
+	Attempted   int64
+	Lost        int64
+	LostInvalid int64
+}
+
+func attach(ctx context.Context, sink Sink, read func() reading) (finish func() (Delivery, error)) {
+	previous := read()
 	stop, done := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	var firstError error
+	var delivery Delivery
 	full := false
-	push := func(sample Sample) {
+	// safety: a full sink drops readings by design, but an invalid one still carries an exclusion the finish must record.
+	dropFull := func(sample Sample) bool {
+		if !sample.Valid {
+			delivery.LostInvalid++
+			if firstError == nil {
+				firstError = ErrSinkFull
+			}
+		}
+		return false
+	}
+	push := func(sample Sample) bool {
 		if full {
-			return
+			return dropFull(sample)
 		}
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		err := sink.Push(writeCtx, sample)
 		if errors.Is(err, ErrSinkFull) {
 			full = true
-			return
+			return dropFull(sample)
 		}
-		if firstError == nil {
-			firstError = err
+		delivery.Attempted++
+		if err != nil {
+			delivery.Lost++
+			if !sample.Valid {
+				delivery.LostInvalid++
+			}
+			if firstError == nil {
+				firstError = err
+			}
+			return false
 		}
+		return true
 	}
 	if !previous.valid || previous.cpu < 0 || previous.memory < 0 {
 		push(Sample{TS: previous.at})
@@ -100,11 +131,10 @@ func Attach(ctx context.Context, sink Sink) (finish func() error) {
 		ticker := time.NewTicker(Interval())
 		defer ticker.Stop()
 		collect := func(final bool) {
-			current := usageReader()
+			current := read()
 			sample := intervalSample(previous, current)
 			if initialMemoryValid {
 				sample.MemoryBytes = max(sample.MemoryBytes, initialMemory)
-				initialMemoryValid = false
 			}
 			if current.valid {
 				for pid, p := range observed {
@@ -120,8 +150,10 @@ func Attach(ctx context.Context, sink Sink) (finish func() error) {
 			if incomplete || (final && len(current.processes) > 1) {
 				sample.Valid = false
 			}
-			push(sample)
-			previous = current
+			if push(sample) {
+				previous = current
+				initialMemoryValid = false
+			}
 		}
 		for {
 			select {
@@ -133,10 +165,10 @@ func Attach(ctx context.Context, sink Sink) (finish func() error) {
 			}
 		}
 	}()
-	return func() error {
+	return func() (Delivery, error) {
 		once.Do(func() { close(stop) })
 		<-done
-		return firstError
+		return delivery, firstError
 	}
 }
 

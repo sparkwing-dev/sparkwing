@@ -184,6 +184,15 @@ const CacheGrantEnv = "SPARKWING_CACHE_GRANT"
 // operator token in.
 const CacheTokenEnv = "SPARKWING_CACHE_TOKEN"
 
+// CacheTokenCredential and CacheGrantKeyCredential are the file names the
+// cache's operator token and the grant signing key take in a service's
+// credentials directory. The cache and the controller read the same names, so
+// one projected Secret volume serves both.
+const (
+	CacheTokenCredential    = "cache-token"
+	CacheGrantKeyCredential = "cache-grant-key"
+)
+
 // CacheBearerFromEnv returns the bearer this process sends the cache: the
 // run's grant when a runner handed it one, otherwise the operator token.
 func CacheBearerFromEnv() string {

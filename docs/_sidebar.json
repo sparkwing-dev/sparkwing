@@ -2,7 +2,7 @@
   "categories": [
     {
       "label": "Getting Started",
-      "slugs": ["getting-started", "architecture", "machine-config", "cli", "cli-reference"]
+      "slugs": ["getting-started", "architecture", "machine-config", "environment-variables", "cli", "cli-reference"]
     },
     {
       "label": "Pipelines",
@@ -22,7 +22,8 @@
         "admission",
         "local-execution",
         "ci-embedded",
-        "native-mode"
+        "native-mode",
+        "node-protocol"
       ]
     },
     {
@@ -61,7 +62,6 @@
         "scheduling",
         "github-actions-runners",
         "github-app",
-        "warm-pool",
         "gitcache",
         "git-credentials"
       ]

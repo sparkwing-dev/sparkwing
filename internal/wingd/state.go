@@ -24,10 +24,6 @@ type persistedState struct {
 	CancelledRuns []string           `json:"cancelled_runs,omitempty"`
 }
 
-func writeState(path string, snap admission.Snapshot, events []admissionEvent) error {
-	return writeStateWithCancellations(path, snap, events, nil)
-}
-
 func writeStateWithCancellations(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string) error {
 	snap.Waiters = nil
 	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns})
@@ -74,11 +70,6 @@ func quarantineState(path string, now time.Time) (string, error) {
 		return "", err
 	}
 	return dst, nil
-}
-
-func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
-	snap, events, _, err := readStateWithCancellations(path)
-	return snap, events, err
 }
 
 func readStateWithCancellations(path string) (*admission.Snapshot, []admissionEvent, []string, error) {

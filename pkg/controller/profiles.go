@@ -80,7 +80,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 	if run == nil || run.Pipeline == "" {
 		return
 	}
-	nodes, err := s.store.ListNodes(ctx, run.ID)
+	nodes, err := t.ListNodes(ctx, run.ID)
 	if err != nil {
 		return
 	}
@@ -88,6 +88,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 	var runPeakMem int64
 	measured := 0
 	runValid := true
+	runPartial := false
 	for _, n := range nodes {
 		if n.Outcome == "cached" {
 			continue
@@ -102,7 +103,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 			runValid = false
 			continue
 		}
-		samples, err := s.store.ListNodeMetrics(ctx, run.ID, n.NodeID)
+		samples, err := t.ListNodeMetrics(ctx, run.ID, n.NodeID)
 		if err != nil || len(samples) == 0 {
 			runValid = false
 			continue
@@ -112,9 +113,15 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 			runValid = false
 			continue
 		}
+		partial := false
+		for _, sample := range samples {
+			partial = partial || sample.Kind == store.MetricPartial
+		}
+		runPartial = runPartial || partial
 		measured++
 		if err := t.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
-			Duration:        nodeMetricSpan(samples),
+			Partial:         partial,
+			Duration:        nodeMetricSpan(readings(samples)),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     true,
@@ -132,6 +139,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 		return
 	}
 	if err := t.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
+		Partial:         runPartial,
 		Duration:        runDuration(run),
 		PeakCores:       runPeakCores,
 		PeakMemoryBytes: runPeakMem,
@@ -176,6 +184,16 @@ func samplePeaks(samples []store.MetricSample) (float64, int64, bool) {
 	return cores, mem, hasCPU && !unknown
 }
 
+func readings(samples []store.MetricSample) []store.MetricSample {
+	out := make([]store.MetricSample, 0, len(samples))
+	for _, sample := range samples {
+		if !sample.Marker() {
+			out = append(out, sample)
+		}
+	}
+	return out
+}
+
 func nodeMetricSpan(samples []store.MetricSample) (d time.Duration) {
 	if len(samples) < 2 {
 		return 0
@@ -202,6 +220,7 @@ func maxF(a, b float64) float64 {
 }
 
 type profileObservationReq struct {
+	Partial          bool    `json:"partial,omitempty"`
 	DurationNanos    int64   `json:"duration_nanos,omitempty"`
 	PeakCores        float64 `json:"peak_cores,omitempty"`
 	PeakMemoryBytes  int64   `json:"peak_memory_bytes,omitempty"`
@@ -256,6 +275,7 @@ func boundedProfileValue(name string, value, limit float64) error {
 
 func (b profileObservationReq) observation() store.ProfileObservation {
 	return store.ProfileObservation{
+		Partial:          b.Partial,
 		Duration:         time.Duration(b.DurationNanos),
 		PeakCores:        b.PeakCores,
 		PeakMemoryBytes:  b.PeakMemoryBytes,

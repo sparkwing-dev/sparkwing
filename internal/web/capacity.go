@@ -9,13 +9,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-type profileReader interface {
+// ProfileReader reads the learned capacity profiles the capacity page draws.
+type ProfileReader interface {
 	ListPipelineProfiles(ctx context.Context, pipeline string) ([]store.PipelineProfile, error)
 	ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]store.ProfileSample, error)
 }
@@ -146,10 +146,11 @@ type capacityExplainPayload struct {
 	GeneratedMS int64  `json:"generated_at_ms"`
 }
 
-func capacityProfilesHandler(b backend.Backend) http.HandlerFunc {
+// CapacityProfilesHandler serves every pipeline's learned capacity profile.
+// A nil reader answers 501: only a host's own runs store learns profiles.
+func CapacityProfilesHandler(reader ProfileReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		reader, ok := profileReaderFor(b)
-		if !ok {
+		if reader == nil {
 			writeErr(w, http.StatusNotImplemented, errUnsupportedProfiles)
 			return
 		}
@@ -173,10 +174,11 @@ func capacityProfilesHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-func capacityExplainHandler(b backend.Backend) http.HandlerFunc {
+// CapacityExplainHandler explains how one pipeline's charge was resolved.
+// A nil reader answers 501.
+func CapacityExplainHandler(reader ProfileReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		reader, ok := profileReaderFor(b)
-		if !ok {
+		if reader == nil {
 			writeErr(w, http.StatusNotImplemented, errUnsupportedProfiles)
 			return
 		}
@@ -219,14 +221,6 @@ func capacityExplainHandler(b backend.Backend) http.HandlerFunc {
 
 var errUnsupportedProfiles = errors.New(
 	"learned capacity profiles live in the local runs store; this dashboard is not reading one")
-
-func profileReaderFor(b backend.Backend) (profileReader, bool) {
-	sb, ok := b.(interface{ Store() *store.Store })
-	if !ok || sb.Store() == nil {
-		return nil, false
-	}
-	return sb.Store(), true
-}
 
 type profileGroup struct {
 	rollup store.PipelineProfile

@@ -157,7 +157,7 @@ func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name st
 	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
 		return nil, err
 	}
-	if _, err := appendEventTx(ctx, tx, tok.RunID, tok.NodeID, "secret_released",
+	if _, err := appendEventTx(ctx, tx, t.team, tok.RunID, tok.NodeID, "secret_released",
 		map[string]any{"name": name, "generation": tok.Generation}, now); err != nil {
 		return nil, err
 	}

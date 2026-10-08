@@ -49,12 +49,12 @@ the hashed name as well to serve both.
 
 ### Auto-registration (recommended)
 
-Set `GITCACHE_REPOS` env var on the cache deployment:
+Pass `--auto-register-repos` to the cache:
 
 ```yaml
-env:
-  - name: GITCACHE_REPOS
-    value: "gitops=git@github.com:user/gitops.git,app=git@github.com:user/app.git"
+args:
+  - --auto-register-repos
+  - "gitops=git@github.com:user/gitops.git,app=git@github.com:user/app.git"
 ```
 
 On startup, the cache registers the name-to-URL mappings and eagerly
@@ -114,7 +114,7 @@ origin for a clone: `git fetch <sha>` reads `info/refs` first, and by
 the time `git upload-pack` answers, the commit is there.
 
 The refresh runs only for `git-upload-pack`, and only when the mirror's
-last successful fetch is older than `FETCH_FRESH_WINDOW` (default 10
+last successful fetch is older than `--fetch-fresh-window` (default 10
 seconds). That window is the bound on what a caller can spend: **any
 token that can reach these routes can force at most one origin fetch per
 repository per ten seconds**, however many clones it starts. A push
@@ -137,7 +137,7 @@ labeled `reason` (`on_demand` or `keep_warm`) and `failed`.
 
 ## Keep-Warm Pass
 
-`FETCH_INTERVAL` is off by default (`0`). Set it, and the cache refreshes
+`--fetch-interval` is off by default (`0`). Set it, and the cache refreshes
 the mirrors a request touched in the last hour on that cadence, leaving
 every other mirror alone: a repository nobody is building costs origin
 nothing, which is what matters on a hosted cache holding many customers'
@@ -157,7 +157,7 @@ avoided egress cost.
 ### Fetch freshness throttle
 
 A successful fetch (from the keep-warm pass or from a clone reading
-`info/refs`) marks the repo fresh for `FETCH_FRESH_WINDOW` (default 10s),
+`info/refs`) marks the repo fresh for `--fetch-fresh-window` (default 10s),
 and clones inside that window serve straight from the mirror. Ten seconds
 is therefore the worst-case staleness a checkout can see and the most
 origin traffic one repository can be made to spend. Cloning a repo that is
@@ -170,7 +170,7 @@ A registered repository whose mirror is missing is cloned on the
 `/git/<name>` path a runner clones through. A clone that keeps failing
 would otherwise re-download the whole repository on every request, so a
 repo whose mirror is absent is cloned once; a second attempt inside
-`RECLONE_COOLDOWN` (default 1h) that still finds no mirror is refused,
+`--reclone-cooldown` (default 1h) that still finds no mirror is refused,
 naming the remaining cooldown and the error the last attempt hit. A
 successful fetch or clone clears the record, and so does re-registering
 the repo, which is the deliberate way out.
@@ -182,7 +182,7 @@ Health problems to expect from `GET /health`:
 | `gitcache: background fetch failing` | A fetch or clone failed in the last ten minutes, or the keep-warm pass is failing for every mirror. The cache log names the repository hash and the git error. A clone that failed puts the repo on the clone cooldown until it expires or the repo is re-registered. |
 
 An operator who wants the old per-request behavior back can set
-`FETCH_FRESH_WINDOW` and/or `RECLONE_COOLDOWN` to a negative duration
+`--fetch-fresh-window` and/or `--reclone-cooldown` to a negative duration
 (e.g. `-1s`) to disable that guard.
 
 ## Dependency proxy defaults & egress
@@ -231,15 +231,14 @@ Details worth knowing:
 **Opting out.** Set `cache.dependencyProxy.enabled=false` in the chart:
 the env is not emitted and the runner is started with
 `--dependency-proxy=off` so the pods it spawns skip the wiring too. On
-the runner binary directly, `--dependency-proxy=off` (or
-`SPARKWING_DEPENDENCY_PROXY_URL=off`); pass a URL instead to point at
+the runner binary directly, `--dependency-proxy=off`; pass a URL instead to point at
 some other pull-through mirror. Overriding a single ecosystem is a
 `runner.extraEnv` entry with the same name -- a name you set there
 suppresses the chart's default rather than colliding with it.
 
 **Image pulls.** Runner pods are created with
-`imagePullPolicy: IfNotPresent`; `--image-pull-policy` (or
-`SPARKWING_IMAGE_PULL_POLICY`) accepts `Always`, `IfNotPresent`, or
+`imagePullPolicy: IfNotPresent`; `--trigger-runner-image-pull-policy`
+accepts `Always`, `IfNotPresent`, or
 `Never`. `Always` re-downloads the runner image on every node in the
 DAG, which is the other per-run egress bill worth reading twice.
 
@@ -297,16 +296,18 @@ The cache is exposed externally via ingress at your dashboard host's
 `cache-` subdomain. Every route except `/health`, `/metrics`, `/stats`, and the
 package proxy under `/proxy/` requires a bearer token, on reads as well as
 writes: the git protocol and registration routes (`/git/...`), the blob routes
-(`/bin/...`, `/cache/...`), the repository listing (`/repos`), and the admin
-routes (`/admin/...`). The package proxy
+(`/bin/...`, `/cache/...`), and the admin routes (`/admin/...`). The package proxy
 stays open because Go, npm, and pip fetch through it without a credential;
 it serves upstream registry bytes, not repository content. The controller's
 `/api/v1/gitcache/git/...` proxy requires admin scope and permits upload-pack
 reads only. Authenticated requests carry the token as:
 
 ```
-Authorization: Bearer <SPARKWING_API_TOKEN>
+Authorization: Bearer <cache token>
 ```
+
+The cache reads that token from the file `cache-token` in its
+`--credentials-dir`.
 
 Every caller presents the token, in-cluster ones included. Reaching the
 cache through the k8s Service rather than the ingress proves nothing about
@@ -332,7 +333,7 @@ fence, whose grant lasts six hours. A runner token with no fence gets
 `403 claim_required`. Either grant ends sooner if the requesting credential
 expires first. Every grant names the claim that asked for it and the run's
 repository and refs. The cache
-verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
+verifies it with the same key (the file `cache-grant-key` in its `--credentials-dir`)
 without calling the controller and confines the request to that team and
 repository, and it refuses with 401 a grant that names no claim or no
 repository scope, which a controller from before scoped grants minted and
@@ -384,7 +385,7 @@ scope.
   grant with 403, because a registration clones onto the cache volume with the
   cache's own credentials; such a runner asks anyway and fetches from a mirror
   already registered. The mirrors count toward the store ceiling.
-- `/repos` and the `/admin/...` routes refuse a grant with 401.
+- The `/admin/...` routes refuse a grant with 401.
 
 The operator token keeps its unscoped access, and a cache started with
 `--allow-unauthenticated` accepts no grants because it has no key to verify
@@ -398,25 +399,24 @@ on the cache's origin.
 A cache published outside the cluster starts with `--disable-proxy` and
 `--metrics-addr`. The first drops `/proxy/` and `/stats`; the second moves
 `/metrics`, and `/stats` when the proxy is on, to a listener of its own
-(`--metrics-addr=:9090`, falling back to `SPARKWING_METRICS_ADDR`) that the
+(`--metrics-addr=:9090`) that the
 ingress does not route to. The main listener then answers only `/health`
 and the credentialed routes. Without `--metrics-addr` an ingress rule is
 the only thing keeping `/metrics` private.
 
 The cache refuses to start without a token. A laptop or test setup that
-wants the endpoints open passes `--allow-unauthenticated` (or
-`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`); the pod logs a warning at
+wants the endpoints open passes `--allow-unauthenticated`; the pod logs a warning at
 startup so an unauthenticated deployment is visible.
 
 ### Network policy
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod, admitting four peers on the cache port: the release's runner,
-controller, and dashboard pods, plus the Job pods the Kubernetes runner
-backend creates. Set `networkPolicy.enabled=false` to drop it. Point
-`networkPolicy.controllerPodSelector` and `networkPolicy.webPodSelector` at
-your own pod labels when the controller or the dashboard runs under a
-different release; both default to this release's own pods. Override
+cache pod, admitting the release's runner and controller pods on the cache
+port, plus the Job pods the Kubernetes runner backend creates. Set
+`networkPolicy.enabled=false` to drop it. Point
+`networkPolicy.controllerPodSelector` at your own pod labels when the
+controller runs under a different release; it defaults to this release's own
+controller pod. Override
 `networkPolicy.runnerJobPodSelector`, which defaults to
 `app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
 other labels. Add peers through `networkPolicy.extraIngress` for an
@@ -490,7 +490,6 @@ binary names and storage paths keep their existing format.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (`{"status":"ok"}`) |
-| GET | `/repos` | List registered repos (auth required) |
 
 ## Deployment
 
@@ -501,30 +500,38 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 - **Image**: `sparkwing-cache`
 - **Port**: 8090 (service port 80)
 - **Storage**: PVC at `/data`
-- **SSH**: Optional, mounted at `/etc/ssh-key` from `ssh-key` secret
+- **SSH**: Optional, mounted at `/etc/ssh-key` from `ssh-key` secret. The
+  cache stages the key under `$HOME/.ssh` and sets `GIT_SSH_COMMAND` to offer
+  only that key (`IdentitiesOnly=yes`) against the pinned `known_hosts`; a
+  `GIT_SSH_COMMAND` already in the environment is kept as the operator set it
 - **Ingress**: your dashboard host's `cache-` subdomain
 
-### Environment Variables
+### Flags and credentials
 
-| Variable | Description |
-|----------|-------------|
-| `SPARKWING_API_TOKEN` | Bearer token for every route outside `/health`, `/metrics`, `/stats`, and `/proxy/`. Required unless auth is disabled |
-| `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | Start without a token, leaving those routes open |
-| `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
-| `FETCH_INTERVAL` | Cadence of the keep-warm pass over mirrors a request touched in the last hour (default: `0`, the pass is off) |
-| `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
-| `RECLONE_COOLDOWN` | Minimum gap between clone-if-missing attempts for one repo (default: `1h`; negative disables) |
-| `SPARKWING_METRICS_ADDR` | Bind address for `/metrics` and `/stats`, off the main listener (default: empty, both on the main listener) |
-| `DATA_DIR` | Override data root (default: `/data`) |
-| `PORT` | Listen port (default: `8090`) |
+The cache reads its settings from flags alone. `sparkwing-cache --help` lists
+every one; these are the ones a deployment usually sets.
 
-The server variables above configure the cache pod. On the client side,
-`SPARKWING_GITCACHE` forces a specific gitcache base URL for git clones:
-set it to a reachable cache server and sparkwing routes clones through
-that server instead of probing for a local one. `SPARKWING_GITCACHE_URL`,
-the variable the runner chart stamps on every runner pod, is the fallback
-when `SPARKWING_GITCACHE` is empty, so a chart-deployed runner already
-names its cache. With neither set, sparkwing auto-detects a cache on
+| Flag | Description |
+|------|-------------|
+| `--credentials-dir` | Directory holding `cache-token`, the bearer for every route outside `/health`, `/metrics`, `/stats`, and `/proxy/`, and `cache-grant-key`, the key that verifies cache grants. An absent file turns its feature off; without `cache-token` the cache refuses to start unless `--allow-unauthenticated` is set |
+| `--allow-unauthenticated` | Start without a token, leaving those routes open |
+| `--auto-register-repos` | Comma-separated `name=url` pairs for auto-registration |
+| `--fetch-interval` | Cadence of the keep-warm pass over mirrors a request touched in the last hour (default: `0`, the pass is off) |
+| `--fetch-fresh-window` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
+| `--reclone-cooldown` | Minimum gap between clone-if-missing attempts for one repo (default: `1h`; negative disables) |
+| `--metrics-addr` | Bind address for `/metrics` and `/stats`, off the main listener (default: empty, both on the main listener) |
+| `--data-dir` | Data root (default: `/data`) |
+| `--addr` | Listen address (default: `:8090`) |
+
+A malformed value stops the cache at startup with an error naming the flag.
+The controller reads the same token as `SPARKWING_CACHE_TOKEN`; from its own
+credentials directory it will read the same `cache-token` file name.
+
+On the client side, `SPARKWING_GITCACHE_URL` names a specific gitcache base
+URL for git clones: set it to a reachable cache server and sparkwing routes
+clones through that server instead of probing for a local one. The runner
+chart stamps it on every runner pod, so a chart-deployed runner already names
+its cache. Unset, sparkwing auto-detects a cache on
 `localhost:18090` and falls back to a direct clone when none answers.
 
 A clone through a named cache carries the run's `SPARKWING_CACHE_GRANT`, or

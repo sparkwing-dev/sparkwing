@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -203,26 +204,11 @@ func logOutboxUnavailable(log *slog.Logger, err error) {
 }
 
 func outboxDBPath() (string, error) {
-	if root := os.Getenv("SPARKWING_HOME"); root != "" {
-		return filepath.Join(root, "outbox.db"), nil
-	}
-	if underTest() {
-		return filepath.Join(testSandbox(), ".sparkwing", "outbox.db"), nil
-	}
-	home, err := os.UserHomeDir()
+	p, err := paths.DefaultPaths()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".sparkwing", "outbox.db"), nil
-}
-
-func underTest() bool {
-	base := filepath.Base(os.Args[0])
-	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
-}
-
-func testSandbox() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-test-home-%d", os.Getpid()))
+	return filepath.Join(p.Root, "outbox.db"), nil
 }
 
 func resolveStateDSN(surface, url, urlSource string) (string, error) {

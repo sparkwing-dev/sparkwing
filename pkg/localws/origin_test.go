@@ -131,7 +131,7 @@ func TestBuildHandler_GuardsTheServedChain(t *testing.T) {
 		paths:   paths,
 		backend: backend.NewStoreBackend(st, paths, nil),
 		store:   st,
-		ctrl:    controller.New(st, nil),
+		ctrl:    controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle}),
 	}, bundle)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

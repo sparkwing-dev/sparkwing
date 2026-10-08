@@ -237,6 +237,32 @@ A dedicated node process samples its observed process tree every 2 seconds
 and takes a final reading before execution returns. Samples are stored and
 charted in the dashboard. No cluster metrics-server is involved.
 
+A sample delivery failure leaves execution and retries unchanged. Sampling
+continues with a five-second timeout per write; the next recorded interval
+spans any missed intervals to preserve CPU time. At node finish, losses of at
+most 1% of attempted interval and command samples produce a `metrics_partial`
+run event with the counts, without a warning or excluding capacity learning.
+Larger losses produce one node log warning and a `resource_samples_incomplete`
+run event, and the executor makes one bounded, best-effort partial-marker write
+independent of execution cancellation. Partial measurements are lower bounds:
+capacity learning can raise a profile from them, but cannot lower any resource
+dimension or evict an older observation unless the partial measurement raises
+one dimension. Partial measurements never count toward graduation, so they
+cannot end the measuring safety margin. A partial contended run can raise the
+demand floor without decaying it. Exact exit CPU time and maximum memory remain
+trustworthy. A backend that refuses the partial marker gets the exclusion
+marker instead.
+
+Some samples exist to exclude a measurement: the marker for an unowned node or
+an unrecorded attempt, the parent marker before a spawn (the parent's
+measurement includes child work), and interval samples flagged invalid. When
+one of those is lost, the executor writes an exclusion marker at finish
+regardless of the loss ratio. Markers carry no reading and may exceed the
+per-node sample cap by a small headroom, so a measurement that filled the cap
+can still be labeled. Reaching the sample cap is not a delivery failure. Exact exit accounting is recorded separately, and billing
+uses claim duration and class rates rather than resource samples. Learned
+profiles can influence the resource class reserved for future claims.
+
 ### What's measured
 
 - **CPU**: millicores from the change in cumulative CPU time divided by the
@@ -756,10 +782,10 @@ log lines to `sparkwing-logs`, and each service stores them itself. Each
 therefore carries its own ceiling and refuses its own writes with `507`
 and an error naming its own flags.
 
-| Service | Flags | Environment |
-|--------|------|-------------|
-| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` | `SPARKWING_CACHE_MAX_STORE_BYTES` and the matching names |
-| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` | `SPARKWING_LOGS_MAX_STORE_BYTES` and the matching names |
+| Service | Flags |
+|--------|------|
+| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` |
+| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` |
 
 Each service counts what it stores as it stores it and walks its own
 trees on `--store-reconcile` (hourly by default, `0` measures once at
@@ -827,13 +853,10 @@ each guard; see [security.md](security.md#limits-profiles). A cache that
 verifies grants starts with a 200 GiB alarm unless the operator names
 another.
 
-Each service reads its own environment variables:
-`SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES`,
-`SPARKWING_LOGS_EGRESS_MAX_LOG_STREAMS`,
-`SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
-`SPARKWING_<SERVICE>_EGRESS_<BUDGET>`. They are separate on purpose: one
-variable on a shared ConfigMap read by three processes is one threshold
-applied three times.
+The controller also reads its budgets from environment variables:
+`SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
+`SPARKWING_CONTROLLER_EGRESS_<BUDGET>`. `sparkwing-logs` and
+`sparkwing-cache` read the flags alone.
 
 ### A team's daily download cap
 
@@ -914,9 +937,9 @@ controller's own row and needs no saving. A cache without a controller and
 the logs service count in memory alone: their counters are per process and
 start over on a restart.
 
-Read the controller's meter, including the principals that have
-downloaded the most this month, with `GET /api/v1/egress` on an `admin`
-token.
+Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
+and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether
+the alarm is up.
 
 ### One meter per process
 

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -69,8 +70,8 @@ func TestOpenArtifactStoreCapsTheSDKRetryer(t *testing.T) {
 	if err := store.Put(context.Background(), "key", strings.NewReader("payload")); err == nil {
 		t.Fatal("a put against a bucket that answers 500 returned no error")
 	}
-	if got := hits.Load(); got != int64(SDKMaxAttempts) {
-		t.Fatalf("the bucket was asked %d times for one put, want the cap of %d", got, SDKMaxAttempts)
+	if got := hits.Load(); got != int64(s3store.SDKMaxAttempts) {
+		t.Fatalf("the bucket was asked %d times for one put, want the cap of %d", got, s3store.SDKMaxAttempts)
 	}
 }
 

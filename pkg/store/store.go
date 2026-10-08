@@ -1148,7 +1148,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 92
+const expectedSchemaVersion = 94
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -1781,9 +1781,6 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		return skew
 	}
 	if current <= expectedSchemaVersion {
-		if err := bridgeLegacyFleetSQLite(ctx, tx, current, listed); err != nil {
-			return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
-		}
 		if err := bridgeMainLineageTenantKey(ctx, tx, current, false); err != nil {
 			return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 		}
@@ -1911,9 +1908,6 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if current > expectedSchemaVersion {
 		return tx.Commit()
 	}
-	if err := bridgeLegacyFleetPostgres(ctx, tx, current, listed); err != nil {
-		return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
-	}
 	if err := bridgeMainLineageTenantKey(ctx, tx, current, true); err != nil {
 		return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 	}
@@ -1951,6 +1945,10 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	return backfillRunAnnotationRollup(ctx, storeExecer{s: s})
 }
 
+// safety: the GitHub App is the only signed GitHub trigger, so the per-pipeline webhook secrets go with
+// their table; an older binary that still serves that route then fails its lookup rather than verifying.
+const dropGitHubWebhookBindings = `DROP TABLE IF EXISTS github_webhook_bindings`
+
 // safety: a version absent from this map must leave an older binary reading and
 // writing the migrated database; a version present here does not, so its names are
 // stamped and that binary refuses the store rather than corrupting it. Nothing below
@@ -1961,9 +1959,9 @@ var migrationRequirements = map[int][]string{
 	26: {"unique-token-prefix"},
 	27: {"inherited-holder-marker"},
 	30: {
-		executorEnrollmentRequirement,
-		executorOfferRequirement,
-		agentLossRequirement,
+		"executor-enrollment-v1",
+		"executor-offer-arbitration-v1",
+		"agent-loss-attempt-fencing-v1",
 	},
 	31: {assistedExecutionPolicyRequirement},
 	33: {cronScheduleNameRequirement},
@@ -2123,8 +2121,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 36:
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodePlacementCols)
 	case 37:
-		_, err := tx.ExecContext(ctx, githubWebhookBindingsTableSQLite)
-		return err
+		// safety: v37 created the per-pipeline webhook bindings that v92 drops, so a database
+		// that never held them skips straight past it.
+		return nil
 	case 38:
 		return applyStorageMigrationSQLite(ctx, tx)
 	case 39:
@@ -2265,14 +2264,19 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyMetricSampleKindMigration(ctx, tx)
 	case 90:
 		return applyNodeOutputMigration(ctx, tx)
-	case 92:
-		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
-		return err
 	case 91:
 		if err := ensureColumnsSQLite(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, githubAppDeliveriesReceivedIndex)
+		return err
+	case 92:
+		_, err := tx.ExecContext(ctx, dropGitHubWebhookBindings)
+		return err
+	case 93:
+		return backfillNodeBounceTeams(ctx, tx)
+	case 94:
+		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2598,8 +2602,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 36:
 		return addColumnsTx(ctx, tx, "nodes", nodePlacementColsPostgres)
 	case 37:
-		_, err := tx.ExecContext(ctx, githubWebhookBindingsTablePostgres)
-		return err
+		// safety: v37 created the per-pipeline webhook bindings that v92 drops, so a database
+		// that never held them skips straight past it.
+		return nil
 	case 38:
 		return applyStorageMigrationPostgres(ctx, tx)
 	case 39:
@@ -2738,14 +2743,19 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyMetricSampleKindMigration(ctx, tx)
 	case 90:
 		return applyNodeOutputMigration(ctx, tx)
-	case 92:
-		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
-		return err
 	case 91:
 		if err := addColumnsTx(ctx, tx, "github_app_deliveries", githubAppDeliveryEventCols); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, githubAppDeliveriesReceivedIndex)
+		return err
+	case 92:
+		_, err := tx.ExecContext(ctx, dropGitHubWebhookBindings)
+		return err
+	case 93:
+		return backfillNodeBounceTeams(ctx, tx)
+	case 94:
+		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -3370,13 +3380,13 @@ var (
 // perf: every append rereads and rewrites the run's whole list, and the
 // node's or step's, so a run's annotations cost O(n^2) bytes written; the
 // bounds above cap that at about 1000 rewrites of at most 4 MiB each.
-func appendRunAnnotation(tx *storeTx, runID, msg string) error {
+func appendRunAnnotation(tx *storeTx, team Team, runID, msg string) error {
 	if len(msg) > MaxAnnotationBytes {
 		return ErrAnnotationTooLarge
 	}
 	var blob []byte
 	err := tx.QueryRow(
-		`SELECT annotations_json FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&blob)
+		`SELECT annotations_json FROM runs WHERE team = ? AND id = ?`+tx.forUpdate(), string(team), runID).Scan(&blob)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -3395,7 +3405,7 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	if len(next) > MaxRunAnnotationBytes {
 		return ErrRunAnnotationBytes
 	}
-	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE id = ?`, next, runID)
+	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE team = ? AND id = ?`, next, string(team), runID)
 	return err
 }
 
@@ -4090,28 +4100,11 @@ func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg str
 	return s.defaultTenant().FinishRunIfActive(ctx, runID, status, errMsg)
 }
 
-// FinishRunsIfActive atomically finalizes the named non-terminal runs. A
+// FinishRunsIfActive atomically finalizes the named non-terminal default-team runs. A
 // failure rolls back every member, so one shared lease cannot be partly
 // cancelled.
 func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
-	if !isTerminalRunStatus(status) {
-		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
-	}
-	if len(runIDs) == 0 {
-		return nil
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UnixNano()
-	for _, runID := range runIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return s.defaultTenant().FinishRunsIfActive(ctx, runIDs, status, errMsg)
 }
 
 // TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
@@ -4120,20 +4113,7 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 // (laptop closed, network gone, process killed) and flip it to
 // failed instead of leaving status='running' forever.
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunHeartbeatFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
-		time.Now().UnixNano(), runID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.defaultTenant().TouchRunHeartbeat(ctx, runID)
 }
 
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
@@ -4197,8 +4177,13 @@ ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
 
 // SetRetriedAs stores the reverse retry pointer on runID. Idempotent.
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
-	_, err := s.exec(ctx,
-		`UPDATE runs SET retried_as = ? WHERE id = ?`, newID, runID)
+	return s.defaultTenant().SetRetriedAs(ctx, runID, newID)
+}
+
+// SetRetriedAs is [Store.SetRetriedAs] confined to t's team.
+func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
+	_, err := t.s.exec(ctx,
+		`UPDATE runs SET retried_as = ? WHERE team = ? AND id = ?`, newID, string(t.team), runID)
 	return err
 }
 
@@ -4206,22 +4191,9 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 // has to reach each of them and scanRun together or the scan misaligns.
 const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
 
-// GetRun fetches a single run by ID.
+// GetRun fetches a single default-team run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
-	row := s.queryRow(ctx, `
-SELECT `+runColumns+`
-  FROM runs WHERE id = ?`, runID)
-	run, err := scanRun(row)
-	if errors.Is(err, ErrNotFound) {
-		return nil, notFound("run", runID)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := s.loadAgentLossRetry(ctx, DefaultTeam, run); err != nil {
-		return nil, err
-	}
-	return run, nil
+	return s.defaultTenant().GetRun(ctx, runID)
 }
 
 // RunFilter narrows ListRuns results; zero value matches everything.
@@ -4490,7 +4462,12 @@ SELECT ` + runColumns + `
 // the trigger row in that case (orphaned: child run is gone, edge
 // remains visible) so parent DAGs stay stable.
 func (s *Store) DeleteRun(ctx context.Context, runID string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().DeleteRun(ctx, runID)
+}
+
+// DeleteRun is [Store.DeleteRun] confined to t's team.
+func (t *Tenant) DeleteRun(ctx context.Context, runID string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -4498,18 +4475,28 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, runID); err != nil {
+	var owned int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE team = ? AND id = ?
+UNION ALL SELECT 1 FROM triggers WHERE team = ? AND id = ? LIMIT 1`,
+		string(t.team), runID, string(t.team), runID).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("run", runID)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE team = ? AND id = ?`, string(t.team), runID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM triggers WHERE id = ? AND parent_node_id = ''`, runID); err != nil {
+		`DELETE FROM triggers WHERE team = ? AND id = ? AND parent_node_id = ''`, string(t.team), runID); err != nil {
 		return err
 	}
 	// safety: concurrency_cache carries no foreign key, so a memo
 	// entry left here keeps pointing at output this delete removes,
 	// and every later hit on that key fails to fetch it.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM concurrency_cache WHERE origin_run_id = ?`, runID); err != nil {
+		`DELETE FROM concurrency_cache WHERE team = ? AND origin_run_id = ?`, string(t.team), runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4520,7 +4507,7 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 // including on failure, so callers can purge their log files and cache blobs.
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error) {
 	rows, err := s.query(ctx,
-		`SELECT id FROM runs
+		`SELECT id, team FROM runs
 		   WHERE COALESCE(finished_at, started_at) < ?
 		     AND `+runTerminalIn,
 		cutoff.UnixNano())
@@ -4528,19 +4515,21 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 		return nil, err
 	}
 	var ids []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
+		teams[id] = Team(team)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	var deleted []string
 	for _, id := range ids {
-		if err := s.DeleteRun(ctx, id); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).DeleteRun(ctx, id); err != nil {
 			return deleted, err
 		}
 		deleted = append(deleted, id)
@@ -4824,22 +4813,22 @@ INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefe
 			       execution_body_requirements_json, execution_body_requirements_hash,
 			       seq)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
-		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
-		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
-		COALESCE(?, (SELECT retry_avoid_until FROM runs WHERE id = ?)),
+		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE team = ? AND id = ?), ''),
+		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE team = ? AND id = ?), ''),
+		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE team = ? AND id = ?), ''),
+		COALESCE(?, (SELECT retry_avoid_until FROM runs WHERE team = ? AND id = ?)),
 		?,
 		COALESCE((SELECT root_run_id FROM agent_loss_retries WHERE team = ? AND run_id = ?), ?),
 		?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
-		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
+		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
-		n.AvoidCoordinatorID, n.RunID,
-		n.AvoidExecutorKind, n.RunID,
-		n.AvoidExecutorID, n.RunID,
-		nullableUnixNano(n.AvoidUntil), n.RunID,
+		n.AvoidCoordinatorID, string(team), n.RunID,
+		n.AvoidExecutorKind, string(team), n.RunID,
+		n.AvoidExecutorID, string(team), n.RunID,
+		nullableUnixNano(n.AvoidUntil), string(team), n.RunID,
 		n.AttemptsConsumed,
 		string(team), n.RunID, n.RunID,
 		n.RequiredCoordinatorID,
@@ -4847,7 +4836,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		policyJSON, policyHash, policyVersion, bodyProtocol,
 		supervisorRequirementsJSON, supervisorRequirementsHash,
 		bodyRequirementsJSON, bodyRequirementsHash,
-		n.RunID)
+		string(team), n.RunID)
 	if err != nil {
 		return err
 	}
@@ -4874,10 +4863,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 // A no-op is silent: every caller starts a node it is about to
 // execute and finish, and none reads the row count.
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID, `
+	return s.defaultTenant().StartNode(ctx, runID, nodeID)
+}
+
+// StartNode is [Store.StartNode] confined to t's team.
+func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID, `
 UPDATE nodes SET status = ?, started_at = ?
- WHERE run_id = ? AND node_id = ? AND status != ?`,
-		nodeStatusRunning, time.Now().UnixNano(), runID, nodeID, nodeStatusDone)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status != ?`,
+		nodeStatusRunning, time.Now().UnixNano(), string(t.team), runID, nodeID, nodeStatusDone)
 	if err != nil {
 		return err
 	}
@@ -4886,7 +4880,12 @@ UPDATE nodes SET status = ?, started_at = ?
 
 // SetNodeStatus updates only the status column.
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().SetNodeStatus(ctx, runID, nodeID, status)
+}
+
+// SetNodeStatus is [Store.SetNodeStatus] confined to t's team.
+func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -4894,11 +4893,12 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	var executorName, currentStatus string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &currentStatus)
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), runID, nodeID).Scan(&executorName, &currentStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -4913,7 +4913,8 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 			return ErrLockHeld
 		}
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`, status, runID, nodeID)
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		status, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -4925,11 +4926,16 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 
 // UpdateNodeDeps rewrites a node's stored dependency list.
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
+	return s.defaultTenant().UpdateNodeDeps(ctx, runID, nodeID, deps)
+}
+
+// UpdateNodeDeps is [Store.UpdateNodeDeps] confined to t's team.
+func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	depsJSON, _ := json.Marshal(deps)
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET deps_json = ?
-		  WHERE run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
-		depsJSON, runID, nodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
+		depsJSON, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -4950,27 +4956,38 @@ func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 // bytes are written to the store's own output directory, so only a store
 // with one ([Store.OutputDir]) accepts them.
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	// safety: the output is written into the node's own team and the finish
+	// below is the default team's, so a node of another team is refused before
+	// its bytes are stored and charged.
+	if _, err := s.defaultTenant().GetNode(ctx, runID, nodeID); err != nil {
+		return err
+	}
 	ref, err := s.writeLocalOutput(ctx, runID, nodeID, output)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrOutputNotStored, err)
 	}
-	return s.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
+	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
 }
 
 // FinishNodeWithOutputRef finishes a node whose output, when there is one,
 // is already a committed object named by ref.
 func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
-	return s.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
 
-func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
+// FinishNodeWithOutputRef is [Store.FinishNodeWithOutputRef] confined to t's team.
+func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
+	return t.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+}
+
+func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
 	reason string, exitCode *int,
 ) error {
 	var code any
 	if exitCode != nil {
 		code = *exitCode
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -4978,14 +4995,14 @@ func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
 	var executorName, team string
 	var generation, consumed int64
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return notFound("node", runID+"/"+nodeID)
 	}
 	if err != nil {
 		return err
@@ -5009,9 +5026,9 @@ func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 UPDATE nodes
 	   SET status = ?, outcome = ?, error = ?, finished_at = ?,
 	       failure_reason = ?, exit_code = ?
-	 WHERE run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
+	 WHERE team = ? AND run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
 		nodeStatusDone, outcome, errMsg, time.Now().UnixNano(), reason, code,
-		runID, nodeID, nodeStatusDone)
+		string(t.team), runID, nodeID, nodeStatusDone)
 	if err != nil {
 		return err
 	}
@@ -5053,9 +5070,14 @@ UPDATE node_steps SET status = ?, finished_at = ?
 // FinishNode flip so a consumer dispatched on completion always sees
 // the reference. Empty digest is a no-op-equivalent clear.
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET artifact_manifest = ? WHERE run_id = ? AND node_id = ?`,
-		manifestDigest, runID, nodeID)
+	return s.defaultTenant().SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest)
+}
+
+// SetNodeArtifactManifest is [Store.SetNodeArtifactManifest] confined to t's team.
+func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
+		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		manifestDigest, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5087,20 +5109,26 @@ type NodeUsage struct {
 // the same time. Negative inputs and overflowing totals reject the entire observation.
 // Zero stays the value every reader treats as absent.
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
+	return s.defaultTenant().AddNodeUsage(ctx, runID, nodeID, u)
+}
+
+// AddNodeUsage is [Store.AddNodeUsage] confined to t's team; a node of
+// another team reads as missing, which is the no-op a missing node gets.
+func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
 	if u.CPUTime < 0 || u.Wall < 0 || u.MaxRSSBytes < 0 {
 		return errors.New("node usage requires nonnegative CPU time, wall time and peak RSS")
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
 	var cpu, wall int64
 	err = tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes
- WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&cpu, &wall)
+ WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&cpu, &wall)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -5121,7 +5149,8 @@ UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,
        process_wall_nanos = process_wall_nanos + ?,
        max_rss_bytes = CASE WHEN ? > max_rss_bytes THEN ? ELSE max_rss_bytes END
- WHERE run_id = ? AND node_id = ?`, int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ?`,
+		int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5136,10 +5165,15 @@ UPDATE nodes
 // update on Postgres. Rows a pre-v29 Postgres store wrote carry no
 // sequence and fall back to node id.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
-	rows, err := s.query(ctx, `SELECT `+nodeSelectColumns+`
+	return s.defaultTenant().ListNodes(ctx, runID)
+}
+
+// ListNodes is [Store.ListNodes] confined to t's team.
+func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
+	rows, err := t.s.query(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ?
- ORDER BY seq, node_id`, runID)
+ WHERE team = ? AND run_id = ?
+ ORDER BY seq, node_id`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -5159,7 +5193,7 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 		return nil, err
 	}
 	for _, n := range out {
-		attempts, err := s.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
+		attempts, err := t.s.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -5170,14 +5204,19 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 
 // GetNode fetches a single node row; ErrNotFound when missing.
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	row := s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
+	return s.defaultTenant().GetNode(ctx, runID, nodeID)
+}
+
+// GetNode is [Store.GetNode] confined to t's team.
+func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
+	row := t.s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ? AND node_id = ?`, runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
 	record := &nodeRecord{}
 	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
-	attempts, err := s.ListNodeExecutionAttempts(ctx, runID, nodeID)
+	attempts, err := t.s.ListNodeExecutionAttempts(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -5186,9 +5225,9 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 }
 
 const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
-       (SELECT o.key FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       (SELECT o.size FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       (SELECT o.sha256 FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.key FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.size FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.sha256 FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
        started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, prefers_labels,
        requested_cores, requested_memory_bytes, requested_slots,
@@ -5204,7 +5243,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 	   placement_reason, placement_hold_from, credit_cpu_class,
-	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
+	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte
@@ -5314,18 +5353,23 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 // concurrent appenders from losing entries: the transaction alone does
 // not, since Postgres runs it at READ COMMITTED.
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().AppendNodeAnnotation(ctx, runID, nodeID, msg)
+}
+
+// AppendNodeAnnotation is [Store.AppendNodeAnnotation] confined to t's team.
+func (t *Tenant) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	var current []byte
 	row := tx.QueryRowContext(ctx,
-		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID)
+		`SELECT annotations_json FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), runID, nodeID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
@@ -5344,16 +5388,16 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET annotations_json = ? WHERE run_id = ? AND node_id = ?`,
-		next, runID, nodeID); err != nil {
+		`UPDATE nodes SET annotations_json = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		next, string(t.team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
-		msg, runID); err != nil {
+		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?`,
+		msg, string(t.team), runID); err != nil {
 		return err
 	}
-	if err := appendRunAnnotation(tx, runID, msg); err != nil {
+	if err := appendRunAnnotation(tx, t.team, runID, msg); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5364,8 +5408,13 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 // ErrNotFound if the node row doesn't exist. Driven by
 // sparkwing.Summary() emitted outside any step body.
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET summary = ? WHERE run_id = ? AND node_id = ?`, md, runID, nodeID)
+	return s.defaultTenant().SetNodeSummary(ctx, runID, nodeID, md)
+}
+
+// SetNodeSummary is [Store.SetNodeSummary] confined to t's team.
+func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
+		`UPDATE nodes SET summary = ? WHERE team = ? AND run_id = ? AND node_id = ?`, md, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5426,19 +5475,25 @@ type NodeStep struct {
 // step) is a no-op, leaving the original started_at intact so a
 // retry doesn't reset the clock.
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().StartNodeStep(ctx, runID, nodeID, stepID)
+}
+
+// StartNodeStep is [Store.StartNodeStep] confined to t's team.
+func (t *Tenant) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
+VALUES (?,?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5449,25 +5504,31 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 // the running state. Creates the row if missing so the rare reorder where
 // step_end lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	return s.defaultTenant().FinishNodeStep(ctx, runID, nodeID, stepID, status)
+}
+
+// FinishNodeStep is [Store.FinishNodeStep] confined to t's team.
+func (t *Tenant) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	if err := ValidateStepTerminalStatus(status); err != nil {
 		return err
 	}
 	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
-    finished_at = excluded.finished_at`,
-		runID, runID, nodeID, stepID, status, now, now); err != nil {
+    finished_at = excluded.finished_at
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, status, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5477,22 +5538,28 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // phase). started_at == finished_at == now so duration computes to 0
 // without special-casing nulls in the wire-shape serializer.
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	return s.defaultTenant().SkipNodeStep(ctx, runID, nodeID, stepID)
+}
+
+// SkipNodeStep is [Store.SkipNodeStep] confined to t's team.
+func (t *Tenant) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
-    finished_at = excluded.finished_at`,
-		runID, runID, nodeID, stepID, StepSkipped, now, now); err != nil {
+    finished_at = excluded.finished_at
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, StepSkipped, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5502,11 +5569,16 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // nodes. Returned in (node_id, started_at) order so callers can
 // stream-bucket by node without a second sort.
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListNodeSteps(ctx, runID)
+}
+
+// ListNodeSteps is [Store.ListNodeSteps] confined to t's team.
+func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
+	rows, err := t.s.query(ctx, `
 SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
 FROM node_steps
-WHERE run_id = ?
-ORDER BY node_id, started_at`, runID)
+WHERE team = ? AND run_id = ?
+ORDER BY node_id, started_at`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -5544,12 +5616,17 @@ ORDER BY node_id, started_at`, runID)
 // row it locked, so an appender that lost the insert waits for the
 // winner rather than reading past it.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
+}
+
+// AppendStepAnnotation is [Store.AppendStepAnnotation] confined to t's team.
+func (t *Tenant) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 
@@ -5560,10 +5637,11 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 	var current []byte
 	if err := tx.QueryRowContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status)
-VALUES (`+runTeamSQL+`,?,?,?,?)
+VALUES (?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+  WHERE node_steps.team = excluded.team
 RETURNING annotations_json`,
-		runID, runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
+		string(t.team), runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
@@ -5579,16 +5657,16 @@ RETURNING annotations_json`,
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE node_steps SET annotations_json = ?
-WHERE run_id = ? AND node_id = ? AND step_id = ?`,
-		next, runID, nodeID, stepID); err != nil {
+WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
+		next, string(t.team), runID, nodeID, stepID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
-		msg, runID); err != nil {
+		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?`,
+		msg, string(t.team), runID); err != nil {
 		return err
 	}
-	if err := appendRunAnnotation(tx, runID, msg); err != nil {
+	if err := appendRunAnnotation(tx, t.team, runID, msg); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5601,25 +5679,31 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 // pattern AppendStepAnnotation uses. Driven by sparkwing.Summary()
 // emitted inside a step body.
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().SetStepSummary(ctx, runID, nodeID, stepID, md)
+}
+
+// SetStepSummary is [Store.SetStepSummary] confined to t's team.
+func (t *Tenant) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (team, run_id, node_id, step_id, status)
-VALUES (`+runTeamSQL+`,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, runID, nodeID, stepID, StepRunning); err != nil {
+VALUES (?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+  WHERE node_steps.team = excluded.team`,
+		string(t.team), runID, nodeID, stepID, StepRunning); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE node_steps SET summary = ?
-WHERE run_id = ? AND node_id = ? AND step_id = ?`,
-		md, runID, nodeID, stepID); err != nil {
+WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
+		md, string(t.team), runID, nodeID, stepID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5627,16 +5711,30 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 
 // MarkNodeReady opens the node's offer round with the highest attainable
 // executor priority from the same transaction that snapshots its requirements.
+// The node is opened in its run's own team, where CreateNode wrote it.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	return s.markNodeReady(ctx, runID, nodeID, nil)
+	t, err := s.runTenant(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return t.MarkNodeReady(ctx, runID, nodeID)
+}
+
+// MarkNodeReady is [Store.MarkNodeReady] confined to t's team.
+func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
+	return t.markNodeReady(ctx, runID, nodeID, nil)
 }
 
 func (s *Store) markNodeReadyWithExecutionPolicy(ctx context.Context, runID, nodeID string, policy nodeExecutionPolicy) error {
-	return s.markNodeReady(ctx, runID, nodeID, &policy)
+	t, err := s.runTenant(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return t.markNodeReady(ctx, runID, nodeID, &policy)
 }
 
-func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
-	tx, err := s.beginTx(ctx)
+func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -5646,17 +5744,17 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	node := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
-  FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID), node); err != nil {
+  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
 		return err
 	}
 	var pipeline string
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE id = ?`, runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", runID+"/"+nodeID)
 	} else if err != nil {
 		return err
 	}
 	opened := node.OfferStartedAt != nil
-	retrySource, isAgentLossRetry, err := s.requiredAgentLossRetryNodeSourceTx(ctx, tx, runID, nodeID)
+	retrySource, isAgentLossRetry, err := t.s.requiredAgentLossRetryNodeSourceTx(ctx, tx, runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -5674,7 +5772,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 			}
 			policy = &existing
 		} else {
-			built, eligible, policyErr := s.buildNodeExecutionPolicyTx(ctx, tx, node, pipeline)
+			built, eligible, policyErr := t.s.buildNodeExecutionPolicyTx(ctx, tx, node, pipeline)
 			if policyErr != nil {
 				return policyErr
 			}
@@ -5727,11 +5825,11 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 			   SET execution_policy_json = ?, execution_policy_hash = ?, execution_policy_version = ?, execution_body_protocol = ?,
        execution_supervisor_requirements_json = ?, execution_supervisor_requirements_hash = ?,
        execution_body_requirements_json = ?, execution_body_requirements_hash = ?
-			 WHERE run_id = ? AND node_id = ? AND offer_started_at IS NULL
+			 WHERE team = ? AND run_id = ? AND node_id = ? AND offer_started_at IS NULL
 			   AND `+nodeExecutionUnsealed,
 				persisted.PolicyJSON, persisted.PolicyHash, persisted.PolicyVersion, persisted.BodyProtocol,
 				persisted.SupervisorRequirementsJSON, persisted.SupervisorRequirementsHash,
-				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, runID, nodeID)
+				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, string(t.team), runID, nodeID)
 			if err != nil {
 				return err
 			}
@@ -5754,11 +5852,11 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 			return err
 		}
 		now = time.Now()
-		summary, err = s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+		summary, err = t.s.schedulingSummaryTx(ctx, tx, runID, nodeID)
 		if err != nil {
 			return err
 		}
-		target, executorEligible, err = s.highestActiveExecutorPriorityTx(
+		target, executorEligible, err = t.s.highestActiveExecutorPriorityTx(
 			ctx, tx, summary, now.Add(-ExecutorRegistrationActiveWindow), now,
 		)
 		if err != nil {
@@ -5774,7 +5872,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	offerStart := now
 	if !opened && !executorEligible {
-		idle, err := s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
+		idle, err := t.s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
 		if err != nil {
 			return err
 		}
@@ -5789,8 +5887,8 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		                  offer_started_at = COALESCE(offer_started_at, ?),
 		                  credit_cpu_class = ?,
 		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
-		  WHERE run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, target, runID, nodeID,
+		  WHERE team = ? AND run_id = ? AND node_id = ?`,
+		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, target, string(t.team), runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -5803,7 +5901,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		return notFound("node", runID+"/"+nodeID)
 	}
 	if !opened {
-		if _, err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
+		if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "executor_offer_round_opened", map[string]any{
 			"deadline":               offerStart.Add(nodeClaimOfferWindow),
 			"priority_target":        target,
 			"hard_capabilities":      summary.HardCapabilities,
@@ -5819,7 +5917,12 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 }
 
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().ResetNodeForAutoRetry(ctx, runID, nodeID)
+}
+
+// ResetNodeForAutoRetry is [Store.ResetNodeForAutoRetry] confined to t's team.
+func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -5831,14 +5934,14 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return ErrLockHeld
 	}
 	if _, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
-		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 			return err
 		}
 	}
 	var status, outcome, failureReason, executorName string
 	var claimedBy sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by, claim_executor
-  FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(), runID, nodeID).Scan(
+  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(), string(t.team), runID, nodeID).Scan(
 		&status, &outcome, &failureReason, &claimedBy, &executorName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
@@ -5856,19 +5959,16 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 	if status != nodeStatusDone || outcome != "failed" || failureReason == FailureAgentLost {
 		return ErrLockHeld
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return err
 	}
 	// safety: the reset puts the claim generation back to 0, so a token from
 	// the reset attempt would authorize again once a later claim reaches its
 	// generation.
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return err
-	}
+	team := t.team
 	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_tokens WHERE team = ? AND run_id = ? AND node_id = ?`,
 		string(team), runID, nodeID); err != nil {
 		return err
@@ -5887,8 +5987,8 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        credit_charged_through = 0,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
- WHERE run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
-		nodeStatusPending, runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
+		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
 	if err != nil {
 		return err
 	}
@@ -5904,16 +6004,21 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 
 // RevokeNodeReady cancels an unclaimed offer round.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().RevokeNodeReady(ctx, runID, nodeID)
+}
+
+// RevokeNodeReady is [Store.RevokeNodeReady] confined to t's team.
+func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
-		  WHERE run_id = ? AND node_id = ?
+		  WHERE team = ? AND run_id = ? AND node_id = ?
 		    AND claimed_by IS NULL AND `+nodeNotDone,
-		runID, nodeID,
+		string(t.team), runID, nodeID,
 	)
 	if err != nil {
 		return false, err
@@ -5929,7 +6034,7 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 		return false, nil
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		`DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -6405,7 +6510,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 	// one the plan declared itself earns an event on every claim.
 	if candidate.decision.reason == PlacementFallback ||
 		(candidate.decision.reason == PlacementPreferred && candidate.decision.nodeOwned) {
-		if _, err := appendEventTx(ctx, tx, candidate.runID, candidate.nodeID, "node_placed", nodePlacementEvent{
+		if _, err := appendRunEventTx(ctx, tx, candidate.runID, candidate.nodeID, "node_placed", nodePlacementEvent{
 			HolderID: holderID, Reason: candidate.decision.reason,
 			Prefers: placement.prefersFor(candidate.prefers),
 		}, now); err != nil {
@@ -6422,9 +6527,14 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
+	return s.defaultTenant().UpdateNodeActivity(ctx, runID, nodeID, detail)
+}
+
+// UpdateNodeActivity is [Store.UpdateNodeActivity] confined to t's team.
+func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
-		  WHERE run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), runID, nodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -6433,9 +6543,14 @@ func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail st
 
 // TouchNodeHeartbeat stamps last_heartbeat=now.
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET last_heartbeat = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), runID, nodeID)
+	return s.defaultTenant().TouchNodeHeartbeat(ctx, runID, nodeID)
+}
+
+// TouchNodeHeartbeat is [Store.TouchNodeHeartbeat] confined to t's team.
+func (t *Tenant) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
+	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
+		`UPDATE nodes SET last_heartbeat = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		time.Now().UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -6565,10 +6680,15 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 // with the zero identity -- nobody holds it -- and a trigger that does
 // not exist comes back ErrNotFound.
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
+	return s.defaultTenant().TriggerClaimant(ctx, triggerID)
+}
+
+// TriggerClaimant is [Store.TriggerClaimant] confined to t's team.
+func (t *Tenant) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
 	var claimant ClaimIdentity
-	err := s.queryRow(ctx,
-		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`,
-		triggerID).Scan(&claimant.Principal, &claimant.TokenPrefix)
+	err := t.s.queryRow(ctx,
+		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE team = ? AND id = ?`,
+		string(t.team), triggerID).Scan(&claimant.Principal, &claimant.TokenPrefix)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimIdentity{}, ErrNotFound
 	}
@@ -6611,28 +6731,6 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 		    AND claim_token_prefix = ?
 		    AND `+nodeClaimLiveSQL(""),
 		runID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
-	if err != nil {
-		return false, err
-	}
-	return held > 0, nil
-}
-
-// PrincipalHoldsPipelineClaim reports whether claimant holds an
-// unexpired claim on any node of any run of the named pipeline, whatever
-// repository the run declares. A write that names a profile key uses
-// PrincipalHoldsProfileClaim, which accepts the trigger claim as well.
-// An unbound claimant holds nothing.
-func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	var held int
-	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE run_id IN (SELECT id FROM runs WHERE pipeline = ?)
-		    AND claim_principal = ? AND claim_token_prefix = ?
-		    AND `+nodeClaimLiveSQL(""),
-		pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
 	if err != nil {
 		return false, err
 	}
@@ -6822,16 +6920,21 @@ type Event struct {
 // ListEventsAfter returns events with seq > afterSeq, ascending.
 // Pass 0 for full backlog; empty slice when there's nothing new.
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
+	return s.defaultTenant().ListEventsAfter(ctx, runID, afterSeq, limit)
+}
+
+// ListEventsAfter is [Store.ListEventsAfter] confined to t's team.
+func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
 	if limit <= 0 {
 		limit = 500
 	}
 	limit = min(limit, MaxRunListLimit)
-	rows, err := s.query(ctx, `
+	rows, err := t.s.query(ctx, `
 SELECT run_id, seq, node_id, kind, ts, payload
   FROM events
- WHERE run_id = ? AND seq > ?
+ WHERE team = ? AND run_id = ? AND seq > ?
  ORDER BY seq ASC
- LIMIT ?`, runID, afterSeq, limit)
+ LIMIT ?`, string(t.team), runID, afterSeq, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -6880,14 +6983,14 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 	}
 	defer func() { _ = tx.Rollback() }()
 	if nodeID != "" {
-		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
 
-	seq, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
+	seq, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
 	if err != nil {
 		return 0, err
 	}
@@ -6897,7 +7000,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 	return seq, nil
 }
 
-func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
+func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
 	var raw []byte
 	var err error
 	switch value := payload.(type) {
@@ -6911,34 +7014,44 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 	if err != nil {
 		return 0, err
 	}
-	if err := lockEventSequenceTx(ctx, tx, runID); err != nil {
+	if err := lockEventSequenceTx(ctx, tx, team, runID); err != nil {
 		return 0, err
 	}
 	var seq int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?`, runID).Scan(&seq); err != nil {
+		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE team = ? AND run_id = ?`, string(team), runID).Scan(&seq); err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
+VALUES (?,?,?,?,?,?,?)`, string(team), runID, seq, nodeID, kind, at.UnixNano(), raw)
 	if err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx,
-		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE id = ?`,
-		eventBytes(kind, raw), runID)
+		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE team = ? AND id = ?`,
+		eventBytes(kind, raw), string(team), runID)
 	return seq, err
+}
+
+// safety: a caller without a tenant handle appends into its run's own team, the team the run's
+// other rows were written into.
+func appendRunEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return 0, err
+	}
+	return appendEventTx(ctx, tx, team, runID, nodeID, kind, payload, at)
 }
 
 // safety: an append bumps the run row's event counters, so it takes the run's
 // row lock before the event-sequence lock, the order a claim round takes
 // them in; the other order deadlocks the two on PostgreSQL.
-func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
+func lockEventSequenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if tx.dialect != DialectPostgres {
 		return nil
 	}
-	if err := lockRunRow(ctx, tx, runID); err != nil {
+	if _, err := lockTeamRunRowTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
@@ -6980,44 +7093,78 @@ type DebugPause struct {
 	ReleaseKind string     `json:"release_kind,omitempty"`
 }
 
-// CreateDebugPause inserts (or upserts) an open pause row.
+// CreateDebugPause inserts (or upserts) an open pause row in the default team.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
-	_, err := s.exec(ctx, `
+	return s.defaultTenant().CreateDebugPause(ctx, p)
+}
+
+// CreateDebugPause inserts (or upserts) an open pause row on one of t's
+// runs. A run of another team reads as [ErrNotFound].
+func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, p.RunID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
 INSERT INTO debug_pauses (team, run_id, node_id, reason, paused_at, expires_at)
-VALUES (`+runTeamSQL+`,?,?,?,?,?)
+VALUES (?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
     paused_at = excluded.paused_at,
     expires_at = excluded.expires_at,
     released_at = NULL,
     released_by = '',
-    release_kind = ''`,
-		p.RunID, p.RunID, p.NodeID, p.Reason,
+    release_kind = ''
+  WHERE debug_pauses.team = excluded.team`,
+		string(t.team), p.RunID, p.NodeID, p.Reason,
 		p.PausedAt.UnixNano(), p.ExpiresAt.UnixNano())
-	return err
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return err
+		}
+		return notFound("run", p.RunID)
+	}
+	return tx.Commit()
 }
 
-// GetActiveDebugPause returns the open pause for a node, if any.
+// GetActiveDebugPause returns the open pause for a node of the default team, if any.
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
-	row := s.queryRow(ctx, `
+	return s.defaultTenant().GetActiveDebugPause(ctx, runID, nodeID)
+}
+
+// GetActiveDebugPause returns the open pause for a node of one of t's runs, if any.
+func (t *Tenant) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
+	row := t.s.queryRow(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
- WHERE run_id = ? AND node_id = ? AND released_at IS NULL
+ WHERE team = ? AND run_id = ? AND node_id = ? AND released_at IS NULL
  ORDER BY paused_at DESC
- LIMIT 1`, runID, nodeID)
+ LIMIT 1`, string(t.team), runID, nodeID)
 	return scanDebugPause(row)
 }
 
-// ListDebugPauses returns all pause rows for a run, newest first.
+// ListDebugPauses returns all pause rows for a run of the default team, newest first.
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListDebugPauses(ctx, runID)
+}
+
+// ListDebugPauses returns all pause rows for one of t's runs, newest first.
+func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugPause, err error) {
+	rows, err := t.s.query(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
- WHERE run_id = ?
- ORDER BY paused_at DESC`, runID)
+ WHERE team = ? AND run_id = ?
+ ORDER BY paused_at DESC`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []*DebugPause
 	for rows.Next() {
 		p, err := scanDebugPause(rows)
@@ -7029,13 +7176,19 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 	return out, rows.Err()
 }
 
-// ReleaseDebugPause closes the open pause; ErrNotFound when none.
+// ReleaseDebugPause closes the open pause of a default-team node; ErrNotFound when none.
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
-	res, err := s.exec(ctx, `
+	return s.defaultTenant().ReleaseDebugPause(ctx, runID, nodeID, releasedBy, kind)
+}
+
+// ReleaseDebugPause closes the open pause of a node of one of t's runs;
+// ErrNotFound when none.
+func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
+	res, err := t.s.exec(ctx, `
 UPDATE debug_pauses
    SET released_at = ?, released_by = ?, release_kind = ?
- WHERE run_id = ? AND node_id = ? AND released_at IS NULL`,
-		time.Now().UnixNano(), releasedBy, kind, runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND released_at IS NULL`,
+		time.Now().UnixNano(), releasedBy, kind, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -7161,7 +7314,7 @@ type Trigger struct {
 	// captured one delivery could re-send it under an id of their own.
 	//
 	// The store writes this field and never reads it back: it exists for
-	// the unique constraint, and [Store.FindTriggerByWebhookReplay]
+	// the unique constraint, and [Tenant.FindTriggerByWebhookReplay]
 	// resolves a collision to the trigger that won it.
 	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
 	// Team owns the trigger and the run it becomes. A claim and a read
@@ -7343,47 +7496,7 @@ func isUniqueViolation(err error) bool {
 // submission of one pipeline with another pipeline's run would mean the
 // requested pipeline never runs at all.
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error) {
-	if key == "" || pipeline == "" {
-		return nil, notFound("trigger for idempotency key", key)
-	}
-	var id string
-	err := s.queryRow(ctx,
-		`SELECT id FROM triggers WHERE pipeline = ? AND idempotency_key = ?`,
-		pipeline, key).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("trigger for idempotency key", key)
-		}
-		return nil, err
-	}
-	return s.GetTrigger(ctx, id)
-}
-
-// FindTriggerByWebhookReplay returns the trigger a refused webhook
-// delivery collided with: the one holding replayKey, or failing that the
-// one holding delivery. It reports ErrNotFound when neither is stored.
-//
-// The caller is answering a duplicate, so it needs the run the first
-// delivery produced rather than a bare refusal; a redelivery from the
-// provider is then answered with that run's id instead of a dead end.
-func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
-	if replayKey == "" && delivery == "" {
-		return nil, notFound("trigger for webhook delivery", delivery)
-	}
-	var id string
-	err := s.queryRow(ctx,
-		`SELECT id FROM triggers
-		  WHERE (webhook_replay_key != '' AND webhook_replay_key = ?)
-		     OR (webhook_delivery != '' AND webhook_delivery = ?)
-		  ORDER BY created_at LIMIT 1`,
-		replayKey, delivery).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("trigger for webhook delivery", delivery)
-		}
-		return nil, err
-	}
-	return s.GetTrigger(ctx, id)
+	return s.defaultTenant().FindTriggerByIdempotencyKey(ctx, pipeline, key)
 }
 
 // FinishTriggerAtGeneration closes a trigger only while seq is still
@@ -7396,21 +7509,31 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 // caller that sees false knows its work was superseded and that the
 // current claim owns the outcome.
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return s.endTriggerClaim(ctx, id, false,
+	return s.defaultTenant().FinishTriggerAtGeneration(ctx, id, seq)
+}
+
+// FinishTriggerAtGeneration is [Store.FinishTriggerAtGeneration] confined to t's team.
+func (t *Tenant) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	return t.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers SET status = CASE WHEN EXISTS
-		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+		   (SELECT 1 FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id AND runs.status = 'failed')
 		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
-		  WHERE id = ? AND claim_seq = ?`, id, seq)
+		  WHERE team = ? AND id = ? AND claim_seq = ?`, string(t.team), id, seq)
 }
 
 // safety: a refused write rolls the settlement back with it, so a superseded caller cannot settle a
 // claim it no longer holds.
-func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
-	tx, err := s.beginTx(ctx)
+// safety: a trigger of another team reads as missing before its credits are
+// settled, so ending a foreign claim settles nothing and changes nothing.
+func (t *Tenant) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if owned, err := rowPresentTx(ctx, tx, `SELECT 1 FROM triggers WHERE team = ? AND id = ?`, string(t.team), id); err != nil || !owned {
+		return false, err
+	}
 	if err := settleTriggerCreditsTx(ctx, tx, id, time.Now(), refundAll); err != nil {
 		return false, err
 	}
@@ -7433,7 +7556,15 @@ func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, 
 // not. A re-dispatch inherits the previous attempt's terminal run row, so a run
 // that ended before this claim began says nothing about the dispatch holding it.
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
-	return s.endTriggerClaim(ctx, id, false,
+	var team string
+	err := s.queryRow(ctx, `SELECT team FROM triggers WHERE id = ?`, id).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return (&Tenant{s: s, team: Team(team)}).endTriggerClaim(ctx, id, false,
 		`UPDATE triggers SET status = CASE WHEN EXISTS
 		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
 		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
@@ -7456,10 +7587,15 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 // is producing. Reports false without writing when the generation has
 // moved on.
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
+	return s.defaultTenant().FinishRunAtGeneration(ctx, runID, seq, status, errMsg)
+}
+
+// FinishRunAtGeneration is [Store.FinishRunAtGeneration] confined to t's team.
+func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
 	if !isTerminalRunStatus(status) {
 		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -7469,10 +7605,9 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 	// run write. Read them apart and a re-claim lands between the two, which
 	// is the one interleaving this fence exists to refuse.
 	var current int64
-	var team string
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT claim_seq, team FROM triggers WHERE id = ?`+tx.forUpdate(), runID).
-		Scan(&current, &team); {
+		`SELECT claim_seq FROM triggers WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), runID).
+		Scan(&current); {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
@@ -7481,7 +7616,7 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 		return false, nil
 	}
 
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, Team(team)); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7537,13 +7672,18 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // no row at all reads as not started, which is also what an unclaimed
 // trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	return s.endTriggerClaim(ctx, id, true,
+	return s.defaultTenant().RequeueUnstartedClaim(ctx, id)
+}
+
+// RequeueUnstartedClaim is [Store.RequeueUnstartedClaim] confined to t's team.
+func (t *Tenant) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
+	return t.endTriggerClaim(ctx, id, true,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
-		  WHERE id = ? AND status = ?
-		    AND COALESCE((SELECT status FROM runs WHERE runs.id = triggers.id), ?) = ?`,
-		triggerStatusPending, id, triggerStatusClaimed, runStatusPending, runStatusPending)
+		  WHERE team = ? AND id = ? AND status = ?
+		    AND COALESCE((SELECT status FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), ?) = ?`,
+		triggerStatusPending, string(t.team), id, triggerStatusClaimed, runStatusPending, runStatusPending)
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending
@@ -7554,21 +7694,31 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 // a lease. The generation guard keeps a shutting-down consumer from
 // yanking a claim another consumer has already taken.
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return s.endTriggerClaim(ctx, id, false,
+	return s.defaultTenant().ReleaseClaimAtGeneration(ctx, id, seq)
+}
+
+// ReleaseClaimAtGeneration is [Store.ReleaseClaimAtGeneration] confined to t's team.
+func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	return t.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
-		  WHERE id = ? AND claim_seq = ? AND status = ?`,
-		triggerStatusPending, id, seq, triggerStatusClaimed)
+		  WHERE team = ? AND id = ? AND claim_seq = ? AND status = ?`,
+		triggerStatusPending, string(t.team), id, seq, triggerStatusClaimed)
 }
 
 // TriggerClaimGeneration returns a trigger's current claim generation,
 // so a dispatch can tell whether it still owns the claim it started
 // under before it writes anything terminal.
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
+	return s.defaultTenant().TriggerClaimGeneration(ctx, id)
+}
+
+// TriggerClaimGeneration is [Store.TriggerClaimGeneration] confined to t's team.
+func (t *Tenant) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
 	var seq int64
-	if err := s.queryRow(ctx,
-		`SELECT claim_seq FROM triggers WHERE id = ?`, id).Scan(&seq); err != nil {
+	if err := t.s.queryRow(ctx,
+		`SELECT claim_seq FROM triggers WHERE team = ? AND id = ?`, string(t.team), id).Scan(&seq); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -7589,8 +7739,13 @@ func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, e
 // one of the two sees a row affected; a cancel that loses reports false
 // and the caller escalates to cancelling the now-running run.
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
+	return s.defaultTenant().CancelPendingTrigger(ctx, id)
+}
+
+// CancelPendingTrigger is [Store.CancelPendingTrigger] confined to t's team.
+func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
 	now := time.Now()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -7599,8 +7754,8 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers
 		    SET status = ?, cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		  WHERE id = ? AND status = ?`,
-		triggerStatusDone, now.UnixNano(), id, triggerStatusPending)
+		  WHERE team = ? AND id = ? AND status = ?`,
+		triggerStatusDone, now.UnixNano(), string(t.team), id, triggerStatusPending)
 	if err != nil {
 		return false, err
 	}
@@ -7614,9 +7769,9 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE runs
 		    SET status = ?, finished_at = ?, error = ?
-		  WHERE id = ? AND status = ?`,
+		  WHERE team = ? AND id = ? AND status = ?`,
 		runStatusCancelled, now.UnixNano(),
-		"cancelled before dispatch", id, runStatusPending); err != nil {
+		"cancelled before dispatch", string(t.team), id, runStatusPending); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7662,11 +7817,16 @@ type SpawnedChild struct {
 // + pipeline so the caller can attribute the spawn back to its node.
 // Ordered by parent_node_id, created_at so callers can stream-bucket.
 func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListSpawnedChildrenByRun(ctx, runID)
+}
+
+// ListSpawnedChildrenByRun is [Store.ListSpawnedChildrenByRun] confined to t's team.
+func (t *Tenant) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
+	rows, err := t.s.query(ctx, `
 SELECT parent_node_id, pipeline, id
 FROM triggers
-WHERE parent_run_id = ? AND parent_node_id != ''
-ORDER BY parent_node_id, created_at`, runID)
+WHERE team = ? AND parent_run_id = ? AND parent_node_id != ''
+ORDER BY parent_node_id, created_at`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -7894,23 +8054,28 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 // extending its lease. It returns whether cancel was requested.
 // ErrNotFound when not claimed.
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
+	return s.defaultTenant().HeartbeatTrigger(ctx, id, lease)
+}
+
+// HeartbeatTrigger is [Store.HeartbeatTrigger] confined to t's team.
+func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var team, principal, tokenPrefix string
+	var principal, tokenPrefix string
 	var reservedAt, claimSeq int64
 	var oldLease, cancelNS sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		`SELECT team, credit_reserved_at, lease_expires_at, cancel_requested_at,
+		`SELECT credit_reserved_at, lease_expires_at, cancel_requested_at,
 		        claim_principal, claim_token_prefix, claim_seq
-		   FROM triggers WHERE id = ? AND status = ?`+tx.forUpdate(),
-		id, triggerStatusClaimed).Scan(&team, &reservedAt, &oldLease, &cancelNS,
+		   FROM triggers WHERE team = ? AND id = ? AND status = ?`+tx.forUpdate(),
+		string(t.team), id, triggerStatusClaimed).Scan(&reservedAt, &oldLease, &cancelNS,
 		&principal, &tokenPrefix, &claimSeq)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, fenced := TriggerClaimFenceFromContext(ctx); fenced {
@@ -7929,7 +8094,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
 		// safety: exhaustion finishes the run under the ledger, so the run
 		// row is locked first, in the order lockTeamRunRowTx names.
-		if err := lockRunRow(ctx, tx, id); err != nil {
+		if _, err := lockTeamRunRowTx(ctx, tx, t.team, id); err != nil {
 			return false, err
 		}
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
@@ -7942,18 +8107,18 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 		return false, ErrLockHeld
 	}
 	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
-		if err := settleTriggerWindowTx(ctx, tx, Team(team), id, reservedAt, now.UnixNano(), false, false); err != nil {
+		if err := settleTriggerWindowTx(ctx, tx, t.team, id, reservedAt, now.UnixNano(), false, false); err != nil {
 			if errors.Is(err, ErrInsufficientCredits) {
 				if _, stopErr := tx.ExecContext(ctx,
 					`UPDATE triggers SET status = ?, lease_expires_at = NULL, credit_reserved_at = 0,
 					        credit_paid_seconds = 0, credit_paid_amount_micro = 0, credit_reservation_id = '',
 					        cancel_requested_at = COALESCE(cancel_requested_at, ?)
 					  WHERE id = ? AND team = ? AND status = ?`,
-					triggerStatusFailed, now.UnixNano(), id, team, triggerStatusClaimed); stopErr != nil {
+					triggerStatusFailed, now.UnixNano(), id, string(t.team), triggerStatusClaimed); stopErr != nil {
 					return false, stopErr
 				}
 				if _, stopErr := tx.ExecContext(ctx, finishRunStmt,
-					runStatusFailed, "trigger credits exhausted", now.UnixNano(), id, team); stopErr != nil {
+					runStatusFailed, "trigger credits exhausted", now.UnixNano(), id, string(t.team)); stopErr != nil {
 					return false, stopErr
 				}
 				if commitErr := tx.Commit(); commitErr != nil {
@@ -7964,8 +8129,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = ?`,
-		now.Add(lease).UnixNano(), id, triggerStatusClaimed); err != nil {
+		`UPDATE triggers SET lease_expires_at = ? WHERE team = ? AND id = ? AND status = ?`,
+		now.Add(lease).UnixNano(), string(t.team), id, triggerStatusClaimed); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7981,10 +8146,15 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 // two statements leaves the flag on a claimed trigger, which is the
 // cooperative path again.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
-	if handled, err := s.requestControllerRunCancel(ctx, id, time.Now()); handled || err != nil {
+	return s.defaultTenant().RequestCancel(ctx, id)
+}
+
+// RequestCancel is [Store.RequestCancel] confined to t's team.
+func (t *Tenant) RequestCancel(ctx context.Context, id string) error {
+	if handled, err := t.s.requestControllerRunCancel(ctx, t.team, id, time.Now()); handled || err != nil {
 		return err
 	}
-	cancelled, err := s.CancelPendingTrigger(ctx, id)
+	cancelled, err := t.CancelPendingTrigger(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -7992,11 +8162,11 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 		return nil
 	}
 	now := time.Now().UnixNano()
-	res, err := s.exec(ctx,
+	res, err := t.s.exec(ctx,
 		`UPDATE triggers
 		    SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		  WHERE id = ?`,
-		now, id)
+		  WHERE team = ? AND id = ?`,
+		now, string(t.team), id)
 	if err != nil {
 		return err
 	}
@@ -8069,10 +8239,15 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 // FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
+	return s.defaultTenant().FinishTrigger(ctx, id)
+}
+
+// FinishTrigger is [Store.FinishTrigger] confined to t's team.
+func (t *Tenant) FinishTrigger(ctx context.Context, id string) error {
 	query := `UPDATE triggers SET status = CASE WHEN EXISTS
-	   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
-	   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL WHERE id = ?`
-	args := []any{id}
+	   (SELECT 1 FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id AND runs.status = 'failed')
+	   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL WHERE team = ? AND id = ?`
+	args := []any{string(t.team), id}
 	_, fenced := TriggerClaimFenceFromContext(ctx)
 	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
 		query += ` AND claim_principal = ? AND claim_token_prefix = ? AND claim_seq = ?
@@ -8080,7 +8255,7 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 			fence.ClaimGeneration, triggerStatusDone, triggerStatusFailed, triggerStatusClaimed, time.Now().UnixNano())
 	}
-	finished, err := s.endTriggerClaim(ctx, id, false, query, args...)
+	finished, err := t.endTriggerClaim(ctx, id, false, query, args...)
 	if err != nil || !fenced || finished {
 		return err
 	}
@@ -8214,7 +8389,7 @@ func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, r
 	now := time.Now().UnixNano()
 
 	rows, err := s.query(ctx, `
-SELECT id FROM runs
+SELECT id, team FROM runs
  WHERE status = ?
    AND last_heartbeat_at IS NOT NULL
    AND last_heartbeat_at < ?
@@ -8226,13 +8401,15 @@ SELECT id FROM runs
 		return nil, err
 	}
 	var ids []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
+		teams[id] = Team(team)
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -8243,7 +8420,7 @@ SELECT id FROM runs
 		if err := s.cascadeOrphanedNodes(ctx, id, reason, now); err != nil {
 			return nil, err
 		}
-		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).FinishRun(ctx, id, runStatusFailed, reason); err != nil {
 			return nil, err
 		}
 	}
@@ -8261,7 +8438,7 @@ func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline, staleHeartbe
 	nowNS := now.UnixNano()
 
 	rows, err := s.query(ctx, `
-SELECT r.id
+SELECT r.id, r.team
   FROM runs r
   JOIN triggers t ON t.id = r.id
  WHERE r.finished_at IS NULL
@@ -8278,13 +8455,15 @@ SELECT r.id
 		return nil, err
 	}
 	var candidates []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			closeRowsOrLog(rows)
 			return nil, err
 		}
 		candidates = append(candidates, id)
+		teams[id] = Team(team)
 	}
 	closeRowsOrLog(rows)
 	if err := rows.Err(); err != nil {
@@ -8314,7 +8493,7 @@ UPDATE runs SET status = ?, error = ?, finished_at = ?
 		}
 		// safety: the trigger outlives the run it names, so a late claimant would
 		// compile and execute a child for a run this sweep already failed.
-		if err := s.FinishTrigger(ctx, id); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).FinishTrigger(ctx, id); err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
@@ -8349,7 +8528,7 @@ UPDATE nodes
 
 func (s *Store) orphanedRunsQuery() string {
 	return `
-SELECT r.id
+SELECT r.id, r.team
   FROM runs r
  WHERE r.status = ?
    AND r.started_at < ?
@@ -8368,13 +8547,15 @@ func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.D
 		return 0, err
 	}
 	var orphanIDs []string
+	teams := map[string]Team{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
 			_ = rows.Close()
 			return 0, err
 		}
 		orphanIDs = append(orphanIDs, id)
+		teams[id] = Team(team)
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -8387,7 +8568,7 @@ func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.D
 		if err := s.cascadeOrphanedNodes(ctx, id, errMsg, now); err != nil {
 			return 0, err
 		}
-		if err := s.FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
+		if err := (&Tenant{s: s, team: teams[id]}).FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
 			return 0, err
 		}
 	}
@@ -8425,19 +8606,24 @@ UPDATE nodes
 // that started it -- without the filter, two parallel local runs
 // would steal each other's children. Empty list when no candidates.
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
+	return s.defaultTenant().ListPendingTriggersForParent(ctx, parentRunID)
+}
+
+// ListPendingTriggersForParent is [Store.ListPendingTriggersForParent] confined to t's team.
+func (t *Tenant) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
 	now := time.Now()
-	if err := s.expirePendingAgentLossRetries(ctx, now); err != nil {
+	if err := t.s.expirePendingAgentLossRetries(ctx, now); err != nil {
 		return nil, err
 	}
-	rows, err := s.query(ctx, `
+	rows, err := t.s.query(ctx, `
 SELECT id FROM triggers
- WHERE status = ? AND parent_run_id = ? AND available_at <= ?
+ WHERE team = ? AND status = ? AND parent_run_id = ? AND available_at <= ?
 	AND NOT EXISTS (
 	    SELECT 1 FROM agent_loss_retries alr
-	    JOIN runs source_run ON source_run.id = alr.source_run_id
-	    WHERE alr.run_id = triggers.id
+	    JOIN runs source_run ON source_run.team = alr.team AND source_run.id = alr.source_run_id
+	    WHERE alr.team = triggers.team AND alr.run_id = triggers.id
 	      AND source_run.status NOT IN ('success','failed','cancelled'))
-	ORDER BY created_at ASC`, triggerStatusPending, parentRunID, now.UnixNano())
+	ORDER BY created_at ASC`, string(t.team), triggerStatusPending, parentRunID, now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -8455,13 +8641,7 @@ SELECT id FROM triggers
 
 // CountPendingTriggers returns how many triggers are waiting to be claimed.
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error) {
-	var n int
-	if err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM triggers WHERE status = ?`,
-		triggerStatusPending).Scan(&n); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return s.defaultTenant().CountPendingTriggers(ctx)
 }
 
 // ClaimSpecificTrigger flips a known pending trigger to 'claimed'
@@ -8588,66 +8768,80 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 
 // GetTrigger fetches a single trigger by ID.
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
-	var t Trigger
+	return s.defaultTenant().GetTrigger(ctx, id)
+}
+
+// GetTrigger is [Store.GetTrigger] confined to t's team.
+func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
+	var tr Trigger
 	var argsJSON, envJSON []byte
 	var createdNS int64
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
 	var fullInt, repoInheritedInt int
-	err := s.queryRow(
+	err := t.s.queryRow(
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
        idempotency_key, claim_seq, webhook_delivery, team,
-       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
-  FROM triggers WHERE id = ?`, id,
-	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
-		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.GithubRepoID, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team, &t.Error)
+       COALESCE((SELECT error FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), '')
+  FROM triggers WHERE team = ? AND id = ?`, string(t.team), id,
+	).Scan(&tr.ID, &tr.Pipeline, &argsJSON, &tr.TriggerSource, &tr.TriggerUser,
+		&envJSON, &tr.GitBranch, &tr.GitSHA, &tr.Status, &createdNS, &claimedNS, &leaseNS,
+		&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &tr.GithubRepoID, &repoInheritedInt, &tr.RetryOf, &tr.RetrySource, &tr.ParentNodeID, &parent, &fullInt,
+		&tr.IdempotencyKey, &tr.ClaimSeq, &tr.WebhookDelivery, &tr.Team, &tr.Error)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("trigger", id)
 		}
 		return nil, err
 	}
-	t.CreatedAt = time.Unix(0, createdNS)
+	tr.CreatedAt = time.Unix(0, createdNS)
 	if claimedNS.Valid {
 		ct := time.Unix(0, claimedNS.Int64)
-		t.ClaimedAt = &ct
+		tr.ClaimedAt = &ct
 	}
 	if leaseNS.Valid {
 		lt := time.Unix(0, leaseNS.Int64)
-		t.LeaseExpiresAt = &lt
+		tr.LeaseExpiresAt = &lt
 	}
 	if parent.Valid {
-		t.ParentRunID = parent.String
+		tr.ParentRunID = parent.String
 	}
-	t.Full = fullInt != 0
-	t.RepoInherited = repoInheritedInt != 0
+	tr.Full = fullInt != 0
+	tr.RepoInherited = repoInheritedInt != 0
 	if len(argsJSON) > 0 {
-		_ = json.Unmarshal(argsJSON, &t.Args)
+		if err := json.Unmarshal(argsJSON, &tr.Args); err != nil {
+			tr.Args = nil
+		}
 	}
 	if len(envJSON) > 0 {
-		_ = json.Unmarshal(envJSON, &t.TriggerEnv)
+		if err := json.Unmarshal(envJSON, &tr.TriggerEnv); err != nil {
+			tr.TriggerEnv = nil
+		}
 	}
-	return &t, nil
+	return &tr, nil
 }
 
 // FindSpawnedChildTriggerID returns the most-recent child trigger
 // for (parentRunID, parentNodeID, pipeline), or "".
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
+	return s.defaultTenant().FindSpawnedChildTriggerID(ctx, parentRunID, parentNodeID, pipeline)
+}
+
+// FindSpawnedChildTriggerID is [Store.FindSpawnedChildTriggerID] confined to t's team.
+func (t *Tenant) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
 	if parentRunID == "" || parentNodeID == "" || pipeline == "" {
 		return "", nil
 	}
 	var id string
-	err := s.queryRow(
+	err := t.s.queryRow(
 		ctx, `
 SELECT id FROM triggers
- WHERE parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
+ WHERE team = ? AND parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
  ORDER BY created_at DESC
- LIMIT 1`, parentRunID, parentNodeID, pipeline,
+ LIMIT 1`, string(t.team), parentRunID, parentNodeID, pipeline,
 	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -8941,15 +9135,20 @@ type NodeSettlement struct {
 // The claim recorded there names the credential the ledger priced the work
 // against, so a finish posted by another principal settles the same way.
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
+	return s.defaultTenant().NodeSettlement(ctx, runID, nodeID)
+}
+
+// NodeSettlement is [Store.NodeSettlement] confined to t's team.
+func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
 	var out NodeSettlement
 	var startedAt, finishedAt sql.NullInt64
 	var chargedThrough int64
 	var metered sql.NullBool
-	err := s.queryRow(ctx,
+	err := t.s.queryRow(ctx,
 		`SELECT started_at, finished_at, claim_token_prefix, credit_charged_through,
-                        (SELECT metered FROM tokens WHERE prefix = nodes.claim_token_prefix)
-                   FROM nodes WHERE run_id = ? AND node_id = ?`,
-		runID, nodeID,
+                        (SELECT metered FROM tokens WHERE tokens.team = nodes.team AND prefix = nodes.claim_token_prefix)
+                   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(t.team), runID, nodeID,
 	).Scan(&startedAt, &finishedAt, &out.ClaimTokenPrefix, &chargedThrough, &metered)
 	if err != nil {
 		return out, err
@@ -9014,13 +9213,20 @@ type Approval struct {
 	Comment     string     `json:"comment,omitempty"`
 }
 
-// CreateApproval inserts a pending approval and flips node status to
-// approval_pending in one txn. Re-runs a gate from scratch.
+// CreateApproval inserts a pending approval on a default-team node and flips
+// its status to approval_pending in one txn. Re-runs a gate from scratch.
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
+	return s.defaultTenant().CreateApproval(ctx, a)
+}
+
+// CreateApproval inserts a pending approval on a node of one of t's runs and
+// flips the node's status to approval_pending in one txn. Re-runs a gate from
+// scratch. A run of another team reads as [ErrNotFound].
+func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error {
 	if a.OnTimeout == "" {
 		a.OnTimeout = ApprovalOnTimeoutFail
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -9028,8 +9234,12 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, a.RunID); err != nil {
+		return err
+	}
 	var executorName, currentStatus string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), a.RunID, a.NodeID).Scan(&executorName, &currentStatus)
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), a.RunID, a.NodeID).Scan(&executorName, &currentStatus)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -9041,9 +9251,9 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 			return ErrLockHeld
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id) DO UPDATE SET
     requested_at = excluded.requested_at,
     message      = excluded.message,
@@ -9052,49 +9262,66 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
     approver     = '',
     resolved_at  = NULL,
     resolution   = '',
-    comment      = ''`,
-		a.RunID, a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
-		a.Message, a.TimeoutMS, a.OnTimeout); err != nil {
+    comment      = ''
+  WHERE approvals.team = excluded.team`,
+		string(t.team), a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
+		a.Message, a.TimeoutMS, a.OnTimeout)
+	if err != nil {
 		return err
 	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err != nil {
+			return err
+		}
+		return notFound("run", a.RunID)
+	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`,
-		NodeStatusApprovalPending, a.RunID, a.NodeID); err != nil {
+		`UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		NodeStatusApprovalPending, string(t.team), a.RunID, a.NodeID); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// GetApproval returns the row, or ErrNotFound.
+// GetApproval returns the row of a default-team node, or ErrNotFound.
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
-	row := s.queryRow(ctx, `
+	return s.defaultTenant().GetApproval(ctx, runID, nodeID)
+}
+
+// GetApproval returns the row of a node of one of t's runs, or ErrNotFound.
+func (t *Tenant) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
+	row := t.s.queryRow(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
-  FROM approvals WHERE run_id = ? AND node_id = ?`, runID, nodeID)
+  FROM approvals WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
 	return scanApproval(row)
 }
 
-// ResolveApproval stamps resolution on a pending row.
+// ResolveApproval stamps resolution on a pending default-team row.
 // ErrNotFound when missing; ErrLockHeld when already resolved.
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
-	if handled, err := s.resolveControllerApproval(ctx, runID, nodeID, resolution, approver, comment); err != nil {
+	return s.defaultTenant().ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
+}
+
+// ResolveApproval stamps resolution on a pending row of one of t's runs.
+// ErrNotFound when missing or another team's; ErrLockHeld when already
+// resolved.
+func (t *Tenant) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
+	if handled, err := t.s.resolveControllerApproval(ctx, t.team, runID, nodeID, resolution, approver, comment); err != nil {
 		return nil, err
 	} else if handled {
-		return s.GetApproval(ctx, runID, nodeID)
+		return t.GetApproval(ctx, runID, nodeID)
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var pkRun, pkNode string
 	var resolvedNS sql.NullInt64
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT run_id, node_id, resolved_at FROM approvals
-		  WHERE run_id = ? AND node_id = ?`, runID, nodeID,
-	).Scan(&pkRun, &pkNode, &resolvedNS)
+	err = tx.QueryRowContext(ctx,
+		`SELECT resolved_at FROM approvals WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(t.team), runID, nodeID).Scan(&resolvedNS)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("approval", runID+"/"+nodeID)
@@ -9108,28 +9335,33 @@ func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE approvals
    SET resolution = ?, approver = ?, comment = ?, resolved_at = ?
- WHERE run_id = ? AND node_id = ? AND resolved_at IS NULL`,
+ WHERE team = ? AND run_id = ? AND node_id = ? AND resolved_at IS NULL`,
 		resolution, approver, comment, time.Now().UnixNano(),
-		runID, nodeID); err != nil {
+		string(t.team), runID, nodeID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return s.GetApproval(ctx, runID, nodeID)
+	return t.GetApproval(ctx, runID, nodeID)
 }
 
-// ListApprovalsForRun returns all rows in request order.
+// ListApprovalsForRun returns a default-team run's rows in request order.
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error) {
-	rows, err := s.query(ctx, `
+	return s.defaultTenant().ListApprovalsForRun(ctx, runID)
+}
+
+// ListApprovalsForRun returns the rows of one of t's runs in request order.
+func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error) {
+	rows, err := t.s.query(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
-  FROM approvals WHERE run_id = ?
- ORDER BY requested_at ASC`, runID)
+  FROM approvals WHERE team = ? AND run_id = ?
+ ORDER BY requested_at ASC`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []*Approval
 	for rows.Next() {
 		a, err := scanApproval(rows)
@@ -9141,26 +9373,10 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	return out, rows.Err()
 }
 
-// ListPendingApprovals returns unresolved approvals oldest-first.
+// ListPendingApprovals returns the default team's unresolved approvals
+// oldest-first.
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error) {
-	rows, err := s.query(ctx, `
-SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
-       approver, resolved_at, resolution, comment
-  FROM approvals WHERE resolved_at IS NULL
- ORDER BY requested_at ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*Approval
-	for rows.Next() {
-		a, err := scanApproval(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return s.defaultTenant().ListPendingApprovals(ctx)
 }
 
 func scanApproval(rs rowScanner) (*Approval, error) {

@@ -16,7 +16,6 @@ import (
 
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
@@ -94,41 +93,6 @@ func TestStampSpan_SkipsEmptyAttrs(t *testing.T) {
 	StampSpan(ctx, SpanAttrs{RunID: "only-this"})
 }
 
-func TestTraceParentEnv_EmptyWithoutSpan(t *testing.T) {
-	if got := TraceParentEnv(context.Background()); got != "" {
-		t.Errorf("expected empty with no span, got %q", got)
-	}
-}
-
-func TestTraceParentEnv_WithSpan(t *testing.T) {
-	tp := sdktrace.NewTracerProvider()
-	defer tp.Shutdown(context.Background())
-	ctx, span := tp.Tracer("test").Start(context.Background(), "unit")
-	defer span.End()
-
-	env := TraceParentEnv(ctx)
-	const prefix = "TRACEPARENT="
-	if env == "" || len(env) <= len(prefix) || env[:len(prefix)] != prefix {
-		t.Fatalf("unexpected env var: %q", env)
-	}
-
-	t.Setenv("TRACEPARENT", env[len(prefix):])
-	extracted := ContextFromEnv(context.Background())
-	want := span.SpanContext().TraceID().String()
-	got := spanTraceIDString(extracted)
-	if got != want {
-		t.Errorf("round-trip trace id mismatch: got %q want %q", got, want)
-	}
-}
-
-func spanTraceIDString(ctx context.Context) string {
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.HasTraceID() {
-		return ""
-	}
-	return sc.TraceID().String()
-}
-
 func containsAll(haystack string, needles ...string) bool {
 	for _, n := range needles {
 		if !contains(haystack, n) {
@@ -168,7 +132,10 @@ func TestInitPreservesConfiguredLogging(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
 	var output bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	telemetry := Init(t.Context(), Config{ServiceName: "test"})
+	telemetry, err := Init(t.Context(), Config{ServiceName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		if err := telemetry.Shutdown(context.Background()); err != nil {
 			t.Error(err)
@@ -217,7 +184,10 @@ func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
 	handler := &startupLogHandler{Handler: slog.NewTextHandler(io.Discard, nil), ready: make(chan struct{})}
 	slog.SetDefault(slog.New(handler))
-	telemetry := Init(t.Context(), Config{ServiceName: "shutdown-test"})
+	telemetry, err := Init(t.Context(), Config{ServiceName: "shutdown-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		select {
 		case <-handler.ready:
@@ -255,7 +225,13 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 	log.SetOutput(io.Discard)
 
 	done := make(chan *Telemetry, 1)
-	go func() { done <- Init(t.Context(), Config{ServiceName: "test"}) }()
+	go func() {
+		telemetry, err := Init(t.Context(), Config{ServiceName: "test"})
+		if err != nil {
+			t.Error(err)
+		}
+		done <- telemetry
+	}()
 	var telemetry *Telemetry
 	select {
 	case telemetry = <-done:
@@ -276,5 +252,39 @@ func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
 	case <-printed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("logging after Init did not return")
+	}
+}
+
+func TestInitServesMetricsOnlyWhenAsked(t *testing.T) {
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"} {
+		t.Setenv(key, "")
+	}
+	old := slog.Default()
+	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+
+	plain, err := Init(t.Context(), Config{ServiceName: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = plain.Shutdown(context.Background()) })
+	if plain.PromHandler != nil || otel.GetMeterProvider() != meter {
+		t.Fatal("a service that serves no /metrics got a Prometheus meter provider")
+	}
+
+	served, err := Init(t.Context(), Config{ServiceName: "served", Prometheus: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = served.Shutdown(context.Background()) })
+	counter, err := Meter("served").Int64Counter("otelutil_test_hits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Add(t.Context(), 1)
+	rec := httptest.NewRecorder()
+	served.PromHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "otelutil_test_hits") {
+		t.Fatalf("/metrics does not serve the meter's instruments:\n%s", rec.Body.String())
 	}
 }

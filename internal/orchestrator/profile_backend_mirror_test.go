@@ -92,3 +92,7 @@ func TestApplyProfileBackendsWithMirror_LocalOnlyNoMirror(t *testing.T) {
 		t.Fatalf("LocalOnly State = %T, want *store.Store", opts.State)
 	}
 }
+
+func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {
+	return applyProfileBackendsWithMirror(ctx, opts, p, paths, false)
+}

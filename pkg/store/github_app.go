@@ -545,8 +545,7 @@ func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, 
 
 // GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
 // The App webhook refuses an event older than this, so a forgotten digest
-// does not readmit a replayed App delivery; a legacy webhook delivery
-// replayed after it is accepted again.
+// does not readmit a replayed delivery.
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 
 // BindGitHubAppDeliveryEvent ties digest to the first event it arrived as and
@@ -641,7 +640,7 @@ func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha 
 	}
 	out := make([]*Trigger, 0, len(ids))
 	for _, id := range ids {
-		trig, err := t.s.GetTrigger(ctx, id)
+		trig, err := t.GetTrigger(ctx, id)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
