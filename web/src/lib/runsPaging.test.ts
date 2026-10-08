@@ -144,10 +144,25 @@ describe("runListQuery", () => {
       exclude_git_branch: "wip",
       git_sha: "abc1234",
       exclude_git_sha: "def5678",
-      started_after: "2026-10-01T00:00:00.000Z",
+      started_after: "2026-10-01T00:00:00Z",
       q: "deploy -flaky",
       limit: "51",
     });
+  });
+
+  it("passes a full RFC 3339 bound through with every nanosecond", () => {
+    const q = runListQuery(
+      filters({
+        startedBefore: "2026-10-08T17:00:50.123456789Z",
+        finishedAfter: " 2026-10-08T11:00:50.5-06:00 ",
+        finishedBefore: "2026-10-08",
+      }),
+      {},
+      { kind: "latest" },
+    );
+    assert.equal(q?.get("started_before"), "2026-10-08T17:00:50.123456789Z");
+    assert.equal(q?.get("finished_after"), "2026-10-08T11:00:50.5-06:00");
+    assert.equal(q?.get("finished_before"), new Date("2026-10-08T00:00").toISOString());
   });
 
   it("turns tags into the pipelines that carry them", () => {

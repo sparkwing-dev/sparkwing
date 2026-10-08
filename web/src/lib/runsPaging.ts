@@ -61,7 +61,12 @@ export function pageRefParams(ref: RunsPageRef): Record<string, string | null> {
 
 type FilterValues = Omit<RunFilterState, `set${string}`>;
 
+// A full RFC 3339 time passes through untouched, because Date keeps milliseconds and an
+// inclusive bound copied from a run's nanosecond start would exclude that run.
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
 function isoBound(raw: string): string | null {
+  if (RFC3339.test(raw.trim())) return raw.trim();
   const ms = parseLooseDate(raw);
   return ms === null ? null : new Date(ms).toISOString();
 }
