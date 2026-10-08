@@ -611,3 +611,30 @@ func cacheCandidates(ctx context.Context, root string, limit int) ([]cacheCandid
 	candidates, _, err := cacheCandidatesBounded(ctx, root, limit)
 	return candidates, err
 }
+
+func TestAcquireOrMaterializeRefusesABrokenCeilingOnEveryPath(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	writeCacheConfig(t, "cache:\n  max_bytes: lots\n")
+	root := filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
+
+	fresh := testEntry(t, root, "33333333-33333333")
+	writes := 0
+	if _, _, err := fresh.AcquireOrMaterialize(context.Background(), func(path string) error {
+		writes++
+		return os.WriteFile(path, []byte("new"), 0o755)
+	}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
+		t.Fatalf("materialize error = %v, want the broken ceiling named", err)
+	}
+	if writes != 0 {
+		t.Fatalf("materializer ran %d times; a broken ceiling must refuse before publishing", writes)
+	}
+
+	cached := testEntry(t, root, "44444444-44444444")
+	seedEntry(t, cached, "cached", time.Unix(1, 0))
+	if _, _, err := cached.AcquireOrMaterialize(context.Background(), func(string) error {
+		t.Fatal("a cached entry was rebuilt")
+		return nil
+	}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
+		t.Fatalf("cache-hit error = %v, want the broken ceiling named", err)
+	}
+}
