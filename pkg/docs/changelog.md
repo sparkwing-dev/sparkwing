@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Fold eight `crons` verbs into `crons uninstall`, `crons list`, `crons show` and `crons set`
+  `crons disarm NAME` is `crons uninstall --name NAME`; `crons status` is `crons list --timer` with the same exit code; `crons next [--count N]` is `crons list --next N`, and `crons next NAME` is `crons show NAME --next N`; `crons lock` and `unlock` are `crons set NAME --pin` and `--unpin`; `crons pause` and `resume` are `crons set NAME --pause` and `--resume`; `crons reset NAME` is `crons set NAME --reset`. Output, JSON shapes and `--profile` behaviour carry over, and the timer units keep running `crons tick`. See [migration guide](docs/migrations/_unreleased.md#crons-verbs-fold-into-uninstall-list-show-and-set).
+
 - **cli (Breaking):** Fold `pipeline run`, `pipeline discover`, `pipeline explain`, `pipeline hooks fire` and `pipeline hooks survey` into the verbs that already do the job
   `pipeline run X` is `run X`; `pipeline discover --query Q` is `pipeline list --query Q`; `pipeline explain --name X|--all` is `pipeline plan --static --name X|--all`; `pipeline hooks fire [--fleet]` is `pipeline hooks status --prove [--fleet]`; `pipeline hooks survey [--ungated]` is `pipeline hooks status --all [--ungated]`. Generated pipeline examples now name `pipeline plan --static`. See [migration guide](docs/migrations/_unreleased.md#pipeline-verbs-fold-into-list-plan-and-hooks-status).
 

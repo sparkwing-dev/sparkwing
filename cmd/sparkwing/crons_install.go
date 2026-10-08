@@ -306,6 +306,7 @@ func cronsClampedCatchUps(schedules []store.CronSchedule) []cronsCatchUpCap {
 func runCronsUninstall(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsUninstall.Path, flag.ContinueOnError)
 	fleet := fs.Bool("fleet", false, "disarm every registered repo")
+	name := fs.String("name", "", "disarm this one schedule instead of the repo's")
 	outFmt := cronsOutputFlag(fs)
 	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsUninstall, fs, args); err != nil {
@@ -314,12 +315,24 @@ func runCronsUninstall(args []string) error {
 		}
 		return err
 	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("crons uninstall: unexpected positional %q; --name NAME disarms one schedule", fs.Arg(0))
+	}
 	if *on != "" && *fleet {
 		return fmt.Errorf("crons uninstall: %w", errCronsProfileAndFleet)
+	}
+	if fs.Changed("name") && *fleet {
+		return errors.New("crons uninstall: --name disarms one schedule and --fleet every one; drop one")
+	}
+	if fs.Changed("name") && *name == "" {
+		return errors.New("crons uninstall: --name needs a schedule name")
 	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUninstall.Path)
 	if err != nil {
 		return err
+	}
+	if *name != "" {
+		return runCronsDisarmOne(*name, format, *on)
 	}
 	if *on != "" {
 		roots, rerr := cronsTargetRoots(false)

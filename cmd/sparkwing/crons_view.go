@@ -19,42 +19,29 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func runCronsStatus(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsStatus.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmdCronsStatus, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsStatus.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return runCronsStatusProfile(*on, format)
+func runCronsTimer(profileName, format string) error {
+	if profileName != "" {
+		return runCronsStatusProfile(profileName, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
-		return fmt.Errorf("crons status: %w", err)
+		return fmt.Errorf("crons list --timer: %w", err)
 	}
 	defer release()
 
 	host, err := cronsTimerHost(session.paths)
 	if err != nil {
-		return fmt.Errorf("crons status: %w", err)
+		return fmt.Errorf("crons list --timer: %w", err)
 	}
 	health, err := session.svc.Health(context.Background(), host)
 	if err != nil {
-		return fmt.Errorf("crons status: %w", err)
+		return fmt.Errorf("crons list --timer: %w", err)
 	}
 	if err := renderCronsHealth(os.Stdout, health, session.now(), format); err != nil {
 		return err
 	}
 	if !health.Healthy() {
-		return exitErrorf(1, "crons status: %s", health.Detail)
+		return exitErrorf(1, "crons list --timer: %s", health.Detail)
 	}
 	return nil
 }
@@ -131,6 +118,8 @@ func cronsTickWord(h crons.Health, now time.Time) string {
 func runCronsList(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsList.Path, flag.ContinueOnError)
 	all := fs.Bool("all", false, "include schedules the repo no longer declares")
+	timer := fs.Bool("timer", false, "report the OS timer, the last tick and the counts instead of the rows")
+	next := fs.Int("next", 0, "show the next N instants across every armed schedule instead of the rows")
 	outFmt := cronsOutputFlag(fs)
 	on := addCronsProfileFlag(fs)
 	nowFlag := cronsNowFlag(fs)
@@ -140,9 +129,27 @@ func runCronsList(args []string) error {
 		}
 		return err
 	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("crons list: unexpected positional %q; `sparkwing crons show NAME --next N` reads one schedule", fs.Arg(0))
+	}
+	views := 0
+	for _, name := range []string{"all", "timer", "next"} {
+		if fs.Changed(name) {
+			views++
+		}
+	}
+	if views > 1 {
+		return errors.New("crons list: --all, --timer and --next each pick a different report; name one")
+	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsList.Path)
 	if err != nil {
 		return err
+	}
+	if *timer {
+		return runCronsTimer(*on, format)
+	}
+	if fs.Changed("next") {
+		return runCronsNext(cmdCronsList.Path, "", *next, format, *on, *nowFlag)
 	}
 	if *on != "" {
 		return runCronsListProfile(*on, format, *all)
@@ -244,8 +251,10 @@ type cronsFireView struct {
 func runCronsShow(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsShow.Path, flag.ContinueOnError)
 	fires := fs.Int("fires", 10, "how many recent fires to show")
+	next := fs.Int("next", 0, "show the next N instants this schedule fires instead of its record")
 	outFmt := cronsOutputFlag(fs)
 	on := addCronsProfileFlag(fs)
+	nowFlag := cronsNowFlag(fs)
 	if err := parseAndCheck(cmdCronsShow, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -256,9 +265,15 @@ func runCronsShow(args []string) error {
 		PrintHelp(cmdCronsShow, os.Stderr)
 		return errors.New("crons show: one schedule name is required")
 	}
+	if fs.Changed("next") && fs.Changed("fires") {
+		return errors.New("crons show: --next replaces the record and its fires; drop --fires")
+	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsShow.Path)
 	if err != nil {
 		return err
+	}
+	if fs.Changed("next") {
+		return runCronsNext(cmdCronsShow.Path, fs.Arg(0), *next, format, *on, *nowFlag)
 	}
 	if *on != "" {
 		return runCronsShowProfile(*on, fs.Arg(0), format, *fires)
@@ -377,53 +392,37 @@ type cronsUpcoming struct {
 	At       time.Time `json:"at"`
 }
 
-func runCronsNext(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsNext.Path, flag.ContinueOnError)
-	count := fs.Int("count", 5, "how many instants to show")
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	nowFlag := cronsNowFlag(fs)
-	if err := parseAndCheck(cmdCronsNext, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+// safety: name empty merges every armed schedule, the way list reads them all.
+func runCronsNext(path, name string, count int, format, profileName, nowRFC string) error {
+	label := strings.TrimPrefix(path, "sparkwing ") + " --next"
+	if count <= 0 {
+		return fmt.Errorf("%s: N must be positive, got %d", label, count)
 	}
-	if fs.NArg() > 1 {
-		return fmt.Errorf("crons next: unexpected positional %q", fs.Arg(1))
+	if profileName != "" {
+		return runCronsNextProfile(profileName, name, format, count)
 	}
-	if *count <= 0 {
-		return fmt.Errorf("crons next: --count must be positive, got %d", *count)
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsNext.Path)
+	session, release, err := openCrons(nowRFC)
 	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return runCronsNextProfile(*on, fs.Arg(0), format, *count)
-	}
-	session, release, err := openCrons(*nowFlag)
-	if err != nil {
-		return fmt.Errorf("crons next: %w", err)
+		return fmt.Errorf("%s: %w", label, err)
 	}
 	defer release()
 
 	ctx := context.Background()
 	var wanted []crons.Row
-	if fs.NArg() == 1 {
-		sched, rerr := session.svc.Resolve(ctx, fs.Arg(0))
+	if name != "" {
+		sched, rerr := session.svc.Resolve(ctx, name)
 		if rerr != nil {
 			return rerr
 		}
 		row, _, serr := session.svc.Show(ctx, sched.ID, 1)
 		if serr != nil {
-			return fmt.Errorf("crons next: %w", serr)
+			return fmt.Errorf("%s: %w", label, serr)
 		}
 		wanted = []crons.Row{row}
 	} else {
 		rows, lerr := session.svc.List(ctx)
 		if lerr != nil {
-			return fmt.Errorf("crons next: %w", lerr)
+			return fmt.Errorf("%s: %w", label, lerr)
 		}
 		for _, r := range rows {
 			if r.State == crons.StateArmed {
@@ -434,17 +433,17 @@ func runCronsNext(args []string) error {
 
 	var out []cronsUpcoming
 	for _, r := range wanted {
-		instants, uerr := session.svc.Upcoming(ctx, r.ID, *count)
+		instants, uerr := session.svc.Upcoming(ctx, r.ID, count)
 		if uerr != nil {
-			return fmt.Errorf("crons next: %w", uerr)
+			return fmt.Errorf("%s: %w", label, uerr)
 		}
 		for _, at := range instants {
 			out = append(out, cronsUpcoming{Schedule: r.ID, Name: r.Display, At: at})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
-	if len(out) > *count {
-		out = out[:*count]
+	if len(out) > count {
+		out = out[:count]
 	}
 	return renderCronsNext(os.Stdout, out, session.now(), format)
 }

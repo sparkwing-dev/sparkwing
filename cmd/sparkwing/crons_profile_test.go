@@ -95,27 +95,27 @@ func TestCronsShowProfile_RendersOneRow(t *testing.T) {
 	}
 }
 
-func TestCronsStatusProfile_ReportsTheControllerLoop(t *testing.T) {
+func TestCronsListTimerProfile_ReportsTheControllerLoop(t *testing.T) {
 	f := newCronsProfileFixture(t)
 	f.push(t)
 
 	out := captureStdout(t, func() {
 		// safety: a controller that has never ticked is unhealthy while
 		// something is armed, which is the exit code an operator reads.
-		_ = runCrons([]string{"status", "--profile", "prod", "-o", "pretty"})
+		_ = runCrons([]string{"list", "--timer", "--profile", "prod", "-o", "pretty"})
 	})
 	if !strings.Contains(out, crons.ControllerTimerDetail) {
 		t.Errorf("status does not name the controller loop:\n%s", out)
 	}
 }
 
-func TestCronsPauseProfile_PausesOnTheController(t *testing.T) {
+func TestCronsSetPauseProfile_PausesOnTheController(t *testing.T) {
 	f := newCronsProfileFixture(t)
 	f.push(t)
 
 	out := captureStdout(t, func() {
-		if err := runCrons([]string{"pause", "acme/widgets/nightly", "--profile", "prod", "-o", "pretty"}); err != nil {
-			t.Errorf("crons pause --profile: %v", err)
+		if err := runCrons([]string{"set", "acme/widgets/nightly", "--pause", "--profile", "prod", "-o", "pretty"}); err != nil {
+			t.Errorf("crons set --pause --profile: %v", err)
 		}
 	})
 	if !strings.Contains(out, "is paused") {
@@ -181,11 +181,11 @@ func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.
 	}
 }
 
-func TestCronsLockProfile_SaysThePinMovesWithThePush(t *testing.T) {
+func TestCronsSetPinProfile_SaysThePinMovesWithThePush(t *testing.T) {
 	newCronsProfileFixture(t)
-	err := runCrons([]string{"lock", "nightly", "--profile", "prod"})
+	err := runCrons([]string{"set", "nightly", "--pin", "--profile", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "crons install --profile") {
-		t.Fatalf("crons lock --profile: err = %v, want the push named as the way to re-pin", err)
+		t.Fatalf("crons set --pin --profile: err = %v, want the push named as the way to re-pin", err)
 	}
 }
 

@@ -37,35 +37,19 @@ func runCrons(args []string) error {
 	if len(args) == 0 {
 		PrintHelp(cmdCrons, os.Stderr)
 		return errors.New("crons: subcommand required " +
-			"(install|uninstall|disarm|lock|unlock|set|reset|status|list|show|next|pause|resume|run|tick)")
+			"(install|uninstall|list|show|set|run)")
 	}
 	switch args[0] {
 	case "install":
 		return runCronsInstall(args[1:])
 	case "uninstall":
 		return runCronsUninstall(args[1:])
-	case "disarm":
-		return runCronsDisarm(args[1:])
-	case "lock":
-		return runCronsLock(args[1:])
-	case "unlock":
-		return runCronsUnlock(args[1:])
 	case "set":
 		return runCronsSet(args[1:])
-	case "reset":
-		return runCronsReset(args[1:])
-	case "status":
-		return runCronsStatus(args[1:])
 	case "list":
 		return runCronsList(args[1:])
 	case "show":
 		return runCronsShow(args[1:])
-	case "next":
-		return runCronsNext(args[1:])
-	case "pause":
-		return runCronsPause(args[1:])
-	case "resume":
-		return runCronsResume(args[1:])
 	case "run":
 		return runCronsRun(args[1:])
 	case "tick":

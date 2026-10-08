@@ -3951,23 +3951,23 @@ path as ` + "`sparkwing run --sw-detached`" + `.
 
 Arming pins by default: install compiles the pipeline and keeps that binary, so
 a checkout updated afterwards does not change what runs unattended. Re-run
-install to move the pin, ` + "`crons unlock`" + ` to follow the checkout again,
-and ` + "`crons set`" + ` to override a declared cadence on this host alone.
+install to move the pin, ` + "`crons set --unpin`" + ` to follow the checkout
+again, and ` + "`crons set`" + ` to override a declared cadence on this host
+alone.
 
---profile NAME points every verb but tick, lock and unlock at a controller
-instead of this host.
+--profile NAME points every verb but tick, set --pin and set --unpin at a
+controller instead of this host.
 ` + "`crons install --profile`" + ` pushes the repo's ` + "`where: controller`" + `
 entries to it, pinned at HEAD unless --follow; the controller evaluates them
 from a loop of its own, one evaluator per store, and each fire becomes a
 trigger the cluster clones and runs.`,
 	SubcommandOrder: []string{
-		"install", "uninstall", "disarm", "lock", "unlock", "set", "reset",
-		"status", "list", "show", "next", "pause", "resume", "run",
+		"install", "uninstall", "list", "show", "set", "run",
 	},
 	Examples: []Example{
 		{"Arm this repo's schedules on this host", "sparkwing crons install"},
 		{"See what is armed and when it next fires", "sparkwing crons list"},
-		{"Check the timer and the last tick", "sparkwing crons status"},
+		{"Check the timer and the last tick", "sparkwing crons list --timer"},
 		{"Push this repo's controller schedules", "sparkwing crons install --profile prod"},
 	},
 }
@@ -4037,75 +4037,24 @@ too: the timer exists to serve armed schedules and nothing else.
 
 --fleet disarms every schedule this home holds.
 
+--name NAME removes one schedule instead: its fire history and its pinned
+pipeline binary go with it, and every other schedule of the same pipeline and
+repo stays armed. The timer is left as it is. To stop a schedule without
+losing its history, ` + "`crons set NAME --pause`" + ` instead.
+
 --profile NAME deletes the repo's schedules from that controller instead,
-naming the repo by its git origin.`,
+naming the repo by its git origin, or with --name the one schedule.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "fleet", Desc: "Disarm every schedule this home holds", Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Disarm this one schedule (id, repo/pipeline[/name], pipeline/name, or a unique pipeline name)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
 		{"Disarm the current repo", "sparkwing crons uninstall"},
 		{"Disarm everything on this host", "sparkwing crons uninstall --fleet"},
+		{"Remove one named entry", "sparkwing crons uninstall --name sweep/quick"},
 		{"Remove this repo from a controller", "sparkwing crons uninstall --profile prod"},
-	},
-}
-
-var cmdCronsDisarm = Command{
-	Path:     "sparkwing crons disarm",
-	Synopsis: "Remove one schedule from this host",
-	Description: `Deletes one schedule, its fire history and its pinned
-pipeline binary. Every other schedule of the same pipeline and repo stays
-armed.
-
-To stop a schedule without losing its history, pause it instead.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Remove one named entry", "sparkwing crons disarm sweep/quick"},
-	},
-}
-
-var cmdCronsLock = Command{
-	Path:     "sparkwing crons lock",
-	Synopsis: "Pin one schedule to the checkout as it stands",
-	Description: `Compiles the pipeline, keeps that binary under the sparkwing
-home, and records the checkout's HEAD against the schedule. Every later fire
-runs that binary, so editing or updating the checkout does not change what an
-unattended run executes.
-
-The pin covers the pipeline the repo declares. Scripts and binaries the
-pipeline runs from the checkout or from PATH are outside it.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Pin a schedule at HEAD", "sparkwing crons lock nightly"},
-	},
-}
-
-var cmdCronsUnlock = Command{
-	Path:     "sparkwing crons unlock",
-	Synopsis: "Let one schedule follow the checkout again",
-	Description: `Drops the pin and the pinned binary, so every later fire
-compiles the checkout as it stands at that minute, and the tick's refresh reads
-the repo's declaration again.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Follow the checkout again", "sparkwing crons unlock nightly"},
 	},
 }
 
@@ -4120,7 +4069,24 @@ field named again replaces the previous override.
 --arg replaces the declared argument set whole, so name every argument the
 schedule should launch with.
 
-The override survives re-arming; ` + "`sparkwing crons reset`" + ` drops it.
+The override survives re-arming; --reset drops it, returning the schedule to
+what the repo declares while the pin, the pause state, the cursor and the fire
+history stay.
+
+--pin compiles the pipeline, keeps that binary under the sparkwing home, and
+records the checkout's HEAD, so every later fire runs that binary however the
+checkout moves. The pin covers the pipeline the repo declares; scripts and
+binaries it runs from the checkout or from PATH are outside it. --unpin drops
+the pin and its binary, so every later fire compiles the checkout as it stands
+at that minute and the tick's refresh reads the declaration again. A
+controller schedule is pinned by the commit it was pushed at, so neither takes
+--profile.
+
+--pause stops the schedule firing and keeps it armed. A paused schedule still
+advances its cursor on every tick, so --resume fires the next due instant
+instead of replaying the ones that passed while it was paused.
+
+--pin, --unpin, --pause, --resume and --reset each stand alone on a call.
 ` + "`sparkwing crons list`" + ` marks an overridden expression with *, and
 ` + "`sparkwing crons show`" + ` prints the declared, override and effective
 value side by side.`,
@@ -4134,54 +4100,23 @@ value side by side.`,
 		{Name: "overlap", Argument: "POLICY", Desc: "What a due instant does while the previous run is going: skip|queue", Group: "Input"},
 		{Name: "catch-up", Argument: "DUR", Desc: "How late a due instant may still fire, such as 6h", Group: "Input"},
 		{Name: "arg", Argument: "K=V", Desc: "Argument the launch passes (repeatable; replaces the declared set)", Group: "Input"},
+		{Name: "reset", Desc: "Drop this host's override and run what the repo declares", Group: "Behavior"},
+		{Name: "pin", Desc: "Pin the schedule to the checkout as it stands", Group: "Behavior"},
+		{Name: "unpin", Desc: "Let the schedule follow the checkout again", Group: "Behavior"},
+		{Name: "pause", Desc: "Stop the schedule firing, keeping it armed", Group: "Behavior"},
+		{Name: "resume", Desc: "Let a paused schedule fire again", Group: "Behavior"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
+	GroupOrder: []string{"Input", "Behavior", "Output"},
 	Examples: []Example{
 		{"Run it later on this host", "sparkwing crons set nightly --cron '0 5 * * *'"},
 		{"Read the expression locally", "sparkwing crons set nightly --tz local"},
 		{"Launch with arguments", "sparkwing crons set sweep/quick --arg depth=shallow --arg dry-run=true"},
-	},
-}
-
-var cmdCronsReset = Command{
-	Path:     "sparkwing crons reset",
-	Synopsis: "Drop this host's override of a schedule",
-	Description: `Returns the schedule to what the repo declares. The pin, the
-pause state, the cursor and the fire history are untouched.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Run what the repo declares", "sparkwing crons reset nightly"},
-	},
-}
-
-var cmdCronsStatus = Command{
-	Path:     "sparkwing crons status",
-	Synopsis: "Report the OS timer, the last tick, and what is armed here",
-	Description: `Answers whether this host is actually evaluating what it
-armed: whether the timer is installed and running, whether it runs this
-sparkwing or one that has since moved, when the tick last landed and what it
-reported, and how many schedules are armed, paused, and undeclared.
-
-Exits non-zero when schedules are armed and the timer is not running, runs
-another binary, or has not ticked in the last few minutes, so a check script
-can read the exit code. A host with nothing armed is healthy.
-
---profile NAME reads a controller's scheduler instead: its counts, when its
-loop last ticked, and what that tick reported.`,
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Read the host's scheduler health", "sparkwing crons status"},
-		{"Machine-readable", "sparkwing crons status -o json"},
-		{"Read a controller's scheduler", "sparkwing crons status --profile prod"},
+		{"Run what the repo declares", "sparkwing crons set nightly --reset"},
+		{"Pin a schedule at HEAD", "sparkwing crons set nightly --pin"},
+		{"Follow the checkout again", "sparkwing crons set nightly --unpin"},
+		{"Pause a schedule", "sparkwing crons set fictional-nightly --pause"},
+		{"Resume it", "sparkwing crons set fictional-nightly --resume"},
 	},
 }
 
@@ -4193,16 +4128,32 @@ cron expression and zone it is read in, when it next fires, when it last
 fired, that fire's outcome, and whether it is armed, paused, or undeclared.
 
 Schedules the repo no longer declares are hidden behind a count; --all shows
-them. They keep their history and never fire.`,
+them. They keep their history and never fire.
+
+--timer answers whether this host is actually evaluating what it armed: whether
+the timer is installed and running, whether it runs this sparkwing or one that
+has since moved, when the tick last landed and what it reported, and how many
+schedules are armed, paused, and undeclared. It exits non-zero when schedules
+are armed and the timer is not running, runs another binary, or has not ticked
+in the last few minutes, so a check script can read the exit code. A host with
+nothing armed is healthy. With --profile it reads the controller's scheduler:
+its counts, when its loop last ticked, and what that tick reported.
+
+--next N merges the next N instants of every armed schedule, each in its
+configured zone; ` + "`crons show NAME --next N`" + ` reads one schedule.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "all", Desc: "Include schedules the repo no longer declares", Group: "Output"},
+		{Name: "timer", Desc: "Report the OS timer, the last tick and the counts instead of the rows", Group: "Output"},
+		{Name: "next", Argument: "N", Desc: "Show the next N instants across every armed schedule instead of the rows", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "sw-now", Argument: "RFC3339", Desc: "Read the relative times as of this instant", Group: "Behavior", Hidden: true},
 	},
 	Examples: []Example{
 		{"What is armed here", "sparkwing crons list"},
 		{"Include withdrawn schedules", "sparkwing crons list --all"},
+		{"Check the timer and the last tick", "sparkwing crons list --timer"},
+		{"What fires next on this host", "sparkwing crons list --next 5"},
 		{"What a controller evaluates", "sparkwing crons list --profile prod"},
 		{"Machine-readable (NDJSON)", "sparkwing crons list -o json"},
 	},
@@ -4217,74 +4168,24 @@ decided it, what it decided, the run it launched and that run's current
 status, and the reason for any outcome that is not a launch.
 
 NAME is a schedule id, a repo/pipeline name, or a bare pipeline name that is
-unique across this host's schedules.`,
+unique across this host's schedules.
+
+--next N prints the next N instants the schedule fires, in its configured
+zone, instead of the record.`,
 	PosArgs: []PosArg{
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "fires", Argument: "N", Desc: "How many recent fires to show", Default: "10", Group: "Output"},
+		{Name: "next", Argument: "N", Desc: "Show the next N instants this schedule fires instead of its record", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+		{Name: "sw-now", Argument: "RFC3339", Desc: "Walk --next forward from this instant instead of now", Group: "Behavior", Hidden: true},
 	},
 	Examples: []Example{
 		{"Inspect one schedule", "sparkwing crons show fictional-nightly"},
 		{"Read further back", "sparkwing crons show fictional-nightly --fires 50"},
-	},
-}
-
-var cmdCronsNext = Command{
-	Path:     "sparkwing crons next",
-	Synopsis: "Show the instants a schedule fires next",
-	Description: `Shows upcoming times in each schedule's configured time zone. Supply a
-schedule name to inspect one expression; omit it to merge upcoming times
-from every armed schedule.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name; omit for every armed schedule"},
-	},
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "count", Argument: "N", Desc: "How many instants to show", Default: "5", Group: "Output"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "sw-now", Argument: "RFC3339", Desc: "Walk forward from this instant instead of now", Group: "Behavior", Hidden: true},
-	},
-	Examples: []Example{
-		{"What fires next on this host", "sparkwing crons next"},
-		{"Check one expression", "sparkwing crons next fictional-nightly --count 10"},
-	},
-}
-
-var cmdCronsPause = Command{
-	Path:     "sparkwing crons pause",
-	Synopsis: "Stop a schedule firing, keeping it armed",
-	Description: `A paused schedule still advances its cursor on every tick, so
-resuming it fires the next due instant instead of replaying the ones that
-passed while it was paused.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Pause a schedule", "sparkwing crons pause fictional-nightly"},
-	},
-}
-
-var cmdCronsResume = Command{
-	Path:     "sparkwing crons resume",
-	Synopsis: "Let a paused schedule fire again",
-	Description: `Resumes at the next due instant. The instants that passed while the schedule
-was paused are behind its cursor and do not run.`,
-	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Resume a schedule", "sparkwing crons resume fictional-nightly"},
+		{"Check one expression", "sparkwing crons show fictional-nightly --next 10"},
 	},
 }
 

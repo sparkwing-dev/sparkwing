@@ -124,7 +124,7 @@ func TestCronsInstallPinsLocalEntriesAndReportsTheControllerOnes(t *testing.T) {
 		t.Fatalf("list does not report the checkout moving past the pin:\n%s", ahead)
 	}
 
-	status := captureStdout(t, func() { _ = runCronsStatus([]string{"-o", "pretty"}) })
+	status := captureStdout(t, func() { _ = runCronsList([]string{"--timer", "-o", "pretty"}) })
 	if !strings.Contains(status, "2 locked") || !strings.Contains(status, "crons install") {
 		t.Fatalf("status does not count the locks or name the remedy:\n%s", status)
 	}
@@ -225,8 +225,8 @@ func TestCronsSetAndResetRoundTripAnOverride(t *testing.T) {
 	}
 
 	reset := captureStdout(t, func() {
-		if err := runCronsReset([]string{"sweep/quick", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons reset: %v", err)
+		if err := runCronsSet([]string{"sweep/quick", "--reset", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons set --reset: %v", err)
 		}
 	})
 	if !strings.Contains(reset, "no override") || !strings.Contains(reset, "*/15 * * * *") {
@@ -318,7 +318,7 @@ func TestCronsInstallWarnsAndShowMarksACatchUpAboveTheCeiling(t *testing.T) {
 	}
 }
 
-func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
+func TestCronsPinUnpinAndUninstallNameEmitOneRecordPerFormat(t *testing.T) {
 	_, _ = cronsTestHome(t)
 	cronsFakeProver(t)
 	repo := cronsTestGitRepo(t, cronsTwoSidedRepo)
@@ -329,8 +329,8 @@ func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
 	})
 
 	locked := captureStdout(t, func() {
-		if err := runCronsLock([]string{"sweep/quick", "-o", "json"}); err != nil {
-			t.Fatalf("crons lock: %v", err)
+		if err := runCronsSet([]string{"sweep/quick", "--pin", "-o", "json"}); err != nil {
+			t.Fatalf("crons set --pin: %v", err)
 		}
 	})
 	row := oneJSONRecord[crons.Row](t, locked)
@@ -343,8 +343,8 @@ func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
 	}
 
 	unlocked := captureStdout(t, func() {
-		if err := runCronsUnlock([]string{"sweep/quick", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons unlock: %v", err)
+		if err := runCronsSet([]string{"sweep/quick", "--unpin", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons set --unpin: %v", err)
 		}
 	})
 	if !strings.Contains(unlocked, "unpinned") || !strings.Contains(unlocked, crons.LockFollows) {
@@ -363,8 +363,8 @@ func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
 		t.Fatalf("set record: %+v", row.Effective)
 	}
 	reset := captureStdout(t, func() {
-		if err := runCronsReset([]string{"sweep/quick", "-o", "plain"}); err != nil {
-			t.Fatalf("crons reset: %v", err)
+		if err := runCronsSet([]string{"sweep/quick", "--reset", "-o", "plain"}); err != nil {
+			t.Fatalf("crons set --reset: %v", err)
 		}
 	})
 	if strings.TrimSpace(reset) != row.ID {
@@ -372,8 +372,8 @@ func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
 	}
 
 	disarmed := captureStdout(t, func() {
-		if err := runCronsDisarm([]string{"sweep/quick", "-o", "plain"}); err != nil {
-			t.Fatalf("crons disarm: %v", err)
+		if err := runCronsUninstall([]string{"--name", "sweep/quick", "-o", "plain"}); err != nil {
+			t.Fatalf("crons uninstall --name: %v", err)
 		}
 	})
 	if strings.TrimSpace(disarmed) != filepath.Base(repo)+"/sweep/quick" {

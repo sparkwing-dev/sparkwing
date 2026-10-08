@@ -582,3 +582,41 @@ instead of naming its replacement.
 - Pipelines scaffolded by an earlier `pipeline new` list
   `sparkwing pipeline explain --name X` among their examples; edit the
   example to `sparkwing pipeline plan --static --name X`.
+
+## Crons verbs fold into uninstall, list, show and set
+
+| Before | After |
+|---|---|
+| `sparkwing crons disarm NAME` | `sparkwing crons uninstall --name NAME` |
+| `sparkwing crons status` | `sparkwing crons list --timer` |
+| `sparkwing crons next [--count N]` | `sparkwing crons list --next N` |
+| `sparkwing crons next NAME [--count N]` | `sparkwing crons show NAME --next N` |
+| `sparkwing crons lock NAME` | `sparkwing crons set NAME --pin` |
+| `sparkwing crons unlock NAME` | `sparkwing crons set NAME --unpin` |
+| `sparkwing crons pause NAME` | `sparkwing crons set NAME --pause` |
+| `sparkwing crons resume NAME` | `sparkwing crons set NAME --resume` |
+| `sparkwing crons reset NAME` | `sparkwing crons set NAME --reset` |
+
+- **Exit codes and output:** each replacement prints what the old verb printed,
+  in every `-o` format, and exits the same way. `crons list --timer` still exits
+  1 when schedules are armed and the timer is not evaluating them, so a check
+  script only changes its command line. `-o json` keeps the old shapes: the
+  health record for `--timer`, one NDJSON instant per line for `--next`, the
+  schedule row for `--pin`, `--unpin`, `--pause` and `--resume`, and
+  `{"schedule": ..., "name": ...}` for `uninstall --name`. Error messages
+  name the new spelling, such as `crons set --pause:`.
+- **Defaults:** `crons next` showed 5 instants unless `--count` said otherwise;
+  `--next` takes the count as its value, so write `--next 5` for the old
+  default.
+- **Profiles:** `--profile NAME` works on each replacement as it did on the old
+  verb. `--pin` and `--unpin` refuse it, as `lock` and `unlock` did.
+- **One action per call:** `--pin`, `--unpin`, `--pause`, `--resume` and
+  `--reset` each stand alone on `crons set`, and none mixes with `--cron`,
+  `--tz`, `--overlap`, `--catch-up` or `--arg`. `crons list` takes one of
+  `--all`, `--timer` and `--next`. `uninstall --name` refuses `--fleet`, and
+  leaves the OS timer in place as `disarm` did.
+- **Positionals:** `crons list` and `crons uninstall` now refuse a stray
+  positional. `crons uninstall NAME` used to ignore the name and disarm the
+  whole repository.
+- **Timer units:** the systemd and launchd units run `sparkwing crons tick`,
+  which keeps its name, so an installed timer needs no change.

@@ -617,7 +617,7 @@ func TestTickRecordsAnOverrideThatStoppedEvaluating(t *testing.T) {
 	if len(report.Errors) != 1 || !strings.Contains(report.Errors[0], "Mars/Olympus") {
 		t.Fatalf("errors = %v", report.Errors)
 	}
-	if !strings.Contains(report.Errors[0], "crons reset") {
+	if !strings.Contains(report.Errors[0], "--reset") {
 		t.Errorf("the reason does not say how to drop the override: %q", report.Errors[0])
 	}
 	fires, err := h.store.ListCronFires(ctx, id, 0)

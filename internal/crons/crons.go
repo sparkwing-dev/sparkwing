@@ -814,7 +814,7 @@ func (s *Service) pinnedBinaryReady(sched store.CronSchedule) error {
 	if _, err := os.Stat(sched.LockedBinary); err != nil {
 		return fmt.Errorf(
 			"the pinned pipeline binary at %s is gone; re-run `sparkwing crons install` to pin the checkout again, "+
-				"or `sparkwing crons unlock` to follow it", sched.LockedBinary)
+				"or `sparkwing crons set %s --unpin` to follow it", sched.LockedBinary, DisplayName(sched))
 	}
 	return nil
 }

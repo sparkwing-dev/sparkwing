@@ -69,7 +69,7 @@ func (r *cronsRemote) rows(ctx context.Context) ([]crons.Row, crons.Health, erro
 }
 
 func runCronsStatusProfile(profileName, format string) error {
-	remote, err := openCronsRemote(profileName, "crons status")
+	remote, err := openCronsRemote(profileName, "crons list --timer")
 	if err != nil {
 		return err
 	}
@@ -77,13 +77,13 @@ func runCronsStatusProfile(profileName, format string) error {
 	defer cancel()
 	_, health, err := remote.rows(ctx)
 	if err != nil {
-		return fmt.Errorf("crons status: %s: %w", remote.name, err)
+		return fmt.Errorf("crons list --timer: %s: %w", remote.name, err)
 	}
 	if err := renderCronsHealth(os.Stdout, health, time.Now(), format); err != nil {
 		return err
 	}
 	if !health.Healthy() {
-		return exitErrorf(1, "crons status: %s: %s", remote.name, health.Detail)
+		return exitErrorf(1, "crons list --timer: %s: %s", remote.name, health.Detail)
 	}
 	return nil
 }
@@ -137,7 +137,11 @@ func runCronsShowProfile(profileName, name, format string, fires int) error {
 }
 
 func runCronsNextProfile(profileName, name, format string, count int) error {
-	remote, err := openCronsRemote(profileName, "crons next")
+	label := "crons list --next"
+	if name != "" {
+		label = "crons show --next"
+	}
+	remote, err := openCronsRemote(profileName, label)
 	if err != nil {
 		return err
 	}
@@ -147,13 +151,13 @@ func runCronsNextProfile(profileName, name, format string, count int) error {
 	if name != "" {
 		detail, derr := remote.api.GetCron(ctx, name)
 		if derr != nil {
-			return fmt.Errorf("crons next: %s: %w", remote.name, derr)
+			return fmt.Errorf("%s: %s: %w", label, remote.name, derr)
 		}
 		wanted = []crons.Row{crons.RowFromView(detail.Schedule)}
 	} else {
 		rows, _, lerr := remote.rows(ctx)
 		if lerr != nil {
-			return fmt.Errorf("crons next: %s: %w", remote.name, lerr)
+			return fmt.Errorf("%s: %s: %w", label, remote.name, lerr)
 		}
 		for _, row := range rows {
 			if row.State == crons.StateArmed {
@@ -166,7 +170,7 @@ func runCronsNextProfile(profileName, name, format string, count int) error {
 	for _, row := range wanted {
 		instants, uerr := crons.UpcomingAfter(row.Effective.Cron, row.Effective.TZ, now, count)
 		if uerr != nil {
-			return fmt.Errorf("crons next: %s: %w", row.Display, uerr)
+			return fmt.Errorf("%s: %s: %w", label, row.Display, uerr)
 		}
 		for _, at := range instants {
 			out = append(out, cronsUpcoming{Schedule: row.ID, Name: row.Display, At: at})
@@ -180,11 +184,11 @@ func runCronsNextProfile(profileName, name, format string, count int) error {
 }
 
 func runCronsPauseResumeProfile(profileName, name, format string, pause bool) error {
-	verb := "resume"
+	verb := "--resume"
 	if pause {
-		verb = "pause"
+		verb = "--pause"
 	}
-	remote, err := openCronsRemote(profileName, "crons "+verb)
+	remote, err := openCronsRemote(profileName, "crons set "+verb)
 	if err != nil {
 		return err
 	}
@@ -197,7 +201,7 @@ func runCronsPauseResumeProfile(profileName, name, format string, pause bool) er
 		view, err = remote.api.ResumeCron(ctx, name)
 	}
 	if err != nil {
-		return fmt.Errorf("crons %s: %s: %w", verb, remote.name, err)
+		return fmt.Errorf("crons set %s: %s: %w", verb, remote.name, err)
 	}
 	row := crons.RowFromView(*view)
 	switch format {
@@ -244,7 +248,7 @@ func runCronsRunProfile(profileName, name, format string) error {
 }
 
 func runCronsDisarmProfile(profileName, name, format string) error {
-	remote, err := openCronsRemote(profileName, "crons disarm")
+	remote, err := openCronsRemote(profileName, "crons uninstall --name")
 	if err != nil {
 		return err
 	}
@@ -252,7 +256,7 @@ func runCronsDisarmProfile(profileName, name, format string) error {
 	defer cancel()
 	view, err := remote.api.DisarmCron(ctx, name)
 	if err != nil {
-		return fmt.Errorf("crons disarm: %s: %w", remote.name, err)
+		return fmt.Errorf("crons uninstall --name: %s: %w", remote.name, err)
 	}
 	report := cronsDisarmReport{Schedule: view.ID, Name: view.Name}
 	switch format {
@@ -281,7 +285,7 @@ func runCronsSetProfile(profileName, name, format string, req client.CronOverrid
 }
 
 func runCronsResetProfile(profileName, name, format string) error {
-	remote, err := openCronsRemote(profileName, "crons reset")
+	remote, err := openCronsRemote(profileName, "crons set --reset")
 	if err != nil {
 		return err
 	}
@@ -289,18 +293,18 @@ func runCronsResetProfile(profileName, name, format string) error {
 	defer cancel()
 	view, err := remote.api.ClearCronOverride(ctx, name)
 	if err != nil {
-		return fmt.Errorf("crons reset: %s: %w", remote.name, err)
+		return fmt.Errorf("crons set --reset: %s: %w", remote.name, err)
 	}
 	return renderCronsOverride(crons.RowFromView(*view), format)
 }
 
 // safety: a controller schedule's pin is the commit it clones, which moves only
 // when the repository is pushed again, so there is no separate lock to take.
-func cronsRemotePinError(verb string) error {
+func cronsRemotePinError(flagName string) error {
 	return fmt.Errorf(
-		"crons %s: a controller schedule is pinned by the commit it was pushed at; "+
+		"crons set %s: a controller schedule is pinned by the commit it was pushed at; "+
 			"`sparkwing crons install --profile <name>` re-pins it at HEAD, and `--follow` makes it clone the branch tip",
-		verb)
+		flagName)
 }
 
 func runCronsInstallProfile(profileName, root string, only []string, follow bool, format string) error {
