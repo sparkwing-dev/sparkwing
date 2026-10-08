@@ -69,7 +69,10 @@ func runHandleTriggerCLI(args []string) error {
 		"profile to resolve backends from (local mode only). Forwarded by "+
 			"the parent's local trigger dispatcher so the child opens the "+
 			"same state backend the parent enqueued the trigger in.")
-	positional := parseInterspersed(fs, args)
+	positional, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
 
 	if len(positional) < 1 {
 		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local [--profile NAME]]")
@@ -203,13 +206,15 @@ func HandleTriggerArgs(triggerID, controllerURL, logsURL string, heartbeat time.
 // safety: an older sparkwing cluster worker put the trigger ID before its
 // flags, and the stdlib parser stops at the first positional, which dropped
 // --heartbeat and left the claim to expire.
-func parseInterspersed(fs *flag.FlagSet, args []string) []string {
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
-		_ = fs.Parse(args)
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
 		args = fs.Args()
 		if len(args) == 0 {
-			return positional
+			return positional, nil
 		}
 		positional = append(positional, args[0])
 		args = args[1:]
