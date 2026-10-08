@@ -6,8 +6,10 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -115,7 +119,7 @@ func TestBrokeredNodeMintsAnOIDCToken(t *testing.T) {
 
 // hack: the upstream credential is admin, as the local loopback controller's run token is, so the
 // controller authorizes what the broker forwards and the test sees the feature itself work.
-func adminBrokeredNode(t *testing.T, nodeID string) (*store.Store, *remoteExecutionBroker, *client.Client) {
+func adminBrokeredNode(t *testing.T, nodeID string, wrap ...func(http.Handler) http.Handler) (*store.Store, *remoteExecutionBroker, *client.Client) {
 	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -133,7 +137,11 @@ func adminBrokeredNode(t *testing.T, nodeID string) (*store.Store, *remoteExecut
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: nodeID, Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).EnableAuthFromStore().Handler())
+	handler := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).EnableAuthFromStore().Handler()
+	for _, w := range wrap {
+		handler = w(handler)
+	}
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	broker, err := startRemoteExecutionBroker(srv.URL, "", token, "run-1", nodeID, store.NodeClaimFence{}, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -186,5 +194,91 @@ func TestBrokeredRunnerSpawnMeetsTheControllersOwnAnswer(t *testing.T) {
 	brokeredErr := f.child.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "parent/brokered", Status: "pending"})
 	if (directErr == nil) != (brokeredErr == nil) || (brokeredErr != nil && strings.Contains(brokeredErr.Error(), brokerRefusal)) {
 		t.Fatalf("direct = %v, brokered = %v; the broker must forward a spawn for the controller to judge", directErr, brokeredErr)
+	}
+}
+
+func TestBrokeredNodeAwaitsAChildRun(t *testing.T) {
+	triggered := make(chan struct{}, 1)
+	st, broker, child := adminBrokeredNode(t, "parent", func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers" {
+				triggered <- struct{}{}
+			}
+		})
+	})
+	ctx := context.Background()
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() {
+		<-triggered
+		finished <- func() error {
+			triggers, err := st.ListTriggers(ctx, store.TriggerFilter{})
+			if err != nil {
+				return err
+			}
+			for _, tr := range triggers {
+				if tr.ParentRunID != "run-1" {
+					continue
+				}
+				if _, err := st.GetRun(ctx, tr.ID); errors.Is(err, store.ErrNotFound) {
+					if err := st.CreateRun(ctx, store.Run{ID: tr.ID, Pipeline: "child", Status: "running", StartedAt: time.Now()}); err != nil {
+						return err
+					}
+				}
+				if err := st.CreateNode(ctx, store.Node{RunID: tr.ID, NodeID: "report", Status: "running"}); err != nil {
+					return err
+				}
+				if err := st.FinishNode(ctx, tr.ID, "report", "success", "", []byte(`{"ok":true}`)); err != nil {
+					return err
+				}
+				return st.FinishRun(ctx, tr.ID, "success", "")
+			}
+			return errors.New("no child trigger names run-1 as its parent")
+		}()
+	}()
+	await := childAwaitConfig{
+		state:       child,
+		concurrency: NewHTTPConcurrency(broker.URL(), nil, broker.capability, time.Minute),
+		parentRunID: "run-1",
+		retryOf:     "run-0",
+		masker:      secrets.NewMasker(),
+		diagnostics: podChildAwaitDiagnostics{logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
+		pollFactory: func() (childAwaitPollPolicy, error) { return &retryChildAwaitPoll{}, nil },
+	}
+	resolved, err := await.await(sparkwingruntime.WithNode(ctx, "parent"),
+		sparkwing.AwaitRequest{Pipeline: "child", NodeID: "report", Timeout: time.Minute})
+	if err != nil {
+		t.Fatalf("RunAndAwait through the broker: %v", err)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	if string(resolved.Data) != `{"ok":true}` {
+		t.Fatalf("child output = %s", resolved.Data)
+	}
+	if _, err := await.concurrency.State(ctx, "group"); err != nil && !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("child admission state read: %v", err)
+	}
+
+	for _, req := range []client.TriggerRequest{
+		{Pipeline: "child"},
+		{Pipeline: "child", ParentRunID: "run-2", ParentNodeID: "parent"},
+		{Pipeline: "child", ParentRunID: "run-1", ParentNodeID: "sibling"},
+	} {
+		if _, err := child.CreateTrigger(ctx, req); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
+			t.Errorf("trigger %+v = %v, want the broker's refusal", req, err)
+		}
+	}
+	if _, err := child.FindSpawnedChildTriggerID(ctx, "run-0", "sibling", "child"); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
+		t.Errorf("a sibling's spawned child = %v, want the broker's refusal", err)
+	}
+	if _, err := child.GetRunForExecution(ctx, resolved.RunID); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
+		t.Errorf("another run's secret arguments = %v, want the broker's refusal", err)
+	}
+	if _, err := child.GetRunForExecution(ctx, "run-1"); err != nil {
+		t.Errorf("own run's execution read: %v", err)
 	}
 }

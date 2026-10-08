@@ -275,12 +275,14 @@ type brokerRoute struct {
 // safety: this is everything a brokered node reaches; docs/node-protocol.md lists the
 // same set, and a test holds the two equal.
 var brokerRoutes = []brokerRoute{
-	{http.MethodGet, "/api/v1/runs/{run}", nil},
+	{http.MethodGet, "/api/v1/runs/{anyrun}", secretsOfThisRunOnly},
 	{http.MethodGet, "/api/v1/triggers/{run}", nil},
+	{http.MethodPost, "/api/v1/triggers", triggeredByThisNode},
+	{http.MethodGet, "/api/v1/triggers/spawned-child", spawnedChildOfThisNode},
 	{http.MethodGet, "/api/v1/runs/{run}/steps", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}", nil},
-	{http.MethodGet, "/api/v1/runs/{run}/nodes/{spawned}/output", nil},
+	{http.MethodGet, "/api/v1/runs/{anyrun}/nodes/{spawned}/output", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}/bounce", nil},
 	{http.MethodGet, "/api/v1/secrets/{name}", secretForThisRun},
 	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
@@ -310,6 +312,7 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/status", nil},
 	{http.MethodGet, "/api/v1/concurrency/{key}/holder", concurrencyForThisNode},
 	{http.MethodGet, "/api/v1/concurrency/{key}/resolve", concurrencyForThisNode},
+	{http.MethodGet, "/api/v1/concurrency/{key}/state", oneSegmentKey},
 	{http.MethodPost, "/api/v1/concurrency/{key}/acquire", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/heartbeat", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/release", concurrencyForThisNode},
@@ -364,6 +367,11 @@ func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[s
 			if err != nil || !b.ownNode(node) {
 				return nil, false
 			}
+		case w == "{anyrun}":
+			run, err := url.PathUnescape(got)
+			if err != nil || run == "" || run == "." || run == ".." || strings.ContainsAny(run, "/\\") {
+				return nil, false
+			}
 		case w == "{other}":
 			node, err := url.PathUnescape(got)
 			if err != nil || !runNodeID(node) || strings.Contains(node, "/") {
@@ -408,6 +416,34 @@ func spawnedByThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]s
 		ID string `json:"id"`
 	}
 	return readBrokeredBody(r, &node) && node.ID != b.nodeID && b.ownNode(node.ID)
+}
+
+// safety: another run's record is readable for RunAndAwait and pipeline references, but its
+// unredacted secret arguments belong to that run's own nodes.
+func secretsOfThisRunOnly(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	return r.URL.EscapedPath() == "/api/v1/runs/"+url.PathEscape(b.runID) ||
+		!strings.Contains(r.URL.Query().Get("include"), store.IncludeSecretValues)
+}
+
+// safety: a child run started from this node names it as the parent, so the controller checks
+// the parent claim the broker's fence headers carry.
+func triggeredByThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	var trigger struct {
+		ParentRunID  string `json:"parent_run_id"`
+		ParentNodeID string `json:"parent_node_id"`
+	}
+	return readBrokeredBody(r, &trigger) && trigger.ParentRunID == b.runID && b.ownNode(trigger.ParentNodeID)
+}
+
+// safety: a retried node looks up the child its earlier attempt started, whose parent run is the
+// run this one retries, so only the parent node is bound.
+func spawnedChildOfThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	return b.ownNode(r.URL.Query().Get("parent_node_id"))
+}
+
+func oneSegmentKey(_ *remoteExecutionBroker, _ *http.Request, segments map[string]string) bool {
+	key, err := url.PathUnescape(segments["key"])
+	return err == nil && key != "" && !strings.Contains(key, "/")
 }
 
 func secretForThisRun(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
