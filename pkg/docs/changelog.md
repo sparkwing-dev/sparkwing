@@ -54,6 +54,9 @@ unlock.
 - **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 
+- **logs:** `sparkwing-logs export --root R --to URL [--archive-store S] [--default-team T]` converts every node log the service holds into the segment layout the controller reads
+  One attempt per stored attempt file, under `logs/r90/` or `logs/r30/` by the team's standing, with each manifest's status from the service's seals; an unnumbered log reads `incomplete`, reason `migrated without seal`. Already exported attempts are skipped, and the command exits non-zero naming each run it could not convert. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
+
 ### Changed
 - **cli (Breaking):** `-C DIR` before the verb replaces `--sw-cd`, `--sparkwing-dir`, `--dir` and the path form of `--repo`; `--home` gives way to `SPARKWING_HOME`; `--profile` may precede the verb and falls back to `SPARKWING_PROFILE`
   `sparkwing -C DIR <verb>` works for every verb, as in git. `--sw-cd`/`-C` after the verb, `pipeline sparks * --sparkwing-dir`, `cache explain --dir`, and `--repo DIR` on `pipeline hooks install/uninstall/status/fire` and `crons install/uninstall` are gone; `pipeline lint --dir` (the source directory to scan) and `--repo` that names a registered repo or an `OWNER/NAME` filter stay. `--home` is gone from `queue`, `daemon`, `doctor`, `serve`, `runs cancel/retry/bounce` and `runs consumer`; set `SPARKWING_HOME`. A verb that reads runs without `--profile` now resolves `SPARKWING_PROFILE` before the project's `defaults.profile`, and `runs stats` follows that chain as `runs status` does instead of reading the local store. See [migration guide](docs/migrations/_unreleased.md#root-flags-replace-per-verb-directory-and-home-flags).

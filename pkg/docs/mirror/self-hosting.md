@@ -74,6 +74,28 @@ team's log storage, and the hourly storage pass lists the segments to
 correct the count and, for a team without credits past its log share,
 deletes its least recently written finished runs' logs.
 
+### Moving the logs service's logs to segments
+
+`sparkwing-logs export` converts every node log a logs service holds, on
+its volume and in its archive, into segments and manifests the controller
+reads, so they stay readable once the service is retired. Run it once
+with the service's own root and archive, against the controller's
+`--cache-blob-store`, or its state directory for a controller without one:
+
+```bash
+sparkwing-logs export --root /var/lib/sparkwing-logs \
+  --archive-store s3://my-logs-bucket/logs --to s3://my-cache-bucket/cache
+```
+
+Each stored attempt becomes one attempt under `logs/r90/` or, for a team
+the service marked as without credits, `logs/r30/`. Its manifest says
+`complete` for a sealed stream with nothing missing, `incomplete` for one
+with missing lines, `cut_off` for a numbered stream that never sealed,
+and `incomplete` with reason `migrated without seal` for a log no writer
+numbered. A run that names no team goes under `--default-team`
+(`default`). An attempt already exported is skipped, so the command may
+run again, and it exits non-zero naming every run it could not convert.
+
 ### Signed downloads through CloudFront
 
 For object-store downloads through a public ingress, configure the controller

@@ -1122,6 +1122,11 @@ step with the controller's own.
   its own disk needs no rule and keeps them until their run is deleted.
   On a multi-team controller segment bytes count against the team's log
   storage.
+- **Logs the service already holds:** run `sparkwing-logs export` once
+  against the service's root and archive and the controller's cache
+  bucket (see [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments))
+  before you retire the service; a later release removes it, and logs
+  not exported become unreadable then.
 - **Mixed versions:** upgrade the controller first. A runner that predates
   segments keeps writing to its logs URL, which the controller still reads
   through. A runner of this release against an older controller finds no
