@@ -1036,8 +1036,12 @@ func resolveCleanupRoot() (string, error) {
 		if candidate == runtimeHome {
 			break
 		}
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		info, err := os.Stat(candidate)
+		switch {
+		case err == nil && info.IsDir():
 			return dir, nil
+		case err != nil && !errors.Is(err, os.ErrNotExist):
+			return "", fmt.Errorf("inspect %s: %w", candidate, err)
 		}
 		if filepath.Dir(dir) == dir {
 			break

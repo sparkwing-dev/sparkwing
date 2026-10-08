@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -701,5 +702,35 @@ func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T
 	})
 	if _, err := os.Stat(hook); !os.IsNotExist(err) {
 		t.Fatalf("managed hook survived uninstall: %v", err)
+	}
+}
+
+func TestHooksUninstallStopsAtAnUninspectableDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny directory traversal on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root traverses a mode-000 directory")
+	}
+	root := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(root, "app")
+	inner := filepath.Join(locked, "src")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(inner)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	_, err := resolveCleanupRoot()
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("cleanup discovery under an uninspectable directory = %v, want the inspection error", err)
 	}
 }
