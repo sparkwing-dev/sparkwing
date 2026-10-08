@@ -34,23 +34,22 @@ sequenceDiagram
 
 ## Environment contract
 
-The host sets these variables in the SDK process's environment. Values are strings. A descriptor named by a `_FD` variable is inherited from the host, and the SDK closes it when it is done with it.
+The host sets these variables in the SDK process's environment. Values are strings. A descriptor named by a `_FD` variable is inherited from the host. The SDK removes the variable from its environment and keeps the descriptor from the processes it starts (the Go SDK marks it close-on-exec), and closes it when it is done with it.
 
 | Variable | Meaning | Value | Set by, today |
 |---|---|---|---|
-| `SPARKWING_RUN_ID` | Run the node belongs to | run id | local runner, Kubernetes and launcher Jobs; the brokered child gets it in argv only |
+| `SPARKWING_RUN_ID` | Run the node belongs to | run id | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_NODE_ID` | Node the process runs | node id | as above |
 | `SPARKWING_CONTROLLER_URL` | Base URL of the node-facing routes | absolute `http` or `https` URL | local runner (loopback controller), broker supervisor (broker URL), Kubernetes and launcher Jobs |
-| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, local runner without an API socket; the brokered child reads its bearer from stdin instead. A pipeline binary removes it from its environment at start, so the commands a step runs do not inherit it |
-| `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | local runner |
+| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, local runner without an API socket; the brokered child reads its bearer from stdin instead. The local runner never passes on a bearer it inherited. On the API socket path the local child gets no bearer and a URL only the socket reaches, so that path serves the Go SDK alone. A pipeline binary removes the variable from its environment at start, so the commands a step runs do not inherit it |
+| `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_MASK_VALUES_FD` | Descriptor the SDK writes each secret value to, one base64 line per value, so the host masks it in every log | decimal descriptor number of at least 3 | local runner, broker supervisor, launcher Job |
 | `SPARKWING_PARENT_LIVENESS_FD` | Read end of a pipe the host holds open; end of file means the host is gone, and the SDK cancels its work and exits | decimal descriptor number of at least 3 | local runner |
-| `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | local runner, Kubernetes Job |
-| `SPARKWING_RUNNER_TYPE` | Kind of that runner | `local` or `kubernetes` | local runner, Kubernetes Job |
-| `SPARKWING_RUNNER_LABELS` | Labels of that runner, for `WhenRunner` | comma-separated labels | local runner, Kubernetes Job |
-| `TRACEPARENT` | W3C trace context of the run | `traceparent` header value | trigger children only |
-| `SPARKWING_CACHE_URL` | Artifact store for SDK cache helpers | URL | local runner, Kubernetes and launcher Jobs |
-| `SPARKWING_GITCACHE_URL` | Git mirror for the SDK's clone helper | URL | Kubernetes and launcher Jobs |
+| `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | every path: local runner, Kubernetes and launcher Jobs, and the broker supervisor, which passes on a runner pool's holder prefix or its own `SPARKWING_RUNNER_*` |
+| `SPARKWING_RUNNER_TYPE` | Kind of that runner | `local` or `kubernetes`; unset for a runner that does not classify itself, such as a runner pool on a host | local runner, Kubernetes and launcher Jobs, broker supervisor as above |
+| `SPARKWING_RUNNER_LABELS` | Labels of that runner, for `WhenRunner` | comma-separated labels | local runner, Kubernetes Job, broker supervisor as above; a launcher Job advertises none |
+| `SPARKWING_CACHE_URL` | Artifact store for SDK cache helpers | URL | local runner and Kubernetes and launcher Jobs when an artifact store is configured; the brokered child reaches the supervisor's store at `/bin/` on `SPARKWING_CONTROLLER_URL` with its own bearer instead |
+| `SPARKWING_GITCACHE_URL` | Git mirror for the SDK's clone helper | URL | Kubernetes and launcher Jobs when a mirror is configured; a local node clones directly, and a brokered child's supervisor has already fetched the source |
 | `SPARKWING_CACHE_GRANT` | Run-scoped bearer for the two caches above | opaque token | broker supervisor, launcher Job, Kubernetes Job |
 
 The last three rows apply only while an SDK ships its own cache helpers. Under the hosted model the host restores and saves dependency caches from the describe document and points `git` at the mirror through `GIT_CONFIG_COUNT` entries, so a hosted SDK needs none of the three.
@@ -58,6 +57,8 @@ The last three rows apply only while an SDK ships its own cache helpers. Under t
 The dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST` are not part of this contract: every package manager already reads them, so the host sets them and the SDK does nothing.
 
 Run options are not environment variables in this contract; [Run options](#run-options) carries them.
+
+**Target:** `TRACEPARENT` carries the run's W3C trace context into the SDK process. No path sets or reads it today.
 
 ### Variables outside the contract
 
@@ -76,8 +77,8 @@ The Go in-process path reads more variables than the contract names. They exist 
 
 **Today.** A node reaches the routes below at `SPARKWING_CONTROLLER_URL` with `Authorization: Bearer <token>`. Three hosts answer them:
 
-- the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`;
-- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller or the logs service;
+- the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`; a run whose state is not a SQLite store gets a **loopback shim** instead, which serves the same routes over that state. A local node reads its secrets from the local secret store, so the shim serves no secrets route, and it holds no signing key, so it serves no OIDC token; it answers the bounce poll 204 when its state holds no bounce requests, and `execution-start` and `execution-finish` 501 when its state records no execution attempts. Its dispatcher takes a local node's concurrency slots, so it serves only the concurrency `state` read;
+- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller or the logs service; a signed output transfer passes without a bearer and without the runner's credential;
 - the **controller** itself, for a Kubernetes or launcher Job that holds a claim token.
 
 The Go child on a local run may use the unix socket in `SPARKWING_API_SOCKET` instead of URL plus bearer. The socket stays as a Go-only optimization; it is not part of the contract.
@@ -95,21 +96,25 @@ The protocol version is a string, currently `1`.
 
 ## Node-facing routes
 
-Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
+Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{anyrun}` any run, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
 
 <!-- node-routes:start -->
 | Method | Path | Reach | Request | Response | Handler |
 |---|---|---|---|---|---|
-| GET | `/api/v1/runs/{run}` | broker | none; `include=nodes` adds the nodes | 200 run record | `pkg/controller/handlers.go` `handleGetRun` |
+| GET | `/api/v1/runs/{anyrun}` | broker | none; `include=nodes` adds the nodes, and `include=secret_values` is refused for any run but the node's own | 200 run record | `pkg/controller/handlers.go` `handleGetRun` |
 | GET | `/api/v1/triggers/{run}` | broker | none | 200 trigger record | `pkg/controller/handlers.go` `handleGetTrigger` |
+| POST | `/api/v1/triggers` | broker | a trigger request `{pipeline, args?, trigger?, git?, parent_run_id, parent_node_id, retry_of?}`, for `RunAndAwait`; `parent_run_id` is the node's run and `parent_node_id` the node | 201 `{run_id, status}` | `pkg/controller/handlers.go` `handleTrigger` |
+| GET | `/api/v1/triggers/spawned-child` | broker | query `parent_run_id`, `parent_node_id` = the node, `pipeline` | 200 `{run_id}`, empty when the node started none | `pkg/controller/handlers.go` `handleFindSpawnedChildTrigger` |
+| GET | `/api/v1/pipelines/{name}/latest` | broker | query `status`, `max_age`; for a pipeline reference | 200 the newest matching run; 404 when none | `pkg/controller/handlers.go` `handlePipelineLatest` |
 | GET | `/api/v1/runs/{run}/steps` | broker | none | 200 `{steps: [step]}` | `pkg/controller/handlers.go` `handleListNodeSteps` |
 | GET | `/api/v1/runs/{run}/nodes/{node}` | broker | none | 200 node record | `pkg/controller/handlers.go` `handleGetNode` |
 | GET | `/api/v1/runs/{run}/nodes/{other}` | broker | none | 200 node record | `pkg/controller/handlers.go` `handleGetNode` |
-| GET | `/api/v1/runs/{run}/nodes/{spawned}/output` | broker | none | 200 `{url?, sha256?, size?, expires?, source_run_id?}`; 409 until the node is done | `pkg/controller/node_output.go` `handleGetNodeOutput` |
+| GET | `/api/v1/runs/{anyrun}/nodes/{spawned}/output` | broker | none | 200 `{url?, sha256?, size?, expires?, source_run_id?}`; 409 until the node is done | `pkg/controller/node_output.go` `handleGetNodeOutput` |
 | GET | `/api/v1/runs/{run}/nodes/{node}/bounce` | broker | none | 200 `{run_id, node_id, seq, requested_at, requested_by?, consumed_at?, outcome?}`; 204 when none is pending | `pkg/controller/bounce.go` `handlePendingNodeBounce` |
 | GET | `/api/v1/secrets/{name}` | broker | query `run` = the node's run | 200 `{name, value?, principal, pipeline?, masked, shared?, bound, created_at, updated_at}`; 404 when unset | `pkg/controller/claim_run.go` `handleClaimSecret` for a claim token, else `pkg/controller/secrets.go` `handleGetSecret` |
 | POST | `/api/v1/runs/{run}/events` | broker | `{node_id?, kind, payload?}`, payload base64 | 200 `{seq}` | `pkg/controller/handlers.go` `handleAppendEvent` |
 | POST | `/api/v1/runs/{run}/heartbeat` | broker | none | 204 | `pkg/controller/handlers.go` `handleTouchRunHeartbeat` |
+| POST | `/api/v1/runs/{run}/oidc-token` | broker | `{audience}` | 200 `{token, expires_at}`; 404 when the controller holds no signing key or the caller no live claim on the run | `pkg/controller/oidc_token.go` `handleOIDCToken` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/start` | broker | none | 204 | `pkg/controller/handlers.go` `handleStartNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/finish` | broker | `{outcome, error?, output?: {key, size, sha256}, failure_reason?, exit_code?}` | 204; 422 on an invalid outcome or an uncommitted output | `pkg/controller/handlers.go` `handleFinishNode` |
 | POST | `/api/v1/runs/{run}/nodes/{node}/deps` | broker | `{deps: [node id]}` | 204 | `pkg/controller/handlers.go` `handleUpdateNodeDeps` |
@@ -133,33 +138,29 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/api/v1/runs/{run}/nodes/{node}/status` | broker | `{status}` | 204 | `pkg/controller/handlers.go` `handleSetNodeStatus` |
 | GET | `/api/v1/concurrency/{key}/holder` | broker | query `holder_id` = `<run>/<node>` | 200 `{holder_id, run_id, node_id?, claimed_at, queue_arrived_at?, lease_expires_at, superseded, cost?}`; 404 when not held | `pkg/controller/concurrency.go` `handleObserveSlot` |
 | GET | `/api/v1/concurrency/{key}/resolve` | broker | query `run_id`, `node_id` = the node's own, optional `cache_key_hash`, `leader_run_id`, `leader_node_id`, `bypass_read` | 200 `{status, holder_id?, holder_lease_expires?, output_ref?, origin_run_id?, origin_node_id?, leader_run_id?, leader_node_id?, leader_outcome?, leader_failure_reason?, position?, queue_length?, holders?}` | `pkg/controller/concurrency.go` `handleResolveWaiter` |
+| GET | `/api/v1/concurrency/{key}/state` | broker | none; a `RunAndAwait` parent reads its child's plan admission | 200 group state; 404 when the group is unknown | `pkg/controller/concurrency.go` `handleConcurrencyState` |
 | POST | `/api/v1/concurrency/{key}/acquire` | broker | `{holder_id, run_id, node_id?, max?, cost?, policy?, cache_key_hash?, cache_ttl_ns?, cancel_timeout_ns?, lease_secs?, bypass_read?}`; `holder_id` is `<run>/<node>` and `inherited_holder_id` is empty | 200 granted or cached, 202 queued, 429 skipped or failed; `{granted, kind, holder_id?, lease_expires_at?, output_ref?, position?, queue_length?, holders?}` and the leader and origin fields | `pkg/controller/concurrency.go` `handleAcquireSlot` |
 | POST | `/api/v1/concurrency/{key}/heartbeat` | broker | `{holder_id, lease_secs?}` | 200 `{lease_expires_at, cancelled_by_newer}` | `pkg/controller/concurrency.go` `handleHeartbeatSlot` |
 | POST | `/api/v1/concurrency/{key}/release` | broker | `{holder_id, outcome, output_ref?, cache_key_hash?, cache_ttl_ns?}` | 204 | `pkg/controller/concurrency.go` `handleReleaseSlot` |
 | POST | `/api/v1/concurrency/{key}/cancel-waiter` | broker | `{run_id, node_id?}` naming the node itself | 200 `{cancelled}` | `pkg/controller/concurrency.go` `handleCancelWaiter` |
+| POST | `/api/v1/concurrency/{key}/force-release` | broker | none; a `CancelOthers` holder drops the holders it superseded once their cancel timeout passes | 200 `{dropped: [holder]}`; 403 `missing_scope` unless the credential is admin | `pkg/controller/concurrency.go` `handleForceRelease` |
 | POST | `/api/v1/logs/{run}/{node}` | broker | NDJSON log records as `text/plain`, at most 4 MiB; optional `X-Sparkwing-Log-Stream`, `X-Sparkwing-Log-Seq`, `X-Sparkwing-Log-Seq-End` | 204 | `pkg/logs/server.go` `handleAppend` |
 | GET | `/api/v1/logs/{run}/{node}` | broker | read filters as query | 200 `text/plain` or `application/x-ndjson` | `pkg/logs/server.go` `handleRead` |
 | POST | `/api/v1/logs/{run}/{node}/seal` | broker | `{stream, final_seq, lines, bytes, dropped, sha256}` | 204 | `pkg/logs/seal.go` `handleSeal` |
 | GET | `/api/v1/logs/{run}/{node}/seal` | broker | none | 200 seal report | `pkg/logs/seal.go` `handleReadSeals` |
 | GET | `/api/v1/logs/{run}/{node}/stream` | broker | none | 200 event stream | `pkg/logs/server.go` `handleStream` |
+| PUT | `/api/v1/outputs/uploads/{upload}` | broker | the output bytes, at the URL `output-upload` granted, without a bearer; a relative URL resolves against `SPARKWING_CONTROLLER_URL` | 200 | `pkg/controller/node_output.go` `handleOutputBlobPut` |
+| GET | `/api/v1/outputs/objects/{key...}` | broker | none, at the URL `output` granted, without a bearer; a relative URL resolves against `SPARKWING_CONTROLLER_URL` | 200 the output bytes | `pkg/controller/node_output.go` `handleOutputBlobGet` |
 | GET | `/bin/{key...}` | broker | key `artifacts/blobs/<sha256>` or `artifacts/manifests/<sha256>` | 200 `application/octet-stream`; 404 | the broker itself, `internal/orchestrator/remote_execution_broker.go` `serveArtifact` |
 | HEAD | `/bin/{key...}` | broker | as GET | 200 or 404 | as GET |
 | PUT | `/bin/{key...}` | broker | the blob; its sha256 must equal the key's digest | 201; 400 on a digest mismatch | as GET |
 | POST | `/api/v1/runs/{id}/cache-grant` | direct | none | 200 `{grant, team, expires_at}` | `pkg/controller/cache_grant.go` `handleRunCacheGrant` |
-| POST | `/api/v1/runs/{id}/oidc-token` | direct | `{audience}` | 200 `{token, expires_at}` | `pkg/controller/oidc_token.go` `handleOIDCToken` |
-| PUT | `/api/v1/outputs/uploads/{id}` | direct | the output bytes, at the URL `output-upload` granted | 200 | `pkg/controller/node_output.go` `handleOutputBlobPut` |
-| GET | `/api/v1/outputs/objects/{key...}` | direct | none, at the URL `output` granted | 200 the output bytes | `pkg/controller/node_output.go` `handleOutputBlobGet` |
 | POST | `/api/v1/runs/{id}/nodes` | direct | a node record, for a node a dynamic fan-out adds at run time | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | direct | an attempt report, claim token only | 200 `{status}` | `pkg/controller/claim_dispatch.go` `handleReportAttempt` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | direct | `{kind, key?, cache_key_hash?, pipeline?, node?, max_age_ms?}`, claim token only | 200 the input | `pkg/controller/claim_run.go` `handleClaimInput` |
 | POST | `/api/v1/runs/{id}/children` | direct | `{ordinal, pipeline, args?, repo?, branch?}`, claim token only | 200 the child run | `pkg/controller/claim_run.go` `handleEnqueueChildRun` |
 | GET | `/api/v1/runs/{id}/children/{childID}` | direct | none | 200 the child run | `pkg/controller/claim_run.go` `handleGetChildRun` |
 | GET | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | direct | none | 200 output grant | `pkg/controller/claim_run.go` `handleGetChildNodeOutput` |
-| POST | `/api/v1/triggers` | direct | a trigger request, for `RunAndAwait` | 201 trigger | `pkg/controller/handlers.go` `handleTrigger` |
-| GET | `/api/v1/triggers/spawned-child` | direct | query names the parent run and node | 200 trigger id | `pkg/controller/handlers.go` `handleFindSpawnedChildTrigger` |
-| GET | `/api/v1/pipelines/{name}/latest` | direct | none, for a pipeline reference | 200 latest run | `pkg/controller/handlers.go` `handlePipelineLatest` |
-| GET | `/api/v1/concurrency/{key}/state` | direct | none | 200 group state | `pkg/controller/concurrency.go` `handleConcurrencyState` |
-| POST | `/api/v1/concurrency/{key}/force-release` | direct | holder ids a newer holder supersedes | 200 | `pkg/controller/concurrency.go` `handleForceRelease` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | direct | live log lines | 204 | `pkg/controller/livelogs_http.go` `handleAppendNodeLiveLog` |
 | GET | `/node/v1/secrets/{name}` | target | none | 200 `{value, masked}`; the host registers the value with the masker before it answers | node host |
 | POST | `/node/v1/cleanups` | target | `{argv: [string], description}` | 201 `{id}`; the host runs argv when the node ends unless released | node host |
@@ -167,7 +168,7 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/node/v1/oidc-token` | target | `{audience}` | 200 `{token, expires_at}` | node host |
 <!-- node-routes:end -->
 
-**Auth.** `broker` routes take the node's bearer; the broker or loopback controller confines it to the node's own run and node. `direct` routes take a claim token or the loopback run token, and the controller checks the claim fence headers (`X-Sparkwing-Claim-Holder`, `X-Sparkwing-Claim-Membership`, `X-Sparkwing-Claim-Reservation`, `X-Sparkwing-Claim-Generation`) on writes. `PUT` and `GET` under `/api/v1/outputs/` take no bearer: the URL the grant returned is signed. `target` routes take the host's bearer and need no fence, because the host adds it.
+**Auth.** `broker` routes take the node's bearer; the broker or loopback controller confines it to the node's own run and node. The broker then forwards with the runner's own credential, so the controller still decides: a runner token lacks `runs.write`, `runs.read` and `triggers.read`, so `RunAndAwait`, pipeline references, reads of another run and the concurrency state answer it `missing_scope` or `claim_required`, and force-release takes `admin`. An admin or loopback run token is served. `direct` routes take a claim token or the loopback run token, and the controller checks the claim fence headers (`X-Sparkwing-Claim-Holder`, `X-Sparkwing-Claim-Membership`, `X-Sparkwing-Claim-Reservation`, `X-Sparkwing-Claim-Generation`) on writes. `PUT` and `GET` under `/api/v1/outputs/` take no bearer: the URL the grant returned is signed, and the broker forwards it without its capability and without the runner's credential or fence. The controller grants an absolute URL, on itself or on object storage, which the node must reach; the loopback shim grants a relative one, which reaches it through the broker. `target` routes take the host's bearer and need no fence, because the host adds it.
 
 **Target namespace.** Once the node host serves the routes, a node calls them under `/node/v1/` with the run and node implied by its bearer, so `/api/v1/runs/{run}/nodes/{node}/start` becomes `/node/v1/start`. The request and response bodies stay as listed.
 

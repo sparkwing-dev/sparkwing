@@ -23,9 +23,8 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	// The dispatcher already applied --only to the parent plan, so carrying it
 	// into a node would filter any nested run against the parent's job names.
 	drop := []string{wingwire.APISocketEnv, "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_ONLY", ParentLivenessFDEnv}
-	if cfg.APISocket != "" {
-		drop = append(drop, tokenEnvNames...)
-	}
+	// safety: an inherited bearer is the outer run's, so it goes whether or not this run has one.
+	drop = append(drop, tokenEnvNames...)
 	base = withoutEnv(base, drop)
 	env = append(env, base...)
 

@@ -335,6 +335,7 @@ func runContextFor(run *store.Run) sparkwing.RunContext {
 }
 
 func runNodeCLI(args []string) error {
+	defer secrets.StopSharingRegistered()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
 		"controller base URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")
@@ -430,11 +431,11 @@ func runNodeCLI(args []string) error {
 	if *coordinated {
 		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
 		runOpts = append(runOpts, Coordinated())
-		var abandon context.CancelFunc
-		ctx, abandon = context.WithCancel(ctx)
-		defer abandon()
-		defer WatchParentLiveness(abandon)()
 	}
+	var abandon context.CancelFunc
+	ctx, abandon = context.WithCancel(ctx)
+	defer abandon()
+	defer WatchParentLiveness(abandon)()
 	if brokeredChild {
 		for name := range remoteExecutionPrivateEnv {
 			_ = os.Unsetenv(name)
