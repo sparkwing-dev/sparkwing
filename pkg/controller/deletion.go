@@ -373,6 +373,17 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 }
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []string, now time.Time) error {
+	objs := s.logObjects()
+	for i, id := range runIDs {
+		if i > 0 && i%100 == 0 {
+			if err := s.holdDeletion(ctx, team, time.Now()); err != nil {
+				return err
+			}
+		}
+		if err := s.deleteRunSegments(ctx, objs, team, id); err != nil {
+			return fmt.Errorf("delete log segments of run %s: %w", id, err)
+		}
+	}
 	ts := s.teamStorage
 	if ts.LogsURL == "" || len(runIDs) == 0 {
 		return nil

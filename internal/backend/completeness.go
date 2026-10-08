@@ -6,11 +6,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type sealReader interface {
 	ReadSeals(ctx context.Context, runID, nodeID string) (logs.SealReport, error)
+}
+
+type segmentCompleteness interface {
+	NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (c logseg.Completeness, found bool, err error)
 }
 
 type logStoreHolder interface {
@@ -28,6 +33,14 @@ func NodeLogCompleteness(ctx context.Context, b Backend, runID string, n *store.
 	holder, ok := b.(logStoreHolder)
 	if !ok {
 		return unknown, nil
+	}
+	if segs, ok := holder.nodeLogStore().(segmentCompleteness); ok {
+		p := NodeProgress(n, now)
+		c, found, err := segs.NodeLogCompleteness(ctx, runID, n.NodeID, logseg.NodeProgress(p), now)
+		if err != nil || !found {
+			return unknown, err
+		}
+		return logs.Completeness(c), nil
 	}
 	reader, ok := holder.nodeLogStore().(sealReader)
 	if !ok {

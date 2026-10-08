@@ -1,0 +1,196 @@
+package controller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+)
+
+type logSegmentFixture struct {
+	dispatchRouteFixture
+	srv *Server
+	url string
+}
+
+func newLogSegmentFixture(t *testing.T) logSegmentFixture {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	now := time.Now()
+	if err := st.CreateRun(t.Context(), store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreatePlanNode(t.Context(), store.DefaultTeam, "run-d", now); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(st, nil).EnableAuthFromStore()
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+	f := logSegmentFixture{dispatchRouteFixture: dispatchRouteFixture{st: st, handler: srv.Handler()}, srv: srv, url: hs.URL}
+	plan := f.claim(t, store.PlanNodeID, store.ClaimTokenPlan)
+	wantPost(t, f.dispatchRouteFixture, planPath, plan, `{"nodes":[{"id":"a","deps":[],`+dispatchHash+`},{"id":"b","deps":[],`+dispatchHash+`}]}`,
+		http.StatusOK, "accepted")
+	return f
+}
+
+type signalUploader struct {
+	*client.LogSegmentUploader
+	stored chan int
+}
+
+func (u signalUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error {
+	err := u.LogSegmentUploader.PutSegment(ctx, seg, body)
+	if err == nil {
+		u.stored <- seg.N
+	}
+	return err
+}
+
+func (f logSegmentFixture) sink(t *testing.T, token, nodeID string) (*logseg.Sink, signalUploader) {
+	t.Helper()
+	up := signalUploader{
+		LogSegmentUploader: client.NewWithToken(f.url, nil, token).NewLogSegmentUploader(t.Context(), "run-d", nodeID),
+		stored:             make(chan int, 64),
+	}
+	if err := up.Open(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	s, err := logseg.NewSink(t.Context(), up, logseg.Options{
+		Run: "run-d", Node: nodeID, SpoolDir: t.TempDir(), SegmentBytes: 16,
+		RetryBase: time.Millisecond, RetryMax: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, up
+}
+
+func logLine(i int) string { return fmt.Sprintf("line %02d\n", i) }
+
+func TestLogSegmentsRoundTripThroughTheController(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	var want strings.Builder
+	for i := 1; i <= 6; i++ {
+		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+		want.WriteString(logLine(i))
+	}
+	m, err := s.Close(ctx, logseg.End{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Status != logseg.StatusComplete || len(m.Segments) < 2 {
+		t.Fatalf("manifest = %+v", m)
+	}
+	logs := f.srv.dashboardLogs(store.DefaultTeam)
+	got, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
+	if err != nil || string(got) != want.String() {
+		t.Fatalf("read %q, %v; want %q", got, err, want.String())
+	}
+	if tail, _ := logs.Read(ctx, "run-d", "a", storage.ReadOpts{Tail: 1}); string(tail) != logLine(6) {
+		t.Fatalf("tail read %q", tail)
+	}
+	if other, err := f.srv.dashboardLogs("other").Read(ctx, "run-d", "a", storage.ReadOpts{}); err != nil || len(other) != 0 {
+		t.Fatalf("another team read the log: %q, %v", other, err)
+	}
+	c, found, err := logs.(segmentLogs).NodeLogCompleteness(ctx, "run-d", "a",
+		logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: time.Now()}, time.Now())
+	if err != nil || !found || c.State != logseg.StateComplete || c.Lines != 6 {
+		t.Fatalf("completeness = %+v %v %v", c, found, err)
+	}
+
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r90/teams/default/runs/run-d/a/a1-g") {
+		t.Fatalf("record = %+v, %v", rec, err)
+	}
+	stored, err := logseg.Open(ctx, f.srv.logObjects(), rec.Prefix)
+	if err != nil || stored.Manifest == nil || stored.Manifest.Attempt != 1 || stored.Manifest.Generation < 1 {
+		t.Fatalf("stored manifest = %+v, %v", stored, err)
+	}
+}
+
+func TestLogSegmentsRefuseASupersededAttemptAndASecondManifest(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	code, body := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/log-segments", tok, []byte(`{"attempt":7,"generation":1,"next":1,"count":1}`))
+	if code != http.StatusConflict {
+		t.Fatalf("a superseded attempt asked for URLs: %d %s", code, body)
+	}
+	code, body = f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/b/log-segments", tok, []byte(`{"next":1,"count":1}`))
+	if code == http.StatusOK {
+		t.Fatalf("a's claim took URLs for node b: %d %s", code, body)
+	}
+	s, up := f.sink(t, tok, "a")
+	if _, err := s.Close(t.Context(), logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := up.PutManifest(t.Context(), logseg.Manifest{Version: logseg.ManifestVersion, Status: logseg.StatusComplete}); !errors.Is(err, logseg.ErrSealed) {
+		t.Fatalf("a second manifest = %v, want ErrSealed", err)
+	}
+}
+
+// A runner that dies mid-node never seals its attempt. Once the node is
+// finished and the grace has passed, the controller seals what landed
+// and the log reads incomplete.
+func TestControllerSealsAnAttemptItsRunnerAbandoned(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "b", store.ClaimTokenWork)
+	s, up := f.sink(t, tok, "b")
+	for i := 1; i <= 5; i++ {
+		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for n := range up.stored {
+		if n >= 2 {
+			break
+		}
+	}
+	wantPost(t, f.dispatchRouteFixture, "/api/v1/runs/run-d/nodes/b/attempt", tok, `{"outcome":"failed","error":"runner lost"}`, http.StatusOK, "")
+
+	f.srv.sealAbandonedLogs(ctx, time.Now().Add(2*logseg.SealGrace))
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "b")
+	if err != nil || rec.SealedAt.IsZero() {
+		t.Fatalf("the abandoned attempt was not sealed: %+v, %v", rec, err)
+	}
+	logs := f.srv.dashboardLogs(store.DefaultTeam).(segmentLogs)
+	got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{})
+	if err != nil || !strings.HasPrefix("line 01\nline 02\nline 03\nline 04\nline 05\n", string(got)) || len(got) == 0 {
+		t.Fatalf("read %q, %v", got, err)
+	}
+	c, _, err := logs.NodeLogCompleteness(ctx, "run-d", "b", logseg.NodeProgress{Started: true, Terminal: true}, time.Now())
+	if err != nil || c.State != logseg.StateIncomplete || !strings.Contains(c.Message, logseg.ReasonRunnerLost) {
+		t.Fatalf("completeness = %+v, %v", c, err)
+	}
+	if _, err := s.Close(context.Background(), logseg.End{}); err == nil {
+		t.Fatal("the lost runner sealed after the controller did")
+	}
+
+	admin := f.admin(t)
+	if code, raw := f.do(t, http.MethodDelete, "/api/v1/runs/run-d", admin, nil); code != http.StatusNoContent {
+		t.Fatalf("delete run: %d %s", code, raw)
+	}
+	if left, _ := f.srv.logObjects().List(ctx, rec.Prefix); len(left) != 0 {
+		t.Fatalf("deleting the run left its log objects: %v", left)
+	}
+}

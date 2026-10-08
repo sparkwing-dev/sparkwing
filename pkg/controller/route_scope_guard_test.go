@@ -45,6 +45,7 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		// safety: output bytes move through URLs this controller signed for one
 		// upload or one object; the handlers check the signature and its expiry.
 		"PUT /api/v1/outputs/uploads/{id}":     true,
+		"PUT /api/v1/log-segments/{key...}":    true,
 		"GET /api/v1/outputs/objects/{key...}": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")

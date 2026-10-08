@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the run-scoped reads sit behind the team boundary, which answers another team's run as missing; the
@@ -23,7 +24,7 @@ func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc) http
 		if !ok {
 			return
 		}
-		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs()).
+		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs(tenant.Team())).
 			Scoped(tenant, liveLogReader{s.liveLogs})
 		read(b).ServeHTTP(w, r)
 	})
@@ -49,19 +50,25 @@ func (s *Server) dashboardPaths() paths.Paths {
 
 // safety: a read made through the logs service carries the caller's own credential, because the logs service asks
 // this controller whose run it is; a credential of the controller's own would answer for the operator's team.
-func (s *Server) dashboardLogs() storage.LogStore {
+// A node whose log reached this controller as segments reads from them instead.
+func (s *Server) dashboardLogs(team store.Team) storage.LogStore {
 	if s.dashboard != nil && s.dashboard.Logs != nil {
 		return s.dashboard.Logs
 	}
-	if s.logsURL == "" {
-		return nil
+	var forwarded storage.LogStore
+	if s.logsURL != "" {
+		s.forwardedLogsOnce.Do(func() {
+			s.forwardedLogs = sparkwinglogs.New(s.logsURL, &http.Client{
+				Transport: forwardCredential{base: otelutil.WrapTransport(nil)},
+			}, "")
+		})
+		forwarded = s.forwardedLogs
 	}
-	s.forwardedLogsOnce.Do(func() {
-		s.forwardedLogs = sparkwinglogs.New(s.logsURL, &http.Client{
-			Transport: forwardCredential{base: otelutil.WrapTransport(nil)},
-		}, "")
-	})
-	return s.forwardedLogs
+	objs := s.logObjects()
+	if objs == nil {
+		return forwarded
+	}
+	return segmentLogs{s: s, team: team, objs: objs, fallback: forwarded}
 }
 
 type forwardedCredentialKey struct{}
