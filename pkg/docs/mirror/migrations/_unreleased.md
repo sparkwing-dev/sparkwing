@@ -512,3 +512,114 @@ review as the route table moves to one declared list.
   inside their own transactions.
 - **Author steps:** settle a node with `FinalizeNodeCredits`; generate a release
   seed as described above under `cmd/sign-manifest is removed`.
+
+## Six unused SDK names are removed
+
+**Before:** the `sparkwing` package exported `Cache`, `Logs` and `State` (type
+aliases for the `pkg/storage` interfaces), `TypeName`, `FailureFromContext` and
+`(*SpawnSpec).ResolvedID`.
+
+**After:** none of them exist. No pipeline, sparks library or guide used them.
+
+**Author steps:**
+
+| Removed | Use instead |
+|---|---|
+| `sparkwing.Cache`, `sparkwing.Logs`, `sparkwing.State` | `storage.ArtifactStore`, `storage.LogStore`, `storage.StateStore` from `github.com/sparkwing-dev/sparkwing/pkg/storage` |
+| `sparkwing.TypeName(p)` | `reflect.TypeOf(p).Elem().Name()` for a pointer, or `reflect.TypeOf(p).Name()` |
+| `sparkwing.FailureFromContext(ctx)` | the `sparkwing.Failure` argument an `OnFailure` handler already receives |
+| `(*SpawnSpec).ResolvedID()` | nothing; it always returned `""` |
+
+The `sparkwing-web` service is gone: the controller serves the dashboard,
+sign-in, and the browser flows on its own listener. Operators repoint the
+console host at the controller and delete the web Deployment; `sparkwing
+serve` users change nothing.
+
+## The controller serves the dashboard
+
+**Before:** `sparkwing-web` hosted the dashboard bundle, the login page, OAuth
+and GitHub App browser flows, and a proxy that forwarded an allowlist of
+`/api/v1/*` routes to the controller and log reads to the logs service. The
+`sparkwing-full` chart deployed it as `<release>-web`, and its Ingress routed
+there.
+
+**After:** `sparkwing-controller` serves the dashboard pages, `/login`,
+password and first-admin sign-in, logout, `/auth/{provider}/start` and
+`/callback`, identity linking at `/auth/{provider}/link`, the GitHub App pages
+under `/github/app/`, and the dashboard's log, grep, event-stream and capacity
+reads, on the same port as its API. Session cookies are `__Host-sw_session` and
+`__Host-sw_csrf`. Log reads go to the logs service named by the controller's
+`--logs-url`, carrying the caller's own credential. Pages require sign-in
+whenever the controller enforces token auth. A controller built without
+`bin/build-web.sh` still starts, and its pages answer 503 naming that step.
+The chart deploys no web Deployment or Service, and its Ingress routes every
+host to the controller Service.
+
+**Upgrade:**
+
+1. Point the console host's Ingress or load balancer at the controller
+   Service. A console host and an API host can both point at it; a reverse
+   proxy in front can still split them.
+2. Delete the `sparkwing-web` Deployment and Service. A `sparkwing-full`
+   upgrade removes them and names the Ingress after the controller. A
+   values file that still sets `web` fails to render: move `web.logs.url` to
+   `controller.logs.url` and drop the rest.
+3. Move `sparkwing-web` flags to the controller:
+
+   | `sparkwing-web` | Controller |
+   |---|---|
+   | `--require-login` | Follows the controller's own auth: pages require sign-in whenever it enforces tokens |
+   | `--hsts` | `--hsts` |
+   | `--trusted-proxy-addr` | `--trusted-proxy-addr`, which also reads `X-Forwarded-Proto` as TLS evidence |
+   | `SPARKWING_WEB_INSECURE_COOKIES` with `--allow-insecure-cookies-remote` | `--insecure-cookies` |
+   | `--controller`, `--logs`, `--token`, `--profile`, `--state-spec`, `--logs-spec`, `--artifacts-spec` | None; the controller reads its own state and uses `--logs-url` |
+   | `--allow-unauthenticated-remote`, `--allow-origin` | None; the controller refuses cross-site browser writes to `/api/` |
+
+   Chart users: `ingress.tls` passes `--hsts`, and `ingress.allowInsecure=true`
+   without TLS passes `--insecure-cookies`.
+4. A dashboard published over plain HTTP needs `--insecure-cookies` (chart:
+   `ingress.allowInsecure=true`), or browsers drop the `Secure` session cookies.
+5. Register the OAuth and GitHub App callback URLs on the host that now
+   reaches the controller, and list the sign-in callbacks in
+   `--oauth-redirect-uris`. The paths are unchanged.
+
+`sparkwing serve` runs the controller in local mode with the dashboard
+attached and needs nothing.
+
+**Removed routes:** `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`,
+`POST /api/v1/me/identities/{provider}/link` and `/link/complete`,
+`POST /api/v1/team/github-app/connect`, `/connect/available`,
+`/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and
+`GET /api/v1/auth/bootstrap-needed` answer 404. No CLI command called them; a
+client of your own drives the browser pages that replace them.
+`/api/v1/auth/login`, `/api/v1/auth/session` and `/api/v1/auth/logout` remain.
+
+**Why:** two processes split one browser surface, and the proxy's route
+allowlist and service bearer were a second authorization layer to keep in
+step with the controller's own.
+
+## Node bounce requests move to their run's team
+
+- **Before:** a bounce request was recorded without its team, so every row
+  carried the default team whatever team its run belonged to.
+- **After:** schema 93 moves each existing request into the team of the run it
+  names, and new requests record their run's team. A team's open requests stay
+  visible to its runners, and its next request continues the node's sequence.
+- **Upgrade:** nothing to do; the controller applies schema 93 on start. An
+  older binary keeps reading the upgraded database.
+
+## Store methods removed or moved to Tenant
+
+- **Before:** `pkg/store` exported `Store.ActiveExecutorActivity`,
+  `Store.PrincipalHoldsPipelineClaim` and `Store.FailNodeForUnpricedClass`.
+- **After:** the first two are gone, and the third is a method of `Tenant`.
+  Many other `Store` methods now act on the default team only; their `Tenant`
+  methods of the same name serve every team.
+- **Upgrade:** code embedding `pkg/store` replaces
+  `st.ActiveExecutorActivity(ctx, now)` with
+  `team.ActiveExecutorActivity(ctx, now)` on the handle from
+  `st.ForTeam(ctx, slug)`, replaces `st.PrincipalHoldsPipelineClaim` with
+  `st.PrincipalHoldsProfileClaim` or `st.PrincipalHoldsRunClaim`, and calls
+  `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
+  writes runs, nodes or triggers of a team other than the default goes
+  through that team's handle.

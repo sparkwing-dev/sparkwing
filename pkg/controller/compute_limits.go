@@ -236,7 +236,13 @@ func (s *Server) noteComputeLimitBlocked(
 	if err != nil {
 		return
 	}
-	wrote, err := s.store.AppendEventOnce(ctx, runID, nodeID, store.EventKindComputeLimitBlocked, payload)
+	tenant, err := s.tenantFor(r)
+	if err != nil {
+		s.logger.Warn("recording a compute-limit refusal failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return
+	}
+	wrote, err := tenant.AppendEventOnce(ctx, runID, nodeID, store.EventKindComputeLimitBlocked, payload)
 	if err != nil {
 		s.logger.Warn("recording a compute-limit refusal failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
@@ -254,7 +260,12 @@ func (s *Server) noteComputeLimitBlocked(
 func (s *Server) stopForWallClockLimit(r *http.Request, runID, nodeID, prefix string) (stop bool) {
 	ctx := r.Context()
 	now := time.Now()
-	ceiling, over, err := s.store.RunExceedsWallClock(ctx, runID, now)
+	var ceiling int64
+	var over bool
+	tenant, err := s.tenantFor(r)
+	if err == nil {
+		ceiling, over, err = tenant.RunExceedsWallClock(ctx, runID, now)
+	}
 	if err != nil {
 		s.logger.Warn("reading the wall-clock guard failed",
 			"run_id", runID, "node_id", nodeID, "err", err)

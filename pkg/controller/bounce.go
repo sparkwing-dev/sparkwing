@@ -8,9 +8,13 @@ import (
 )
 
 func (s *Server) handleRequestNodeBounce(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	b, err := s.store.RequestNodeBounce(r.Context(), runID, nodeID, auditPrincipal(r))
+	b, err := tenant.RequestNodeBounce(r.Context(), runID, nodeID, auditPrincipal(r))
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)
@@ -24,7 +28,11 @@ func (s *Server) handleRequestNodeBounce(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handlePendingNodeBounce(w http.ResponseWriter, r *http.Request) {
-	b, err := s.store.PendingNodeBounce(r.Context(), r.PathValue("id"), r.PathValue("nodeID"))
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	b, err := tenant.PendingNodeBounce(r.Context(), r.PathValue("id"), r.PathValue("nodeID"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -37,6 +45,10 @@ func (s *Server) handlePendingNodeBounce(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleConsumeNodeBounce(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	var body struct {
 		Seq     int64  `json:"seq"`
 		Outcome string `json:"outcome"`
@@ -48,7 +60,7 @@ func (s *Server) handleConsumeNodeBounce(w http.ResponseWriter, r *http.Request)
 	if body.Outcome == "" {
 		body.Outcome = store.BounceBounced
 	}
-	err := s.store.ConsumeNodeBounce(r.Context(),
+	err := tenant.ConsumeNodeBounce(r.Context(),
 		r.PathValue("id"), r.PathValue("nodeID"), body.Seq, body.Outcome)
 	switch {
 	case errors.Is(err, store.ErrNotFound):

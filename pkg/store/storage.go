@@ -798,7 +798,7 @@ func (s *Store) AppendEventCharged(
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if nodeID != "" {
-		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
@@ -814,7 +814,7 @@ func (s *Store) AppendEventCharged(
 	if err := s.chargeStorageTx(ctx, tx, principal, runID, size, 0, time.Now().UTC()); err != nil {
 		return 0, err
 	}
-	seq, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
+	seq, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
 	if err != nil {
 		return 0, err
 	}
@@ -831,24 +831,38 @@ func (s *Store) AppendEventCharged(
 func (s *Store) SetNodeArtifactManifestCharged(
 	ctx context.Context, principal, runID, nodeID, manifestDigest string,
 ) (err error) {
-	tx, err := s.beginTx(ctx)
+	return s.defaultTenant().SetNodeArtifactManifestCharged(ctx, principal, runID, nodeID, manifestDigest)
+}
+
+// SetNodeArtifactManifestCharged is [Store.SetNodeArtifactManifestCharged] confined to t's team.
+func (t *Tenant) SetNodeArtifactManifestCharged(
+	ctx context.Context, principal, runID, nodeID, manifestDigest string,
+) (err error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	if err := s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
+	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET artifact_manifest = ? WHERE run_id = ? AND node_id = ?`,
-		manifestDigest, runID, nodeID)
+		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		manifestDigest, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
 	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
+		return err
+	}
+	// safety: the object is charged only once the node is proven to be this
+	// team's, so a foreign or missing node rolls back without spending quota.
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return notFound("node", runID+"/"+nodeID)
+	}
+	if err := t.s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit()

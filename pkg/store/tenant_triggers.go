@@ -124,7 +124,7 @@ func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key 
 	if err != nil {
 		return nil, err
 	}
-	return t.s.GetTrigger(ctx, id)
+	return t.GetTrigger(ctx, id)
 }
 
 // FindTriggerByWebhookReplay returns the trigger in t's team a refused
@@ -152,7 +152,7 @@ func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deli
 	if err != nil {
 		return nil, err
 	}
-	return t.s.GetTrigger(ctx, id)
+	return t.GetTrigger(ctx, id)
 }
 
 // CountPendingTriggers returns how many of t's triggers are waiting to be

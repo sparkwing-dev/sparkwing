@@ -770,7 +770,7 @@ sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
 Manage dashboard login users
 
 Seeds admin credentials in the controller's users table, used
-by the web pod's login flow. Connection info comes from the
+by the dashboard's password sign-in. Connection info comes from the
 profile named by --profile.
 
 ### Subcommands

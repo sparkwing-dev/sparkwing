@@ -18,8 +18,8 @@ team, not once per developer.
 ---
 
 Sparkwing (prod deployment) is a self-hosted CI/CD platform that runs on
-Kubernetes. The stack is five pods: a controller, cache, web, runner,
-and logs. Building container images (Docker-in-Docker) and hosting an
+Kubernetes. The stack is four pods: a controller, which also serves the
+dashboard, cache, runner, and logs. Building container images (Docker-in-Docker) and hosting an
 image registry, when a pipeline needs them, are external infrastructure
 the chart does not deploy.
 
@@ -29,12 +29,12 @@ the chart does not deploy.
 ┌──────────────────────────────────────────────────────────────────┐
 │                      Kubernetes Cluster                            │
 │                                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
-│  │  Controller  │  │   Cache      │  │   Web        │             │
-│  │ (API + queue │  │  (git HTTP + │  │  (dashboard) │             │
-│  │  + webhooks) │  │   blob store │  │              │             │
-│  │              │  │   + pkg proxy│  │              │             │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘             │
+│  ┌──────────────┐  ┌──────────────┐                               │
+│  │  Controller  │  │   Cache      │                               │
+│  │ (API + queue │  │  (git HTTP + │                               │
+│  │  + webhooks  │  │   blob store │                               │
+│  │  + dashboard)│  │   + pkg proxy│                               │
+│  └──────┬───────┘  └──────────────┘                               │
 │         │                                                          │
 │  ┌──────┴───────┐  ┌──────────────┐                               │
 │  │  Runner      │  │   Logs       │                               │
@@ -51,8 +51,8 @@ the chart does not deploy.
     └─────────┘          └─────────┘
 ```
 
-Five pods: sparkwing-controller, sparkwing-cache, sparkwing-web,
-sparkwing-runner, and sparkwing-logs.
+Four pods: sparkwing-controller, sparkwing-cache, sparkwing-runner, and
+sparkwing-logs.
 
 ### Controller
 
@@ -61,6 +61,8 @@ serves it to runners that poll and claim.
 
 - **API server** (port 4344): HTTP endpoints for triggers, run status,
   agent polling, secrets, and authorization
+- **Dashboard**: the dashboard pages, sign-in, and the browser flows for
+  OAuth and the GitHub App, on the same port as the API
 - **Job queue**: in-memory queue with SQLite persistence
   (`/data/state.db`) for run state, metadata, secrets, and tokens
 - **Webhooks**: receives GitHub webhook payloads, verifies HMAC
@@ -117,7 +119,10 @@ See [Cache](gitcache.md) for endpoints and configuration.
 ### Dashboard
 
 Next.js web app showing pipeline runs, logs, node status, and
-documentation.
+documentation. The controller embeds the bundle and serves it on its API
+port; `sparkwing serve` serves the same bundle locally. Log panes read
+through the controller, which forwards each read to the logs service with
+the viewer's own credential.
 
 The Fleet page shows team-scoped executors and queue activity. Operators can
 check controller and logs health through their own service endpoints.
@@ -139,7 +144,8 @@ That is up to the pipeline author.
 ### Logs
 
 Dedicated log storage and streaming service. Runners send step output via
-HTTP; the dashboard reads live logs via SSE.
+HTTP; the controller reads them for the dashboard, which streams live
+logs via SSE.
 
 ## Component Communication
 
@@ -157,8 +163,8 @@ Runner ────────► Cache             clone repo, download code +
 Runner ────────► Logs              stream step output
 Runner ────────► DinD              Docker builds (tcp://localhost:2375)
 Runner ────────► Registry          docker push (localhost:30500)
-Dashboard ─────► Controller        read runs / agents / pipelines
-Dashboard ─────► Logs              live log stream (SSE)
+Dashboard ─────► Controller        pages, runs / agents / pipelines, log reads (SSE)
+Controller ────► Logs              dashboard log reads, with the viewer's credential
 
 Cache ─────────► GitHub            git fetch (background, every 30s)
 
@@ -172,11 +178,10 @@ ingress, each component needs these allow rules:
 
 | Component | Accepts traffic from |
 |-----------|---------------------|
-| Controller | External (webhooks), Dashboard, Runners |
+| Controller | External (webhooks, dashboard, API), Runners |
 | Cache | Controller, Runners |
 | DinD | Runners |
-| Dashboard | External (port 4343) |
-| Logs | Runners, Dashboard |
+| Logs | Runners, Controller |
 | Registry | Runners, Nodes (image pulls) |
 
 ### Internal service addresses
@@ -189,7 +194,6 @@ All components discover each other via k8s DNS. No hardcoded IPs.
 | Cache | `sparkwing-cache.sparkwing.svc.cluster.local` | 80 -> 8090 |
 | Logs | `sparkwing-logs.sparkwing.svc.cluster.local` | 80 -> 4345 |
 | DinD | `dind.sparkwing.svc.cluster.local` | 2375 |
-| Dashboard | `sparkwing-web.sparkwing.svc.cluster.local` | 80 -> 4343 |
 | Registry | `registry.registry.svc.cluster.local` | 5000 (NodePort 30500) |
 
 ### Environment variables set on runners

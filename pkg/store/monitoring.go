@@ -64,11 +64,11 @@ func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline st
 	query := `
 SELECT id, pipeline, status, created_at, started_at, finished_at
      , CASE
-         WHEN EXISTS (SELECT 1 FROM nodes WHERE nodes.run_id = runs.id)
+         WHEN EXISTS (SELECT 1 FROM nodes WHERE nodes.team = runs.team AND nodes.run_id = runs.id)
           AND NOT EXISTS (
                 SELECT 1
                   FROM nodes
-                 WHERE nodes.run_id = runs.id
+                 WHERE nodes.team = runs.team AND nodes.run_id = runs.id
                    AND COALESCE(nodes.outcome, '') NOT IN ('cached', 'satisfied')
               )
          THEN 1 ELSE 0

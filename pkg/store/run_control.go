@@ -152,16 +152,12 @@ func resolveApprovalTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 
 // safety: any node but a controller approval gate reports handled false and
 // writes nothing, so a gate the in-process dispatcher polls keeps its path.
-func (s *Store) resolveControllerApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (handled bool, err error) {
+func (s *Store) resolveControllerApproval(ctx context.Context, team Team, runID, nodeID, resolution, approver, comment string) (handled bool, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	team, found, err := runOwnerTx(ctx, tx, runID)
-	if err != nil || !found {
-		return false, err
-	}
 	// safety: a node's kind is fixed when it is inserted, so reading it before
 	// the run lock cannot misroute the resolution.
 	var kind string
@@ -237,16 +233,12 @@ func (s *Store) timeOutControllerApprovals(ctx context.Context, now time.Time) (
 
 // safety: a run with no controller planning node reports handled false and
 // writes nothing, so a run a trigger holder drives keeps the cooperative cancel.
-func (s *Store) requestControllerRunCancel(ctx context.Context, runID string, now time.Time) (handled bool, err error) {
+func (s *Store) requestControllerRunCancel(ctx context.Context, team Team, runID string, now time.Time) (handled bool, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	team, found, err := runOwnerTx(ctx, tx, runID)
-	if err != nil || !found {
-		return false, err
-	}
 	var one int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?`,
 		string(team), runID, PlanNodeID, nodeKindPlan).Scan(&one)

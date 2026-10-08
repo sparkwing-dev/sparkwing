@@ -59,7 +59,7 @@ func TestNodeLogCompleteness_ReportsTheVerdictTheDashboardDraws(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness",
-		nodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, sparkwinglogs.New(hs.URL, nil, ""))))
+		NodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, sparkwinglogs.New(hs.URL, nil, ""))))
 	get := func(node string, want int) logs.Completeness {
 		t.Helper()
 		rec := httptest.NewRecorder()
@@ -81,7 +81,7 @@ func TestNodeLogCompleteness_ReportsTheVerdictTheDashboardDraws(t *testing.T) {
 
 	mux = http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness",
-		nodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, nil)))
+		NodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, nil)))
 	if c := get("silent", http.StatusOK); c.State != logs.StateUnknown {
 		t.Fatalf("store without seals = %+v", c)
 	}

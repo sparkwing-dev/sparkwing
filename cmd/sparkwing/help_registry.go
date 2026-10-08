@@ -2360,7 +2360,7 @@ var cmdUsers = Command{
 	Path:     "sparkwing cluster users",
 	Synopsis: "Manage dashboard login users",
 	Description: `Seeds admin credentials in the controller's users table, used
-by the web pod's login flow. Connection info comes from the
+by the dashboard's password sign-in. Connection info comes from the
 profile named by --profile.`,
 	SubcommandOrder: []string{"add", "list", "delete"},
 }

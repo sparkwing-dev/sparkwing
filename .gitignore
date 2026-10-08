@@ -12,7 +12,6 @@
 /sparkwing-controller
 /sparkwing-logs
 /sparkwing-runner
-/sparkwing-web
 /verify-release
 
 # Go workspace

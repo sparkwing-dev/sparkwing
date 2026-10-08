@@ -21,7 +21,7 @@ func freshController(t *testing.T, lic *license.License) (string, *store.Store) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	srv := controller.New(st, nil).WithLicense(lic)
+	srv := controller.New(st, nil).WithLicense(lic).WithDashboard(controller.Dashboard{})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

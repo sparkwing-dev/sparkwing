@@ -53,7 +53,7 @@ VALUES ($1, $2, $2, 'n1', 1, 1, 'coord-a', 'member-a', 'runner', 'team-a-box', '
 			t.Fatalf("team B creates its node = %d: %s", resp.StatusCode, out)
 		}
 
-		node, err := f.st.GetNode(ctx, runB, "n1")
+		node, err := f.teamB.GetNode(ctx, runB, "n1")
 		if err != nil {
 			t.Fatal(err)
 		}

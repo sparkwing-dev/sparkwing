@@ -744,6 +744,11 @@ SELECT pipeline, node_id, ` + profileColumns + `
 // or "" for every pipeline. Pipelines with no cache-dominant runs are absent
 // from the map.
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
+	return s.defaultTenant().CacheExcludedCounts(ctx, pipeline, cachedOutcome, fraction)
+}
+
+// CacheExcludedCounts is [Store.CacheExcludedCounts] confined to t's team.
+func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
 	q := `
 SELECT r.pipeline, COUNT(*)
   FROM (
@@ -751,17 +756,18 @@ SELECT r.pipeline, COUNT(*)
            SUM(CASE WHEN outcome = ? THEN 1 ELSE 0 END) AS cached,
            SUM(CASE WHEN outcome != '' THEN 1 ELSE 0 END) AS total
       FROM nodes
+     WHERE team = ?
      GROUP BY run_id
   ) x
   JOIN runs r ON r.id = x.run_id
- WHERE x.total > 0 AND CAST(x.cached AS REAL) / x.total >= ?`
-	args := []any{cachedOutcome, fraction}
+ WHERE r.team = ? AND x.total > 0 AND CAST(x.cached AS REAL) / x.total >= ?`
+	args := []any{cachedOutcome, string(t.team), string(t.team), fraction}
 	if pipeline != "" {
 		q += ` AND r.pipeline = ?`
 		args = append(args, pipeline)
 	}
 	q += ` GROUP BY r.pipeline`
-	rows, err := s.query(ctx, q, args...)
+	rows, err := t.s.query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

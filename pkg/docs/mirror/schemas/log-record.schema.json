@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sparkwing node protocol: log record",
+  "description": "One line of the NDJSON log stream a node process writes to stdout. Each line is one JSON object terminated by a newline. A property whose description starts with 'Target:' is part of the contract the engine-hosted model needs and no SDK emits yet; every other property is emitted today.",
+  "type": "object",
+  "properties": {
+    "ts": { "type": "string", "description": "RFC 3339 timestamp with fractional seconds. The host may replace it with its own receive time." },
+    "level": { "enum": ["debug", "info", "warn", "error"] },
+    "node": { "type": "string", "description": "Id of the node that wrote the record." },
+    "step": { "type": "string", "description": "Id of the active step, when one is running." },
+    "event": {
+      "type": "string",
+      "description": "Empty or absent for a plain message. Known values a node writes: node_annotation, node_summary, step_start, step_end, step_skipped, work_fail_fast, exec_start, exec_line, and the Target exec_end. The engine writes further values of its own, such as node_start, node_end and retry."
+    },
+    "msg": { "type": "string", "description": "The message. May carry raw ANSI from a child process; the other fields never do." },
+    "attrs": { "type": "object", "description": "Event-specific fields." }
+  },
+  "required": ["ts"],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "event": { "const": "node_annotation" } }, "required": ["event"] },
+      "then": { "properties": { "attrs": { "$ref": "#/$defs/annotation" } }, "required": ["attrs"] }
+    },
+    {
+      "if": { "properties": { "event": { "const": "node_summary" } }, "required": ["event"] },
+      "then": { "properties": { "attrs": { "$ref": "#/$defs/summary" } }, "required": ["attrs"] }
+    },
+    {
+      "if": { "properties": { "event": { "const": "exec_end" } }, "required": ["event"] },
+      "then": { "properties": { "attrs": { "$ref": "#/$defs/execEnd" } }, "required": ["attrs"] }
+    }
+  ],
+  "$defs": {
+    "annotation": {
+      "type": "object",
+      "description": "attrs of a node_annotation record.",
+      "properties": {
+        "message": { "type": "string" },
+        "level": { "enum": ["notice", "warning", "error"], "description": "Target: the annotation's severity; absent means notice." },
+        "file": { "type": "string", "description": "Target: repository-relative path the annotation points at." },
+        "line": { "type": "integer", "minimum": 1, "description": "Target: 1-based line in file." },
+        "end_line": { "type": "integer", "minimum": 1, "description": "Target: last line of the range in file." }
+      },
+      "required": ["message"],
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "description": "attrs of a node_summary record.",
+      "properties": {
+        "markdown": { "type": "string" }
+      },
+      "required": ["markdown"],
+      "additionalProperties": false
+    },
+    "execEnd": {
+      "type": "object",
+      "description": "Target: attrs of an exec_end record, the per-command resource numbers an SDK reports when it has them.",
+      "properties": {
+        "exit_code": { "type": "integer" },
+        "cpu_ms": { "type": "integer", "minimum": 0 },
+        "max_rss": { "type": "integer", "minimum": 0, "description": "Peak resident set size in bytes." }
+      },
+      "additionalProperties": false
+    }
+  }
+}

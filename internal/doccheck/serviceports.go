@@ -15,7 +15,6 @@ type service struct {
 
 var services = []service{
 	{"sparkwing-controller", filepath.Join("cmd", "sparkwing-controller", "main.go")},
-	{"sparkwing-web", filepath.Join("cmd", "sparkwing-web", "main.go")},
 	{"sparkwing-logs", filepath.Join("cmd", "sparkwing-logs", "main.go")},
 }
 

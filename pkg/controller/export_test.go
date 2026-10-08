@@ -64,3 +64,8 @@ func (r *githubCheckReporter) idle(ctx context.Context) error {
 		}
 	}
 }
+
+// ReportGitHubRunState reports runID's state to GitHub as a run finish does.
+func ReportGitHubRunState(ctx context.Context, s *Server, runID, status string) {
+	s.reportGitHubRunState(ctx, runID, status)
+}

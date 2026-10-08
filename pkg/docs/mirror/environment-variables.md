@@ -159,12 +159,6 @@ Kinds:
 |---|---|
 | `SPARKWING_RELEASE_SIGNING_KEY` | [security](security.md) |
 
-## Configuration: `sparkwing-web`
-
-| Variable | Described in |
-|---|---|
-| `SPARKWING_WEB_INSECURE_COOKIES` | [auth](auth.md) |
-
 ## Runtime
 
 Set by Sparkwing for pipeline code and node processes.

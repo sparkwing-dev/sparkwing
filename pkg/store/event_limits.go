@@ -133,7 +133,11 @@ func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, principal, runID 
 	if limits.MaxBytesPerRun <= 0 && limits.MaxEventsPerRun <= 0 {
 		return nil
 	}
-	if err := lockEventSequenceTx(ctx, tx, runID); err != nil {
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if err := lockEventSequenceTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	var storedBytes, storedEvents int64

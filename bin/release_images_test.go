@@ -81,7 +81,7 @@ func TestReleaseImagesPackageBothArchitecturesWithoutRecompiling(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, arch := range []string{"amd64", "arm64"} {
-		for _, binary := range []string{"sparkwing-controller", "sparkwing-runner", "sparkwing-cache", "sparkwing-logs", "sparkwing-web"} {
+		for _, binary := range []string{"sparkwing-controller", "sparkwing-runner", "sparkwing-cache", "sparkwing-logs"} {
 			if err := os.WriteFile(filepath.Join(dir, "dist", binary+"-linux-"+arch), []byte("payload:"+binary+":"+arch), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +98,7 @@ func TestReleaseImagesPackageBothArchitecturesWithoutRecompiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 5 {
+	if len(entries) != 4 {
 		t.Fatalf("manifests=%d", len(entries))
 	}
 }
@@ -123,7 +123,7 @@ func TestReleaseImageTagsPreserveLatestAndImmutableVersions(t *testing.T) {
 			state := map[string]string{}
 			old := "sha256:" + strings.Repeat("a", 64)
 			next := "sha256:" + strings.Repeat("b", 64)
-			for _, binary := range []string{"sparkwing-controller", "sparkwing-runner", "sparkwing-cache", "sparkwing-logs", "sparkwing-web"} {
+			for _, binary := range []string{"sparkwing-controller", "sparkwing-runner", "sparkwing-cache", "sparkwing-logs"} {
 				if err := os.WriteFile(filepath.Join(dir, "scanned-image-digests", binary), []byte(next), 0o600); err != nil {
 					t.Fatal(err)
 				}

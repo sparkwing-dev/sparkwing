@@ -46,7 +46,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(source.TriggerSource, "pipeline-working-tree@") {
-		trigger, triggerErr := s.store.GetTrigger(r.Context(), srcID)
+		trigger, triggerErr := tenant.GetTrigger(r.Context(), srcID)
 		if triggerErr != nil && !errors.Is(triggerErr, store.ErrNotFound) {
 			s.writeInternalError(w, r, "read retry source trigger", triggerErr)
 			return
@@ -63,7 +63,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	// safety: a retry creates a run, so the hourly guard measures the principal
 	// that asked for it exactly as a direct create does.
 	retryCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
-	created, err := runretry.Create(retryCtx, s.store, srcID, newRunID(), full, time.Now())
+	created, err := runretry.Create(retryCtx, s.store, tenant, srcID, newRunID(), full, time.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)

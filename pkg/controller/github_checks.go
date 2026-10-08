@@ -310,7 +310,7 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 	if err != nil {
 		return err
 	}
-	check := r.checkRun(ctx, u)
+	check := r.checkRun(ctx, tenant, u)
 	if id != 0 {
 		return r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
 	}
@@ -344,12 +344,12 @@ func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubChe
 	})
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, u githubCheckUpdate) githubapp.CheckRun {
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) githubapp.CheckRun {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
 	}
-	run, err := r.store.GetRun(ctx, u.runID)
+	run, err := tenant.GetRun(ctx, u.runID)
 	if err != nil {
 		run = nil
 	}
@@ -373,7 +373,7 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, u githubCheckUpdate)
 		check.CompletedAt = &completed
 		var nodes []*store.Node
 		if run != nil {
-			if nodes, err = r.store.ListNodes(ctx, u.runID); err != nil {
+			if nodes, err = tenant.ListNodes(ctx, u.runID); err != nil {
 				nodes = nil
 			}
 		}
@@ -500,7 +500,7 @@ func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus stri
 	if s.githubApp == nil {
 		return
 	}
-	trigger, err := s.store.GetTrigger(ctx, runID)
+	trigger, err := s.runTrigger(ctx, runID)
 	if err != nil || trigger.TriggerEnv[envGitHubAppInstallation] == "" {
 		return
 	}

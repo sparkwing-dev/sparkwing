@@ -110,8 +110,11 @@ profiles:
 
 ```sh
 sparkwing run hello --profile shared
-sparkwing-web --state-spec=postgres://...  # same DSN
+sparkwing serve start --profile shared --no-local-store --read-only
 ```
+
+`sparkwing serve` serves a read-only dashboard over the profile's object
+store; a dashboard with sign-in comes from a controller.
 
 The first runner to start migrates the schema; staggered upgrades are
 covered under "Schema versioning" in

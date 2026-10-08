@@ -266,7 +266,11 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, errors.New("source downloads need a live claim grant"))
 			return
 		}
-		trigger, findErr := s.store.GetTrigger(r.Context(), grant.Run)
+		var trigger *store.Trigger
+		tenant, findErr := s.tenantForTeam(r.Context(), team)
+		if findErr == nil {
+			trigger, findErr = tenant.GetTrigger(r.Context(), grant.Run)
+		}
 		if findErr != nil || trigger.Team != team || !strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") ||
 			req.Key != trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] {
 			writeError(w, http.StatusForbidden, errors.New("source bundle does not belong to this run"))

@@ -177,7 +177,15 @@ func mintTeamClaimant(t *testing.T, tn *store.Tenant, principal string) store.Cl
 
 func requireTriggerStatus(t *testing.T, st *store.Store, id, want string) {
 	t.Helper()
-	got, err := st.GetTrigger(context.Background(), id)
+	team, err := st.AsOperator().TriggerTeam(context.Background(), id)
+	if err != nil {
+		t.Fatalf("TriggerTeam(%s): %v", id, err)
+	}
+	tn, err := st.ForTeam(context.Background(), team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := tn.GetTrigger(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetTrigger(%s): %v", id, err)
 	}

@@ -410,12 +410,12 @@ startup so an unauthenticated deployment is visible.
 ### Network policy
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod, admitting four peers on the cache port: the release's runner,
-controller, and dashboard pods, plus the Job pods the Kubernetes runner
-backend creates. Set `networkPolicy.enabled=false` to drop it. Point
-`networkPolicy.controllerPodSelector` and `networkPolicy.webPodSelector` at
-your own pod labels when the controller or the dashboard runs under a
-different release; both default to this release's own pods. Override
+cache pod, admitting the release's runner and controller pods on the cache
+port, plus the Job pods the Kubernetes runner backend creates. Set
+`networkPolicy.enabled=false` to drop it. Point
+`networkPolicy.controllerPodSelector` at your own pod labels when the
+controller runs under a different release; it defaults to this release's own
+controller pod. Override
 `networkPolicy.runnerJobPodSelector`, which defaults to
 `app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
 other labels. Add peers through `networkPolicy.extraIngress` for an

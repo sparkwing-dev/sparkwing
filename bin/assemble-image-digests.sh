@@ -2,7 +2,7 @@
 set -euo pipefail
 
 mkdir -p scanned-image-digests
-for binary in sparkwing-controller sparkwing-runner sparkwing-cache sparkwing-logs sparkwing-web; do
+for binary in sparkwing-controller sparkwing-runner sparkwing-cache sparkwing-logs; do
   image="ghcr.io/sparkwing-dev/$binary"
   sources=()
   for arch in amd64 arm64; do
