@@ -58,16 +58,17 @@ func TestPipelineCacheKey_InvalidatesOnGitignoreEdit(t *testing.T) {
 	}
 }
 
-func TestPipelineCacheKey_HashAllFilesEnvRestoresFullHashing(t *testing.T) {
+func TestPipelineCacheKey_HashAllFilesRestoresFullHashing(t *testing.T) {
 	dir := newGitPipelineDir(t)
 	writeFile(t, filepath.Join(dir, ".gitignore"), "dist/\n")
-	t.Setenv(HashAllFilesEnv, "1")
+	SetHashAllFiles(true)
+	t.Cleanup(func() { SetHashAllFiles(false) })
 	before := mustKey(t, dir)
 
 	writeFile(t, filepath.Join(dir, "dist/binary"), "pretend output")
 
 	if after := mustKey(t, dir); after == before {
-		t.Fatalf("%s must restore hashing of ignored files, got %s twice", HashAllFilesEnv, before)
+		t.Fatalf("SetHashAllFiles must restore hashing of ignored files, got %s twice", before)
 	}
 }
 

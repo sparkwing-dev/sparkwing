@@ -78,15 +78,14 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 State, cache, and logs come from the resolved profile; see
 [storage backends](backends.md) for the configuration shape.
 
-### Recommended: `SPARKWING_NO_SPARKS_RESOLVE=1` in CI
+### Recommended: `--sw-no-update` in CI
 
 If your `.sparkwing/sparkwing.yaml` declares a `sparks:` block, sparkwing
 auto-refreshes the resolved overlay at run time by default. That
 shells out to `go env` / `go list`, which means CI runners would
-need a Go toolchain even on a cache hit. **Set
-`SPARKWING_NO_SPARKS_RESOLVE=1` in the CI step's env** so the runner
-trusts the committed `.resolved.mod` overlay and never resolves on
-its own.
+need a Go toolchain even on a cache hit. **Pass `--sw-no-update` to
+`sparkwing run` in the CI step** so the runner trusts the committed
+`.resolved.mod` overlay and never resolves on its own.
 
 Workflow then becomes:
 
@@ -100,7 +99,7 @@ git push                          # triggers publish + run with frozen overlay
 
 CI never re-resolves; the publish step on your laptop (or in a
 publish-on-merge workflow) is the deliberate "go fresh" surface.
-Repos without a `sparks:` block ignore this var -- it's a no-op.
+Repos without a `sparks:` block ignore the flag -- it's a no-op.
 
 ## Profile-based config (laptop)
 

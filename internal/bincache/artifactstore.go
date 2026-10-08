@@ -16,11 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// DigestBackfillEnv names the variable that lets a fetch accept a blob
-// whose digest sidecar is missing and write the sidecar from the bytes
-// it just downloaded. Unset, a missing sidecar fails the fetch.
-const DigestBackfillEnv = "SPARKWING_ARTIFACT_DIGEST_BACKFILL"
-
 func digestKey(key string) string { return "bin/" + key + ".sha256" }
 
 func storedDigest(ctx context.Context, store storage.ArtifactStore, key string) ([]byte, error) {
@@ -43,7 +38,11 @@ func storedDigest(ctx context.Context, store storage.ArtifactStore, key string) 
 	return want, nil
 }
 
-func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, key, dest string) error {
+// FetchFromArtifactStore downloads bin/key to dest and checks it against its
+// digest sidecar. acceptMissingDigest lets a blob with no sidecar through and
+// writes the sidecar from the downloaded bytes; otherwise a missing sidecar
+// fails the fetch.
+func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, key, dest string, acceptMissingDigest bool) error {
 	want, err := storedDigest(ctx, store, key)
 	backfill := false
 	if err != nil {
@@ -51,9 +50,9 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 			return err
 		}
 		// safety: with no companion object nothing outside the fetched bytes attests them, so healing is opt-in.
-		if os.Getenv(DigestBackfillEnv) == "" {
+		if !acceptMissingDigest {
 			slog.Default().Warn("artifact-store blob has no stored digest; refusing it",
-				"hash", key, "opt_in", DigestBackfillEnv)
+				"hash", key, "opt_in", "--sw-artifact-digest-backfill")
 			return err
 		}
 		backfill = true

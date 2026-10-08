@@ -47,18 +47,13 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | Variable | Described in |
 |---|---|
 | `SPARKWING_ADMISSION_CLASS` | [admission](admission.md) |
-| `SPARKWING_ALLOW_UNADMITTED` | [cli](cli.md), [local-execution](local-execution.md) |
-| `SPARKWING_ARTIFACT_DIGEST_BACKFILL` | [caching](caching.md) |
 | `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [cli-configure](cli-configure.md), [cli-fleet](cli-fleet.md) |
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
 | `SPARKWING_DEV_ENV_DISABLE` | [architecture](architecture.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
-| `SPARKWING_HASH_ALL_FILES` | [caching](caching.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-fleet](cli-fleet.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
-| `SPARKWING_NO_BINCACHE` | [caching](caching.md) |
-| `SPARKWING_NO_SPARKS_RESOLVE` | [ci-embedded](ci-embedded.md) |
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
 | `SPARKWING_SECRETS` | [machine-config](machine-config.md) |
@@ -135,7 +130,8 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_LOG_LEVEL` | Carries `--sw-verbose` (`-v`) to the pipeline binary as `debug`. |
 | `SPARKWING_MASK_VALUES_FD` | The inherited pipe the pipeline binary writes registered secret values to, so the launcher masks them in the child's stdout and stderr. |
 | `SPARKWING_NO_CACHE` | Carries `--sw-no-cache` to the pipeline binary. |
-| `SPARKWING_NO_UPDATE` | Carries `--sw-no-update` to the pipeline binary, which records it with the run's invocation. Setting it by hand changes only that record; `SPARKWING_NO_SPARKS_RESOLVE=1` is the knob that skips sparks resolution. |
+| `SPARKWING_NO_UPDATE` | Carries `--sw-no-update` to the pipeline binary, which records it with the run's invocation. Setting it by hand changes only that record; the flag is what skips sparks resolution. |
+| `SPARKWING_ALLOW_UNADMITTED` | Carries `--sw-allow-unadmitted` to the pipeline binary; a pipeline binary no CLI launched reads it the same way. See [local-execution](local-execution.md). |
 | `SPARKWING_ONLY` | Carries `--sw-only` to the pipeline binary. |
 | `SPARKWING_PROFILE` | Carries `--profile` to the pipeline binary. |
 | `SPARKWING_REF` | Carries `--sw-ref` to the pipeline binary. |

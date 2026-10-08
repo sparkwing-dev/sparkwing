@@ -93,12 +93,8 @@ exit 1
 			t.Setenv("RUNTIME_LOG", runtimeLog)
 			t.Setenv("SPARKWING_FLEET", "1")
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
-			t.Setenv("SPARKWING_NO_BINCACHE", "")
-			if uncached {
-				t.Setenv("SPARKWING_NO_BINCACHE", "1")
-			}
 			runtimeEnv := os.Environ()
-			if err := compileAndExec(dir, nil, runtimeEnv, compileOptions{NoUpdate: true}); err != nil {
+			if err := compileAndExec(dir, nil, runtimeEnv, compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
 				t.Fatal(err)
 			}
 			for path, want := range map[string]string{buildLog: "go1.26.8", runtimeLog: "go1.26.6", probeLog: "probe"} {

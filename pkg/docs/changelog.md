@@ -146,6 +146,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** One-off run switches are `--sw-*` flags, not environment variables
+  `sparkwing run` gains `--sw-no-bincache`, `--sw-hash-all-files`, `--sw-artifact-digest-backfill` and `--sw-allow-unadmitted`; `SPARKWING_NO_BINCACHE`, `SPARKWING_HASH_ALL_FILES` and `SPARKWING_ARTIFACT_DIGEST_BACKFILL` are no longer read, and `SPARKWING_NO_SPARKS_RESOLVE` gives way to the existing `--sw-no-update`. `SPARKWING_ALLOW_UNADMITTED` stays only as the variable that carries the flag to the pipeline binary. See [migration guide](docs/migrations/_unreleased.md#one-off-run-switches-become---sw--flags).
+
 - **cli + orchestrator (Breaking):** Machine settings read config.yaml, not the environment
   `SPARKWING_BUDGET`, `SPARKWING_CACHE_MAX_BYTES`, `SPARKWING_CACHE_MAX_ENTRIES`, `SPARKWING_VERSION_HOLD`, `SPARKWING_NO_AUTO_REGISTER`, `SPARKWING_AUTO_REGISTER_WORKTREES`, `SPARKWING_BOX_ID`, `SPARKWING_LOGS_DROP_POLICY`, `SPARKWING_PAUSE_TIMEOUT`, `SPARKWING_SUBMIT_ENV_ALLOW` and `SPARKWING_RERUN_IMAGE` are no longer read. config.yaml gains the `cache`, `machine`, `logs`, `debug` and `run` sections, `repos.auto_register` and `repos.include_worktrees`, and a profile's `rerun_image`; the cache ceilings and the submit allow-list refuse a value they cannot parse. See [migration guide](docs/migrations/_unreleased.md#machine-settings-move-from-the-environment-to-configyaml).
 

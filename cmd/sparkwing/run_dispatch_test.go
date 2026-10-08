@@ -229,7 +229,6 @@ func TestDispatchRun_ConsumesSeparatorBeforeExecutingPipeline(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("SPARKWING_NO_BINCACHE", "1")
 	t.Setenv("GOWORK", "off")
 	repository := t.TempDir()
 	pipelineDirectory := filepath.Join(repository, ".sparkwing")
@@ -262,7 +261,7 @@ func main() {
 	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
 	want := []string{"fictional", "--sw-profile", "fictional", "--sw-mystery=value", "--", "literal"}
 	t.Chdir(repository)
-	arguments := append([]string{"fictional", "--sw-no-update", "--"}, want[1:]...)
+	arguments := append([]string{"fictional", "--sw-no-update", "--sw-no-bincache", "--"}, want[1:]...)
 	if err := dispatchRun(arguments); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +284,6 @@ func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("SPARKWING_NO_BINCACHE", "1")
 	t.Setenv("GOWORK", "off")
 	// safety: an inherited cap would satisfy the assertion without the flag reaching
 	// the child, so the ambient value is set to one the test never expects to see.
@@ -328,7 +326,7 @@ func main() {
 	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
 
 	t.Chdir(repository)
-	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-workers", "3"}); err != nil {
+	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-no-bincache", "--sw-workers", "3"}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(environmentFile)
@@ -393,5 +391,15 @@ func TestSetupRefWorktreeCleanupLeavesNothingRegistered(t *testing.T) {
 	}
 	if strings.Contains(list, worktree) {
 		t.Errorf("worktree still registered:\n%s", list)
+	}
+}
+
+func TestParseRunFlags_OneOffSwitches(t *testing.T) {
+	flags, rest := parseRunFlags([]string{"--sw-no-bincache", "--sw-hash-all-files", "--sw-artifact-digest-backfill", "--sw-allow-unadmitted", "--keep"})
+	if !flags.noBincache || !flags.hashAllFiles || !flags.digestBackfill || !flags.allowUnadmitted {
+		t.Fatalf("flags = %+v, want every one-off switch set", flags)
+	}
+	if len(rest) != 1 || rest[0] != "--keep" {
+		t.Fatalf("passthrough = %v, want only --keep", rest)
 	}
 }

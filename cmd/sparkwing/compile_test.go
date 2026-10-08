@@ -195,17 +195,6 @@ func TestResolveSparks_NoUpdate_SkipsResolve(t *testing.T) {
 	}
 }
 
-func TestResolveSparks_EnvVar_SkipsResolve(t *testing.T) {
-	t.Setenv("GOPROXY", "http://proxy.invalid.example")
-	t.Setenv("SPARKWING_NO_SPARKS_RESOLVE", "1")
-	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
-	dir := newSparksFixture(t, manifest)
-
-	if err := resolveSparks(context.Background(), dir, compileOptions{}); err != nil {
-		t.Fatalf("SPARKWING_NO_SPARKS_RESOLVE should bypass resolve, got: %v", err)
-	}
-}
-
 func TestResolveSparks_ProxyDown_FailsLoudly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 30.0s of real work; the fast class runs under -short")

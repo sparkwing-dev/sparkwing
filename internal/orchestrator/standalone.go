@@ -177,8 +177,8 @@ func standaloneWarning(sel hostedSelection, sdkVersion string) string {
 			"so this run is standalone. "+standaloneLoss+
 			"\n\n  to see why\n    sparkwing daemon status\n", daemon, sel.fault)
 	case standaloneForced:
-		return "sparkwing: " + AllowUnadmittedEnv + " is set, so this run is standalone. " + standaloneLoss +
-			"\n\n  to rejoin the daemon\n    unset " + AllowUnadmittedEnv + "\n"
+		return "sparkwing: --sw-allow-unadmitted is set, so this run is standalone. " + standaloneLoss +
+			"\n\n  to rejoin the daemon\n    run it without --sw-allow-unadmitted\n"
 	}
 	return ""
 }

@@ -42,7 +42,7 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
-	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); err != nil {
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest, false); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -62,7 +62,7 @@ func TestArtifactStoreFetchMissReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	store, _ := fs.NewArtifactStore(t.TempDir())
 	dest := filepath.Join(t.TempDir(), "x")
-	err := bincache.FetchFromArtifactStore(context.Background(), store, "missing", dest)
+	err := bincache.FetchFromArtifactStore(context.Background(), store, "missing", dest, false)
 	if !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -91,7 +91,7 @@ func TestArtifactStoreFetchRejectsTamperedBlob(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
-	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); !errors.Is(err, bincache.ErrDigest) {
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest, false); !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
@@ -112,7 +112,7 @@ func TestArtifactStoreFetchRefusesABlobWithNoStoredDigest(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
-	err = bincache.FetchFromArtifactStore(ctx, store, key, dest)
+	err = bincache.FetchFromArtifactStore(ctx, store, key, dest, false)
 	if !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}
@@ -125,7 +125,6 @@ func TestArtifactStoreFetchRefusesABlobWithNoStoredDigest(t *testing.T) {
 }
 
 func TestArtifactStoreFetchHealsABlobPublishedWithoutADigestWhenOptedIn(t *testing.T) {
-	t.Setenv(bincache.DigestBackfillEnv, "1")
 	store, err := fs.NewArtifactStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
@@ -138,7 +137,7 @@ func TestArtifactStoreFetchHealsABlobPublishedWithoutADigestWhenOptedIn(t *testi
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
-	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); err != nil {
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest, true); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -164,7 +163,7 @@ func TestArtifactStoreFetchHealsABlobPublishedWithoutADigestWhenOptedIn(t *testi
 		t.Fatalf("tamper: %v", err)
 	}
 	healed := filepath.Join(t.TempDir(), "downloaded")
-	if err := bincache.FetchFromArtifactStore(ctx, store, key, healed); !errors.Is(err, bincache.ErrDigest) {
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, healed, true); !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest once the companion exists", err)
 	}
 }
@@ -185,7 +184,7 @@ func TestArtifactStoreFetchRejectsAMalformedStoredDigest(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
-	err = bincache.FetchFromArtifactStore(ctx, store, key, dest)
+	err = bincache.FetchFromArtifactStore(ctx, store, key, dest, false)
 	if !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}

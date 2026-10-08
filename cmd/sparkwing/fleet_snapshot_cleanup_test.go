@@ -30,7 +30,6 @@ func TestDispatchFleetCompileFailureCleansExactSource(t *testing.T) {
 		"SPARKWING_TEST_FLEET_COMPILE_FAILURE=1",
 		"SPARKWING_TEST_FLEET_REPO="+repo,
 		"SPARKWING_CONFIG="+configPath,
-		"SPARKWING_NO_BINCACHE=1",
 		"GOWORK=off",
 		"TMPDIR="+tmp,
 	)

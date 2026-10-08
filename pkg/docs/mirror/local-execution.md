@@ -1230,12 +1230,12 @@ daemon that is not behind this pipeline, so the block carries the
 daemon's own reason and points at `sparkwing daemon status` rather than
 at an upgrade.
 
-**`SPARKWING_ALLOW_UNADMITTED=1` is set** -- the operator asked for the
-direct path, for a box whose other work they know. The block says so and
-names `unset SPARKWING_ALLOW_UNADMITTED`; it is read strictly, so only
-the exact value `1` turns the check off. The variable is an environment
-variable rather than a flag because the runs that need it are the ones no
-CLI launched.
+**`--sw-allow-unadmitted` is set** -- the operator asked for the direct
+path, for a box whose other work they know. The block says so and names
+the run without the flag as the way back. `sparkwing run` carries the flag
+to the pipeline binary as `SPARKWING_ALLOW_UNADMITTED=1`; a pipeline binary
+no CLI launched reads that variable the same way, strictly, so only the
+exact value `1` turns the check off.
 
 A pipeline that reserves host capacity with a plan-level or node-level
 `.Resources()` pin is not an exception. It runs standalone rather than

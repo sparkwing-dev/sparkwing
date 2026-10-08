@@ -570,6 +570,34 @@ ran it.
   `SPARKWING_ADMISSION_CLASS` stays: a hook sets it for the run it starts,
   and it goes with `AdmissionClass`.
 
+## One-off run switches become --sw-* flags
+
+- **Before:** five environment variables switched `sparkwing run`
+  behaviour for one invocation: `SPARKWING_NO_BINCACHE`,
+  `SPARKWING_NO_SPARKS_RESOLVE`, `SPARKWING_HASH_ALL_FILES`,
+  `SPARKWING_ARTIFACT_DIGEST_BACKFILL` and `SPARKWING_ALLOW_UNADMITTED`.
+- **After:** `sparkwing run` takes the flags instead:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_NO_BINCACHE=1` | `--sw-no-bincache` |
+  | `SPARKWING_NO_SPARKS_RESOLVE=1` | `--sw-no-update`, which already skipped sparks resolution |
+  | `SPARKWING_HASH_ALL_FILES=1` | `--sw-hash-all-files` |
+  | `SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` | `--sw-artifact-digest-backfill` |
+  | `SPARKWING_ALLOW_UNADMITTED=1` | `--sw-allow-unadmitted` |
+
+  The first four variables are no longer read. `sparkwing run` carries
+  `--sw-allow-unadmitted` to the pipeline binary as
+  `SPARKWING_ALLOW_UNADMITTED=1`, which a pipeline binary no CLI launched
+  still reads.
+- **Operator steps:** replace each exported variable with its flag on the
+  `sparkwing run` command line; a CI step that set
+  `SPARKWING_NO_SPARKS_RESOLVE` passes `--sw-no-update`.
+- **Edge cases:** a detached run (`--sw-detached`) refuses each of the
+  flags, as it refuses `--sw-no-update`, because the consumer compiles the
+  run and the trigger does not carry them; a queued run therefore always
+  resolves sparks and uses the binary cache.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper
