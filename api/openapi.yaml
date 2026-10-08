@@ -7362,7 +7362,7 @@ paths:
       tags: [dashboard]
       summary: Search the logs of the caller's team's runs.
       description: >-
-        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team.
+        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team. One search reads at most 256 MiB of logs and scans for at most 10 seconds; one that stops at a bound answers `truncated: true` and names the bound in `stopped`.
       responses:
         default: {description: Undescribed.}
 
@@ -7407,7 +7407,7 @@ paths:
       tags: [dashboard]
       summary: Search one run's node logs.
       description: >-
-        Takes `q` and an optional `limit` of at most 5000 matches.
+        Takes `q` and an optional `limit` of at most 5000 matches. One search reads at most 256 MiB of logs and scans for at most 10 seconds; one that stops at a bound answers `truncated: true` and names the bound in `stopped`.
       responses:
         default: {description: Undescribed.}
 

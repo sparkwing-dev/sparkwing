@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
@@ -392,8 +393,46 @@ func parseDisplayLine(raw string) displayLine {
 	return displayLine{body: "", step: rec.Step, show: true}
 }
 
-// RunLogsSearchHandler searches the run named by {id} for the q query value.
-func RunLogsSearchHandler(b backend.Backend) http.HandlerFunc {
+// SearchBounds caps the work one log search may do. A zero field leaves
+// that bound off.
+type SearchBounds struct {
+	// MaxBytes caps the log bytes one search reads.
+	MaxBytes int64
+	// Timeout caps how long one search scans.
+	Timeout time.Duration
+}
+
+type searchBudget struct {
+	maxBytes int64
+	read     atomic.Int64
+	stopped  atomic.Pointer[string]
+}
+
+// safety: a search past its byte bound stops reading and names the bound in its reply, so a partial result never
+// reads as the whole one.
+func (s *searchBudget) spend(n int) bool {
+	if s.maxBytes > 0 && s.read.Add(int64(n)) > s.maxBytes {
+		s.stop(fmt.Sprintf("the search stopped after reading %d bytes of logs", s.maxBytes))
+		return false
+	}
+	return true
+}
+
+func (s *searchBudget) stop(reason string) { s.stopped.CompareAndSwap(nil, &reason) }
+
+func (s *searchBudget) reason(ctx context.Context, timeout time.Duration) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		s.stop(fmt.Sprintf("the search stopped after %s", timeout))
+	}
+	if r := s.stopped.Load(); r != nil {
+		return *r
+	}
+	return ""
+}
+
+// RunLogsSearchHandler searches the run named by {id} for the q query
+// value, within bounds.
+func RunLogsSearchHandler(b backend.Backend, bounds SearchBounds) http.HandlerFunc {
 	type match struct {
 		NodeID  string `json:"node_id"`
 		Line    int    `json:"line"`
@@ -433,14 +472,23 @@ func RunLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 		results := make([]nodeResult, len(nodes))
 		var wg sync.WaitGroup
 		ctx := r.Context()
+		if bounds.Timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, bounds.Timeout)
+			defer cancel()
+		}
+		budget := &searchBudget{maxBytes: bounds.MaxBytes}
 		for i, n := range nodes {
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(ctx context.Context, i int, nodeID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
+				if ctx.Err() != nil || budget.stopped.Load() != nil {
+					return
+				}
 				content, err := b.ReadNodeLog(ctx, runID, nodeID, backend.ReadOpts{})
-				if err != nil || len(content) == 0 {
+				if err != nil || len(content) == 0 || !budget.spend(len(content)) {
 					return
 				}
 				sc := bufio.NewScanner(bytes.NewReader(content))
@@ -484,17 +532,22 @@ func RunLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 				matches = append(matches, m)
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		reply := map[string]any{
 			"query":     q,
 			"results":   matches,
 			"total":     total,
 			"truncated": truncated,
-		})
+		}
+		if stopped := budget.reason(ctx, bounds.Timeout); stopped != "" {
+			reply["truncated"], reply["stopped"] = true, stopped
+		}
+		writeJSON(w, http.StatusOK, reply)
 	}
 }
 
-// RunsGrepHandler searches the logs of the runs b lists for the q query value.
-func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
+// RunsGrepHandler searches the logs of the runs b lists for the q query
+// value, within bounds.
+func RunsGrepHandler(b backend.Backend, bounds SearchBounds) http.HandlerFunc {
 	type match struct {
 		RunID    string `json:"run_id"`
 		Pipeline string `json:"pipeline"`
@@ -576,12 +629,19 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 		truncated := false
 		searched := 0
 		runsMeta := make(map[string]*store.Run)
+		ctx := r.Context()
+		if bounds.Timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, bounds.Timeout)
+			defer cancel()
+		}
+		budget := &searchBudget{maxBytes: bounds.MaxBytes}
 		for _, run := range runs {
-			if r.Context().Err() != nil || (maxMatches > 0 && len(matches) >= maxMatches) {
+			if ctx.Err() != nil || budget.stopped.Load() != nil || (maxMatches > 0 && len(matches) >= maxMatches) {
 				truncated = true
 				break
 			}
-			nodes, err := b.ListNodes(r.Context(), run.ID)
+			nodes, err := b.ListNodes(ctx, run.ID)
 			if err != nil {
 				truncated = true
 				continue
@@ -592,10 +652,14 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 					truncated = true
 					break
 				}
-				content, err := b.ReadNodeLog(r.Context(), run.ID, node.NodeID, backend.ReadOpts{})
+				content, err := b.ReadNodeLog(ctx, run.ID, node.NodeID, backend.ReadOpts{})
 				if err != nil {
 					truncated = true
 					continue
+				}
+				if !budget.spend(len(content)) {
+					truncated = true
+					break
 				}
 				if len(content) == 0 {
 					continue
@@ -623,7 +687,7 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 				truncated = truncated || errors.Is(sc.Err(), bufio.ErrTooLong)
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		reply := map[string]any{
 			"query":         q,
 			"matches":       matches,
 			"runs":          runsMeta,
@@ -631,7 +695,11 @@ func RunsGrepHandler(b backend.Backend) http.HandlerFunc {
 			"runs_scanned":  searched,
 			"runs_matching": len(runs),
 			"truncated":     truncated,
-		})
+		}
+		if stopped := budget.reason(ctx, bounds.Timeout); stopped != "" {
+			reply["truncated"], reply["stopped"] = true, stopped
+		}
+		writeJSON(w, http.StatusOK, reply)
 	}
 }
 

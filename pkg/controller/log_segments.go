@@ -154,6 +154,10 @@ func (s *Server) logClass(context.Context, store.Team) string {
 	return logseg.ClassStandard
 }
 
+func (s *Server) logClasses() []string {
+	return []string{logseg.ClassStandard, logseg.ClassFree}
+}
+
 // safety: the attempt is the one the node's claim holds now, and a writer naming an older one is refused, so a
 // fenced-out runner cannot write the new attempt's log.
 func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {

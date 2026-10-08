@@ -2,6 +2,12 @@
 
 func AppendHandler(sink *Sink, runID, nodeID string) http.Handler
 func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
+type Attempt struct {
+	Prefix     string
+	NodeID     string
+	Attempt    int64
+	Generation int64
+}
 func AttemptPrefix(class, team, runID, nodeID string, attempt, generation int64) (string, error)
 func ClassDays(class string) (int, bool)
 const ClassFree = "r30"
@@ -21,6 +27,7 @@ var ErrBadManifest = errors.New("logseg: unreadable manifest")
 var ErrClosed = errors.New("logseg: the sink is closed")
 var ErrSealed = errors.New("logseg: the attempt already has a manifest")
 func EscapeNode(nodeID string) string
+func FindAttempts(ctx context.Context, objs Objects, classes []string, team, runID, nodeID string) ([]Attempt, error)
 type Gap struct {
 	From int64
 	To   int64
@@ -137,6 +144,7 @@ const StatusComplete = "complete"
 const StatusCutOff = "cut_off"
 const StatusIncomplete = "incomplete"
 const TruncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
+func UnescapeNode(escaped string) (string, bool)
 type Uploader interface {
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
 

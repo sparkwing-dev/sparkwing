@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -29,12 +30,19 @@ func (l segmentLogs) Append(context.Context, string, string, []byte) error {
 	return fmt.Errorf("%w: node logs reach the controller as segments", storage.ErrNotSupported)
 }
 
+// safety: a log the run store does not record, such as one exported from the logs service, is found by listing
+// the retention classes, so it reads the same as one a runner wrote.
 func (l segmentLogs) record(ctx context.Context, runID, nodeID string) (store.NodeLog, bool, error) {
 	rec, err := l.s.store.LatestNodeLog(ctx, l.team, runID, nodeID)
-	if errors.Is(err, store.ErrNotFound) {
-		return store.NodeLog{}, false, nil
+	if !errors.Is(err, store.ErrNotFound) {
+		return rec, err == nil, err
 	}
-	return rec, err == nil, err
+	found, err := logseg.FindAttempts(ctx, l.objs, l.s.logClasses(), string(l.team), runID, nodeID)
+	if err != nil || len(found) == 0 {
+		return store.NodeLog{}, false, err
+	}
+	a := found[len(found)-1]
+	return store.NodeLog{Team: l.team, RunID: runID, NodeID: nodeID, Attempt: a.Attempt, Generation: a.Generation, Prefix: a.Prefix}, true, nil
 }
 
 func (l segmentLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error) {
@@ -59,6 +67,15 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) 
 	recs, err := l.s.store.RunNodeLogs(ctx, l.team, runID)
 	if err != nil {
 		return nil, err
+	}
+	if len(recs) == 0 {
+		found, err := logseg.FindAttempts(ctx, l.objs, l.s.logClasses(), string(l.team), runID, "")
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range found {
+			recs = append(recs, store.NodeLog{NodeID: a.NodeID, Prefix: a.Prefix})
+		}
 	}
 	if len(recs) == 0 && l.fallback != nil {
 		return l.fallback.ReadRun(ctx, runID)
@@ -108,6 +125,10 @@ func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadC
 	}()
 	return pr, nil
 }
+
+// safety: one search reads at most this much log and runs at most this long, the bounds the logs service held its
+// own searches to, so a broad grep cannot hold the controller's memory or a request slot.
+var controllerSearchBounds = web.SearchBounds{MaxBytes: 256 << 20, Timeout: 10 * time.Second}
 
 // perf: segments land every 10 s, so the stream lists the prefix about
 // this often while the live ring serves the lines in between.
@@ -229,14 +250,26 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 // safety: the records are the only index of a run's segments, so they go only after every object did.
 func (s *Server) deleteRunSegments(ctx context.Context, objs logObjectStore, team store.Team, runID string) error {
 	recs, err := s.store.RunNodeLogs(ctx, team, runID)
-	if err != nil || len(recs) == 0 {
+	if err != nil {
 		return err
 	}
 	if objs == nil {
-		return errLogsUnavailable
+		if len(recs) > 0 {
+			return errLogsUnavailable
+		}
+		return nil
 	}
 	for _, rec := range recs {
 		if err := objs.deletePrefix(ctx, rec.Prefix); err != nil {
+			return err
+		}
+	}
+	for _, class := range s.logClasses() {
+		prefix, err := logseg.RunPrefix(class, string(team), runID)
+		if err != nil {
+			return err
+		}
+		if err := objs.deletePrefix(ctx, prefix); err != nil {
 			return err
 		}
 	}

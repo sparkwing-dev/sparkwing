@@ -2,7 +2,11 @@ package controller
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -365,5 +369,45 @@ func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	}
 	if code, body := runBeat(true); code != http.StatusOK || !strings.Contains(string(body), `"watched_nodes":["a"]`) {
 		t.Fatalf("run heartbeat that asked: %d %s", code, body)
+	}
+}
+
+// A log the run store does not record, as the logs service's export
+// writes, reads and deletes like one a runner wrote.
+func TestUnrecordedLogsReadAndDelete(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	objs := f.srv.logObjects()
+	prefix, err := logseg.AttemptPrefix(logseg.ClassFree, string(store.DefaultTeam), "run-d", "b", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	_, _ = zw.Write([]byte("exported line\n"))
+	_ = zw.Close()
+	sum := sha256.Sum256(gz.Bytes())
+	if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), gz.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := logseg.Manifest{
+		Version: logseg.ManifestVersion, Run: "run-d", Node: "b", Attempt: 1, Status: logseg.StatusComplete,
+		Lines: 1, Segments: []logseg.Segment{{N: 1, FirstSeq: 1, LastSeq: 1, Lines: 1, SHA256: hex.EncodeToString(sum[:])}},
+	}.Marshal()
+	if err := objs.putIfAbsent(ctx, logseg.ManifestKey(prefix), manifest); err != nil {
+		t.Fatal(err)
+	}
+	logs := f.srv.dashboardLogs(store.DefaultTeam)
+	if got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{}); err != nil || string(got) != "exported line\n" {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+	if run, err := logs.ReadRun(ctx, "run-d"); err != nil || !strings.Contains(string(run), "=== b ===\nexported line\n") {
+		t.Fatalf("read run = %q, %v", run, err)
+	}
+	if code, raw := f.do(t, http.MethodDelete, "/api/v1/runs/run-d", f.admin(t), nil); code != http.StatusNoContent {
+		t.Fatalf("delete run: %d %s", code, raw)
+	}
+	if left, _ := objs.List(ctx, prefix); len(left) != 0 {
+		t.Fatalf("deleting the run left %v", left)
 	}
 }

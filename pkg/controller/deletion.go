@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -373,15 +374,12 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 }
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []string, now time.Time) error {
-	objs := s.logObjects()
-	for i, id := range runIDs {
-		if i > 0 && i%100 == 0 {
-			if err := s.holdDeletion(ctx, team, time.Now()); err != nil {
-				return err
+	if objs := s.logObjects(); objs != nil {
+		for _, class := range s.logClasses() {
+			prefix := logseg.ClassPrefix(class) + "teams/" + string(team) + "/"
+			if err := objs.deletePrefix(ctx, prefix); err != nil {
+				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
 			}
-		}
-		if err := s.deleteRunSegments(ctx, objs, team, id); err != nil {
-			return fmt.Errorf("delete log segments of run %s: %w", id, err)
 		}
 	}
 	ts := s.teamStorage
