@@ -1008,9 +1008,13 @@ func runAPICheck(args []string) error {
 	}
 	checkSecretValues(&c, bearer, inv.SecretRows, canaryDigests, *keyed)
 
-	if code, _ := anon.do("POST", "/api/v1/auth/login", map[string]string{}, nil); code == http.StatusOK || code == http.StatusBadRequest {
+	code, err := anon.do("POST", "/api/v1/auth/login", map[string]string{}, nil)
+	switch {
+	case code == 0:
+		c.fail("the retired password login route: %v", err)
+	case code == http.StatusOK || code == http.StatusBadRequest:
 		c.fail("the retired password login route still answers (%d)", code)
-	} else {
+	default:
 		c.pass("the retired password login route is gone (%d)", code)
 	}
 	return c.err()
