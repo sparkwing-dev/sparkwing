@@ -43,8 +43,16 @@ func openPrivateFile(path string, flag int) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	current, _, _, err := privateConfigSIDs()
+	if err != nil {
+		return nil, err
+	}
 	descriptor, err := windows.NewSecurityDescriptor()
 	if err != nil {
+		return nil, err
+	}
+	// safety: an elevated token's default owner is Administrators, which the owner check on reopen refuses.
+	if err := descriptor.SetOwner(current, false); err != nil {
 		return nil, err
 	}
 	if err := descriptor.SetDACL(acl, true, false); err != nil {

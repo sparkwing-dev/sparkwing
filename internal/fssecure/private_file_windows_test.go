@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestWriteFileWindowsProducesReadablePrivateConfig(t *testing.T) {
@@ -132,5 +135,51 @@ func TestPrivateConfigWindowsDetectsRealReplacementBeforeOpen(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "changed while it was opened") {
 		t.Fatalf("real credential replacement error = %v", err)
+	}
+}
+
+func TestOpenFileWindowsOwnsFilesUnderAdministratorsDefaultOwner(t *testing.T) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_ADJUST_DEFAULT, &token); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = token.Close() }()
+	buffer := make([]byte, 256)
+	var size uint32
+	if err := windows.GetTokenInformation(token, windows.TokenOwner, &buffer[0], uint32(len(buffer)), &size); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := (*struct{ Owner *windows.SID })(unsafe.Pointer(&buffer[0])).Owner.Copy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	setOwner := func(sid *windows.SID) error {
+		owner := struct{ Owner *windows.SID }{sid}
+		return windows.SetTokenInformation(token, windows.TokenOwner, (*byte)(unsafe.Pointer(&owner)), uint32(unsafe.Sizeof(owner)))
+	}
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setOwner(admins); err != nil {
+		t.Skipf("this token cannot default new objects to Administrators, as only an elevated one can: %v", err)
+	}
+	defer func() {
+		if err := setOwner(previous); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	for _, body := range []string{"created", "rewritten"} {
+		if err := WriteFile(path, []byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPrivateConfig(path, info); err != nil {
+		t.Fatal(err)
 	}
 }
