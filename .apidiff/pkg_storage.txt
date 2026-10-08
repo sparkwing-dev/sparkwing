@@ -51,6 +51,7 @@ type ReadOpts struct {
 	Lines string
 	Grep  string
 }
+func (o ReadOpts) Apply(data []byte) ([]byte, error)
 func SafeArtifactKey(key string) error
 func SafeLogIDs(runID, nodeID string) error
 func SafeRelPath(id string) error

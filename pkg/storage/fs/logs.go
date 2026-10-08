@@ -1,7 +1,6 @@
 package fs
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -116,7 +115,7 @@ func (s *LogStore) Read(_ context.Context, runID, nodeID string, opts storage.Re
 		}
 		return nil, err
 	}
-	return applyReadOpts(data, opts)
+	return opts.Apply(data)
 }
 
 func (s *LogStore) ReadRun(_ context.Context, runID string) ([]byte, error) {
@@ -173,80 +172,4 @@ func (s *LogStore) DeleteRun(_ context.Context, runID string) error {
 		return nil
 	}
 	return err
-}
-
-func applyReadOpts(data []byte, opts storage.ReadOpts) ([]byte, error) {
-	if (opts == storage.ReadOpts{}) {
-		return data, nil
-	}
-	lines := splitLines(data)
-
-	if opts.Lines != "" {
-		from, to, err := parseRange(opts.Lines)
-		if err != nil {
-			return nil, err
-		}
-		if from < 1 {
-			from = 1
-		}
-		if to > len(lines) {
-			to = len(lines)
-		}
-		if from > len(lines) || from > to {
-			lines = nil
-		} else {
-			lines = lines[from-1 : to]
-		}
-	}
-
-	if opts.Grep != "" {
-		filtered := lines[:0]
-		for _, l := range lines {
-			if strings.Contains(l, opts.Grep) {
-				filtered = append(filtered, l)
-			}
-		}
-		lines = filtered
-	}
-
-	if opts.Tail > 0 && len(lines) > opts.Tail {
-		lines = lines[len(lines)-opts.Tail:]
-	}
-	if opts.Head > 0 && len(lines) > opts.Head {
-		lines = lines[:opts.Head]
-	}
-
-	var out bytes.Buffer
-	w := bufio.NewWriter(&out)
-	for _, l := range lines {
-		_, _ = w.WriteString(l)
-		_ = w.WriteByte('\n')
-	}
-	_ = w.Flush()
-	return out.Bytes(), nil
-}
-
-func splitLines(data []byte) []string {
-	if len(data) == 0 {
-		return nil
-	}
-	s := string(data)
-	if s[len(s)-1] == '\n' {
-		s = s[:len(s)-1]
-	}
-	return strings.Split(s, "\n")
-}
-
-func parseRange(spec string) (from, to int, err error) {
-	parts := strings.SplitN(spec, ":", 2)
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid lines range %q", spec)
-	}
-	if _, err := fmt.Sscanf(parts[0], "%d", &from); err != nil {
-		return 0, 0, fmt.Errorf("invalid lines.from %q: %w", parts[0], err)
-	}
-	if _, err := fmt.Sscanf(parts[1], "%d", &to); err != nil {
-		return 0, 0, fmt.Errorf("invalid lines.to %q: %w", parts[1], err)
-	}
-	return from, to, nil
 }
