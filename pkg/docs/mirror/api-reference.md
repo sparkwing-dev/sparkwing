@@ -206,9 +206,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/team/billing/pay` | `team.admin` |
 | `GET` | `/api/v1/team/build-trust` | `runs.read` |
 | `PUT` | `/api/v1/team/build-trust` | `team.admin` |
-| `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
-| `POST` | `/api/v1/team/cli-tokens` | `runs.read` |
-| `DELETE` | `/api/v1/team/cli-tokens/{prefix}` | `runs.read` |
 | `GET` | `/api/v1/team/git-credentials` | `runs.read` |
 | `POST` | `/api/v1/team/git-credentials` | `team.admin` |
 | `GET` | `/api/v1/team/git-credentials/releases` | `team.admin` |
@@ -234,10 +231,10 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/team/members` | `runs.read` |
 | `DELETE` | `/api/v1/team/members/{user_id}` | `runs.read` |
 | `PATCH` | `/api/v1/team/members/{user_id}` | `team.admin` |
-| `GET` | `/api/v1/team/runner-tokens` | `runs.write` |
-| `POST` | `/api/v1/team/runner-tokens` | `runs.write` |
-| `DELETE` | `/api/v1/team/runner-tokens/{prefix}` | `runs.write` |
-| `PUT` | `/api/v1/team/runner-tokens/{prefix}/git-credentials` | `team.admin` |
+| `GET` | `/api/v1/team/tokens` | `runs.read` |
+| `POST` | `/api/v1/team/tokens` | `runs.read` |
+| `DELETE` | `/api/v1/team/tokens/{prefix}` | `runs.read` |
+| `PUT` | `/api/v1/team/tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `DELETE` | `/api/v1/teams/{team}` | `admin` |
 | `PUT` | `/api/v1/teams/{team}/repos/{owner}/{name}/dispatch` | `admin` |

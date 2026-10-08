@@ -2,10 +2,9 @@ package controller
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,9 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// safety: the scope set docs/auth.md gives a runner; a runner token minted from team settings gets no more.
-var runnerTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRunsState, ScopeSecretsRead, ScopeLogsWrite}
 
 const runnerPrincipalPrefix = "agent:"
 
@@ -277,28 +273,7 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type runnerTokenReq struct {
-	Name  string   `json:"name"`
-	Repos []string `json:"repos"`
-}
-
 const maxRunnerRepos = 32
-
-type runnerTokenResp struct {
-	Token   string `json:"token"`
-	Prefix  string `json:"prefix"`
-	Command string `json:"command"`
-}
-
-type runnerTokenJSON struct {
-	Prefix         string `json:"prefix"`
-	Name           string `json:"name"`
-	CreatedBy      string `json:"created_by"`
-	CreatedAt      int64  `json:"created_at"`
-	ExpiresAt      *int64 `json:"expires_at"`
-	LastUsedAt     *int64 `json:"last_used_at"`
-	GitCredentials bool   `json:"git_credentials"`
-}
 
 func validRunnerName(name string) bool {
 	if name == "" || len(name) > 63 {
@@ -310,52 +285,6 @@ func validRunnerName(name string) bool {
 		}
 	}
 	return true
-}
-
-func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleEditor)
-	if !ok {
-		return
-	}
-	var req runnerTokenReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	name := strings.TrimSpace(req.Name)
-	// safety: the name lands in a shell command the dashboard shows, so it is held to a charset no shell expands.
-	if !validRunnerName(name) {
-		writeError(w, http.StatusBadRequest, errors.New("name is 1 to 63 letters, digits, '-', '_' or '.'"))
-		return
-	}
-	if len(req.Repos) == 0 {
-		writeError(w, http.StatusBadRequest, errors.New("repos names the repositories this machine may build, "+
-			"e.g. github.com/acme/*; the machine runs their pipeline code as the user who starts it"))
-		return
-	}
-	if len(req.Repos) > maxRunnerRepos {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("repos holds at most %d patterns", maxRunnerRepos))
-		return
-	}
-	allow, err := sourceurl.ParseRepoAllowlist(req.Repos)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("repos: %w", err))
-		return
-	}
-	raw, tok, err := t.CreateRunnerToken(r.Context(), runnerPrincipalPrefix+name, runnerTokenScopes, p.AccountID, time.Now().UTC())
-	if errors.Is(err, store.ErrRunnerTokenLimit) || errors.Is(err, store.ErrAgentNameTaken) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
-	if err != nil {
-		writeIdentityError(w, s, r, "mint runner token", err)
-		return
-	}
-	s.logger.Info("runner token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)
-	writeJSON(w, http.StatusCreated, runnerTokenResp{
-		Token: raw, Prefix: tok.Prefix,
-		Command: runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name, allow),
-	})
 }
 
 // safety: the connect command stores the token in a file, never on the runner's
@@ -372,7 +301,8 @@ func runnerTokenSetup(raw string) string {
 // hack: --metrics-addr= because a second runner on a machine would collide on its port; no
 // --gitcache since the git cache is the operator's; --logs only when announced, since the
 // controller serves no logs route. Patterns are single-quoted because '*' is a shell glob.
-func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist) string {
+// The claim flags follow the token's scopes, since a loop the token may not claim for fails.
+func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist, scopes []string) string {
 	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
 	if logsURL != "" {
 		cmd += " --logs " + strings.TrimRight(logsURL, "/")
@@ -380,7 +310,13 @@ func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.Repo
 	for _, p := range allow.Patterns() {
 		cmd += " --allow-repo '" + p + "'"
 	}
-	return cmd + " --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix " + name
+	if slices.Contains(scopes, ScopeTriggersClaim) {
+		cmd += " --also-claim-triggers"
+	}
+	if !slices.Contains(scopes, ScopeNodesClaim) {
+		cmd += " --claim-nodes=false"
+	}
+	return cmd + " --max-claims-before-restart 0 --metrics-addr= --holder-prefix " + name
 }
 
 func (s *Server) controllerURL(r *http.Request) string {
@@ -388,64 +324,4 @@ func (s *Server) controllerURL(r *http.Request) string {
 		return strings.TrimRight(s.externalURL, "/")
 	}
 	return "http://" + r.Host
-}
-
-func (s *Server) handleListRunnerTokens(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleEditor)
-	if !ok {
-		return
-	}
-	toks, err := t.RunnerTokens(r.Context(), time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "list runner tokens", err)
-		return
-	}
-	optedIn, err := t.GitCredentialMachines(r.Context())
-	if err != nil {
-		s.writeInternalError(w, r, "list git credential machines", err)
-		return
-	}
-	out := make([]runnerTokenJSON, 0, len(toks))
-	for _, tok := range toks {
-		row := runnerTokenJSON{
-			Prefix: tok.Prefix, Name: strings.TrimPrefix(tok.Principal, runnerPrincipalPrefix),
-			CreatedBy: tok.CreatedBy, CreatedAt: tok.CreatedAt.Unix(), GitCredentials: optedIn[tok.Prefix],
-		}
-		if tok.ExpiresAt != nil {
-			v := tok.ExpiresAt.Unix()
-			row.ExpiresAt = &v
-		}
-		if tok.LastUsedAt != nil {
-			v := tok.LastUsedAt.Unix()
-			row.LastUsedAt = &v
-		}
-		out = append(out, row)
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleRevokeRunnerToken(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleEditor)
-	if !ok {
-		return
-	}
-	prefix := r.PathValue("prefix")
-	tok, err := t.RunnerToken(r.Context(), prefix)
-	if err != nil {
-		writeIdentityError(w, s, r, "revoke runner token", err)
-		return
-	}
-	if !p.HasScope(ScopeTeamAdmin) && tok.CreatedBy != p.AccountID {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "forbidden", Principal: p.label(),
-			Message: "an editor revokes only the runner tokens they minted",
-		})
-		return
-	}
-	if err := t.RevokeRunnerToken(r.Context(), prefix, time.Now()); err != nil {
-		writeIdentityError(w, s, r, "revoke runner token", err)
-		return
-	}
-	s.auth.Invalidate(prefix)
-	w.WriteHeader(http.StatusNoContent)
 }

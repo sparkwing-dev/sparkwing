@@ -958,8 +958,8 @@ func (f *appFixture) appWork(owner signedIn, runID, slug string) string {
 		f.t.Fatal(err)
 	}
 	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth,
-		map[string]any{"name": "r-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
+		map[string]any{"scopes": machineScopes, "name": "r-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
 	auth := "Bearer " + m.Token

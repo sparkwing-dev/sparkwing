@@ -192,7 +192,7 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 	if code != http.StatusForbidden || got.Error != "git_credential_not_released" || got.Secret != "" {
 		t.Fatalf("a machine not opted in = %d %+v; want 403 git_credential_not_released", code, got)
 	}
-	path := "/api/v1/team/runner-tokens/" + prefix + "/git-credentials"
+	path := "/api/v1/team/tokens/" + prefix + "/git-credentials"
 	if code := f.call("PUT", path, f.olga.auth, map[string]bool{"enabled": true}, nil); code != http.StatusOK {
 		t.Fatalf("opt in = %d", code)
 	}
@@ -200,7 +200,7 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 		Prefix         string `json:"prefix"`
 		GitCredentials bool   `json:"git_credentials"`
 	}
-	f.call("GET", "/api/v1/team/runner-tokens", f.olga.auth, nil, &tokens)
+	f.call("GET", "/api/v1/team/tokens", f.olga.auth, nil, &tokens)
 	listed := false
 	for _, tok := range tokens {
 		listed = listed || (tok.Prefix == prefix && tok.GitCredentials)

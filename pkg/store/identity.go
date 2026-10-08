@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -95,7 +94,7 @@ func isReservedSlug(slug string) bool {
 	return reservedSlugs[slug] || strings.HasPrefix(slug, reservedSlugPrefix)
 }
 
-// Team-wide ceilings. Every runner token multiplies each per-principal budget, and every invitation
+// Team-wide ceilings. Every machine token multiplies each per-principal budget, and every invitation
 // may become a mail the deployment sends, so a team holds a bounded number of both.
 const (
 	MaxRunnerTokensPerTeam = 100
@@ -103,7 +102,7 @@ const (
 	MaxOpenInvitations     = 50
 )
 
-// RunnerTokenLifetime is how long a team runner token lives unused. Each use
+// RunnerTokenLifetime is how long a team's machine token lives unused. Each use
 // moves its expiry to this far past the use, so a machine that keeps working
 // keeps its token, and one a forgotten machine still holds stops working on
 // its own. The token reads the secrets of whatever run it claims.
@@ -132,11 +131,11 @@ var (
 	// existing account holds. It names none of that account's providers.
 	ErrAccountExists    = errors.New("store: an account with this email already exists")
 	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
-	ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
-	// ErrAgentNameTaken refuses a runner token for a name another live runner
+	ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
+	// ErrAgentNameTaken refuses a machine token for a name another live machine
 	// token of the team already carries, because a node selector and a
 	// workload identity bound to name= would admit either machine.
-	ErrAgentNameTaken  = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
+	ErrAgentNameTaken  = errors.New("store: another live machine token of this team carries that agent name; revoke it before minting a new one")
 	ErrInvitationLimit = errors.New("store: this team has sent as many invitations as it may for now")
 )
 
@@ -1175,9 +1174,9 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 // their own, may not re-role someone who outranks them, and may not demote
 // the last owner, because a team without an owner cannot be administered and
 // nobody can put one back. A demotion to reader revokes every token the
-// subject minted in t's team: a reader may not mint a runner token, and a CLI
-// token minted at a higher role carries write scopes. An owner's CLI token
-// already carries only the editor's scopes, so a demotion to editor keeps it.
+// subject minted in t's team: a reader may not mint a machine token, and a
+// member token minted at a higher role carries write scopes. An owner's member
+// token carries at most the editor's scopes, so a demotion to editor keeps it.
 // The revoked prefixes are returned so a caller can drop them from any cache.
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error) {
 	if !role.Valid() {
@@ -1313,9 +1312,9 @@ func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx,
 	return err
 }
 
-// safety: a runner token outlives the membership that minted it and reads
-// the secrets of every run it claims, and a CLI token acts as its minter, so
-// both go with the minter's access.
+// safety: a machine token outlives the membership that minted it and reads
+// the secrets of every run it claims, and a member token acts as its minter,
+// so both go with the minter's access, legacy runner and CLI tokens included.
 func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) ([]string, error) {
 	if accountID == "" {
 		return nil, nil
@@ -1366,66 +1365,6 @@ func (t *Tenant) lockTeamTx(ctx context.Context, tx *storeTx) error {
 		return ErrNotFound
 	}
 	return err
-}
-
-// CreateRunnerToken mints a runner token for t's team, refusing once the team
-// holds [MaxRunnerTokensPerTeam] live ones. It returns the raw token once.
-func (t *Tenant) CreateRunnerToken(
-	ctx context.Context, principal string, scopes []string, createdBy string, now time.Time,
-) (string, *Token, error) {
-	if err := refuseAdminScope(scopes); err != nil {
-		return "", nil, err
-	}
-	for attempt := 1; ; attempt++ {
-		raw, tok, err := t.createRunnerTokenOnce(ctx, principal, scopes, createdBy, now)
-		if err == nil {
-			return raw, tok, nil
-		}
-		if attempt < mintAttempts && isTokenPrefixCollision(err) {
-			continue
-		}
-		return "", nil, err
-	}
-}
-
-func (t *Tenant) createRunnerTokenOnce(
-	ctx context.Context, principal string, scopes []string, createdBy string, now time.Time,
-) (string, *Token, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return "", nil, err
-	}
-	// safety: the caller's role check ran before this transaction, and a
-	// removal or demotion committed since then has already swept the tokens
-	// this account minted, so a runner token minted now would outlive it.
-	role, err := t.roleTx(ctx, tx, createdBy)
-	if err != nil {
-		return "", nil, err
-	}
-	if !role.AtLeast(RoleEditor) {
-		return "", nil, ErrRoleAboveOwn
-	}
-	at := now.UTC().Unix()
-	var live int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM tokens
-		WHERE team = ? AND kind = ? AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
-		string(t.team), TokenKindRunner, at, at).Scan(&live); err != nil {
-		return "", nil, err
-	}
-	if live >= MaxRunnerTokensPerTeam {
-		return "", nil, ErrRunnerTokenLimit
-	}
-	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, RunnerTokenLifetime, now,
-		TokenOptions{CreatedBy: createdBy})
-	if err != nil {
-		return "", nil, err
-	}
-	return raw, tok, tx.Commit()
 }
 
 // safety: account deletion drops memberships without the team lock, so the
@@ -1565,92 +1504,8 @@ func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time)
 	return nil
 }
 
-// RunnerTokens lists t's live runner tokens.
-func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error) {
-	return t.liveTokens(ctx, TokenKindRunner, "", now)
-}
-
-func (t *Tenant) liveTokens(ctx context.Context, kind, createdBy string, now time.Time) (_ []Token, err error) {
-	at := now.UTC().Unix()
-	q := `
-		SELECT prefix, principal, scopes, created_by, created_at, expires_at, last_used_at
-		FROM tokens
-		WHERE team = ? AND kind = ? AND (revoked_at IS NULL OR revoked_at > ?)
-		  AND (expires_at IS NULL OR expires_at > ?)`
-	args := []any{string(t.team), kind, at, at}
-	if createdBy != "" {
-		q += ` AND created_by = ?`
-		args = append(args, createdBy)
-	}
-	rows, err := t.s.query(ctx, q+` ORDER BY created_at`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-	var out []Token
-	for rows.Next() {
-		tok := Token{Team: t.team, Kind: kind}
-		var scopes string
-		var created int64
-		var expires, lastUsed sql.NullInt64
-		if err := rows.Scan(&tok.Prefix, &tok.Principal, &scopes, &tok.CreatedBy, &created, &expires, &lastUsed); err != nil {
-			return nil, err
-		}
-		tok.Scopes = splitScopes(scopes)
-		tok.CreatedAt = time.Unix(created, 0).UTC()
-		if expires.Valid {
-			ts := time.Unix(expires.Int64, 0).UTC()
-			tok.ExpiresAt = &ts
-		}
-		if lastUsed.Valid {
-			ts := time.Unix(lastUsed.Int64, 0).UTC()
-			tok.LastUsedAt = &ts
-		}
-		out = append(out, tok)
-	}
-	return out, rows.Err()
-}
-
-// RunnerToken reads one of t's runner tokens by prefix, or ErrNotFound.
-func (t *Tenant) RunnerToken(ctx context.Context, prefix string) (Token, error) {
-	tok := Token{Team: t.team, Kind: TokenKindRunner, Prefix: prefix}
-	var revoked sql.NullInt64
-	err := t.s.queryRow(ctx, `
-		SELECT principal, created_by, revoked_at FROM tokens WHERE team = ? AND prefix = ? AND kind = ?`,
-		string(t.team), prefix, TokenKindRunner).Scan(&tok.Principal, &tok.CreatedBy, &revoked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Token{}, ErrNotFound
-	}
-	if revoked.Valid {
-		ts := time.Unix(revoked.Int64, 0).UTC()
-		tok.RevokedAt = &ts
-	}
-	return tok, err
-}
-
-// RevokeRunnerToken revokes one of t's runner tokens. A prefix that belongs
-// to another team, or is already revoked, is ErrNotFound.
-func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.Time) error {
-	at := now.UTC().Unix()
-	res, err := t.s.exec(ctx, `
-		UPDATE tokens SET revoked_at = ?
-		WHERE team = ? AND prefix = ? AND kind = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		at, string(t.team), prefix, TokenKindRunner, at)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// CLI token limits. A member's CLI token authenticates as that member from a
-// terminal, so it lapses on its own like a runner token, and one member holds
+// Member token limits. A member token authenticates as that member from a
+// terminal, so it lapses on its own like a machine token, and one member holds
 // a bounded number because every live token is a hash a bearer lookup may try.
 const (
 	CLITokenLifetime      = 90 * 24 * time.Hour
@@ -1658,95 +1513,4 @@ const (
 )
 
 // ErrCLITokenLimit refuses a CLI token past [MaxCLITokensPerMember].
-var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
-
-// CreateCLIToken mints a user token for accountID in t's team, carrying
-// the requested scopes allowed by their current role and filed under principal,
-// refusing once the member holds
-// [MaxCLITokensPerMember] live ones. It returns the raw token once. The
-// token is revoked with the member's other tokens when they leave the team
-// or are demoted to reader.
-func (t *Tenant) CreateCLIToken(
-	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
-) (string, *Token, error) {
-	if accountID == "" {
-		return "", nil, fmt.Errorf("%w: a CLI token belongs to an account", ErrInvalidInput)
-	}
-	if err := refuseAdminScope(scopes); err != nil {
-		return "", nil, err
-	}
-	for attempt := 1; ; attempt++ {
-		raw, tok, err := t.createCLITokenOnce(ctx, principal, scopes, accountID, now)
-		if err == nil {
-			return raw, tok, nil
-		}
-		if attempt < mintAttempts && isTokenPrefixCollision(err) {
-			continue
-		}
-		return "", nil, err
-	}
-}
-
-func (t *Tenant) createCLITokenOnce(
-	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
-) (string, *Token, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return "", nil, err
-	}
-	role, err := t.roleTx(ctx, tx, accountID)
-	if err != nil {
-		return "", nil, err
-	}
-	// safety: the membership lock also serializes demotion and removal, so stale requests cannot restore authority.
-	allowed := CLITokenScopes(role)
-	scopes = slices.DeleteFunc(slices.Clone(scopes), func(scope string) bool { return !slices.Contains(allowed, scope) })
-	at := now.UTC().Unix()
-	var live int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM tokens
-		WHERE team = ? AND kind = ? AND created_by = ?
-		  AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
-		string(t.team), TokenKindUser, accountID, at, at).Scan(&live); err != nil {
-		return "", nil, err
-	}
-	if live >= MaxCLITokensPerMember {
-		return "", nil, ErrCLITokenLimit
-	}
-	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindUser, scopes, CLITokenLifetime, now,
-		TokenOptions{CreatedBy: accountID})
-	if err != nil {
-		return "", nil, err
-	}
-	return raw, tok, tx.Commit()
-}
-
-// CLITokens lists the live CLI tokens accountID minted in t's team.
-func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error) {
-	return t.liveTokens(ctx, TokenKindUser, accountID, now)
-}
-
-// RevokeCLIToken revokes one of the CLI tokens accountID minted in t's team.
-// A prefix that is another member's, another team's, or already revoked is
-// ErrNotFound.
-func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, now time.Time) error {
-	if accountID == "" {
-		return ErrNotFound
-	}
-	at := now.UTC().Unix()
-	res, err := t.s.exec(ctx, `
-		UPDATE tokens SET revoked_at = ?
-		WHERE team = ? AND prefix = ? AND kind = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		at, string(t.team), prefix, TokenKindUser, accountID, at)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
+var ErrCLITokenLimit = errors.New("store: this member holds as many member tokens as a member may")

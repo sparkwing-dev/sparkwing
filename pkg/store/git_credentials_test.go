@@ -162,7 +162,7 @@ func TestGitCredentialMachineOptInIsForTheTeamsOwnRunnerTokens(t *testing.T) {
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
 	seedMinter(t, st, "acme", "owner", store.RoleOwner)
 	now := time.Now()
-	_, tok, err := acme.CreateRunnerToken(ctx, "agent:laptop", []string{"nodes.claim"}, "owner", now)
+	_, tok, err := acme.CreateMachineToken(ctx, "laptop", []string{"nodes.claim"}, "owner", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestGitCredentialMachineOptInIsForTheTeamsOwnRunnerTokens(t *testing.T) {
 	if on, err := acme.GitCredentialMachine(ctx, tok.Prefix); err != nil || on {
 		t.Fatalf("after opting out = %v, %v", on, err)
 	}
-	if err := acme.RevokeRunnerToken(ctx, tok.Prefix, now); err != nil {
+	if err := acme.RevokeTeamToken(ctx, tok.Prefix, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := acme.SetGitCredentialMachine(ctx, tok.Prefix, true, "owner", now.Add(time.Second)); !errors.Is(err, store.ErrNotFound) {

@@ -284,15 +284,15 @@ const ScopeClaimsLaunch = store.LaunchScope
 const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = store.ScopeLogsRead
-const ScopeLogsWrite = "logs.write"
-const ScopeNodesClaim = "nodes.claim"
+const ScopeLogsWrite = store.ScopeLogsWrite
+const ScopeNodesClaim = store.ScopeNodesClaim
 const ScopeRunsControl = store.ScopeRunsControl
 const ScopeRunsRead = store.ScopeRunsRead
-const ScopeRunsState = "runs.state"
+const ScopeRunsState = store.ScopeRunsState
 const ScopeRunsWrite = store.ScopeRunsWrite
-const ScopeSecretsRead = "secrets.read"
+const ScopeSecretsRead = store.ScopeSecretsRead
 const ScopeTeamAdmin = store.ScopeTeamAdmin
-const ScopeTriggersClaim = "triggers.claim"
+const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
 func ScopesForRole(role store.Role) []string
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)

@@ -366,17 +366,17 @@ func (t *Tenant) GitCredentialReleases(ctx context.Context, limit int) (_ []GitC
 	return out, rows.Err()
 }
 
-// SetGitCredentialMachine opts the team's runner token prefix in to, or out
+// SetGitCredentialMachine opts the team's machine token prefix in to, or out
 // of, receiving the team's git credentials. Without it only a cloud runner
-// receives them. ErrNotFound when prefix is no live runner token of the
-// team.
+// receives them. ErrNotFound when prefix is no unrevoked machine token of
+// the team.
 func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, enabled bool, by string, now time.Time) error {
-	tok, err := t.RunnerToken(ctx, prefix)
+	tok, err := t.TeamToken(ctx, prefix)
 	if err != nil {
 		return err
 	}
-	if tok.RevokedAt != nil && !now.Before(*tok.RevokedAt) {
-		return notFound("runner token", prefix)
+	if tok.Family() != TokenFamilyMachine || (tok.RevokedAt != nil && !now.Before(*tok.RevokedAt)) {
+		return notFound("machine token", prefix)
 	}
 	if !enabled {
 		_, err := t.s.exec(ctx, `DELETE FROM git_credential_machines WHERE team = ? AND token_prefix = ?`,
@@ -389,7 +389,7 @@ func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, ena
 	return err
 }
 
-// GitCredentialMachines lists the team's runner token prefixes opted in to
+// GitCredentialMachines lists the team's machine token prefixes opted in to
 // receiving its git credentials.
 func (t *Tenant) GitCredentialMachines(ctx context.Context) (_ map[string]bool, err error) {
 	rows, err := t.s.query(ctx, `SELECT token_prefix FROM git_credential_machines WHERE team = ?`, string(t.team))

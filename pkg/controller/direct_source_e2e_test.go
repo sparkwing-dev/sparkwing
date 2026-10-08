@@ -63,7 +63,7 @@ func TestCLITokenTriggerRunsOnADirectSourceRunner(t *testing.T) {
 		Setup   string `json:"setup"`
 		Run     string `json:"run"`
 	}
-	if code := e.f.call("POST", "/api/v1/team/cli-tokens", e.alice.auth, nil, &minted); code != http.StatusCreated {
+	if code := e.f.call("POST", "/api/v1/team/tokens", e.alice.auth, map[string]any{"scopes": memberScopes}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint CLI token = %d", code)
 	}
 	t.Logf("setup: %s", minted.Setup)
@@ -178,8 +178,8 @@ func newDirectSourceE2E(t *testing.T) *directSourceE2E {
 	var minted struct {
 		Command string `json:"command"`
 	}
-	if code := e.f.call("POST", "/api/v1/team/runner-tokens", e.alice.auth,
-		map[string]any{"name": "alice-laptop", "repos": []string{envOr("SPARKWING_E2E_ALLOW_REPO", "github.com/sparkwing-dev/sparkwing")}},
+	if code := e.f.call("POST", "/api/v1/team/tokens", e.alice.auth,
+		map[string]any{"scopes": machineScopes, "name": "alice-laptop", "repos": []string{envOr("SPARKWING_E2E_ALLOW_REPO", "github.com/sparkwing-dev/sparkwing")}},
 		&minted); code != http.StatusCreated {
 		t.Fatalf("mint runner token = %d", code)
 	}

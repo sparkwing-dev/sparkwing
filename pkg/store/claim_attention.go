@@ -143,7 +143,7 @@ func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]Register
        e.name, e.location, e.capabilities_json, e.accept_repos_json, e.budget_cores, e.budget_memory_bytes, e.last_seen
   FROM tokens t LEFT JOIN executors e ON e.token_prefix = t.prefix
  WHERE t.team = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)
-   AND (t.kind = 'runner' OR e.name IS NOT NULL)
+   AND (t.kind = 'runner' OR (t.kind = 'team' AND substr(t.principal, 1, 6) = 'agent:') OR e.name IS NOT NULL)
  ORDER BY t.prefix`, string(team), time.Now().UnixNano())
 	if err != nil {
 		return nil, err

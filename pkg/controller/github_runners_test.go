@@ -247,7 +247,7 @@ func TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes(t *testing.T) {
 		{"GET", "/api/v1/runs"},
 		{"POST", "/api/v1/nodes/claim/prepare"},
 		{"GET", "/api/v1/team/github-runners"},
-		{"POST", "/api/v1/team/runner-tokens"},
+		{"POST", "/api/v1/team/tokens"},
 		{"GET", "/api/v1/tokens"},
 	} {
 		if code := f.call(route[0], route[1], runner, map[string]any{}, nil); code != http.StatusForbidden {

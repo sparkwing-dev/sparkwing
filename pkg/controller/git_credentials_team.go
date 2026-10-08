@@ -270,7 +270,7 @@ type runnerGitCredentialsReq struct {
 }
 
 // safety: Owner opt-in controls machine access to team credentials; metered cloud runners do not need it.
-func (s *Server) handleSetRunnerGitCredentials(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetTeamTokenGitCredentials(w http.ResponseWriter, r *http.Request) {
 	p, t, ok := s.teamMember(w, r, store.RoleOwner)
 	if !ok {
 		return
@@ -287,10 +287,10 @@ func (s *Server) handleSetRunnerGitCredentials(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "set runner git credentials", err)
+		s.writeInternalError(w, r, "set machine git credentials", err)
 		return
 	}
-	s.logger.Info("runner git credentials set", "team", string(p.Team), "prefix", prefix,
+	s.logger.Info("machine git credentials set", "team", string(p.Team), "prefix", prefix,
 		"enabled", req.Enabled, "by", p.AccountID)
 	writeJSON(w, http.StatusOK, req)
 }

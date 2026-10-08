@@ -193,6 +193,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// table; that binary fails only the statements naming users, and a token session's empty scopes column
 	// grants it nothing.
 	95: {sessionTokenCols},
+	// safety: v96 rebuilds a unique index and adds no column; an older binary
+	// never mints a team token, so the wider index refuses nothing it writes.
+	96: nil,
 }
 
 func columnSpecMaps() []map[string]string {

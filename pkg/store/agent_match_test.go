@@ -188,20 +188,20 @@ func TestRunnerTokenRefusesADuplicateAgentName(t *testing.T) {
 	}
 	seedMinter(t, s, store.DefaultTeam, "owner", store.RoleOwner)
 	now := time.Now().UTC()
-	_, first, err := tenant.CreateRunnerToken(ctx, "agent:moonborn", []string{"nodes.claim"}, "owner", now)
+	_, first, err := tenant.CreateMachineToken(ctx, "moonborn", []string{"nodes.claim"}, "owner", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tenant.CreateRunnerToken(ctx, "agent:moonborn", []string{"nodes.claim"}, "owner", now); !errors.Is(err, store.ErrAgentNameTaken) {
+	if _, _, err := tenant.CreateMachineToken(ctx, "moonborn", []string{"nodes.claim"}, "owner", now); !errors.Is(err, store.ErrAgentNameTaken) {
 		t.Fatalf("a second moonborn token = %v, want ErrAgentNameTaken", err)
 	}
-	if _, _, err := tenant.CreateRunnerToken(ctx, "agent:pi", []string{"nodes.claim"}, "owner", now); err != nil {
+	if _, _, err := tenant.CreateMachineToken(ctx, "pi", []string{"nodes.claim"}, "owner", now); err != nil {
 		t.Fatalf("another name = %v", err)
 	}
-	if err := tenant.RevokeRunnerToken(ctx, first.Prefix, now); err != nil {
+	if err := tenant.RevokeTeamToken(ctx, first.Prefix, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tenant.CreateRunnerToken(ctx, "agent:moonborn", []string{"nodes.claim"}, "owner", now.Add(time.Second)); err != nil {
+	if _, _, err := tenant.CreateMachineToken(ctx, "moonborn", []string{"nodes.claim"}, "owner", now.Add(time.Second)); err != nil {
 		t.Fatalf("re-minting moonborn after revoking it = %v", err)
 	}
 }

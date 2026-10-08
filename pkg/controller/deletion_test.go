@@ -114,8 +114,8 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	var minted struct {
 		Token string `json:"token"`
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth,
-		map[string]any{"name": "box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
+		map[string]any{"scopes": machineScopes, "name": "box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint runner token = %d", code)
 	}
 	f.seedRun("acme", "run-acme")

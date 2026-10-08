@@ -22,7 +22,7 @@ import (
 // Principal is the request-scoped authenticated identity.
 type Principal struct {
 	Name        string    // free-form label ("alice", "pool-prod")
-	Kind        string    // "user" | "runner" | "service"
+	Kind        string    // "user" | "runner" | "service", a team token as the kind its family acts as
 	Scopes      []string  // exact-string set membership
 	TokenPrefix string    // non-secret prefix for audit
 	Authed      time.Time // when this request authenticated
@@ -63,23 +63,23 @@ const (
 	// they are held apart from the scopes a runner carries: a runner
 	// reports state on work it holds and never reaches for another run.
 	ScopeRunsControl  = store.ScopeRunsControl
-	ScopeNodesClaim   = "nodes.claim"
+	ScopeNodesClaim   = store.ScopeNodesClaim
 	ScopeLogsRead     = store.ScopeLogsRead
-	ScopeLogsWrite    = "logs.write"
+	ScopeLogsWrite    = store.ScopeLogsWrite
 	ScopeTriggersRead = store.ScopeTriggersRead
 	// ScopeTriggersClaim gates the trigger worker lifecycle: claim,
 	// heartbeat, and done. It carries no authority over run or node
 	// state.
-	ScopeTriggersClaim = "triggers.claim"
+	ScopeTriggersClaim = store.ScopeTriggersClaim
 	// ScopeRunsState gates run and node state writes: run create and
 	// finish, node create, start, finish, and run event append. The
 	// per-node routes are additionally bound to the caller's own
 	// claim.
-	ScopeRunsState = "runs.state"
+	ScopeRunsState = store.ScopeRunsState
 	// ScopeSecretsRead gates GET /api/v1/secrets/{name}. A non-admin
 	// holder resolves a name against the pipeline of the run it
 	// currently holds a claim in.
-	ScopeSecretsRead = "secrets.read"
+	ScopeSecretsRead = store.ScopeSecretsRead
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
 	// Any principal with this scope can resolve any approval. Reads
 	// are covered by runs.read.
@@ -371,7 +371,7 @@ func (a *Authenticator) verify(raw, key, client string, now time.Time) (*Princip
 	}
 	principal := &Principal{
 		Name:        tok.Principal,
-		Kind:        tok.Kind,
+		Kind:        store.ActingKind(tok.Kind, tok.Principal),
 		Scopes:      tok.Scopes,
 		TokenPrefix: tok.Prefix,
 		Authed:      now,

@@ -61,8 +61,8 @@ func (f *appFixture) runWork(owner signedIn, runID, repoURL string) (auth, prefi
 func (f *appFixture) teamRunner(owner signedIn, name string) (auth, prefix string) {
 	f.t.Helper()
 	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth,
-		map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}}, &m); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
+		map[string]any{"scopes": machineScopes, "name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}}, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
 	return "Bearer " + m.Token, m.Prefix

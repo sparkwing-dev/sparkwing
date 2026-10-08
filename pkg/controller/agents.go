@@ -130,7 +130,7 @@ func (s *Server) handleEnrollAgent(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	token, err := s.store.LookupTokenByPrefix(strings.TrimSpace(body.TokenPrefix))
 	if err != nil || !token.IsValid(now) ||
-		(token.Kind != store.TokenKindRunner && token.Kind != store.TokenKindService) || !token.HasScope(ScopeNodesClaim) {
+		(store.ActingKind(token.Kind, token.Principal) != store.TokenKindRunner && token.Kind != store.TokenKindService) || !token.HasScope(ScopeNodesClaim) {
 		writeError(w, http.StatusBadRequest, errors.New("token_prefix must name a live runner or service token with nodes.claim"))
 		return
 	}

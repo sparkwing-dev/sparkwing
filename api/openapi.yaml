@@ -5105,144 +5105,90 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/team/cli-tokens:
+  /api/v1/team/tokens:
     get:
       x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: List the caller's live CLI tokens in the active team.
-      description: Any member lists the CLI tokens they minted; nobody sees another member's.
-      responses:
-        "200":
-          description: CLI tokens.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  x-sparkwing-go-type: pkg/controller.cliTokenJSON
-                  type: object
-                  required: [prefix, scopes, created_at, expires_at, last_used_at]
-                  properties:
-                    prefix: {type: string}
-                    scopes: {type: array, items: {type: string}}
-                    created_at: {type: integer, format: int64, description: Unix seconds.}
-                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a CLI token lapses after 90 days."}
-                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-    post:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Mint a CLI token that acts for the caller in the active team.
+      summary: List the team tokens the caller may manage in the active team.
       description: >-
-        Needs a signed-in session; a bearer token cannot mint one. The token carries the scopes of the caller's role except team administration, so a reader's token only reads, and it lapses after 90 days. Removing the member, or demoting them to reader, revokes it. The plaintext is returned once, with the `sparkwing cloud connect` command that stores it in a profile named for the team and the `sparkwing pipeline trigger` command that starts a run with it.
-      responses:
-        "201":
-          description: Minted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.cliTokenResp
-                type: object
-                required: [token, prefix, scopes, expires_at, profile, setup, run]
-                properties:
-                  token: {type: string}
-                  prefix: {type: string}
-                  scopes: {type: array, items: {type: string}}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-                  profile: {type: string, description: "The profile name the setup command writes, which is the team slug."}
-                  setup: {type: string, description: A command that reads the token from a no-echo prompt and writes the profile.}
-                  run: {type: string, description: "The command that starts a run from a pushed checkout, with a pipeline placeholder."}
-        "409": {description: The caller already holds 10 live CLI tokens in this team.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/team/cli-tokens/{prefix}:
-    delete:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Revoke one of the caller's CLI tokens.
-      description: A member revokes only the CLI tokens they minted; another member's prefix answers 404.
-      parameters:
-        - {name: prefix, in: path, required: true, schema: {type: string}}
-      responses:
-        "204": {description: Revoked.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/team/runner-tokens:
-    get:
-      x-sparkwing-scope: runs.write
-      tags: [teams]
-      summary: List the active team's live runner tokens.
-      description: Needs the editor role.
+        Any member lists the live tokens they minted, of either family, CLI and runner tokens minted before the team token included. An editor or owner also lists every live machine token of the team, whoever minted it. Nobody lists another member's member tokens.
       responses:
         "200":
-          description: Runner tokens.
+          description: Team tokens, oldest first.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  x-sparkwing-go-type: pkg/controller.runnerTokenJSON
+                  x-sparkwing-go-type: pkg/controller.teamTokenJSON
                   type: object
-                  required: [prefix, name, created_by, created_at, expires_at, last_used_at, git_credentials]
+                  required: [prefix, name, family, scopes, created_by, created_at, expires_at, last_used_at, git_credentials]
                   properties:
                     prefix: {type: string}
-                    name: {type: string}
-                    created_by: {type: string, description: User id of the minter; empty for an operator-minted token.}
+                    name: {type: string, description: "The machine's agent name; empty for a member token."}
+                    family: {type: string, enum: [member, machine]}
+                    scopes: {type: array, items: {type: string}}
+                    created_by: {type: string, description: User id of the minter.}
                     created_at: {type: integer, format: int64, description: Unix seconds.}
-                    expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds; a runner token minted here lapses after 90 days.}
+                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a member token lapses 90 days after minting, a machine token 90 days after its last use."}
                     last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
                     git_credentials: {type: boolean, description: "A team owner opted this machine in to receiving the team's git credentials."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: Mint a runner token for the active team.
+      summary: Mint a team token in the active team.
       description: >-
-        Needs the editor role. The token carries the runner scope set the CLI's `runners add` mints and belongs to the active team. The plaintext is returned once, with a `sparkwing-runner` command that connects a machine.
+        Needs a signed-in session; a bearer token cannot mint one. The scopes pick the family, and must all come from one of two disjoint sets; an empty list, an unknown scope or a mix answers 400. A member token carries a subset of the scopes the caller's role grants, without team administration, acts as the caller, lapses after 90 days and goes when the member leaves or is demoted to reader; a scope above the caller's role answers 403, and a member holds at most 10. docs/auth.md lists both scope sets. A machine token carries a subset of the runner scopes that claims nodes or triggers, needs the editor role, a name and repos, authenticates as agent:<name> and lapses 90 days after its last use; a team holds at most 100 runner and machine tokens and one live token per agent name. The plaintext is returned once: with the `sparkwing cloud connect` and `sparkwing pipeline trigger` commands for a member token, or with a `sparkwing-runner` command that connects the machine for a machine token.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.runnerTokenReq
+              x-sparkwing-go-type: pkg/controller.teamTokenReq
               type: object
-              required: [name]
+              required: [scopes]
               properties:
-                name: {type: string, description: "1 to 63 letters, digits, '-', '_' or '.'."}
+                scopes: {type: array, items: {type: string}}
+                name: {type: string, description: "A machine token's agent name: 1 to 63 letters, digits, '-', '_' or '.'. Absent for a member token."}
                 repos:
                   type: array
                   items: {type: string}
                   description: >-
-                    Repositories the machine may build, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32.
+                    A machine token's repositories, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32. Absent for a member token.
       responses:
         "201":
           description: Minted.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.runnerTokenResp
+                x-sparkwing-go-type: pkg/controller.teamTokenResp
                 type: object
-                required: [token, prefix, command]
+                required: [token, prefix, family, scopes, expires_at]
                 properties:
                   token: {type: string}
                   prefix: {type: string}
-                  command: {type: string}
+                  family: {type: string, enum: [member, machine]}
+                  name: {type: string, description: The machine token's agent name.}
+                  scopes: {type: array, items: {type: string}}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  profile: {type: string, description: "A member token's profile name, which is the team slug."}
+                  setup: {type: string, description: A member token's command that reads the token from a no-echo prompt and writes the profile.}
+                  run: {type: string, description: "A member token's command that starts a run from a pushed checkout, with a pipeline placeholder."}
+                  command: {type: string, description: A machine token's command that stores the token and starts sparkwing-runner.}
         "400": {$ref: "#/components/responses/BadRequest"}
-        "409": {description: The team already holds 10 live runner tokens.}
+        "409": {description: "The member or team holds as many tokens of this family as it may, or another live machine token carries the name."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/team/runner-tokens/{prefix}:
+  /api/v1/team/tokens/{prefix}:
     delete:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: Revoke one of the active team's runner tokens.
-      description: An owner revokes any of the team's runner tokens; an editor revokes only the ones they minted.
+      summary: Revoke one team token.
+      description: >-
+        The minter revokes their own token of either family, and an owner revokes any machine token of the team. A token the caller cannot list answers 404; a machine token an editor lists but did not mint answers 403.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
       responses:
@@ -5251,12 +5197,12 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/team/runner-tokens/{prefix}/git-credentials:
+  /api/v1/team/tokens/{prefix}/git-credentials:
     put:
       x-sparkwing-scope: team.admin
       tags: [teams]
       summary: Opt one of the team's machines in to, or out of, receiving the team's git credentials.
-      description: An owner. A cloud runner receives the team's git credentials without this; any other runner token of the team receives them only once opted in. Answers 404 for a prefix that is no live runner token of the team.
+      description: An owner. A cloud runner receives the team's git credentials without this; any other machine or runner token of the team receives them only once opted in. Answers 404 for a prefix that is no unrevoked machine or runner token of the team.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
       requestBody:

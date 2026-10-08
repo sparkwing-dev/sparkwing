@@ -40,7 +40,7 @@ func cacheGrantServer(t *testing.T, cacheToken, grantKey string) *Server {
 	return New(st, nil).WithCacheCredentials("http://cache.invalid", cacheToken)
 }
 
-var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes}
+var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: store.MachineTokenScopes()}
 
 func teamA(*http.Request) (store.Team, error) { return "team-a", nil }
 
@@ -124,7 +124,7 @@ func TestCacheGrantRefusesAGitHubRunnerCredential(t *testing.T) {
 	s := cacheGrantServer(t, "operator-token", "grant-key")
 	p := &Principal{
 		Name: store.GitHubRunnerPrincipalPrefix + "42:acme/app", Kind: store.TokenKindRunner,
-		Team: "team-a", Scopes: runnerTokenScopes, Expires: time.Now().Add(time.Hour),
+		Team: "team-a", Scopes: store.MachineTokenScopes(), Expires: time.Now().Add(time.Hour),
 	}
 	if rec := mintAs(t, s, p, teamA); rec.Code != http.StatusForbidden {
 		t.Fatalf("mint for a GitHub Actions credential = %d, want 403: %s", rec.Code, rec.Body.String())
