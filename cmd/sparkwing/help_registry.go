@@ -194,14 +194,14 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Inspect and operate a controller's executors, triggers, admission, users and
+	Description: `Inspect and operate a controller's executors, triggers, admission and
 tokens. Select the controller with --profile NAME; connect one with
 'sparkwing cloud connect' and check its health with 'sparkwing cloud status
 --cluster'.
 
 'worker' executes queued triggers on this machine. Manage secrets with
 'sparkwing secrets' and the local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "users", "tokens", "limits", "concurrency", "object-store"},
+	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "tokens", "limits", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cloud status --profile prod --cluster"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -338,7 +338,7 @@ reports its contents. 'profiles' lists and edits controller connections;
 'sparkwing cloud' adds, checks and removes them. 'sparkwing repos'
 registers local repositories.
 
-Manage controller users and tokens with 'sparkwing cluster'.
+Manage controller tokens with 'sparkwing cluster'.
 Manage secrets with 'sparkwing secrets'.`,
 	SubcommandOrder: []string{"init", "profiles"},
 	Examples: []Example{
@@ -1771,7 +1771,7 @@ one home. A write from a command running under a home of its own is
 refused rather than sent to the machine's profiles: set
 SPARKWING_CONFIG to a path inside that home to keep it there.
 
-Every human-driven client command (tokens, users, runs
+Every human-driven client command (tokens, runs
 retry/cancel/prune/logs) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.
@@ -1997,69 +1997,6 @@ window short.`,
 	},
 	Examples: []Example{
 		{"Rotate a token with a 48h grace window", "sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod"},
-	},
-}
-
-var cmdUsers = Command{
-	Path:     "sparkwing cluster users",
-	Synopsis: "Manage dashboard login users",
-	Description: `Seeds admin credentials in the controller's users table, used
-by the dashboard's password sign-in. Connection info comes from the
-profile named by --profile.`,
-	SubcommandOrder: []string{"add", "list", "delete"},
-}
-
-var cmdUsersAdd = Command{
-	Path:     "sparkwing cluster users add",
-	Synopsis: "Create a dashboard user",
-	Description: `Prompts for a password on stdin with echo disabled when stdin
-is a TTY (the password is not shown on-screen or recorded in
-shell history). Passing --password skips the prompt -- useful
-for CI seed flows but leaks via shell history if used
-interactively. --scope sets what the account's dashboard
-sessions may reach; omitting it grants admin. The first account
-on a controller must be an admin, so a --scope list that omits
-admin is refused until one exists.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
-		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
-		{Name: "scope", Argument: "LIST", Desc: "Comma-separated scopes (omit to grant admin; the first account must include admin)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Interactive add of the first admin", "sparkwing cluster users add --name fictional-user --profile prod"},
-		{"Read-only account, once an admin exists", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
-		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
-	},
-}
-
-var cmdUsersList = Command{
-	Path:     "sparkwing cluster users list",
-	Synopsis: "Print every user",
-	Description: `Prints name, scopes, created_at, and last_login_at for every
-user in the controller's users table.`,
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"List users", "sparkwing cluster users list --profile prod"},
-	},
-}
-
-var cmdUsersDelete = Command{
-	Path:     "sparkwing cluster users delete",
-	Synopsis: "Remove a dashboard user",
-	Description: `Deletes the user row, every session that user holds, and
-revokes every token minted under that principal name except the token
-this request authenticates with, in one transaction. The sessions and
-tokens are revoked and the auth cache on the serving replica is
-cleared; auth.md describes the windows that remain elsewhere.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Delete a user", "sparkwing cluster users delete --name fictional-user --profile prod"},
 	},
 }
 

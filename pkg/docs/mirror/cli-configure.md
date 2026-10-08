@@ -13,7 +13,7 @@ reports its contents. 'profiles' lists and edits controller connections;
 'sparkwing cloud' adds, checks and removes them. 'sparkwing repos'
 registers local repositories.
 
-Manage controller users and tokens with 'sparkwing cluster'.
+Manage controller tokens with 'sparkwing cluster'.
 Manage secrets with 'sparkwing secrets'.
 
 ### Subcommands
@@ -93,7 +93,7 @@ one home. A write from a command running under a home of its own is
 refused rather than sent to the machine's profiles: set
 SPARKWING_CONFIG to a path inside that home to keep it there.
 
-Every human-driven client command (tokens, users, runs
+Every human-driven client command (tokens, runs
 retry/cancel/prune/logs) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.

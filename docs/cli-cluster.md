@@ -8,7 +8,7 @@ Every `sparkwing cluster` command, flag, and argument, generated from the CLI's 
 
 Operate and inspect the sparkwing cluster
 
-Inspect and operate a controller's executors, triggers, admission, users and
+Inspect and operate a controller's executors, triggers, admission and
 tokens. Select the controller with --profile NAME; connect one with
 'sparkwing cloud connect' and check its health with 'sparkwing cloud status
 --cluster'.
@@ -22,7 +22,6 @@ tokens. Select the controller with --profile NAME; connect one with
 - `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
 - `triggers` -- List or inspect controller triggers
-- `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
 - `limits` -- Read and set the compute guards
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
@@ -692,99 +691,6 @@ sparkwing cluster triggers list --profile prod --status pending
 
 # Pipeline-specific, JSON
 sparkwing cluster triggers list --profile prod --pipeline fictional-build --limit 5 -o json
-```
-
-## `sparkwing cluster users`
-
-Manage dashboard login users
-
-Seeds admin credentials in the controller's users table, used
-by the dashboard's password sign-in. Connection info comes from the
-profile named by --profile.
-
-### Subcommands
-
-- `add` -- Create a dashboard user
-- `list` -- Print every user
-- `delete` -- Remove a dashboard user
-
-## `sparkwing cluster users add`
-
-Create a dashboard user
-
-Prompts for a password on stdin with echo disabled when stdin
-is a TTY (the password is not shown on-screen or recorded in
-shell history). Passing --password skips the prompt -- useful
-for CI seed flows but leaks via shell history if used
-interactively. --scope sets what the account's dashboard
-sessions may reach; omitting it grants admin. The first account
-on a controller must be an admin, so a --scope list that omits
-admin is refused until one exists.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Dashboard username (required) |
-| `--password PASSWORD` | Password (omit to prompt interactively) |
-| `--scope LIST` | Comma-separated scopes (omit to grant admin; the first account must include admin) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Interactive add of the first admin
-sparkwing cluster users add --name fictional-user --profile prod
-
-# Read-only account, once an admin exists
-sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod
-
-# Non-interactive add for CI
-sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod
-```
-
-## `sparkwing cluster users delete`
-
-Remove a dashboard user
-
-Deletes the user row, every session that user holds, and
-revokes every token minted under that principal name except the token
-this request authenticates with, in one transaction. The sessions and
-tokens are revoked and the auth cache on the serving replica is
-cleared; auth.md describes the windows that remain elsewhere.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Dashboard username to remove (required) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Delete a user
-sparkwing cluster users delete --name fictional-user --profile prod
-```
-
-## `sparkwing cluster users list`
-
-Print every user
-
-Prints name, scopes, created_at, and last_login_at for every
-user in the controller's users table.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# List users
-sparkwing cluster users list --profile prod
 ```
 
 ## `sparkwing cluster worker`

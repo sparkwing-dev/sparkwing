@@ -86,12 +86,10 @@ func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bo
 func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipeline string, masked, shared bool) error
 func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
-func (c *Client) CreateUser(ctx context.Context, name, password string, scopes []string) error
 func (c *Client) DeleteCronRepo(ctx context.Context, repoURL string) (*CronRepoDeleteResponse, error)
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
 func (c *Client) DeleteSecretForPipeline(ctx context.Context, name, pipeline string) error
-func (c *Client) DeleteUser(ctx context.Context, name string) error
 func (c *Client) DisarmCron(ctx context.Context, name string) (*api.ScheduleView, error)
 func (c *Client) EnqueueChildRun(ctx context.Context, runID string, child ChildRun) (string, error)
 func (c *Client) EnqueueTrigger(
@@ -165,7 +163,6 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTokens(ctx context.Context, kind string, includeRevoked bool) ([]TokenInfo, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
-func (c *Client) ListUsers(ctx context.Context) ([]User, error)
 func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
@@ -487,12 +484,6 @@ type UnavailableError struct {
 func (e *UnavailableError) Error() string
 func (e *UnavailableError) Unwrap() error
 const UnavailableRetries = 3
-type User struct {
-	Name        string
-	Scopes      []string
-	CreatedAt   int64
-	LastLoginAt *int64
-}
 type WaiterHolder struct {
 	HolderID       string
 	RunID          string

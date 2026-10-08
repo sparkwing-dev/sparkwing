@@ -493,8 +493,6 @@ func runCluster(args []string) error {
 		return runWorker(args[1:])
 	case "triggers":
 		return runTriggers(args[1:])
-	case "users":
-		return runUsers(args[1:])
 	case "tokens":
 		return runTokens(args[1:])
 	case "limits":

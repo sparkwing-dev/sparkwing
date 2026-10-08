@@ -45,15 +45,6 @@ type RotatedToken struct {
 	OldReplacedBy string          `json:"old_replaced_by"`
 }
 
-// User is one dashboard user as GET /api/v1/users lists it. Times are Unix
-// seconds; LastLoginAt is nil for a user who has never signed in.
-type User struct {
-	Name        string   `json:"name"`
-	Scopes      []string `json:"scopes"`
-	CreatedAt   int64    `json:"created_at"`
-	LastLoginAt *int64   `json:"last_login_at"`
-}
-
 // CreateToken mints a token. It needs the admin scope.
 func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error) {
 	var out CreatedToken
@@ -139,31 +130,4 @@ func (c *Client) SetComputeLimits(ctx context.Context, limits map[string]int64) 
 		return nil, err
 	}
 	return out, nil
-}
-
-// CreateUser adds a dashboard user. Empty scopes take the controller's
-// default.
-func (c *Client) CreateUser(ctx context.Context, name, password string, scopes []string) error {
-	body := struct {
-		Name     string   `json:"name"`
-		Password string   `json:"password"`
-		Scopes   []string `json:"scopes,omitempty"`
-	}{Name: name, Password: password, Scopes: scopes}
-	return c.post(ctx, "/api/v1/users", body, http.StatusCreated, nil)
-}
-
-// ListUsers lists the controller's dashboard users.
-func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
-	var out struct {
-		Users []User `json:"users"`
-	}
-	if err := c.getJSON(ctx, c.baseURL+"/api/v1/users", &out); err != nil {
-		return nil, err
-	}
-	return out.Users, nil
-}
-
-// DeleteUser removes a dashboard user.
-func (c *Client) DeleteUser(ctx context.Context, name string) error {
-	return c.deleteJSON(ctx, "/api/v1/users/"+url.PathEscape(name), http.StatusNoContent, nil)
 }
