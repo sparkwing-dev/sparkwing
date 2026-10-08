@@ -228,14 +228,22 @@ export interface CreatedInvitation {
   email_sent?: boolean;
 }
 
-export interface RunnerToken {
+export type TokenFamily = "member" | "machine";
+
+// One row of the team token list. Member rows are the caller's own CLI
+// tokens; machine rows are runner tokens, every one of the team's for an
+// editor or owner.
+export interface TeamToken {
   prefix: string;
-  name?: string;
+  family: TokenFamily;
+  // Empty on member rows.
+  name: string;
+  scopes: string[];
   created_by?: string;
   // Unix seconds, as the controller reports them.
   created_at?: number;
-  expires_at?: number;
-  last_used_at?: number;
+  expires_at?: number | null;
+  last_used_at?: number | null;
   git_credentials?: boolean;
 }
 
@@ -246,10 +254,25 @@ export function unixSecondsISO(seconds?: number): string {
   return new Date(seconds * 1000).toISOString();
 }
 
-export interface MintedRunnerToken {
+export interface MintedMachineToken {
   token: string;
   prefix: string;
+  family: "machine";
+  name: string;
+  scopes: string[];
+  expires_at: number;
   command: string;
+}
+
+export interface MintedMemberToken {
+  token: string;
+  prefix: string;
+  family: "member";
+  scopes: string[];
+  expires_at: number;
+  profile: string;
+  setup: string;
+  run: string;
 }
 
 // A list route may answer with a bare array or wrap it under one key; both read
@@ -344,22 +367,55 @@ export async function acceptInvitation(id: string): Promise<void> {
   );
 }
 
-export async function listRunnerTokens(): Promise<RunnerToken[]> {
-  const res = await send("GET", "/api/v1/team/runner-tokens", "List machines");
-  return asList<RunnerToken>(await res.json(), "tokens");
+export async function listTeamTokens(): Promise<TeamToken[]> {
+  const res = await send("GET", "/api/v1/team/tokens", "List tokens");
+  return asList<TeamToken>(await res.json(), "tokens");
 }
 
-export async function mintRunnerToken(
+// A runner needs every machine scope to claim, report and fetch what a run
+// uses, so the page mints them all.
+export const machineScopes = [
+  "nodes.claim",
+  "triggers.claim",
+  "runs.state",
+  "secrets.read",
+  "logs.write",
+];
+
+export async function mintMachineToken(
   name: string,
   repos: string[],
-): Promise<MintedRunnerToken> {
-  const res = await send(
-    "POST",
-    "/api/v1/team/runner-tokens",
-    "Connect a machine",
-    { name, repos },
-  );
-  return (await res.json()) as MintedRunnerToken;
+): Promise<MintedMachineToken> {
+  const res = await send("POST", "/api/v1/team/tokens", "Connect a machine", {
+    scopes: machineScopes,
+    name,
+    repos,
+  });
+  return (await res.json()) as MintedMachineToken;
+}
+
+const readerScopes = ["runs.read", "logs.read", "triggers.read"];
+const writerScopes = ["runs.write", "runs.control", "approvals.write"];
+
+// The controller refuses a member scope the role lacks, so the default is the
+// role's full set.
+export function memberScopesForRole(role: Role): string[] {
+  return role === "reader"
+    ? [...readerScopes]
+    : [...readerScopes, ...writerScopes];
+}
+
+export async function mintMemberToken(
+  scopes: string[],
+): Promise<MintedMemberToken> {
+  const res = await send("POST", "/api/v1/team/tokens", "Create CLI token", {
+    scopes,
+  });
+  return (await res.json()) as MintedMemberToken;
+}
+
+export async function revokeTeamToken(prefix: string): Promise<void> {
+  await send("DELETE", `/api/v1/team/tokens/${seg(prefix)}`, "Revoke token");
 }
 
 // The page collects one free-form field; the controller validates each pattern.
@@ -370,21 +426,13 @@ export function parseRepoPatterns(input: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-export async function revokeRunnerToken(prefix: string): Promise<void> {
-  await send(
-    "DELETE",
-    `/api/v1/team/runner-tokens/${seg(prefix)}`,
-    "Revoke machine token",
-  );
-}
-
 // The controller composes the connect command because only it knows the URL a
 // machine reaches it on. Without one, the same command carries a placeholder the
 // reader fills in, and the page says so.
 export const controllerURLPlaceholder = "<controller-url>";
 
 export function runnerConnectCommand(
-  minted: MintedRunnerToken,
+  minted: Pick<MintedMachineToken, "token" | "command">,
   name: string,
   repos: string[],
 ): string {
@@ -400,43 +448,6 @@ export function runnerConnectCommand(
     "--also-claim-triggers --max-claims-before-restart 0 --metrics-addr=",
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
-}
-
-export interface CLIToken {
-  prefix: string;
-  scopes?: string[];
-  // Unix seconds, as the controller reports them.
-  created_at?: number;
-  expires_at?: number | null;
-  last_used_at?: number | null;
-}
-
-export interface MintedCLIToken {
-  token: string;
-  prefix: string;
-  scopes: string[];
-  expires_at: number;
-  profile: string;
-  setup: string;
-  run: string;
-}
-
-export async function listCLITokens(): Promise<CLIToken[]> {
-  const res = await send("GET", "/api/v1/team/cli-tokens", "List CLI tokens");
-  return asList<CLIToken>(await res.json(), "tokens");
-}
-
-export async function mintCLIToken(): Promise<MintedCLIToken> {
-  const res = await send("POST", "/api/v1/team/cli-tokens", "Create CLI token");
-  return (await res.json()) as MintedCLIToken;
-}
-
-export async function revokeCLIToken(prefix: string): Promise<void> {
-  await send(
-    "DELETE",
-    `/api/v1/team/cli-tokens/${seg(prefix)}`,
-    "Revoke CLI token",
-  );
 }
 
 // A CLI token without runs.write reads runs but cannot start one, which is
