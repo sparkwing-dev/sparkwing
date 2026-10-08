@@ -42,7 +42,7 @@ func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig 
 }
 
 func (t *Tenant) checkGitHubAppAutomationTx(ctx context.Context, tx *storeTx, grant GitHubAppAutomation) error {
-	// safety: writing both rows serializes insertion with suspension, unbinding and consent deletion on every database dialect.
+	// safety: writing both authority rows serializes admission with suspension, unbinding and consent deletion.
 	res, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET updated_at = updated_at
 	    WHERE team = ? AND installation_id = ? AND suspended = 0`, string(t.team), grant.InstallationID)
 	if err != nil {
