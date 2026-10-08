@@ -81,6 +81,9 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+- **cli:** `sparkwing run` accepts several allowed values for a `[]string` input with an `enum` tag
+  The run parser compared the whole comma-separated value against the enum, so `--envs dev,prod` failed even when both were allowed. It now checks each element, with the same rule the pipeline applies when it resolves Inputs and job args; `DescribeArg.CheckEnum` exposes that rule.
+
 - **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
 - **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
 - **Child runs:** A controller-dispatched node's child run checks its ancestry in the claim's team, and the run profile fold reads node samples in the run's team, rather than in the default team.
@@ -147,6 +150,12 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+- **sdk (Breaking):** Remove `JobSpawn` and `JobSpawnEach`; `JobFanOutDynamic` inserts runtime-decided Jobs
+  `JobSpawn`, `JobSpawnEach`, `SpawnSpec`, `SpawnGenSpec`, `SpawnHandler`, `SpawnHandlerFunc`, `Work.Spawns`, `Work.SpawnGens`, `CoerceSpawnEachJob` and `NewDetachedNode` are gone, with the engine's spawn handlers and the `spawn_dispatched` event. Split the spawned unit into its own Job ordered with `Needs`, or produce the item list from a Job and expand it with `JobFanOutDynamic`; the source Job's runner exits before its children dispatch instead of staying suspended. Plan snapshots, `pipeline plan --json`, `pipeline explain` and the run API's node work tree no longer carry `spawns` or `spawn_each`; a plan recorded by an older SDK that has them still gets no execution policy. See [migration guide](docs/migrations/_unreleased.md#jobspawn-and-jobspawneach-are-removed).
+
+- **sdk (Breaking):** Remove the programmatic job-args schema builder; `WithArgs[T]` reads the pipeline Inputs tags
+  `NewSchema`, `SchemaBuilder`, `FieldBuilder`, `GroupBuilder`, `Schema`, `SchemaProvider`, `NewSchemaFromType`, `ResolveAs`, `ResolveInputs`, the `Constraint` functions (`Required`, `RequiredWhen`, `Default`, `Computed`, `DependsOn`, `Bind`, `OneOf`, `Min`, `Max`, `Range`, `Positive`, `Custom`), the predicates (`Predicate`, `PredicateContext`, `ArgEq`, `ArgNeq`, `ArgIn`, `ArgSet`, `ArgUnset`, `And`, `Or`, `Not`, `Local`, `Remote`, `Profile`, `Always`), `Arg`, `ArgOrDefault`, `WithResolvedArgs`, `ProfileResolutionContext`, `TransitiveArg`, `Plan.JobArgSchema`, `Plan.JobArgSchemas`, `Plan.TransitiveArgsSurface` and `Plan.ResolvedArgs` are gone. Declare a job's constraints with the struct tags pipeline Inputs use (`flag`, `short`, `desc`, `default`, `required`, `enum`), and read values with `j.Args(ctx)`. A field without a `flag:` tag is no longer a flag; `secret:"true"` and `flag:",extra"` stay pipeline-only and panic on a job. `Plan.JobArgs` lists a plan's job flags for tooling. See [migration guide](docs/migrations/_unreleased.md#the-job-args-schema-builder-is-removed).
+
 - **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
   Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
 

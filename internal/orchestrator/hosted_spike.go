@@ -245,8 +245,6 @@ func hostedUnsupported(n snapshotNode) string {
 		return "is an OnFailure recovery"
 	case len(n.OptionalDeps) > 0:
 		return "has optional dependencies"
-	case n.Work != nil && (len(n.Work.Spawns) > 0 || len(n.Work.SpawnEach) > 0):
-		return "spawns nodes"
 	}
 	m := n.Modifiers
 	if m == nil {

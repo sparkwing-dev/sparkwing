@@ -238,11 +238,9 @@
     },
     "work": {
       "type": "object",
-      "description": "The steps inside a node. `needs` on a step or spawn is its edge.",
+      "description": "The steps inside a node. `needs` on a step is its edge.",
       "properties": {
         "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
-        "spawns": { "type": "array", "items": { "$ref": "#/$defs/spawn" } },
-        "spawn_each": { "type": "array", "items": { "$ref": "#/$defs/spawnEach" } },
         "step_groups": { "type": "array", "items": { "$ref": "#/$defs/stepGroup" } },
         "result_step": { "type": "string" },
         "failure_policy": { "type": "string" }
@@ -261,30 +259,6 @@
         "continue_on_error": { "type": "boolean", "description": "Target: a failure of this step does not fail the node." },
         "optional": { "type": "boolean", "description": "Target: the step may be skipped without failing the node." },
         "closures": { "$ref": "#/$defs/closures", "description": "Target: ids of the step's closures." }
-      },
-      "required": ["id"],
-      "additionalProperties": false
-    },
-    "spawn": {
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "needs": { "type": "array", "items": { "type": "string" } },
-        "target_job": { "type": "string" },
-        "target_work": { "$ref": "#/$defs/work" },
-        "has_skip_if": { "type": "boolean" }
-      },
-      "required": ["id"],
-      "additionalProperties": false
-    },
-    "spawnEach": {
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "needs": { "type": "array", "items": { "type": "string" } },
-        "target_job": { "type": "string" },
-        "item_template_work": { "$ref": "#/$defs/work" },
-        "note": { "type": "string" }
       },
       "required": ["id"],
       "additionalProperties": false

@@ -280,8 +280,6 @@ export interface NodeModifiers {
 
 export interface NodeWork {
   steps?: NodeWorkStep[];
-  spawns?: NodeWorkSpawn[];
-  spawn_each?: NodeWorkSpawnEach[];
   result_step?: string;
   step_groups?: NodeStepGroup[];
 }
@@ -302,22 +300,6 @@ export interface NodeWorkStep {
   duration_ms?: number;
   annotations?: string[];
   summary?: string;
-}
-
-export interface NodeWorkSpawn {
-  id: string;
-  needs?: string[];
-  target_job?: string;
-  target_work?: NodeWork;
-  has_skip_if?: boolean;
-}
-
-export interface NodeWorkSpawnEach {
-  id: string;
-  needs?: string[];
-  target_job?: string;
-  item_template_work?: NodeWork;
-  note?: string;
 }
 
 export interface RunDetail {
