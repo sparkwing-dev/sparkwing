@@ -360,12 +360,13 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 
 // safety: the connect command stores the token in a file, never on the runner's
 // command line, where any local user can read it; the old file goes first,
-// because umask sets only a new file's mode.
+// because umask sets only a new file's mode, and && keeps a failed removal from
+// writing the token into that old file (set -e is off inside an && operand).
 const runnerCredentialsDir = `"$HOME/.config/sparkwing/runner-credentials"`
 
 func runnerTokenSetup(raw string) string {
 	file := runnerCredentialsDir + "/agent-token"
-	return "(umask 077; mkdir -p " + runnerCredentialsDir + "; rm -f " + file + "; printf '%s' " + raw + " > " + file + ")"
+	return "(umask 077 && mkdir -p " + runnerCredentialsDir + " && rm -f " + file + " && printf '%s' " + raw + " > " + file + ")"
 }
 
 // hack: --metrics-addr= because a second runner on a machine would collide on its port; no
