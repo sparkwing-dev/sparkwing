@@ -539,7 +539,7 @@ part of the stored log, and JSON output omits it.
 | `--head N` | Print only the first N lines |
 | `--lines A:B` | 1-indexed inclusive line range |
 | `--grep PATTERN` | Substring match (case-sensitive) |
-| `--since DURATION` | Only include nodes that started within the last D (5m, 1h, and similar durations) |
+| `--since DURATION` | Only include nodes that started within the last D; with --grep and no --run, only runs newer than D (5m, 1h, 7d, and similar durations) |
 | `--tree` | Merge root + descendant runs into one stream (local only) |
 | `--events-only` | Include event records and omit node body output |
 | `--no-events` | Include node body output and omit event records |

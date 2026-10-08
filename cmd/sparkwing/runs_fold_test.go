@@ -167,3 +167,14 @@ func TestWatchedRunHonoursQuiet(t *testing.T) {
 		t.Errorf("non-quiet JSON = %q, want the run record", full.String())
 	}
 }
+
+func TestRunsLogsSinceAcceptsDays(t *testing.T) {
+	runsFoldHome(t)
+	var err error
+	captureStdout(t, func() {
+		err = runJobs([]string{"logs", "--grep", "boom", "--since", "7d", "-o", "json"})
+	})
+	if err != nil {
+		t.Fatalf("runs logs --grep --since 7d: %v", err)
+	}
+}

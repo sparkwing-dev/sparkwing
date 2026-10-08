@@ -767,8 +767,8 @@ func runJobs(args []string) error {
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
 		grep := fs.String("grep", "", "substring filter (server-side in cluster mode)")
-		since := fs.Duration("since", 0,
-			"only include output from nodes whose StartedAt >= now-D (5m, 1h, and similar durations)")
+		since := lookbackDuration(fs, "since", 0,
+			"only include output from nodes whose StartedAt >= now-D; with --grep and no --run, only runs newer than D (5m, 1h, 7d, and similar durations)")
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
 		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
 		noEvents := fs.Bool("no-events", false, "show node output only")
