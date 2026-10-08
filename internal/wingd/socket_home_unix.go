@@ -2,4 +2,4 @@
 
 package wingd
 
-func socketHomeIdentity(home string) (string, error) { return home, nil }
+func socketHomeIdentity(home string) (path, key string, err error) { return home, home, nil }

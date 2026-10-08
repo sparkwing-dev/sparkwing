@@ -162,7 +162,7 @@ func TestSocketBaseDir_IgnoresTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err := socketHomeIdentity(home)
+	_, identity, err := socketHomeIdentity(home)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -250,12 +250,12 @@ func resolveLayout(home string) (layout, error) {
 		}
 		home = p.Root
 	}
-	home, err := socketHomeIdentity(home)
+	home, key, err := socketHomeIdentity(home)
 	if err != nil {
 		return layout{}, fmt.Errorf("wingd: resolve home identity: %w", err)
 	}
 	dir := filepath.Join(home, "wingd")
-	sock := socketPathForHome(home)
+	sock := socketPathForHome(key)
 	return layout{
 		home:    home,
 		dir:     dir,

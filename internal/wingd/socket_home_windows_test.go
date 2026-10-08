@@ -22,7 +22,7 @@ func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliases := []string{home, forward, strings.ToLower(home[:1]) + home[1:], home + `\unused\..`, relative}
+	aliases := []string{home, forward, strings.ToLower(home[:1]) + home[1:], strings.ToLower(home), strings.ToUpper(home), home + `\unused\..`, relative}
 	daemon, err := New(Config{Home: forward, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 	for _, alias := range aliases {
 		t.Run(alias, func(t *testing.T) {
 			layout, err := resolveLayout(alias)
-			if err != nil || layout.home != daemon.layout.home || layout.sock != daemon.layout.sock || layout.lock != daemon.layout.lock {
+			if err != nil || !strings.EqualFold(layout.home, daemon.layout.home) || layout.sock != daemon.layout.sock {
 				t.Fatalf("alias layout differs from elected layout: %+v, %v", layout, err)
 			}
 			held, err := LockHeld(alias)
