@@ -242,7 +242,30 @@ func TestSparksAddNeverAdoptsTheRuntimeHome(t *testing.T) {
 	if body, _ := os.ReadFile(marker); string(body) != "sparks: []\n" {
 		t.Fatalf("the runtime home's sparkwing.yaml was rewritten: %q", body)
 	}
-	if _, ok := nearestDotSparkwing(checkout); ok {
+	if _, ok, _ := nearestDotSparkwing(checkout); ok {
 		t.Fatal("discovery accepted the runtime home as a project")
+	}
+}
+
+func TestDiscoveryStopsAtAnUnreadableNestedProject(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 directory")
+	}
+	root := writeSparkFixture(t, map[string]string{
+		".sparkwing/sparkwing.yaml":     "sparks: []\n",
+		"app/.sparkwing/sparkwing.yaml": "sparks: []\n",
+		"app/src/README":                "x\n",
+	})
+	nested := filepath.Join(root, "app", ".sparkwing")
+	if err := os.Chmod(nested, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(nested, 0o755) })
+	err := runIn(t, filepath.Join(root, "app", "src"), runSparksAdd, "--source", "example.com/lib")
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("sparks add under an unreadable project = %v, want the inspection error", err)
+	}
+	if body, _ := os.ReadFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml")); string(body) != "sparks: []\n" {
+		t.Fatalf("the ancestor project's sparkwing.yaml was rewritten: %q", body)
 	}
 }

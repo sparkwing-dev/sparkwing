@@ -1008,7 +1008,11 @@ func resolveHooksRepo() (repoRoot, sparkwingDir string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	if dir, ok := nearestDotSparkwing(cwd); ok {
+	dir, ok, err := nearestDotSparkwing(cwd)
+	if err != nil {
+		return "", "", err
+	}
+	if ok {
 		return filepath.Dir(dir), dir, nil
 	}
 	return "", "", fmt.Errorf("no .sparkwing/ directory in %s or above it (pass -C DIR)", cwd)
@@ -1018,7 +1022,7 @@ func resolveHooksRepo() (repoRoot, sparkwingDir string, err error) {
 // so the walk stops there and accepts only a directory carrying a project
 // marker; otherwise a checkout with no .sparkwing/ of its own would write its
 // project files into the runs store's directory.
-func nearestDotSparkwing(start string) (string, bool) {
+func nearestDotSparkwing(start string) (string, bool, error) {
 	runtimeHome := ""
 	if p, err := paths.DefaultPaths(); err == nil {
 		runtimeHome = filepath.Clean(p.Root)
@@ -1026,24 +1030,41 @@ func nearestDotSparkwing(start string) (string, bool) {
 	for dir := filepath.Clean(start); ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, ".sparkwing")
 		if candidate == runtimeHome {
-			return "", false
+			return "", false, nil
 		}
-		if isProjectDotSparkwing(candidate) {
-			return candidate, true
+		ok, err := isProjectDotSparkwing(candidate)
+		if err != nil || ok {
+			return candidate, ok, err
 		}
 		if filepath.Dir(dir) == dir {
-			return "", false
+			return "", false, nil
 		}
 	}
 }
 
-func isProjectDotSparkwing(dir string) bool {
+// safety: a .sparkwing/ this process cannot inspect may still be the project,
+// so an error other than absence stops the walk rather than letting it land
+// on an ancestor's project.
+func isProjectDotSparkwing(dir string) (bool, error) {
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("inspect %s: %w", dir, err)
+	case !info.IsDir():
+		return false, nil
+	}
 	for _, marker := range []string{"sparkwing.yaml", "go.mod"} {
-		if info, err := os.Stat(filepath.Join(dir, marker)); err == nil && info.Mode().IsRegular() {
-			return true
+		info, err := os.Stat(filepath.Join(dir, marker))
+		switch {
+		case err == nil && info.Mode().IsRegular():
+			return true, nil
+		case err != nil && !errors.Is(err, os.ErrNotExist):
+			return false, fmt.Errorf("inspect %s: %w", dir, err)
 		}
 	}
-	return false
+	return false, nil
 }
 
 func renderHookScript(hookName string, pipes []string, chainGlobal bool, profileName string) string {

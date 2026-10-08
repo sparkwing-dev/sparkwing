@@ -27,7 +27,11 @@ func defaultSparkwingDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if dir, ok := nearestDotSparkwing(cwd); ok {
+	dir, ok, err := nearestDotSparkwing(cwd)
+	if err != nil {
+		return "", err
+	}
+	if ok {
 		return dir, nil
 	}
 	return "", fmt.Errorf("no .sparkwing/ project (sparkwing.yaml or go.mod) in %s or above it; run from a checkout or pass -C DIR", cwd)
