@@ -183,7 +183,7 @@ func TestSQLExecutionPolicyGetAndListReturnImmutableCopies(t *testing.T) {
 	}
 }
 
-func TestOrdinaryReadyIsDenyAllAndLegacyClaimSkipsAnyPolicyTuple(t *testing.T) {
+func TestOrdinaryReadyIsDenyAllAndClaimSkipsAnyPolicyTuple(t *testing.T) {
 	ctx := context.Background()
 	st, err := Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -213,12 +213,12 @@ func TestOrdinaryReadyIsDenyAllAndLegacyClaimSkipsAnyPolicyTuple(t *testing.T) {
 	if err := st.markNodeReadyWithExecutionPolicy(ctx, "run", "ordinary", policy); !errors.Is(err, errExecutionPolicyConflict) {
 		t.Fatalf("upgrade ordinary ready row = %v, want conflict", err)
 	}
-	claimed, err := st.ClaimNextReadyNode(ctx, ClaimIdentity{}, "legacy", time.Minute, nil)
+	claimed, err := st.ClaimNextReadyNode(ctx, ClaimIdentity{}, "runner", time.Minute, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if claimed.NodeID != "ordinary" {
-		t.Fatalf("legacy claim = %s, want ordinary", claimed.NodeID)
+		t.Fatalf("claim = %s, want ordinary", claimed.NodeID)
 	}
 
 	partialValues := map[string]any{

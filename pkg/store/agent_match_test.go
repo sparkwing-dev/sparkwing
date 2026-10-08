@@ -33,7 +33,7 @@ func seedMatchNode(t *testing.T, s *store.Store, runID, repoURL string, cores fl
 	}
 }
 
-// A legacy runner that reports its capacity is never handed a node that asks
+// A runner that reports its capacity is never handed a node that asks
 // for more, and one that reports none claims as it always has.
 func TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity(t *testing.T) {
 	s := storetest.Open(t)

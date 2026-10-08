@@ -43,7 +43,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	windowStart := time.Now().Add(-1 * time.Hour)
-	claims, err := tenant.ListLegacyAgentClaims(r.Context(), windowStart)
+	claims, err := tenant.ListAgentClaims(r.Context(), windowStart)
 	if err != nil {
 		s.writeInternalError(w, r, "list agent claims", err)
 		return

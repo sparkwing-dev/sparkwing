@@ -57,7 +57,7 @@ func newLogClaimFixture(t *testing.T, principal string) (*logClaimFixture, strin
 }
 
 // safety: warm mode marks the node ready under the trigger claim and a pool
-// runner takes it through the legacy claim route, which is the pair that put
+// runner takes it through the claim route, which is the pair that put
 // the node's closing lines on the far side of its execution attempt.
 func warmReadyNode(t *testing.T, f *logClaimFixture, runID, nodeID string) {
 	t.Helper()

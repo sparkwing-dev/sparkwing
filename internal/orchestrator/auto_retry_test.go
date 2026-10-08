@@ -95,11 +95,11 @@ func claimedRetryContext(t *testing.T, st *store.Store, runID, pipeline string) 
 	})
 }
 
-func awaitLegacyMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID string, identity store.ClaimIdentity) *store.Node {
-	return awaitLegacyMixedClaimAfterAttempts(t, ctx, st, runID, 0, identity)
+func awaitMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID string, identity store.ClaimIdentity) *store.Node {
+	return awaitMixedClaimAfterAttempts(t, ctx, st, runID, 0, identity)
 }
 
-func awaitLegacyMixedClaimAfterAttempts(t *testing.T, ctx context.Context, st *store.Store, runID string, consumed int, identity store.ClaimIdentity) *store.Node {
+func awaitMixedClaimAfterAttempts(t *testing.T, ctx context.Context, st *store.Store, runID string, consumed int, identity store.ClaimIdentity) *store.Node {
 	t.Helper()
 	for {
 		node, err := st.GetNode(ctx, runID, "mixed")
@@ -108,7 +108,7 @@ func awaitLegacyMixedClaimAfterAttempts(t *testing.T, ctx context.Context, st *s
 				time.Now().Add(-time.Minute).UnixNano(), runID, "mixed")
 		}
 		if err == nil && node.ReadyAt != nil && node.AttemptsConsumed == consumed && !node.Claimed {
-			claimed, claimErr := st.ClaimNextReadyNode(store.WithoutClaimFences(ctx), identity, "legacy-holder", time.Minute, nil)
+			claimed, claimErr := st.ClaimNextReadyNode(store.WithoutClaimFences(ctx), identity, "runner-holder", time.Minute, nil)
 			if claimErr == nil {
 				return claimed
 			}
@@ -282,7 +282,7 @@ func TestAutoRetry_FallbackThenLegacyLossUsesOnlyTwoGlobalAttempts(t *testing.T)
 		})
 		done <- runResult{result: result, err: runErr}
 	}()
-	claimed := awaitLegacyMixedClaimAfterAttempts(t, ctx, st, "mixed-fallback-agent", 1, agent)
+	claimed := awaitMixedClaimAfterAttempts(t, ctx, st, "mixed-fallback-agent", 1, agent)
 	claimCtx := store.WithNodeClaimFence(store.WithoutClaimFences(ctx), store.NodeClaimFence{
 		Claimant: agent, HolderID: claimed.ClaimedBy, MembershipID: claimed.ClaimMembershipID,
 		ReservationID: claimed.ReservationID, ClaimGeneration: claimed.ClaimGeneration,
@@ -348,8 +348,8 @@ func TestAutoRetry_AssistedFailureThenFallbackUsesOrdinalTwo(t *testing.T) {
 		})
 		done <- runResult{result: result, err: runErr}
 	}()
-	agent := store.ClaimIdentity{Principal: "legacy-agent", TokenPrefix: "swr_legacy_agent"}
-	claimed := awaitLegacyMixedClaim(t, ctx, st, "mixed-agent-fallback", agent)
+	agent := store.ClaimIdentity{Principal: "runner-agent", TokenPrefix: "swr_runner_agent"}
+	claimed := awaitMixedClaim(t, ctx, st, "mixed-agent-fallback", agent)
 	claimCtx := store.WithNodeClaimFence(store.WithoutClaimFences(ctx), store.NodeClaimFence{
 		Claimant: agent, HolderID: claimed.ClaimedBy, MembershipID: claimed.ClaimMembershipID,
 		ReservationID: claimed.ReservationID, ClaimGeneration: claimed.ClaimGeneration,

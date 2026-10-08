@@ -122,7 +122,7 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 	}
 }
 
-func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
+func TestAgents_PlainHolderUsesOwnLivePoll(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := tenant.ListLegacyAgentClaims(ctx, now.Add(-time.Hour))
+	claims, err := tenant.ListAgentClaims(ctx, now.Add(-time.Hour))
 	if err != nil || len(claims) != 1 || claims[0].TokenPrefix == "" || claims[0].TokenPrefix != ownerToken.Prefix {
 		t.Fatalf("stored claim credential matches owner = %t, owner length=%d, claim length=%d, err=%v", len(claims) == 1 && claims[0].TokenPrefix == ownerToken.Prefix, len(ownerToken.Prefix), len(claims[0].TokenPrefix), err)
 	}
@@ -200,7 +200,7 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	}
 	stale := list()
 	if stale.Name != "moonborn" || stale.Type != "agent" || stale.MaxConcurrent != 0 || stale.Headroom != nil {
-		t.Fatalf("unrelated poll changed legacy identity or capacity: %+v", stale)
+		t.Fatalf("unrelated poll changed the agent identity or capacity: %+v", stale)
 	}
 	staleSeen, err := time.Parse(time.RFC3339, stale.LastSeen)
 	if err != nil || !staleSeen.Before(now.Add(-5*time.Minute)) {
@@ -214,7 +214,7 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	if err != nil || live.Name != "moonborn" || live.Type != "agent" ||
 		live.MaxConcurrent != 2 || live.Headroom == nil || live.Headroom.Cores != 2 ||
 		liveSeen.Before(now.Add(-5*time.Second)) {
-		t.Fatalf("live legacy agent = %+v, time error %v", live, err)
+		t.Fatalf("live agent = %+v, time error %v", live, err)
 	}
 	ready := func(id string) {
 		if err := st.CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
@@ -272,7 +272,7 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	}
 }
 
-func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
+func TestAgents_HeadroomIncludesControllerObservationTime(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +291,7 @@ func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	ctrl := client.NewWithToken(srv.URL, nil, "")
-	if _, err := ctrl.ClaimNode(ctx, "runner:legacy-box:1", nil, time.Minute, &client.Headroom{
+	if _, err := ctrl.ClaimNode(ctx, "runner:plain-box:1", nil, time.Minute, &client.Headroom{
 		Cores: 2, MemoryBytes: 4 << 30, QueueDepth: 1,
 	}); err != nil {
 		t.Fatal(err)
@@ -308,10 +308,10 @@ func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
 	}
 	headroom := body.Agents[0].Headroom
 	if headroom == nil || headroom.Cores != 2 || headroom.QueueDepth != 1 {
-		t.Fatalf("legacy headroom = %+v", headroom)
+		t.Fatalf("agent headroom = %+v", headroom)
 	}
 	if _, err := time.Parse(time.RFC3339, headroom.ObservedAt); err != nil {
-		t.Fatalf("legacy headroom observed_at = %q: %v", headroom.ObservedAt, err)
+		t.Fatalf("agent headroom observed_at = %q: %v", headroom.ObservedAt, err)
 	}
 }
 

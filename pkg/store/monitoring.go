@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// LegacyAgentClaim is one recent claim made outside enrolled-executor mode.
-type LegacyAgentClaim struct {
+// AgentClaim is one recent node claim an agent made.
+type AgentClaim struct {
 	RunID       string
 	Status      string
 	ClaimedBy   string

@@ -199,7 +199,7 @@ type placementPolicy struct {
 	liveness       time.Duration
 }
 
-// WithLocalFirstPlacement holds a node back from a legacy claim-mode runner
+// WithLocalFirstPlacement holds a node back from a claim-mode runner
 // that does not advertise the node's Prefers, for hold measured from the node's
 // ready time, while another runner that does advertise it has polled within
 // liveness and has a free slot. After the hold any eligible runner takes the

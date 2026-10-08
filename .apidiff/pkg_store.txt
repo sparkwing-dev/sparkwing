@@ -60,6 +60,14 @@ type AcquireSlotResponse struct {
 	Holders     []ConcurrencyHolder
 }
 func ActingKind(kind, principal string) string
+type AgentClaim struct {
+	RunID       string
+	Status      string
+	ClaimedBy   string
+	TokenPrefix string
+	StartedAt   time.Time
+	LastSeen    time.Time
+}
 type AgentLossRecovery struct {
 	RunID       string
 	NodeID      string
@@ -1180,14 +1188,6 @@ type LaunchJobResult struct {
 }
 type LaunchJobState string
 const LaunchScope = "claims.launch"
-type LegacyAgentClaim struct {
-	RunID       string
-	Status      string
-	ClaimedBy   string
-	TokenPrefix string
-	StartedAt   time.Time
-	LastSeen    time.Time
-}
 type LegacyOutput struct {
 	Team   Team
 	RunID  string
@@ -2650,6 +2650,7 @@ func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Dur
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error)
 func (t *Tenant) Info(ctx context.Context) (TeamInfo, error)
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error)
+func (t *Tenant) ListAgentClaims(ctx context.Context, since time.Time) (_ []AgentClaim, err error)
 func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error)
 func (t *Tenant) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (t *Tenant) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
@@ -2658,7 +2659,6 @@ func (t *Tenant) ListCronFires(ctx context.Context, scheduleID string, limit int
 func (t *Tenant) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
 func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugPause, err error)
 func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
-func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (t *Tenant) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error)
 func (t *Tenant) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error)

@@ -724,12 +724,12 @@ func TestSchemaV30AgentLossEventsAreOrderedAndCredentialSafe(t *testing.T) {
 	}
 }
 
-func TestSchemaV30LegacyClaimWithoutTrustedPlacementDoesNotRetry(t *testing.T) {
+func TestSchemaV30ClaimWithoutTrustedPlacementDoesNotRetry(t *testing.T) {
 	ctx := context.Background()
 	s := storetest.Open(t)
-	createRetryRunAndReadyNode(t, s, "run-legacy-placement", 1)
-	identity := store.ClaimIdentity{Principal: "legacy-runner", TokenPrefix: "swr_legacy"}
-	n := claimNode(t, s, "run-legacy-placement", identity, "legacy-holder")
+	createRetryRunAndReadyNode(t, s, "run-untrusted-placement", 1)
+	identity := store.ClaimIdentity{Principal: "plain-runner", TokenPrefix: "swr_plain"}
+	n := claimNode(t, s, "run-untrusted-placement", identity, "plain-holder")
 	ackNodeAttempt(t, s, n, identity, 1)
 	forceExpireNodeClaim(t, s, n.RunID, n.NodeID)
 	recovered, err := store.Maintenance.RecoverExpiredNodeClaims(s, ctx)
@@ -737,7 +737,7 @@ func TestSchemaV30LegacyClaimWithoutTrustedPlacementDoesNotRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(recovered) != 1 || recovered[0].RetryRunID != "" {
-		t.Fatalf("legacy placement recovery = %+v, want no automatic retry", recovered)
+		t.Fatalf("untrusted placement recovery = %+v, want no automatic retry", recovered)
 	}
 	events, err := s.ListEventsAfter(ctx, n.RunID, 0, 100)
 	if err != nil {
@@ -748,7 +748,7 @@ func TestSchemaV30LegacyClaimWithoutTrustedPlacementDoesNotRetry(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("missing placement_unknown decision for legacy claim")
+	t.Fatal("missing placement_unknown decision for an untrusted claim")
 }
 
 func TestSchemaV30ConcurrentLossCoalescesRetryAndRecordsMixedBudgetDecision(t *testing.T) {
