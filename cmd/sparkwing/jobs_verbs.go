@@ -63,12 +63,14 @@ func collectLocalFailures(
 
 	standalone := orchestrator.OpenStandaloneStores(ctx, paths)
 	defer func() { _ = standalone.Close() }()
-	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, error) {
+	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
 		runs, err := st.ListRuns(ctx, f)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return orchestrator.MergeTaggedRuns(append(orchestrator.TagShared(runs), standalone.ListRuns(ctx, f)...)), nil
+		others := standalone.ListRuns(ctx, f)
+		exhausted := f.Limit > 0 && len(runs) < f.Limit && len(others) < f.Limit
+		return orchestrator.MergeTaggedRuns(append(orchestrator.TagShared(runs), others...)), exhausted, nil
 	}
 	var rows []failureRow
 	err = walkRunPages(filter, limit, fetch, keep, func(r orchestrator.TaggedRun) {
@@ -81,18 +83,19 @@ func collectLocalFailures(
 }
 
 // safety: a client-side filter can reject a whole page, so the walk follows
-// the store cursor until limit rows are kept or a page comes back empty;
-// stopping after one page would hide older matches from every --limit.
+// the store cursor until limit rows are kept or the store runs out; a page
+// shorter than the ask ends it without a cursor request an older controller
+// would refuse.
 func walkRunPages(
 	filter store.RunFilter,
 	limit int,
-	fetch func(store.RunFilter) ([]orchestrator.TaggedRun, error),
+	fetch func(store.RunFilter) (page []orchestrator.TaggedRun, exhausted bool, err error),
 	keep func(*store.Run) bool,
 	emit func(orchestrator.TaggedRun),
 ) error {
 	kept := 0
 	for {
-		page, err := fetch(filter)
+		page, exhausted, err := fetch(filter)
 		if err != nil {
 			return err
 		}
@@ -111,6 +114,9 @@ func walkRunPages(
 			if limit > 0 && kept == limit {
 				return nil
 			}
+		}
+		if exhausted {
+			return nil
 		}
 		last := page[len(page)-1]
 		filter.AfterID = last.ID
@@ -155,12 +161,12 @@ func failureRowFor(
 
 func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter, limit int, keep func(*store.Run) bool) ([]failureRow, error) {
 	c := client.NewWithToken(controllerURL, nil, token)
-	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, error) {
+	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
 		runs, err := c.ListRuns(ctx, f)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return orchestrator.TagShared(runs), nil
+		return orchestrator.TagShared(runs), f.Limit > 0 && len(runs) < f.Limit, nil
 	}
 	var rows []failureRow
 	err := walkRunPages(filter, limit, fetch, keep, func(tagged orchestrator.TaggedRun) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -216,9 +218,9 @@ func TestWalkRunPagesFindsAMatchBehindFullPagesOfMisses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, error) {
+	fetch := func(f store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
 		runs, err := st.ListRuns(context.Background(), f)
-		return orchestrator.TagShared(runs), err
+		return orchestrator.TagShared(runs), len(runs) < f.Limit, err
 	}
 	var got []string
 	keep := func(r *store.Run) bool { return r.ID == "run-0" || r.ID == "run-1" }
@@ -228,5 +230,29 @@ func TestWalkRunPagesFindsAMatchBehindFullPagesOfMisses(t *testing.T) {
 	}
 	if strings.Join(got, ",") != "run-1,run-0" {
 		t.Fatalf("walk kept %v, want the two oldest runs found behind pages of misses", got)
+	}
+}
+
+func TestRemoteFailuresStopOnAShortPageWithoutACursor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/runs" {
+			if r.URL.Query().Get("after_id") != "" {
+				t.Errorf("walk sent a cursor after a short page: %s", r.URL.RawQuery)
+			}
+			w.Header().Set("X-Sparkwing-Run-Filter-Version", "1")
+			_, _ = w.Write([]byte(`{"runs":[{"id":"run-old","pipeline":"build","status":"failed"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"nodes":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+	rows, err := collectRemoteFailures(context.Background(), srv.URL, "", store.RunFilter{Statuses: []string{"failed"}, Limit: 20}, 20,
+		func(*store.Run) bool { return true })
+	if err != nil {
+		t.Fatalf("a cursorless controller with one failure: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != "run-old" {
+		t.Fatalf("rows = %+v, want the one failed run", rows)
 	}
 }
