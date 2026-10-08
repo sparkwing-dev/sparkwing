@@ -39,7 +39,7 @@ func TestRenderDoctorPretty_NamesEachUngatedRepoAndItsFix(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"/code/pulsewing", "/config/git/hooks", "sparkwing pipeline hooks install --repo /code/pulsewing"} {
+	for _, want := range []string{"/code/pulsewing", "/config/git/hooks", "sparkwing -C /code/pulsewing pipeline hooks install"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pretty output does not carry %q:\n%s", want, out)
 		}

@@ -564,3 +564,21 @@ instead of naming its replacement.
   views read the local store unless `--profile` was given. Their replacements
   follow `runs status`: `--profile`, then `SPARKWING_PROFILE`, then the
   project's `defaults.profile`.
+
+## Pipeline verbs fold into list, plan and hooks status
+
+| Before | After |
+|---|---|
+| `sparkwing pipeline run X [flags]` | `sparkwing run X [flags]` |
+| `sparkwing pipeline discover --query Q [-o json]` | `sparkwing pipeline list --query Q [-o json]` |
+| `sparkwing pipeline explain --name X [-- pipeline-flags]` | `sparkwing pipeline plan --static --name X [-- pipeline-flags]` |
+| `sparkwing pipeline explain --all` | `sparkwing pipeline plan --static --all` |
+| `sparkwing pipeline hooks fire [--fleet]` | `sparkwing pipeline hooks status --prove [--fleet]` |
+| `sparkwing pipeline hooks survey [--ungated]` | `sparkwing pipeline hooks status --all [--ungated]` |
+
+- Output, exit codes and JSON shapes are unchanged; only the invocation moves.
+- A CI step that gates on `pipeline explain --all` changes its command line
+  and nothing else.
+- Pipelines scaffolded by an earlier `pipeline new` list
+  `sparkwing pipeline explain --name X` among their examples; edit the
+  example to `sparkwing pipeline plan --static --name X`.

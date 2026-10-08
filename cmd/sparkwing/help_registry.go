@@ -1284,53 +1284,28 @@ var cmdPipeline = Command{
 	Description: `Per-project namespace. Every verb here operates on the
 nearest .sparkwing/ walking up from the current directory.
 
-Discovery (list / describe / discover / explain) shows what
-pipelines this repo defines. 'new' scaffolds a fresh pipeline
-(auto-bootstraps .sparkwing/ on first use). 'run' invokes one
-(positional name; same as 'sparkwing run <name>'). 'hooks' wires
+Discovery (list / describe / plan) shows what pipelines this repo
+defines. 'new' scaffolds a fresh pipeline (auto-bootstraps .sparkwing/
+on first use); 'sparkwing run <name>' invokes one. 'hooks' wires
 pipelines to git pre-commit / pre-push / post-commit.
 'sparks' manages reusable spark libraries declared in the
 sparks: block of .sparkwing/sparkwing.yaml.
 
-The discovery verbs (list / describe / discover / templates)
+The discovery verbs (list / describe / plan)
 support -o json so an agent can parse output directly rather
 than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
 'sparkwing update --sdk'. To see the current pin, run
 'sparkwing version' (composite card).`,
-	SubcommandOrder: []string{"list", "describe", "discover", "new", "explain", "lint", "plan", "run", "trigger", "hooks", "sparks"},
+	SubcommandOrder: []string{"list", "describe", "new", "lint", "plan", "trigger", "hooks", "sparks"},
 	Examples: []Example{
 		{"Machine-readable catalog", "sparkwing pipeline list -o json"},
 		{"One pipeline's details", "sparkwing pipeline describe --name fictional-release -o json"},
-		{"Search by intent", `sparkwing pipeline discover --query "tag a release"`},
+		{"Search by intent", `sparkwing pipeline list --query "tag a release"`},
 		{"First pipeline in a new repository (auto-bootstraps)", "sparkwing pipeline new --name release"},
-		{"Inspect the DAG before running", "sparkwing pipeline explain --name fictional-release"},
-		{"Run a pipeline", "sparkwing pipeline run release"},
-	},
-}
-
-var cmdPipelineRun = Command{
-	Path:     "sparkwing pipeline run",
-	Synopsis: "Invoke a pipeline",
-	Description: `Compiles and runs the named pipeline from the nearest pipeline directory.
-This command has the same behavior as 'sparkwing run <pipeline>'.
-
-Runner options use the --sw- prefix. Unknown --sw- options fail before
-execution setup. Other arguments pass to the pipeline. Put -- before
-pipeline arguments that resemble runner options; every argument after the
-separator passes through unchanged.`,
-	PosArgs: []PosArg{
-		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
-	},
-	Flags:       runFlagSpecs,
-	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
-	UsageSuffix: "[-- pipeline-flags...]",
-	Examples: []Example{
-		{"Run with no flags", "sparkwing pipeline run fictional-build"},
-		{"Pass a typed pipeline arg", "sparkwing pipeline run fictional-release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing pipeline run fictional-build --sw-ref feature/xyz"},
-		{"Dispatch remotely", "sparkwing pipeline trigger deploy --profile prod"},
+		{"Inspect the DAG before running", "sparkwing pipeline plan --static --name fictional-release"},
+		{"Run a pipeline", "sparkwing run release"},
 	},
 }
 
@@ -1408,16 +1383,24 @@ metadata, and prints a grouped aligned table.
 -o json since tab-complete / table output is for human reading.
 
 --all includes entries marked 'hidden: true'. By default they're
-omitted.`,
+omitted.
+
+--query searches by intent instead: every token must match some field
+(name / short / help / group / tags / triggers), hidden entries included,
+and matches in the name rank above matches in prose. -o json adds a score
+to each record, highest first.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "all", Desc: "Include entries marked hidden", Group: "Output"},
+		{Name: "query", Argument: "TEXT", Desc: "Rank entries whose fields match every token", Group: "Filter"},
 	},
-	GroupOrder: []string{"Output", "Other"},
+	GroupOrder: []string{"Filter", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing pipeline list"},
 		{"Agent-readable catalog", "sparkwing pipeline list -o json"},
 		{"Include hidden entries", "sparkwing pipeline list --all"},
+		{"Find release-related pipelines", "sparkwing pipeline list --query release"},
+		{"Agent-readable ranked hits", "sparkwing pipeline list --query \"tag release\" -o json"},
 	},
 }
 
@@ -1442,28 +1425,6 @@ source binding, and its resolution status instead of the metadata.`,
 		{"Human-readable", "sparkwing pipeline describe --name release"},
 		{"Agent-readable", "sparkwing pipeline describe --name fictional-release -o json"},
 		{"Inspect the declared secrets", "sparkwing pipeline describe --name fictional-release --secrets -o json"},
-	},
-}
-
-var cmdPipelineDiscover = Command{
-	Path:     "sparkwing pipeline discover",
-	Synopsis: "Fuzzy search over pipeline names + descriptions + tags",
-	Description: `Search the catalog by intent. Every token in --query
-must match some haystack field (name / short / help / group /
-tags / triggers); matches in the name score higher than matches
-in prose so direct hits surface first.
-
--o json emits {name, kind, group, ..., score} records sorted by
-score descending; agents should prefer -o json for consumption.`,
-	Flags: []FlagSpec{
-		{Name: "query", Argument: "TEXT", Desc: "Search query (one or more tokens, all must hit some field)", Required: true, Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-	},
-	GroupOrder: []string{"Target", "Output", "Other"},
-	Examples: []Example{
-		{"Find release-related pipelines", `sparkwing pipeline discover --query release`},
-		{"Multi-token, all must hit", `sparkwing pipeline discover --query "tag release"`},
-		{"Agent-readable ranked hits", `sparkwing pipeline discover --query deploy -o json`},
 	},
 }
 
@@ -1543,36 +1504,6 @@ example. Use 'sparkwing pipeline new --template <shape>' to start a pipeline.`,
 	},
 }
 
-var cmdPipelineExplain = Command{
-	Path:     "sparkwing pipeline explain",
-	Synopsis: "Render the pipeline's Plan DAG without dispatching any jobs",
-	Description: `Compiles the pipeline binary, calls the named pipeline's Plan method, and
-prints its nodes, dependencies, and approval gates. Jobs remain unexecuted.
-
-Arguments other than --name, --all, -o/--output, and --help pass to the
-pipeline. This previews plans controlled by --env, --version, and similar
-inputs. Missing required arguments are tolerated so the plan can be inspected
-before every input is supplied.
-
---all constructs every declared pipeline with no extra arguments and exits
-non-zero if any plan fails validation. Validation detects mismatched typed
-references, inconsistent declared outputs, duplicate node IDs, and similar
-errors.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Pipeline to explain (one of --name or --all required)", Group: "Target"},
-		{Name: "all", Desc: "Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure", Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-	},
-	GroupOrder:  []string{"Target", "Output", "Other"},
-	UsageSuffix: "[-- pipeline-flags...]",
-	Examples: []Example{
-		{"Inspect the example release DAG", "sparkwing pipeline explain --name fictional-release"},
-		{"Preview with args (forwarded to the pipeline)", "sparkwing pipeline explain --name example-release --env prod"},
-		{"Agent-readable JSON", "sparkwing pipeline explain --name fictional-release -o json"},
-		{"Validate every pipeline (CI gate)", "sparkwing pipeline explain --all"},
-	},
-}
-
 var cmdPipelineLint = Command{
 	Path:     "sparkwing pipeline lint",
 	Synopsis: "Check pipeline source for idiomatic anti-patterns (enforced gate)",
@@ -1631,9 +1562,19 @@ Skip reasons:
 
 Dynamic fan-out counts remain unresolved when they require execution.
 Skipping a state-loading step with --start-at leaves that state empty;
-downstream predicates are evaluated with the resulting state.`,
+downstream predicates are evaluated with the resulting state.
+
+--static prints the Plan DAG as the pipeline declares it -- nodes,
+dependencies, approval gates -- without resolving runtime skips. Missing
+required arguments are tolerated so the plan can be inspected before every
+input is supplied. --static --all constructs every declared pipeline with
+no extra arguments and exits non-zero if any plan fails validation
+(mismatched typed references, inconsistent declared outputs, duplicate node
+IDs, and similar errors), which makes it a CI gate.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Pipeline to plan", Group: "Target"},
+		{Name: "name", Argument: "NAME", Desc: "Pipeline to plan", RequiredWhen: "unless --static --all", Group: "Target"},
+		{Name: "static", Desc: "Print the declared Plan DAG without resolving runtime skips", Group: "Target"},
+		{Name: "all", Desc: "With --static, validate every pipeline in sparkwing.yaml; non-zero exit on any failure", RequiresFlags: []string{"static"}, Group: "Target"},
 		{Name: "start-at", Argument: "STEP", Desc: "Skip every WorkStep upstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "stop-at", Argument: "STEP", Desc: "Skip every WorkStep downstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -1644,6 +1585,8 @@ downstream predicates are evaluated with the resulting state.`,
 		{"Resolve the example cluster DAG with supplied arguments", "sparkwing pipeline plan --name fictional-cluster"},
 		{"Preview a resume-from-step", "sparkwing pipeline plan --name fictional-cluster --start-at fictional-install"},
 		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name fictional-release -o json"},
+		{"The declared DAG, with args forwarded to the pipeline", "sparkwing pipeline plan --static --name example-release --env prod"},
+		{"Validate every pipeline (CI gate)", "sparkwing pipeline plan --static --all"},
 	},
 }
 
@@ -2842,7 +2785,7 @@ Managed hooks carry an "Installed by sparkwing" marker so
 uninstall and status can tell them apart from hand-written
 hooks. Existing unmanaged hooks are left alone; install skips
 them with a warning.`,
-	SubcommandOrder: []string{"install", "uninstall", "status", "survey", "fire"},
+	SubcommandOrder: []string{"install", "uninstall", "status"},
 }
 
 var cmdHooksInstall = Command{
@@ -2874,57 +2817,6 @@ gate.`,
 	},
 }
 
-var cmdHooksSurvey = Command{
-	Path:     "sparkwing pipeline hooks survey",
-	Synopsis: "Report effective gates for registered repositories",
-	Description: `Reports declared hooks for every registered repository as armed, shadowed,
-uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
-selects another location. The STATE column reads no-gate where every declared
-hook fires and none of them is pre-commit or pre-push, because nothing there
-refuses a commit or a push.
-
-Coverage includes registered repositories and configured fallback paths.
-Register other checkouts before expecting them in the report. An unreadable
-registry produces an error.
-
---ungated selects repositories where commits or pushes run without a gate.
-Only pre-commit and pre-push hooks can block those operations.`,
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "ungated", Desc: "List only the repos git runs no gate for", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Survey the fleet", "sparkwing pipeline hooks survey"},
-		{"Just the ungated repos", "sparkwing pipeline hooks survey --ungated"},
-		{"Machine-readable", "sparkwing pipeline hooks survey -o json"},
-	},
-}
-
-var cmdHooksFire = Command{
-	Path:     "sparkwing pipeline hooks fire",
-	Synopsis: "Make the gate refuse a commit, to see that it can",
-	Description: `Attempts a commit with a managed gate instructed to refuse it and reports
-whether the gate blocked Git. A control attempt with hooks disabled must
-succeed, so an unrelated commit failure cannot count as a passing diagnostic.
-
-The attempts use a temporary detached worktree and index. The source checkout
-and its branches remain unchanged. Only managed hooks carrying the diagnostic
-guard execute; other hooks are reported as unprovable.
-
-Exits nonzero unless every applicable repository refused the test commit
-through its own gate. Repositories without a pre-commit trigger are excluded.
-This command verifies pre-commit hooks.`,
-	Flags: []FlagSpec{
-		{Name: "fleet", Desc: "Fire the gate in every registered repo instead of one", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-	},
-	Examples: []Example{
-		{"Prove this repo's gate refuses a commit", "sparkwing pipeline hooks fire"},
-		{"Prove every registered repo's gate", "sparkwing pipeline hooks fire --fleet"},
-		{"Machine-readable", "sparkwing pipeline hooks fire -o json"},
-	},
-}
-
 var cmdHooksUninstall = Command{
 	Path:     "sparkwing pipeline hooks uninstall",
 	Synopsis: "Remove sparkwing-managed git hooks",
@@ -2941,12 +2833,38 @@ var cmdHooksStatus = Command{
 	Synopsis: "Report declared, installed, and missing sparkwing hooks",
 	Description: `Lists every managed hook file under .git/hooks/ along with the pipelines it
 invokes. Declared hooks that are missing, shadowed, or borrowed are named with
-the command that repairs them.`,
+the command that repairs them.
+
+--prove attempts a commit with a managed gate instructed to refuse it and
+reports whether the gate blocked Git. A control attempt with hooks disabled
+must succeed, so an unrelated commit failure cannot count as a passing
+diagnostic. The attempts use a temporary detached worktree and index; the
+checkout and its branches remain unchanged. Only managed hooks carrying the
+diagnostic guard execute; other hooks are reported as unprovable. It exits
+nonzero unless every applicable repository refused the test commit through
+its own gate, and it proves pre-commit hooks only. --fleet proves every
+registered repository.
+
+--all reports declared hooks for every registered repository as armed,
+shadowed, uninstalled, or undeclared. A shadowed hook is installed but
+core.hooksPath selects another location. The STATE column reads no-gate where
+every declared hook fires and none of them is pre-commit or pre-push, because
+nothing there refuses a commit or a push. Register other checkouts before
+expecting them in the report; an unreadable registry produces an error.
+--ungated selects repositories where commits or pushes run without a gate.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints hook names.", Group: "Output"},
+		{Name: "prove", Desc: "Make the gate refuse a test commit and report whether it did", ConflictsWith: []string{"all"}, Group: "Mode"},
+		{Name: "fleet", Desc: "With --prove, prove every registered repo", RequiresFlags: []string{"prove"}, Group: "Mode"},
+		{Name: "all", Desc: "Report the effective gates of every registered repo", Group: "Mode"},
+		{Name: "ungated", Desc: "With --all, list only the repos git runs no gate for", RequiresFlags: []string{"all"}, Group: "Mode"},
 	},
 	Examples: []Example{
 		{"Show hook status", "sparkwing pipeline hooks status"},
+		{"Prove this repo's gate refuses a commit", "sparkwing pipeline hooks status --prove"},
+		{"Prove every registered repo's gate", "sparkwing pipeline hooks status --prove --fleet"},
+		{"Survey every registered repo's gates", "sparkwing pipeline hooks status --all"},
+		{"Just the ungated repos", "sparkwing pipeline hooks status --all --ungated"},
 	},
 }
 

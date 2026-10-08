@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,47 +10,31 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-func runHooksFire(args []string) error {
-	fs := flag.NewFlagSet(cmdHooksFire.Path, flag.ContinueOnError)
-	fleet := fs.Bool("fleet", false, "fire the gate in every registered repo")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	if err := parseAndCheck(cmdHooksFire, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdHooksFire.Path)
-	if err != nil {
-		return err
-	}
-
+func proveHooks(fleet bool, format string) error {
 	var results []githooks.FireResult
-	if *fleet {
+	if fleet {
 		roots, err := fleetRepoRoots(runGit)
 		if err != nil {
-			return fmt.Errorf("hooks fire: %w", err)
+			return fmt.Errorf("hooks status --prove: %w", err)
 		}
 		for _, root := range roots {
 			declared, err := declaredHookNames(root)
 			if err != nil {
-				return fmt.Errorf("hooks fire: %w", err)
+				return fmt.Errorf("hooks status --prove: %w", err)
 			}
 			results = append(results, githooks.Fire(runGit, root, declared))
 		}
 	} else {
 		repoRoot, _, err := resolveHooksRepo()
 		if err != nil {
-			return fmt.Errorf("hooks fire: %w", err)
+			return fmt.Errorf("hooks status --prove: %w", err)
 		}
 		declared, err := declaredHookNames(repoRoot)
 		if err != nil {
-			return fmt.Errorf("hooks fire: %w", err)
+			return fmt.Errorf("hooks status --prove: %w", err)
 		}
 		results = append(results, githooks.Fire(runGit, repoRoot, declared))
 	}
@@ -59,7 +42,7 @@ func runHooksFire(args []string) error {
 		return err
 	}
 	if unenforced := unenforcedResults(results); len(unenforced) > 0 {
-		return fmt.Errorf("hooks fire: %d repo(s) did not refuse a commit", len(unenforced))
+		return fmt.Errorf("hooks status --prove: %d repo(s) did not refuse a commit", len(unenforced))
 	}
 	return nil
 }

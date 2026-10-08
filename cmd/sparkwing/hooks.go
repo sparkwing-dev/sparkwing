@@ -33,7 +33,7 @@ func runHooks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdHooks, os.Stderr)
-		return errors.New("hooks: subcommand required (install|uninstall|status|survey|fire)")
+		return errors.New("hooks: subcommand required (install|uninstall|status)")
 	}
 	switch args[0] {
 	case "install":
@@ -42,10 +42,6 @@ func runHooks(args []string) error {
 		return runHooksUninstall(args[1:])
 	case "status":
 		return runHooksStatus(args[1:])
-	case "survey":
-		return runHooksSurvey(args[1:])
-	case "fire":
-		return runHooksFire(args[1:])
 	default:
 		PrintHelp(cmdHooks, os.Stderr)
 		return fmt.Errorf("hooks: unknown subcommand %q", args[0])
@@ -766,6 +762,10 @@ func releaseHooksPath(git githooks.Git, repoRoot, hooksDir string) {
 func runHooksStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksStatus.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
+	prove := fs.Bool("prove", false, "make the gate refuse a test commit and report whether it did")
+	fleet := fs.Bool("fleet", false, "with --prove, prove every registered repo")
+	all := fs.Bool("all", false, "report the effective gates of every registered repo")
+	ungated := fs.Bool("ungated", false, "with --all, list only the repos git runs no gate for")
 	if err := parseAndCheck(cmdHooksStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -775,6 +775,12 @@ func runHooksStatus(args []string) error {
 	mode, err := resolveOutputFormat(*output, fs.Name())
 	if err != nil {
 		return err
+	}
+	switch {
+	case *prove:
+		return proveHooks(*fleet, mode)
+	case *all:
+		return surveyHooks(*ungated, mode)
 	}
 
 	repoRoot, _, err := resolveHooksRepo()
@@ -892,25 +898,12 @@ func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 		strings.Join(silenced, ", "), hooksDir)
 }
 
-func runHooksSurvey(args []string) error {
-	fs := flag.NewFlagSet(cmdHooksSurvey.Path, flag.ContinueOnError)
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	ungatedOnly := fs.Bool("ungated", false, "list only the repos git runs no gate for")
-	if err := parseAndCheck(cmdHooksSurvey, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdHooksSurvey.Path)
-	if err != nil {
-		return err
-	}
+func surveyHooks(ungatedOnly bool, format string) error {
 	rows, err := surveyFleet(runGit)
 	if err != nil {
-		return fmt.Errorf("hooks survey: %w", err)
+		return fmt.Errorf("hooks status --all: %w", err)
 	}
-	if *ungatedOnly {
+	if ungatedOnly {
 		rows = githooks.Ungated(rows)
 	}
 	return renderHooksSurvey(os.Stdout, rows, format)
@@ -956,7 +949,7 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 	_ = tw.Flush()
 	if len(ungated) == 0 && len(lapsed) == 0 {
 		fmt.Fprintf(w, "\n%d repo(s), every declared gate fires\n", len(rows))
-		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks fire --fleet` is what a commit says")
+		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks status --prove --fleet` is what a commit says")
 		return nil
 	}
 	if len(ungated) > 0 {

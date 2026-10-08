@@ -361,7 +361,7 @@ case "$mode" in
 esac
 
 previous="$mark"
-sparkwing pipeline new --name demo --template "$template" -C "$REPO" \
+sparkwing -C "$REPO" pipeline new --name demo --template "$template" \
   >"$WORK/scaffold.log" 2>&1 || {
   cat "$WORK/scaffold.log" >&2
   if download_unavailable "$WORK/scaffold.log"; then
@@ -386,7 +386,7 @@ mark="$(now_ns)"
 scaffold_ms="$(milliseconds_of $((mark - previous)))"
 
 previous="$mark"
-sparkwing pipeline explain --name demo -C "$REPO" >"$WORK/compile.log" 2>&1 || {
+sparkwing -C "$REPO" pipeline plan --static --name demo >"$WORK/compile.log" 2>&1 || {
   cat "$WORK/compile.log" >&2
   if download_unavailable "$WORK/compile.log"; then
     unavailable compile "could not reach the module proxy"
@@ -397,7 +397,7 @@ mark="$(now_ns)"
 compile_ms="$(milliseconds_of $((mark - previous)))"
 
 previous="$mark"
-SPARKWING_LOG_FORMAT=json sparkwing run demo -C "$REPO" >"$WORK/run.log" 2>&1 ||
+SPARKWING_LOG_FORMAT=json sparkwing -C "$REPO" run demo >"$WORK/run.log" 2>&1 ||
   { cat "$WORK/run.log" >&2; fail "the run phase failed"; }
 mark="$(now_ns)"
 run_ms="$(milliseconds_of $((mark - previous)))"

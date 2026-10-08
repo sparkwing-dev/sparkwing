@@ -1121,6 +1121,6 @@ members still take turns oldest-first inside the group.
 - `sparkwing docs read --topic pipelines` - conceptual tour
 - `sparkwing docs read --topic sdk` - this page
 - `sparkwing docs all` - every doc concatenated (one stdout dump for agents)
-- `sparkwing pipeline explain --name X [-o json]` - render the full
+- `sparkwing pipeline plan --static --name X [-o json]` - render the full
   Plan -> Job -> Work -> Step tree before running
 - [`pipelines.md`](pipelines.md) - the conceptual Plan/Work tour

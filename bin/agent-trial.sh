@@ -242,7 +242,7 @@ echo "  lint:    $(sparkwing pipeline lint --all >/dev/null 2>&1 && echo PASS ||
 explain_ok=0
 explain_bad=""
 for p in $(cut -f1 <<<"$registered"); do
-  if sparkwing pipeline explain --name "$p" --sw-dry-run -o json >/dev/null 2>&1; then
+  if sparkwing pipeline plan --static --name "$p" --sw-dry-run -o json >/dev/null 2>&1; then
     explain_ok=$((explain_ok + 1))
   else
     explain_bad="$explain_bad $p"

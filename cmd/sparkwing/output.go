@@ -148,7 +148,7 @@ flags:
 		}
 		slot++
 	}
-	if path == "sparkwing run" || path == "sparkwing pipeline run" {
+	if path == "sparkwing run" {
 		if hasOutput && !wantsHelp(rest) {
 			return nil, fmt.Errorf("%s: -o/--output does not select a run's stream. The stream is pretty on a terminal "+
 				"and NDJSON when piped, and SPARKWING_LOG_FORMAT overrides that; flags for the pipeline itself go after --", path)

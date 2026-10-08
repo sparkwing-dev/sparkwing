@@ -63,18 +63,12 @@ func runPipeline(args []string) error {
 		return runPipelineList(args[1:])
 	case "describe":
 		return runPipelineDescribe(args[1:])
-	case "discover":
-		return runPipelineDiscover(args[1:])
 	case "new":
 		return runPipelineNew(args[1:])
-	case "explain":
-		return runPipelineExplain(args[1:])
 	case "lint":
 		return runPipelineLint(args[1:])
 	case "plan":
 		return runPipelinePlan(args[1:])
-	case "run":
-		return dispatchRun(args[1:])
 	case "trigger":
 		return runPipelineTrigger(args[1:])
 	case "hooks":
@@ -91,15 +85,25 @@ func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
+	query := fs.String("query", "", "rank entries whose fields match every token; searches hidden entries too")
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("pipeline list: unexpected positional %q (use --query)", fs.Arg(0))
+	}
 	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
 	if err != nil {
 		return err
+	}
+	if fs.Changed("query") {
+		if strings.TrimSpace(*query) == "" {
+			return errors.New("pipeline list: --query needs at least one token")
+		}
+		return searchPipelines(*query, format)
 	}
 	pipelines, err := gatherPipelinesCatalog(*includeHidden)
 	if err != nil {
@@ -124,29 +128,7 @@ func runPipelineList(args []string) error {
 	}
 }
 
-func runPipelineDiscover(args []string) error {
-	fs := flag.NewFlagSet(cmdPipelineDiscover.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	queryFlag := fs.String("query", "", "search query (one or more tokens; all must match some field)")
-	if err := parseAndCheck(cmdPipelineDiscover, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		PrintHelp(cmdPipelineDiscover, os.Stderr)
-		return fmt.Errorf("discover: unexpected positional %q (use --query)", fs.Arg(0))
-	}
-	if *queryFlag == "" {
-		PrintHelp(cmdPipelineDiscover, os.Stderr)
-		return errors.New("discover: --query is required")
-	}
-	format, err := resolveOutputFormat(*output, cmdPipelineDiscover.Path)
-	if err != nil {
-		return err
-	}
-	query := *queryFlag
+func searchPipelines(query, format string) error {
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
 		return err

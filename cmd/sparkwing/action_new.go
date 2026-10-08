@@ -596,7 +596,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the gate locally", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
 	}
 }
 
@@ -681,7 +681,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the release flow", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
 	}
 }
 
@@ -775,7 +775,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the report now", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline explain --name {{NAME}}"},
+		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
 	}
 }
 

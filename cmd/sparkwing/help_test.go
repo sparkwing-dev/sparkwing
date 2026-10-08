@@ -395,7 +395,6 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		cmd  Command
 	}{
 		{"sparkwing run", cmdRun},
-		{"sparkwing pipeline run", cmdPipelineRun},
 	}
 	allFlags := []string{
 		"--sw-ref",
@@ -436,7 +435,6 @@ func TestCompletionFlagsListsHotOnly(t *testing.T) {
 		cmd  Command
 	}{
 		{"sparkwing run", cmdRun},
-		{"sparkwing pipeline run", cmdPipelineRun},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			flags := visibleFlagsForHelp(tc.cmd, true)

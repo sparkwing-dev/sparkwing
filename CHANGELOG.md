@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Fold `pipeline run`, `pipeline discover`, `pipeline explain`, `pipeline hooks fire` and `pipeline hooks survey` into the verbs that already do the job
+  `pipeline run X` is `run X`; `pipeline discover --query Q` is `pipeline list --query Q`; `pipeline explain --name X|--all` is `pipeline plan --static --name X|--all`; `pipeline hooks fire [--fleet]` is `pipeline hooks status --prove [--fleet]`; `pipeline hooks survey [--ungated]` is `pipeline hooks status --all [--ungated]`. Generated pipeline examples now name `pipeline plan --static`. See [migration guide](docs/migrations/_unreleased.md#pipeline-verbs-fold-into-list-plan-and-hooks-status).
+
 - **cli (Breaking):** Fold eleven `runs` verbs into `runs status`, `runs list` and `runs logs`, and move `runs triggers` to `cluster triggers`
   `runs get` is `runs status -o json`; `runs wait` is `runs status --follow --timeout D` with the same exit codes (0, 1, 2 on timeout, 3 on a failed read); `runs summary`, `timeline`, `receipt`, `errors` and `tree` are `runs status --view NAME`; `runs last` is `runs list --limit 1` (`--watch` keeps printing newer runs); `runs find` is `runs list` with `--repo`, `--root-only` and `--wait`; `runs failures` is `runs list --status failed --group-by run|step|node`; `runs grep --pattern P` is `runs logs --grep P` without `--run`. The folded readers follow the `--profile` chain `runs status` uses. See [migration guide](docs/migrations/_unreleased.md#runs-verbs-fold-into-status-list-and-logs).
 

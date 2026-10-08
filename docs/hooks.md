@@ -155,7 +155,7 @@ Then install the hooks once per checkout:
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
 sparkwing pipeline hooks status      # report declared, installed, and missing hooks
-sparkwing pipeline hooks survey      # report which registered repos git gates at all
+sparkwing pipeline hooks status --all      # report which registered repos git gates at all
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
@@ -211,7 +211,7 @@ through a forwarder in each repository's own hook directory, so `prepare-commit-
 and friends still fire, and a repository is never asked to choose between its
 gate and the machine's hooks.
 
-Two failures follow from breaking the rule, and `hooks survey` names both:
+Two failures follow from breaking the rule, and `hooks status --all` names both:
 a repository whose hooks are **shadowed** by the global path holds a full set of
 gates and runs none, and one whose `core.hooksPath` points at a **sibling
 repository** runs that repository's gates instead of its own.
@@ -263,12 +263,12 @@ to restore them.
 
 ### Which repositories are gated at all
 
-One repository at a time is how a repository gets forgotten. `hooks survey`
+One repository at a time is how a repository gets forgotten. `hooks status --all`
 answers for every checkout in the local registry at once:
 
 ```bash
-sparkwing pipeline hooks survey            # every registered repo, classified
-sparkwing pipeline hooks survey --ungated  # just the ones accepting ungated commits
+sparkwing pipeline hooks status --all            # every registered repo, classified
+sparkwing pipeline hooks status --all --ungated  # just the ones accepting ungated commits
 sparkwing pipeline hooks install --fleet   # arm all of them
 ```
 
@@ -333,8 +333,8 @@ fully installed and refuses nothing, and a borrowed one inspects as installing
 nothing and refuses everything. Only a commit settles it.
 
 ```bash
-sparkwing pipeline hooks fire            # this repo: make the gate refuse a commit
-sparkwing pipeline hooks fire --fleet    # every registered repo
+sparkwing pipeline hooks status --prove            # this repo: make the gate refuse a commit
+sparkwing pipeline hooks status --prove --fleet    # every registered repo
 ```
 
 `fire` stages a file and commits it with the gate told to refuse, then reports

@@ -84,9 +84,9 @@ indexed in [cli-reference.md](cli-reference.md):
 | Group | For |
 |---|---|
 | `info` | Agent entrypoint card: what sparkwing is, what's in this repo, what to run next |
-| `pipeline` | This repo's pipelines: list / describe / discover / new / explain / run / trigger / hooks / sparks |
-| `run` | Shortcut for `pipeline run` (the positional form) |
-| `runs` | Inspect and manage runs: list / status / logs / retry / cancel, plus `approvals` and `triggers` |
+| `pipeline` | This repo's pipelines: list / describe / new / lint / plan / trigger / hooks / sparks |
+| `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
+| `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / bounce / prune, plus `approvals` and `annotations` |
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update |
 | `queue` | Local admission: holders, connections, waiters, capacity |
 | `daemon` | The local admission daemon: status / restart |
@@ -136,7 +136,7 @@ sparkwing commands --query status
 sparkwing runs status --help
 sparkwing pipeline list -o json
 sparkwing pipeline describe --name fictional-build -o json
-sparkwing pipeline discover --query fictional-build -o json
+sparkwing pipeline list --query fictional-build -o json
 ```
 
 Command records carry `path`, `synopsis`, and `subcommand_count`.

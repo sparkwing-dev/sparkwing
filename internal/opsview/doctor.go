@@ -1761,7 +1761,7 @@ func renderUngatedRepos(w io.Writer, r DoctorReport) {
 		fmt.Fprintf(w, "  %s\n    %s\n", g.Summary(), g.Remedy())
 	}
 	if r.GatesSurveyed > 0 {
-		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks fire --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
+		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks status --prove --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
 	}
 }
 

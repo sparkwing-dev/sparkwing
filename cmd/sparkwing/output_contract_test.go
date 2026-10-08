@@ -175,7 +175,6 @@ func TestRootOutputNeverReachesThePipeline(t *testing.T) {
 	for _, verb := range [][]string{
 		{"-o", "pretty", "run", "pipeline", "--", "--output", "child"},
 		{"-o", "json", "run", "pipeline"},
-		{"--output=json", "pipeline", "run", "pipeline"},
 	} {
 		arguments, err := moveRootFlags(verb)
 		if err == nil {
