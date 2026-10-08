@@ -63,7 +63,7 @@ func cursorFor(r *store.Run, since time.Time) string {
 	if r == nil {
 		return ""
 	}
-	c := runsCursor{StartedAt: runStartedAtKey(r.StartedAt), ID: r.ID}
+	c := runsCursor{StartedAt: store.RunCursorKey(r.StartedAt), ID: r.ID}
 	if !since.IsZero() {
 		c.Since = since.UnixNano()
 	}
@@ -157,11 +157,4 @@ func runsQueryFor(opts ListOpts) (store.RunFilter, CompiledFilter, runsPager, er
 		}
 	}
 	return filter, clientFilter, pager, nil
-}
-
-func runStartedAtKey(startedAt time.Time) int64 {
-	if startedAt.IsZero() {
-		return 0
-	}
-	return startedAt.UnixNano()
 }

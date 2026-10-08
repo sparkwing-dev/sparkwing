@@ -1041,6 +1041,7 @@ const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
+func FilterRuns(runs []*Run, f RunFilter) ([]*Run, error)
 type FirstGreenStats struct {
 	TeamsCreated  int
 	TeamsGreen    int
@@ -1600,6 +1601,7 @@ var PaidTierQuota = StorageQuota{
 func ParseGitHubRepo(slug string) (GitHubRepo, bool)
 func ParseRunFilter(q url.Values) RunFilter
 func ParseRunFilterValidated(q url.Values) (RunFilter, error)
+func ParseRunSearch(s string) (include, exclude []string)
 func ParseSignUpMode(raw string) (SignUpMode, error)
 const PauseReasonAfter = "pause-after"
 const PauseReasonBefore = "pause-before"
@@ -1820,6 +1822,7 @@ type RunCreditUsage struct {
 	AmountMicro   int64
 	LastChargedAt time.Time
 }
+func RunCursorKey(startedAt time.Time) int64
 type RunFilter struct {
 	Pipelines      []string
 	Statuses       []string
@@ -1832,13 +1835,34 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 
+	ExcludePipelines      []string
+	ExcludeStatuses       []string
+	ExcludeGitSHAPrefixes []string
+	ExcludeGitBranches    []string
+	TriggerSources        []string
+	ExcludeTriggerSources []string
+
+	RepoNames        []string
+	ExcludeRepoNames []string
+
+	StartedBefore  time.Time
+	FinishedAfter  time.Time
+	FinishedBefore time.Time
+
+	Text        []string
+	ExcludeText []string
+
 	AfterStartedAt int64
 	AfterID        string
 
+	BeforeStartedAt int64
+	BeforeID        string
+
 	ProbeMayBeClamped bool
 }
+func (f RunFilter) HasBeforeCursor() bool
 func (f RunFilter) HasCursor() bool
-const RunFilterVersion = "2"
+const RunFilterVersion = "3"
 type RunTrend struct {
 	RunID      string
 	Pipeline   string
@@ -2575,6 +2599,7 @@ func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]Waitlisted
 func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 func SupportsRunCursor(version string) bool
+func SupportsRunDisplayFilters(version string) bool
 func SupportsRunIdentityFilters(version string) bool
 type TableSize struct {
 	Name  string
