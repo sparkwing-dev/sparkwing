@@ -228,14 +228,15 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 		status         sql.NullString
 		claimedBy      sql.NullString
 		lease, nodeGen sql.NullInt64
+		claimant       sql.NullString
 	)
 	err := s.queryRow(ctx, `SELECT c.prefix, c.team, c.run_id, c.node_id, c.claim_generation, c.kind, c.expires_at,
-       n.status, n.claimed_by, n.lease_expires_at, n.claim_generation
+       n.status, n.claimed_by, n.lease_expires_at, n.claim_generation, n.claim_token_prefix
   FROM claim_tokens c
   LEFT JOIN nodes n ON n.team = c.team AND n.run_id = c.run_id AND n.node_id = c.node_id
  WHERE `+where, args...).Scan(
 		&tok.Prefix, &team, &tok.RunID, &tok.NodeID, &tok.Generation, &kind, &expires,
-		&status, &claimedBy, &lease, &nodeGen)
+		&status, &claimedBy, &lease, &nodeGen, &claimant)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimToken{}, errClaimTokenUnknown
 	}
@@ -248,7 +249,32 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 	}
 	live := status.Valid && status.String != nodeStatusDone && claimedBy.Valid &&
 		lease.Valid && lease.Int64 > now.UnixNano() && nodeGen.Int64 == tok.Generation
+	if tok.Kind == ClaimTokenNode && live {
+		if err := s.claimantLive(ctx, claimant.String, now); err != nil {
+			return ClaimToken{}, err
+		}
+	}
 	return s.applyClaimClass(ctx, tok, live, class)
+}
+
+// safety: a runner's claim token acts as the runner's credential confined to
+// one claim, so it ends the moment that credential is revoked or expires.
+func (s *Store) claimantLive(ctx context.Context, prefix string, now time.Time) error {
+	if prefix == "" {
+		return fmt.Errorf("%w: the claim names no credential", ErrClaimTokenInvalid)
+	}
+	var revoked, expires sql.NullInt64
+	err := s.queryRow(ctx, `SELECT revoked_at, expires_at FROM tokens WHERE prefix = ?`, prefix).Scan(&revoked, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: the claiming credential is gone", ErrClaimTokenInvalid)
+	}
+	if err != nil {
+		return err
+	}
+	if err := TokenEnded(nullableUnix(revoked), nullableUnix(expires), now); err != nil {
+		return fmt.Errorf("%w: the claiming credential %w", ErrClaimTokenInvalid, err)
+	}
+	return nil
 }
 
 func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, class ClaimRouteClass) (ClaimToken, error) {

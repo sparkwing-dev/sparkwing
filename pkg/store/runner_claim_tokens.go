@@ -93,11 +93,13 @@ func (s *Store) authorizeTriggerClaim(ctx context.Context, digest string, class 
 		status string
 		seq    int64
 		lease  sql.NullInt64
+		holder string
 	)
-	err := s.queryRow(ctx, `SELECT c.prefix, c.team, c.trigger_id, c.claim_seq, t.status, t.claim_seq, t.lease_expires_at
+	err := s.queryRow(ctx, `SELECT c.prefix, c.team, c.trigger_id, c.claim_seq, t.status, t.claim_seq, t.lease_expires_at,
+       t.claim_token_prefix
   FROM trigger_claim_tokens c
   JOIN triggers t ON t.id = c.trigger_id AND t.team = c.team
- WHERE c.digest = ?`, digest).Scan(&tok.Prefix, &team, &tok.RunID, &tok.Generation, &status, &seq, &lease)
+ WHERE c.digest = ?`, digest).Scan(&tok.Prefix, &team, &tok.RunID, &tok.Generation, &status, &seq, &lease, &holder)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimToken{}, ErrClaimTokenInvalid
 	}
@@ -106,6 +108,11 @@ func (s *Store) authorizeTriggerClaim(ctx context.Context, digest string, class 
 	}
 	tok.Team, tok.Kind, tok.ExpiresAt = Team(team), ClaimTokenTrigger, runnerClaimTokenExpiry
 	live := status == triggerStatusClaimed && seq == tok.Generation && lease.Valid && lease.Int64 > now.UnixNano()
+	if live {
+		if err := s.claimantLive(ctx, holder, now); err != nil {
+			return ClaimToken{}, err
+		}
+	}
 	return s.applyClaimClass(ctx, tok, live, class)
 }
 

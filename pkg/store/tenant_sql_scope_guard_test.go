@@ -107,6 +107,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).UnlinkIdentity":                "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
 	"(*Store).lookupSession":                 "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
+	"(*Store).claimantLive":                  "checks the credential that made a claim by its prefix, which is unique across teams",
 	"(*Store).DeleteSession":                 "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":                   "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",

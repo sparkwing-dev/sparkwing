@@ -147,6 +147,25 @@ func TestRunnerClaim_RevokingTheRunnerStopsItsClaimTokens(t *testing.T) {
 	if got, body := f.do(t, "GET", "/api/v1/runs/run-1", n.ClaimToken, ""); got != http.StatusUnauthorized {
 		t.Fatalf("a claim token of a revoked runner = %d %v, want 401", got, body)
 	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-1", n.ClaimToken, ""); got != http.StatusUnauthorized {
+		t.Fatalf("a secret read on a revoked runner's node claim = %d %v, want 401", got, body)
+	}
+}
+
+// A trigger claim's token reads secrets only while the runner that claimed
+// the trigger still authenticates.
+func TestRunnerClaim_RevokingTheRunnerStopsItsTriggerToken(t *testing.T) {
+	f := newRunnerClaimFixture(t)
+	trig, err := client.NewWithToken(f.url, nil, f.runner).ClaimSpecificTrigger(context.Background(), "run-1", time.Minute)
+	if err != nil || trig == nil {
+		t.Fatalf("claim trigger = %+v, %v", trig, err)
+	}
+	if err := f.st.RevokeToken(f.runner[:store.PrefixLen], time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-1", trig.ClaimToken, ""); got != http.StatusUnauthorized {
+		t.Fatalf("a secret read on a revoked runner's trigger claim = %d %v, want 401", got, body)
+	}
 }
 
 // A trigger claim answers with a claim token that reads the run's declared
