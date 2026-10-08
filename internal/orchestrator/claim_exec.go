@@ -95,6 +95,19 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	cmd := exec.Command(binary.path, args...)
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), authwire.CacheGrantEnv+"="+grant, SpecHashEnv+"="+specHash)
+	var logSink *nodeLogSink
+	if nodeID != store.PlanNodeID && os.Getenv("SPARKWING_LOGS_URL") == "" {
+		logSink = openNodeLogSink(ctx, c, runID, nodeID, logger)
+	}
+	if logSink != nil {
+		defer logSink.close(ctx, true)
+		logsURL, stopLogs, err := serveLoopbackLogs(logSink, token, logger)
+		if err != nil {
+			return fail(fmt.Errorf("serve the node's log: %w", err))
+		}
+		defer stopLogs(ctx)
+		cmd.Env = append(cmd.Env, "SPARKWING_LOGS_URL="+logsURL)
+	}
 	values, err := secrets.ShareWithChild(cmd)
 	if err != nil {
 		return fail(err)
@@ -107,6 +120,9 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 		cmd.Stdout = &plan
 	}
 	outcome, err := runAssistedChildProcess(ctx, cmd, logger)
+	if logSink != nil {
+		logSink.close(ctx, err != nil || outcome.cancelCause != nil || !exitedOnItsOwn(outcome.waitErr))
+	}
 	switch {
 	case err != nil:
 		return fail(fmt.Errorf("start the pipeline: %w", err))

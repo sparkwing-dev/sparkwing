@@ -117,6 +117,10 @@ const childLogSealBudget = httpNodeLogFinishTimeout
 // safety: a child killed by a signal or cancelled may not have written everything, so its log
 // is left unsealed and reads as cut off.
 func (b *remoteExecutionBroker) sealChildLogs(ctx context.Context, outcome assistedChildOutcome, startErr error, logger *slog.Logger) {
+	if b.logSink != nil {
+		b.logSink.close(ctx, startErr != nil || outcome.cancelCause != nil || !exitedOnItsOwn(outcome.waitErr))
+		return
+	}
 	if b.logs == nil {
 		return
 	}

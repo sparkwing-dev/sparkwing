@@ -377,7 +377,7 @@ func runRunnerCLI(args []string, version string) error {
 	controllerURL := fs.String("controller", "",
 		"controller base URL (required)")
 	logsURL := fs.String("logs", "",
-		"logs service URL (optional; pod stdout if empty)")
+		"logs service URL (optional; without one, node logs reach the controller as segments)")
 	poll := fs.Duration("poll", 500*time.Millisecond,
 		"poll interval when the claim queue is empty")
 	heartbeat := fs.Duration("heartbeat", 0,

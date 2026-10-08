@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -223,6 +224,10 @@ func runNodeChild(
 	defer broker.Close()
 	childLogsURL := ""
 	if logsURL != "" {
+		childLogsURL = broker.URL()
+	} else if sink := openNodeLogSink(ctx, client.NewWithToken(controllerURL, nil, token), runID, nodeID, logger); sink != nil {
+		defer sink.close(ctx, true)
+		broker.logSink = sink
 		childLogsURL = broker.URL()
 	}
 	childBaseEnv, err := remoteExecutionChildEnvironment(os.Environ())

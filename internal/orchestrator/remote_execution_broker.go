@@ -45,6 +45,7 @@ type remoteExecutionBroker struct {
 	logsHost       string
 	logsURL        string
 	logSeal        childLogSeal
+	logSink        *nodeLogSink
 	protocol       nodeProtocolCheck
 }
 
@@ -142,8 +143,12 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	b.protocol.observe(r)
 	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
-	if !b.allow(r) || (logsRequest && b.logs == nil) {
+	if !b.allow(r) || (logsRequest && b.logs == nil && b.logSink == nil) {
 		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
+		return
+	}
+	if logsRequest && b.logSink != nil {
+		b.logSink.ServeHTTP(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.EscapedPath(), "/bin/") {
