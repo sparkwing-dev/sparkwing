@@ -1,8 +1,8 @@
 # Credential model
 
-Status: proposal. This page is a design for contributors. The sections
-marked "landed" describe released-to-main behavior; the rest describe work
-that has not started, and the decisions at the end are either decided or still open.
+Status: in progress. This page is a design for contributors. Sections marked
+"landed" describe behavior the code has; the rest describe work that has not
+started. The decisions at the end are either decided or still open.
 
 The controller accepts four kinds of credential, and every request it
 authenticates names one of them:
@@ -41,7 +41,7 @@ unlicensed single-team controller therefore has exactly one browser sign-in,
 the operator token, and no way to give a second person narrower dashboard
 access. Decision D1 below asks whether that is the intended product.
 
-## Team tokens
+## Team tokens (landed)
 
 One kind, `team`, replaces team CLI tokens and team runner tokens. A token
 draws its scopes from exactly one family at mint time:
@@ -156,7 +156,7 @@ same token. The in-memory token reuse the bearer routes kept is gone. A
 runner's trigger claim has no node, so it gets the per-minute limit alone; its
 token never leaves the runner process. The trigger loop fetches with the
 trigger's claim token, and a pooled node's supervisor and a Kubernetes Job
-with the node's claim token. `source-token` (D-CRD-04) and `git-credential`
+with the node's claim token. `source-token` and `git-credential`
 are removed and answer 404, and a runner older than this release fetches no
 source straight from a controller of it.
 
@@ -164,13 +164,12 @@ source straight from a controller of it.
 
 Three static secrets authenticated services to each other. None was a
 principal in the tokens table, and each granted more than its caller needed.
-The cache operator token is gone (landed, D-CRD-02); the two logs-service
-secrets go with the logs service.
+The cache operator token is gone (landed); the two logs-service secrets go
+with the logs service.
 
 | Secret | Direction | Used for | Grants |
 |---|---|---|---|
 | logs-delete token (`SPARKWING_LOGS_DELETE_TOKEN`) | controller to logs service | deleting a deleted team's logs | a controller token holding only `logs.delete` |
-| ~~cache operator token~~ (removed) | was controller to cache, and cache to controller | was the controller's git-cache proxy and team purge, and the cache's storage counter calls | was every cache route, every team's tree, and every team's storage counters |
 | logs service's controller bearer (`controller.tokenSecret` in the runner bundle) | logs service to controller | resolving a caller's credential before serving a log | the scopes of whatever runner token the operator mounted |
 
 What landed for the cache operator token, which split by direction into two
