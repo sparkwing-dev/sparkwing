@@ -189,6 +189,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	93: nil,
 	// safety: v94 adds a consent table older binaries never read or write.
 	94: nil,
+	95: nil,
 }
 
 func columnSpecMaps() []map[string]string {

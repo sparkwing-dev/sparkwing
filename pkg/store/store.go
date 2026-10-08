@@ -1148,7 +1148,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 94
+const expectedSchemaVersion = 95
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -2278,6 +2278,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 94:
 		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
+	case 95:
+		return applyNodeLogsMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2757,6 +2759,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 94:
 		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
+	case 95:
+		return applyNodeLogsMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
