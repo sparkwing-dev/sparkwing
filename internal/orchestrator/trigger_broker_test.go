@@ -130,7 +130,7 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 		{"POST", "/api/v1/concurrency/deploy/release", capability, `{"holder_id":"run-b/n1"}`, http.StatusForbidden},
 		{"GET", "/api/v1/runs/run-a/nodes", capability, "", http.StatusOK},
 		{"POST", "/api/v1/runs", capability, `{"id":"run-a"}`, http.StatusOK},
-		{"GET", "/api/v1/secrets/DEPLOY_KEY?run=run-a", capability, "", http.StatusOK},
+		{"GET", "/api/v1/secrets/DEPLOY_KEY?run=run-a", capability, "", http.StatusForbidden},
 		{"POST", "/api/v1/concurrency/deploy/release", capability, `{"holder_id":"run-a/n1"}`, http.StatusOK},
 		{"POST", "/api/v1/triggers", capability, `{"pipeline":"x","parent_run_id":"run-a"}`, http.StatusOK},
 		{"GET", "/api/v1/runs/child-run", capability, "", http.StatusOK},
@@ -188,6 +188,34 @@ func TestTriggerBrokerReadsSecretsWithTheTriggerClaimToken(t *testing.T) {
 	}
 	if got := seen["/api/v1/runs/run-a"]; got != "Bearer runner-token" {
 		t.Errorf("the run read went upstream with %q, want the runner token", got)
+	}
+}
+
+// A trigger claim that returned no claim token reads no secret: the broker
+// refuses rather than forwarding the read with the runner's token.
+func TestTriggerBrokerRefusesASecretReadWithoutAClaimToken(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the broker forwarded %s upstream", r.URL.Path)
+	}))
+	defer upstream.Close()
+	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "", "runner-token",
+		&store.Trigger{ID: "run-a", Pipeline: "build"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close(context.Background())
+	req, err := http.NewRequest(http.MethodGet, broker.URL()+"/api/v1/secrets/DEPLOY_KEY?run=run-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+broker.Capability())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a secret read with no claim token = %d, want 403", resp.StatusCode)
 	}
 }
 

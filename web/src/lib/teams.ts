@@ -378,7 +378,6 @@ export const machineScopes = [
   "nodes.claim",
   "triggers.claim",
   "runs.state",
-  "secrets.read",
   "logs.write",
 ];
 

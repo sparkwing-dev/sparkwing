@@ -216,9 +216,10 @@ runs uses the claim token the controller returns with it: a node the runner
 executes, every Job a `k8s` or `warm` trigger runner creates, and the trigger's
 own secret reads. A Job spec carries its node's claim token, never this
 bearer. Mint it with
-`nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
+`nodes.claim`, `triggers.claim`, `runs.state`, and
 `logs.write`: enough to claim triggers and nodes, drive the runs it claimed
-from plan to finish, read the secrets its repository owns, and ship logs. It
+from plan to finish, and ship logs. The claims' own tokens read the secrets
+each run's plan declares. It
 needs no `admin`. A warm-pool dispatcher that marks nodes ready for a pool is
 the exception and keeps an `admin` token. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's

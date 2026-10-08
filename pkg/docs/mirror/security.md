@@ -136,8 +136,10 @@ Give this scope to someone who may read the team's history. An operator's
 
 **Accepted trust facts.** Each of these follows from the model above and is
 not a defect. A team editor can read masked secret values: it can mint a
-runner token, start a run, claim it and read the run's secrets, because it
-already chooses the code that run executes. The operator's launcher token
+runner token, start a run, claim it and read, through the claim's token, the
+secrets the run's plan declares, because it already chooses the code that run
+executes. A runner's own token reads no secret, and every node read is
+recorded as a `secret_released` event. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
 every team's run secrets, source tokens and cache grants; keep it
 operator-only. Which secrets a run may read through a claim token is declared

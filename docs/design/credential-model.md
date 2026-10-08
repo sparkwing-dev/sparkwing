@@ -51,7 +51,7 @@ draws its scopes from exactly one family at mint time:
   minter, the lifetime is 90 days fixed, ten live per member, and the token
   dies with the minter's membership or a demotion that drops its scopes.
 - **Machine family:** a subset of `nodes.claim`, `triggers.claim`,
-  `runs.state`, `secrets.read` and `logs.write` that includes a claim scope.
+  `runs.state` and `logs.write` that includes a claim scope.
   The minter must be an editor; the token is named (`agent:<name>`, unique in
   the team across old runner tokens and new machine tokens), lists the
   repositories the machine may build, and slides its 90-day lifetime on use.
@@ -96,34 +96,23 @@ routes with the runner's bearer. A trigger child that runs a node in its own
 process does so under the trigger claim, which is why a trigger claim reads
 secrets at all.
 
-### Secret release becomes claim-bound
+### Secret release is claim-bound (landed)
 
-Today `GET /api/v1/secrets/{name}` has two node paths:
+`GET /api/v1/secrets/{name}` has one node path. A claim token (work, runner
+node or trigger) names its own run; `ReleaseClaimSecret` checks the claim,
+checks that the run's plan declares the secret, applies the sensitive fence
+and records a `secret_released` event, so every node read is declared and
+audited.
 
-- with a claim token (work, runner node or trigger), `ReleaseClaimSecret`
-  checks the claim, checks that the run's plan declares the secret, applies
-  the sensitive fence and records a `secret_released` event;
-- with a bearer holding `secrets.read`, the controller finds the run the
-  principal holds a claim in (`ClaimedRunFor`, or the only one it holds) and
-  returns any secret of that pipeline, with no declaration check and no
-  event.
-
-Plan:
-
-1. Runner claims return a claim token next to the claim (landed, above).
-2. The node's secret client sends the claim token (landed: a pooled node and
-   a Kubernetes Job run on theirs, and the trigger broker forwards secret
-   reads with the trigger's).
-3. The bearer branch of the secret route goes: a machine
-   bearer reading a secret answers `403 claim_required`, and `secrets.read`
-   leaves the machine family. Operator and team-admin reads by name stay;
-   they are management reads, audited as such.
-4. Every node read then passes the declaration check and leaves an event,
-   which is what the audit log promises.
-
-Step 3 lands after steps 1 and 2 reach runners: a runner older than step 1
-cannot read secrets from a controller with step 3, which the migration note
-says.
+A bearer reads by name only as the operator (`admin`) or a team's owner
+(`team.admin`), a management read; a masked row still answers the owner
+`403 write_only`. Any other bearer, a runner's token holding `secrets.read`
+included, answers `403 claim_required`, even while it holds the run's claim.
+`secrets.read` left the machine token family and the runner scope sets
+(`sparkwing cluster runners add`, the dashboard, the GitHub Actions
+exchange); a token minted with it keeps authenticating, and the scope
+releases nothing. `ClaimedRunsFor` went with the bearer path, and a runner
+older than the claim tokens above reads no secret from this controller.
 
 ## Service credentials
 
@@ -220,9 +209,9 @@ with this design:
   claim-bound, is the only route that mints a GitHub App installation token;
   a repository a run names by hand qualifies only when the team has
   subscribed it. `source-token` and `git-credential` go.
-- **Bearer secret release: removed.** A node reads secrets with its claim
-  token, under the plan declaration and with an audit event; a team token
-  keeps no `secrets.read`, and management reads by name stay with the
+- **Bearer secret release: removed (landed).** A node reads secrets with its
+  claim token, under the plan declaration and with an audit event; a team
+  token keeps no `secrets.read`, and management reads by name stay with the
   operator and team admins.
 - **Claim tokens for every pod (landed).** Every runner claim returns a
   claim token, the node's process uses it in place of the runner's bearer,

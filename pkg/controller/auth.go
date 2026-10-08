@@ -76,9 +76,10 @@ const (
 	// per-node routes are additionally bound to the caller's own
 	// claim.
 	ScopeRunsState = store.ScopeRunsState
-	// ScopeSecretsRead gates GET /api/v1/secrets/{name}. A non-admin
-	// holder resolves a name against the pipeline of the run it
-	// currently holds a claim in.
+	// ScopeSecretsRead releases no secret. A node reads its run's secrets
+	// with its claim token, so a bearer holding only this scope is answered
+	// 403 claim_required on GET /api/v1/secrets/{name}. Tokens minted with
+	// it keep authenticating; no team token or runner is minted with it.
 	ScopeSecretsRead = store.ScopeSecretsRead
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
 	// Any principal with this scope can resolve any approval. Reads

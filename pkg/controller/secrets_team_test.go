@@ -64,9 +64,15 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := client.NewWithToken(srv.URL, nil, raw)
 
-	if _, err := c.ClaimSpecificTrigger(ctx, "run-acme", time.Minute); err != nil {
+	if err := acme.UpdatePlanSnapshot(ctx, "run-acme",
+		[]byte(`{"nodes":[],"secrets":[{"name":"API_KEY"},{"name":"NPM_TOKEN"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	trig, err := c.ClaimSpecificTrigger(ctx, "run-acme", time.Minute)
+	if err != nil || trig == nil {
 		t.Fatalf("ClaimSpecificTrigger: %v", err)
 	}
+	c = client.NewWithToken(srv.URL, nil, trig.ClaimToken)
 	for _, tc := range []struct{ name, want string }{
 		{"API_KEY", "acme-value"},
 		{"NPM_TOKEN", "acme-npm"},
@@ -77,15 +83,6 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 		}
 		if sec.Value != tc.want {
 			t.Errorf("an acme runner holding an acme run read %s = %q, want %q", tc.name, sec.Value, tc.want)
-		}
-		// safety: a read that names no run resolves through the claimant's
-		// only claimed run, a second path to the same team.
-		sec, err = c.GetSecret(ctx, tc.name)
-		if err != nil {
-			t.Fatalf("GetSecret(%s): %v", tc.name, err)
-		}
-		if sec.Value != tc.want {
-			t.Errorf("an acme runner naming no run read %s = %q, want %q", tc.name, sec.Value, tc.want)
 		}
 	}
 }

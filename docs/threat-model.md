@@ -41,16 +41,17 @@ cannot execute against a claim it was not given. The allow-list is
 `allowController` in `internal/orchestrator/remote_execution_broker.go`, and it
 is the whole list.
 
-**A secret resolves against the repository of a live claim.** The broker passes
-a secret read only when the request names its own run. The controller then
-resolves the name against the repository of a run the caller holds a live claim
-in, plus the secrets an admin marked shared; a runner token names no
-repository of its own, and a principal holding no claim is refused with
-`claim_required`. An admin-scoped token is the exception: it names any
-repository it likes on the same route. See `readSecretForCaller` in
-`pkg/controller/secrets.go` and `GetSecretForRun` in `pkg/store`. Within the claim the grant is the repository,
-not the pipeline's declared inputs: code in that run reads any secret name that
-repository has.
+**A secret resolves through the node's claim and its plan.** The broker passes
+a secret read only when the request names its own run, and forwards it with
+the node's claim token. The controller answers only a name the run's plan
+declares, resolved against the run's pipeline plus the secrets an admin marked
+shared, and records the release as a `secret_released` event; an undeclared
+name is refused with `secret_undeclared`. The runner's own token is refused
+with `claim_required`, and only an operator or team-admin credential reads a
+row by name. See `handleClaimSecret` in `pkg/controller/claim_run.go` and
+`ReleaseClaimSecret` in `pkg/store`. The plan is the pipeline's own code, so
+the grant is what that code declares: a branch that adds a declaration reads
+that secret of its pipeline.
 
 **The child's environment is rebuilt rather than inherited.** It carries `PATH`,
 `HOME`, `TMPDIR`, the locale and TLS-bundle variables, and similar runtime

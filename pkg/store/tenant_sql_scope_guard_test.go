@@ -240,8 +240,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"or triggers; a token prefix is unique across teams and a claim only reaches its own team's work",
 	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +
 		"answer scoped to the asker is no answer; a token prefix is unique across teams",
-	"(*Store).ClaimedRunsFor": "asks which teams' runs the exact claimant credential holds live work in, so an answer " +
-		"scoped to the asker is no answer; a token prefix is unique across teams",
 	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
 		"selected, in the order the claim path names, and read nothing back",
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +

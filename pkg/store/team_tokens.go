@@ -24,7 +24,7 @@ const (
 	TokenFamilyMachine TokenFamily = "machine"
 )
 
-var machineTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRunsState, ScopeSecretsRead, ScopeLogsWrite}
+var machineTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRunsState, ScopeLogsWrite}
 
 // MachineTokenScopes returns the scopes a machine team token may carry.
 func MachineTokenScopes() []string { return slices.Clone(machineTokenScopes) }

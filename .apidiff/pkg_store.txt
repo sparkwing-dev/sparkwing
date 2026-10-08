@@ -2132,7 +2132,6 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
-func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now time.Time) (_ []ClaimedRun, err error)
 func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
 func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error)

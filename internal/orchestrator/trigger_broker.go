@@ -139,7 +139,11 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upstream := b.upstreamToken
-	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") && b.claimToken != "" {
+	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") {
+		if b.claimToken == "" {
+			http.Error(w, "the trigger claim carried no claim token, which a secret read needs", http.StatusForbidden)
+			return
+		}
 		upstream = b.claimToken
 	}
 	r.Header.Set("Authorization", "Bearer "+upstream)

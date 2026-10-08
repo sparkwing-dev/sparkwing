@@ -527,7 +527,9 @@ func TestRunnerScopes_PoolRunnerReadsItsPipelineSecret(t *testing.T) {
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
+	declareSecrets(t, f.store, "run-web", "DEPLOY_KEY")
+	n, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
 	if _, err := c.GetRunForExecution(ctx, "run-web"); err != nil {
@@ -537,12 +539,28 @@ func TestRunnerScopes_PoolRunnerReadsItsPipelineSecret(t *testing.T) {
 		t.Fatalf("GetTrigger while holding the node claim: %v", err)
 	}
 
-	sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
+	sec, err := client.NewWithToken(f.url, nil, n.ClaimToken).GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
 	if err != nil {
 		t.Fatalf("GetSecretForRun while holding the claim: %v", err)
 	}
 	if sec.Value != "web-key" {
 		t.Errorf("GetSecretForRun value = %q, want the claimed run's pipeline row", sec.Value)
+	}
+}
+
+func declareSecrets(t *testing.T, st *store.Store, runID string, names ...string) {
+	t.Helper()
+	var doc strings.Builder
+	doc.WriteString(`{"nodes":[],"secrets":[`)
+	for i, name := range names {
+		if i > 0 {
+			doc.WriteString(",")
+		}
+		fmt.Fprintf(&doc, `{"name":%q}`, name)
+	}
+	doc.WriteString(`]}`)
+	if err := st.UpdatePlanSnapshot(context.Background(), runID, []byte(doc.String())); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -571,8 +589,8 @@ func TestRunnerScopes_SecretsReadIsNotAdmin(t *testing.T) {
 
 	t.Run("cannot read another pipeline's secret", func(t *testing.T) {
 		c := client.NewWithToken(f.url, nil, raw)
-		if _, err := c.GetSecretForPipeline(ctx, "DEPLOY_KEY", "deploy-api"); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("GetSecretForPipeline(deploy-api) err = %v, want ErrNotFound; the caller named a pipeline it does not hold", err)
+		if _, err := c.GetSecretForPipeline(ctx, "DEPLOY_KEY", "deploy-api"); err == nil || !strings.Contains(err.Error(), "claim_required") {
+			t.Fatalf("GetSecretForPipeline(deploy-api) err = %v, want 403 claim_required; a runner's bearer reads no secret", err)
 		}
 	})
 
@@ -636,7 +654,8 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	if run.DeclaredRepo != "acme/web" {
 		t.Fatalf("run declared repo = %q, want acme/web; the runner rewrote it", run.DeclaredRepo)
 	}
-	sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
+	declareSecrets(t, f.store, "run-web", "DEPLOY_KEY")
+	sec, err := client.NewWithToken(f.url, nil, trig.ClaimToken).GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
 	if err != nil {
 		t.Fatalf("GetSecretForRun: %v", err)
 	}
@@ -697,18 +716,22 @@ func TestRunnerScopes_SecretReadNamesItsRun(t *testing.T) {
 
 	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "deploy-web", false)
 	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "deploy-api", false)
+	claims := map[string]string{}
 	for _, seed := range []struct{ run, pipeline string }{
 		{"run-web", "deploy-web"},
 		{"run-api", "deploy-api"},
 	} {
 		seedRunNode(t, f.store, seed.run, "build")
 		setRunPipeline(t, f.store, seed.run, seed.pipeline)
+		declareSecrets(t, f.store, seed.run, "DEPLOY_KEY")
 		if err := f.store.MarkNodeReady(ctx, seed.run, "build"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.ClaimNode(ctx, "holder-"+seed.run, nil, time.Minute, nil); err != nil {
+		n, err := c.ClaimNode(ctx, "holder-"+seed.run, nil, time.Minute, nil)
+		if err != nil || n == nil {
 			t.Fatalf("ClaimNode %s: %v", seed.run, err)
 		}
+		claims[n.RunID] = n.ClaimToken
 	}
 
 	if _, err := c.GetSecret(ctx, "DEPLOY_KEY"); err == nil {
@@ -718,7 +741,7 @@ func TestRunnerScopes_SecretReadNamesItsRun(t *testing.T) {
 		{"run-web", "web-key"},
 		{"run-api", "api-key"},
 	} {
-		sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", tc.run)
+		sec, err := client.NewWithToken(f.url, nil, claims[tc.run]).GetSecretForRun(ctx, "DEPLOY_KEY", tc.run)
 		if err != nil {
 			t.Fatalf("GetSecretForRun(%s): %v", tc.run, err)
 		}
@@ -737,25 +760,28 @@ func TestRunnerScopes_UnscopedSecretNeedsShared(t *testing.T) {
 	seedSecret(t, f.store, "NPM_TOKEN", "npm", "", true)
 	seedRunNode(t, f.store, "run-web", "build")
 	setRunPipeline(t, f.store, "run-web", "deploy-web")
+	declareSecrets(t, f.store, "run-web", "LEGACY_KEY", "NPM_TOKEN")
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
+	n, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
+	node := client.NewWithToken(f.url, nil, n.ClaimToken)
 
-	if _, err := c.GetSecretForRun(ctx, "LEGACY_KEY", "run-web"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := node.GetSecretForRun(ctx, "LEGACY_KEY", "run-web"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetSecretForRun(LEGACY_KEY) err = %v, want ErrNotFound until an admin shares it", err)
 	}
-	sec, err := c.GetSecretForRun(ctx, "NPM_TOKEN", "run-web")
+	sec, err := node.GetSecretForRun(ctx, "NPM_TOKEN", "run-web")
 	if err != nil {
 		t.Fatalf("GetSecretForRun(NPM_TOKEN): %v", err)
 	}
 	if sec.Value != "npm" {
 		t.Errorf("GetSecretForRun(NPM_TOKEN) = %q, want npm", sec.Value)
 	}
-	if got := f.do(t, raw, http.MethodGet, "/api/v1/secrets/LEGACY_KEY", ""); got != http.StatusNotFound {
-		t.Errorf("GET LEGACY_KEY = %d, want 404", got)
+	if got := f.do(t, raw, http.MethodGet, "/api/v1/secrets/LEGACY_KEY", ""); got != http.StatusForbidden {
+		t.Errorf("GET LEGACY_KEY with the runner's bearer = %d, want 403", got)
 	}
 }
 

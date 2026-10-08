@@ -2375,10 +2375,12 @@ paths:
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
-        A masked row's value goes only to the operator's bearer token and to
-        a runner reading through the run it has claimed. Every other caller,
-        a dashboard session or a team owner's token included, gets `403`
-        with error `write_only`; it may still read an unmasked variable.
+        A bearer reads by name only as the operator or a team's owner; any
+        other bearer, a runner's token included, gets `403` with error
+        `claim_required`. A masked row's value goes
+        only to the operator's bearer token and to a claim that declares
+        it; a dashboard session or a team owner's token gets `403` with
+        error `write_only`, and may still read an unmasked variable.
         A claim token (a controller-dispatched work node's, a runner's node
         claim or a runner's trigger claim) reads with `?run=` set to its own
         run, and only a secret its run's plan declares (`403

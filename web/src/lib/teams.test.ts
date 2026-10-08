@@ -330,7 +330,6 @@ describe("mintMachineToken", () => {
         "nodes.claim",
         "triggers.claim",
         "runs.state",
-        "secrets.read",
         "logs.write",
       ],
       name: "build-box",

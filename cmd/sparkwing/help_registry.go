@@ -2801,7 +2801,7 @@ var cmdRunnersAdd = Command{
 	Path:     "sparkwing cluster runners add",
 	Synopsis: "Mint a runner token, write the config, start the service",
 	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
-runs.state, secrets.read and logs.write against the profile's controller,
+runs.state and logs.write against the profile's controller,
 writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.

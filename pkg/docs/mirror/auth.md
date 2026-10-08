@@ -538,7 +538,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
-| `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
+| `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
@@ -547,9 +547,10 @@ mapping is in the generated [api-reference.md](api-reference.md):
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
 
-A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
-and `logs.write`. That set claims work, drives the run it claimed from plan to
-finish, reads the secrets its pipeline owns, and ships logs. It mints no token,
+A runner needs `nodes.claim`, `triggers.claim`, `runs.state` and
+`logs.write`. That set claims work, drives the run it claimed from plan to
+finish, and ships logs; the claim tokens its claims return read the secrets
+the run's plan declares. It mints no token,
 reads no user, lists no secret, cannot start or retry a run of its own
 choosing, and cannot read cached source for an unclaimed run. A pool replica that executes
 already-created nodes still needs `runs.state`, because `start`, `finish`, and
@@ -752,15 +753,15 @@ name the same repository and it means nothing either way.
 - An `admin` principal reads any row. `?pipeline=<name>` selects a pipeline's
   row, `?run=<id>` selects the pipeline of that run, and without either the
   unscoped row answers.
-- A `secrets.read` principal without `admin` cannot name a pipeline. It names
-  the run it is executing with `?run=<id>`, and the controller answers only
-  when the caller holds that run's claim; the name then resolves against that
-  run's pipeline, falling back to an unscoped row only when that row is shared.
-  A caller holding no claim reads nothing. A caller holding claims in one
-  pipeline may omit `?run`; holding claims in two, it must name the run.
+- A `team.admin` principal reads its own team's rows the same way, a
+  management read by name. A masked row answers it `403 write_only`.
+- Any other bearer, a runner's token or a `secrets.read` token included, is
+  answered `403 claim_required`, even while it holds the run's claim: a node
+  reads with its claim token.
 - A claim token (a controller-dispatched work node's, a runner's node claim
   or a runner's trigger claim) names its own run with `?run=<id>` and reads
-  only a name the run's plan declares, resolved like the row above. Each
+  only a name the run's plan declares, resolved against the run's pipeline
+  and falling back to an unscoped row only when that row is shared. Each
   release is recorded as a `secret_released` event on the run, naming the
   node for a node's claim. The pipeline's code declares its secrets, as in GitHub
   Actions, so push access to the repository is the trust boundary; fork pull
@@ -773,8 +774,8 @@ name the same repository and it means nothing either way.
   chosen repositories is a future feature.
 
 So one runner token cannot lift another pipeline's deploy credential by asking
-for it by name, and a token working two runs cannot read the wrong one's
-credential by accident. `GET /api/v1/secrets` (the list) and the secret writes
+for it by name, a claim reads only its own run's declared secrets, and every
+node read leaves a `secret_released` event. `GET /api/v1/secrets` (the list) and the secret writes
 stay `admin`; the list carries each row's pipeline and shared flag.
 
 Token creation validates scopes against that same set: a scope the
@@ -967,7 +968,7 @@ empty list answers `400`:
   and the `profile`, `setup` and `run` values the dashboard shows for
   connecting the CLI.
 - A **machine** token is for a runner. Its scopes are a subset of
-  `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and
+  `nodes.claim`, `triggers.claim`, `runs.state` and
   `logs.write` that includes `nodes.claim` or `triggers.claim`. Minting one
   needs `editor` (`403` otherwise), and the request names the agent in `name`
   (1 to 63 letters, digits, `-`, `_` or `.`) and the repositories in `repos`,
@@ -1555,8 +1556,8 @@ resets the backoff.
   span. There is no dedicated audit database.
 - **Per-user multi-tenancy**: principals are a free-form label. Adding a
   roles model is orthogonal and doesn't require a wire-shape change.
-- **Fine-grained `admin` split**: `triggers.claim`, `runs.state`, and
-  `secrets.read` carved the runner's work out of `admin`. What remains can be
+- **Fine-grained `admin` split**: `triggers.claim` and `runs.state`
+  carved the runner's work out of `admin`. What remains can be
   split further into `cache.write`, `locks.admin`, and similar when a real
   caller needs that narrower trust.
 - **Execution capabilities beyond runner job bodies**: a runner keeps its

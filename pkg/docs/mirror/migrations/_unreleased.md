@@ -1159,7 +1159,7 @@ Tokens already minted keep working.
   `triggers.read`, and for an editor or owner `runs.write`, `runs.control`,
   `approvals.write`) make a CLI token: any member mints one, with no `name` or
   `repos`, and it lasts 90 days. Machine scopes (`nodes.claim`,
-  `triggers.claim`, `runs.state`, `secrets.read`, `logs.write`, including
+  `triggers.claim`, `runs.state`, `logs.write`, including
   `nodes.claim` or `triggers.claim`) make a runner token: an editor mints one
   with `name` and `repos`, and it lasts 90 days past its last use. A request
   that mixes families, names an unknown scope or sends none answers `400`.
@@ -1177,7 +1177,7 @@ To upgrade:
    a signed-in session, as the old ones did. A runner token becomes this body:
 
    ```json
-   {"scopes": ["nodes.claim", "triggers.claim", "runs.state", "secrets.read", "logs.write"],
+   {"scopes": ["nodes.claim", "triggers.claim", "runs.state", "logs.write"],
     "name": "build-box", "repos": ["github.com/acme/*"]}
    ```
 
@@ -1301,3 +1301,48 @@ To upgrade:
   run or a write to another node, and `403 claim_ended` once its claim has
   ended. A pipeline that reached another run through its runner's bearer
   from inside a node no longer can.
+
+## Node secret reads need the claim token
+
+A node reads its run's secrets only through its claim, so every read is one
+the run's plan declares and every release is recorded.
+
+- **Before:** `GET /api/v1/secrets/{name}?run=<id>` answered any bearer
+  holding `secrets.read` and a live claim on the run with any secret of the
+  run's pipeline, with no declaration check and no event. A runner token,
+  and scripts given one, read secrets this way.
+- **After:** that bearer gets `403 claim_required`. A claim token reads a
+  name its run's plan declares and leaves a `secret_released` event; an
+  undeclared name answers `403 secret_undeclared`. The operator (`admin`)
+  and a team's owner (`team.admin`) still read a row by name; a masked row
+  still answers a team owner `403 write_only`. `secrets.read` is no longer a
+  machine team token scope: `POST /api/v1/team/tokens` refuses it with
+  `400`, and `sparkwing cluster runners add`, the dashboard and the GitHub
+  Actions exchange stop granting it. Existing tokens that carry it keep
+  authenticating; the scope releases nothing.
+
+To upgrade:
+
+1. Upgrade every runner together with the controller (see
+   [Runner claims answer with claim tokens](#runner-claims-answer-with-claim-tokens)).
+   A runner older than this release reads no secret from the upgraded
+   controller, so its nodes fail at their first secret.
+2. Declare every secret a pipeline reads in its `Secrets()` struct. A node
+   that calls `sparkwing.Secret(ctx, name)` for a name the struct does not
+   declare now gets `secret_undeclared` on a runner, as it already did on a
+   controller-dispatched run.
+3. Move scripts that read secrets with a runner or machine token to an
+   operator token (`sparkwing cluster tokens create`) or a team owner's
+   credential.
+4. Drop `secrets.read` from scripts that mint machine tokens through
+   `POST /api/v1/team/tokens`, and from code that calls
+   `store.Store.ClaimedRunsFor`, which is removed; `ClaimedRunFor` stays.
+
+**Edge cases:**
+
+- A local run whose profile reads secrets from a controller does so with
+  the profile's token, which reads by name only when it is an operator or
+  team-admin credential, as before.
+- A node that runs inside its trigger's process, under the in-process node
+  runner, reads through the trigger's claim token; its release event names
+  the run and no node.

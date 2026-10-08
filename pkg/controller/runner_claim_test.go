@@ -192,3 +192,46 @@ func TestRunnerClaim_TriggerTokenReadsDeclaredSecretsWhileItsClaimLives(t *testi
 		t.Fatalf("a secret read after the trigger finished = %d %v, want 403 claim_ended", got, body)
 	}
 }
+
+// A bearer no longer releases a node's secrets: the runner's own token is
+// refused even while it holds the run's claim, and only the claim's token
+// reads. The operator and a team's owner still read a row by name.
+func TestSecrets_ABearerReadsByNameOnlyAsOperatorOrTeamAdmin(t *testing.T) {
+	f := newRunnerClaimFixture(t)
+	now := time.Now()
+	legacy, _, err := f.st.CreateToken("runner-legacy", store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim, controller.ScopeSecretsRead}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := client.NewWithToken(f.url, nil, legacy).ClaimNode(context.Background(), "runner:legacy:1", nil, time.Minute, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim = %+v, %v", n, err)
+	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-1", legacy, ""); got != http.StatusForbidden || body["error"] != "claim_required" {
+		t.Fatalf("a secrets.read bearer holding the claim = %d %v, want 403 claim_required", got, body)
+	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-1", n.ClaimToken, ""); got != http.StatusOK || body["value"] != "v-DEPLOY_TOKEN" {
+		t.Fatalf("the claim's token = %d %v, want the declared secret", got, body)
+	}
+	admin, _, err := f.st.CreateToken("operator", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/UNDECLARED?pipeline=demo", admin, ""); got != http.StatusOK || body["value"] != "v-UNDECLARED" {
+		t.Fatalf("an operator read by name = %d %v", got, body)
+	}
+	owner, _, err := f.st.CreateToken("owner", store.TokenKindUser, []string{controller.ScopeTeamAdmin}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/UNDECLARED?pipeline=demo", owner, ""); got != http.StatusForbidden || body["error"] != "write_only" {
+		t.Fatalf("a team owner's read of a masked row = %d %v, want 403 write_only", got, body)
+	}
+	if err := f.st.CreateOrReplaceSecret(store.Secret{Name: "REGION", Value: "us-east-1", Pipeline: "demo"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, body := f.do(t, "GET", "/api/v1/secrets/REGION?pipeline=demo", owner, ""); got != http.StatusOK || body["value"] != "us-east-1" {
+		t.Fatalf("a team owner's read by name = %d %v", got, body)
+	}
+}

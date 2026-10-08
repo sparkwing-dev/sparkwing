@@ -157,7 +157,7 @@ sparkwing cluster runners add --profile prod --name dev-laptop
 ```
 
 It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
-`runs.state`, `secrets.read` and `logs.write`, writes
+`runs.state` and `logs.write`, writes
 the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
 keeping the file's other sections, installs the user service, and
 prints the token prefix with the command that revokes it. Logs use the profile's

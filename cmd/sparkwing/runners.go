@@ -28,7 +28,7 @@ import (
 )
 
 // safety: the scope set docs/auth.md gives a runner; a wider one hands a workstation reads no claim loop needs.
-var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state", "secrets.read", "logs.write"}
+var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state", "logs.write"}
 
 // safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"

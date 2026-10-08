@@ -105,7 +105,7 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
 # A runner token needs `nodes.claim`, `triggers.claim`, `runs.state`,
-# `secrets.read`, and `logs.write`.
+# and `logs.write`.
 
 # The cache's operator token and the key cache grants are signed with.
 # Both are random secrets of their own and neither is ever a runner token:
