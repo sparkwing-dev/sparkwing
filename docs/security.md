@@ -197,6 +197,9 @@ email or a token) and `team`. These also get an `audit` record:
 - reads of secrets, tokens and operator routes (`/api/v1/secrets`,
   `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
   `/api/v1/operator/...`);
+- the dashboard's own sign-in and logout routes, and the redirect that finishes
+  a browser flow: a completed OAuth sign-in, identity link or GitHub App
+  connection, recorded with the account it signed in or acted for;
 - every `401` and `403`, whatever the method. A refused bearer shaped like a
   Sparkwing token adds `attempted_prefix`, the prefix that names the token
   without granting it.
@@ -257,7 +260,7 @@ message and the detail goes to the controller log.
 
 Login throttling keys on the TCP peer. Only a request accepted on the
 controller's `--trusted-proxy-addr` listener counts against the budget of its
-`X-Real-IP`, so keep that port reachable by the ingress and the dashboard alone.
+`X-Real-IP`, so keep that port reachable by the ingress alone.
 Without it every browser shares the proxy's budget, which stays safe and turns
 coarse. [auth.md](auth.md) covers the setup.
 
@@ -689,13 +692,13 @@ the published images are known bad.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token (`--api-token`, falling back to
-`$SPARKWING_API_TOKEN`) on every route that touches repository content: git
+`sparkwing-cache` requires a bearer token (the file `cache-token` in its
+`--credentials-dir`) on every route that touches repository content: git
 clone and registration, the binary and dependency-archive blob routes, and
 the admin routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
 refuses to start without one unless the operator passes
-`--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
+`--allow-unauthenticated`, which
 logs a startup warning. The guard has no network-location exemption: an
 in-cluster caller, a port-forward, and an ingress request are all rejected
 without the bearer, because a caller-controlled header cannot prove where a
@@ -718,10 +721,7 @@ Off-cluster runners read Git through
 live claim on the named run, and the repository recorded on its trigger. The
 unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
 drops the caller's bearer and presents its own cache credential upstream, and
-permits only registration and upload-pack reads. A login-enabled dashboard
-exposes those paths to machine bearers without accepting browser sessions:
-the mount rejects a request carrying no bearer before it extends the half-hour
-stream deadline or proxies anything, and caps concurrent Git streams. A
+permits only registration and upload-pack reads. A
 direct cache receives the run's cache grant instead, which opens only that
 team's blob trees. Every grant names the live claim that asked for it and the
 run's repository and refs; the cache refuses one that names neither, so no
@@ -758,7 +758,7 @@ records, not by the cache.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's
-runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+runner and controller pods plus the Job pods the Kubernetes runner
 backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
 render a non-`ClusterIP` cache Service unless a token Secret is configured. A
 controller or runner pool outside the cluster reaches the cache through
@@ -878,8 +878,8 @@ post-install mismatch restores the prior binary and fails loudly.
 
 The signing key is release machinery, not per-user configuration:
 
-- Generate a base64-encoded 32-byte Ed25519 seed and store it as the
-  `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
+- Generate a base64-encoded 32-byte Ed25519 seed (`openssl rand -base64 32`)
+  and store it as the `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
 - Add its public key to `internal/releaseauth.TrustedPublicKeys`. The
   release verifier refuses publication unless the secret-derived key is
   in the updater trust set.
@@ -970,12 +970,11 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   `controller.bootstrapAdminToken.name`) before revoking, or mint a
   replacement admin token first so the table still holds a live one.
 - **Point the logs service at a controller.** Without `--controller`
-  (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
+  `sparkwing-logs` resolves no tokens, so
   anything that reaches its Service can read, forge, and delete every
   run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
-  and `sparkwing cloud status --cluster` flags the logs probe as a warning. Set
-  `SPARKWING_REQUIRE_AUTH=1` (or `--require-auth`) so the pod refuses to
-  start without an absolute `http(s)` controller URL, which keeps a
+  and `sparkwing cloud status --cluster` flags the logs probe as a warning. Pass
+  `--require-auth` so the pod refuses to start without an absolute `http(s)` controller URL, which keeps a
   typo from advertising `"auth": "enabled"` on a service whose every
   token lookup fails. The runner-bundle chart wires the controller URL
   from `controller.tokenSecret`, and a logs-enabled install without that
@@ -985,26 +984,26 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   announced logs URL, a health body with no `auth` field (an image
   older than the report), or a degraded service.
 - **Size the logs service's quotas for your volume.** `sparkwing-logs`
-  caps what one authenticated runner can spend. Each flag below reads an
-  environment variable of the same meaning, and `0` turns that bound off.
+  caps what one authenticated runner can spend. The service reads these
+  as flags only, and `0` turns that bound off.
 
-  | Flag (env) | Default | Effect |
+  | Flag | Default | Effect |
   |------------|---------|--------|
-  | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
-  | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
-  | `--max-inflight-bytes` (`SPARKWING_LOGS_MAX_INFLIGHT_BYTES`) | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
-  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
-  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off); 2160h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 90 days unless the operator names another value, zero included. A run of a team without credits keeps its archived logs 30 days at most. |
-  | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
-  | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
-  | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
-  | `--max-line-bytes` (`SPARKWING_LOGS_MAX_LINE_BYTES`) | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
-  | `--binary-ratio` (`SPARKWING_LOGS_BINARY_RATIO`) | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
-  | `--max-store-bytes` (`SPARKWING_LOGS_MAX_STORE_BYTES`) | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
-  | `--max-store-objects` (`SPARKWING_LOGS_MAX_STORE_OBJECTS`) | 0 (off) | Same ceiling counted in log files. |
-  | `--warn-store-bytes` (`SPARKWING_LOGS_WARN_STORE_BYTES`) | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
-  | `--warn-store-objects` (`SPARKWING_LOGS_WARN_STORE_OBJECTS`) | 0 (off) | Same warning counted in log files. |
-  | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
+  | `--max-node-bytes` | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
+  | `--max-run-bytes` | 1GiB | Same cap across every node log in one run. |
+  | `--max-inflight-bytes` | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
+  | `--min-free-bytes` | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
+  | `--retention` | 0 (off); 2160h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 90 days unless the operator names another value, zero included. A run of a team without credits keeps its archived logs 30 days at most. |
+  | `--sweep-interval` | 1h | How often the sweeper runs. |
+  | `--search-max-bytes` | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
+  | `--search-timeout` | 10s | How long one search may scan. |
+  | `--max-line-bytes` | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
+  | `--binary-ratio` | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
+  | `--max-store-bytes` | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
+  | `--max-store-objects` | 0 (off) | Same ceiling counted in log files. |
+  | `--warn-store-bytes` | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
+  | `--warn-store-objects` | 0 (off) | Same warning counted in log files. |
+  | `--store-reconcile` | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
   the matches it found with `"truncated": true` and a `reason` naming the

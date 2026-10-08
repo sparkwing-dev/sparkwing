@@ -47,3 +47,20 @@ func TestLogOutboxUnavailable_WarnsWithReason(t *testing.T) {
 		t.Errorf("warning does not carry the underlying cause: %q", out)
 	}
 }
+
+func TestOutboxDBPathRefusesTheOperatorsHomeFromATest(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory to refuse")
+	}
+	t.Setenv("SPARKWING_HOME", filepath.Join(home, ".sparkwing"))
+	if path, err := outboxDBPath(); err == nil {
+		t.Fatalf("a test binary resolved the operator's outbox %s", path)
+	}
+
+	t.Setenv("SPARKWING_HOME", "")
+	path, err := outboxDBPath()
+	if err != nil || !strings.HasPrefix(path, os.TempDir()) {
+		t.Fatalf("outboxDBPath = %q, %v; want the test sandbox", path, err)
+	}
+}

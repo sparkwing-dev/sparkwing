@@ -22,7 +22,8 @@
         "admission",
         "local-execution",
         "ci-embedded",
-        "native-mode"
+        "native-mode",
+        "node-protocol"
       ]
     },
     {

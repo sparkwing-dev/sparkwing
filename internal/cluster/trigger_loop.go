@@ -54,6 +54,10 @@ type TriggerLoopOptions struct {
 	DependencyProxy string
 
 	K8sImagePullPolicy string
+	K8sCPUCeiling      string
+	K8sMemoryCeiling   string
+	K8sJobDeadline     time.Duration
+	K8sTeamNodes       bool
 	WorkRoot           string
 	Poll               time.Duration
 	Logger             *slog.Logger
@@ -372,7 +376,7 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	env := append(triggerChildEnv(ctx, os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
+	env := append(triggerChildEnv(os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
 	cmd.Env = orchestrator.PipelineSourceEnvironment(env, trigger.TriggerEnv[orchestrator.PipelineRevKey])
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -417,6 +421,16 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
 	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)
+	appendFlag("--k8s-cpu-ceiling", opts.K8sCPUCeiling)
+	appendFlag("--k8s-memory-ceiling", opts.K8sMemoryCeiling)
+	if opts.K8sJobDeadline > 0 {
+		args = append(args, "--k8s-job-deadline", opts.K8sJobDeadline.String())
+	}
+	// safety: the flag goes only when set, so a pipeline built from an SDK older
+	// than it still runs every trigger that does not ask for team nodes.
+	if opts.K8sTeamNodes {
+		args = append(args, "--runner-team-nodes")
+	}
 	if opts.DependencyProxy != "" {
 		args = append(args, "--dependency-proxy", opts.DependencyProxy)
 	} else {

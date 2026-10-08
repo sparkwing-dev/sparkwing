@@ -1,6 +1,6 @@
 // Package localws is the single-process local dev server: one HTTP
-// server, one SQLite file, one port. Composes the controller,
-// logs-service, and web handlers on the same mux so the CLI and the
+// server, one SQLite file, one port. It runs the controller in local mode
+// with the dashboard attached, beside a logs service, so the CLI and the
 // dashboard read from the same state.
 //
 // # Composition
@@ -13,7 +13,9 @@
 //     <Home>/state.db.
 //   - A [github.com/sparkwing-dev/sparkwing/pkg/logs.Server] for log
 //     reads and writes, rooted at <Home>/logs.
-//   - The embedded Next.js dashboard bundle, served at /.
+//   - The embedded Next.js dashboard bundle, which the controller serves at
+//     / in local mode: no sign-in pages, with the serve token as the
+//     credential.
 //
 // All three live on the same mux at [Options.Addr] (default
 // 127.0.0.1:4343), so `sparkwing run <pipeline>` and the dashboard
@@ -30,7 +32,7 @@
 //
 // # Cluster mode
 //
-// Cluster deployments compose the same primitives differently:
-// `sparkwing-controller`, `sparkwing-logs`, and `sparkwing-web` ship
-// as standalone pod binaries. localws is the laptop equivalent.
+// Cluster deployments run the same controller with its dashboard and
+// browser sign-in as `sparkwing-controller`, beside `sparkwing-logs`.
+// localws is the laptop equivalent.
 package localws

@@ -365,7 +365,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 	start := time.Now()
 	rewindChargeWindow(t, s, "run-charge", "build", start)
 
-	res, err := s.ChargeNodeCredits(ctx, "run-charge", "build", claimant.TokenPrefix, start.Add(10*time.Second))
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-charge", "build", claimant.TokenPrefix, start.Add(10*time.Second))
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 		t.Fatal("a funded ledger must not ask for a cancellation")
 	}
 
-	res, err = s.ChargeNodeCredits(ctx, "run-charge", "build", claimant.TokenPrefix, start.Add(10*time.Second))
+	res, err = store.ChargeNodeCreditsForTest(ctx, s, "run-charge", "build", claimant.TokenPrefix, start.Add(10*time.Second))
 	if err != nil {
 		t.Fatalf("repeat charge: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 		t.Fatalf("repeat charge wrote %+v, want nothing", res.Charge)
 	}
 
-	res, err = s.ChargeNodeCredits(ctx, "run-charge", "build", claimant.TokenPrefix, start.Add(25*time.Second))
+	res, err = store.ChargeNodeCreditsForTest(ctx, s, "run-charge", "build", claimant.TokenPrefix, start.Add(25*time.Second))
 	if err != nil {
 		t.Fatalf("third charge: %v", err)
 	}
@@ -455,11 +455,11 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	usageStart := time.Now()
 	rewindChargeWindow(t, s, "run-b", "build", usageStart)
 	usageAt := usageStart.Add(10 * time.Second)
-	if res, err := s.ChargeNodeCredits(ctx, "run-b", "build", pool.TokenPrefix, usageAt); err != nil ||
+	if res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-b", "build", pool.TokenPrefix, usageAt); err != nil ||
 		res.Charge == nil || res.Charge.Kind != store.CreditChargeUsage {
 		t.Fatalf("charge tenant B = %+v, %v; want usage", res.Charge, err)
 	}
-	if res, err := s.ChargeNodeCredits(ctx, "run-b", "build", pool.TokenPrefix, usageAt); err != nil ||
+	if res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-b", "build", pool.TokenPrefix, usageAt); err != nil ||
 		res.Charge != nil {
 		t.Fatalf("repeat charge tenant B = %+v, %v; want no charge", res.Charge, err)
 	}
@@ -504,7 +504,7 @@ func TestChargeNodeCreditsDoesNotDoubleChargeTheReservedMinimum(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	for _, after := range []time.Duration{time.Second, 5 * time.Second, 19 * time.Second} {
-		res, err := s.ChargeNodeCredits(ctx, "run-reserved", "build", claimant.TokenPrefix, time.Now().Add(after))
+		res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-reserved", "build", claimant.TokenPrefix, time.Now().Add(after))
 		if err != nil {
 			t.Fatalf("charge at %s: %v", after, err)
 		}
@@ -675,7 +675,7 @@ func TestChargeCapForgivesAStalledGap(t *testing.T) {
 	}
 	rewindChargeWindow(t, s, "run-stall", "build", time.Now().Add(-time.Hour))
 
-	res, err := s.ChargeNodeCredits(ctx, "run-stall", "build", claimant.TokenPrefix, time.Now())
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-stall", "build", claimant.TokenPrefix, time.Now())
 	if err != nil {
 		t.Fatalf("charge after a stall: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestChargeCapForgivesAStalledGap(t *testing.T) {
 
 	// safety: the anchor caught up, so the next charge bills from now rather
 	// than re-billing the forgiven gap.
-	res, err = s.ChargeNodeCredits(ctx, "run-stall", "build", claimant.TokenPrefix, time.Now().Add(2*time.Second))
+	res, err = store.ChargeNodeCreditsForTest(ctx, s, "run-stall", "build", claimant.TokenPrefix, time.Now().Add(2*time.Second))
 	if err != nil {
 		t.Fatalf("charge after the cap: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 
 	start := time.Now()
 	rewindChargeWindow(t, s, "run-empty", "build", start)
-	res, err := s.ChargeNodeCredits(ctx, "run-empty", "build", claimant.TokenPrefix, start.Add(5*time.Second))
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-empty", "build", claimant.TokenPrefix, start.Add(5*time.Second))
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 	}
 
 	rewindChargeWindow(t, s, "run-empty", "build", start.Add(5*time.Second))
-	res, err = s.ChargeNodeCredits(ctx, "run-empty", "build", claimant.TokenPrefix, start.Add(40*time.Second))
+	res, err = store.ChargeNodeCreditsForTest(ctx, s, "run-empty", "build", claimant.TokenPrefix, start.Add(40*time.Second))
 	if err != nil {
 		t.Fatalf("charge after grace: %v", err)
 	}
@@ -740,7 +740,7 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 		t.Fatalf("top-up: %v", err)
 	}
 	rewindChargeWindow(t, s, "run-empty", "build", start.Add(40*time.Second))
-	res, err = s.ChargeNodeCredits(ctx, "run-empty", "build", claimant.TokenPrefix, start.Add(45*time.Second))
+	res, err = store.ChargeNodeCreditsForTest(ctx, s, "run-empty", "build", claimant.TokenPrefix, start.Add(45*time.Second))
 	if err != nil {
 		t.Fatalf("charge after top-up: %v", err)
 	}
@@ -1193,7 +1193,7 @@ func chargeAt(
 	t *testing.T, s *store.Store, runID string, claimant store.ClaimIdentity, at time.Time,
 ) store.CreditChargeResult {
 	t.Helper()
-	res, err := s.ChargeNodeCredits(context.Background(), runID, "build", claimant.TokenPrefix, at)
+	res, err := store.ChargeNodeCreditsForTest(context.Background(), s, runID, "build", claimant.TokenPrefix, at)
 	if err != nil {
 		t.Fatalf("charge at %s: %v", at, err)
 	}
@@ -1305,7 +1305,7 @@ func TestChargeNodeCreditsNeverCancelsInsideTheClaimReservation(t *testing.T) {
 	// safety: the claim consumed the whole balance, so every heartbeat inside
 	// the reservation reads a spent ledger and must still let it run.
 	for _, at := range []time.Duration{3 * time.Second, 10 * time.Second, store.MinBillableSeconds * time.Second} {
-		res, err := s.ChargeNodeCredits(ctx, "run-reserved", "build", claimant.TokenPrefix, start.Add(at))
+		res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-reserved", "build", claimant.TokenPrefix, start.Add(at))
 		if err != nil {
 			t.Fatalf("charge at %s: %v", at, err)
 		}
@@ -1317,7 +1317,7 @@ func TestChargeNodeCreditsNeverCancelsInsideTheClaimReservation(t *testing.T) {
 		}
 	}
 
-	res, err := s.ChargeNodeCredits(ctx, "run-reserved", "build", claimant.TokenPrefix,
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-reserved", "build", claimant.TokenPrefix,
 		start.Add((store.MinBillableSeconds+store.PoolHeartbeatInterval/time.Second)*time.Second))
 	if err != nil {
 		t.Fatalf("charge past the reservation: %v", err)
@@ -1347,7 +1347,7 @@ func TestChargeNodeCreditsKeepsTheGracePeriodPastTheReservation(t *testing.T) {
 	start := acknowledgeClaimedExecution(t, s, claimant, n)
 
 	reservationEnd := start.Add(store.MinBillableSeconds * time.Second)
-	res, err := s.ChargeNodeCredits(ctx, "run-graced", "build", claimant.TokenPrefix,
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, "run-graced", "build", claimant.TokenPrefix,
 		reservationEnd.Add(5*time.Second))
 	if err != nil {
 		t.Fatalf("charge past the reservation: %v", err)
@@ -1357,7 +1357,7 @@ func TestChargeNodeCreditsKeepsTheGracePeriodPastTheReservation(t *testing.T) {
 	}
 
 	rewindChargeWindow(t, s, "run-graced", "build", reservationEnd)
-	res, err = s.ChargeNodeCredits(ctx, "run-graced", "build", claimant.TokenPrefix,
+	res, err = store.ChargeNodeCreditsForTest(ctx, s, "run-graced", "build", claimant.TokenPrefix,
 		reservationEnd.Add(time.Duration(grace+5)*time.Second))
 	if err != nil {
 		t.Fatalf("charge after the grace period: %v", err)

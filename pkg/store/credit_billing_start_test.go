@@ -110,7 +110,7 @@ func TestDispatchedClaimBillsFromThePodsFirstRenewal(t *testing.T) {
 	// safety: forty seconds of provisioning pass before the pod renews, and
 	// none of them may be billed.
 	renewed := time.Now().Add(40 * time.Second)
-	res, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, renewed)
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, n.RunID, n.NodeID, claimant.TokenPrefix, renewed)
 	if err != nil {
 		t.Fatalf("first renewal: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestDispatchedClaimBillsFromThePodsFirstRenewal(t *testing.T) {
 	// safety: fetch and compile run between the renewal and the execution
 	// start, so the execution start must leave the window where it is.
 	setup := renewed.Add((store.MinBillableSeconds + 10) * time.Second)
-	if res, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, setup); err != nil ||
+	if res, err := store.ChargeNodeCreditsForTest(ctx, s, n.RunID, n.NodeID, claimant.TokenPrefix, setup); err != nil ||
 		res.Charge == nil || res.Charge.Seconds != 10 {
 		t.Fatalf("setup charge = %+v, %v; want the ten seconds past the minimum", res.Charge, err)
 	}
@@ -157,7 +157,7 @@ func TestQueueClaimBillsSetupBeforeExecution(t *testing.T) {
 		t.Fatal("a runner claiming its own work did not start billing at the claim")
 	}
 	setChargeWindowWithoutExecution(t, s, n.RunID, n.NodeID, time.Now().Add(-25*time.Second))
-	res, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now())
+	res, err := store.ChargeNodeCreditsForTest(ctx, s, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now())
 	if err != nil || res.Charge == nil || res.Charge.Kind != store.CreditChargeUsage {
 		t.Fatalf("setup heartbeat = %+v, %v; want the compile time billed", res.Charge, err)
 	}
@@ -204,7 +204,7 @@ func TestSetupRefundFollowsWhoseFailureItWas(t *testing.T) {
 				t.Fatalf("claim: %v", err)
 			}
 			setChargeWindowWithoutExecution(t, s, n.RunID, n.NodeID, time.Now().Add(-25*time.Second))
-			if res, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now()); err != nil ||
+			if res, err := store.ChargeNodeCreditsForTest(ctx, s, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now()); err != nil ||
 				res.Charge == nil {
 				t.Fatalf("setup heartbeat = %+v, %v", res.Charge, err)
 			}
@@ -250,7 +250,7 @@ func TestReapBeforeExecutionKeepsTheSetupTheClaimBilled(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	setChargeWindowWithoutExecution(t, s, n.RunID, n.NodeID, time.Now().Add(-25*time.Second))
-	if res, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now()); err != nil ||
+	if res, err := store.ChargeNodeCreditsForTest(ctx, s, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now()); err != nil ||
 		res.Charge == nil {
 		t.Fatalf("setup heartbeat = %+v, %v", res.Charge, err)
 	}

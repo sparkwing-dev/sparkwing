@@ -783,6 +783,38 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 	}
 }
 
+func TestSetupSSHKeepsTheOperatorsGitSSHCommand(t *testing.T) {
+	saved := sshKeyDir
+	t.Cleanup(func() { sshKeyDir = saved })
+	root := t.TempDir()
+	sshKeyDir = filepath.Join(root, "key")
+	if err := os.MkdirAll(sshKeyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sshKeyDir, "id_ed25519"), []byte("private-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	const operator = "ssh -i /etc/ssh-key/id_ed25519 -o IdentitiesOnly=yes"
+	t.Setenv("GIT_SSH_COMMAND", operator)
+	if err := setupSSH(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GIT_SSH_COMMAND"); got != operator {
+		t.Fatalf("GIT_SSH_COMMAND = %q, want the operator's %q", got, operator)
+	}
+
+	t.Setenv("GIT_SSH_COMMAND", "")
+	if err := setupSSH(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GIT_SSH_COMMAND"); !strings.Contains(got, "-o IdentitiesOnly=yes") {
+		t.Fatalf("GIT_SSH_COMMAND = %q, want it to offer only the staged key", got)
+	}
+}
+
 func TestLoadRepoNamesDropsEntriesTheCloneValidatorRefuses(t *testing.T) {
 	root := t.TempDir()
 	oldNamesFile := namesFile

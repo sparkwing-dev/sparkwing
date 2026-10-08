@@ -147,7 +147,7 @@ func RunNodeOnce(
 			return runner.Result{}, fmt.Errorf("artifact store: %w", err)
 		}
 	}
-	backends := RemoteBackends(ctx, stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
 	if cfg.claim != nil {
 		backends.State = cfg.claim
 	}
@@ -389,7 +389,7 @@ func runNodeCLI(args []string) error {
 	}
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
-	token := os.Getenv("SPARKWING_AGENT_TOKEN")
+	token := agentToken
 	if isClaimToken(token) && apiSocket == "" {
 		return runClaimedNode(ctx, *controllerURL, *logsURL, runID, nodeID, token)
 	}

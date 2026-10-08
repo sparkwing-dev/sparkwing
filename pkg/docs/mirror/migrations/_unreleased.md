@@ -155,18 +155,215 @@ ran it.
       --trigger-runner-sa=SA --trigger-runner-image-pull-secret=SECRET
   ```
 
-  `--trigger-sources`, `--token`, `--metrics-addr` and `--dependency-proxy`
-  carry over; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
+  `--trigger-sources`, `--metrics-addr` and `--dependency-proxy` carry over,
+  and `--token` becomes the file `agent-token` under `--credentials-dir`; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
   and `--runner-logs-url` gain the `--trigger-runner-` prefix, and
   `--artifact-store` becomes `--trigger-artifact-store`. Drop
   `--claim-nodes=false` to let the same pod also run nodes. The worker's
   `--log-store` has no runner equivalent: the runner streams logs to `--logs`.
   `--k8s-cpu-ceiling`, `--k8s-memory-ceiling` and `--k8s-job-deadline` become
-  `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING` and
-  `SPARKWING_K8S_JOB_DEADLINE` in the runner pod's environment, which each
-  trigger's child inherits.
+  `--cpu-ceiling`, `--memory-ceiling` and `--deadline`.
 - **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
   for a profile, is unchanged.
+
+## sparkwing-logs reads flags only
+
+- **Before:** every `sparkwing-logs` flag took its default from an
+  environment variable of the same meaning: `SPARKWING_CONTROLLER_URL`,
+  `SPARKWING_REQUIRE_AUTH`, `SPARKWING_LOGS_ARCHIVE_STORE`,
+  `SPARKWING_LOGS_ARCHIVE_IDLE`, the `SPARKWING_LOGS_*` limits, and
+  `SPARKWING_LOGS_EGRESS_*`.
+- **After:** the service reads none of them. A variable left in the pod's
+  environment is ignored, so the setting it carried falls back to the flag's
+  default. A malformed flag value stops the service at startup with an error
+  naming the flag.
+- **Operator steps:** the `sparkwing-runner-bundle` chart already passes flags
+  and needs nothing. In a manifest of your own, move each variable to its flag:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_REQUIRE_AUTH` | `--require-auth` |
+  | `SPARKWING_LOGS_ARCHIVE_STORE` | `--archive-store` |
+  | `SPARKWING_LOGS_ARCHIVE_IDLE` | `--archive-idle` |
+  | `SPARKWING_LOGS_MAX_NODE_BYTES` | `--max-node-bytes` |
+  | `SPARKWING_LOGS_MAX_RUN_BYTES` | `--max-run-bytes` |
+  | `SPARKWING_LOGS_MAX_INFLIGHT_BYTES` | `--max-inflight-bytes` |
+  | `SPARKWING_LOGS_MIN_FREE_BYTES` | `--min-free-bytes` |
+  | `SPARKWING_LOGS_RETENTION` | `--retention` |
+  | `SPARKWING_LOGS_SWEEP_INTERVAL` | `--sweep-interval` |
+  | `SPARKWING_LOGS_SEARCH_MAX_BYTES` | `--search-max-bytes` |
+  | `SPARKWING_LOGS_SEARCH_TIMEOUT` | `--search-timeout` |
+  | `SPARKWING_LOGS_MAX_LINE_BYTES` | `--max-line-bytes` |
+  | `SPARKWING_LOGS_BINARY_RATIO` | `--binary-ratio` |
+  | `SPARKWING_LOGS_MAX_STORE_BYTES` | `--max-store-bytes` |
+  | `SPARKWING_LOGS_MAX_STORE_OBJECTS` | `--max-store-objects` |
+  | `SPARKWING_LOGS_WARN_STORE_BYTES` | `--warn-store-bytes` |
+  | `SPARKWING_LOGS_WARN_STORE_OBJECTS` | `--warn-store-objects` |
+  | `SPARKWING_LOGS_STORE_RECONCILE` | `--store-reconcile` |
+  | `SPARKWING_LOGS_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+  | `SPARKWING_LOGS_EGRESS_MAX_DOWNLOADS` | `--egress-max-downloads` |
+  | `SPARKWING_LOGS_EGRESS_MAX_LOG_STREAMS` | `--egress-max-log-streams` |
+
+- **Edge cases:** `SPARKWING_REQUIRE_AUTH` also accepted `yes` and `on`;
+  `--require-auth` is a boolean flag, so pass it bare. A retention set through
+  `SPARKWING_LOGS_RETENTION` used to count as named and kept an archived
+  service off its 90-day default; only `--retention` counts now.
+  `SPARKWING_S3_ENDPOINT` is still read, because it has no flag yet.
+
+## sparkwing-cache reads flags and a credentials directory
+
+- **Before:** `sparkwing-cache` took each flag's default from an environment
+  variable, including eleven without the `SPARKWING_` prefix, and its two
+  secrets from `SPARKWING_API_TOKEN` and `SPARKWING_CACHE_GRANT_KEY` or the
+  `--api-token` and `--grant-key` flags. A value it could not parse was
+  ignored: a malformed duration or boolean kept the default without a word, and
+  a malformed byte count printed a warning and stayed unlimited.
+- **After:** the cache reads settings from flags alone and its secrets from
+  `--credentials-dir`, a directory holding one file per secret: `cache-token`
+  (the operator token) and `cache-grant-key`. An absent file turns that
+  feature off, as an unset variable did. `--api-token` and `--grant-key` are
+  gone, because a flag value shows in `/proc/<pid>/cmdline`. A malformed flag
+  value now stops the cache at startup with an error naming the flag; so does
+  a `--credentials-dir` that names no directory.
+- **Operator steps:** the `sparkwing-runner-bundle` chart projects
+  `cache.tokenSecret` and `cache.grantKeySecret` into
+  `/etc/sparkwing/credentials` and passes the flags; upgrading the chart needs
+  no value changes. In a manifest of your own, mount the two Secret keys as
+  files and move each variable to its flag:
+
+  ```yaml
+  args:
+    - --credentials-dir
+    - /etc/sparkwing/credentials
+  volumeMounts:
+    - name: credentials
+      mountPath: /etc/sparkwing/credentials
+      readOnly: true
+  volumes:
+    - name: credentials
+      projected:
+        defaultMode: 0400
+        sources:
+          - secret:
+              name: sparkwing-cache-token
+              items: [{key: token, path: cache-token}]
+          - secret:
+              name: sparkwing-cache-grant-key
+              items: [{key: key, path: cache-grant-key}]
+  ```
+
+  | Variable or flag | Use instead |
+  |---|---|
+  | `SPARKWING_API_TOKEN`, `--api-token` | the file `cache-token` under `--credentials-dir` |
+  | `SPARKWING_CACHE_GRANT_KEY`, `--grant-key` | the file `cache-grant-key` under `--credentials-dir` |
+  | `PORT`, `PORT_ADDR` | `--addr` |
+  | `DATA_DIR` | `--data-dir` |
+  | `PROXY_CACHE_DIR` | `--proxy-cache-dir` |
+  | `PROXY_CACHE_TTL` | `--proxy-cache-ttl` |
+  | `PROXY_MAX_AGE` | `--proxy-max-age` |
+  | `FETCH_INTERVAL` | `--fetch-interval` |
+  | `FETCH_FRESH_WINDOW` | `--fetch-fresh-window` |
+  | `RECLONE_COOLDOWN` | `--reclone-cooldown` |
+  | `GITCACHE_REPOS` | `--auto-register-repos` |
+  | `SSH_KEY_DIR` | `--ssh-key-dir` |
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_METRICS_ADDR` | `--metrics-addr` |
+  | `SPARKWING_CACHE_PUBLIC_URL` | `--public-url` |
+  | `SPARKWING_CACHE_TRUST_FORWARDED_HOST` | `--trust-forwarded-host` |
+  | `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | `--allow-unauthenticated` |
+  | `SPARKWING_CACHE_BLOB_STORE` | `--blob-store` |
+  | `SPARKWING_CACHE_MAX_ARCHIVE_BYTES` | `--max-cache-archive-bytes` |
+  | `SPARKWING_CACHE_MAX_STORE_BYTES` | `--max-store-bytes` |
+  | `SPARKWING_CACHE_MAX_STORE_OBJECTS` | `--max-store-objects` |
+  | `SPARKWING_CACHE_WARN_STORE_BYTES` | `--warn-store-bytes` |
+  | `SPARKWING_CACHE_WARN_STORE_OBJECTS` | `--warn-store-objects` |
+  | `SPARKWING_CACHE_STORE_RECONCILE` | `--store-reconcile` |
+  | `SPARKWING_CACHE_PROXY_MAX_BYTES` | `--proxy-max-bytes` |
+  | `SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+
+- **Edge cases:** a cache whose environment carried a malformed value used to
+  start on the default; with the value moved to its flag it refuses to start,
+  so check the value before the upgrade. `--allow-unauthenticated` is a boolean
+  flag: pass it bare, because `--allow-unauthenticated=yes` is refused.
+  The controller still reads the same token as `SPARKWING_CACHE_TOKEN` and the
+  grant key as `SPARKWING_CACHE_GRANT_KEY`; when it moves to a credentials
+  directory it reads the same `cache-token` and `cache-grant-key` file names,
+  so one projected Secret volume will serve both. `SPARKWING_S3_ENDPOINT`,
+  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
+
+## sparkwing-runner reads flags and a credentials directory
+
+- **Before:** `sparkwing-runner runner` and `sparkwing-runner launch` took
+  their bearer from `SPARKWING_AGENT_TOKEN` or `--token`, and `runner` seeded
+  most flags from `SPARKWING_*` variables. The Kubernetes Job ceilings,
+  deadline and team-node switch existed only as `SPARKWING_K8S_CPU_CEILING`,
+  `SPARKWING_K8S_MEMORY_CEILING`, `SPARKWING_K8S_JOB_DEADLINE` and
+  `SPARKWING_RUNNER_TEAM_NODES` on the runner pod, which each trigger's
+  `handle-trigger` child inherited and read.
+- **After:** both commands read their bearer from the file `agent-token` under
+  `--credentials-dir`; `--token` is gone, because a flag value shows in
+  `/proc/<pid>/cmdline`. The runner takes `--cpu-ceiling`, `--memory-ceiling`,
+  `--deadline` and `--team-nodes`, the launcher's names, validates them at
+  startup, and hands them to each trigger as `handle-trigger` flags.
+  `handle-trigger` no longer reads those four variables, nor
+  `SPARKWING_RUNNER_SA`, `SPARKWING_IMAGE_PULL_POLICY` and
+  `SPARKWING_DEPENDENCY_PROXY_URL`, which the runner already passed as flags.
+  `POD_NAME`, `POD_NAMESPACE`, `KUBECONFIG` and the GitHub Actions variables
+  are still read, because other tools define them. The token a Job or a
+  trigger child receives from Sparkwing still crosses in
+  `SPARKWING_AGENT_TOKEN`; that is Sparkwing's own protocol, not a setting.
+- **Operator steps:** the `sparkwing-runner-bundle` chart projects
+  `controller.tokenSecret` as `agent-token` and passes
+  `runner.jobCeiling` as flags; upgrading needs no value changes. A Helm
+  user who set `SPARKWING_K8S_JOB_DEADLINE` or `SPARKWING_RUNNER_TEAM_NODES`
+  through `runner.extraEnv` moves them to the new values `runner.jobDeadline`
+  and `runner.teamNodes`. An external
+  gitcache moves from a `SPARKWING_GITCACHE_URL` entry in `runner.extraEnv` to
+  `runner.gitcacheUrl`. In a manifest of your own, mount the token Secret as a
+  file and move each variable to its flag:
+
+  | Variable or flag | Use instead |
+  |---|---|
+  | `SPARKWING_AGENT_TOKEN`, `--token` | the file `agent-token` under `--credentials-dir` |
+  | `SPARKWING_K8S_CPU_CEILING` | `sparkwing-runner runner --cpu-ceiling` |
+  | `SPARKWING_K8S_MEMORY_CEILING` | `--memory-ceiling` |
+  | `SPARKWING_K8S_JOB_DEADLINE` | `--deadline` |
+  | `SPARKWING_RUNNER_TEAM_NODES` | `--team-nodes` |
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_LOGS_URL` | `--logs` |
+  | `SPARKWING_GITCACHE_URL` | `--gitcache` |
+  | `SPARKWING_RUNNER_SA` | `--trigger-runner-sa` |
+  | `SPARKWING_CACHE_URL` | `--trigger-artifact-store` |
+  | `SPARKWING_DEPENDENCY_PROXY_URL` | `--dependency-proxy` |
+  | `SPARKWING_IMAGE_PULL_POLICY` | `--trigger-runner-image-pull-policy` |
+  | `SPARKWING_WARM_MODULES` | `--warm-modules` |
+  | `SPARKWING_LOCAL_RESERVE` | `--local-reserve` |
+  | `SPARKWING_TEAM` | `--team` |
+
+  A machine connected from the dashboard runs the new command the machines
+  page prints, which writes the token to
+  `$HOME/.config/sparkwing/runner-credentials/agent-token` with mode `0600`
+  before it starts the runner.
+- **Edge cases:** `--team-nodes` reaches a trigger as
+  `handle-trigger --runner-team-nodes`, which a pipeline built from an SDK
+  older than v0.66.0 rejects; the runner passes it only when set. A pipeline
+  built from an SDK older than this release still reads the four Job
+  variables if they remain in the runner pod's environment, so delete them
+  rather than leaving them beside the flags. `sparkwing-runner agent`, which
+  reads `config.yaml`, is unchanged.
+
+## Leftover variable names are removed
+
+- **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper
+  ahead of `SPARKWING_GITCACHE_URL`.
+- **After:** the clone helper reads `SPARKWING_GITCACHE_URL` alone.
+- **Author or operator steps:** rename `SPARKWING_GITCACHE` to
+  `SPARKWING_GITCACHE_URL`.
+- **Edge cases:** `SPARKWING_TOKEN`, `SPARKWING_TRIGGER_CLAIM_GENERATION`,
+  `SPARKWING_TRIGGER_GENERATION` and `SPARKWING_ATTEMPT_ORDINAL` were stripped
+  from child environments although nothing set or read them; they no longer
+  appear in the code.
 
 ## Flag-mirror environment variables are no longer read
 
@@ -728,3 +925,171 @@ argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
 ```
 
 `SPARKWING_GITOPS_REPO` is no longer read.
+
+## Pipeline steps no longer see SPARKWING_AGENT_TOKEN
+
+- **Before:** the pipeline binary kept the runner's `SPARKWING_AGENT_TOKEN` in
+  its environment, so every command a step started inherited it, and a step
+  that printed it showed the raw value in the run's logs. `.CacheDir` used it
+  as the cache bearer when no `SPARKWING_CACHE_GRANT` or
+  `SPARKWING_CACHE_TOKEN` was set.
+- **After:** the pipeline binary removes the token from its environment when
+  it starts and masks it in node output. Commands a step starts do not see it,
+  and `.CacheDir` sends only the cache grant or cache token.
+- **Author steps:** a step that called the controller with
+  `$SPARKWING_AGENT_TOKEN` uses the SDK instead (`sparkwing.Secret`,
+  `sparkwing.RunAndAwait`), which reaches the controller through the node's own
+  connection.
+- **Operator steps:** a cache that accepted the agent token because its API
+  token was set to the same value now needs the controller to mint cache grants
+  (`SPARKWING_CACHE_GRANT_KEY` on the controller and the cache), or the dependency cache runs without the service.
+
+## cmd/sign-manifest is removed
+
+- **Before:** `go run ./cmd/sign-manifest -genkey` printed an Ed25519 keypair,
+  and the same helper could sign and verify a manifest.
+- **After:** the helper is gone. The release workflow signs and verifies
+  with `cmd/verify-release`.
+- **Operator steps:** generate a seed with `openssl rand -base64 32`, store it
+  as `SPARKWING_UPDATE_SIGNING_KEY`, and print its public key with
+  `SPARKWING_RELEASE_SIGNING_KEY=<seed> go run ./cmd/verify-release --public-key`.
+
+## Storage and store names that moved
+
+- **Before:** `storeurl.OpenS3`, `storeurl.SDKMaxAttempts` and
+  `storeurl.SDKMaxBackoff` lived in `pkg/storage/storeurl`.
+- **After:** they are `Open`, `SDKMaxAttempts` and `SDKMaxBackoff` in
+  `pkg/storage/s3`, beside `ParseURL` and `NewClient`. Behaviour is unchanged.
+- **Author steps:** replace `storeurl.OpenS3(ctx, raw)` with `s3.Open(ctx, raw)`
+  from `github.com/sparkwing-dev/sparkwing/pkg/storage/s3`.
+
+## The controller's dispatcher hook is removed
+
+- **Before:** `controller.Server.WithDispatcher` took a `controller.Dispatcher`
+  that was called with a `controller.RunRequest` after each trigger was
+  recorded, defaulting to `controller.NoopDispatcher`.
+- **After:** the types and the option are gone. A trigger is recorded and a
+  runner claims it by polling, as with the default before.
+- **Author steps:** remove the `WithDispatcher` call. Start work for a recorded
+  trigger by claiming it (`POST /api/v1/triggers/claim`, or
+  `client.ClaimTriggerFor`).
+
+## Removed store and release helpers
+
+- **Before:** `store.Store.ChargeNodeCredits` billed a node's elapsed seconds
+  directly, and `go run ./cmd/sign-manifest -genkey` printed a signing key.
+- **After:** both are gone; node renewal, finish and launch settlement bill
+  inside their own transactions.
+- **Author steps:** settle a node with `FinalizeNodeCredits`; generate a release
+  seed as described above under `cmd/sign-manifest is removed`.
+
+## Six unused SDK names are removed
+
+**Before:** the `sparkwing` package exported `Cache`, `Logs` and `State` (type
+aliases for the `pkg/storage` interfaces), `TypeName`, `FailureFromContext` and
+`(*SpawnSpec).ResolvedID`.
+
+**After:** none of them exist. No pipeline, sparks library or guide used them.
+
+**Author steps:**
+
+| Removed | Use instead |
+|---|---|
+| `sparkwing.Cache`, `sparkwing.Logs`, `sparkwing.State` | `storage.ArtifactStore`, `storage.LogStore`, `storage.StateStore` from `github.com/sparkwing-dev/sparkwing/pkg/storage` |
+| `sparkwing.TypeName(p)` | `reflect.TypeOf(p).Elem().Name()` for a pointer, or `reflect.TypeOf(p).Name()` |
+| `sparkwing.FailureFromContext(ctx)` | the `sparkwing.Failure` argument an `OnFailure` handler already receives |
+| `(*SpawnSpec).ResolvedID()` | nothing; it always returned `""` |
+
+The `sparkwing-web` service is gone: the controller serves the dashboard,
+sign-in, and the browser flows on its own listener. Operators repoint the
+console host at the controller and delete the web Deployment; `sparkwing
+serve` users change nothing.
+
+## The controller serves the dashboard
+
+**Before:** `sparkwing-web` hosted the dashboard bundle, the login page, OAuth
+and GitHub App browser flows, and a proxy that forwarded an allowlist of
+`/api/v1/*` routes to the controller and log reads to the logs service. The
+`sparkwing-full` chart deployed it as `<release>-web`, and its Ingress routed
+there.
+
+**After:** `sparkwing-controller` serves the dashboard pages, `/login`,
+password and first-admin sign-in, logout, `/auth/{provider}/start` and
+`/callback`, identity linking at `/auth/{provider}/link`, the GitHub App pages
+under `/github/app/`, and the dashboard's log, grep, event-stream and capacity
+reads, on the same port as its API. Session cookies are `__Host-sw_session` and
+`__Host-sw_csrf`. Log reads go to the logs service named by the controller's
+`--logs-url`, carrying the caller's own credential. Pages require sign-in
+whenever the controller enforces token auth. A controller built without
+`bin/build-web.sh` still starts, and its pages answer 503 naming that step.
+The chart deploys no web Deployment or Service, and its Ingress routes every
+host to the controller Service.
+
+**Upgrade:**
+
+1. Point the console host's Ingress or load balancer at the controller
+   Service. A console host and an API host can both point at it; a reverse
+   proxy in front can still split them.
+2. Delete the `sparkwing-web` Deployment and Service. A `sparkwing-full`
+   upgrade removes them and names the Ingress after the controller. A
+   values file that still sets `web` fails to render: move `web.logs.url` to
+   `controller.logs.url` and drop the rest.
+3. Move `sparkwing-web` flags to the controller:
+
+   | `sparkwing-web` | Controller |
+   |---|---|
+   | `--require-login` | Follows the controller's own auth: pages require sign-in whenever it enforces tokens |
+   | `--hsts` | `--hsts` |
+   | `--trusted-proxy-addr` | `--trusted-proxy-addr`, which also reads `X-Forwarded-Proto` as TLS evidence |
+   | `SPARKWING_WEB_INSECURE_COOKIES` with `--allow-insecure-cookies-remote` | `--insecure-cookies` |
+   | `--controller`, `--logs`, `--token`, `--profile`, `--state-spec`, `--logs-spec`, `--artifacts-spec` | None; the controller reads its own state and uses `--logs-url` |
+   | `--allow-unauthenticated-remote`, `--allow-origin` | None; the controller refuses cross-site browser writes to `/api/` |
+
+   Chart users: `ingress.tls` passes `--hsts`, and `ingress.allowInsecure=true`
+   without TLS passes `--insecure-cookies`.
+4. A dashboard published over plain HTTP needs `--insecure-cookies` (chart:
+   `ingress.allowInsecure=true`), or browsers drop the `Secure` session cookies.
+5. Register the OAuth and GitHub App callback URLs on the host that now
+   reaches the controller, and list the sign-in callbacks in
+   `--oauth-redirect-uris`. The paths are unchanged.
+
+`sparkwing serve` runs the controller in local mode with the dashboard
+attached and needs nothing.
+
+**Removed routes:** `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`,
+`POST /api/v1/me/identities/{provider}/link` and `/link/complete`,
+`POST /api/v1/team/github-app/connect`, `/connect/available`,
+`/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and
+`GET /api/v1/auth/bootstrap-needed` answer 404. No CLI command called them; a
+client of your own drives the browser pages that replace them.
+`/api/v1/auth/login`, `/api/v1/auth/session` and `/api/v1/auth/logout` remain.
+
+**Why:** two processes split one browser surface, and the proxy's route
+allowlist and service bearer were a second authorization layer to keep in
+step with the controller's own.
+
+## Node bounce requests move to their run's team
+
+- **Before:** a bounce request was recorded without its team, so every row
+  carried the default team whatever team its run belonged to.
+- **After:** schema 93 moves each existing request into the team of the run it
+  names, and new requests record their run's team. A team's open requests stay
+  visible to its runners, and its next request continues the node's sequence.
+- **Upgrade:** nothing to do; the controller applies schema 93 on start. An
+  older binary keeps reading the upgraded database.
+
+## Store methods removed or moved to Tenant
+
+- **Before:** `pkg/store` exported `Store.ActiveExecutorActivity`,
+  `Store.PrincipalHoldsPipelineClaim` and `Store.FailNodeForUnpricedClass`.
+- **After:** the first two are gone, and the third is a method of `Tenant`.
+  Many other `Store` methods now act on the default team only; their `Tenant`
+  methods of the same name serve every team.
+- **Upgrade:** code embedding `pkg/store` replaces
+  `st.ActiveExecutorActivity(ctx, now)` with
+  `team.ActiveExecutorActivity(ctx, now)` on the handle from
+  `st.ForTeam(ctx, slug)`, replaces `st.PrincipalHoldsPipelineClaim` with
+  `st.PrincipalHoldsProfileClaim` or `st.PrincipalHoldsRunClaim`, and calls
+  `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
+  writes runs, nodes or triggers of a team other than the default goes
+  through that team's handle.

@@ -221,9 +221,8 @@ func ensureDescribeCache(ctx context.Context, sparkwingDir, key, binPath string)
 }
 
 func announceCompile() {
-	cacheRoot := filepath.Join(bincache.SparkwingHome(), "cache", "pipelines", "v1", "entries")
 	firstEver := true
-	if entries, err := os.ReadDir(cacheRoot); err == nil && len(entries) > 0 {
+	if entries, err := os.ReadDir(bincache.CacheRoot()); err == nil && len(entries) > 0 {
 		firstEver = false
 	}
 	var msg string

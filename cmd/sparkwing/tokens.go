@@ -2,11 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 
 	flag "github.com/spf13/pflag"
 )
@@ -63,24 +64,13 @@ func runTokensCreate(args []string) error {
 		return err
 	}
 
-	body := map[string]any{
-		"kind":      *kind,
-		"principal": *principal,
-		"scopes":    splitCSV(*scopes),
-	}
+	req := client.CreateTokenRequest{Kind: *kind, Principal: *principal, Scopes: splitCSV(*scopes)}
 	if *ttl > 0 {
-		body["ttl_secs"] = int64((*ttl).Seconds())
+		req.TTLSecs = int64((*ttl).Seconds())
 	}
-	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens", body)
+	out, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).CreateToken(context.Background(), req)
 	if err != nil {
 		return err
-	}
-	var out struct {
-		Token    string          `json:"token"`
-		Metadata json.RawMessage `json:"metadata"`
-	}
-	if err := json.Unmarshal(resp, &out); err != nil {
-		return fmt.Errorf("decode: %w", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "WARNING: stash this token NOW. It is not recoverable after this command exits.")
@@ -88,16 +78,6 @@ func runTokensCreate(args []string) error {
 	fmt.Fprintln(os.Stderr, "---")
 	fmt.Fprintln(os.Stderr, string(out.Metadata))
 	return nil
-}
-
-type tokenListItem struct {
-	Prefix     string   `json:"prefix"`
-	Kind       string   `json:"kind"`
-	Principal  string   `json:"principal"`
-	Scopes     []string `json:"scopes"`
-	Metered    bool     `json:"metered,omitempty"`
-	LastUsedAt *int64   `json:"last_used_at,omitempty"`
-	RevokedAt  *int64   `json:"revoked_at,omitempty"`
 }
 
 func runTokensList(args []string) error {
@@ -121,38 +101,26 @@ func runTokensList(args []string) error {
 	if err := requireController(prof, "tokens list"); err != nil {
 		return err
 	}
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	if *prefix != "" {
-		return printTokenRecord(prof.ControllerURL(), prof.ControllerToken(), *prefix)
+		return printTokenRecord(c, *prefix)
 	}
-	q := url("")
-	if *kind != "" {
-		q = q.with("kind", *kind)
-	}
-	if *includeRevoked {
-		q = q.with("include_revoked", "1")
-	}
-	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens"+q.encode())
+	tokens, err := c.ListTokens(context.Background(), *kind, *includeRevoked)
 	if err != nil {
 		return err
 	}
-	var out struct {
-		Tokens []tokenListItem `json:"tokens"`
-	}
-	if err := json.Unmarshal(resp, &out); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
 
 	if *outputFormat == "json" {
-		return renderTokensJSON(os.Stdout, out.Tokens)
+		return renderTokensJSON(os.Stdout, tokens)
 	}
-	return renderTokensTable(os.Stdout, out.Tokens)
+	return renderTokensTable(os.Stdout, tokens)
 }
 
-func renderTokensJSON(w io.Writer, tokens []tokenListItem) error {
+func renderTokensJSON(w io.Writer, tokens []client.TokenInfo) error {
 	return ndjson.Write(w, tokens)
 }
 
-func renderTokensTable(w io.Writer, tokens []tokenListItem) error {
+func renderTokensTable(w io.Writer, tokens []client.TokenInfo) error {
 	if len(tokens) == 0 {
 		_, err := fmt.Fprintln(w, "(no tokens)")
 		return err
@@ -204,15 +172,16 @@ func runTokensRevoke(args []string) error {
 	if err := requireController(prof, "tokens revoke"); err != nil {
 		return err
 	}
-	if _, err := tokensDelete(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix); err != nil {
+	if err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+		RevokeToken(context.Background(), *prefix); err != nil {
 		return err
 	}
 	fmt.Printf("revoked %s\n", *prefix)
 	return nil
 }
 
-func printTokenRecord(controllerURL, token, prefix string) error {
-	resp, err := tokensGet(controllerURL, token, "/api/v1/tokens/"+prefix)
+func printTokenRecord(c *client.Client, prefix string) error {
+	resp, err := c.LookupToken(context.Background(), prefix)
 	if err != nil {
 		return err
 	}
@@ -244,115 +213,16 @@ func runTokensRotate(args []string) error {
 	if err := requireController(prof, "tokens rotate"); err != nil {
 		return err
 	}
-	body := map[string]any{
-		"grace_secs": int64((*grace).Seconds()),
-	}
-	if *ttl > 0 {
-		body["ttl_secs"] = int64((*ttl).Seconds())
-	}
-	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix+"/rotate", body)
+	out, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+		RotateToken(context.Background(), *prefix, *grace, *ttl)
 	if err != nil {
-		return err
-	}
-	var out struct {
-		Token       string          `json:"token"`
-		New         json.RawMessage `json:"new"`
-		OldRevoked  int64           `json:"old_revoked_at"`
-		OldReplaced string          `json:"old_replaced_by"`
-	}
-	if err := json.Unmarshal(resp, &out); err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "WARNING: stash this new token NOW. The old token continues working until the grace window closes.")
 	fmt.Println(out.Token)
 	fmt.Fprintf(os.Stderr, "---\nold prefix=%s revoked_at=%d\nnew metadata: %s\n",
-		*prefix, out.OldRevoked, string(out.New))
+		*prefix, out.OldRevokedAt, string(out.New))
 	return nil
-}
-
-func tokensPost(controller, token, path string, body any) ([]byte, error) {
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(controller, "/")+path, bytes.NewReader(buf))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	return doTokenReq(req)
-}
-
-func tokensPut(controller, token, path string, body any) ([]byte, error) {
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest(http.MethodPut, strings.TrimRight(controller, "/")+path, bytes.NewReader(buf))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	return doTokenReq(req)
-}
-
-func tokensGet(controller, token, path string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(controller, "/")+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	return doTokenReq(req)
-}
-
-func tokensDelete(controller, token, path string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodDelete, strings.TrimRight(controller, "/")+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	return doTokenReq(req)
-}
-
-func doTokenReq(req *http.Request) ([]byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("%s %s -> %d: %s", req.Method, req.URL.Path, resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	return body, nil
-}
-
-type urlQuery struct {
-	parts []string
-}
-
-func url(_ string) urlQuery { return urlQuery{} }
-
-func (q urlQuery) with(k, v string) urlQuery {
-	return urlQuery{parts: append(q.parts, k+"="+v)}
-}
-
-func (q urlQuery) encode() string {
-	if len(q.parts) == 0 {
-		return ""
-	}
-	return "?" + strings.Join(q.parts, "&")
 }
 
 func splitCSV(s string) []string {

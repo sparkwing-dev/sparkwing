@@ -297,10 +297,7 @@ func (s3StateAdapter) ReconcileOrphanedLocalRuns(context.Context, time.Duration)
 
 var _ StateBackend = (*client.Client)(nil)
 
-func RemoteBackends(ctx context.Context, c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
-	if logs == nil {
-		logs = NewHTTPLogsWithToken(remoteLogsURL(ctx, c), nil, c.Token(), nil)
-	}
+func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
 	if h, ok := logs.(*HTTPLogs); ok {
 		logs = h.WithLiveSink(c)
 	}
@@ -315,13 +312,21 @@ func RemoteBackends(ctx context.Context, c *client.Client, logs LogBackend, art 
 	}
 }
 
-func remoteLogsURL(ctx context.Context, c *client.Client) string {
+// DiscoverLogsURL returns the logs service URL the controller announces on
+// GET /api/v1/services, or an error naming the controller when it announces
+// none. Only sparkwing-logs routes /api/v1/logs, so the controller's own URL
+// is never a substitute.
+func DiscoverLogsURL(ctx context.Context, controllerURL, token string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, logsDiscoveryTimeout)
 	defer cancel()
-	if svc, err := discovery.ServicesFor(ctx, c.BaseURL(), c.Token()); err == nil && svc.Logs != "" {
-		return svc.Logs
+	svc, err := discovery.ServicesFor(ctx, controllerURL, token)
+	if err != nil {
+		return "", fmt.Errorf("discover the logs service from controller %s: %w; name one with the profile's logs.url or SPARKWING_LOGS_URL", controllerURL, err)
 	}
-	return c.BaseURL()
+	if svc.Logs == "" {
+		return "", fmt.Errorf("controller %s announces no logs service (start it with --logs-url); name one with the profile's logs.url or SPARKWING_LOGS_URL", controllerURL)
+	}
+	return svc.Logs, nil
 }
 
 const logsDiscoveryTimeout = 3 * time.Second

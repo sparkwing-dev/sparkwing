@@ -263,7 +263,9 @@ func TestRunnerTokenIsBoundToTheTeamThatMintedIt(t *testing.T) {
 	if code := f.call("POST", "/api/v1/team/runner-tokens", a.auth, map[string]any{"name": "a-box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint = %d", code)
 	}
-	if !strings.HasPrefix(minted.Command, "SPARKWING_AGENT_TOKEN="+minted.Token+" sparkwing-runner runner --controller ") ||
+	if !strings.Contains(minted.Command, "printf '%s' "+minted.Token+" > ") ||
+		!strings.Contains(minted.Command, " && sparkwing-runner runner --credentials-dir ") ||
+		strings.Contains(minted.Command, "SPARKWING_AGENT_TOKEN") ||
 		!strings.Contains(minted.Command, " --also-claim-triggers ") ||
 		!strings.Contains(minted.Command, " --max-claims-before-restart 0 ") ||
 		strings.Contains(minted.Command, "--gitcache") ||

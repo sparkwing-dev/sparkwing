@@ -161,24 +161,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	}
 
 	var ctrl *controller.Server
-	if !useS3OnlyReader {
-		ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
-		if err != nil {
-			return fmt.Errorf("local secrets key: %w", err)
-		}
-		ctrl = controller.New(st, nil).
-			WithArtifactStore(opts.ArtifactStore).
-			WithSecretsCipher(ring.For(st)).
-			WithLocalExecution().
-			WithReconcileHook(func(rctx context.Context) error {
-				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
-				return err
-			})
-		if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil, opts.Version); err != nil {
-			return err
-		}
-	}
-
 	var dashBackend backend.Backend
 	if useS3OnlyReader {
 		s3b := backend.NewS3Backend(opts.ArtifactStore, opts.LogStore)
@@ -190,16 +172,39 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		})
 		dashBackend = s3b
 	} else {
-		sb := backend.NewStoreBackend(st, paths, opts.LogStore)
-		sb.SetCapabilities(backend.Capabilities{
-			Mode:     "local",
-			Storage:  backendCapabilitiesStorage(opts, "sqlite"),
-			Features: localFeatures(),
-		})
-		dashBackend = sb
+		ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+		if err != nil {
+			return fmt.Errorf("local secrets key: %w", err)
+		}
+		ctrl = controller.New(st, nil).
+			WithArtifactStore(opts.ArtifactStore).
+			WithSecretsCipher(ring.For(st)).
+			WithLocalExecution().
+			WithReconcileHook(func(rctx context.Context) error {
+				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
+				return err
+			}).
+			WithDashboard(controller.Dashboard{
+				Local:   true,
+				Bundle:  bundle,
+				Version: opts.Version,
+				Logs:    opts.LogStore,
+				Paths:   paths,
+				Capabilities: backend.Capabilities{
+					Mode:     "local",
+					Storage:  backendCapabilitiesStorage(opts, "sqlite"),
+					Features: localFeatures(),
+				},
+			})
+		if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil, opts.Version); err != nil {
+			return err
+		}
 	}
 
 	baseURL := "http://" + opts.Addr
+	if ctrl != nil && logsSrv != nil {
+		ctrl.WithLogsURL(baseURL)
+	}
 	if err := writeDevEnv(paths.Root, baseURL); err != nil {
 		return fmt.Errorf("write dev.env: %w", err)
 	}
@@ -272,44 +277,22 @@ func buildHandler(
 	parts handlerParts,
 	bundle fs.FS,
 ) http.Handler {
-	webOpts := web.HandlerOptions{
-		Backend: parts.backend,
-		Paths:   parts.paths,
-		Version: opts.Version,
-	}
-	webHandler := web.HandlerFromOptionsWithBundle(webOpts, bundle)
-
 	root := http.NewServeMux()
 	root.Handle("GET /api/v1/version", versionHandler(opts.Version, opts.Instance))
-	root.Handle("GET /api/v1/runs/grep", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/logs/{node}", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/events/stream", webHandler)
-	root.Handle("GET /api/v1/capabilities", web.CapabilitiesHandler(parts.backend))
-	if parts.s3OnlyReader {
-		root.Handle("GET /api/v1/runs", web.ListRunsHandler(parts.backend))
-		root.Handle("GET /api/v1/runs/{id}", web.GetRunHandler(parts.backend))
-	}
-	if parts.logs != nil {
-		root.Handle("/api/v1/logs/", parts.logs.Handler())
-	}
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	root.Handle("GET /api/v1/queue", queueHandler(parts.paths.Root, opts.Version))
 	registerCronRoutes(root, &cronsAPI{store: parts.store, paths: parts.paths, readOnly: opts.ReadOnly})
-	// safety: the controller claims all of /api/v1/, so dashboard-owned routes
-	// must be named here to remain reachable.
-	root.Handle("GET /api/v1/capacity/profiles", webHandler)
-	root.Handle("GET /api/v1/capacity/profiles/explain", webHandler)
+	if parts.logs != nil {
+		root.Handle("/api/v1/logs/", parts.logs.Handler())
+	}
 	if parts.ctrl != nil {
-		ctrlHandler := parts.ctrl.Handler()
-		root.Handle("/api/v1/", ctrlHandler)
-		root.Handle("/webhooks/", ctrlHandler)
 		// safety: this API has no sign-in, so a masked value never leaves it;
 		// the dashboard lists, writes and deletes rows without reading one.
 		root.Handle("GET /api/v1/secrets/{name}", http.NotFoundHandler())
+		root.Handle("/", parts.ctrl.Handler())
+	} else {
+		registerObjectStoreDashboard(root, parts.backend, opts.Version, bundle)
 	}
-	root.Handle("/", webHandler)
 
 	var handler http.Handler = root
 	if parts.store != nil {
@@ -325,8 +308,26 @@ func buildHandler(
 	if parts.serveToken != "" {
 		handler = requireServeToken(handler, parts.serveToken)
 	}
-	return web.SecurityHeadersMiddleware(webOpts,
+	return web.SecurityHeaders(false,
 		originguard.Guard(handler, originguard.NewPolicy(opts.Addr, opts.AllowRemote, opts.AllowOrigins)))
+}
+
+// safety: with no local store there is no controller, so the object-store reader answers the dashboard's reads
+// itself; it has no write route to offer.
+func registerObjectStoreDashboard(mux *http.ServeMux, b backend.Backend, version string, bundle fs.FS) {
+	mux.Handle("GET /api/v1/capabilities", web.CapabilitiesHandler(b))
+	mux.Handle("GET /api/v1/runs", web.ListRunsHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}", web.GetRunHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs", web.RunLogsHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs/search", web.RunLogsSearchHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", web.NodeLogsHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", web.NodeLogStreamHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", web.NodeLogCompletenessHandler(b))
+	mux.Handle("GET /api/v1/runs/grep", web.RunsGrepHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/events/stream", web.EventsStreamHandler(b))
+	mux.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(version, false))
+	mux.Handle("/api/", http.NotFoundHandler())
+	mux.Handle("/", web.Pages(bundle))
 }
 
 func localPaths(home string) (orchestrator.Paths, error) {

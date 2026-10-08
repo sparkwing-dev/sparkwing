@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
 // UnavailableRetries is how many times a client repeats a request the server
@@ -27,8 +29,9 @@ const MaxUnavailableWait = 5 * time.Second
 // server says the condition will not clear; only a server that invites the
 // caller back gets another attempt.
 func (c *Client) do(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	if c.token != "" {
-		req = req.Clone(req.Context())
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	for attempt := 0; ; attempt++ {

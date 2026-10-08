@@ -38,7 +38,11 @@ func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 	if onTimeout == "" {
 		onTimeout = store.ApprovalOnTimeoutFail
 	}
-	if err := s.store.CreateApproval(r.Context(), store.Approval{
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.CreateApproval(r.Context(), store.Approval{
 		RunID:       runID,
 		NodeID:      nodeID,
 		RequestedAt: time.Now(),
@@ -46,6 +50,10 @@ func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 		TimeoutMS:   body.TimeoutMS,
 		OnTimeout:   onTimeout,
 	}); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -88,7 +96,11 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 		approver = "unknown"
 	}
 
-	got, err := s.store.ResolveApproval(r.Context(), runID, nodeID,
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	got, err := tenant.ResolveApproval(r.Context(), runID, nodeID,
 		body.Resolution, approver, body.Comment)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -114,7 +126,11 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	a, err := s.store.GetApproval(r.Context(), runID, nodeID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	a, err := tenant.GetApproval(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -128,7 +144,11 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	rows, err := s.store.ListApprovalsForRun(r.Context(), runID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	rows, err := tenant.ListApprovalsForRun(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

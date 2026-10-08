@@ -71,12 +71,13 @@ spec:
             {{- /*
               Announced so a client with no logs: surface of its own -- a
               laptop running `sparkwing run --profile prod` -- posts node
-              log lines to the logs service. The controller serves no
-              /api/v1/logs route, and without this a client falls back to
-              the controller's URL and every append 404s. The in-cluster
-              runner is unaffected: its Deployment passes --logs directly.
+              log lines to the logs service. The controller accepts no log
+              appends, and without this a client falls back to the
+              controller's URL and every append 404s. The dashboard's log
+              panes read through the same service. The in-cluster runner
+              is unaffected: its Deployment passes --logs directly.
             */}}
-            {{- $logsURL := include "sparkwing-full.web.logsURL" . }}
+            {{- $logsURL := include "sparkwing-full.controller.logsURL" . }}
             {{- if $logsURL }}
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
@@ -134,6 +135,12 @@ spec:
             - {{ printf "%s=%s" $limit.flag (toString $value) | quote }}
             {{- end }}
             {{- end }}
+            {{- end }}
+            {{- if and .Values.ingress.enabled .Values.ingress.tls }}
+            - "--hsts"
+            {{- end }}
+            {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (kindIs "bool" .Values.ingress.allowInsecure) .Values.ingress.allowInsecure }}
+            - "--insecure-cookies"
             {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}

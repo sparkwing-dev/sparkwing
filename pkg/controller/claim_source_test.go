@@ -156,7 +156,7 @@ func TestRunCacheGrant_IsBoundToTheClaim(t *testing.T) {
 	if binaryOnly, err := controller.VerifyLiveDataGrant(ctx, f.srv, out.Grant); err != nil || !binaryOnly {
 		t.Fatalf("live plan grant = %v, %v; want accepted and binary-only", binaryOnly, err)
 	}
-	if err := f.store.RequestCancel(ctx, "run-grant"); err != nil {
+	if err := f.teamOf(olga).RequestCancel(ctx, "run-grant"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.VerifyLiveDataGrant(ctx, f.srv, out.Grant); err == nil {

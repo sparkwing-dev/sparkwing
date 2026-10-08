@@ -13,6 +13,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
@@ -228,7 +230,7 @@ func revokeCloudToken(prof *profile.Profile, revokeWith string) {
 		fmt.Fprintf(os.Stderr, "revoke it from an admin profile with:\n  sparkwing cluster tokens revoke --profile ADMIN --prefix %s\n", prefix)
 		return
 	}
-	if _, err := tokensDelete(prof.ControllerURL(), revokeWith, "/api/v1/tokens/"+prefix); err != nil {
+	if err := client.NewWithToken(prof.ControllerURL(), nil, revokeWith).RevokeToken(context.Background(), prefix); err != nil {
 		fmt.Fprintf(os.Stderr, "leaving the token %s live: %v\n", prefix, err)
 		fmt.Fprintf(os.Stderr, "revoke it from an admin profile with:\n  sparkwing cluster tokens revoke --profile ADMIN --prefix %s\n", prefix)
 		return
@@ -239,11 +241,11 @@ func revokeCloudToken(prof *profile.Profile, revokeWith string) {
 // safety: the profile names a prefix, not a promise about it; revoking a runner
 // or service token here would cut a machine off its controller.
 func requireCloudUserToken(controllerURL, adminToken, prefix string) error {
-	resp, err := tokensGet(controllerURL, adminToken, "/api/v1/tokens/"+prefix)
+	resp, err := client.NewWithToken(controllerURL, nil, adminToken).LookupToken(context.Background(), prefix)
 	if err != nil {
 		return fmt.Errorf("look up the token %s: %w", prefix, err)
 	}
-	var found tokenListItem
+	var found client.TokenInfo
 	if err := json.Unmarshal(resp, &found); err != nil {
 		return fmt.Errorf("decode the token %s: %w", prefix, err)
 	}
@@ -339,33 +341,9 @@ func mintCloudUserToken(controllerURL, adminToken, principal string, scopes []st
 	if len(scopes) == 0 {
 		return mintedToken{}, errors.New("cloud connect: --scope selected no scopes")
 	}
-	resp, err := tokensPost(controllerURL, adminToken, "/api/v1/tokens", map[string]any{
-		"kind":      store.TokenKindUser,
-		"principal": principal,
-		"scopes":    scopes,
+	return mintToken(controllerURL, adminToken, client.CreateTokenRequest{
+		Kind: store.TokenKindUser, Principal: principal, Scopes: scopes,
 	})
-	if err != nil {
-		return mintedToken{}, err
-	}
-	var out struct {
-		Token    string `json:"token"`
-		Metadata struct {
-			Prefix string `json:"prefix"`
-		} `json:"metadata"`
-	}
-	if err := json.Unmarshal(resp, &out); err != nil {
-		return mintedToken{}, fmt.Errorf("decode minted token: %w", err)
-	}
-	if out.Token == "" {
-		return mintedToken{}, errors.New("the controller returned no token")
-	}
-	minted := mintedToken{Raw: out.Token, Prefix: out.Metadata.Prefix}
-	if minted.Prefix == "" {
-		if minted.Prefix, err = tokenPrefix(out.Token); err != nil {
-			return mintedToken{}, err
-		}
-	}
-	return minted, nil
 }
 
 func printAnnouncedDashboard(ctx context.Context, prof *profile.Profile) {

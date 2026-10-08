@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -34,8 +35,8 @@ func runLaunchCLI(args []string) error {
 	fs.DurationVar(&cfg.Deadline, "deadline", launcher.MaxDeadline, "a Job's life and its claim token's")
 	fs.StringVar(&cfg.ScratchLimit, "scratch", "", "size limit of a Job's scratch volume (default 20Gi)")
 	poll := fs.Duration("poll", time.Second, "how often an idle launcher asks for work")
-	token := fs.String("token", os.Getenv("SPARKWING_AGENT_TOKEN"),
-		"the launcher's claims.launch bearer token (env: SPARKWING_AGENT_TOKEN)")
+	credentialsDir := fs.String(credentials.FlagName, "",
+		"directory holding "+agentTokenCredential+", the launcher's claims.launch bearer token (required)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -52,8 +53,16 @@ func runLaunchCLI(args []string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if *token == "" {
-		return errors.New("launch: a claims.launch token is required")
+	creds, err := credentials.Open(*credentialsDir)
+	if err != nil {
+		return err
+	}
+	token, err := creds.Read(agentTokenCredential)
+	if err != nil {
+		return err
+	}
+	if token == "" {
+		return errors.New("launch: a claims.launch token is required in " + agentTokenCredential + " under --" + credentials.FlagName)
 	}
 	rc, err := rest.InClusterConfig()
 	if err != nil {
@@ -70,7 +79,7 @@ func runLaunchCLI(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	l := &launcher.Launcher{
-		Kube: kube, Ctrl: client.NewWithToken(cfg.ControllerURL, nil, *token), Config: cfg,
+		Kube: kube, Ctrl: client.NewWithToken(cfg.ControllerURL, nil, token), Config: cfg,
 		Holder: "launcher:" + holder, Poll: *poll, Logger: slog.Default(),
 	}
 	return l.Run(ctx)

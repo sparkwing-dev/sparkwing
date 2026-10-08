@@ -15,26 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-// safety: records what each tick asked for, so a test can tell one dispatch
-// from two.
-type countingDispatcher struct {
-	mu   sync.Mutex
-	runs []RunRequest
-}
-
-func (d *countingDispatcher) Dispatch(_ context.Context, req RunRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.runs = append(d.runs, req)
-	return nil
-}
-
-func (d *countingDispatcher) count() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return len(d.runs)
-}
-
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	svc := &crons.Service{Store: st}
@@ -71,9 +51,9 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	// safety: both evaluators read the same instant two minutes on, so one due
 	// instant exists without the test waiting a minute for the clock.
 	ahead := func() time.Time { return time.Now().Add(2 * time.Minute) }
-	alpha := New(st, nil).WithDispatcher(&countingDispatcher{})
+	alpha := New(st, nil)
 	alpha.cronHolder, alpha.cronNow = "alpha", ahead
-	beta := New(st, nil).WithDispatcher(&countingDispatcher{})
+	beta := New(st, nil)
 	beta.cronHolder, beta.cronNow = "beta", ahead
 
 	ctx := context.Background()
@@ -113,11 +93,6 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 
 	if peak > 1 {
 		t.Errorf("%d controllers held the tick at once, want at most 1", peak)
-	}
-
-	dispatched := alpha.dispatcher.(*countingDispatcher).count() + beta.dispatcher.(*countingDispatcher).count()
-	if dispatched != 1 {
-		t.Fatalf("two controllers dispatched %d runs for one due instant, want 1", dispatched)
 	}
 
 	triggers, err := st.ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
@@ -165,7 +140,7 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	sched := armPushedForTick(t, st)
 
-	srv := New(st, nil).WithDispatcher(&countingDispatcher{})
+	srv := New(st, nil)
 	launcher := cronLauncher{server: srv}
 	due := time.Now().UTC().Truncate(time.Minute)
 
@@ -180,8 +155,8 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	if second != first {
 		t.Errorf("the repeated instant started run %s, want the first run %s", second, first)
 	}
-	if got := srv.dispatcher.(*countingDispatcher).count(); got != 1 {
-		t.Errorf("dispatched %d runs, want 1", got)
+	if triggers, err := st.ListTriggers(context.Background(), store.TriggerFilter{Pipelines: []string{"nightly"}}); err != nil || len(triggers) != 1 {
+		t.Errorf("recorded %d runs (%v), want 1", len(triggers), err)
 	}
 }
 
@@ -267,7 +242,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	}
 	id := report.Schedules[0].ID
 
-	srv := New(st, nil).WithDispatcher(&countingDispatcher{})
+	srv := New(st, nil)
 	srv.cronNow = func() time.Time { return time.Now().Add(2 * time.Minute) }
 	srv.cronTickOnce(ctx)
 

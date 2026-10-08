@@ -26,7 +26,7 @@ The controller refuses to start with some of the App settings and not the others
 
 ### GitHub App settings
 
-The examples use the hosted deployment's hosts: the dashboard at `console.sparkwing.dev` and the controller at `api.sparkwing.dev`. A self-hosted deployment puts its own dashboard URL (`--dashboard-url` or `SPARKWING_DASHBOARD_URL`) and controller external URL (`--external-url` or `SPARKWING_EXTERNAL_URL`) in their place.
+The examples use the hosted deployment's hosts: the dashboard at `console.sparkwing.dev` and the API at `api.sparkwing.dev`. Both route to the controller, which serves the dashboard and the API on one listener. A self-hosted deployment puts its own dashboard URL (`--dashboard-url` or `SPARKWING_DASHBOARD_URL`) and controller external URL (`--external-url` or `SPARKWING_EXTERNAL_URL`) in their place, and may use one host for both.
 
 - **Webhook**: active. URL `https://api.sparkwing.dev/webhooks/github-app`. Secret: the webhook secret above.
 - **Setup URL**: `https://console.sparkwing.dev/github/app/setup`, with **Redirect on update** checked.
@@ -41,14 +41,14 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 
 Only a team owner connects, and only as a signed-in account with a linked GitHub identity, which a Google-first account adds from **Account -> Linked sign-ins** ([linked sign-ins](auth.md#linked-sign-ins)). Unlinking that GitHub sign-in later leaves the installations the account connected bound to their teams. In the dashboard, the owner opens **Team -> GitHub** and chooses **Connect GitHub**; the tab appears when `GET /api/v1/capabilities` reports `github_app`. Readers and editors see the same tab read-only.
 
-1. The dashboard calls `POST /api/v1/team/github-app/connect {redirect_uri}` and gets `{install_url, authorize_url, state, verifier}`. It keeps `state` and `verifier` in a short-lived `__Host-` cookie and sends the browser to `install_url`.
-2. GitHub returns the browser to the setup URL with `installation_id`, `setup_action` and `state`. The dashboard checks `state` against its cookie, keeps `installation_id` in the cookie, and sends the browser to `authorize_url`.
-3. GitHub returns the browser to the callback with `code` and `state`. The dashboard checks `state` again and calls `POST /api/v1/team/github-app/connect/complete {state, verifier, code, installation_id, redirect_uri}`.
+1. **Connect GitHub** posts to the controller's `/github/app/connect` with the session's CSRF token. The controller creates the install URL, the authorize URL, a state and a PKCE verifier, keeps the state and verifier in a short-lived `__Host-` cookie, and sends the browser to the install URL.
+2. GitHub returns the browser to the setup URL, `/github/app/setup`, with `installation_id`, `setup_action` and `state`. The controller checks `state` against the cookie, keeps `installation_id` in the cookie, and sends the browser to the authorize URL.
+3. GitHub returns the browser to the callback, `/github/app/callback`, with `code` and `state`. The controller checks `state` again, keeps the code in the cookie, and moves on to `/github/app/complete`, a same-site request that carries the session and binds the installation.
 
-The `installation_id` the dashboard sends is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the dashboard origin before `connect/complete` uses the session. A setup return with `setup_action=request` means an organization owner must approve the install; the dashboard says so and the owner connects again after the approval.
+The `installation_id` the controller binds is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the controller's own origin before the session is used. A setup return with `setup_action=request` means an organization owner must approve the install; the controller's page says so and the owner connects again after the approval.
 
 When an administrator changes repository access on GitHub outside a connect flow,
-GitHub returns to the setup URL with `setup_action=update`, and the dashboard
+GitHub returns to the setup URL with `setup_action=update`, and the controller
 opens **Team → GitHub** with “Repository access updated on GitHub”.
 
 The controller binds the installation to the caller's active team only when all of these hold:

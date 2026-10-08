@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/api"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -67,7 +68,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 		t.Fatalf("default team holds %d schedules (err %v), want none", len(own), err)
 	}
 
-	var overview crons.OverviewView
+	var overview api.OverviewView
 	f.call(http.MethodGet, "/api/v1/crons", f.writer, nil, http.StatusOK, &overview)
 	if len(overview.Schedules) != 0 {
 		t.Errorf("the default team lists %d of team B's schedules", len(overview.Schedules))
@@ -138,7 +139,7 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 	writerB := teamToken(t, tenantB, controller.ScopeRunsRead, controller.ScopeRunsControl)
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, nil)
 
-	var launched crons.RunEnvelope
+	var launched api.RunEnvelope
 	f.call(http.MethodPost, "/api/v1/crons/acme%2Fwidgets%2Fnightly/run", writerB, nil, http.StatusOK, &launched)
 
 	ctx := context.Background()

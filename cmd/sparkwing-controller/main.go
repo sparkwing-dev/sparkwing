@@ -15,6 +15,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
@@ -24,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -292,6 +294,14 @@ func run(args []string) error {
 			"waitlist whatever the operator's stored setting says; open defers to "+
 			"that setting, which PUT /api/v1/signups changes. Existing accounts are "+
 			"never affected.")
+	hsts := fs.Bool("hsts", false,
+		"assert that browsers reach this controller's dashboard over TLS: send "+
+			"Strict-Transport-Security and require an https origin on cookie-authenticated "+
+			"writes. Unneeded when a proxy reaching --trusted-proxy-addr forwards X-Forwarded-Proto")
+	insecureCookies := fs.Bool("insecure-cookies", false,
+		"drop Secure and the __Host- prefix from the dashboard's session cookies so a browser "+
+			"keeps a session over plain HTTP. Only for a dashboard published without TLS: the "+
+			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -406,7 +416,10 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	bootstrapToken, bterr := loadBootstrapAdminToken(*bootstrapAdminTokenFile)
@@ -567,7 +580,7 @@ func run(args []string) error {
 		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
 		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
 		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
-		client, _, _, err := storeurl.OpenS3(ctx, rawStore)
+		client, _, _, err := s3store.Open(ctx, rawStore)
 		if err != nil {
 			return fmt.Errorf("download signer S3: %w", err)
 		}
@@ -576,7 +589,7 @@ func run(args []string) error {
 		}
 	}
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
-		client, bucket, prefix, err := storeurl.OpenS3(ctx, *cacheBlobStore)
+		client, bucket, prefix, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
@@ -589,6 +602,7 @@ func run(args []string) error {
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err
 	}
+	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
 	return controller.ServeWith(ctx, srv, *addr)
 }
 
@@ -902,7 +916,7 @@ func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Dur
 	if raw == "" {
 		return nil, nil
 	}
-	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	client, bucket, prefix, err := s3store.Open(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -930,4 +944,27 @@ func applyBucketCeiling(cfg objectguard.CeilingConfig) error {
 	}
 	limiter.Ceiling().Configure(cfg)
 	return nil
+}
+
+// safety: a source build carries no dashboard bundle, so the controller still starts and serves its API and
+// sign-in pages; its dashboard pages name the build step instead.
+func dashboard(p paths.Paths, hsts, insecureCookies bool) controller.Dashboard {
+	d := controller.Dashboard{
+		Version:         Version,
+		HSTS:            hsts,
+		InsecureCookies: insecureCookies,
+		Paths:           p,
+		Capabilities: backend.Capabilities{
+			Mode:     "cluster",
+			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "sparkwinglogs", Runs: "controller"},
+			Features: []string{"pipelines", "runs", "logs", "secrets", "approvals", "cross-pipeline-refs"},
+		},
+	}
+	if web.VerifyBundleEmbedded() == nil {
+		d.Bundle = web.BundleFS()
+	} else {
+		fmt.Fprintln(os.Stderr, "sparkwing-controller: this build carries no dashboard bundle; "+
+			"dashboard pages answer 503 until a build that ran bin/build-web.sh is deployed")
+	}
+	return d
 }

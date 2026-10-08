@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -133,7 +135,7 @@ func TestControllerCrons_PushStoresRowsAndListsThem(t *testing.T) {
 		t.Fatalf("push returned %v, want two schedules", pushed["schedules"])
 	}
 
-	var overview crons.OverviewView
+	var overview api.OverviewView
 	f.call(http.MethodGet, "/api/v1/crons", f.reader, nil, http.StatusOK, &overview)
 	if len(overview.Schedules) != 2 {
 		t.Fatalf("overview holds %d schedules, want two", len(overview.Schedules))
@@ -144,7 +146,7 @@ func TestControllerCrons_PushStoresRowsAndListsThem(t *testing.T) {
 	if overview.Health.Timer.Detail != crons.ControllerTimerDetail {
 		t.Errorf("timer detail = %q, want %q", overview.Health.Timer.Detail, crons.ControllerTimerDetail)
 	}
-	byName := map[string]crons.ScheduleView{}
+	byName := map[string]api.ScheduleView{}
 	for _, view := range overview.Schedules {
 		byName[view.Name] = view
 	}
@@ -198,7 +200,7 @@ func TestControllerCrons_DetailCarriesFiresAndUpcoming(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 
-	var detail crons.DetailView
+	var detail api.DetailView
 	f.call(http.MethodGet, "/api/v1/crons/acme%2Fwidgets%2Fnightly", f.reader, nil, http.StatusOK, &detail)
 	if detail.Schedule.Pipeline != "nightly" {
 		t.Fatalf("schedule = %+v", detail.Schedule)
@@ -217,7 +219,7 @@ func TestControllerCrons_PauseResumeAndOverride(t *testing.T) {
 	f.push(cronPushBody())
 	const path = "/api/v1/crons/acme%2Fwidgets%2Fnightly"
 
-	var env crons.ScheduleEnvelope
+	var env api.ScheduleEnvelope
 	f.call(http.MethodPost, path+"/pause", f.writer, nil, http.StatusOK, &env)
 	if env.Schedule.State != crons.StatePaused {
 		t.Errorf("state = %q, want paused", env.Schedule.State)
@@ -257,7 +259,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	f.push(cronPushBody())
 	const path = "/api/v1/crons/acme%2Fwidgets%2Fnightly"
 
-	var launched crons.RunEnvelope
+	var launched api.RunEnvelope
 	f.call(http.MethodPost, path+"/run", f.writer, nil, http.StatusOK, &launched)
 	if launched.RunID == "" {
 		t.Fatal("run now named no run")
@@ -327,7 +329,7 @@ func TestControllerCrons_DisarmAndDeleteRepo(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 
-	var env crons.ScheduleEnvelope
+	var env api.ScheduleEnvelope
 	f.call(http.MethodPost, "/api/v1/crons/acme%2Fwidgets%2Fsweep%2Fquick/disarm", f.writer, nil,
 		http.StatusOK, &env)
 	if env.Schedule.Name != "acme/widgets/sweep/quick" {
@@ -340,7 +342,7 @@ func TestControllerCrons_DisarmAndDeleteRepo(t *testing.T) {
 	if removed["removed"] != float64(1) {
 		t.Errorf("removed = %v, want the one remaining row", removed["removed"])
 	}
-	var overview crons.OverviewView
+	var overview api.OverviewView
 	f.call(http.MethodGet, "/api/v1/crons", f.reader, nil, http.StatusOK, &overview)
 	if len(overview.Schedules) != 0 {
 		t.Errorf("overview still holds %d schedules", len(overview.Schedules))
@@ -406,7 +408,7 @@ func TestControllerCrons_HealthIsUnhealthyBeforeTheFirstTick(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 
-	var overview crons.OverviewView
+	var overview api.OverviewView
 	f.call(http.MethodGet, "/api/v1/crons", f.reader, nil, http.StatusOK, &overview)
 	if !overview.Health.TickStale {
 		t.Error("a controller that has never ticked reports a fresh tick")
@@ -420,7 +422,7 @@ func TestControllerCrons_OverrideRoundTripsAnEmptyArgumentSet(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 
-	var envelope crons.ScheduleEnvelope
+	var envelope api.ScheduleEnvelope
 	f.call(http.MethodPut, "/api/v1/crons/acme%2Fwidgets%2Fnightly/override", f.writer,
 		map[string]any{"args": map[string]string{}}, http.StatusOK, &envelope)
 	if len(envelope.Schedule.Effective.Args) != 0 {
@@ -443,7 +445,7 @@ func TestControllerCrons_OverrideValuesSurviveTheWire(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 
-	var envelope crons.ScheduleEnvelope
+	var envelope api.ScheduleEnvelope
 	f.call(http.MethodPut, "/api/v1/crons/acme%2Fwidgets%2Fnightly/override", f.writer,
 		map[string]any{"cron": "*/15 * * * *", "tz": "America/Denver", "overlap": "queue", "catch_up": "6h"},
 		http.StatusOK, &envelope)
@@ -490,7 +492,7 @@ func TestControllerCrons_DetailServesTheWholeRetainedHistory(t *testing.T) {
 		}
 	}
 
-	var detail crons.DetailView
+	var detail api.DetailView
 	f.call(http.MethodGet, "/api/v1/crons/"+id, f.reader, nil, http.StatusOK, &detail)
 	if len(detail.Fires) != seeded {
 		t.Errorf("detail carried %d fires, want the %d the store retains so `--fires N` is not capped below N",
@@ -510,7 +512,7 @@ func TestControllerCrons_APushWithNoSchedulesKeyWithdrawsEverything(t *testing.T
 		t.Fatalf("withdrawn = %v, want both schedules", out["withdrawn"])
 	}
 
-	var overview crons.OverviewView
+	var overview api.OverviewView
 	f.call(http.MethodGet, "/api/v1/crons", f.reader, nil, http.StatusOK, &overview)
 	for _, view := range overview.Schedules {
 		if view.Declared {

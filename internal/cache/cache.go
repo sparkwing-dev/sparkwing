@@ -145,14 +145,14 @@ func New(cfg Config) (*Server, error) {
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
 	cfg.GrantKey = strings.TrimSpace(cfg.GrantKey)
 	if cfg.GrantKey != "" && cfg.GrantKey == cfg.APIToken {
-		return nil, fmt.Errorf("cache: the grant key (--grant-key or $%s) is the operator token; "+
+		return nil, fmt.Errorf("cache: the grant key (%s) is the operator token (%s); "+
 			"give it a secret of its own, because whoever holds the key signs access to every team's tree",
-			authwire.CacheGrantKeyEnv)
+			authwire.CacheGrantKeyCredential, authwire.CacheTokenCredential)
 	}
 	if cfg.APIToken == "" {
 		if !cfg.AllowUnauthenticated {
-			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
-				"or pass --allow-unauthenticated to serve the git and blob endpoints to anyone who can reach the port")
+			return nil, fmt.Errorf("cache: an API token is required: put it in " + authwire.CacheTokenCredential +
+				" under --credentials-dir, or pass --allow-unauthenticated to serve the git and blob endpoints to anyone who can reach the port")
 		}
 		log.Printf("WARNING: sparkwing-cache is serving the git and blob endpoints without authentication (--allow-unauthenticated)")
 	} else {
@@ -193,7 +193,7 @@ func New(cfg Config) (*Server, error) {
 	// controller can count them, so a cache that could not ask it does not
 	// start rather than store every team's bytes uncounted.
 	if cfg.GrantKey != "" && cfg.BlobStore != "" && cfg.ControllerURL == "" {
-		return nil, fmt.Errorf("cache: --grant-key with --blob-store needs --controller, which counts what each team stores")
+		return nil, fmt.Errorf("cache: a grant key with --blob-store needs --controller, which counts what each team stores")
 	}
 	if cfg.StoreReconcile < 0 {
 		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
@@ -283,7 +283,11 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{cfg: cfg}
 	// bug: instruments bind to the meter provider current when they are created, so telemetry starts first.
-	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
+	tel, err := otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache", Prometheus: true})
+	if err != nil {
+		return nil, err
+	}
+	s.tel = tel
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()

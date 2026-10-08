@@ -62,7 +62,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 	}
 	// safety: an empty name silently lands runner pods on the namespace default SA
 	if cfg.ServiceAccount == "" {
-		return nil, fmt.Errorf("--runner-sa (or SPARKWING_RUNNER_SA) is required with --runner k8s")
+		return nil, fmt.Errorf("--runner-sa is required with --runner k8s")
 	}
 	pullPolicy, err := k8srunner.ParsePullPolicy(cfg.ImagePullPolicy)
 	if err != nil {

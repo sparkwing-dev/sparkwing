@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -194,7 +196,7 @@ func runCronsPauseResumeProfile(profileName, name, format string, pause bool) er
 	}
 	ctx, cancel := cronsRemoteContext()
 	defer cancel()
-	var view *crons.ScheduleView
+	var view *api.ScheduleView
 	if pause {
 		view, err = remote.api.PauseCron(ctx, name)
 	} else {

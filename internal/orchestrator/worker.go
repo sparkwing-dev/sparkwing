@@ -49,8 +49,12 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 
 	runCtx, cancelRun := context.WithCancel(ctx)
 	cancelled := &atomic.Bool{}
-	go runHeartbeat(runCtx, stateClient, trigger.ID,
-		opts.HeartbeatInterval, cancelRun, cancelled, logger)
+	// safety: the runner's trigger loop heartbeats the claim it holds, so a child
+	// that also beat it doubled every heartbeat; only a parent that does not asks.
+	if opts.HeartbeatInterval > 0 {
+		go runHeartbeat(runCtx, stateClient, trigger.ID,
+			opts.HeartbeatInterval, cancelRun, cancelled, logger)
+	}
 
 	var r runner.Runner
 	if opts.RunnerFactory != nil {
@@ -199,7 +203,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if opts.LogsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, nil, opts.Token, opts.Logger)
 	}
-	backends := RemoteBackends(ctx, stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)
 	if err != nil {
@@ -220,9 +224,6 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 	interval time.Duration,
 	cancelRun context.CancelFunc, cancelled *atomic.Bool, logger *slog.Logger,
 ) {
-	if interval <= 0 {
-		interval = runHeartbeatDefaultInterval
-	}
 	if interval < 100*time.Millisecond {
 		interval = 100 * time.Millisecond
 	}
@@ -272,8 +273,6 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 }
 
 var (
-	runHeartbeatDefaultInterval = 3 * time.Second
-
 	runHeartbeatTimeout = 2 * time.Second
 
 	runHeartbeatMaxSilence = 3 * time.Minute

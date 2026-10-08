@@ -39,7 +39,6 @@ func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
 		"SPARKWING_NODE_CLAIM_GENERATION=17",
 		"SPARKWING_NODE_CLAIM_MEMBERSHIP=membership-secret",
 		"SPARKWING_NODE_CLAIM_RESERVATION=reservation-secret",
-		"SPARKWING_TRIGGER_CLAIM_GENERATION=9",
 	}
 	got, err := remoteExecutionChildEnvironment(append(private,
 		"PATH=/safe/bin", "AWS_REGION=us-west-2", submissionEnvironmentAllowKey+"=AWS_REGION"))
@@ -598,5 +597,62 @@ func TestRemoteExecutionBrokerProducerMetadataScope(t *testing.T) {
 				t.Fatalf("status = %d, want 403", resp.StatusCode)
 			}
 		})
+	}
+}
+
+func TestRemoteExecutionBrokerReadsHierarchicalNodeIDs(t *testing.T) {
+	var mu sync.Mutex
+	var forwarded []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		forwarded = append(forwarded, r.URL.EscapedPath())
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "build/linux", store.NodeClaimFence{}, nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+
+	get := func(path string) int {
+		t.Helper()
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, broker.URL()+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+broker.capability)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, path := range []string{
+		"/api/v1/runs/run-1/nodes/build%2Flinux",
+		"/api/v1/runs/run-1/nodes/build%2Flinux/output",
+		"/api/v1/runs/run-1/nodes/test%2Fdarwin%2Farm64/output",
+	} {
+		if status := get(path); status != http.StatusNoContent {
+			t.Errorf("GET %s = %d, want it forwarded", path, status)
+		}
+	}
+	for _, path := range []string{
+		"/api/v1/runs/run-1/nodes/build%2F..%2Fother",
+		"/api/v1/runs/run-1/nodes/%2Fbuild/output",
+		"/api/v1/runs/run-1/nodes/build%5Clinux",
+		"/api/v1/runs/run-1/nodes/test%2Fdarwin",
+	} {
+		if status := get(path); status != http.StatusForbidden {
+			t.Errorf("GET %s = %d, want 403", path, status)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(forwarded) != 3 || forwarded[0] != "/api/v1/runs/run-1/nodes/build%2Flinux" {
+		t.Fatalf("forwarded %v, want the three hierarchical reads with their escaping intact", forwarded)
 	}
 }

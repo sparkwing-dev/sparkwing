@@ -1306,6 +1306,20 @@ func scanRefWorktrees(ctx context.Context, st *store.Store, homeRoot *os.Root) (
 	return stale, scanErr
 }
 
+// safety: a worktree is reclaimed only once its trigger, read in whichever
+// team owns it, has finished; a default-team read misses every other team's.
+func triggerInItsTeam(ctx context.Context, st *store.Store, id string) (*store.Trigger, error) {
+	team, err := st.AsOperator().TriggerTeam(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	tn, err := st.ForTeam(ctx, team)
+	if err != nil {
+		return nil, err
+	}
+	return tn.GetTrigger(ctx, id)
+}
+
 func scanUnreclaimedRefWorktrees(ctx context.Context, st *store.Store, root *os.Root) ([]string, error) {
 	if root == nil {
 		return nil, nil
@@ -1326,7 +1340,7 @@ func scanUnreclaimedRefWorktrees(ctx context.Context, st *store.Store, root *os.
 		if !e.IsDir() {
 			continue
 		}
-		trig, err := st.GetTrigger(ctx, e.Name())
+		trig, err := triggerInItsTeam(ctx, st, e.Name())
 		if err == nil {
 			if trig.IsFinished() {
 				stale = append(stale, e.Name())
@@ -1370,7 +1384,9 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.
 		if !e.IsDir() {
 			continue
 		}
-		_, err := st.GetRun(ctx, e.Name())
+		// safety: a run directory is kept only while some team holds a run row
+		// under its id; a deleted child's trigger outlives the run for lineage.
+		_, err := st.AsOperator().RunTeam(ctx, e.Name())
 		if err == nil {
 			continue
 		}

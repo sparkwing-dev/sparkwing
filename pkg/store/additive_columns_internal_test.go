@@ -186,6 +186,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v92 drops github_webhook_bindings and adds nothing; an older binary
 	// keeps every other table and fails only the statements that name that one.
 	92: nil,
+	93: nil,
 }
 
 func columnSpecMaps() []map[string]string {

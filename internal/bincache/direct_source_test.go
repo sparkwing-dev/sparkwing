@@ -628,3 +628,40 @@ func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	opts.cred = cred
 	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
 }
+
+func TestSweepDirectMirrorsKeepsHeldAndCheckedOutMirrors(t *testing.T) {
+	root := t.TempDir()
+	opts := httpOnly
+	stale := time.Now().Add(-30 * 24 * time.Hour)
+	idle, shaIdle := directTestRepo(t, sparkwingTree(t))
+	held, shaHeld := directTestRepo(t, sparkwingTree(t))
+	inUse, shaInUse := directTestRepo(t, sparkwingTree(t))
+	checkoutAndRelease(t, root, idle, shaIdle, opts)
+	checkoutAndRelease(t, root, held, shaHeld, opts)
+	if err := directCheckout(context.Background(), root, inUse, "main", shaInUse,
+		filepath.Join(t.TempDir(), "run"), opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, remote := range []string{idle, held, inUse} {
+		if err := os.Chtimes(directMirrorPath(root, remote), stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lock, err := os.OpenFile(directMirrorPath(root, held)+".lock", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	if _, err := cacheLock(lock, cacheLockShared); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, freed := SweepDirectMirrors(context.Background(), root, time.Now().Add(-7*24*time.Hour))
+	if removed != 1 || freed <= 0 || mirrorExists(root, idle) {
+		t.Fatalf("sweep removed %d (%d bytes), idle mirror kept=%v; want only the idle one gone",
+			removed, freed, mirrorExists(root, idle))
+	}
+	if !mirrorExists(root, held) || !mirrorExists(root, inUse) {
+		t.Fatalf("mirrors held=%v inUse=%v, want both kept", mirrorExists(root, held), mirrorExists(root, inUse))
+	}
+}

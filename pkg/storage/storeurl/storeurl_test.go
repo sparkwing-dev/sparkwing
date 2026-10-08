@@ -59,34 +59,6 @@ func TestFsPath(t *testing.T) {
 	}
 }
 
-func TestS3BucketPrefix(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		rest, bucket, prefix string
-		wantErr              bool
-	}{
-		{"bucket/prefix", "bucket", "prefix", false},
-		{"bucket/p1/p2", "bucket", "p1/p2", false},
-		{"bucket", "bucket", "", false},
-		{"bucket/", "bucket", "", false},
-		{"/no-bucket", "", "", true},
-	}
-	for _, tc := range cases {
-		b, p, err := s3BucketPrefix(tc.rest)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("s3BucketPrefix(%q) err = %v, wantErr %v", tc.rest, err, tc.wantErr)
-			continue
-		}
-		if tc.wantErr {
-			continue
-		}
-		if b != tc.bucket || p != tc.prefix {
-			t.Errorf("s3BucketPrefix(%q) = (%q, %q), want (%q, %q)",
-				tc.rest, b, p, tc.bucket, tc.prefix)
-		}
-	}
-}
-
 func TestOpenArtifactStore_FS(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

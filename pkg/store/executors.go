@@ -400,20 +400,7 @@ type ExecutorActivity struct {
 }
 
 // ActiveExecutorActivity returns live run IDs and claim counts by registered
-// executor.
-func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
-	rows, err := s.query(ctx, `
-SELECT claim_executor, run_id, COUNT(*) FROM nodes
- WHERE claim_executor != '' AND claimed_by IS NOT NULL
-   AND lease_expires_at >= ? AND `+nodeNotDone+`
- GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`, now.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	return scanExecutorActivity(rows)
-}
-
-// ActiveExecutorActivity returns only claims on t's nodes.
+// executor, counting only claims on t's nodes.
 func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
 	rows, err := t.s.query(ctx, `
 SELECT claim_executor, run_id, COUNT(*) FROM nodes
@@ -1362,7 +1349,7 @@ UPDATE nodes
 		event["avoid_until"] = n.AvoidUntil
 	}
 	payload, _ := json.Marshal(event)
-	if _, err := appendEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
+	if _, err := appendRunEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
 		return nil, err
 	}
 	return &n.Node, nil

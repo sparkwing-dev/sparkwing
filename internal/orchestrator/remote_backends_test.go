@@ -3,11 +3,14 @@ package orchestrator_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -47,10 +50,15 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 		t.Errorf("BaseURL = %q, want %q", c.BaseURL(), srv.URL)
 	}
 
+	logStore, err := fs.NewLogStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	paths := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline: "remote-ok",
 		State:    c,
+		LogStore: logStore,
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -71,10 +79,36 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	}
 }
 
+func TestRunLocal_RefusesAControllerThatAnnouncesNoLogsService(t *testing.T) {
+	registerRemotePipelines(t)
+	ctrlStore, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
+	if err != nil {
+		t.Fatalf("controller store: %v", err)
+	}
+	t.Cleanup(func() { _ = ctrlStore.Close() })
+	srv := orchestrator.NewControllerServer(t, ctrlStore, nil)
+	t.Cleanup(srv.Close)
+
+	_, err = orchestrator.RunLocal(context.Background(), newPaths(t), orchestrator.Options{
+		Pipeline: "remote-ok",
+		State:    client.NewWithToken(srv.URL, nil, ""),
+	})
+	if err == nil || !strings.Contains(err.Error(), "announces no logs service") {
+		t.Fatalf("RunLocal err = %v, want a refusal naming the missing logs service", err)
+	}
+	runs, err := ctrlStore.ListRuns(context.Background(), store.RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("the controller recorded %d run(s) for a refused start", len(runs))
+	}
+}
+
 func TestRemoteBackends_FromBaseURL(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "tok-abc")
 	art := &noListArtifact{}
-	b := orchestrator.RemoteBackends(context.Background(), c, nil, art, nil, 0)
+	b := orchestrator.RemoteBackends(c, testLogBackend(t), art, nil, 0)
 	if b.State == nil || b.Logs == nil || b.Concurrency == nil {
 		t.Fatalf("RemoteBackends = %+v", b)
 	}
@@ -88,8 +122,17 @@ func TestRemoteBackends_FromBaseURL(t *testing.T) {
 
 func TestRemoteBackends_NilArtifact(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "")
-	b := orchestrator.RemoteBackends(context.Background(), c, nil, nil, nil, 0)
+	b := orchestrator.RemoteBackends(c, testLogBackend(t), nil, nil, 0)
 	if b.Artifact != nil {
 		t.Errorf("Artifact = %v, want nil", b.Artifact)
 	}
+}
+
+func testLogBackend(t *testing.T) orchestrator.LogBackend {
+	t.Helper()
+	logs, err := fs.NewLogStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return orchestrator.NewLogStoreBackend(logs, nil)
 }

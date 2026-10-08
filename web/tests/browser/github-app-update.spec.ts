@@ -7,7 +7,7 @@ test("GitHub repository access update returns to the signed-in GitHub tab", asyn
     await page.goto(`${dashboard.origin}/login`);
     await page.getByLabel("Username").fill("admin");
     await page.getByLabel("Password").fill("correct-horse");
-    await page.getByRole("button", { name: "Create admin and sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.route("**/api/v1/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/v1/capabilities") {
@@ -29,7 +29,7 @@ test("GitHub repository access update returns to the signed-in GitHub tab", asyn
     await page.goto("https://github.example/settings");
     const setupRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/github/app/setup");
     await page.getByRole("link", { name: "Return to Sparkwing" }).click();
-    expect(await (await setupRequest).headerValue("cookie")).toContain("sw_session=session-1");
+    expect(await (await setupRequest).headerValue("cookie")).toContain("sw_session=");
     await expect(page).toHaveURL(/\/team\/github(?:\?access_updated=1)?$/);
     await expect(page.getByText("Repository access updated on GitHub")).toBeVisible();
   } finally {

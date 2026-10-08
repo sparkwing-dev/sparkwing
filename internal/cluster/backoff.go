@@ -21,7 +21,7 @@ var ErrCredentialChanged = errors.New("the credential's configuration changed wh
 const (
 	remedyAgentConfig = "Re-enroll this machine with `sparkwing cluster runners add --force`; " +
 		"the agent reloads its config within seconds of the rewrite"
-	remedyFlagToken = "Restart this process with a live token (--token or SPARKWING_AGENT_TOKEN)"
+	remedyFlagToken = "Restart this process with a live token in agent-token under --credentials-dir"
 )
 
 type claimPacing struct {

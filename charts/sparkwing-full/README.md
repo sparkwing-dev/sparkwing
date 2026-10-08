@@ -4,8 +4,7 @@ Helm chart that deploys the **complete OSS Sparkwing stack** into a
 single Kubernetes cluster:
 
 - `sparkwing-controller` -- the orchestrator (state DB, /api/v1/*,
-  webhooks)
-- `sparkwing-web` -- the dashboard SPA host
+  webhooks) and the dashboard with its sign-in pages
 - `sparkwing-runner-bundle` (sub-chart) -- runner + cache + logs
 
 This is the chart referenced in architectural decision 0001 for the
@@ -18,7 +17,7 @@ paid tier and live in separate charts.
 > `appVersion` do not currently identify a compatible public image set. A bare
 > install renders the intended topology, but it is not a supported runnable
 > release. Until a corrected release is published, build or mirror one
-> mutually compatible controller, web, runner, cache, and logs image set and
+> mutually compatible controller, runner, cache, and logs image set and
 > explicitly set every enabled component's `image.repository` and `image.tag`.
 
 If you only need a runner pool against a remote controller (Cloud or
@@ -53,19 +52,15 @@ fresh clone with no `helm dependency update` first.
    |  Browsers / CLI / webhooks         |
    +------------------------------------+
                  |
-                 v
+                 v                          [optional Ingress]
    +-------------------------------+
-   |   sparkwing-web (dashboard)   |     [optional Ingress]
+   |   sparkwing-controller        |
+   |   API + dashboard pages       |
+   |   (state DB on PVC)           |
    +-------------------------------+
-                 |
-                 v  /api/v1/*
-   +-------------------------------+      +---------------+
-   |   sparkwing-controller        | <--- |  Webhooks     |
-   |   (state DB on PVC)           |      |  (GitHub etc) |
-   +-------------------------------+      +---------------+
-        ^               ^
-        | claim         | log writes / reads
-        |               |
+        ^               |
+        | claim         | dashboard log reads
+        |               v
    +---------+      +---------+      +---------+
    |  runner |----> | gitcache|      |  logs   |
    +---------+      +---------+      +---------+
@@ -104,20 +99,13 @@ openssl rand -base64 32 > /tmp/sparkwing-key
 kubectl -n sparkwing create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
 
-# Bearer token for sparkwing-web (controller proxy) and the runner
-# bundle (claim loop). The controller only accepts tokens IT minted,
-# so mint it with the bootstrap admin token after the first
-# `helm install` -- see Auth below.
+# Bearer token for the runner bundle (claim loop). The controller only
+# accepts tokens IT minted, so mint it with the bootstrap admin token
+# after the first `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
-# Tokens carry scopes: a runner token needs `nodes.claim`,
-# `triggers.claim`, `runs.state`, `secrets.read`, and `logs.write`.
-# The web pod's needs `runs.read` + `logs.read`, plus
-# `runs.write` where operators cancel, retry, or release runs from the
-# dashboard and `approvals.write` where they resolve approval gates.
-# Deleting a run from the dashboard needs `admin` on the web token AND
-# on the signed-in account; leave it off to keep deletion on the CLI.
-# Mint the two separately so neither carries the other's reach.
+# A runner token needs `nodes.claim`, `triggers.claim`, `runs.state`,
+# `secrets.read`, and `logs.write`.
 
 # The cache's operator token and the key cache grants are signed with.
 # Both are random secrets of their own and neither is ever a runner token:
@@ -138,8 +126,6 @@ revision or copied together into your registry:
 ```yaml
 controller:
   image: {repository: registry.example/sparkwing-controller, tag: <compatible-tag>}
-web:
-  image: {repository: registry.example/sparkwing-web, tag: <compatible-tag>}
 sparkwing-runner-bundle:
   runner:
     image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
@@ -210,11 +196,9 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.dashboardURL=https://sparkwing.example.com \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
-    --set web.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
     --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
-    --set web.requireLogin=true \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
     --set ingress.hosts[0].paths[0].path=/ \
@@ -223,20 +207,20 @@ helm install sparkwing ./charts/sparkwing-full \
     --set ingress.tls[0].secretName=sparkwing-tls
 ```
 
-An Ingress with an empty `ingress.tls` or with `web.requireLogin=false`
-fails to render, because publishing the dashboard is the one knob whose
-purpose is reaching browsers outside the cluster. Set
-`ingress.allowInsecure=true` to publish it unencrypted or open anyway;
-it must be a bool, since a quoted string fails the render instead of
-reading as an opt-out. Opting in without TLS also sets
-`SPARKWING_WEB_INSECURE_COOKIES=1` and `--allow-insecure-cookies-remote`
-on the web Deployment, so the login gate still works over plain HTTP on
-a pod that binds a non-loopback address. The `ingress.tls` check is
-presence-only: an entry without `secretName` leaves TLS to the ingress
-controller's default certificate. An `ingress.tls` entry also passes
-`--hsts` to the web Deployment, so the dashboard sends
-Strict-Transport-Security, builds https OAuth redirect URIs and requires
-an https Origin on unsafe requests.
+The Ingress publishes the whole controller: its API, webhooks, and
+dashboard. An Ingress fails to render with an empty `ingress.tls`, with
+`controller.requireAuth=false`, or with `controller.allowOpenBootstrap=true`
+and no `controller.bootstrapAdminToken.name`, because each one publishes a
+controller that anyone on the path can read or drive. Set
+`ingress.allowInsecure=true` to publish it unencrypted or open anyway; it
+must be a bool, since a quoted string fails the render instead of reading
+as an opt-out. Opting in without TLS also passes `--insecure-cookies` to
+the controller, so a browser keeps its session over plain HTTP. The
+`ingress.tls` check is presence-only: an entry without `secretName` leaves
+TLS to the ingress controller's default certificate. An `ingress.tls`
+entry also passes `--hsts` to the controller, so it sends
+Strict-Transport-Security and requires an https Origin on
+cookie-authenticated writes.
 
 ## Values cheat sheet
 
@@ -261,28 +245,18 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
 | `controller.allowOpenBootstrap` | Render without `bootstrapAdminToken` and drop `--require-auth`, so an empty tokens table serves every route unauthenticated until a token exists and the controller restarts. A controller that already holds a token stays authenticated. Bool only. | `false` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
-
-### Web
-
-| Key | Purpose | Default |
-| --- | --- | --- |
-| `web.image.repository` | Override web image. | `ghcr.io/sparkwing-dev/sparkwing-web` |
-| `web.replicas` | Replica count (web is stateless). | `1` |
-| `web.controller.url` | Override controller URL. | (auto-computed in-cluster) |
-| `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
-| `web.tokenSecret.name` | Secret holding the controller-bearer token. | (defaults to `sparkwing-runner-bundle.controller.tokenSecret`) |
-| `web.addr` | Address the web pod binds. Empty binds `0.0.0.0:<web.port>`, which the Service needs; a loopback value is reachable only through a port-forward. | `""` |
-| `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
+| `controller.logs.url` | The logs service the controller announces to clients and reads dashboard log panes from, passed as `--logs-url`. | (auto-computed from sub-chart) |
+| `controller.cache.url` | The cache the controller's gitcache proxy forwards to. | (auto-computed from sub-chart) |
 
 ### Security and volume ownership
 
 | Key | Purpose | Default |
 | --- | --- | --- |
-| `podSecurityContext.runAsUser` | Non-root UID for controller and web. | `65534` |
+| `podSecurityContext.runAsUser` | Non-root UID for the controller. | `65534` |
 | `podSecurityContext.fsGroup` | Group for mounted storage. | `65534` |
 | `podSecurityContext.seccompProfile.type` | Seccomp profile the Pod Security "restricted" profile requires. | `RuntimeDefault` |
 | `containerSecurityContext.readOnlyRootFilesystem` | Read-only image layer; each pod writes to its mounted volumes and a `/tmp` scratch `emptyDir`. | `true` |
-| `volumePermissions.enabled` | Run a CHOWN-only init container before controller and web. | `true` |
+| `volumePermissions.enabled` | Run a CHOWN-only init container before the controller. | `true` |
 
 ### Ingress
 
@@ -290,9 +264,9 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | --- | --- | --- |
 | `ingress.enabled` | Create the Ingress resource. | `false` |
 | `ingress.className` | IngressClass. Empty = cluster default. | `""` |
-| `ingress.hosts[].host` | Hostname for the dashboard. | `sparkwing.example.com` |
-| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. Any entry passes `--hsts` to the dashboard. | `[]` |
-| `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. Bool only. | `false` |
+| `ingress.hosts[].host` | Hostname routed to the controller Service. List a console host and an API host to publish both. | `sparkwing.example.com` |
+| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. Any entry passes `--hsts` to the controller. | `[]` |
+| `ingress.allowInsecure` | Publish the controller without TLS or without `--require-auth`. Without TLS it also passes `--insecure-cookies`. Bool only. | `false` |
 
 ### Runner-bundle sub-chart
 
@@ -323,8 +297,7 @@ you set top-level `nameOverride` or `fullnameOverride`, also set
 `sparkwing-runner-bundle.controller.url` to the resulting controller Service;
 the chart stops at render time with this instruction when the URL is missing.
 Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
-included in the web and controller URLs for the bundled logs and cache
-Services.
+included in the controller URLs for the bundled logs and cache Services.
 
 Set `sparkwing-runner-bundle.runner.triggerRunner.kind=warm` and
 `sparkwing-runner-bundle.runner.automountServiceAccountToken=true` to offer
@@ -369,38 +342,36 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    once at startup. `allowOpenBootstrap` must be a bool; a quoted string
    fails the render.
 
-2. Mint one token per consumer, stash each in a Secret (see Pre-install
-   above), and reference them from `web.tokenSecret.name` /
-   `sparkwing-runner-bundle.controller.tokenSecret.name`. Separate tokens keep
-   the web pod's proxy bearer to the dashboard's scopes.
+2. Mint the runner's token, stash it in a Secret (see Pre-install above),
+   and reference it from `sparkwing-runner-bundle.controller.tokenSecret.name`.
 
    A configured Secret name requires a non-empty key; the chart rejects
-   incomplete pairs. Web, runner, and cache Secret references are required, so
+   incomplete pairs. Runner and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
    `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
    service's signal to resolve callers against the controller.
-   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as
-   `SPARKWING_API_TOKEN` and the controller as `SPARKWING_CACHE_TOKEN`, and
-   `sparkwing-runner-bundle.cache.grantKeySecret` what both read as
-   `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
+   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as the
+   credential file `cache-token` and the controller as `SPARKWING_CACHE_TOKEN`,
+   and `sparkwing-runner-bundle.cache.grantKeySecret` what the cache reads as
+   `cache-grant-key` and the controller as `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
    token fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
    logs-enabled one without the runner token unless
    `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap
    window above needs both and the token upgrade should turn both back off.
 
-   An install that sets only `sparkwing-runner-bundle.controller.tokenSecret`
-   gives the web pod that same Secret, so the dashboard's log panes carry a
-   bearer the authenticated logs service accepts. Set `web.tokenSecret.name`
-   to hand the dashboard its own narrower token instead.
+   The dashboard's log panes read the logs service with the signed-in
+   browser's own credential, so the dashboard needs no token Secret.
 
-3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
-   On a fresh cluster `/login` renders a "create first admin" form and
-   the account you create there becomes the admin; afterwards, seed
-   users with `sparkwing cluster users add`, whose `--scope` bounds what a
-   signed-in account reaches through the dashboard proxy. Login cookies are `Secure`,
-   so configure an HTTPS ingress before signing in. The chart's plain HTTP
-   port-forward remains useful for probes but cannot retain a browser login.
+3. The controller serves the dashboard and gates its pages behind `/login`
+   whenever it enforces tokens. Create dashboard accounts with
+   `sparkwing cluster users add`, whose `--scope` bounds what a signed-in
+   account reaches. During the `allowOpenBootstrap` window the controller
+   serves pages without sign-in, and `/login` offers a "create first admin"
+   form. Session cookies are `Secure` and `__Host-` prefixed, so configure
+   an HTTPS ingress before signing in; `ingress.allowInsecure=true` without
+   TLS passes `--insecure-cookies`, which drops both so a plain HTTP session
+   holds.
 
 ## Storage
 
@@ -410,15 +381,15 @@ doesn't wipe run history. Disable with
 `controller.storage.pvc.keepOnUninstall=false`, or
 `controller.storage.type=emptyDir` for a fully ephemeral test install.
 
-By default, controller and web each run a short ownership init container before
+By default, the controller runs a short ownership init container before
 the non-root application starts. The init container runs as UID 0 with a
 read-only root filesystem, no privilege escalation, and only the `CHOWN`
 capability; it assigns the mounted Sparkwing home root to
 `podSecurityContext.runAsUser:podSecurityContext.fsGroup`. The application
 container remains non-root with all capabilities dropped. Set
 `volumePermissions.enabled=false` only when the storage driver provisions the
-mounted root with that ownership already. The enabled path requires controller
-and web images containing `/bin/chown`; Sparkwing's release-shaped Alpine images
+mounted root with that ownership already. The enabled path requires a controller
+image containing `/bin/chown`; Sparkwing's release-shaped Alpine images
 include it, but custom images must provide it themselves.
 
 The ownership init container runs as UID 0 with `CHOWN`, so Kubernetes' baseline
@@ -445,19 +416,16 @@ later with the same data.)
 
 ## Ingress
 
-Disabled by default -- many self-host operators front the dashboard
+Disabled by default -- many self-host operators front the controller
 with their own ingress controller / Gateway / cloud LB. Set
-`ingress.enabled=true` to let this chart manage one. The Ingress
-points at `sparkwing-web` (port 80); the SPA proxies `/api/v1/*` to
-the controller, so you don't need a separate Ingress for the
-controller.
-
-The web pod proxies `/api/v1/*` only. GitHub App deliveries are served
-by the controller at `POST /webhooks/github-app`; if you use the App,
-add your own Ingress rule (or host) routing that path to the
-`<release>-controller` Service on port 80 -- this chart does not
-create one. The App's settings come from `SPARKWING_GITHUB_APP_*`
-variables set through `controller.extraEnv`; see the GitHub App guide.
+`ingress.enabled=true` to let this chart manage one. Every host in
+`ingress.hosts` routes to the `<release>-controller` Service on port 80,
+which serves the API, webhooks (including the GitHub App's
+`POST /webhooks/github-app`), and dashboard on one port. A console host
+and an API host can both point at that Service; a reverse proxy in front
+can still split them. The App's settings come from
+`SPARKWING_GITHUB_APP_*` variables set through `controller.extraEnv`; see
+the GitHub App guide.
 
 ## Sub-chart dependency
 
@@ -467,7 +435,7 @@ variables set through `controller.extraEnv`; see the GitHub App guide.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.9"
+    version: "0.1.10"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```
@@ -501,13 +469,12 @@ the vendored `values.yaml` and `templates/` against the source chart, and
 Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-controller:<chart appVersion>`
-- `ghcr.io/sparkwing-dev/sparkwing-web:<chart appVersion>`
 - (sub-chart) `ghcr.io/sparkwing-dev/sparkwing-runner:<...>`,
   `sparkwing-cache`, `sparkwing-logs`
 
 These fallbacks describe the chart's intended registry layout; they are not a
 compatible public release contract for the current chart version. Pin both
-repository and tag for every enabled image. Keep all five images on the same
+repository and tag for every enabled image. Keep all four images on the same
 compatible Sparkwing revision until a corrected chart release publishes and
 verifies a public default set.
 
@@ -528,8 +495,14 @@ holds a token authenticated but reopens the window if its tokens table is
 ever emptied.
 
 The controller uses `strategy: Recreate` (RWO PVC -- can't
-multi-attach), so expect a brief downtime per upgrade. Web is
-RollingUpdate. Runner pods rolling-update one at a time.
+multi-attach), so expect a brief downtime per upgrade, dashboard
+included. Runner pods rolling-update one at a time.
+
+An upgrade from a chart that deployed `sparkwing-web` removes its
+Deployment and Service; the Ingress then routes to the controller
+Service. A values file that still sets `web` fails to render: move
+`web.logs.url` to `controller.logs.url` and drop the rest. See the
+migration guide section "The controller serves the dashboard".
 
 State-DB compatibility: the controller's SQLite schema migrates
 forward automatically on startup. There is no rollback story for
@@ -554,10 +527,10 @@ PVC binding failed. Check `kubectl describe pvc <release>-controller`.
 Most common: no default StorageClass. Set
 `controller.storage.pvc.storageClassName` explicitly.
 
-**Web pod 502s on /api/v1/***
-Web can't reach the controller. Check
-`kubectl logs deploy/<release>-web` -- you'll see the upstream URL.
-Confirm the controller Service resolves:
+**Dashboard pages answer 503**
+The controller image carries no dashboard bundle, which happens with a
+source build that skipped `bin/build-web.sh`. The API still works; deploy
+an image built after that step. Confirm the controller Service resolves:
 
 ```bash
 kubectl -n <ns> run --rm -it -q probe --image=curlimages/curl -- \
@@ -571,9 +544,9 @@ inside the runner pod. See
 [`sparkwing-runner-bundle/README.md`](../sparkwing-runner-bundle/README.md#troubleshooting).
 
 **Dashboard redirects to /login and I have no account**
-The first visit to /login on a fresh cluster offers a "create first
-admin" form. If the users table is already seeded, add accounts with
-`sparkwing cluster users add`.
+A controller that enforces tokens offers no sign-up form. Add an
+account with `sparkwing cluster users add` using an admin token, such
+as the bootstrap admin token.
 
 **`helm template` fails with "missing in charts/ directory: sparkwing-runner-bundle"**
 The vendored sub-chart tarball was deleted. Restore it with

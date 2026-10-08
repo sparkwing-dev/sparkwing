@@ -218,13 +218,19 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	ctrl := client.NewWithToken(controllerURL, nil, token)
+	if opts.EventsOnly {
+		return writeEventsViaBackend(ctx, backend.NewClientBackend(ctrl, nil), runID, opts, out)
+	}
+	if logsURL == "" {
+		var err error
+		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
+			return err
+		}
+	}
 	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("cli"))
 
 	b := backend.NewClientBackend(ctrl, logc)
-	if opts.EventsOnly {
-		return writeEventsViaBackend(ctx, b, runID, opts, out)
-	}
 	if !opts.Follow {
 		nodes, err := ctrl.ListNodes(ctx, runID)
 		if err != nil {

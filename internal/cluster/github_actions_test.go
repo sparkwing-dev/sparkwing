@@ -70,7 +70,6 @@ func TestGitHubActionsCredentialNeedsTheIDTokenPermission(t *testing.T) {
 
 func TestGitHubActionsRunnerClaimsTriggersInProcess(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv("SPARKWING_WARM_MODULES", "off")
 	var triggerClaims atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /token", func(w http.ResponseWriter, _ *http.Request) {
@@ -103,7 +102,7 @@ func TestGitHubActionsRunnerClaimsTriggersInProcess(t *testing.T) {
 
 	err := runRunnerCLI([]string{
 		"--controller=" + srv.URL, "--team=acme", "--github-actions",
-		"--metrics-addr=", "--poll=10ms", "--idle-exit=100ms",
+		"--metrics-addr=", "--poll=10ms", "--idle-exit=100ms", "--warm-modules=off",
 	}, "")
 	if err != nil {
 		t.Fatal(err)

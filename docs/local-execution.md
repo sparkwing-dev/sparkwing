@@ -530,7 +530,7 @@ guard and token.
 An off-cluster machine can claim only these triggers and compile them locally:
 
 ```bash
-SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+sparkwing-runner runner --credentials-dir="$HOME/.config/sparkwing/runner-credentials" \
   --controller=https://sparkwing.example.com \
   --logs=https://sparkwing.example.com \
   --gitcache=https://sparkwing.example.com/api/v1/gitcache \
@@ -539,8 +539,9 @@ SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
   --metrics-addr= --max-claims-before-restart=0
 ```
 
-The source proxy and trigger claim require the current admin-capable runner
-token. Login-enabled dashboard ingress passes this machine bearer directly to
+The runner reads its token from the file `agent-token` in its
+`--credentials-dir`; create it with mode `0600`. The source proxy and trigger
+claim require the current admin-capable runner token. Login-enabled dashboard ingress passes this machine bearer directly to
 the controller without a browser session or CSRF token. The process opens no
 listener. A private direct cache URL can replace the controller proxy when the
 machines already share a LAN, VPN, or tailnet. Direct cache binary writes use
@@ -567,7 +568,10 @@ machine's own git config and credentials. The dashboard's machines page asks
 which repositories the machine may build and prints this command:
 
 ```bash
-SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+(umask 077 && mkdir -p "$HOME/.config/sparkwing/runner-credentials" &&
+  rm -f "$HOME/.config/sparkwing/runner-credentials/agent-token" &&
+  printf '%s' swr_... > "$HOME/.config/sparkwing/runner-credentials/agent-token") &&
+sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials" \
   --controller https://sparkwing.example.com --logs https://logs.example.com \
   --allow-repo 'github.com/acme/*' \
   --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= \
@@ -825,8 +829,9 @@ mid-node: nothing releases a claim, so the node waits out the lease before the
 reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten
 minutes past the node's own `.Timeout()` where it declared one and six hours
 otherwise, so a wedged pod cannot outlive the run that wanted it.
-`--k8s-job-deadline` (env `SPARKWING_K8S_JOB_DEADLINE`, a Go duration of at
-least a minute) moves that six hours. A no-progress timeout measures silence
+`sparkwing-runner runner --deadline` (a Go duration of at least a minute,
+which the Helm value `runner.jobDeadline` sets) moves that six hours; the runner hands it to each trigger as
+`handle-trigger --k8s-job-deadline`. A no-progress timeout measures silence
 rather than elapsed time, so it deliberately does not bound the Job. A node
 Kubernetes kills at the deadline fails with `timeout` and an error naming the
 deadline, which is how an operator tells it from a pod that crashed.
@@ -839,15 +844,13 @@ Job lifecycle and pod-read permissions the Kubernetes fallback calls.
 `sparkwing-runner-bundle.runner.triggerRunner.labels` declares fallback Job
 capabilities; a manually launched trigger worker repeats
 `--trigger-runner-label` for the same values.
-For a manually launched runner, `SPARKWING_RUNNER_SA` supplies the service
-account used by `--runner k8s`, `--trigger-runner k8s`, and warm fallback Jobs;
-the matching command-line flags take precedence.
+For a manually launched runner, `--trigger-runner-sa` names the service
+account used by `--trigger-runner k8s` and warm fallback Jobs.
 
 On Kubernetes a pipeline's `.Resources()` pin becomes the Job pod's requests
-and limits, so an operator bounds it: `--k8s-cpu-ceiling` and
-`--k8s-memory-ceiling` (or `SPARKWING_K8S_CPU_CEILING` and
-`SPARKWING_K8S_MEMORY_CEILING`, which the Helm values
-`runner.jobCeiling.cpu` and `runner.jobCeiling.memory` set) take Kubernetes
+and limits, so an operator bounds it: `sparkwing-runner runner
+--cpu-ceiling` and `--memory-ceiling`, which the Helm values
+`runner.jobCeiling.cpu` and `runner.jobCeiling.memory` set, take Kubernetes
 quantities such as `8` and `16Gi`. A pin or a measured charge above the
 ceiling is clamped to it, burst limit included, and the runner logs the pin,
 the ceiling, and the size it settled on, and writes the same line to the run

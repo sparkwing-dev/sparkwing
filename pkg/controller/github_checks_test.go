@@ -114,7 +114,15 @@ func (f *appFixture) addNode(runID, nodeID, outcome, errMsg string) {
 	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.store.FinishNode(ctx, runID, nodeID, outcome, errMsg, nil); err != nil {
+	team, err := f.store.AsOperator().RunTeam(ctx, runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	tn, err := f.store.ForTeam(ctx, team)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := tn.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, nil, store.FailureUnknown, nil); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -385,7 +393,7 @@ func TestGitHubAppCheckRunRerequestedRerunsItsPipeline(t *testing.T) {
 	if code != http.StatusAccepted || len(ids) != 1 {
 		t.Fatalf("rerequested = %d %v, want one run", code, out)
 	}
-	trig, err := f.store.GetTrigger(context.Background(), ids[0])
+	trig, err := f.trigger(ids[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,5 +599,45 @@ func TestGitHubAppRerequestedSpendsTheRunBudget(t *testing.T) {
 	f.drainChecks()
 	if code, _ := f.deliver("check_run", checkRunPayload(7, "rerequested", f.app.CheckRunCalls()[0]), ""); code != http.StatusTooManyRequests {
 		t.Fatalf("rerequested past the team's cap = %d, want 429", code)
+	}
+}
+
+// A run's outcome goes to the check of the trigger in the run's own team;
+// another team's GitHub trigger under the same id is not touched.
+func TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	ctx := context.Background()
+	in, err := f.store.AsOperator().GitHubAppInstallationTeam(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := f.store.ForTeam(ctx, in.Team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.CreateTrigger(ctx, store.Trigger{
+		ID: "shared", Pipeline: "build", GithubOwner: "acme", GithubRepo: "widgets", GitSHA: headSHA,
+		TriggerEnv: map[string]string{"GITHUB_APP_INSTALLATION_ID": "7"}, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AsOperator().CreateTeam(ctx, "other"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.store.ForTeam(ctx, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.CreateRun(ctx, store.Run{ID: "shared", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	controller.ReportGitHubRunState(ctx, f.srv, "shared", "failed")
+	f.drainChecks()
+
+	if calls := f.app.CheckRunCalls(); len(calls) != 0 {
+		t.Fatalf("check run writes = %+v, want none for another team's trigger", calls)
 	}
 }

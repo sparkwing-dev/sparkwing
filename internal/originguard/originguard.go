@@ -1,8 +1,7 @@
 // Package originguard refuses browser requests that reach an unauthenticated
 // loopback server from another site: a rebound DNS name, a cross-origin
-// write, or a cross-site subresource. `sparkwing serve` and a sparkwing-web
-// dashboard without sign-in wrap their handlers in [Guard]; a dashboard
-// without sign-in on a non-loopback address wraps its handler in
+// write, or a cross-site subresource. `sparkwing serve` wraps its handler in
+// [Guard]; a controller serving the dashboard wraps its API in
 // [RefuseCrossSiteWrites].
 package originguard
 

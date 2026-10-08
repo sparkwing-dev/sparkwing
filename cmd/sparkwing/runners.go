@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+
 	flag "github.com/spf13/pflag"
 	"go.yaml.in/yaml/v3"
 
@@ -199,7 +201,7 @@ func runRunnersRemove(args []string) error {
 	if err := stopRunnerService(path, *noService); err != nil {
 		return err
 	}
-	if _, err := tokensDelete(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+prefix); err != nil {
+	if err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).RevokeToken(context.Background(), prefix); err != nil {
 		return err
 	}
 	fmt.Printf("revoked %s on profile %s\n", prefix, prof.Name)
@@ -213,27 +215,26 @@ type mintedToken struct {
 }
 
 func mintRunnerToken(controller, adminToken, principal string) (mintedToken, error) {
-	resp, err := tokensPost(controller, adminToken, "/api/v1/tokens", map[string]any{
-		"kind":      "runner",
-		"principal": principal,
-		"scopes":    runnerTokenScopes,
+	return mintToken(controller, adminToken, client.CreateTokenRequest{
+		Kind: "runner", Principal: principal, Scopes: runnerTokenScopes,
 	})
+}
+
+func mintToken(controller, adminToken string, req client.CreateTokenRequest) (mintedToken, error) {
+	out, err := client.NewWithToken(controller, nil, adminToken).CreateToken(context.Background(), req)
 	if err != nil {
 		return mintedToken{}, err
-	}
-	var out struct {
-		Token    string `json:"token"`
-		Metadata struct {
-			Prefix string `json:"prefix"`
-		} `json:"metadata"`
-	}
-	if err := json.Unmarshal(resp, &out); err != nil {
-		return mintedToken{}, fmt.Errorf("decode minted token: %w", err)
 	}
 	if out.Token == "" {
 		return mintedToken{}, errors.New("the controller returned no token")
 	}
-	minted := mintedToken{Raw: out.Token, Prefix: out.Metadata.Prefix}
+	var meta struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal(out.Metadata, &meta); err != nil {
+		return mintedToken{}, fmt.Errorf("decode minted token: %w", err)
+	}
+	minted := mintedToken{Raw: out.Token, Prefix: meta.Prefix}
 	if minted.Prefix == "" {
 		if minted.Prefix, err = tokenPrefix(out.Token); err != nil {
 			return mintedToken{}, err
@@ -250,11 +251,11 @@ func tokenPrefix(raw string) (string, error) {
 }
 
 func requireRunnerToken(controller, adminToken, prefix, configPath string) error {
-	resp, err := tokensGet(controller, adminToken, "/api/v1/tokens/"+prefix)
+	resp, err := client.NewWithToken(controller, nil, adminToken).LookupToken(context.Background(), prefix)
 	if err != nil {
 		return fmt.Errorf("look up the token %s named by %s: %w", prefix, configPath, err)
 	}
-	var found tokenListItem
+	var found client.TokenInfo
 	if err := json.Unmarshal(resp, &found); err != nil {
 		return fmt.Errorf("decode the token %s: %w", prefix, err)
 	}
