@@ -20,13 +20,13 @@ import {
   type FilterCtx,
   type FilterFacet,
   FilterableValue,
+  FILTER_URL_KEYS,
   FullFilterBar,
   activeFilterCount,
   buildGroupsFromState,
   clearAllFilters,
   computeOptions,
   repoLabel,
-  runMatchesFilter,
   useFilterCtx,
   useFilterDropdownState,
   useUrlFilterState,
@@ -36,6 +36,7 @@ import {
   type NodeWorkStep,
   type RunLogMatch,
   type RunsGrepMatch,
+  type RunsGrepResponse,
   type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
@@ -48,12 +49,19 @@ import {
   getNodeStreamUrl,
   getPipelines,
   getRun,
-  getRuns,
+  listRuns,
   retryRun,
   searchRunLogs,
   searchRunsGrep,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
+import {
+  type RunsPageRef,
+  pageFromResponse,
+  pageRefFromParams,
+  pageRefParams,
+  runListQuery,
+} from "@/lib/runsPaging";
 import { useCurrentTime } from "@/lib/useCurrentTime";
 import {
   fmtAgo,
@@ -99,7 +107,6 @@ import {
 
 const POLL_MS = 2000;
 const DETAIL_FALLBACK_POLL_MS = 8000;
-const RUNS_WINDOW = 200;
 const EMPTY_NODES: RunNode[] = [];
 const COLUMNS_KEY = "sparkwing:runs-columns";
 type ColumnsMode = "expanded" | "runs-collapsed" | "collapsed";
@@ -392,14 +399,90 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     }
   }, []);
 
+  const pageRef = useMemo(
+    () => pageRefFromParams(new URLSearchParams(queryString)),
+    [queryString],
+  );
+  const viewKey = useMemo(() => {
+    const params = new URLSearchParams(queryString);
+    return [...FILTER_URL_KEYS, "older", "newer"]
+      .map((k) => params.get(k) ?? "")
+      .join("\u0000");
+  }, [queryString]);
+  const [runsPage, setRunsPage] = useState<{
+    older: RunsPageRef | null;
+    newer: RunsPageRef | null;
+  }>({ older: null, newer: null });
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const runsRequest = useRef({ filterState, pageRef, viewKey });
+  runsRequest.current = { filterState, pageRef, viewKey };
+  const runsSeq = useRef({ next: 0, applied: 0 });
+  const runsPaneRef = useRef<HTMLDivElement | null>(null);
+  const scrollAnchor = useRef<{ id: string; top: number } | null>(null);
+  const captureScrollAnchor = () => {
+    const pane = runsPaneRef.current;
+    scrollAnchor.current = null;
+    if (!pane || pane.scrollTop <= 0) return;
+    const paneTop = pane.getBoundingClientRect().top;
+    for (const row of pane.querySelectorAll<HTMLElement>("[data-run-id]")) {
+      const box = row.getBoundingClientRect();
+      if (box.bottom > paneTop && row.dataset.runId) {
+        scrollAnchor.current = { id: row.dataset.runId, top: box.top - paneTop };
+        return;
+      }
+    }
+  };
+  useLayoutEffect(() => {
+    const anchor = scrollAnchor.current;
+    const pane = runsPaneRef.current;
+    scrollAnchor.current = null;
+    if (!anchor || !pane) return;
+    const row = pane.querySelector<HTMLElement>(
+      `[data-run-id="${CSS.escape(anchor.id)}"]`,
+    );
+    if (!row) return;
+    const moved =
+      row.getBoundingClientRect().top - pane.getBoundingClientRect().top - anchor.top;
+    pane.scrollTop += moved;
+  }, [runs]);
+
   const refresh = useCallback(async () => {
-    const [runList, meta] = await Promise.all([
-      getRuns({ limit: RUNS_WINDOW }),
-      getPipelines(),
-    ]);
-    setRuns(runList);
-    setPipelineMeta(meta);
-  }, []);
+    const { filterState: filters, pageRef: ref, viewKey: key } = runsRequest.current;
+    const seq = ++runsSeq.current.next;
+    let fetched: Run[] = [];
+    let page: ReturnType<typeof pageFromResponse> | null = null;
+    try {
+      const meta = await getPipelines();
+      if (runsRequest.current.viewKey === key) setPipelineMeta(meta);
+      const query = runListQuery(filters, meta, ref);
+      if (query) fetched = await listRuns(query);
+      page = pageFromResponse(fetched, ref);
+    } catch (e) {
+      if (runsRequest.current.viewKey === key && seq > runsSeq.current.applied) {
+        setRunsError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    if (runsRequest.current.viewKey !== key || seq < runsSeq.current.applied) return;
+    runsSeq.current.applied = seq;
+    captureScrollAnchor();
+    setRuns(page.runs);
+    setRunsPage({ older: page.older, newer: page.newer });
+    setRunsError(null);
+    if (ref.kind === "newer" && page.atLatest) {
+      writeParams(pageRefParams({ kind: "latest" }));
+    }
+  }, [writeParams]);
+
+  const goToPage = (ref: RunsPageRef) => {
+    const next = new URLSearchParams(window.location.search.replace(/^\?/, ""));
+    for (const [k, v] of Object.entries(pageRefParams(ref))) {
+      if (v) next.set(k, v);
+      else next.delete(k);
+    }
+    const qs = next.toString();
+    router.push(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+  };
 
   const detailSelectionRef = useRef({ runID: selectedRun });
   const detailRequestRef = useRef({ next: 0, committed: 0 });
@@ -424,13 +507,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setDetail(d);
   }, []);
 
+  const pollsForNewRuns = pageRef.kind === "latest";
   useEffect(() => {
+    runsPaneRef.current?.scrollTo({ top: 0 });
     refresh();
+    // perf: only the newest page can gain runs; an older page holds still until asked.
+    if (!pollsForNewRuns) return;
     const i = setInterval(() => {
       if (!document.hidden) refresh();
     }, POLL_MS);
     return () => clearInterval(i);
-  }, [refresh]);
+  }, [refresh, viewKey, pollsForNewRuns]);
 
   const [runProgress, setRunProgress] = useState<
     Record<string, { done: number; total: number }>
@@ -544,17 +631,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       !runs.some((r) => r.id === detailRun.id)
         ? [detailRun, ...runs]
         : runs;
-    return withSelected
-      .filter(
-        (r) =>
-          r.id === selectedRun ||
-          runMatchesFilter(r, filterState, pipelineMeta),
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
-      );
-  }, [runs, detailRun, selectedRun, filterState, pipelineMeta]);
+    return withSelected === runs
+      ? runs
+      : [...withSelected].sort(
+          (a, b) =>
+            new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+        );
+  }, [runs, detailRun, selectedRun]);
   const activeCount = activeFilterCount(filterState);
 
   const scrolledForRef = useRef<string | null>(null);
@@ -1144,7 +1227,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             </div>
           ) : (
           <>
-          <div className="pane-scrollbar flex-1 overflow-y-auto" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
+          <div ref={runsPaneRef} className="pane-scrollbar flex-1 overflow-y-auto" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
+            {runsError && (
+              <div role="alert" className="px-3 py-2 text-xs font-mono text-red-400 border-b border-[var(--border)]">
+                {runsError}
+              </div>
+            )}
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
@@ -1197,11 +1285,23 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 </div>
               );
             })}
-            {topLevel.length === 0 && (
+            {topLevel.length === 0 && !runsError && (
               <div className="p-8 text-center text-[var(--muted)] text-sm">
-                {activeCount > 0 ? "No matching runs" : "No runs yet"}
+                {pageRef.kind !== "latest"
+                  ? "No runs on this page"
+                  : activeCount > 0
+                    ? "No matching runs"
+                    : "No runs yet"}
               </div>
             )}
+            <RunsPager
+              compact={paneOpen}
+              older={runsPage.older}
+              newer={runsPage.newer}
+              latest={pageRef.kind === "latest"}
+              onPage={goToPage}
+              onRefresh={refresh}
+            />
           </div>
           </>
           )}
@@ -1352,6 +1452,59 @@ function useClickPopup<T extends HTMLElement>() {
   return { open, setOpen, ref };
 }
 
+function RunsPager({
+  compact,
+  older,
+  newer,
+  latest,
+  onPage,
+  onRefresh,
+}: {
+  compact: boolean;
+  older: RunsPageRef | null;
+  newer: RunsPageRef | null;
+  latest: boolean;
+  onPage: (ref: RunsPageRef) => void;
+  onRefresh: () => void;
+}) {
+  if (latest && !older) return null;
+  const button =
+    "text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
+  return (
+    <nav
+      aria-label="Run pages"
+      className={`flex ${compact ? "flex-col items-stretch" : "items-center justify-center"} gap-2 px-3 py-3`}
+    >
+      {!latest && (
+        <button type="button" className={button} onClick={() => onPage({ kind: "latest" })}>
+          « Newest
+        </button>
+      )}
+      <button
+        type="button"
+        className={button}
+        disabled={!newer}
+        onClick={() => newer && onPage(newer)}
+      >
+        ‹ Newer
+      </button>
+      <button
+        type="button"
+        className={button}
+        disabled={!older}
+        onClick={() => older && onPage(older)}
+      >
+        Older ›
+      </button>
+      {!latest && (
+        <button type="button" className={button} onClick={onRefresh} title="This page does not update on its own">
+          ↻ Refresh
+        </button>
+      )}
+    </nav>
+  );
+}
+
 function FilterableTimestamp({
   iso,
   field,
@@ -1467,6 +1620,8 @@ function searchFilterValues(raw: string): string[] {
     .filter(Boolean);
 }
 
+const SEARCH_RUNS_PER_REQUEST = 200;
+
 function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1505,7 +1660,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsScanned, setRunsScanned] = useState(0);
-  const [runsMatching, setRunsMatching] = useState(0);
+  const [nextCursor, setNextCursor] = useState<RunsGrepResponse["next_cursor"]>();
   const searchGeneration = useRef(0);
   const runGrep = useCallback(
     async (
@@ -1515,6 +1670,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       statusVal: string,
       branchVal: string,
       commitVal: string,
+      after?: RunsGrepResponse["next_cursor"],
     ) => {
       const generation = ++searchGeneration.current;
       const trimmed = q.trim();
@@ -1522,7 +1678,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         setResults(null);
         setRunsMap({});
         setRunsScanned(0);
-        setRunsMatching(0);
+        setNextCursor(undefined);
         setError(null);
         setLoading(false);
         return;
@@ -1537,15 +1693,18 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         setResults(null);
         setRunsMap({});
         setRunsScanned(0);
-        setRunsMatching(0);
+        setNextCursor(undefined);
         setLoading(false);
         return;
       }
       setLoading(true);
       setError(null);
-      setResults(null);
-      setRunsMap({});
-      setRunsScanned(0);
+      if (!after) {
+        setResults(null);
+        setRunsMap({});
+        setRunsScanned(0);
+        setNextCursor(undefined);
+      }
       try {
         const resp = await searchRunsGrep(trimmed, {
           pipelines: searchFilterValues(pipelineVal),
@@ -1553,18 +1712,20 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           branches: searchFilterValues(branchVal),
           shaPrefixes: commits,
           since: sinceVal === "all" ? undefined : sinceVal,
-          limit: 200,
+          limit: SEARCH_RUNS_PER_REQUEST,
           maxMatches: 10,
+          after,
         });
         if (generation !== searchGeneration.current) return;
-        setResults(resp.matches ?? []);
-        setRunsMap(resp.runs ?? {});
-        setRunsScanned(resp.runs_scanned);
-        setRunsMatching(resp.runs_matching);
+        setResults((prev) => [...(after ? (prev ?? []) : []), ...(resp.matches ?? [])]);
+        setRunsMap((prev) => ({ ...(after ? prev : {}), ...(resp.runs ?? {}) }));
+        setRunsScanned((prev) => (after ? prev : 0) + resp.runs_scanned);
+        setNextCursor(resp.next_cursor);
       } catch (e) {
         if (generation !== searchGeneration.current) return;
         setError(e instanceof Error ? e.message : String(e));
-        setResults([]);
+        // A failed continuation keeps the matches already found and its cursor, so it can be retried.
+        if (!after) setResults([]);
       } finally {
         if (generation === searchGeneration.current) setLoading(false);
       }
@@ -1637,6 +1798,26 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     params.set("node", m.node_id);
     router.push(`/runs?${params.toString()}`);
   };
+  const searchOlder = () =>
+    runGrep(
+      initialQuery,
+      initialSince,
+      initialPipeline,
+      initialStatus,
+      initialBranch,
+      initialCommit,
+      nextCursor,
+    );
+  const olderButton = nextCursor && !loading && (
+    <button
+      type="button"
+      onClick={searchOlder}
+      className="mt-3 text-[10px] px-2 py-1 rounded border border-fuchsia-400/60 text-fuchsia-300 hover:bg-fuchsia-500/10 transition-colors"
+    >
+      Search older runs
+    </button>
+  );
+  const scannedNote = `searched ${runsScanned} run${runsScanned === 1 ? "" : "s"}${nextCursor ? "; older runs not searched yet" : ", every matching run"}`;
   const visibleResults = results;
   const byRun = new Map<string, RunsGrepMatch[]>();
   const runOrder: string[] = [];
@@ -1727,24 +1908,26 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {error && (
           <div className="text-xs font-mono text-red-400 mb-3">
             error: {error}
+            {(visibleResults ?? []).length === 0 && <div>{olderButton}</div>}
           </div>
         )}
         {visibleResults === null && !loading && !error && (
           <div className="text-xs text-[var(--muted)] space-y-1">
-            <div>Searches job logs from up to 200 matching runs, newest first.</div>
+            <div>Searches job logs of matching runs, newest first, {SEARCH_RUNS_PER_REQUEST} runs at a time.</div>
             <div>Choose All time to include older runs.</div>
           </div>
         )}
         {visibleResults !== null && visibleResults.length === 0 && !loading && !error && (
           <div className="text-xs text-[var(--muted)]">
-            no matches; searched {runsScanned} of {runsMatching} candidate runs
+            no matches; {scannedNote}
+            <div>{olderButton}</div>
           </div>
         )}
         {visibleResults !== null && visibleResults.length > 0 && (
           <>
             <div className="text-[10px] text-[var(--muted)] font-mono mb-2">
               {visibleResults.length} match{visibleResults.length === 1 ? "" : "es"} across{" "}
-              {byRun.size} run{byRun.size === 1 ? "" : "s"}; searched {runsScanned} of {runsMatching} candidate runs
+              {byRun.size} run{byRun.size === 1 ? "" : "s"}; {scannedNote}
             </div>
             <div className="flex flex-col gap-3">
               {runOrder.map((runID) => {
@@ -1823,6 +2006,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 );
               })}
             </div>
+            {olderButton}
           </>
         )}
       </div>

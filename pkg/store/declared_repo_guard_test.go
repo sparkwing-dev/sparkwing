@@ -16,6 +16,7 @@ var declaredRepoReaders = map[string]string{
 	"pkg/store/store.go":                         "the column's own persistence: schema, insert, scan, and the list filter",
 	"pkg/store/agent_loss_recovery.go":           "copies the column forward when an agent loss retries a run",
 	"pkg/store/runfilter_http.go":                "parses the ?repo= list filter off a request",
+	"pkg/store/run_filter_display.go":            "matches the run list's repository name and text filters, in SQL and in memory",
 	"pkg/controller/handlers.go":                 "copies the trigger's repository onto the run row for display",
 	"pkg/controller/github_app_webhook.go":       "copies the installation's repository onto the pending run row for display",
 	"pkg/controller/client/client.go":            "sends the ?repo= list filter",

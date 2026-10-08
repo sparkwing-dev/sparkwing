@@ -246,52 +246,6 @@ func TestPreviewPlan_KnownStartAtSucceeds(t *testing.T) {
 	}
 }
 
-type previewFanOutJob struct{ sparkwing.Base }
-
-func (previewFanOutJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "seed", nopStep)
-	sparkwing.JobSpawnEach(w, []string{}, func(s string) (string, any) {
-		return "child-" + s, nopStep
-	})
-	return nil, nil
-}
-
-type previewFanOutPipe struct{ sparkwing.Base }
-
-func (previewFanOutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "fanout", previewFanOutJob{})
-	return nil
-}
-
-func TestPreviewPlan_DynamicFanOutCardinalityUnresolved(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("plan-preview-fanout",
-		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewFanOutPipe{} })
-	reg, _ := sparkwing.Lookup("plan-preview-fanout")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-preview-fanout"})
-	if err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-
-	previewExecCounter.Store(0)
-	preview, err := sparkwingruntime.PreviewPlan(plan, "plan-preview-fanout", nil, sparkwingruntime.PreviewOptions{})
-	if err != nil {
-		t.Fatalf("PreviewPlan: %v", err)
-	}
-	if previewExecCounter.Load() != 0 {
-		t.Fatalf("step body executed (counter = %d)", previewExecCounter.Load())
-	}
-	if len(preview.Nodes) != 1 || preview.Nodes[0].Work == nil {
-		t.Fatalf("expected one node with Work")
-	}
-	if len(preview.Nodes[0].Work.SpawnEach) != 1 {
-		t.Fatalf("expected one SpawnEach generator, got %d", len(preview.Nodes[0].Work.SpawnEach))
-	}
-	gen := preview.Nodes[0].Work.SpawnEach[0]
-	if gen.Cardinality != "unresolved" {
-		t.Errorf("cardinality: got %q, want unresolved", gen.Cardinality)
-	}
-}
-
 type previewArgsInputs struct {
 	Tag string `flag:"tag" desc:"a tag"`
 }

@@ -107,8 +107,8 @@ type Defaults struct {
 
 	// Args supplies per-arg default values for every pipeline. Each
 	// key is layered under pipeline.args (pipeline wins per-key),
-	// and the merged map sits in the priority chain between
-	// schema.Computed and the explicit operator CLI flag.
+	// and the merged map overrides a field's `default` tag while an
+	// explicit operator CLI flag overrides it.
 	Args map[string]string `yaml:"args,omitempty"`
 
 	// Guards apply to every pipeline. Wholesale-replaced by a

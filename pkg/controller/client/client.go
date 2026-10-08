@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,11 +101,37 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if len(f.RepoURLs) > 0 {
 		q.Set("repo_url", strings.Join(f.RepoURLs, ","))
 	}
+	for param, values := range map[string][]string{
+		"exclude_pipeline":       f.ExcludePipelines,
+		"exclude_status":         f.ExcludeStatuses,
+		"exclude_git_sha":        f.ExcludeGitSHAPrefixes,
+		"exclude_git_branch":     f.ExcludeGitBranches,
+		"trigger_source":         f.TriggerSources,
+		"exclude_trigger_source": f.ExcludeTriggerSources,
+		"repo_name":              f.RepoNames,
+		"exclude_repo_name":      f.ExcludeRepoNames,
+	} {
+		if len(values) > 0 {
+			q.Set(param, strings.Join(values, ","))
+		}
+	}
 	if f.RootOnly {
 		q.Set("root_only", "true")
 	}
 	if !f.Since.IsZero() {
 		q.Set("since", time.Since(f.Since).String())
+	}
+	for param, t := range map[string]time.Time{
+		"started_before":  f.StartedBefore,
+		"finished_after":  f.FinishedAfter,
+		"finished_before": f.FinishedBefore,
+	} {
+		if !t.IsZero() {
+			q.Set(param, t.UTC().Format(time.RFC3339Nano))
+		}
+	}
+	if search := runSearchQuery(f.Text, f.ExcludeText); search != "" {
+		q.Set("q", search)
 	}
 	if f.Limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", f.Limit))
@@ -112,6 +139,10 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if f.HasCursor() {
 		q.Set("after_started_at", fmt.Sprintf("%d", f.AfterStartedAt))
 		q.Set("after_id", f.AfterID)
+	}
+	if f.HasBeforeCursor() {
+		q.Set("before_started_at", fmt.Sprintf("%d", f.BeforeStartedAt))
+		q.Set("before_id", f.BeforeID)
 	}
 	u := c.baseURL + "/api/v1/runs"
 	if enc := q.Encode(); enc != "" {
@@ -139,6 +170,9 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if f.HasCursor() && !cursorCapable {
 		return nil, errors.New("controller does not support paging runs by cursor")
 	}
+	if usesRunDisplayFilters(f) && !store.SupportsRunDisplayFilters(resp.Header.Get("X-Sparkwing-Run-Filter-Version")) {
+		return nil, errors.New("controller does not support the run exclusion, trigger, repository name, time range, text or before-cursor filters")
+	}
 	// safety: an older controller clamps away the row that tells a full page from a cut
 	// one, and answers a full page, which reads as the whole set.
 	if f.Limit > store.MaxRunListLimit && !cursorCapable && !f.ProbeMayBeClamped {
@@ -153,6 +187,21 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 		return nil, err
 	}
 	return body.Runs, nil
+}
+
+func usesRunDisplayFilters(f store.RunFilter) bool {
+	return len(f.ExcludePipelines)+len(f.ExcludeStatuses)+len(f.ExcludeGitSHAPrefixes)+len(f.ExcludeGitBranches)+
+		len(f.TriggerSources)+len(f.ExcludeTriggerSources)+len(f.RepoNames)+len(f.ExcludeRepoNames)+
+		len(f.Text)+len(f.ExcludeText) > 0 ||
+		!f.StartedBefore.IsZero() || !f.FinishedAfter.IsZero() || !f.FinishedBefore.IsZero() || f.HasBeforeCursor()
+}
+
+func runSearchQuery(include, exclude []string) string {
+	terms := slices.Clone(include)
+	for _, term := range exclude {
+		terms = append(terms, "-"+term)
+	}
+	return strings.Join(terms, " ")
 }
 
 // GetRun fetches a run for display. Values of args the pipeline

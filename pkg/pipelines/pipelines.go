@@ -61,10 +61,10 @@ type Pipeline struct {
 	// like one typed on the command line. See pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
-	// Args supplies per-arg default values. Higher priority than
-	// schema Default and Computed; lower than an explicit operator
-	// CLI flag. Keyed by CLI flag name (kebab-case, matching what
-	// the SDK's WithArgs[T] field tags resolve to).
+	// Args supplies per-arg default values. Higher priority than a
+	// field's `default` tag; lower than an explicit operator CLI flag.
+	// Keyed by the field's `flag` tag on pipeline Inputs or a job's
+	// WithArgs[T].
 	Args map[string]string `yaml:"args,omitempty"`
 
 	// Profile names the project profile (from sparkwing.yaml's
