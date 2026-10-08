@@ -51,6 +51,9 @@ unlock.
 - **store:** Schema v95 records where each node attempt's log segments live
   The `node_logs` table holds the attempt's key prefix, its uploaded-through segment, stored bytes and seal time. `Store.CurrentNodeAttempt`, `OpenNodeLog`, `RecordNodeLogProgress`, `MarkNodeLogSealed`, `LatestNodeLog`, `RunNodeLogs`, `AbandonedNodeLogs` and `DeleteRunNodeLogs` read and write it.
 
+- **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
+  Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
+
 ### Changed
 - **cli (Breaking):** `-C DIR` before the verb replaces `--sw-cd`, `--sparkwing-dir`, `--dir` and the path form of `--repo`; `--home` gives way to `SPARKWING_HOME`; `--profile` may precede the verb and falls back to `SPARKWING_PROFILE`
   `sparkwing -C DIR <verb>` works for every verb, as in git. `--sw-cd`/`-C` after the verb, `pipeline sparks * --sparkwing-dir`, `cache explain --dir`, and `--repo DIR` on `pipeline hooks install/uninstall/status/fire` and `crons install/uninstall` are gone; `pipeline lint --dir` (the source directory to scan) and `--repo` that names a registered repo or an `OWNER/NAME` filter stay. `--home` is gone from `queue`, `daemon`, `doctor`, `serve`, `runs cancel/retry/bounce` and `runs consumer`; set `SPARKWING_HOME`. A verb that reads runs without `--profile` now resolves `SPARKWING_PROFILE` before the project's `defaults.profile`, and `runs stats` follows that chain as `runs status` does instead of reading the local store. See [migration guide](docs/migrations/_unreleased.md#root-flags-replace-per-verb-directory-and-home-flags).
@@ -96,6 +99,9 @@ unlock.
   A search that stops at a bound answers `truncated: true` and names the bound in `stopped`; the dashboard and the CLI keep the matches found until then. These are the bounds the logs service held its own searches to. `sparkwing serve` searches a laptop's logs without them.
 - **controller:** Logs the run store does not record, such as ones the logs service export writes, read and delete like the logs a runner wrote
   The controller finds them by listing `logs/r90/` and `logs/r30/` under the run, and deleting a run or a team deletes them.
+
+- **controller:** Node log segments expire by bucket lifecycle rule per retention class and count against the team's log storage
+  A new attempt's log goes under `logs/r90/` for a team with credits or a single-team install, `logs/r30/` for a team without credits, or the class `--log-retention` maps the team to; the class is chosen when the attempt's first upload URLs are issued. The controller reads the cache bucket's lifecycle rules and issues no upload URLs into a class without an enabled rule that expires its prefix after its days, so the runner keeps that log as it would without segments; it needs `s3:GetLifecycleConfiguration`. On a multi-team controller each attempt's stored bytes are committed to the team's log storage as its runner reports them, a team whose storage is paused gets no URLs (`402`), and the hourly storage pass counts the segments and deletes a team's oldest finished runs' segments while it is past its free log share. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
 
 ### Fixed
 - **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).

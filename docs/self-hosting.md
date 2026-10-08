@@ -42,6 +42,38 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+### Node log retention
+
+A controller with `--cache-blob-store` keeps node log segments in that
+bucket under one prefix per retention class: `<prefix>/logs/r90/` for a
+team with credits and for a single-team install, `<prefix>/logs/r30/` for a
+team without credits, and `<prefix>/logs/r<days>/` for each team
+`--log-retention team=days` names. The bucket's lifecycle rules expire
+them; the controller never writes rules, because a put replaces the
+bucket's whole configuration. It reads them on its first log request and
+again every 5 minutes while one is missing, and issues no upload URLs into
+a class without an enabled rule that expires the class prefix after
+exactly its days, naming the rule in its log and refusal; the runner then
+keeps that node's log as it would against a controller without segments.
+Grant the controller `s3:GetLifecycleConfiguration` on the bucket and add
+the rules, merged with any the bucket already has:
+
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket my-cache-bucket \
+  --lifecycle-configuration '{"Rules": [
+    {"ID": "sparkwing-logs-r90", "Status": "Enabled",
+     "Filter": {"Prefix": "cache/logs/r90/"}, "Expiration": {"Days": 90}},
+    {"ID": "sparkwing-logs-r30", "Status": "Enabled",
+     "Filter": {"Prefix": "cache/logs/r30/"}, "Expiration": {"Days": 30}}]}'
+```
+
+A controller without a cache bucket keeps segments in its output
+directory and expires nothing; deleting a run or a team deletes its logs.
+On a multi-team controller a segment's stored bytes count against the
+team's log storage, and the hourly storage pass lists the segments to
+correct the count and, for a team without credits past its log share,
+deletes its least recently written finished runs' logs.
+
 ### Signed downloads through CloudFront
 
 For object-store downloads through a public ingress, configure the controller

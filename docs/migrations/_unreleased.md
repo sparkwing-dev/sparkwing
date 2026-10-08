@@ -1110,12 +1110,18 @@ step with the controller's own.
   the controller, which serves segments first and the logs service for a
   node that wrote none, so logs the service already holds stay readable.
   Deleting a run or a team deletes its segments.
-- **Operator steps:** none are required; keep the logs service running so
-  its existing logs stay readable. On an S3 cache bucket, add a lifecycle
-  rule that expires `<cache prefix>/logs/r90/` after 90 days; until later
-  releases manage retention, nothing else expires these objects. A
-  controller that keeps them on its own disk keeps them until their run is
-  deleted. Segment bytes do not yet count against a team's storage share.
+- **Operator steps:** keep the logs service running so its existing logs
+  stay readable. On an S3 cache bucket, grant the controller
+  `s3:GetLifecycleConfiguration` and add enabled lifecycle rules expiring
+  `<cache prefix>/logs/r90/` after 90 days and `<cache prefix>/logs/r30/`
+  after 30, plus `<cache prefix>/logs/r<days>/` after `<days>` for each
+  team `--log-retention team=days` names; [self-hosting.md](../self-hosting.md#node-log-retention)
+  has the command. Until a class has its rule, the controller issues no
+  upload URLs into it and those nodes' runners keep writing to their logs
+  URL, or their own disk without one. A controller that keeps segments on
+  its own disk needs no rule and keeps them until their run is deleted.
+  On a multi-team controller segment bytes count against the team's log
+  storage.
 - **Mixed versions:** upgrade the controller first. A runner that predates
   segments keeps writing to its logs URL, which the controller still reads
   through. A runner of this release against an older controller finds no

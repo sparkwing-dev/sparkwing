@@ -235,10 +235,9 @@ one listing the segments that landed, and the log reads incomplete:
 | `cut_off` | The binary was killed or never started, sent no seal after numbering its lines, or reached the 64 MiB node cap. | `- logs cut off after line N: ... -` |
 | `streaming` | The node is running, or finished less than 60 seconds ago and its manifest has not landed. | Nothing yet. |
 
-Deleting a run deletes its segments, and so does deleting a team. Nothing
-expires segments on its own yet; see the
-[migration guide](migrations/_unreleased.md#node-logs-reach-the-controller-as-segments)
-for the lifecycle rule to add.
+Deleting a run deletes its segments, and so does deleting a team. Bucket
+lifecycle rules expire them by retention class; see
+[self-hosting.md](self-hosting.md#node-log-retention).
 
 ## Failure excerpts
 
