@@ -34,13 +34,12 @@ exists somewhere else and you just need a runner pool.
 ## Render the chart
 
 `helm template` stops on this chart's own `validate.yaml` unless the cache's
-operator token Secret is named, because `cache.enabled` defaults to true. The
+grant key Secret is named, because `cache.enabled` defaults to true. The
 minimal read-only render is:
 
 ```bash
 helm template runners ./charts/sparkwing-runner-bundle \
   --set controller.tokenSecret.name=sparkwing-token \
-  --set cache.tokenSecret.name=sparkwing-cache-token \
   --set cache.grantKeySecret.name=sparkwing-cache-grant-key
 ```
 
@@ -96,12 +95,10 @@ logs:
 # 1. Create the namespace.
 kubectl create namespace sparkwing
 
-# 2. Create the runner's bearer token, the cache's operator token and the
-#    cache grant key as three Secrets. Each is a different secret.
+# 2. Create the runner's bearer token and the cache grant key as two
+#    Secrets. Each is a different secret.
 kubectl -n sparkwing create secret generic sparkwing-token \
     --from-literal=token=<your-token>
-kubectl -n sparkwing create secret generic sparkwing-cache-token \
-    --from-literal=token="$(openssl rand -hex 32)"
 kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
     --from-literal=key="$(openssl rand -hex 32)"
 
@@ -111,14 +108,13 @@ helm install runners ./charts/sparkwing-runner-bundle \
     -f compatible-images.yaml \
     --set controller.url=https://api.sparkwing.dev \
     --set controller.tokenSecret.name=sparkwing-token \
-    --set cache.tokenSecret.name=sparkwing-cache-token \
     --set cache.grantKeySecret.name=sparkwing-cache-grant-key \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-The controller the runners claim from needs the same cache token as
-`SPARKWING_CACHE_TOKEN` and the same grant key as
-`SPARKWING_CACHE_GRANT_KEY`.
+The controller the runners claim from needs the same grant key as
+`SPARKWING_CACHE_GRANT_KEY`: it signs runs' grants with it, and the operator
+grant it presents on its own calls to the cache.
 
 For a fully unauthenticated test cluster, opt the cache and the logs
 service out of their token requirement explicitly:
@@ -141,8 +137,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.url` | Where the runner claims from. **Required.** | `""` |
 | `controller.tokenSecret.name` | Existing Secret holding the bearer token. | `""` |
 | `controller.tokenSecret.key` | Key inside the Secret. | `token` |
-| `cache.tokenSecret.name` | Existing Secret holding the cache's operator token. Never the runner's token. | `""` |
-| `cache.grantKeySecret.name` | Existing Secret holding the key cache grants are signed and verified with. Never either token. | `""` |
+| `cache.grantKeySecret.name` | Existing Secret holding the key cache grants are signed and verified with. Never the runner's token. Required when the cache is enabled, unless `cache.allowUnauthenticated`. | `""` |
 | `runner.replicas` | Pool size. | `2` |
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
@@ -157,7 +152,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.goCache.persistence.size` | Go cache PVC size. | `20Gi` |
 | `runner.goCache.persistence.accessModes` | Access modes on that claim. Needs `ReadWriteMany` above one replica. | `[ReadWriteMany]` |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
-| `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
+| `cache.allowUnauthenticated` | Serve the cache's blob, git and admin endpoints without a grant. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy; `false` also stops the cache serving it. Must be `false` when `cache.service.type` is not `ClusterIP`, because the proxy takes no credential. | `true` |
 | `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
 | `cache.repos` | `--auto-register-repos` -- comma-separated `alias=url`. | `""` |
@@ -228,23 +223,26 @@ incoming Authorization header to the resolved controller's
 receive a second service bearer. Once a Secret name is configured, its key
 and the Secret itself are required.
 
-The chart projects `cache.tokenSecret` and `cache.grantKeySecret` into one
-volume at `/etc/sparkwing/credentials` and passes it as `--credentials-dir`:
-the cache reads its operator token from the file `cache-token` and the key it
-verifies cache grants with from `cache-grant-key`. The runner holds
-neither: for each claimed run it asks the controller for a cache grant, which
-the controller signs with the grant key, and it hands the run only that grant.
-Pipeline code can read the runner's token, so the chart refuses to render when
-any two of `controller.tokenSecret`, `cache.tokenSecret` and
-`cache.grantKeySecret` name the same Secret key: a runner token that was also
-the operator token would open every team's cache, and one that was also the
-grant key would sign a grant for any team. Without `cache.grantKeySecret` no
-grants are minted and runs go without the binary and dependency caches.
+The chart projects `cache.grantKeySecret` into a volume at
+`/etc/sparkwing/credentials` and passes it as `--credentials-dir`: the cache
+reads the key it verifies cache grants with from `cache-grant-key`. Grants are
+the only bearer the cache accepts. The runner does not hold the key: for each
+claimed run it asks the controller for a cache grant, which the controller
+signs with the grant key, and it hands the run only that grant. The controller
+signs a short-lived operator grant for its own calls to the cache. Pipeline
+code can read the runner's token, so the chart refuses to render when
+`controller.tokenSecret` and `cache.grantKeySecret` name the same Secret key:
+a runner token that was also the grant key would sign a grant for any team.
 
-A cache-enabled install without `cache.tokenSecret` fails at render time. Set
-`cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
-to anything that can reach the Service, which is appropriate only on a
-bootstrap install, before the Secret exists.
+A cache-enabled install without `cache.grantKeySecret` fails at render time.
+Set `cache.allowUnauthenticated=true` to serve the cache's blob, git and admin
+endpoints to anything that can reach the Service, which is appropriate only on
+a bootstrap install, before the Secret exists. The chart refuses
+`cache.tokenSecret`, which named the static operator token earlier releases
+used; see the migration guide section "The cache's static operator token is
+removed". A cache started with `--controller` outside this chart also needs a
+`storage.count` service token in the file `controller-token`; the chart does
+not start the cache with `--controller`.
 
 A logs-enabled install without it fails the same way, because the logs service
 has no controller to resolve callers against. With the Secret configured the

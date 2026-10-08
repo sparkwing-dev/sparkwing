@@ -1,29 +1,28 @@
 {{- if and .Values.controller.tokenSecret.name (not .Values.controller.tokenSecret.key) -}}
 {{- fail "sparkwing-runner-bundle: controller.tokenSecret.key is required when controller.tokenSecret.name is set" -}}
 {{- end -}}
-{{- if and .Values.cache.tokenSecret.name (not .Values.cache.tokenSecret.key) -}}
-{{- fail "sparkwing-runner-bundle: cache.tokenSecret.key is required when cache.tokenSecret.name is set" -}}
+{{- if (get (.Values.cache.tokenSecret | default dict) "name") -}}
+{{- fail "sparkwing-runner-bundle: cache.tokenSecret was removed with the cache's static operator token; the cache accepts only grants signed with cache.grantKeySecret, and the controller signs its own. Unset it, delete the Secret, and follow the migration guide section \"The cache's static operator token is removed\"" -}}
 {{- end -}}
 {{- if and .Values.cache.grantKeySecret.name (not .Values.cache.grantKeySecret.key) -}}
 {{- fail "sparkwing-runner-bundle: cache.grantKeySecret.key is required when cache.grantKeySecret.name is set" -}}
 {{- end -}}
-{{- if and .Values.cache.enabled (not .Values.cache.tokenSecret.name) (not .Values.cache.allowUnauthenticated) -}}
-{{- fail "sparkwing-runner-bundle: cache.enabled=true requires cache.tokenSecret.name, the Secret the cache reads its operator token from (mounted as cache-token under --credentials-dir). Set cache.allowUnauthenticated=true to serve the cache to anyone who can reach it instead" -}}
+{{- if and .Values.cache.enabled (not .Values.cache.grantKeySecret.name) (not .Values.cache.allowUnauthenticated) -}}
+{{- fail "sparkwing-runner-bundle: cache.enabled=true requires cache.grantKeySecret.name, the Secret holding the key the cache verifies grants with (mounted as cache-grant-key under --credentials-dir) and the controller signs them with. Set cache.allowUnauthenticated=true to serve the cache to anyone who can reach it instead" -}}
 {{- end -}}
-{{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") (or .Values.cache.allowUnauthenticated (not .Values.cache.tokenSecret.name)) -}}
-{{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster with no bearer token on its routes. Set cache.service.type=ClusterIP, or set cache.tokenSecret.name and leave cache.allowUnauthenticated=false" .Values.cache.service.type) -}}
+{{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") (or .Values.cache.allowUnauthenticated (not .Values.cache.grantKeySecret.name)) -}}
+{{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster with no bearer on its routes. Set cache.service.type=ClusterIP, or set cache.grantKeySecret.name and leave cache.allowUnauthenticated=false" .Values.cache.service.type) -}}
 {{- end -}}
 {{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") .Values.cache.dependencyProxy.enabled -}}
 {{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster, and its registry proxy takes no credential. Set cache.dependencyProxy.enabled=false to serve no proxy, or keep cache.service.type=ClusterIP" .Values.cache.service.type) -}}
 {{- end -}}
 {{- $cacheSecrets := list
       (dict "value" "controller.tokenSecret" "ref" .Values.controller.tokenSecret)
-      (dict "value" "cache.tokenSecret" "ref" .Values.cache.tokenSecret)
       (dict "value" "cache.grantKeySecret" "ref" .Values.cache.grantKeySecret) -}}
 {{- range $i, $a := $cacheSecrets -}}
 {{- range $j, $b := $cacheSecrets -}}
 {{- if and (lt $i $j) $a.ref.name (eq $a.ref.name $b.ref.name) (eq (toString $a.ref.key) (toString $b.ref.key)) -}}
-{{- fail (printf "sparkwing-runner-bundle: %s and %s both read Secret %s key %s. Each must name a different Secret key: pipeline code can read the runner's token, the cache's operator token opens every team's tree, and the grant key signs access to any team's tree" $a.value $b.value $a.ref.name (toString $a.ref.key)) -}}
+{{- fail (printf "sparkwing-runner-bundle: %s and %s both read Secret %s key %s. Each must name a different Secret key: pipeline code can read the runner's token, and the grant key signs access to any team's tree" $a.value $b.value $a.ref.name (toString $a.ref.key)) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

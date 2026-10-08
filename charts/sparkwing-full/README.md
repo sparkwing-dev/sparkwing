@@ -37,7 +37,6 @@ read-only render is:
 helm template sparkwing ./charts/sparkwing-full \
   --set controller.allowOpenBootstrap=true \
   --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
-  --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
   --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key
 ```
 
@@ -107,13 +106,10 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # A runner token needs `nodes.claim`, `triggers.claim`, `runs.state`,
 # and `logs.write`.
 
-# The cache's operator token and the key cache grants are signed with.
-# Both are random secrets of their own and neither is ever a runner token:
-# pipeline code can read the runner's token, and either of these opens
-# every team's cache. The chart refuses to render when two of the three
-# name the same Secret key.
-kubectl -n sparkwing create secret generic sparkwing-cache-token \
-    --from-literal=token="$(openssl rand -hex 32)"
+# The key cache grants are signed with, the only bearer the cache accepts.
+# It is a random secret of its own and never a runner token: pipeline code
+# can read the runner's token, and the key signs access to every team's
+# cache. The chart refuses to render when both name the same Secret key.
 kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
     --from-literal=key="$(openssl rand -hex 32)"
 ```
@@ -197,8 +193,7 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
-    --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
-    --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
+      --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
     --set ingress.hosts[0].paths[0].path=/ \
@@ -279,9 +274,8 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | The runner's bearer-token Secret. | `""` |
-| `sparkwing-runner-bundle.cache.tokenSecret.name` | The cache's operator token, which the controller also holds. Never the runner's token. | `""` |
-| `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with and the cache verifies them with. | `""` |
-| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a token (bootstrap only). | `false` |
+| `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with, its own included, and the cache verifies them with. Never the runner's token. | `""` |
+| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a grant (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.logs.allowUnauthenticated` | Serve every run's logs without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
@@ -350,11 +344,11 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    Kubernetes holds those pods until the configured Secret is present.
    `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
    service's signal to resolve callers against the controller.
-   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as the
-   credential file `cache-token` and the controller as `SPARKWING_CACHE_TOKEN`,
-   and `sparkwing-runner-bundle.cache.grantKeySecret` what the cache reads as
-   `cache-grant-key` and the controller as `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
-   token fails at render time unless
+   `sparkwing-runner-bundle.cache.grantKeySecret` is what the cache reads as
+   `cache-grant-key` and the controller as `SPARKWING_CACHE_GRANT_KEY`; the
+   controller signs its own calls to the cache with it, so no static cache
+   token exists. A cache-enabled install without the grant key fails at
+   render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
    logs-enabled one without the runner token unless
    `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap

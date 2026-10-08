@@ -37,7 +37,7 @@ controller:
   # Secret created out-of-band; the chart does NOT create the secret
   # itself (so you can rotate it without `helm upgrade`). Pipeline code
   # the runner executes can read this token, so it is never the cache's
-  # token or grant key (cache.tokenSecret, cache.grantKeySecret).
+  # grant key (cache.grantKeySecret).
   tokenSecret:
     # Name of the Secret in the install namespace.
     name: ""
@@ -211,31 +211,22 @@ cache:
   # Working-tree runs still need a gitcache.
   enabled: true
 
-  # Serve the cache's blob and sync endpoints to anyone who can reach
-  # the Service. false (the default) requires cache.tokenSecret; true
-  # passes --allow-unauthenticated to the cache and is only appropriate
-  # on a bootstrap install, before the Secret exists.
+  # Serve the cache's blob, git and admin endpoints to anyone who can
+  # reach the Service. false (the default) requires
+  # cache.grantKeySecret; true passes --allow-unauthenticated to the
+  # cache and is only appropriate on a bootstrap install, before the
+  # Secret exists.
   allowUnauthenticated: false
 
-  # The cache's operator token, which opens every route and every
-  # team's tree. The cache requires it and the controller holds it for
-  # its own hop; runners never do. It must name a different Secret key
-  # from controller.tokenSecret, because pipeline code can read the
-  # runner's token, and the chart refuses to render otherwise. The
-  # cache reads it as the file cache-token under --credentials-dir.
-  #   kubectl create secret generic sparkwing-cache-token \
-  #     --from-literal=token=<token>
-  tokenSecret:
-    name: ""
-    key: token
-
   # The key the controller signs cache grants with and the cache
-  # verifies them with. A grant opens one team's cache tree for one
-  # run, so this key is held by the controller and the cache only, and
-  # must name a different Secret key from both tokens above. Leave name
-  # empty to mint no grants: runs then go without the binary and
-  # dependency caches. The cache reads it as the file cache-grant-key
-  # under --credentials-dir.
+  # verifies them with. Grants are the only bearer the cache accepts:
+  # a run's grant opens one team's cache tree for that run, and the
+  # controller signs a short-lived operator grant for its own git
+  # proxy, team purges and store-ceiling calls. So this key is held by
+  # the controller and the cache only, and must name a different Secret
+  # key from controller.tokenSecret; the chart refuses to render
+  # otherwise. The cache reads it as the file cache-grant-key under
+  # --credentials-dir.
   #   kubectl create secret generic sparkwing-cache-grant-key \
   #     --from-literal=key=<random 32 bytes>
   grantKeySecret:

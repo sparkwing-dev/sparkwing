@@ -474,8 +474,6 @@ sparkwing-runner-bundle:
   cache:
     grantKeySecret:
       name: sparkwing-cache-grant-key
-    tokenSecret:
-      name: sparkwing-cache-token
     allowUnauthenticated: false
   logs:
     allowUnauthenticated: false
@@ -568,8 +566,6 @@ admin_token="$(jq -er '.token' <<<"$token_response")"
 
 create_owned_secret sparkwing-token \
   --from-literal="token=$admin_token"
-create_owned_secret sparkwing-cache-token \
-  --from-literal="token=$(openssl rand -base64 32)"
 create_owned_secret sparkwing-cache-grant-key \
   --from-literal="key=$(openssl rand -base64 32)"
 helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \

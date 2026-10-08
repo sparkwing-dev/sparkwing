@@ -39,7 +39,6 @@ func tokenSecretDefaults(chart string) []string {
 	}
 	return append(controller,
 		prefix+"controller.tokenSecret.name=sparkwing-token",
-		prefix+"cache.tokenSecret.name=sparkwing-cache-token",
 		prefix+"cache.grantKeySecret.name=sparkwing-cache-grant-key",
 	)
 }
@@ -1470,7 +1469,7 @@ func TestConfiguredSecretRefsAreRequired(t *testing.T) {
 	if strings.Contains(cache, "optional: true") {
 		t.Fatalf("configured cache Secret is optional:\n%s", cache)
 	}
-	for _, name := range []string{"sparkwing-cache-token", "sparkwing-cache-grant-key", "sparkwing-ssh"} {
+	for _, name := range []string{"sparkwing-cache-grant-key", "sparkwing-ssh"} {
 		if !strings.Contains(cache, "name: \""+name+"\"") && !strings.Contains(cache, "secretName: \""+name+"\"") {
 			t.Errorf("cache did not render required Secret %q:\n%s", name, cache)
 		}
@@ -1501,12 +1500,6 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 				"sparkwing-runner-bundle.controller.tokenSecret.key=",
 			},
 			want: "controller.tokenSecret.key is required",
-		},
-		{
-			name:  "cache operator token",
-			chart: "./sparkwing-runner-bundle",
-			sets:  []string{"cache.tokenSecret.key="},
-			want:  "cache.tokenSecret.key is required",
 		},
 		{
 			name:  "cache grant key",
@@ -1891,12 +1884,12 @@ func TestRunnerCarriesNoCacheToken(t *testing.T) {
 	}
 }
 
-func TestCacheWithoutATokenSecretFailsAtRender(t *testing.T) {
+func TestCacheWithoutAGrantKeySecretFailsAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.tokenSecret.name=")
-	for _, want := range []string{"cache.tokenSecret.name", "cache.allowUnauthenticated=true"} {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.grantKeySecret.name=")
+	for _, want := range []string{"cache.grantKeySecret.name", "cache.allowUnauthenticated=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render error does not name %q:\n%s", want, out)
 		}
@@ -2090,14 +2083,14 @@ func TestCacheNetworkPolicyIsOptOut(t *testing.T) {
 	}
 }
 
-func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
+func TestPublishedCacheWithoutAGrantKeyFailsAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
 	}
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
 		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
 			"cache.service.type="+serviceType, "cache.allowUnauthenticated=true")
-		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "cache.tokenSecret.name"} {
+		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "cache.grantKeySecret.name"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s render error does not name %q:\n%s", serviceType, want, out)
 			}
@@ -2106,7 +2099,7 @@ func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
 	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-service.yaml", "sparkwing",
 		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
 	if !strings.Contains(rendered, "type: LoadBalancer") {
-		t.Errorf("a tokened cache refused a LoadBalancer Service:\n%s", rendered)
+		t.Errorf("a cache verifying grants refused a LoadBalancer Service:\n%s", rendered)
 	}
 }
 
@@ -2134,29 +2127,41 @@ func TestAPublishedCacheServesNoRegistryProxy(t *testing.T) {
 	}
 }
 
-func TestControllerCarriesTheCacheToken(t *testing.T) {
+// The cache's static operator token is removed, so the controller carries
+// only the grant key it signs its own cache calls with.
+func TestControllerCarriesNoCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=cache-operator",
-		"sparkwing-runner-bundle.cache.tokenSecret.key=bearer")
-	for _, env := range controller.Env {
-		if env.Name != "SPARKWING_CACHE_TOKEN" {
-			continue
+	for _, env := range renderController(t).Env {
+		if env.Name == "SPARKWING_CACHE_TOKEN" {
+			t.Fatalf("controller still carries SPARKWING_CACHE_TOKEN: %+v", env)
 		}
-		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
-			t.Fatalf("SPARKWING_CACHE_TOKEN is not a secretKeyRef: %+v", env)
-		}
-		ref := *env.ValueFrom.SecretKeyRef
-		if ref.Name != "cache-operator" || ref.Key != "bearer" {
-			t.Errorf("controller cache token = %+v, want the cache's operator token Secret", ref)
-		}
-		return
 	}
-	t.Fatalf("controller has no SPARKWING_CACHE_TOKEN env: %+v", controller.Env)
 }
 
-func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
+// The cache's static operator token was removed, so a leftover value fails
+// the render in both charts and names the migration, while the empty name an
+// upgrade's reused values carry still renders.
+func TestRemovedCacheTokenSecretFailsTheRender(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
+	for chart, set := range map[string]string{
+		"./sparkwing-runner-bundle": "cache.tokenSecret.name=sparkwing-cache-token",
+		"./sparkwing-full":          "sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token",
+	} {
+		out := helmRenderError(t, chart, "sparkwing", set)
+		for _, want := range []string{"cache.tokenSecret was removed", "The cache's static operator token is removed"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s render error lacks %q:\n%s", chart, want, out)
+			}
+		}
+	}
+	helmTemplate(t, "sparkwing", "sparkwing-runner-bundle.cache.tokenSecret.name=", "sparkwing-runner-bundle.cache.tokenSecret.key=token")
+}
+
+func TestControllerCarriesTheCacheURLBesideTheGrantKey(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
@@ -2165,7 +2170,7 @@ func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
 	var tokenRef *renderedSecretKeyRef
 	for _, e := range controller.Env {
 		env[e.Name] = e.Value
-		if e.Name == "SPARKWING_CACHE_TOKEN" && e.ValueFrom != nil {
+		if e.Name == "SPARKWING_CACHE_GRANT_KEY" && e.ValueFrom != nil {
 			tokenRef = e.ValueFrom.SecretKeyRef
 		}
 	}
@@ -2174,7 +2179,7 @@ func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
 		t.Errorf("SPARKWING_CACHE_URL = %q, want %q", got, want)
 	}
 	if tokenRef == nil {
-		t.Error("controller has no SPARKWING_CACHE_TOKEN secretKeyRef")
+		t.Error("controller has no SPARKWING_CACHE_GRANT_KEY secretKeyRef")
 	}
 }
 
