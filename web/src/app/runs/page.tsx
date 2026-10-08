@@ -1724,7 +1724,8 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       } catch (e) {
         if (generation !== searchGeneration.current) return;
         setError(e instanceof Error ? e.message : String(e));
-        setResults([]);
+        // A failed continuation keeps the matches already found and its cursor, so it can be retried.
+        if (!after) setResults([]);
       } finally {
         if (generation === searchGeneration.current) setLoading(false);
       }
@@ -1907,6 +1908,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {error && (
           <div className="text-xs font-mono text-red-400 mb-3">
             error: {error}
+            {(visibleResults ?? []).length === 0 && <div>{olderButton}</div>}
           </div>
         )}
         {visibleResults === null && !loading && !error && (

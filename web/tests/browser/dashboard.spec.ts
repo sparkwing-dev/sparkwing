@@ -2485,6 +2485,54 @@ test("Search finds an older run through server-side filters", async ({ page }) =
   await expect(page.getByRole("button", { name: /^TAG/ })).toHaveCount(0);
 });
 
+test("a failed search for older runs keeps the matches found and can be retried", async ({ page }) => {
+  await installMockAPI(page);
+  const searched: URL[] = [];
+  const cursor = { after_id: "run-a", after_started_at: "1791478850123456789" };
+  await page.route("**/api/v1/runs/grep?**", async (route) => {
+    const url = new URL(route.request().url());
+    searched.push(url);
+    if (!url.searchParams.has("after_id")) {
+      await route.fulfill({
+        json: {
+          query: "needle",
+          matches: [{ run_id: "run-a", pipeline: "build", node_id: "build", line: 1, content: "needle on the first page" }],
+          runs: { "run-a": { ...finishedRun, id: "run-a" } },
+          total: 1,
+          runs_scanned: 200,
+          runs_matching: 200,
+          next_cursor: cursor,
+        },
+      });
+    } else if (searched.length === 2) {
+      await route.fulfill({ status: 503, body: "busy" });
+    } else {
+      await route.fulfill({
+        json: {
+          query: "needle",
+          matches: [{ run_id: "run-b", pipeline: "build", node_id: "build", line: 2, content: "needle on the second page" }],
+          runs: { "run-b": { ...finishedRun, id: "run-b" } },
+          total: 1,
+          runs_scanned: 30,
+          runs_matching: 30,
+        },
+      });
+    }
+  });
+  await page.goto("/runs?view=search&gq=needle&gsince=all");
+  await expect(page.getByText("needle on the first page")).toBeVisible();
+  const older = page.getByRole("button", { name: "Search older runs" });
+  await older.click();
+  await expect(page.getByText("error: Search failed (503)")).toBeVisible();
+  await expect(page.getByText("needle on the first page")).toBeVisible();
+  await older.click();
+  await expect(page.getByText("needle on the second page")).toBeVisible();
+  await expect(page.getByText("needle on the first page")).toBeVisible();
+  await expect(page.getByText(/searched 230 runs, every matching run/)).toBeVisible();
+  expect(searched[1].searchParams.get("after_started_at")).toBe(cursor.after_started_at);
+  expect(searched[2].searchParams.get("after_id")).toBe("run-a");
+});
+
 test("Search keeps visible filters aligned with same-view navigation", async ({ page }) => {
   const searched: URL[] = [];
   await installMockAPI(page);
