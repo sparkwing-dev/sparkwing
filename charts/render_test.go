@@ -1186,8 +1186,8 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	if strings.Contains(notes, "openssl rand") || strings.Contains(notes, "secretsKey.name is empty") {
 		t.Errorf("notes with a credentials bundle claim a key state the chart cannot see:\n%s", notes)
 	}
-	if !strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "(umask 077 && kubectl") {
-		t.Errorf("SQLite notes with a credentials bundle lack the generated-key backup:\n%s", notes)
+	if !strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "(umask 077 && kubectl") || !strings.Contains(notes, "With pg-url") {
+		t.Errorf("notes with a credentials bundle must cover both backends it may select:\n%s", notes)
 	}
 	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.databaseSecret.name=sparkwing-db")
 	if strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "refuses to store secrets until") {
@@ -2839,6 +2839,20 @@ func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
 		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
 	if !slices.Contains(container.Args, "--require-auth") {
 		t.Fatalf("args = %+v, want --require-auth once a bootstrap token closes the window", container.Args)
+	}
+}
+
+func TestFullChartIngressRefusesOpenBootstrapWithOnlyACredentialBundle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: helm render")
+	}
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.allowOpenBootstrap=true",
+		"controller.credentialsSecret.name=sparkwing-credentials",
+		"ingress.enabled=true",
+		"ingress.tls[0].secretName=sparkwing-tls")
+	if !strings.Contains(out, "publishes the whole controller API") {
+		t.Fatalf("render output = %s, want the published-controller refusal", out)
 	}
 }
 

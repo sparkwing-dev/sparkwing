@@ -42,7 +42,7 @@
 {{- if not .Values.ingress.tls -}}
 {{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the controller API, its tokens and the dashboard's session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also passes --insecure-cookies so a browser keeps its session" -}}
 {{- end -}}
-{{- if or (not .Values.controller.requireAuth) (and .Values.controller.allowOpenBootstrap (not $hasBootstrap)) -}}
-{{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name, publishes the whole controller API: while its tokens table is empty, anyone reaching the Ingress can mint an admin token and drive every route. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to publish it open anyway" -}}
+{{- if not (include "sparkwing-full.controller.rendersRequireAuth" .) -}}
+{{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name (a credentialsSecret does not count, since the chart cannot see whether it carries one), publishes the whole controller API: while its tokens table is empty, anyone reaching the Ingress can mint an admin token and drive every route. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to publish it open anyway" -}}
 {{- end -}}
 {{- end -}}

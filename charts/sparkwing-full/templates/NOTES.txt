@@ -66,9 +66,12 @@ under: keep an owner-only backup of it, and never replace it except by moving
 it to controller.secretsPreviousKey, setting the new key, and running
 `sparkwing secrets rotate`.
 {{- if not .Values.controller.databaseSecret.name }}
-If it carries none, this SQLite controller generates its own key at
-/data/secrets.key on its first secret write, and a different key cannot open
-those secrets. Back that file up, owner-only, once a secret exists:
+If it carries no secrets-key, what happens depends on whether it carries
+pg-url. With pg-url, the controller runs on PostgreSQL and refuses to store
+secrets until it has a key. Without it, the controller runs on SQLite and
+generates its own key at /data/secrets.key on its first secret write. A
+different key cannot open those secrets, so back that file up, owner-only,
+once a secret exists:
 
   (umask 077 && kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
     cat /data/secrets.key > sparkwing-secrets.key)
