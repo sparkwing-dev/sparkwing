@@ -127,6 +127,17 @@ runner:
     cpu: ""
     memory: ""
 
+  # Wall-clock bound on one Job pod this runner creates, as a Go duration
+  # of at least a minute (6h, 90m), passed as --deadline. Kubernetes kills
+  # a pod that outlives it, and a node's own .Timeout() outranks it.
+  # Empty keeps the 6h default.
+  jobDeadline: ""
+
+  # Keep each band node to the team whose Job booted it, passed as
+  # --team-nodes. Turn it on only for a band pool whose nodes carry the
+  # sparkwing.dev/team-node label.
+  teamNodes: false
+
   # An external gitcache the runners fetch source through, passed as
   # --gitcache, when cache.enabled is false. Empty fetches each run's
   # source straight from its host.

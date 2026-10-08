@@ -2713,6 +2713,23 @@ func TestRunnerCarriesTheConfiguredJobCeiling(t *testing.T) {
 	}
 }
 
+func TestRunnerCarriesTheConfiguredJobDeadlineAndTeamNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	args := runnerContainer(t, renderRunner(t)).Args
+	if arg, ok := hasFlag(args, "--deadline"); ok {
+		t.Errorf("default install passes %s; the 6h default needs no flag", arg)
+	}
+	if containsArg(args, "--team-nodes") {
+		t.Error("default install passes --team-nodes; team nodes are opt-in")
+	}
+	args = runnerContainer(t, renderRunner(t, "runner.jobDeadline=90m", "runner.teamNodes=true")).Args
+	if !containsArg(args, "--deadline=90m") || !containsArg(args, "--team-nodes") {
+		t.Errorf("runner args = %v, want --deadline=90m and --team-nodes", args)
+	}
+}
+
 func TestFullChartCarriesTheJobCeiling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")

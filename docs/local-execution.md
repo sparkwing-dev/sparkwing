@@ -829,8 +829,8 @@ mid-node: nothing releases a claim, so the node waits out the lease before the
 reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten
 minutes past the node's own `.Timeout()` where it declared one and six hours
 otherwise, so a wedged pod cannot outlive the run that wanted it.
-`sparkwing-runner runner --deadline` (a Go duration of at least a minute)
-moves that six hours; the runner hands it to each trigger as
+`sparkwing-runner runner --deadline` (a Go duration of at least a minute,
+which the Helm value `runner.jobDeadline` sets) moves that six hours; the runner hands it to each trigger as
 `handle-trigger --k8s-job-deadline`. A no-progress timeout measures silence
 rather than elapsed time, so it deliberately does not bound the Job. A node
 Kubernetes kills at the deadline fails with `timeout` and an error naming the

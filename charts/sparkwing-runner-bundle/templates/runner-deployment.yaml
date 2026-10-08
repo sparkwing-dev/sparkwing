@@ -138,6 +138,12 @@ spec:
             {{- with .Values.runner.jobCeiling.memory }}
             - {{ printf "--memory-ceiling=%v" . | quote }}
             {{- end }}
+            {{- with .Values.runner.jobDeadline }}
+            - {{ printf "--deadline=%v" . | quote }}
+            {{- end }}
+            {{- if .Values.runner.teamNodes }}
+            - --team-nodes
+            {{- end }}
             {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
             - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}
             {{- end }}

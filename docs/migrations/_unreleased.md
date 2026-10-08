@@ -315,7 +315,10 @@ ran it.
   `SPARKWING_AGENT_TOKEN`; that is Sparkwing's own protocol, not a setting.
 - **Operator steps:** the `sparkwing-runner-bundle` chart projects
   `controller.tokenSecret` as `agent-token` and passes
-  `runner.jobCeiling` as flags; upgrading needs no value changes. An external
+  `runner.jobCeiling` as flags; upgrading needs no value changes. A Helm
+  user who set `SPARKWING_K8S_JOB_DEADLINE` or `SPARKWING_RUNNER_TEAM_NODES`
+  through `runner.extraEnv` moves them to the new values `runner.jobDeadline`
+  and `runner.teamNodes`. An external
   gitcache moves from a `SPARKWING_GITCACHE_URL` entry in `runner.extraEnv` to
   `runner.gitcacheUrl`. In a manifest of your own, mount the token Secret as a
   file and move each variable to its flag:

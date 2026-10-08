@@ -171,6 +171,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
 | `runner.jobCeiling.cpu` | Hard CPU ceiling the runner clamps every pipeline pin and measured charge to before it creates a Job pod. Empty means no ceiling. | `""` |
 | `runner.jobCeiling.memory` | Hard memory ceiling for the same. | `""` |
+| `runner.jobDeadline` | Wall-clock bound on one Job pod, as a Go duration of at least a minute, passed as `--deadline`. Empty keeps 6h. | `""` |
+| `runner.teamNodes` | Keep each band node to the team whose Job booted it, passed as `--team-nodes`. | `false` |
 | `limitRange.enabled` | Bound what one container in the namespace may request, including the Job pods the runner creates. | `false` |
 | `limitRange.max` | Per-container ceiling when the LimitRange is on. | `cpu: "16"`, `memory: 64Gi` |
 | `limitRange.min` | Per-container floor, which rejects a pod asking for a sliver no quota counts. | `cpu: 10m`, `memory: 16Mi` |
