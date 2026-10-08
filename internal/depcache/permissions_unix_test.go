@@ -1,6 +1,6 @@
 //go:build !windows
 
-package sparkwing
+package depcache
 
 import (
 	"context"
@@ -16,7 +16,7 @@ func TestLocalDepCacheCreatesPrivateArchive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "go.sum"), []byte("fixture"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	backend := &localDepCache{}
+	backend := &localBackend{}
 	if _, err := backend.store(context.Background(), "private-cache", source); err != nil {
 		t.Fatal(err)
 	}

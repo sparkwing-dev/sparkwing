@@ -130,6 +130,11 @@ sparkwing.Job(plan, "gems", runSpecs).
 Groups take the same declaration and apply it to every member:
 `group.CacheDir(sparkwing.GoModules())`.
 
+The engine performs the restore and the save, not the node's own hooks:
+it restores before the node's `BeforeRun` hooks and saves after its
+`AfterRun` hooks. The plan snapshot lists each node's declared caches
+under `dir_caches`.
+
 ### Directory helpers
 
 `GoModules()` targets GOMODCACHE. `NpmCache()` targets the directory

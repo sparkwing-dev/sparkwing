@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
 const lintCacheManifestName = "workdir"
@@ -218,7 +219,7 @@ func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 }
 
 func extractLintCacheArchiveStaged(r io.Reader, destDir, runningWorkdir string) error {
-	return extractIntoDirStaged(destDir, ".lintcache-restore-*", func(stage string) error {
+	return tarsafe.ExtractIntoDirStaged(destDir, ".lintcache-restore-*", func(stage string) error {
 		return extractLintCacheArchive(r, stage, runningWorkdir)
 	})
 }
@@ -253,10 +254,10 @@ func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error 
 		return err
 	}
 
-	if err := extractTarInRoot(tr, destDir, tarExtractPolicy{
-		minDirPerm:  0o700,
-		minFilePerm: 0o600,
-		rename:      lintCacheEntryName,
+	if err := tarsafe.ExtractInRoot(tr, destDir, tarsafe.Policy{
+		MinDirPerm:  0o700,
+		MinFilePerm: 0o600,
+		Rename:      lintCacheEntryName,
 	}); err != nil {
 		return fmt.Errorf("extract lint cache: %w", err)
 	}

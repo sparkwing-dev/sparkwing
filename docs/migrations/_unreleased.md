@@ -455,3 +455,21 @@ operator token could list its mirror files with `GET /repos`.
 
 **Why:** each was a privileged route with no caller, and each needed its own
 review as the route table moves to one declared list.
+
+## Six unused SDK names are removed
+
+**Before:** the `sparkwing` package exported `Cache`, `Logs` and `State` (type
+aliases for the `pkg/storage` interfaces), `TypeName`, `FailureFromContext` and
+`(*SpawnSpec).ResolvedID`.
+
+**After:** none of them exist. No pipeline, sparks library or guide used them.
+
+**Author steps:**
+
+| Removed | Use instead |
+|---|---|
+| `sparkwing.Cache`, `sparkwing.Logs`, `sparkwing.State` | `storage.ArtifactStore`, `storage.LogStore`, `storage.StateStore` from `github.com/sparkwing-dev/sparkwing/pkg/storage` |
+| `sparkwing.TypeName(p)` | `reflect.TypeOf(p).Elem().Name()` for a pointer, or `reflect.TypeOf(p).Name()` |
+| `sparkwing.FailureFromContext(ctx)` | the `sparkwing.Failure` argument an `OnFailure` handler already receives |
+| `(*SpawnSpec).ResolvedID()` | nothing; it always returned `""` |
+
