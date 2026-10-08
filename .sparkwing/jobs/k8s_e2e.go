@@ -42,7 +42,7 @@ func runKubernetesE2E(ctx context.Context) error {
 	}
 	script := filepath.Join(root, "bin", "k8s-e2e.sh")
 	if err := runKubernetesE2EScript(ctx, root, script); err != nil {
-		return fmt.Errorf("Kubernetes golden path: %w", err)
+		return fmt.Errorf("kubernetes golden path: %w", err)
 	}
 	return nil
 }
