@@ -810,5 +810,6 @@ func snapshotGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		args = append([]string{"-c", "core.longpaths=true"}, args...)
 	}
+	// #nosec G702 -- callers pass fixed Git subcommands with generated or validated operands, and no shell runs.
 	return exec.CommandContext(ctx, "git", args...)
 }
