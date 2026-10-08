@@ -108,7 +108,10 @@ test("every stderr line a body wrote arrives before the node process exits", asy
   assert.match(lines[4095] ?? "", /^4095 x{1024}$/);
 });
 
-test("a slow reader and a write queued from a drain handler neither hang the exit nor lose bytes", { timeout: 30_000 }, async () => {
+test("a slow reader and a write queued from a drain handler neither hang the exit nor lose bytes", {
+  timeout: 30_000,
+  skip: process.platform === "win32" ? "stderr pipes are synchronous on Windows and never emit drain" : false,
+}, async () => {
   const stdin = [
     { id: "p", op: "plan", pipeline: "drainwriter", run: { run_id: "r1", pipeline: "drainwriter" } },
     { id: "n", op: "run_node", node: "flood", attempt: 1 },
@@ -116,6 +119,8 @@ test("a slow reader and a write queued from a drain handler neither hang the exi
   // stdout goes to a file, which Node writes synchronously, so the exit reaches
   // the stderr barrier while the drain handler's write is still queued behind
   // a reader that takes one chunk every few milliseconds.
+  // The queued state depends on timing, so on Linux this detects the old drain
+  // wait's hang probabilistically: it failed roughly two runs in three against it.
   const dir = mkdtempSync(join(tmpdir(), "sw-ts-drain-"));
   const outFd = openSync(join(dir, "stdout"), "w");
   const child = spawn(process.execPath, [drainwriter, "--sw-node-protocol"], { stdio: ["pipe", outFd, "pipe"] });
