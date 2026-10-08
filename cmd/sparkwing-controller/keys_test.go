@@ -53,11 +53,18 @@ func TestReadCredentialsTrimsTokensAndLeavesAbsentFilesOff(t *testing.T) {
 	}
 }
 
-func TestReadCredentialsRefusesAnEmptyPGURL(t *testing.T) {
-	for _, body := range []string{"", " \n\t"} {
-		_, err := readCredentials(credentialsDir(t, map[string]string{credPGURL: body}))
-		if err == nil || !strings.Contains(err.Error(), credPGURL) {
-			t.Fatalf("pg-url %q: error = %v, want a refusal naming %s rather than a fall back to SQLite", body, err, credPGURL)
+func TestReadCredentialsRefusesEveryPresentEmptyCredential(t *testing.T) {
+	for _, name := range []string{
+		credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
+		credBootstrapAdminToken, credLicense, credGitHubClientSecret, credGoogleClientSecret,
+		credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey, credLogsDeleteToken,
+		credBillingToken, credCacheToken, credCacheGrantKey,
+	} {
+		for _, body := range []string{"", " \n\t"} {
+			_, err := readCredentials(credentialsDir(t, map[string]string{name: body}))
+			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "empty") {
+				t.Errorf("%s = %q: error = %v, want a refusal naming the file", name, body, err)
+			}
 		}
 	}
 }

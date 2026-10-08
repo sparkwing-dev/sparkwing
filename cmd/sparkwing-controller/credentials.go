@@ -67,7 +67,7 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credCacheToken:             &c.CacheToken,
 		credCacheGrantKey:          &c.CacheGrantKey,
 	} {
-		if *dst, err = dir.Read(name); err != nil {
+		if *dst, err = readCredential(dir, name); err != nil {
 			return c, err
 		}
 	}
@@ -75,20 +75,13 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credOIDCKey:          &c.OIDCKey,
 		credOIDCPublishedKey: &c.OIDCPublishedKey,
 	} {
-		raw, err := dir.Read(name)
+		raw, err := readCredential(dir, name)
 		if err != nil {
 			return c, err
 		}
 		if raw != "" {
 			*dst = []byte(raw)
 		}
-	}
-	// safety: an empty pg-url would select SQLite and serve a different
-	// database from the one the operator meant, so a present file must hold a URL.
-	if raw, err := dir.ReadBytes(credPGURL); err != nil {
-		return c, err
-	} else if raw != nil && c.PGURL == "" {
-		return c, fmt.Errorf("credential %s in %s is empty; remove the file to use SQLite or write the PostgreSQL URL", credPGURL, path)
 	}
 	if c.SecretsKey, err = readSecretsKey(dir, credSecretsKey); err != nil {
 		return c, err
@@ -99,12 +92,34 @@ func readCredentials(path string) (controllerCredentials, error) {
 	return c, nil
 }
 
+// safety: an absent file leaves a credential off, but a present empty one is a
+// mistake that would otherwise read as off too, which for bootstrap-admin-token
+// serves without auth and for pg-url opens SQLite, so it refuses startup.
+func readCredential(dir credentials.Dir, name string) (string, error) {
+	raw, err := dir.ReadBytes(name)
+	if err != nil || raw == nil {
+		return "", err
+	}
+	value := strings.TrimSpace(string(raw))
+	if value == "" {
+		return "", emptyCredentialError(dir, name)
+	}
+	return value, nil
+}
+
+func emptyCredentialError(dir credentials.Dir, name string) error {
+	return fmt.Errorf("credential %s in %s is empty; write its value or remove the file to leave it unset", name, dir.Path())
+}
+
 // safety: the key file holds either the 32 raw bytes or their base64, and
 // raw bytes are taken untrimmed because whitespace is a valid key byte.
 func readSecretsKey(dir credentials.Dir, name string) ([]byte, error) {
 	data, err := dir.ReadBytes(name)
 	if err != nil || data == nil {
 		return nil, err
+	}
+	if len(data) != secrets.KeySize && strings.TrimSpace(string(data)) == "" {
+		return nil, emptyCredentialError(dir, name)
 	}
 	if len(data) == secrets.KeySize {
 		return data, nil

@@ -46,8 +46,9 @@ cluster.
 
 `sparkwing-controller` reads every secret from one directory, named with
 `--credentials-dir`, holding one file per credential under a fixed name. A file
-that is absent leaves the feature it guards off; there is no environment or
-flag form of any of them. The chart projects its Secret values into this
+that is absent leaves the feature it guards off, and a file that is present
+but empty or only whitespace stops startup, naming the file; there is no
+environment or flag form of any of them. The chart projects its Secret values into this
 directory, and `controller.credentialsSecret` names a Secret whose keys are
 these file names, mounted whole.
 
