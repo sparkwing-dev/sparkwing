@@ -48,13 +48,13 @@ func TestPipelineToolchainOverrideDoesNotReachRuntime(t *testing.T) {
 	if dir := os.Getenv("SPARKWING_TEST_TOOLCHAIN_CHILD_DIR"); dir != "" {
 		if err := compileAndExec(dir, nil, os.Environ(), compileOptions{NoUpdate: true}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1) //nolint:forbidigo // reports the child's failure to the parent test
+			os.Exit(1)
 		}
 		if os.Getenv("GOTOOLCHAIN") != "go1.26.6" {
 			fmt.Fprintln(os.Stderr, "process pin changed")
-			os.Exit(1) //nolint:forbidigo // reports the child's failure to the parent test
+			os.Exit(1)
 		}
-		os.Exit(0) //nolint:forbidigo // ends the child before the parent's test body runs
+		os.Exit(0)
 	}
 	for _, uncached := range []bool{false, true} {
 		name := "cached"
