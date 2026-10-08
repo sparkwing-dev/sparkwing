@@ -145,7 +145,7 @@ func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
 func TestDispatchRun_RefusesProfileAndNamesTrigger(t *testing.T) {
 	for _, args := range [][]string{{"deploy", "--profile", "prod"}, {"deploy", "--profile=prod"}} {
 		err := dispatchRun(args)
-		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger --profile P deploy") {
+		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile P") {
 			t.Errorf("dispatchRun(%q) = %v, want a refusal naming pipeline trigger", args, err)
 		}
 	}

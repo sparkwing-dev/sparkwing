@@ -10,7 +10,7 @@ declares four persistence surfaces plus how to reach a controller:
 
 A profile describes where a command reads and writes and what auth it
 needs to get there. `sparkwing run` always uses this machine's local
-surfaces; `sparkwing pipeline trigger --profile NAME` runs a pipeline on
+surfaces; `sparkwing pipeline trigger runs --profile NAME` a pipeline on
 the profile's controller, and read verbs such as `sparkwing runs list
 --profile NAME` read the profile's surfaces, including S3 or Postgres
 state written there. Laptop
@@ -148,8 +148,8 @@ pipelines:
 
 A pinned pipeline runs only on that profile's controller.
 `sparkwing run release-prod` refuses it (`pipeline release-prod is pinned
-to profile prod; use sparkwing pipeline trigger --profile prod
-release-prod`), and `sparkwing pipeline trigger` requires `--profile` and
+to profile prod; use sparkwing pipeline trigger release-prod --profile
+prod`), and `sparkwing pipeline trigger` requires `--profile` and
 refuses any profile other than `prod`. `sparkwing pipeline describe`
 reports the pin as `pinned_profile` in JSON and a `pinned:` line in text,
 and `sparkwing pipeline plan` prints a `Pinned:` line.

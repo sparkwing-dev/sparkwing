@@ -92,7 +92,7 @@ on a controller (Sparkwing Cloud or one you host) rather than running it
 on the CI VM:
 
 ```sh
-sparkwing pipeline trigger --profile ci-team release-prod
+sparkwing pipeline trigger release-prod --profile ci-team
 ```
 
 The controller dispatches the run to its own runners. The CI step follows

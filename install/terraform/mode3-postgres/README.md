@@ -94,8 +94,8 @@ kubectl -n sparkwing create secret generic sparkwing-database \
 
 [PostgreSQL state](../../../docs/self-hosting.md#postgresql-state) covers
 the chart values that point the controller at that Secret. Laptops and CI
-reach the controller over HTTP with `sparkwing pipeline trigger --profile
-NAME <pipeline>` and never hold the DSN.
+reach the controller over HTTP with `sparkwing pipeline trigger <pipeline>
+--profile NAME` and never hold the DSN.
 
 The first controller to start migrates the schema; staggered upgrades are
 covered under

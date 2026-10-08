@@ -761,18 +761,18 @@ read those backends with `--profile`.
 
 | Before | After |
 |---|---|
-| `sparkwing run deploy --profile prod` | `sparkwing pipeline trigger --profile prod deploy` (add `--working-tree` to run uncommitted changes), or `sparkwing run deploy` to run locally |
-| `sparkwing run build --profile shared` with an S3 or Postgres `state:` surface | Run a controller (Sparkwing Cloud or self-hosted) and `sparkwing pipeline trigger --profile <controller-profile> build`; `sparkwing runs list --profile shared` and `sparkwing serve start --profile shared --read-only` still read the history already in the bucket |
-| `sparkwing run deploy --sw-secrets prod` | `sparkwing secrets set --name NAME` on this machine for a local run, or `sparkwing pipeline trigger --profile prod deploy` to use prod's controller secrets |
+| `sparkwing run deploy --profile prod` | `sparkwing pipeline trigger deploy --profile prod` (add `--working-tree` to run uncommitted changes), or `sparkwing run deploy` to run locally |
+| `sparkwing run build --profile shared` with an S3 or Postgres `state:` surface | Run a controller (Sparkwing Cloud or self-hosted) and `sparkwing pipeline trigger build --profile <controller-profile>`; `sparkwing runs list --profile shared` and `sparkwing serve start --profile shared --read-only` still read the history already in the bucket |
+| `sparkwing run deploy --sw-secrets prod` | `sparkwing secrets set --name NAME` on this machine for a local run, or `sparkwing pipeline trigger deploy --profile prod` to use prod's controller secrets |
 | `SPARKWING_SECRETS_PROFILE=prod sparkwing run deploy` | as above; the variable is dropped before the pipeline process starts |
 | `pipeline hooks install --profile P` | `pipeline hooks install`; every hook runs its pipelines `--sw-local-only` |
 | `mirror_local:` on a profile in `config.yaml` | Remove the key; it fails the config load |
-| a pipeline with `profile: prod` in `sparkwing.yaml`, run with `sparkwing run release` against prod's backends | `sparkwing pipeline trigger --profile prod release`; `sparkwing run release` refuses a pinned pipeline |
+| a pipeline with `profile: prod` in `sparkwing.yaml`, run with `sparkwing run release` against prod's backends | `sparkwing pipeline trigger release --profile prod`; `sparkwing run release` refuses a pinned pipeline |
 
 - **Pinned pipelines:** a pipeline's `profile:` field pins it to that
   controller profile. `sparkwing run` refuses it with `pipeline release is
-  pinned to profile prod; use sparkwing pipeline trigger --profile prod
-  release`, and so does a detached run, a cron and a child pipeline started on
+  pinned to profile prod; use sparkwing pipeline trigger release --profile
+  prod`, and so does a detached run, a cron and a child pipeline started on
   this machine. `pipeline trigger` still requires `--profile` and refuses any
   profile other than the pin. `pipeline describe` reports `pinned_profile`, and
   `pipeline plan` prints the pin. The pin guards against mistakes; the

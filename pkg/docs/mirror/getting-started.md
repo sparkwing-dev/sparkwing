@@ -218,8 +218,8 @@ What still wants the network is visible in advance:
   overlay already on disk, or pin exact tags and pay nothing. Without the
   flag an unreachable proxy fails the run and the error names it. The
   resolution rules are in [sparks.md](sparks.md).
-- **A controller profile.** `sparkwing pipeline trigger --profile NAME`
-  and read verbs that name a controller profile need that controller over
+- **A controller profile.** `sparkwing pipeline trigger <pipeline> --profile
+  NAME` and read verbs that name a controller profile need that controller over
   HTTPS. `sparkwing run` reads and writes only local surfaces.
 - **What the pipeline itself does.** A step that pulls an image, fetches a
   ref, or deploys needs whatever that step needs. Sparkwing does not
@@ -331,7 +331,7 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 ## Run Targets
 
 `sparkwing run` executes on this machine against its local store, logs,
-cache, and secrets. `sparkwing pipeline trigger --profile NAME` hands
+cache, and secrets. `sparkwing pipeline trigger hands --profile NAME`
 execution to that profile's controller. `sparkwing run` also takes
 `--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
 tree (trigger runs the source registered with the controller, or the
@@ -340,9 +340,9 @@ checkout's uncommitted changes with `--working-tree`):
 ```bash
 sparkwing run build                                    # run locally with local code
 sparkwing run build --sw-ref main                      # build the main ref locally
-sparkwing pipeline trigger --profile dev build         # run on the "dev" cluster
-sparkwing pipeline trigger --profile dev --working-tree build  # uncommitted changes on "dev"
-sparkwing pipeline trigger --profile prod build        # run on the "prod" cluster
+sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
+sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted changes on "dev"
+sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
 ```
 
 Cluster names are profiles. `sparkwing cloud connect` writes one; see

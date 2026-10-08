@@ -31,6 +31,6 @@ func RefusePinnedLocalRun(p *pipelines.Pipeline) error {
 	if p == nil || p.Profile == "" {
 		return nil
 	}
-	return fmt.Errorf("pipeline %s is pinned to profile %s; use sparkwing pipeline trigger --profile %s %s",
-		p.Name, p.Profile, p.Profile, p.Name)
+	return fmt.Errorf("pipeline %s is pinned to profile %s; use sparkwing pipeline trigger %s --profile %s",
+		p.Name, p.Profile, p.Name, p.Profile)
 }

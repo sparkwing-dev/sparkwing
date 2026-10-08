@@ -125,7 +125,7 @@ func dispatchRun(args []string) error {
 	}
 	if flags.profileGiven {
 		return fmt.Errorf("run: --profile is not accepted; sparkwing run always executes locally against this machine's store. "+
-			"To run on a controller: sparkwing pipeline trigger --profile P %s", pipelineName)
+			"To run on a controller: sparkwing pipeline trigger %s --profile P", pipelineName)
 	}
 	if separator := slices.Index(passthrough, "--"); separator >= 0 {
 		passthrough = slices.Delete(passthrough, separator, separator+1)
@@ -419,7 +419,7 @@ func pinnedProfileHere(pipelineName string) (string, error) {
 
 func printPin(pipelineName string) {
 	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
-		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger --profile %s %s`\n", pin, pin, pipelineName)
+		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", pin, pipelineName, pin)
 	}
 }
 

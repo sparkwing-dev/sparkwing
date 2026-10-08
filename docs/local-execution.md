@@ -28,13 +28,13 @@ container images. This means:
 sparkwing run build-deploy
 
 # Trigger remote execution -- the cluster runs it via the controller
-sparkwing pipeline trigger --profile prod build-deploy
+sparkwing pipeline trigger build-deploy --profile prod
 ```
 
 `sparkwing run` always executes on the machine you invoke it from,
 against this machine's SQLite store, logs, cache, and local secrets. It
 takes no `--profile`. To hand execution to a cluster, use `sparkwing
-pipeline trigger --profile NAME` (covered below). Both
+pipeline trigger <pipeline> --profile NAME` (covered below). Both
 run the same pipeline code -- the difference is where the work happens and
 where its records land.
 
@@ -220,7 +220,7 @@ unresolved on the trigger, so `front` and `back` are measured against the
 queue the run actually joins when the consumer launches it.
 
 Detaching is local-only. To hand a run to a cluster, use
-`sparkwing pipeline trigger --profile <p> --detach`.
+`sparkwing pipeline trigger <pipeline> --profile <p> --detach`.
 
 #### Publishing a foreground run handle
 
@@ -441,7 +441,7 @@ Remote runner:
 The controller is the gatekeeper for prod-side execution: only the
 cluster can push to ECR, update gitops, and dispatch warm runners.
 
-`sparkwing pipeline trigger --profile prod <pipeline>` submits the trigger
+`sparkwing pipeline trigger <pipeline> --profile prod` submits the trigger
 to the profile's controller for remote execution. `--profile` is required,
 and the chosen profile must have a `controller:` set; passing a
 controller-less profile errors with a clear message. A pipeline pinned to
@@ -1017,7 +1017,7 @@ sparkwing to block them.
 |------|--------------|-------|-------------|
 | `sparkwing run <pipeline>` | Your laptop | Fast (local caches) | Day-to-day development, fast iteration, local-only deploys |
 | `sparkwing run <pipeline> --sw-detached` | Your laptop, detached | Fast | Work that must outlive the terminal: long deploys over ssh, hand-kicked jobs, agents that must not block |
-| `sparkwing pipeline trigger --profile prof <pipeline>` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
+| `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
 
 ## More than one sparkwing on one machine

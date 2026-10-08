@@ -26,7 +26,7 @@ type Pipeline struct {
 	Triggers   []string `json:"triggers,omitempty"`
 	Entrypoint string   `json:"entrypoint,omitempty"`
 	// PinnedProfile is the profile: the pipeline's sparkwing.yaml entry names;
-	// the pipeline runs only through `pipeline trigger --profile` with it.
+	// the pipeline runs only through `pipeline trigger <pipeline> --profile` with it.
 	PinnedProfile string                  `json:"pinned_profile,omitempty"`
 	Args          []sparkwing.DescribeArg `json:"args,omitempty"`
 	Examples      []sparkwing.Example     `json:"examples,omitempty"`
@@ -394,7 +394,7 @@ func printPipelineDetail(a *Pipeline) {
 		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
 	}
 	if a.PinnedProfile != "" {
-		fmt.Printf("pinned: profile %s (run with: sparkwing pipeline trigger --profile %s %s)\n", a.PinnedProfile, a.PinnedProfile, a.Name)
+		fmt.Printf("pinned: profile %s (run with: sparkwing pipeline trigger %s --profile %s)\n", a.PinnedProfile, a.Name, a.PinnedProfile)
 	}
 	if len(a.Risks) > 0 {
 		fmt.Printf("risks: %s\n", strings.Join(a.Risks, ", "))

@@ -16,7 +16,7 @@ func TestRefusePinnedLocalRun(t *testing.T) {
 		t.Fatalf("an unpinned pipeline was refused: %v", err)
 	}
 	err := RefusePinnedLocalRun(&pipelines.Pipeline{Name: "release", Profile: "prod"})
-	if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger --profile prod release") {
+	if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger release --profile prod") {
 		t.Fatalf("a pinned pipeline ran locally or the refusal named no trigger command: %v", err)
 	}
 }

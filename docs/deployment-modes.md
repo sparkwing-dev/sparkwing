@@ -14,8 +14,8 @@ its own controller.
 `sparkwing run` executes on this machine against its local SQLite store,
 logs, cache, and secrets. A profile in `~/.config/sparkwing/config.yaml`
 names a controller or a `state` / `cache` / `logs` triple (see
-[Storage backends](backends.md)). `sparkwing pipeline trigger --profile
-NAME <pipeline>` runs a pipeline on that profile's controller, and read
+[Storage backends](backends.md)). `sparkwing pipeline trigger <pipeline>
+--profile NAME` runs a pipeline on that profile's controller, and read
 verbs such as `sparkwing runs list --profile NAME` and `sparkwing serve
 start --profile NAME --read-only` read the profile's backends.
 
@@ -50,7 +50,7 @@ sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 ```
 
 It stores the token you pass on stdin, writes the profile, and prints the
-dashboard URL. `sparkwing pipeline trigger --profile NAME <pipeline>` then
+dashboard URL. `sparkwing pipeline trigger <pipeline> --profile NAME` then
 runs a pipeline there. See
 [connecting to Sparkwing Cloud](getting-started.md#sparkwing-cloud) for
 the flags, and [hosted controller](#hosted-controller) below for
@@ -227,7 +227,7 @@ the team runs.
 Profile selection is explicit: pass `--profile NAME` on the command that
 should reach the profile. Neither the environment nor a project-wide
 default selects one. `sparkwing run` takes no `--profile` and refuses one,
-naming `sparkwing pipeline trigger --profile NAME <pipeline>`, the command
+naming `sparkwing pipeline trigger <pipeline> --profile NAME`, the command
 that runs a pipeline on a controller. A pipeline whose
 `.sparkwing/sparkwing.yaml` entry names `profile:` is pinned to that
 controller profile; see
@@ -255,5 +255,5 @@ A practical decision order:
    for a single box.
 
 The command picks the shape: `sparkwing run` executes locally, and
-`sparkwing pipeline trigger --profile NAME` executes on a controller.
+`sparkwing pipeline trigger executes --profile NAME` on a controller.
 Pipeline code doesn't change.
