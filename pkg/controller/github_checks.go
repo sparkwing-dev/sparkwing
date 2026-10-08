@@ -500,7 +500,7 @@ func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus stri
 	if s.githubApp == nil {
 		return
 	}
-	trigger, err := s.triggerAcrossTeams(ctx, runID)
+	trigger, err := s.runTrigger(ctx, runID)
 	if err != nil || trigger.TriggerEnv[envGitHubAppInstallation] == "" {
 		return
 	}
