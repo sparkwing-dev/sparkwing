@@ -506,7 +506,9 @@ ran it.
 - **Operator steps:** rename the variable to `AWS_ENDPOINT_URL_S3` in every
   environment that set it: a runner, a laptop shell, a CI job, and the
   controller, cache and logs Deployments.
-- **Edge cases:** `AWS_ENDPOINT_URL` also redirects every other AWS client
+- **Edge cases:** a detached run and a remote node child carry both names
+  from the submitting environment, as they carried `SPARKWING_S3_ENDPOINT`.
+  `AWS_ENDPOINT_URL` also redirects every other AWS client
   in the process, such as SES invitation email on the controller; use the
   S3-specific name unless that is what you want.
 

@@ -247,8 +247,10 @@ The outer CLI passes the path to the pipeline process through
 
 A foreground run inherits the whole environment of the shell that starts
 it. A detached run carries a filtered snapshot of it: every `SPARKWING_*`
-and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`, and
-`KUBERNETES_SERVICE_HOST`. Sparkwing drops the credential-shaped part of
+and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`,
+`KUBERNETES_SERVICE_HOST`, `XDG_CONFIG_HOME` (so the run reads the same
+config.yaml), and the S3 endpoint names `AWS_ENDPOINT_URL` and
+`AWS_ENDPOINT_URL_S3`. Sparkwing drops the credential-shaped part of
 that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`,
 `PAT` and similar, bearer headers, PEM blocks, JSON documents with a
 credential field, and URLs whose userinfo, query, or path names a

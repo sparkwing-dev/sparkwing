@@ -215,6 +215,11 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 			want: []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u"},
 		},
 		{
+			name: "carries the S3 endpoint and the config directory",
+			env:  []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/u/.cfg", "AWS_PROFILE=x"},
+			want: []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/u/.cfg"},
+		},
+		{
 			name: "drops credential-shaped names",
 			env:  []string{"GITHUB_TOKEN=gh", "SPARKWING_SECRETS_KEY=k", "AWS_SECRET_ACCESS_KEY=a", "SPARKWING_PROFILE=dev"},
 			want: []string{"SPARKWING_PROFILE=dev"},

@@ -1508,7 +1508,8 @@ PIPELINE resolves against the checkout you are standing in (or the
 one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
-GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
+GITHUB_*, PATH, HOME, HOSTNAME, KUBERNETES_SERVICE_HOST, XDG_CONFIG_HOME,
+AWS_ENDPOINT_URL and AWS_ENDPOINT_URL_S3, minus
 every credential-shaped name -- widened by the names and NAME_*
 prefixes listed in run.submit_env_allow in config.yaml. A consumer starts automatically if none
 is running and exits after five idle minutes; see
