@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -28,7 +29,7 @@ func TestRunLocal_TriggerLoopFinishesBeforeTheStoreCloses(t *testing.T) {
 		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
 	}
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("GITHUB_ACTIONS", "")
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")

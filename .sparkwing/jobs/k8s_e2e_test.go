@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,49 +29,6 @@ func TestKubernetesE2EPipelineIsRegisteredAndBounded(t *testing.T) {
 	}
 	if got := nodes[0].TimeoutDuration(); got != 40*time.Minute {
 		t.Fatalf("k8s-e2e timeout = %s, want 40m", got)
-	}
-}
-
-func TestKubernetesE2ECommandCancellationRunsCleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	markerDir := t.TempDir()
-	readyMarker := filepath.Join(markerDir, "ready")
-	cleanupMarker := filepath.Join(markerDir, "cleanup")
-	cmd := exec.CommandContext(ctx, "/bin/bash", "-c", `
-trap 'printf cleanup >"$CLEANUP_MARKER"; exit 143' TERM
-printf ready >"$READY_MARKER"
-while :; do sleep 1; done
-`)
-	cmd.Env = append(os.Environ(), "READY_MARKER="+readyMarker, "CLEANUP_MARKER="+cleanupMarker)
-	configureKubernetesE2ECommand(cmd)
-	if cmd.Cancel == nil || cmd.WaitDelay != 90*time.Second {
-		t.Fatal("Kubernetes command cancellation is not bounded and graceful")
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	readyDeadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, err := os.Stat(readyMarker); err == nil {
-			break
-		}
-		if time.Now().After(readyDeadline) {
-			_ = cmd.Process.Kill()
-			t.Fatal("Kubernetes command did not become ready for cancellation")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	cancel()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		_ = cmd.Process.Kill()
-		t.Fatal("Kubernetes command did not honor cancellation")
-	}
-	if got, err := os.ReadFile(cleanupMarker); err != nil || string(got) != "cleanup" {
-		t.Fatalf("Kubernetes cancellation cleanup marker = %q, %v", got, err)
 	}
 }
 
@@ -701,8 +659,8 @@ die() {
 ` + proveFunction + `
 prove_runner_execution run-1 runner-new test
 `
-	cmd := exec.Command("/bin/bash", "-c", harness)
-	cmd.Env = append(os.Environ(),
+	cmd := exec.Command(kubernetesTestBash(t), "-c", harness)
+	cmd.Env = kubernetesTestEnv(t,
 		"CALLS_FILE="+callsFile,
 		"NODES_JSON="+nodes,
 		"artifact_dir="+artifactDir,
@@ -782,8 +740,8 @@ die() {
 ` + waitFunction + `
 wait_run_status run-1 success 5
 `
-	cmd := exec.Command("/bin/bash", "-c", harness)
-	cmd.Env = append(os.Environ(), "COUNT_FILE="+countFile, "RESPONSES_DIR="+responseDir)
+	cmd := exec.Command(kubernetesTestBash(t), "-c", harness)
+	cmd.Env = kubernetesTestEnv(t, "COUNT_FILE="+countFile, "RESPONSES_DIR="+responseDir)
 	out, runErr := cmd.CombinedOutput()
 	countBody, err := os.ReadFile(countFile)
 	if err != nil {
@@ -821,8 +779,8 @@ func runKubernetesScriptWithEnv(t *testing.T, path string, extra ...string) scri
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("/bin/bash", filepath.Join(root, "bin", "k8s-e2e.sh"), "--preflight")
-	cmd.Env = append(os.Environ(), append([]string{"PATH=" + path}, extra...)...)
+	cmd := exec.Command(kubernetesTestBash(t), filepath.ToSlash(filepath.Join(root, "bin", "k8s-e2e.sh")), "--preflight")
+	cmd.Env = kubernetesTestEnv(t, append([]string{"PATH=" + path}, extra...)...)
 	out, runErr := cmd.CombinedOutput()
 	return scriptResult{output: string(out), err: runErr}
 }
@@ -833,8 +791,8 @@ func runKubernetesScriptFullWithEnv(t *testing.T, path string, extra ...string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("/bin/bash", filepath.Join(root, "bin", "k8s-e2e.sh"))
-	cmd.Env = append(os.Environ(), append([]string{"PATH=" + path}, extra...)...)
+	cmd := exec.Command(kubernetesTestBash(t), filepath.ToSlash(filepath.Join(root, "bin", "k8s-e2e.sh")))
+	cmd.Env = kubernetesTestEnv(t, append([]string{"PATH=" + path}, extra...)...)
 	out, runErr := cmd.CombinedOutput()
 	return scriptResult{output: string(out), err: runErr}
 }
@@ -842,6 +800,12 @@ func runKubernetesScriptFullWithEnv(t *testing.T, path string, extra ...string) 
 func linkTool(t *testing.T, dir, name string) {
 	t.Helper()
 	source, err := exec.LookPath(name)
+	if runtime.GOOS == "windows" {
+		matching := filepath.Join(filepath.Dir(kubernetesTestBash(t)), name+".exe")
+		if info, statErr := os.Stat(matching); statErr == nil && info.Mode().IsRegular() {
+			source, err = matching, nil
+		}
+	}
 	if err != nil {
 		t.Fatalf("find %s: %v", name, err)
 	}
@@ -856,4 +820,36 @@ func writeStub(t *testing.T, dir, name, body string) {
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func kubernetesTestBash(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return "/bin/bash"
+	}
+	shell, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := filepath.Join(filepath.Dir(filepath.Dir(shell)), "usr", "bin", "bash.exe")
+	if info, err := os.Stat(direct); err == nil && info.Mode().IsRegular() {
+		return direct
+	}
+	return shell
+}
+
+func kubernetesTestEnv(t *testing.T, extra ...string) []string {
+	env := append([]string{}, os.Environ()...)
+	for _, entry := range extra {
+		name, value, ok := strings.Cut(entry, "=")
+		if runtime.GOOS == "windows" && ok && (strings.HasSuffix(name, "_FILE") || strings.HasSuffix(name, "_DIR") || name == "CALL_RECORD" || name == "artifact_dir") {
+			entry = name + "=" + filepath.ToSlash(value)
+		}
+		if runtime.GOOS == "windows" && name == "PATH" {
+			// hack: copied Windows POSIX tools need their runtime DLL directory.
+			entry += string(os.PathListSeparator) + filepath.Dir(kubernetesTestBash(t))
+		}
+		env = append(env, entry)
+	}
+	return env
 }

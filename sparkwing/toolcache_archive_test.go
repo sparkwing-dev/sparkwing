@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 )
 
@@ -44,6 +45,13 @@ func dirPerm(t *testing.T, path string) fs.FileMode {
 	return fi.Mode().Perm()
 }
 
+func archiveDirPerm(unix fs.FileMode) fs.FileMode {
+	if goruntime.GOOS == "windows" {
+		return 0o777
+	}
+	return unix
+}
+
 func lintArchive(t *testing.T, workdir string, entries []*tar.Header, bodies map[string][]byte) string {
 	t.Helper()
 	hdrs := append([]*tar.Header{
@@ -73,7 +81,7 @@ func TestExtractClampsWideDirectoryModes(t *testing.T) {
 		if err := extractLintCacheArchive(rf, dest, workdir); err != nil {
 			t.Fatalf("extract: %v", err)
 		}
-		if got := dirPerm(t, filepath.Join(dest, "wide")); got != 0o755 {
+		if got := dirPerm(t, filepath.Join(dest, "wide")); got != archiveDirPerm(0o755) {
 			t.Fatalf("dir mode = %o, want 755", got)
 		}
 	})
@@ -143,7 +151,7 @@ func TestRestoreLintCacheStagedReplacesCache(t *testing.T) {
 	if err != nil || string(got) != "good" {
 		t.Fatalf("restored file = %q err=%v", got, err)
 	}
-	if perm := dirPerm(t, dest); perm != 0o700 {
+	if perm := dirPerm(t, dest); perm != archiveDirPerm(0o700) {
 		t.Errorf("cache dir mode = %o, want 700", perm)
 	}
 }

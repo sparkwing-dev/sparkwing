@@ -10,7 +10,7 @@ elif (( $# != 0 )); then
 fi
 # shellcheck source=bin/web-build-lock.sh
 source "$HERE/bin/web-build-lock.sh"
-sparkwing_lock_web_build "$HERE"
+sparkwing_lock_web_build "$HERE" "$@"
 export NODE_ENV=production
 proof="$HERE/bin/web-build-proof.mjs"
 receipt="$HERE/internal/web/.build-state/receipt.json"

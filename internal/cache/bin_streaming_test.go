@@ -29,8 +29,8 @@ func (r *observedBinUpload) Read(p []byte) (int, error) {
 	}
 	staged := false
 	for _, entry := range entries {
-		info, err := entry.Info()
-		if err == nil && info.Size() == 256 {
+		body, err := os.ReadFile(filepath.Join(binsDir, entry.Name()))
+		if err == nil && len(body) == 256 {
 			staged = true
 		}
 	}

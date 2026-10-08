@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -162,11 +163,15 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat the pinned binary: %v", err)
 	}
-	if info.Mode().Perm()&0o111 == 0 {
+	if runtime.GOOS == "windows" {
+		if !info.Mode().IsRegular() {
+			t.Errorf("the pinned compiler artifact is not a regular file: %s", info.Mode())
+		}
+	} else if info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("the pinned binary is not executable: %s", info.Mode())
 	}
 	dir, err := os.Stat(filepath.Dir(quick.LockedBinary))
-	if err != nil || dir.Mode().Perm() != 0o700 {
+	if err != nil || !dir.IsDir() || runtime.GOOS != "windows" && dir.Mode().Perm() != 0o700 {
 		t.Errorf("pin directory mode = %v (err %v), want 0700", dir.Mode().Perm(), err)
 	}
 	if quick.Args["depth"] != "shallow" || quick.Where != store.CronWhereLocal {

@@ -157,7 +157,7 @@ func TestDetect_ReportsAGlobalOverrideShadowingTheGate(t *testing.T) {
 	if shadow.Scope != "global" {
 		t.Errorf("Scope = %q, want global", shadow.Scope)
 	}
-	if shadow.HooksDir != hooksDir || shadow.ActiveDir != "/home/dev/.config/git/hooks" {
+	if shadow.HooksDir != hooksDir || shadow.ActiveDir != filepath.Clean("/home/dev/.config/git/hooks") {
 		t.Errorf("Detect named the wrong directories: %+v", shadow)
 	}
 	if len(shadow.Gates) != 1 || shadow.Gates[0] != "pre-push" {
@@ -173,14 +173,15 @@ func TestDetect_ReportsAGlobalOverrideShadowingTheGate(t *testing.T) {
 
 func TestDetect_PrefersTheRepositoryOverrideOverTheMachineOne(t *testing.T) {
 	repo, _ := repoWithGate(t, "pre-commit")
-	shadow, err := githooks.Detect(stubGit("/repo/.githooks", "/home/dev/.config/git/hooks"), repo)
+	local := filepath.Join(t.TempDir(), ".githooks")
+	shadow, err := githooks.Detect(stubGit(local, "/home/dev/.config/git/hooks"), repo)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
 	if shadow == nil {
 		t.Fatal("Detect missed a local core.hooksPath shadowing an installed gate")
 	}
-	if shadow.Scope != "local" || shadow.ActiveDir != "/repo/.githooks" {
+	if shadow.Scope != "local" || shadow.ActiveDir != filepath.Clean(local) {
 		t.Errorf("Detect did not honor git's local-wins precedence: %+v", shadow)
 	}
 	if !strings.Contains(shadow.Remedy(), "--unset core.hooksPath") {

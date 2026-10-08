@@ -9,7 +9,11 @@ import (
 )
 
 func openPrivateConfigFile(path string) (*os.File, error) {
-	name, err := windows.UTF16PtrFromString(path)
+	native, err := privateFileNativePath(path)
+	if err != nil {
+		return nil, err
+	}
+	name, err := windows.UTF16PtrFromString(native)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -132,8 +133,13 @@ func withoutApproved(findings []finding, allowed map[string]map[sourcePosition]b
 func unconsumedBoundaryMarkers(root string, allowed map[string]map[sourcePosition]bool) ([]finding, error) {
 	var unused []finding
 	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
+		// perf: every source is read, but only possible markers need a comment-aware AST.
+		source, err := os.ReadFile(path)
+		if err != nil || !bytes.Contains(source, []byte("sleepcheck:external-boundary")) {
+			return
+		}
 		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		file, err := parser.ParseFile(fset, path, source, parser.ParseComments)
 		if err != nil {
 			return
 		}

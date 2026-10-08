@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -503,7 +504,11 @@ func TestAPISocketBeside_MatchesTheDaemonLayout(t *testing.T) {
 
 func serveStubAPI(t *testing.T, h http.Handler) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "swstub")
+	socketRoot := "/tmp"
+	if runtime.GOOS == "windows" {
+		socketRoot = os.TempDir()
+	}
+	dir, err := os.MkdirTemp(socketRoot, "swstub")
 	if err != nil {
 		t.Fatalf("temp dir: %v", err)
 	}

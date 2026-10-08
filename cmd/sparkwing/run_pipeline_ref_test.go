@@ -51,14 +51,14 @@ func TestPipelineRefResolutionDoesNotBuildTheCallerPipeline(t *testing.T) {
 	repo := pipelineRefRepo(t)
 	t.Chdir(repo)
 	got, _, err := resolveSubmitRepo(t.Context(), "build", "main")
-	if err != nil || got != repo {
+	if err != nil || filepath.Clean(got) != filepath.Clean(repo) {
 		t.Fatalf("resolve checkout without pipeline source = %q, %v; want %q", got, err, repo)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("not valid Go"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got, _, err = resolveSubmitRepo(t.Context(), "build", "main")
-	if err != nil || got != repo {
+	if err != nil || filepath.Clean(got) != filepath.Clean(repo) {
 		t.Fatalf("resolve checkout without a buildable pipeline = %q, %v; want %q", got, err, repo)
 	}
 }

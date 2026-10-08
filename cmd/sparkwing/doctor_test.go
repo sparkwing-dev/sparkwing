@@ -34,6 +34,11 @@ func TestRenderPartialDoctorWritesRepairsBeforeError(t *testing.T) {
 
 func doctorHome(t *testing.T) paths.Paths {
 	t.Helper()
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	if err := fssecure.WriteFile(config, []byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", config)
 	dir := t.TempDir()
 	p := paths.PathsAt(dir)
 	if err := p.EnsureRoot(); err != nil {
@@ -71,6 +76,12 @@ func TestDiagnose_CleanHomeFindsNothing(t *testing.T) {
 	rep, err := diagnose(context.Background(), p, p.Root, false)
 	if err != nil {
 		t.Fatalf("diagnose: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		if !rep.PermissionAuditUnverified {
+			t.Fatal("Windows mode audit unexpectedly verified")
+		}
+		rep.PermissionAuditUnverified = false
 	}
 	if !rep.Clean() {
 		t.Fatalf("clean home not reported clean: %+v", rep)
@@ -219,6 +230,12 @@ func TestDiagnose_SecondRunIsClean(t *testing.T) {
 	rep, err := diagnose(ctx, p, p.Root, false)
 	if err != nil {
 		t.Fatalf("second diagnose: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		if !rep.PermissionAuditUnverified {
+			t.Fatal("Windows mode audit unexpectedly verified")
+		}
+		rep.PermissionAuditUnverified = false
 	}
 	if !rep.Clean() {
 		t.Fatalf("second run not clean: %+v", rep)

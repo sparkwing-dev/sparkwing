@@ -469,7 +469,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 				Stderr:     res.Stderr,
 				ExitCode:   res.ExitCode,
 				Cause:      waitErr,
-				Terminated: terminationReason(ctx, ee),
+				Terminated: terminationReason(ctx, ee, job.wasCancelled()),
 			}
 		}
 		return res, &ExecError{
@@ -481,8 +481,8 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	return res, nil
 }
 
-func terminationReason(ctx context.Context, ee *exec.ExitError) string {
-	if ee.Exited() {
+func terminationReason(ctx context.Context, ee *exec.ExitError, cancelled bool) string {
+	if ee.Exited() && !cancelled {
 		return ""
 	}
 	if ctx.Err() != nil {

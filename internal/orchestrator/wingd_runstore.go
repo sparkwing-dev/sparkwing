@@ -259,7 +259,7 @@ func (h *HeldRunStore) cachedFailureLocked() bool {
 // daemon opens the file it finds and never creates one.
 func (h *HeldRunStore) openStore() (*store.Store, *store.Store, os.FileInfo, error) {
 	db := h.paths.StateDB()
-	info, err := os.Stat(db)
+	info, err := heldRunStoreIdentity(db)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, nil, errRunStoreAbsent
@@ -293,7 +293,7 @@ func (h *HeldRunStore) revalidate() {
 	}
 	h.mu.Unlock()
 
-	current, err := os.Stat(h.paths.StateDB())
+	current, err := heldRunStoreIdentity(h.paths.StateDB())
 	if err == nil && os.SameFile(current, info) {
 		return
 	}

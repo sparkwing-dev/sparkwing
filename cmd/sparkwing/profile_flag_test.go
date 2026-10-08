@@ -2,17 +2,28 @@ package main
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
+
+func writePrivateConfigFixture(path string, body []byte) error {
+	if err := fssecure.SecurePrivateDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	if err := fssecure.WriteFile(path, body); err != nil {
+		return err
+	}
+	return fssecure.SecurePrivateConfig(path)
+}
 
 func writeProfilesFixture(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := writePrivateConfigFixture(path, []byte(body)); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)

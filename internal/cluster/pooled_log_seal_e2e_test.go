@@ -11,14 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -73,7 +74,11 @@ func runPipelineChildForTest(runID, nodeID string) int {
 	case "cancel":
 		_ = descendant.Wait()
 	case "killed":
-		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+		self, err := os.FindProcess(os.Getpid())
+		if err != nil {
+			return 2
+		}
+		_ = self.Kill()
 		select {}
 	case "sealing":
 		if err := client.Seal(ctx, runID, nodeID, logs.Seal{Stream: "child", FinalSeq: 5, Lines: 5}); err != nil {
@@ -98,8 +103,11 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 		{"killed", logs.StateCutOff},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
+			if tc.mode == "killed" && runtime.GOOS == "windows" {
+				t.Skip("SIGKILL signal status has no Windows equivalent")
+			}
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			testhome.Set(t, home)
 			t.Setenv("SPARKWING_HOME", filepath.Join(home, "sparkwing"))
 			t.Setenv("SPARKWING_CACHE_URL", "")
 			if err := os.WriteFile(filepath.Join(home, pipelineChildModeFile), []byte(tc.mode), 0o600); err != nil {

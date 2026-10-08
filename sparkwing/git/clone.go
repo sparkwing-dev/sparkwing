@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -102,7 +103,13 @@ func originEnv(ctx context.Context, repoDir string) []string {
 
 func promptlessEnv() []string {
 	// safety: git must never stop on a credential prompt; an unattended runner would hang on it.
-	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if runtime.GOOS == "windows" {
+		// safety: Git for Windows' default helper, Git Credential Manager, opens a
+		// sign-in window that only GCM_INTERACTIVE suppresses.
+		env = append(env, "GCM_INTERACTIVE=0")
+	}
+	return env
 }
 
 func gitcacheToken(named bool) string {

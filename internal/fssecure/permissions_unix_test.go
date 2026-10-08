@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestRepairTreeTightensDataAndPreservesPrivateExecutables(t *testing.T) {
@@ -213,7 +214,7 @@ func TestRepairTreeRefusesUnsafeRoots(t *testing.T) {
 		}
 	}
 	userHome := t.TempDir()
-	t.Setenv("HOME", userHome)
+	testhome.Set(t, userHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	if _, err := fssecure.RepairTree(userHome, fileIdentity(t, userHome), true); err == nil {
 		t.Fatalf("RepairTree(%q) accepted the entire user home", userHome)
@@ -227,7 +228,7 @@ func TestRepairTreeRefusesEffectiveHomeThroughSymlinks(t *testing.T) {
 	if err := os.MkdirAll(userHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", userHome)
+	testhome.Set(t, userHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	if _, err := fssecure.RepairTree(targetParent, fileIdentity(t, targetParent), true); err == nil {
 		t.Fatal("RepairTree accepted an ancestor of the effective user home")

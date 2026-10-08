@@ -37,7 +37,7 @@ func queueHome(t *testing.T) string {
 	previousVersion := Version
 	Version = "v1.0.0"
 	t.Cleanup(func() { Version = previousVersion })
-	dir, err := os.MkdirTemp("/tmp", "swq")
+	dir, err := os.MkdirTemp(nativeSocketTestParent(), "swq")
 	if err != nil {
 		t.Fatalf("temp home: %v", err)
 	}

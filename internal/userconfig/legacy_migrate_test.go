@@ -4,10 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 // safety: the config directory sits inside the sparkwing home, or the sandbox
@@ -33,7 +36,7 @@ func legacyHome(t *testing.T) (dir, path string) {
 
 func writeLegacy(t *testing.T, dir, name, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(filepath.Join(dir, name), []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -89,8 +92,15 @@ func TestMigrationCopiesEveryLegacyFileAndLeavesItInPlace(t *testing.T) {
 		}
 	}
 	assertUntouched(t, dir, originals)
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
-		t.Errorf("config.yaml mode = %v, %v; want 0600", info, err)
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("private file mode = %v, %v; want 0600", info, err)
+		}
+	}
+	if file, err := fssecure.OpenPrivateConfig(path); err != nil {
+		t.Fatalf("config.yaml is not private: %v", err)
+	} else {
+		_ = file.Close()
 	}
 	for _, l := range Leftovers() {
 		if !l.Copied {
@@ -101,7 +111,7 @@ func TestMigrationCopiesEveryLegacyFileAndLeavesItInPlace(t *testing.T) {
 
 func TestMigrationMergesIntoAnExistingFileAndKeepsItsComments(t *testing.T) {
 	dir, path := legacyHome(t)
-	if err := os.WriteFile(path, []byte("# my machine\nprofiles:\n  # home lab\n  lab: {}\nadmission:\n  mode: auto\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte("# my machine\nprofiles:\n  # home lab\n  lab: {}\nadmission:\n  mode: auto\n")); err != nil {
 		t.Fatal(err)
 	}
 	writeLegacy(t, dir, "budget", "6\n")
@@ -121,7 +131,7 @@ func TestMigrationMergesIntoAnExistingFileAndKeepsItsComments(t *testing.T) {
 func TestMigrationIgnoresALegacyFileWhoseSectionExists(t *testing.T) {
 	dir, path := legacyHome(t)
 	existing := "fleet:\n  listen: 127.0.0.1:1\nadmission:\n  budget: \"4\"\n"
-	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(existing)); err != nil {
 		t.Fatal(err)
 	}
 	writeLegacy(t, dir, "fleet.yaml", "listen: 127.0.0.1:2\n")
@@ -211,7 +221,7 @@ func TestMigrationNeverCopiesIntoAnOverride(t *testing.T) {
 
 func TestMigrationUnderASandboxHomeReadsConfigAsItIs(t *testing.T) {
 	dir, path := legacyHome(t)
-	if err := os.WriteFile(path, []byte("repos:\n  fallback_paths: [~/src]\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte("repos:\n  fallback_paths: [~/src]\n")); err != nil {
 		t.Fatal(err)
 	}
 	writeLegacy(t, dir, "profiles.yaml", "profiles:\n  prod: {}\n")

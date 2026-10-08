@@ -11,6 +11,7 @@ package gitenv
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -63,9 +64,13 @@ func GateIndex() string {
 // ShellUnbind is Unbind as shell, for a hook that runs before this process
 // does.
 func ShellUnbind() string {
+	absolute := "/*"
+	if runtime.GOOS == "windows" {
+		absolute += "|[a-zA-Z]:/*|[a-zA-Z]:\\\\*|\\\\*"
+	}
 	return "if [ -n \"${GIT_INDEX_FILE:-}\" ]; then\n" +
 		"\tcase \"$GIT_INDEX_FILE\" in\n" +
-		"\t/*) " + GateIndexVar + "=\"$GIT_INDEX_FILE\" ;;\n" +
+		"\t" + absolute + ") " + GateIndexVar + "=\"$GIT_INDEX_FILE\" ;;\n" +
 		"\t*) " + GateIndexVar + "=\"$(pwd)/$GIT_INDEX_FILE\" ;;\n" +
 		"\tesac\n" +
 		"\texport " + GateIndexVar + "\n" +

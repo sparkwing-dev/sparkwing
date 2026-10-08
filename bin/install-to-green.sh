@@ -13,6 +13,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
+windows=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) windows=1 ;; esac
+host_path="$PATH"
+
 readonly EXIT_UNAVAILABLE=75
 
 usage() {
@@ -176,6 +180,7 @@ started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # manager's shim reads the old HOME to find the real binary.
 command -v go >/dev/null 2>&1 || fail "go is required to compile the scaffolded pipeline and is not on PATH"
 GO_BIN_DIR="$(go env GOROOT)/bin"
+if ((windows)); then GO_BIN_DIR="$(cygpath -u -- "$GO_BIN_DIR")"; fi
 [[ -x "$GO_BIN_DIR/go" ]] || fail "go env GOROOT does not contain a go binary at $GO_BIN_DIR/go"
 
 WORK="$(mktemp -d 2>/dev/null || mktemp -d -t sparkwing-install-to-green)"
@@ -192,7 +197,9 @@ cleanup() {
       printf 'install-to-green: could not stop the admission daemon in %s\n' "$DEMO_HOME" >&2
   fi
   if ((keep)); then
-    printf 'install-to-green: kept %s\n' "$WORK" >&2
+    kept_path="$WORK"
+    if ((windows)); then kept_path="$(cygpath -m -- "$WORK")"; fi
+    printf 'install-to-green: kept %s\n' "$kept_path" >&2
   else
     # Go writes the module cache read-only, so the tree needs write permission
     # back before it can be unlinked.
@@ -242,6 +249,7 @@ else
   STAGE="$WORK/releases/$STAGE_TAG"
   mkdir -p "$STAGE"
   asset="sparkwing-$(go env GOOS)-$(go env GOARCH)"
+  if ((windows)); then asset+=".exe"; fi
   # Staging runs on the caller's Go caches on purpose: warming the demo home's
   # module cache here would hand the measured phases a cache no adopter has.
   if [[ "$mode" == build ]]; then
@@ -321,14 +329,20 @@ unset GOBIN
 # The pinned path carries the system administration directories too: this
 # script reads the machine's load through a tool that lives in one of them,
 # and a path without them records no load for the half of the run after it.
-export PATH="$PREFIX:$GO_BIN_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+if ((windows)); then
+  export PATH="$PREFIX:$GO_BIN_DIR:$host_path"
+else
+  export PATH="$PREFIX:$GO_BIN_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+fi
 for required in git curl; do
   command -v "$required" >/dev/null 2>&1 ||
     fail "$required is required and does not resolve on the harness PATH ($PATH)"
 done
 
 if [[ "$mode" != release ]]; then
-  export SPARKWING_RELEASE_BASE_URL="file://$WORK/releases"
+  release_path="$WORK/releases"
+  if ((windows)); then release_path="/$(cygpath -m -- "$release_path")"; fi
+  export SPARKWING_RELEASE_BASE_URL="file://$release_path"
 fi
 
 git -C "$REPO" init -q

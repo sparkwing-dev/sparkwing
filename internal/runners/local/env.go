@@ -2,7 +2,6 @@ package local
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -23,7 +22,7 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	// also process-local: a nested run would contend for the same output file.
 	// The dispatcher already applied --only to the parent plan, so carrying it
 	// into a node would filter any nested run against the parent's job names.
-	drop := []string{wingwire.APISocketEnv, "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_ONLY"}
+	drop := []string{wingwire.APISocketEnv, "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_ONLY", ParentLivenessFDEnv}
 	// safety: an inherited bearer is the outer run's, so it goes whether or not this run has one.
 	drop = append(drop, tokenEnvNames...)
 	base = withoutEnv(base, drop)
@@ -57,11 +56,6 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	set("SPARKWING_RUNNER_NAME", "local")
 	set("SPARKWING_RUNNER_TYPE", "local")
 	set("SPARKWING_RUNNER_LABELS", strings.Join(cfg.Labels, ","))
-
-	// safety: this is the child's authority to claim the descriptor. Without
-	// it the child must not touch fd 3, which in any other process
-	// belongs to whatever opened it.
-	set(ParentLivenessFDEnv, strconv.Itoa(ParentLivenessFD))
 
 	// safety: the run already holds an admission lease; a node process attaches
 	// to it rather than opening a second one and double-charging the

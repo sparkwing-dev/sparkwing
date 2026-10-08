@@ -279,7 +279,11 @@ func TestHooksInstall_FailedProofRestoresManagedHooksForwardersAndConfigByteForB
 			t.Fatal(err)
 		}
 		prior[name] = body
-		modes[name] = mode
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modes[name] = info.Mode().Perm()
 	}
 	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
 

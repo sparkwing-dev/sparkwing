@@ -20,6 +20,9 @@ func TestCompileAndExecFleetCachedPathReturnsToSnapshotOwner(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "--quiet", "--", dir).CombinedOutput(); err != nil {
+		t.Fatalf("initialize fixture repository: %v\n%s", err, out)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test/fleetcached\n\ngo 1.26\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +55,9 @@ func TestCompileAndExecFleetSuccessfulCachedPathReturnsToSnapshotOwner(t *testin
 	}
 
 	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "--quiet", "--", dir).CombinedOutput(); err != nil {
+		t.Fatalf("initialize fixture repository: %v\n%s", err, out)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test/fleetcachedsuccess\n\ngo 1.26\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

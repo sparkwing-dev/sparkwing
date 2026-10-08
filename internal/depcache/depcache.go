@@ -54,7 +54,7 @@ func (s Spec) TargetDir(workdir string) (string, error) {
 	case ResolverGoModules:
 		return resolveGoModCache()
 	case ResolverNpm:
-		return resolveNpmCacheDir()
+		return resolveNpmCacheDir(workdir)
 	case "":
 	default:
 		return "", fmt.Errorf("unknown cache resolver %q", s.Resolver)
@@ -235,18 +235,52 @@ func deriveKey(name, scope, lockPath string) (string, error) {
 	return key, nil
 }
 
-func resolveNpmCacheDir() (string, error) {
+func resolveNpmCacheDir(workdir string) (string, error) {
 	if v := os.Getenv("npm_config_cache"); v != "" {
 		return v, nil
 	}
-	if out, err := exec.Command("npm", "config", "get", "cache").Output(); err == nil {
-		if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
-			return v, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if command, err := npmCacheCommand(ctx, goruntime.GOOS, exec.LookPath); err == nil {
+		command.Dir = workdir
+		if out, err := command.Output(); err == nil {
+			if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
+				return v, nil
+			}
+		}
+	}
+	return defaultNpmCacheDir(goruntime.GOOS)
+}
+
+func npmCacheCommand(ctx context.Context, goos string, lookPath func(string) (string, error)) (*exec.Cmd, error) {
+	npm, err := lookPath("npm")
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"config", "get", "cache"}
+	if goos != "windows" || strings.EqualFold(filepath.Ext(npm), ".exe") {
+		return exec.CommandContext(ctx, npm, args...), nil
+	}
+	node, err := lookPath("node")
+	if err != nil {
+		return nil, err
+	}
+	cli := filepath.Join(filepath.Dir(npm), "node_modules", "npm", "bin", "npm-cli.js")
+	return exec.CommandContext(ctx, node, append([]string{cli}, args...)...), nil
+}
+
+func defaultNpmCacheDir(goos string) (string, error) {
+	if goos == "windows" {
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "npm-cache"), nil
 		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve npm cache dir: %w", err)
+	}
+	if goos == "windows" {
+		return filepath.Join(home, "AppData", "Local", "npm-cache"), nil
 	}
 	return filepath.Join(home, ".npm"), nil
 }

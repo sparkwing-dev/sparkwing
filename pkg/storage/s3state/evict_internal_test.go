@@ -86,7 +86,7 @@ func TestEvictIdleReadsKeepsAnEntryACallerIsStillAcquiring(t *testing.T) {
 	b.runs["r"] = rs
 	b.mu.Unlock()
 
-	b.evictIdleReads(time.Now())
+	b.evictIdleReads(time.Now().Add(time.Second))
 
 	if b.lookupRun("r") != rs {
 		t.Fatal("the sweep dropped an entry a caller had not finished acquiring; a writer would append to a detached run whose envelopes are never flushed")
@@ -114,7 +114,7 @@ func TestEvictIdleReadsKeepsAPinnedSnapshotAndDropsItOnceReleased(t *testing.T) 
 	b.mu.Lock()
 	rs.pins++
 	b.mu.Unlock()
-	b.evictIdleReads(time.Now())
+	b.evictIdleReads(time.Now().Add(time.Second))
 	if b.lookupRun("r") != rs {
 		t.Fatal("the sweep dropped a snapshot a caller is holding")
 	}
@@ -122,7 +122,7 @@ func TestEvictIdleReadsKeepsAPinnedSnapshotAndDropsItOnceReleased(t *testing.T) 
 	b.mu.Lock()
 	rs.pins--
 	b.mu.Unlock()
-	b.evictIdleReads(time.Now())
+	b.evictIdleReads(time.Now().Add(time.Second))
 	if b.lookupRun("r") != nil {
 		t.Fatal("a released snapshot of another process's run was not swept")
 	}
@@ -140,7 +140,7 @@ func TestEvictIdleReadsKeepsARunThisProcessWrites(t *testing.T) {
 		t.Fatalf("flushRun: %v", err)
 	}
 
-	b.evictIdleReads(time.Now())
+	b.evictIdleReads(time.Now().Add(time.Second))
 
 	if b.lookupRun("r") == nil {
 		t.Fatal("the sweep dropped a run this process writes")
@@ -161,7 +161,7 @@ func TestEvictIdleReadsSweepsASnapshotWhoseLoadFailed(t *testing.T) {
 		t.Fatal("no entry to sweep")
 	}
 
-	b.evictIdleReads(time.Now())
+	b.evictIdleReads(time.Now().Add(time.Second))
 
 	if b.lookupRun("r") != nil {
 		t.Fatal("an entry whose load failed is never swept, so a failing read pins one entry per run id")

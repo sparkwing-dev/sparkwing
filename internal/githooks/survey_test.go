@@ -68,7 +68,7 @@ func TestSurvey_ShadowedWhenAGlobalHooksPathRedirectsGit(t *testing.T) {
 	if len(got.NotFiring()) != 1 || got.NotFiring()[0] != "pre-commit" {
 		t.Errorf("NotFiring() = %v, want [pre-commit]", got.NotFiring())
 	}
-	if got.Scope != "global" || got.ActiveDir != elsewhere {
+	if got.Scope != "global" || got.ActiveDir != filepath.Clean(elsewhere) {
 		t.Errorf("redirect = %s (%s), want %s (global)", got.ActiveDir, got.Scope, elsewhere)
 	}
 	if len(got.Installed) != 1 || got.Installed[0] != "pre-commit" {

@@ -80,9 +80,19 @@ func SecurePrivateConfig(path string) error {
 }
 
 func securePrivateDACL(path string, inheritance uint32) error {
-	current, system, admins, err := privateConfigSIDs()
+	dacl, err := privateConfigACL(inheritance)
 	if err != nil {
 		return err
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil)
+}
+
+func privateConfigACL(inheritance uint32) (*windows.ACL, error) {
+	current, system, admins, err := privateConfigSIDs()
+	if err != nil {
+		return nil, err
 	}
 	entries := make([]windows.EXPLICIT_ACCESS, 0, 3)
 	for _, sid := range []*windows.SID{current, system, admins} {
@@ -97,13 +107,7 @@ func securePrivateDACL(path string, inheritance uint32) error {
 			},
 		})
 	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil)
+	return windows.ACLFromEntries(entries, nil)
 }
 
 func privateConfigSIDs() (current, system, admins *windows.SID, err error) {

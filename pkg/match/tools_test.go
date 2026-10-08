@@ -5,11 +5,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestDetectToolsAdvertisesOnlyKnownToolsOnPath(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	onPath := map[string]bool{"terraform": true, "git": true, "make": true}
 	got := match.DetectTools(func(name string) (string, error) {
 		if onPath[name] {

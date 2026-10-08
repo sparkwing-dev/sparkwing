@@ -15,7 +15,7 @@ import (
 
 func worktreeRegistered(t *testing.T, repo, dir string) bool {
 	t.Helper()
-	return strings.Contains(runGitFixture(t, repo, "worktree", "list"), dir)
+	return strings.Contains(filepath.ToSlash(runGitFixture(t, repo, "worktree", "list")), filepath.ToSlash(dir))
 }
 
 func testStore(t *testing.T) *store.Store {

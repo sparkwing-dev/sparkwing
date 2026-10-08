@@ -161,31 +161,32 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 		closeAll(stdout, stdoutW)
 		return failedResult(fmt.Errorf("local runner: stderr pipe for %s: %w", req.NodeID, err)), false
 	}
-	livenessR, livenessW, err := os.Pipe()
+	releaseChild, releaseParent, err := prepareNodeLiveness(cmd)
 	if err != nil {
 		closeAll(stdout, stdoutW, stderr, stderrW)
 		return failedResult(fmt.Errorf("local runner: liveness pipe for %s: %w", req.NodeID, err)), false
 	}
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
-	cmd.ExtraFiles = []*os.File{livenessR}
 	values, err := secrets.ShareWithChild(cmd)
 	if err != nil {
-		closeAll(stdout, stdoutW, stderr, stderrW, livenessR, livenessW)
+		closeAll(stdout, stdoutW, stderr, stderrW)
+		releaseChild()
+		releaseParent()
 		return failedResult(fmt.Errorf("local runner: %w", err)), false
 	}
 	defer values.Close()
 
-	// safety: the dispatcher holds only the write end. Its close -- deliberate
-	// here, or by the kernel when the dispatcher dies -- is the EOF the
-	// child watches for.
-	defer func() { _ = livenessW.Close() }()
+	// safety: on Unix the dispatcher owns the pipe's write end; closing it
+	// signals EOF to the child. Windows uses the job's kill-on-close handle.
+	defer releaseParent()
 
 	spawnedAt := time.Now()
-	group, err := procgroup.Start(cmd)
+	group, err := startNodeProcess(cmd, r.cfg.Logger)
 	// safety: the child owns its copies now; a parent that keeps the write ends
 	// open never sees EOF on its own readers.
-	closeAll(stdoutW, stderrW, livenessR)
+	closeAll(stdoutW, stderrW)
+	releaseChild()
 	if err != nil {
 		closeAll(stdout, stderr)
 		return failedResult(fmt.Errorf("local runner: spawn %s: %w", req.NodeID, err)), false
@@ -255,7 +256,13 @@ const (
 	endBounced
 )
 
-func (r *Runner) await(ctx context.Context, group *procgroup.Group, bounces <-chan *store.NodeBounce) (attemptEnding, *store.NodeBounce, error) {
+type nodeProcess interface {
+	ID() int
+	Finish(context.Context, time.Duration) error
+	Terminate(context.Context, time.Duration) error
+}
+
+func (r *Runner) await(ctx context.Context, group nodeProcess, bounces <-chan *store.NodeBounce) (attemptEnding, *store.NodeBounce, error) {
 	done := make(chan error, 1)
 	go func() { done <- group.Finish(context.WithoutCancel(ctx), r.cfg.TerminationGrace) }()
 

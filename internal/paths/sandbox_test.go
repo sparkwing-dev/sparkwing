@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest(t *testing.T) {
@@ -43,7 +45,7 @@ func TestDefaultPaths_RefusesTheOperatorHomeUnderTest(t *testing.T) {
 		t.Skip("no home directory to refuse")
 	}
 	real := filepath.Join(operatorHome, ".sparkwing")
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Setenv("SPARKWING_HOME", real)
 
 	p, err := DefaultPaths()

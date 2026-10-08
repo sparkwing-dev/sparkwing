@@ -379,7 +379,13 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 				if os.IsNotExist(renameErr) {
 					continue
 				}
-				pruneErr = errors.Join(pruneErr, renameErr)
+				busy, busyErr := legacyRetirementBusy(ctx, candidate.path, renameErr)
+				if busy {
+					result.ExaminedEntries++
+					result.ActiveSkippedEntries++
+					continue
+				}
+				pruneErr = errors.Join(pruneErr, renameErr, busyErr)
 				continue
 			}
 			if timeErr := os.Chtimes(retiredPath, cacheNow(), cacheNow()); timeErr != nil {

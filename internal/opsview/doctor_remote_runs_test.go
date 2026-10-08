@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -39,7 +40,7 @@ func seedRunDirHomeAt(t *testing.T, home string, ghostAge time.Duration) (paths.
 		t.Fatalf("make run dir: %v", err)
 	}
 	envelope := filepath.Join(ghost, "_envelope.ndjson")
-	if err := os.WriteFile(envelope, []byte("{}\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(envelope, []byte("{}\n")); err != nil {
 		t.Fatalf("write envelope: %v", err)
 	}
 	stamp := time.Now().Add(-ghostAge)
@@ -56,7 +57,7 @@ func ownHome(t *testing.T, home, profiles string) {
 	t.Setenv("SPARKWING_HOME", home)
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if profiles != "" {
-		if err := os.WriteFile(path, []byte(profiles), 0o600); err != nil {
+		if err := fssecure.WriteFile(path, []byte(profiles)); err != nil {
 			t.Fatalf("write profiles: %v", err)
 		}
 	}

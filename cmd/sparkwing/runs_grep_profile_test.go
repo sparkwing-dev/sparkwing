@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -47,7 +47,7 @@ func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
 	home := t.TempDir()
 	profiles := filepath.Join(home, "config.yaml")
 	body := fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller, url: %q}\n", controller.URL, logsHTTP.URL)
-	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(profiles, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", profiles)

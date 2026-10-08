@@ -11,10 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func isolateUpdateTests(t *testing.T) {
@@ -269,9 +272,7 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 	}
 	spy := filepath.Join(t.TempDir(), "go-called")
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nprintf called > '"+spy+"'\nexit 99\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testshell.Install(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf called > "+shellSingleQuote(filepath.ToSlash(spy))+"\nexit 99\n")
 	t.Setenv("PATH", bin)
 	report, code := checkPinUpdate(t, "--check", "--version", "v0.49.0")
 	if report.Target != "sdk" || report.Status != "update_available" || code != 1 || report.Installed.Version != "v0.48.0" {
@@ -641,11 +642,13 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	dir := sdkUpdateFixture(t, "")
 	bin := t.TempDir()
 	log := filepath.Join(bin, "go-argv")
-	script := "#!/bin/sh\nif [ \"$1\" = env ]; then printf 'go1.26.6+auto\\ngo1.26.6\\noff\\n'; exit 0; fi\nprintf '%s|%s|%s\\n' \"$PWD\" \"$GOTOOLCHAIN\" \"$*\" >> '" + log + "'\n" +
-		"case \"$1\" in\nget) printf 'module fixture\\n\\ngo 1.26.0\\n\\nrequire " + sdkModulePath + " v0.49.0\\n' > go.mod;;\nmod) printf 'tidy diagnostic\\n'; printf 'fixture sum\\n' > go.sum;;\n*) exit 91;;\nesac\n"
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	cwd := "\"$PWD\""
+	if runtime.GOOS == "windows" {
+		cwd = "\"$(pwd -W)\""
 	}
+	script := "#!/bin/sh\nif [ \"$1\" = env ]; then printf 'go1.26.6+auto\\ngo1.26.6\\noff\\n'; exit 0; fi\nprintf '%s|%s|%s\\n' " + cwd + " \"$GOTOOLCHAIN\" \"$*\" >> '" + filepath.ToSlash(log) + "'\n" +
+		"case \"$1\" in\nget) printf 'module fixture\\n\\ngo 1.26.0\\n\\nrequire " + sdkModulePath + " v0.49.0\\n' > go.mod;;\nmod) printf 'tidy diagnostic\\n'; printf 'fixture sum\\n' > go.sum;;\n*) exit 91;;\nesac\n"
+	testshell.Install(t, filepath.Join(bin, "go"), script)
 	t.Setenv("PATH", bin)
 	t.Setenv("GOTOOLCHAIN", "go1.26.6+auto")
 	writeVersionHold(t, "v0.10")
@@ -665,7 +668,11 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := dir + "|go1.26.6+auto|get " + sdkModulePath + "@v0.49.0\n" + dir + "|go1.26.6+auto|mod tidy\n"
+	expectedDir := dir
+	if runtime.GOOS == "windows" {
+		expectedDir = filepath.ToSlash(dir)
+	}
+	want := expectedDir + "|go1.26.6+auto|get " + sdkModulePath + "@v0.49.0\n" + expectedDir + "|go1.26.6+auto|mod tidy\n"
 	if string(data) != want {
 		t.Fatalf("Go resolver/toolchain semantics changed: %q", data)
 	}
@@ -694,9 +701,7 @@ func TestUnifiedSDKPartialFailureHasNoSuccessReceipt(t *testing.T) {
 	dir := sdkUpdateFixture(t, "")
 	bin := t.TempDir()
 	script := "#!/bin/sh\nif [ \"$1\" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi\nif [ \"$1\" = get ]; then printf 'module fixture\\n\\ngo 1.26.0\\n\\nrequire " + sdkModulePath + " v0.49.0\\n' > go.mod; exit 0; fi\nexit 17\n"
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testshell.Install(t, filepath.Join(bin, "go"), script)
 	t.Setenv("PATH", bin)
 	var commandError error
 	out := captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })

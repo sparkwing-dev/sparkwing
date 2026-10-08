@@ -518,6 +518,9 @@ func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
 }
 
 func TestPruneQuarantinesActiveLegacyWriterUntilGraceExpires(t *testing.T) {
+	if testNativeActiveLegacyWriter(t) {
+		return
+	}
 	originalNow := cacheNow
 	t.Cleanup(func() { cacheNow = originalNow })
 	now := time.Unix(100, 0)

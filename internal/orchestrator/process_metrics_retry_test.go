@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+const windowsLacksCommandSampler = "Windows has no per-command resource sampler and no true command"
 
 type accountingRetryPipeline struct {
 	sparkwing.Base
@@ -49,6 +52,9 @@ func init() {
 }
 
 func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, tc := range []struct {
 		name, pipeline     string
 		reject, incomplete bool
@@ -154,6 +160,9 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 }
 
 func TestPartialCommandMeasurementsOnlyRaiseProfiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, raise := range []bool{false, true} {
 		t.Run(map[bool]string{false: "lower usage", true: "higher memory"}[raise], func(t *testing.T) {
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
@@ -232,6 +241,9 @@ func (s *rejectFirstExecutionStart) AcknowledgeNodeExecutionStart(ctx context.Co
 }
 
 func TestExecutionAcknowledgementFailureExcludesUnrecordedRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, reject := range []bool{false, true} {
 		t.Run(map[bool]string{false: "complete", true: "retry"}[reject], func(t *testing.T) {
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
@@ -344,6 +356,9 @@ func (s *rejectMetricKind) AddNodeMetricSample(ctx context.Context, run, node st
 }
 
 func TestLostExclusionMarkersAreRetriedAsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, tc := range []struct {
 		name    string
 		backend func(localState) *rejectMetricKind

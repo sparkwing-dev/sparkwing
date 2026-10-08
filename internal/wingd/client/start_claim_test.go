@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,23 +15,50 @@ import (
 func TestClientsMissingTheDaemonTogetherStartOne(t *testing.T) {
 	home := shortHome(t)
 	var spawns atomic.Int32
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	ready, spawned := make(chan struct{}), make(chan struct{})
+	var observed atomic.Int32
 
 	var clients sync.WaitGroup
 	for range 8 {
 		clients.Add(1)
 		go func() {
 			defer clients.Done()
+			firstFailure := true
 			_, _ = EnsureDaemon(ctx, Options{
-				Home:        home,
-				Version:     "v1.0.0",
-				Spawn:       func(string, string) error { spawns.Add(1); return nil },
+				Home:    home,
+				Version: "v1.0.0",
+				Spawn: func(string, string) error {
+					if spawns.Add(1) == 1 {
+						close(spawned)
+					}
+					return nil
+				},
+				observeDialFailure: func() {
+					if firstFailure {
+						firstFailure = false
+						if observed.Add(1) == 8 {
+							close(ready)
+						}
+					}
+				},
 				DialTimeout: time.Millisecond,
 				Backoff:     5 * time.Millisecond,
 			})
 		}()
 	}
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		t.Fatal("clients did not attempt their initial connection")
+	}
+	select {
+	case <-spawned:
+	case <-ctx.Done():
+		t.Fatal("no client claimed daemon start")
+	}
+	cancel()
 	clients.Wait()
 
 	if got := spawns.Load(); got != 1 {
@@ -105,4 +133,12 @@ func TestCanceledDialFailureDoesNotStartTheDaemon(t *testing.T) {
 		t.Fatalf("canceled caller retained startup claim: claimed=%v error=%v", claimed, err)
 	}
 	release()
+}
+
+func TestDaemonUnreachableRetainsCancellationAfterDialTimeout(t *testing.T) {
+	dialErr := &net.OpError{Op: "dial", Net: "unix", Err: context.DeadlineExceeded}
+	err := daemonUnreachable(shortHome(t), "fixture.sock", 0, context.Canceled, dialErr)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrDaemonUnreachable) || !errors.Is(err, dialErr) {
+		t.Fatalf("dial timeout lost cancellation or reachability evidence: %v", err)
+	}
 }

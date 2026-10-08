@@ -89,8 +89,8 @@ func newGateIndexFixture(t *testing.T) (f *chainFixture, gateView, inherited str
 	inherited = filepath.Join(f.root, "inherited-index")
 	writeExec(t, filepath.Join(f.binDir, "sparkwing"),
 		"#!/bin/sh\n"+
-			"echo \"${GIT_INDEX_FILE:-none}\" > "+inherited+"\n"+
-			"GIT_INDEX_FILE=\"${"+gitenv.GateIndexVar+":-}\" git diff --cached --name-only > "+gateView+"\n"+
+			"echo \"${GIT_INDEX_FILE:-none}\" > "+shellSingleQuote(filepath.ToSlash(inherited))+"\n"+
+			"GIT_INDEX_FILE=\"${"+gitenv.GateIndexVar+":-}\" git diff --cached --name-only > "+shellSingleQuote(filepath.ToSlash(gateView))+"\n"+
 			"exit 0\n")
 	writeRepoFile(t, filepath.Join(f.repo, "a.txt"), "a2\n")
 	writeRepoFile(t, filepath.Join(f.repo, "b.txt"), "b2\n")
@@ -166,7 +166,7 @@ func newStagingFixture(t *testing.T) (*chainFixture, string) {
 	f.git(t, "commit", "-m", "base")
 
 	writeExec(t, filepath.Join(f.binDir, "sparkwing"),
-		"#!/bin/sh\necho \"$@\" >> "+f.ranFile+"\ngit -C "+elsewhere+" add -A\n")
+		"#!/bin/sh\necho \"$@\" >> "+shellSingleQuote(filepath.ToSlash(f.ranFile))+"\ngit -C "+shellSingleQuote(filepath.ToSlash(elsewhere))+" add -A\n")
 	writeRepoFile(t, filepath.Join(f.repo, "a.txt"), "a2\n")
 	writeRepoFile(t, filepath.Join(f.repo, "b.txt"), "b2\n")
 	return f, elsewhere

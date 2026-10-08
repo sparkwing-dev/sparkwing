@@ -153,6 +153,9 @@ func pathExposure(path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	if !fssecure.AuditSupported() {
+		return "", fssecure.VerifyPrivateConfig(path, info) != nil
+	}
 	perm := info.Mode().Perm()
 	return fmt.Sprintf("%04o", perm), perm&0o077 != 0
 }
@@ -178,11 +181,11 @@ func configSummary(path string, dryRun bool) string {
 func printConfigureInitExposure(info ConfigureInit) {
 	var exposed []string
 	if info.Exposed {
-		exposed = append(exposed, fmt.Sprintf("  ! %s is readable by group or other users; run: chmod 700 %s", info.ConfigDir, info.ConfigDir))
+		exposed = append(exposed, exposureWarning(info.ConfigDir, info.ConfigDir, "700"))
 	}
 	for _, f := range info.ConfigFiles {
 		if f.Exposed {
-			exposed = append(exposed, fmt.Sprintf("  ! %s is readable by group or other users; run: chmod 600 %s", f.Name, f.Path))
+			exposed = append(exposed, exposureWarning(f.Name, f.Path, "600"))
 		}
 	}
 	if len(exposed) == 0 {
@@ -192,6 +195,13 @@ func printConfigureInitExposure(info ConfigureInit) {
 	for _, line := range exposed {
 		fmt.Println(line)
 	}
+}
+
+func exposureWarning(name, path, mode string) string {
+	if !fssecure.AuditSupported() {
+		return fmt.Sprintf("  ! %s does not have a private access list; review Windows Security permissions for %s", name, path)
+	}
+	return fmt.Sprintf("  ! %s is readable by group or other users; run: chmod %s %s", name, mode, path)
 }
 
 func probeToolchain() ConfigureInitToolchain {

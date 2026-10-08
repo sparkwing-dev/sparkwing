@@ -3,13 +3,14 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -40,11 +41,17 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 	t.Setenv(authwire.CacheGrantEnv, "")
 
 	origins := t.TempDir()
-	marker := filepath.Join(t.TempDir(), "ran")
-	if err := syscall.Mkfifo(marker, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	sha := makePrivateOrigin(t, filepath.Join(origins, "acme", "private.git"), marker)
+	ran := make(chan []byte, 1)
+	marker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		ran <- data
+	}))
+	t.Cleanup(marker.Close)
+	sha := makePrivateOrigin(t, filepath.Join(origins, "acme", "private.git"), marker.URL)
 	const repoURL = "ssh://git@git.example.invalid/acme/private.git"
 	standInSSH(t, origins)
 
@@ -78,17 +85,6 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 			MaxConcurrent: 1,
 		})
 	}()
-	ran := make(chan []byte, 1)
-	go func() {
-		got, _ := os.ReadFile(marker)
-		ran <- got
-	}()
-	t.Cleanup(func() {
-		// safety: a run that never came leaves the reader parked on the fifo; a writer that closes frees it.
-		if f, err := os.OpenFile(marker, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
-			_ = f.Close()
-		}
-	})
 	select {
 	case got := <-ran:
 		if !strings.Contains(string(got), "handle-trigger") || !strings.Contains(string(got), "operator-run") {
@@ -128,12 +124,26 @@ func makePrivateOrigin(t *testing.T, bare, marker string) string {
 	main := fmt.Sprintf(`package main
 
 import (
+	"net/http"
 	"os"
 	"strings"
 )
 
 func main() {
-	if err := os.WriteFile(%q, []byte(strings.Join(os.Args[1:], " ")), 0o644); err != nil {
+	const marker = %q
+	value := strings.Join(os.Args[1:], " ")
+	if strings.HasPrefix(marker, "http://") {
+		response, err := http.Post(marker, "text/plain", strings.NewReader(value))
+		if err != nil {
+			os.Exit(1)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		return
+	}
+	if err := os.WriteFile(marker, []byte(value), 0o644); err != nil {
 		os.Exit(1)
 	}
 }
@@ -175,11 +185,11 @@ func standInSSH(t *testing.T, root string) {
 	script := filepath.Join(t.TempDir(), "ssh")
 	body := "#!/bin/sh\n" +
 		"for last; do :; done\n" +
-		"exec sh -c \"$(printf '%s' \"$last\" | sed \"s#'/#'" + root + "/#\")\"\n"
+		"exec sh -c \"$(printf '%s' \"$last\" | sed \"s#'/#'" + filepath.ToSlash(root) + "/#\")\"\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_SSH_COMMAND", script)
+	t.Setenv("GIT_SSH_COMMAND", "'"+strings.ReplaceAll(filepath.ToSlash(script), "'", "'\\''")+"'")
 	t.Setenv("GIT_SSH_VARIANT", "simple")
 }
 

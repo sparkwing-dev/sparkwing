@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,18 @@ type installToGreenOptions struct {
 	stubScaffold string
 	env          []string
 	args         []string
+}
+
+func installerNativePath(t *testing.T, path string) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return path
+	}
+	out, err := exec.Command("cygpath", "-w", "--", path).Output()
+	if err != nil {
+		t.Fatalf("convert shell path %q: %v", path, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func installToGreenRoot(t *testing.T) string {

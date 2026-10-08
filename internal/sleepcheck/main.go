@@ -45,8 +45,10 @@ const unjudgeable = "cannot judge this file; import time by name"
 const usageText = `usage: sleepcheck [-staged | -base ref] [-allow-no-diff] <root>
 
 <root> is one directory to walk, normally the repository root; sleepcheck
-takes no list of files. It parses every _test.go file under <root> and skips
+takes no list of files. It walks every _test.go file under <root> and skips
 vendor, testdata, node_modules, .git and .claude-scratch.
+Scoped runs parse only touched tests for ordinary waits; approved boundaries
+and external-boundary markers are still audited across the entire tree.
 
 Banned in a test: time.Sleep, time.After, time.Tick, time.NewTimer and
 time.NewTicker, whether called or taken as a value, and time.Now, time.Since
@@ -94,8 +96,22 @@ func main() {
 		os.Exit(2)
 	}
 	root := flag.Arg(0)
+	var added map[string]map[int]bool
+	if *staged || *base != "" {
+		var aerr error
+		added, aerr = scopedAdds(root, *staged, *base)
+		if aerr != nil {
+			if !*allowNoDiff {
+				fmt.Fprintln(os.Stderr, diffFailure(*base, aerr))
+				os.Exit(2)
+			}
+			fmt.Fprintf(os.Stderr, "sleepcheck: cannot compute the diff (%v); -allow-no-diff accepted a run that gates nothing\n", aerr)
+			fmt.Println("sleepcheck: skipped (no diff)")
+			return
+		}
+	}
 
-	findings, unread, err := scan(root)
+	findings, unread, err := scanScoped(root, added)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sleepcheck:", err)
 		os.Exit(2)
@@ -109,16 +125,6 @@ func main() {
 	}
 
 	if *staged || *base != "" {
-		added, aerr := scopedAdds(root, *staged, *base)
-		if aerr != nil {
-			if !*allowNoDiff {
-				fmt.Fprintln(os.Stderr, diffFailure(*base, aerr))
-				os.Exit(2)
-			}
-			fmt.Fprintf(os.Stderr, "sleepcheck: cannot compute the diff (%v); -allow-no-diff accepted a run that gates nothing\n", aerr)
-			fmt.Println("sleepcheck: skipped (no diff)")
-			return
-		}
 		findings = onlyAdded(findings, added)
 		unread = onlyChanged(unread, root, added)
 	}
@@ -147,9 +153,16 @@ func diffFailure(base string, err error) string {
 }
 
 func scan(root string) ([]finding, []unreadable, error) {
+	return scanScoped(root, nil)
+}
+
+func scanScoped(root string, added map[string]map[int]bool) ([]finding, []unreadable, error) {
 	var findings []finding
 	var unread []unreadable
 	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
+		if added != nil && !gatescope.Touched(added, root, path) {
+			return
+		}
 		f, ferr := checkFile(path, rel)
 		if ferr != nil {
 			unread = append(unread, unreadable{file: path, err: ferr})

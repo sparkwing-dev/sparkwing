@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -824,14 +826,8 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	if _, ok := readRawMessage(t, control).(*wingwire.HelloAck); !ok {
 		t.Fatal("control handshake failed")
 	}
-	moved := home + ".moved"
-	if err := os.Rename(home, moved); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(moved) })
-	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	restoreState := blockDaemonStateWrites(t, home)
+	t.Cleanup(restoreState)
 
 	if err := writeRawMessage(control, &wingwire.CancelLease{RunID: "cancel-state-write-failure"}); err != nil {
 		t.Fatal(err)
@@ -874,13 +870,8 @@ func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing
 	if _, ok := readRawMessage(t, control).(*wingwire.HelloAck); !ok {
 		t.Fatal("control handshake failed")
 	}
-	moved := home + ".moved"
-	if err := os.Rename(home, moved); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	restoreState := blockDaemonStateWrites(t, home)
+	t.Cleanup(restoreState)
 	if err := writeRawMessage(control, &wingwire.CancelLease{RunID: "cancelled-token-after-restart"}); err != nil {
 		t.Fatal(err)
 	}
@@ -891,12 +882,7 @@ func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing
 	if err := first.waitExit(t, 3*time.Second); err != nil {
 		t.Fatalf("first daemon exit: %v", err)
 	}
-	if err := os.Remove(home); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(moved, home); err != nil {
-		t.Fatal(err)
-	}
+	restoreState()
 	cfg.Runs = &wingd.FuncRunStore{IsTerminal: func(runID string) (bool, error) {
 		return runID == "cancelled-token-after-restart", nil
 	}}
@@ -2561,4 +2547,53 @@ func resourceHeld(qs wingwire.QueueState, key string) float64 {
 		}
 	}
 	return -1
+}
+
+func blockDaemonStateWrites(t *testing.T, home string) func() {
+	t.Helper()
+	restored := false
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(home, "wingd", "state.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return func() {
+			if restored {
+				return
+			}
+			restored = true
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	moved := home + ".moved"
+	if err := os.Rename(home, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if restored {
+			return
+		}
+		restored = true
+		if err := os.Remove(home); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(moved, home); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
 - **controller + web:** Team → GitHub previews repository-declared push and pull request pipelines, with separate owner consent for automatic triggers and GitHub Actions workers
   The controller reads `.sparkwing/sparkwing.yaml` at the verified default-branch head without executing repository code. Existing manual subscriptions keep precedence. Runner setup resolves GitHub repository and owner identities server-side and supplies a workflow using the team's canonical slug.
@@ -81,6 +82,21 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+- **Windows shell commands:** Run owned commands without console windows, and preserve long Git Bash programs, standard input, and exit status when running native pipeline commands
+- **Windows dashboard builds:** Keep build locks across nested installer commands, preserve paths and exported settings across Git Bash and MSYS2, and verify build receipts through native pnpm launchers
+- **Windows configuration:** Create private configuration and secrets files with protected access lists before writing bytes, retain file identity during permission checks, and report Windows permissions correctly in `configure init`
+- **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
+- **Windows daemon:** Launch the background daemon without a console window, keep runs on the same daemon when home paths differ in slashes or drive-letter casing or when processes set different `TEMP` or `TMP` values, capture diagnostic dump identities before replacement, and stop signaling reaped children
+- **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers, and disable interactive credential prompts for unattended requests
+- **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization, preserve native runtime settings, keep the shared daemon available after cancellation, and reclaim abandoned temporary snapshots
+- **Windows worktree snapshots:** Materialize a run's exact source checkout with Git long paths enabled and without line-ending conversion, so a node sees the committed bytes
+- **Windows output storage:** Flush output files through writable handles, replace them durably, and publish restored log archives after closing staging directory handles
+- **Windows Git hooks:** Resolve Git Bash drive paths and detect runnable hooks without relying on Unix executable permission bits
+- **Windows caches:** Reject rooted archive paths, restore contained relative symlinks, and retire completed cache entries after their open writers release them
+- **Windows worktrees:** Keep lease locks readable and remove completed leases through retained handles that allow native deletion
+- **Windows filesystem profiles:** Resolve drive paths and file URLs consistently for local state and repository identity
+- **Maintenance leases:** Keep sweep claim generations distinct when the clock repeats or moves backwards, so an old owner cannot clear a newer claim
+- **Windows installer checks:** Stage native executable assets and file URLs, and preserve Windows tool paths in install-to-green and Xwing candidate installation
 - **runner:** A node behind the execution broker mints OIDC ID tokens: `POST /api/v1/runs/{id}/oidc-token` for the node's own run is on the broker's route table, and the controller still requires the runner's live claim on the run.
 - **runner:** `RunAndAwait` works from a node behind the execution broker: the broker forwards `POST /api/v1/triggers` naming the node as the parent, the spawned-child lookup for the node, reads of the child run and its node outputs, and `GET /api/v1/concurrency/{key}/state` for the child's plan admission. Another run's `include=secret_values` read stays refused.
 - **runner:** Pipeline references and cache hits recorded by another run resolve from a node behind the execution broker: the broker forwards `GET /api/v1/pipelines/{name}/latest` and another run's node output reads.
@@ -150,6 +166,16 @@ unlock.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
 - **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.
+- **Windows queue:** Report an absent daemon after its socket directory is removed instead of a misleading network failure
+- **Windows run handles:** Publish run-handle files without attempting unsupported directory synchronization
+- **Source checks:** Parse touched tests for scoped wait checks while retaining repository-wide boundary audits
+- **Windows cancellation:** Report commands terminated by their cancellation handler as cancelled while preserving ordinary failure exit codes
+- **Windows checkout:** Keep formatted Go source, API snapshots, shell scripts, workflows, security configuration, and module files in LF format under Git's Windows line-ending conversion
+- **Windows dependency cache:** Resolve npm's configured cache through Node and use the native Windows cache fallback when npm is absent
+- **Windows installation:** Preserve `.exe` names and native paths in Git Bash source and signed-release installs, including repeated installs into an existing directory
+- **Windows local runner:** Own pipeline nodes and descendants with separate kill-on-close Job Objects, including simultaneous launches
+- **API checks:** Recognize the SDK module in CRLF go.mod files when checking a Windows checkout
+- **Windows pipelines:** Use native file locking, disk-space checks, and executable names so the repository's pipeline module runs from Git Bash
 - **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
 - **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
 - **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.

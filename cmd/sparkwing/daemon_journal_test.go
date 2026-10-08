@@ -13,40 +13,32 @@ import (
 
 func captureDaemonOutput(t *testing.T, run func() error) string {
 	t.Helper()
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stdout
-	os.Stdout = writer
-	defer func() { os.Stdout = old }()
-	if err := run(); err != nil {
-		t.Fatal(err)
-	}
-	_ = writer.Close()
-	body, err := io.ReadAll(reader)
-	_ = reader.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(body)
+	return captureDaemonStream(t, &os.Stdout, run)
 }
 
 func captureDaemonErrorOutput(t *testing.T, run func() error) string {
 	t.Helper()
-	reader, writer, err := os.Pipe()
+	return captureDaemonStream(t, &os.Stderr, run)
+}
+
+func captureDaemonStream(t *testing.T, stream **os.File, run func() error) string {
+	t.Helper()
+	// bug: A synchronous pipe capture blocks when output exceeds the native pipe capacity.
+	file, err := os.CreateTemp(t.TempDir(), "daemon-output-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := os.Stderr
-	os.Stderr = writer
-	defer func() { os.Stderr = old }()
+	defer file.Close()
+	old := *stream
+	*stream = file
+	defer func() { *stream = old }()
 	if err := run(); err != nil {
 		t.Fatal(err)
 	}
-	_ = writer.Close()
-	body, err := io.ReadAll(reader)
-	_ = reader.Close()
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(file)
 	if err != nil {
 		t.Fatal(err)
 	}

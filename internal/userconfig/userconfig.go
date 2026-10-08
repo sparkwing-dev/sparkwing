@@ -450,7 +450,16 @@ func equalNode(a, b *yaml.Node) bool {
 // file whole rather than truncated.
 func replace(path string, body []byte) (retErr error) {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
+	tempParent := dir
+	if runtime.GOOS == "windows" {
+		privateDir, err := fssecure.MkdirPrivateTemp(dir, ".config-")
+		if err != nil {
+			return fmt.Errorf("create private temp directory in %s: %w", dir, err)
+		}
+		tempParent = privateDir
+		defer func() { retErr = errors.Join(retErr, os.Remove(privateDir)) }()
+	}
+	tmp, err := os.CreateTemp(tempParent, ".config-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create temp file in %s: %w", dir, err)
 	}
@@ -479,8 +488,10 @@ func replace(path string, body []byte) (retErr error) {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("rename %s: %w", tmpPath, err)
 	}
-	if err := fssecure.SecurePrivateConfig(path); err != nil {
-		return err
+	if runtime.GOOS != "windows" {
+		if err := fssecure.SecurePrivateConfig(path); err != nil {
+			return err
+		}
 	}
 	return syncDir(dir)
 }
@@ -510,16 +521,24 @@ func lock(path string) (func(), error) {
 	for range 5 {
 		info, err := os.Lstat(lockPath)
 		if errors.Is(err, os.ErrNotExist) {
-			f, createErr := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+			var f *os.File
+			var createErr error
+			if runtime.GOOS == "windows" {
+				f, createErr = fssecure.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR)
+			} else {
+				f, createErr = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+			}
 			if errors.Is(createErr, os.ErrExist) {
 				continue
 			}
 			if createErr != nil {
 				return nil, createErr
 			}
-			if err := fssecure.SecurePrivateConfig(lockPath); err != nil {
-				_ = f.Close()
-				return nil, err
+			if runtime.GOOS != "windows" {
+				if err := fssecure.SecurePrivateConfig(lockPath); err != nil {
+					_ = f.Close()
+					return nil, err
+				}
 			}
 			if err := flockWait(f); err != nil {
 				_ = f.Close()

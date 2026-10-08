@@ -261,7 +261,16 @@ func (k *Keyring) create() ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generate the local secrets key: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, "."+keyFileName+"-*")
+	privateDir, err := fssecure.MkdirPrivateTemp(dir, "."+keyFileName+"-")
+	if err != nil {
+		return nil, fmt.Errorf("prepare the local secrets key: %w", err)
+	}
+	defer func() {
+		if err := os.Remove(privateDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "sparkwing: remove %s: %v\n", privateDir, err)
+		}
+	}()
+	tmp, err := os.CreateTemp(privateDir, "."+keyFileName+"-*")
 	if err != nil {
 		return nil, fmt.Errorf("create the local secrets key: %w", err)
 	}
@@ -270,7 +279,7 @@ func (k *Keyring) create() ([]byte, error) {
 			fmt.Fprintf(os.Stderr, "sparkwing: remove %s: %v\n", tmp.Name(), err)
 		}
 	}()
-	werr := tmp.Chmod(0o600)
+	werr := fssecure.SecurePrivateConfig(tmp.Name())
 	if werr == nil {
 		_, werr = tmp.Write(key)
 	}

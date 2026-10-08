@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
@@ -57,11 +59,15 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	}
 
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "terraform"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	tool := "terraform"
+	if runtime.GOOS == "windows" {
+		tool += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()

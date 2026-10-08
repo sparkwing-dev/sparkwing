@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -23,7 +24,11 @@ func TestOpenBacksUpAnOlderSQLiteDatabaseBeforeUpgrading(t *testing.T) {
 		t.Fatalf("backups = %v, %v; want one copy of the v49 database", backups, err)
 	}
 	info, err := os.Stat(backups[0])
-	if err != nil || info.Mode().Perm() != 0o600 {
+	expectedMode := os.FileMode(0o600)
+	if runtime.GOOS == "windows" {
+		expectedMode = 0o666
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != expectedMode {
 		t.Fatalf("backup mode = %v, %v; want 0600", info, err)
 	}
 	db, err := sql.Open("sqlite", backups[0])
