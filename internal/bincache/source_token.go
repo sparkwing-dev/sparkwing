@@ -19,9 +19,6 @@ import (
 // team stored no git credential for its host. Its message names both remedies.
 var ErrNoSourceCredential = errors.New("the controller holds no source credential for this run")
 
-// bug: A controller predating the git-credential route answers a plain 404, distinct from no credential.
-var errCredentialRouteAbsent = errors.New("the controller serves no git-credential route")
-
 // Kinds of [DirectCredential] the controller releases.
 const (
 	CredentialGitHubApp = "github_app"
@@ -72,24 +69,11 @@ type gitCredentialBody struct {
 // holding a claim on runID fetches the run's source with. The controller
 // decides which: the team's GitHub App token when an installation covers the
 // repository, else the git credential the team stored for the repository's
-// host. A controller from before the route is asked for its App source token
-// instead.
+// host.
 func RequestDirectCredential(ctx context.Context, controllerURL, runnerToken, runID string) (DirectCredential, error) {
 	if controllerURL == "" || runID == "" {
 		return DirectCredential{}, fmt.Errorf("%w: no controller to ask", ErrNoSourceCredential)
 	}
-	cred, err := requestGitCredential(ctx, controllerURL, runnerToken, runID)
-	if !errors.Is(err, errCredentialRouteAbsent) {
-		return cred, err
-	}
-	tok, err := RequestSourceToken(ctx, controllerURL, runnerToken, runID)
-	if err != nil {
-		return DirectCredential{}, err
-	}
-	return DirectCredential{Kind: CredentialGitHubApp, Host: "github.com", Username: "x-access-token", Secret: tok}, nil
-}
-
-func requestGitCredential(ctx context.Context, controllerURL, runnerToken, runID string) (DirectCredential, error) {
 	endpoint := strings.TrimRight(controllerURL, "/") + "/api/v1/runs/" + neturl.PathEscape(runID) + "/git-credential"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader("{}"))
 	if err != nil {
@@ -111,9 +95,6 @@ func requestGitCredential(ctx context.Context, controllerURL, runnerToken, runID
 	var body gitCredentialBody
 	decodeErr := json.Unmarshal(raw, &body)
 	switch {
-	case resp.StatusCode == http.StatusMethodNotAllowed,
-		resp.StatusCode == http.StatusNotFound && (decodeErr != nil || body.Error == ""):
-		return DirectCredential{}, errCredentialRouteAbsent
 	case resp.StatusCode == http.StatusNotFound && body.Error == "no_source_credential":
 		return DirectCredential{}, fmt.Errorf("%w: %s", ErrNoSourceCredential, body.Message)
 	case resp.StatusCode != http.StatusOK:
@@ -226,53 +207,6 @@ func plainCredentialValue(v string) bool {
 		}
 	}
 	return true
-}
-
-// ErrNoSourceToken reports a controller that mints no source token for the
-// run: it has no GitHub App, or no installation the run's team holds covers
-// the run's repository.
-var ErrNoSourceToken = errors.New("the controller mints no source token for this run")
-
-// RequestSourceToken asks the controller for a short-lived GitHub token that
-// reads the run's repository, for a runner holding a claim on runID. It is
-// the route a controller from before the git-credential route serves.
-func RequestSourceToken(ctx context.Context, controllerURL, runnerToken, runID string) (string, error) {
-	if controllerURL == "" || runID == "" {
-		return "", ErrNoSourceToken
-	}
-	endpoint := strings.TrimRight(controllerURL, "/") + "/api/v1/runs/" + neturl.PathEscape(runID) + "/source-token"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return "", err
-	}
-	if runnerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+runnerToken)
-	}
-	resp, err := credentialHTTPClient().Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request source token: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	switch {
-	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed:
-		return "", ErrNoSourceToken
-	case resp.StatusCode != http.StatusOK:
-		msg, err := io.ReadAll(io.LimitReader(resp.Body, 512))
-		if err != nil {
-			return "", fmt.Errorf("request source token: %s", resp.Status)
-		}
-		return "", fmt.Errorf("request source token: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
-	}
-	var body struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body); err != nil {
-		return "", fmt.Errorf("request source token: decode: %w", err)
-	}
-	if !plainToken(body.Token) {
-		return "", errors.New("request source token: the controller answered with no usable token")
-	}
-	return body.Token, nil
 }
 
 // safety: the token becomes a line of git's credential protocol, so anything

@@ -36,32 +36,6 @@ func runGitHubRepo(trigger *store.Trigger) (store.GitHubRepo, bool) {
 	return store.ParseGitHubRepo(slug)
 }
 
-// safety: the token reads only the run's own repository, only a runner holding
-// live work on the run gets one, and only when an installation the run's team
-// holds covers that repository, so naming a repository in a run proves nothing
-// by itself.
-func (s *Server) handleRunSourceToken(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
-	}
-	runID := r.PathValue("id")
-	src, ok := s.claimedRunSource(w, r, runID)
-	if !ok {
-		return
-	}
-	repo, ok := runGitHubRepo(src.trigger)
-	if !ok {
-		writeError(w, http.StatusNotFound, errors.New("run "+runID+" names no GitHub repository"))
-		return
-	}
-	out, failure := s.runAppToken(r, src, repo, nil)
-	if failure != nil {
-		failure.write(w)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 // safety: A source credential is released only to a caller holding this run's live claim.
 type claimedRunSource struct {
 	claimed store.ClaimedRun

@@ -139,7 +139,7 @@ Each run a delivery creates spends one of the team's hourly runs (`--max-runs-pe
 
 The hourly budget is enforced separately by each controller replica.
 
-`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source-token route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
+`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
 
 ### Pull requests from forks
 
@@ -161,7 +161,7 @@ A runner without the git cache asks `POST /api/v1/runs/{id}/git-credential` befo
 
 The caller gets 403 when it holds no claim on the run. The runner never falls back to credentials of the machine it runs on; only a runner its owner fenced with `--allow-repo` does, and only when the controller releases nothing.
 
-`POST /api/v1/runs/{id}/source-token` is the older route, which serves only the App token as `{token, expires_at, repository}`, and 404 when the repository has no bound installation. A runner asks it when the controller answers the git-credential route with a plain 404, as one from before that route does.
+The older `POST /api/v1/runs/{id}/source-token` route is removed and answers 404, so a runner or controller older than v0.66 fetches no source from this controller.
 
 A claim holds one live token. Asking again returns the same token until five minutes before it expires, when the controller mints the next one, and a claim that asks more than ten times in a minute answers 429 with `Retry-After`. A runner in a retry loop therefore neither mints a stream of tokens nor spends the App's GitHub rate limit.
 

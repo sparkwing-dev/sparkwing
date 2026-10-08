@@ -200,7 +200,6 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/admin/usage-metrics",
 	"GET /api/v1/pipelines",
 	"DELETE /api/v1/github-app/installations/{installation_id}",
-	"POST /api/v1/runs/{id}/source-token",
 	"POST /api/v1/runs/{id}/git-credential",
 	"POST /api/v1/runs/{id}/source-credential",
 	"PUT /api/v1/team/tokens/{prefix}/git-credentials",

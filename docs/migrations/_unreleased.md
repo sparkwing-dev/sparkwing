@@ -1416,3 +1416,25 @@ To upgrade:
   `--blob-store` needs `--controller` and its `controller-token`, and the
   daily egress alarm defaults to 200 GiB unless `--egress-daily-alarm-bytes`
   is set (the alarm reports in `/health` and the metrics and refuses nothing).
+
+## The source-token route is removed
+
+- **Before:** `POST /api/v1/runs/{id}/source-token` minted a read-only GitHub
+  App token for a runner holding a claim on the run, and
+  `GET /api/v1/capabilities` advertised it as `github_app.source_tokens`. A
+  runner asked it when the git-credential route answered a plain 404, as a
+  controller older than v0.66 does.
+- **After:** the route answers 404 and the capabilities answer has no
+  `source_tokens` field. A runner asks only the controller's source credential
+  route and reports an error when the controller lacks it. A runner or
+  controller older than v0.66 fetches no source from a controller of this
+  release, and a runner of this release fetches no source from a controller
+  older than v0.66.
+
+To upgrade:
+
+1. Upgrade every runner and the controller to this release together. The
+   release ships after 2026-10-15, two weeks after v0.66, so a fleet that
+   kept current already runs v0.66 or later.
+2. Drop `github_app.source_tokens` from code that reads
+   `GET /api/v1/capabilities`; `github_app` still names the App's `slug`.

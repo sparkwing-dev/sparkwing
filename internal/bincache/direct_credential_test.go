@@ -42,10 +42,6 @@ func credentialController(t *testing.T, status int, body string) (*httptest.Serv
 			http.Error(w, "unexpected", http.StatusBadRequest)
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/source-token") {
-			_, _ = w.Write([]byte(`{"token":"ghs_legacy"}`))
-			return
-		}
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
@@ -98,20 +94,20 @@ func TestRequestDirectCredentialNamesTheRemedy(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoSourceCredential carrying the remedy", err)
 	}
 	if len(*paths) != 1 {
-		t.Fatalf("asked %v, want no fallback to the source-token route", *paths)
+		t.Fatalf("asked %v, want one request", *paths)
 	}
 }
 
-// A controller from before the git-credential route answers its mux's plain
-// 404, and the runner asks for the App source token instead.
-func TestRequestDirectCredentialFallsBackOnAnOldController(t *testing.T) {
+// A plain 404 is a controller without the route, which the runner reports
+// rather than reading as "no credential".
+func TestRequestDirectCredentialFailsOnAControllerWithoutTheRoute(t *testing.T) {
 	srv, paths := credentialController(t, http.StatusNotFound, "404 page not found\n")
 	got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1")
-	if err != nil || got.Kind != CredentialGitHubApp || got.Secret != "ghs_legacy" || got.Host != "github.com" {
-		t.Fatalf("credential = %+v, %v; want the legacy App token", got, err)
+	if err == nil || errors.Is(err, ErrNoSourceCredential) || !got.Empty() {
+		t.Fatalf("credential = %+v, %v; want an error that is not ErrNoSourceCredential", got, err)
 	}
-	if len(*paths) != 2 || !strings.HasSuffix((*paths)[1], "/source-token") {
-		t.Fatalf("asked %v, want git-credential then source-token", *paths)
+	if len(*paths) != 1 {
+		t.Fatalf("asked %v, want one request", *paths)
 	}
 }
 

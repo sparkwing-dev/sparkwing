@@ -971,11 +971,25 @@ func (f *appFixture) appWork(owner signedIn, runID, slug string) string {
 	return auth
 }
 
-func (f *appFixture) sourceToken(auth, runID string) (controller.SourceTokenResponse, int) {
+func (f *appFixture) sourceToken(auth, runID string) (gitCredentialAnswer, int) {
 	f.t.Helper()
-	var out controller.SourceTokenResponse
-	code := f.call("POST", "/api/v1/runs/"+runID+"/source-token", auth, nil, &out)
-	return out, code
+	return f.gitCredential(auth, runID)
+}
+
+// The source-token route is gone; a runner from before v0.66 that asks it
+// gets the mux's 404.
+func TestGitHubAppSourceTokenRouteIsGone(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	runner := f.appWork(olga, "run-widgets", "acme/widgets")
+	before := len(f.app.Minted())
+	if code := f.call("POST", "/api/v1/runs/run-widgets/source-token", runner, nil, nil); code != http.StatusNotFound {
+		t.Fatalf("source-token = %d, want 404", code)
+	}
+	if n := len(f.app.Minted()) - before; n != 0 {
+		t.Fatalf("the removed route minted %d tokens", n)
+	}
 }
 
 func TestGitHubAppSourceTokenReadsOnlyTheRunsRepository(t *testing.T) {

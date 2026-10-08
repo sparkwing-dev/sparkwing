@@ -106,8 +106,7 @@ type capabilitiesBilling struct {
 }
 
 type capabilitiesGitHubApp struct {
-	Slug         string `json:"slug"`
-	SourceTokens bool   `json:"source_tokens"`
+	Slug string `json:"slug"`
 }
 
 type capabilitiesClaims struct {
@@ -129,7 +128,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp.Claims.AllowRepos = true
 	resp.Claims.Profile = true
 	if s.githubApp != nil {
-		resp.GitHubApp = &capabilitiesGitHubApp{Slug: s.githubApp.client.Slug(), SourceTokens: true}
+		resp.GitHubApp = &capabilitiesGitHubApp{Slug: s.githubApp.client.Slug()}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

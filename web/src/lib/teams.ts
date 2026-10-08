@@ -7,7 +7,7 @@ export interface Capabilities {
   teams?: { enabled: boolean };
   billing?: { enabled: boolean };
   auth?: { providers: string[] };
-  github_app?: { slug: string; source_tokens: boolean };
+  github_app?: { slug: string };
 }
 
 export interface TeamRef {

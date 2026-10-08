@@ -4515,10 +4515,9 @@ paths:
                     x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
                     type: object
                     description: Present only when the controller has a GitHub App configured.
-                    required: [slug, source_tokens]
+                    required: [slug]
                     properties:
                       slug: {type: string, description: "The App's name in https://github.com/apps/<slug>."}
-                      source_tokens: {type: boolean, description: "A runner holding a claim may ask POST /api/v1/runs/{id}/source-token for a fetch credential."}
 
   /api/v1/me:
     get:
@@ -5256,39 +5255,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/runs/{id}/source-token:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
-      tags: [runs]
-      summary: Mint a short-lived GitHub token that reads the run's repository.
-      description: >-
-        For a runner holding a live node or trigger claim on the run. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with contents:read. A claim gets one live token: asking again returns the same token until five minutes before it expires, and a claim that asks more than ten times a minute answers 429 with Retry-After. A runner hands the token to git through a credential helper reading an inherited pipe. Answers 403 without a claim on the run, 404 when the run names no GitHub repository or no installation the team holds covers it, and 502 when GitHub cannot be reached.
-      responses:
-        "200":
-          description: Token minted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.SourceTokenResponse
-                type: object
-                required: [token, expires_at, repository]
-                properties:
-                  token: {type: string}
-                  expires_at: {type: integer, format: int64, description: Unix seconds; at most an hour away.}
-                  repository: {type: string, description: owner/name.}
-                  extra_repositories:
-                    type: array
-                    items: {type: string}
-                    description: Never set on this route; the git-credential route fills it from the team owner's list.
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
   /api/v1/runs/{id}/git-credential:
     parameters:
       - in: path
@@ -5300,7 +5266,7 @@ paths:
       tags: [runs]
       summary: Release the one credential a runner fetches the run's source with.
       description: >-
-        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. The App token also reads the extra repositories a team owner listed for the run's repository (PUT /api/v1/team/github-app/extra-repos), each checked again to be covered by the installation that covers the run's repository (403 otherwise); the route reads no request body, so nothing a runner sends widens it. A team credential is released only while the claim is still live inside the transaction that records the release. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
+        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read; a claim gets one live token, reused until five minutes before it expires, and a claim asking more than ten times a minute answers 429); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. The App token also reads the extra repositories a team owner listed for the run's repository (PUT /api/v1/team/github-app/extra-repos), each checked again to be covered by the installation that covers the run's repository (403 otherwise); the route reads no request body, so nothing a runner sends widens it. A team credential is released only while the claim is still live inside the transaction that records the release. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
       responses:
         "200":
           description: Credential released.
