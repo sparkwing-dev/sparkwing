@@ -82,3 +82,45 @@ func TestSettleExpiredTriggerClaim_FailsRunTheDeadClaimantStarted(t *testing.T) 
 		t.Errorf("run error = %q, want the lease-expiry reason", run.Error)
 	}
 }
+
+// A trigger's expired claim settles the trigger's own run; another team's
+// live run under the same id is not the dead claimant's to fail.
+func TestSettleExpiredTriggerClaim_LeavesAnotherTeamsRunUnderTheSameID(t *testing.T) {
+	ctx := context.Background()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	acme, err := st.ForTeam(ctx, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "shared", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	if err := acme.CreateRun(ctx, store.Run{
+		ID: "shared", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := store.Maintenance.ReapExpiredTriggers(st, ctx); err != nil {
+		t.Fatalf("ReapExpiredTriggers: %v", err)
+	}
+
+	New(st, nil).settleExpiredTriggerClaim(ctx, "shared")
+
+	run, err := acme.GetRun(ctx, "shared")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Status != "running" || run.FinishedAt != nil {
+		t.Fatalf("acme's run = %s finished=%v, want it left running", run.Status, run.FinishedAt)
+	}
+}

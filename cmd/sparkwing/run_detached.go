@@ -25,7 +25,7 @@ import (
 const SubmitRequestIDKey = "_SPARKWING_SUBMIT_REQUEST_ID"
 
 // submitTriggerSourcePrefix keeps the value written before `runs submit` folded
-// into `run --sw-detached`, so stored rows and `runs find` queries still match.
+// into `run --sw-detached`, so stored rows and `runs list --sha` queries still match.
 const submitTriggerSourcePrefix = "runs-submit"
 
 const detachedPath = "run --sw-detached"
@@ -63,7 +63,7 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 	}
 
 	//nolint:contextcheck // The repo registry read predates a context-aware API.
-	repoDir, declared, err := resolveSubmitRepo(ctx, pipelineName, wf.changeDir, wf.pipelineRef)
+	repoDir, declared, err := resolveSubmitRepo(ctx, pipelineName, wf.pipelineRef)
 	if err != nil {
 		return err
 	}
@@ -544,11 +544,8 @@ func submitPaths(home string) (orchestrator.Paths, error) {
 	return orchestrator.DefaultPaths()
 }
 
-func resolveSubmitRepo(ctx context.Context, pipeline, changeDir, pipelineRef string) (string, []sparkwing.DescribePipeline, error) {
-	start := changeDir
-	if start == "" {
-		start = mustGetwd()
-	}
+func resolveSubmitRepo(ctx context.Context, pipeline, pipelineRef string) (string, []sparkwing.DescribePipeline, error) {
+	start := mustGetwd()
 	if pipelineRef == "" {
 		if dir, err := findSparkwingDirFrom(start); err == nil {
 			source, err := projectconfig.PipelineSource(filepath.Dir(dir), pipeline)
@@ -581,7 +578,7 @@ func resolveSubmitRepo(ctx context.Context, pipeline, changeDir, pipelineRef str
 		return "", nil, fmt.Errorf(
 			"run --sw-detached: no project here or in the repo registry declares a pipeline named %q.\n"+
 				"Run it from the checkout that defines it, pass -C <path> to point at that checkout, "+
-				"or register it with `sparkwing configure xrepo add <path>`.\n"+
+				"or register it with `sparkwing repos add <path>`.\n"+
 				"A registered checkout whose pipeline binary has never been built is not searched; "+
 				"run `sparkwing pipeline list` there once first", pipeline)
 	}

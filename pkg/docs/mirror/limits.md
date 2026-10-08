@@ -200,7 +200,7 @@ second run over the same data removes nothing more.
 | Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive; a run the controller answered free when its logs were written keeps its archived logs 30 days at most, recorded with the run so a restart keeps the class | logs service | `--retention` on `sparkwing-logs`; 90 days with `--archive-store` unless set, off otherwise |
 | Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
 | Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
-| Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (`SPARKWING_CACHE_PROXY_MAX_BYTES`, 2 GiB) |
+| Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (2 GiB) |
 | Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |
 | API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |
 | Browser sessions, GitHub runner credentials | expired | controller, hourly storage pass | none |

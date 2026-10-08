@@ -8,12 +8,9 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
-
-	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
@@ -33,48 +30,6 @@ type profileTestReport struct {
 	Profile string               `json:"profile"`
 	Probes  []profileProbeResult `json:"probes"`
 	OK      bool                 `json:"ok"`
-}
-
-func runProfilesTest(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesTest.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name")
-	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
-	if err := parseAndCheck(cmdProfilesTest, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	report := probeProfile(ctx, prof)
-
-	if *outputFormat == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		if err := enc.Encode(report); err != nil {
-			return err
-		}
-		if !report.OK {
-			return errors.New("one or more probes failed")
-		}
-		return nil
-	}
-
-	fmt.Fprintf(os.Stdout, "profile: %s\n", prof.Name)
-	if err := writeProbeTable(os.Stdout, report); err != nil {
-		return err
-	}
-	if !report.OK {
-		return errors.New("one or more probes failed")
-	}
-	return nil
 }
 
 func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Response, bool) {

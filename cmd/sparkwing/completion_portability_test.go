@@ -21,8 +21,11 @@ func TestBashCompletionWithoutMapfile(t *testing.T) {
 			script := "set -u\nif type -t mapfile >/dev/null; then enable -n mapfile; fi\n" + renderBash() + `
 sparkwing() {
  case "$1" in
- _complete-verbs) if [[ "${2-}" != leaf && "${2-}" != empty ]]; then printf '%s\n' run; fi ;;
- _complete-flags) if [[ "${2-}" != empty ]]; then printf '%s\n' --profile; fi ;;
+ __complete)
+  case "$2" in
+  verbs) if [[ "${3-}" != leaf && "${3-}" != empty ]]; then printf '%s\n' run; fi ;;
+  flags) if [[ "${3-}" != empty ]]; then printf '%s\n' --profile; fi ;;
+  esac ;;
  esac
 }
 ` + "COMP_WORDS=(" + tc.words + ")\nCOMP_CWORD=" + tc.index + "\n_sparkwing_complete\nprintf '%s\n' ${COMPREPLY[@]+\"${COMPREPLY[@]}\"}\n"
@@ -53,7 +56,7 @@ func TestFishPipelineProjectionKeepsDescription(t *testing.T) {
 		t.Skip("shell unavailable")
 	}
 	for _, line := range strings.Split(renderFish(), "\n") {
-		if !strings.Contains(line, "_complete-pipelines") || !strings.Contains(line, "awk") {
+		if !strings.Contains(line, "__complete pipelines") || !strings.Contains(line, "awk") {
 			continue
 		}
 		_, projection, ok := strings.Cut(line, "| ")

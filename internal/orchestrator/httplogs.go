@@ -32,10 +32,6 @@ type HTTPLogs struct {
 	live   LiveLogSink
 }
 
-func NewHTTPLogs(baseURL string, httpClient *http.Client, logger *slog.Logger) *HTTPLogs {
-	return NewHTTPLogsWithToken(baseURL, httpClient, "", logger)
-}
-
 func NewHTTPLogsWithToken(baseURL string, httpClient *http.Client, token string, logger *slog.Logger) *HTTPLogs {
 	if logger == nil {
 		logger = slog.Default()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"golang.org/x/mod/module"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
@@ -236,22 +238,31 @@ func dirExists(p string) bool {
 	return err == nil && st.IsDir()
 }
 
-func tidySkeleton(sparkwingDir string) (bool, error) {
+func tidySkeleton(ctx context.Context, sparkwingDir string) (bool, error) {
 	if !goOnPath() {
 		return false, nil
 	}
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
+	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, nil, "")
+	if err != nil {
+		return true, err
+	}
 	fmt.Println()
-	cmd := exec.Command("go", "mod", "tidy")
+	cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
+	cmd.Env = env
 	cmd.Dir = sparkwingDir
 	var captured bytes.Buffer
 	cmd.Stdout = &captured
 	cmd.Stderr = &captured
 
 	stop := startSpinner("resolving dependencies (`go mod tidy`)")
-	err := cmd.Run()
+	err = cmd.Run()
 	stop()
 
 	if err != nil {
+		if explanation := gotoolchain.ExplainOutput(ctx, captured.String(), env); explanation != nil {
+			return true, explanation
+		}
 		return true, fmt.Errorf("go mod tidy in %s failed; the pipeline files are written, so fix the error and rerun it there: %w\n%s",
 			sparkwingDir, err, strings.TrimSpace(captured.String()))
 	}

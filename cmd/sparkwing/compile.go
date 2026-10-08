@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -34,7 +35,7 @@ type pipelineRun struct {
 	raiseInterrupt func()
 	sparkwingDir   string
 	opts           compileOptions
-	goRun          bool
+	uncached       bool
 	lease          *bincache.Lease
 	source         string
 	uncachedBinary string
@@ -48,11 +49,12 @@ func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
 		raiseInterrupt: raiseInterrupt,
 		sparkwingDir:   sparkwingDir,
 		opts:           opts,
-		goRun:          os.Getenv("SPARKWING_NO_BINCACHE") != "",
+		uncached:       os.Getenv("SPARKWING_NO_BINCACHE") != "",
 	}
 }
 
 func (r *pipelineRun) materialize(env []string) error {
+	r.ctx = gotoolchain.WithSession(r.ctx, env, nil)
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
@@ -61,18 +63,19 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err != nil {
 		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)
 	}
-	if r.goRun {
-		ensureDescribeFromSource(r.ctx, r.sparkwingDir, key, env)
-		if r.opts.ExecutionDir != "" && r.opts.ExecutionDir != r.sparkwingDir {
-			dir, err := os.MkdirTemp("", "sparkwing-source-bin-")
-			if err != nil {
-				return err
-			}
-			r.uncachedBinary = filepath.Join(dir, "pipeline")
-			return bincache.CompilePipeline(r.ctx, r.sparkwingDir, r.uncachedBinary)
+	if r.uncached {
+		dir, err := os.MkdirTemp("", "sparkwing-source-bin-")
+		if err != nil {
+			return err
 		}
+		r.uncachedBinary = filepath.Join(dir, "pipeline")
+		if err := bincache.CompileUncachedPipeline(r.ctx, r.sparkwingDir, r.uncachedBinary); err != nil {
+			return err
+		}
+		ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.uncachedBinary)
 		return nil
 	}
+
 	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env)
 	if err != nil {
 		return err
@@ -85,17 +88,18 @@ func (r *pipelineRun) exec(args, env []string) error {
 	env = withWingdHost(env)
 	if r.uncachedBinary != "" {
 		r.stopSignals()
-		return runExec(r.uncachedBinary, args, r.opts.ExecutionDir, env, func() {
+		execDir := r.opts.ExecutionDir
+		if execDir == "" {
+			execDir = r.sparkwingDir
+		}
+		return runExec(r.uncachedBinary, args, execDir, env, func() {
 			r.stop()
 			if r.opts.AfterChild != nil {
 				r.opts.AfterChild()
 			}
 		})
 	}
-	if r.goRun {
-		r.stopSignals()
-		return runGo(r.sparkwingDir, append([]string{"run", "."}, args...), env, r.opts.AfterChild)
-	}
+
 	execDir := r.opts.ExecutionDir
 	if execDir == "" {
 		execDir = r.sparkwingDir
@@ -217,9 +221,8 @@ func ensureDescribeCache(ctx context.Context, sparkwingDir, key, binPath string)
 }
 
 func announceCompile() {
-	cacheRoot := filepath.Join(bincache.SparkwingHome(), "cache", "pipelines", "v1", "entries")
 	firstEver := true
-	if entries, err := os.ReadDir(cacheRoot); err == nil && len(entries) > 0 {
+	if entries, err := os.ReadDir(bincache.CacheRoot()); err == nil && len(entries) > 0 {
 		firstEver = false
 	}
 	var msg string
@@ -265,16 +268,6 @@ func fleetExecutionEnv(env []string) bool {
 	return false
 }
 
-func runGo(dir string, args, env []string, afterChild func()) error {
-	if !goOnPath() {
-		return fmt.Errorf(
-			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via the `go` command.\n" +
-				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
-		)
-	}
-	return runExec("go", args, dir, env, afterChild)
-}
-
 type compileOptions struct {
 	ExecutionDir string
 	NoUpdate     bool
@@ -295,6 +288,13 @@ func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions
 		return fmt.Errorf("sparks resolve: %w", err)
 	}
 	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir, m); err != nil {
+		var toolchainErr *gotoolchain.Error
+		if errors.As(err, &toolchainErr) {
+			return fmt.Errorf("sparks resolve: %w", err)
+		}
+		if explanation := gotoolchain.ExplainOutput(ctx, err.Error(), nil); explanation != nil {
+			return fmt.Errorf("sparks resolve: %w", explanation)
+		}
 		return fmt.Errorf("sparks resolve: %w (use --sw-no-update to compile against existing go.mod pins)", err)
 	}
 	return nil

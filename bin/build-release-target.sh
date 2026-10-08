@@ -6,7 +6,7 @@ case "$GOOS/$GOARCH" in
   linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|windows/amd64|windows/arm64) ;;
   *) echo "unsupported release target $GOOS/$GOARCH" >&2; exit 2 ;;
 esac
-binaries=(sparkwing sparkwing-cache sparkwing-controller sparkwing-runner sparkwing-logs sparkwing-web)
+binaries=(sparkwing sparkwing-cache sparkwing-controller sparkwing-runner sparkwing-logs)
 ext=""
 if [ "$GOOS" = windows ]; then
   binaries=(sparkwing sparkwing-runner)

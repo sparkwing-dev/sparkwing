@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/term"
@@ -74,14 +76,8 @@ func runUsersAdd(args []string) error {
 	if len(password) < 8 {
 		return errors.New("password must be at least 8 characters")
 	}
-	body := map[string]any{
-		"name":     *name,
-		"password": password,
-	}
-	if requested := splitCSV(*scopes); len(requested) > 0 {
-		body["scopes"] = requested
-	}
-	if _, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users", body); err != nil {
+	if err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+		CreateUser(context.Background(), *name, password, splitCSV(*scopes)); err != nil {
 		return err
 	}
 	fmt.Printf("created user %q\n", *name)
@@ -104,27 +100,16 @@ func runUsersList(args []string) error {
 	if err := requireController(prof, "users list"); err != nil {
 		return err
 	}
-	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users")
+	users, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).ListUsers(context.Background())
 	if err != nil {
 		return err
 	}
-	var out struct {
-		Users []struct {
-			Name        string   `json:"name"`
-			Scopes      []string `json:"scopes"`
-			CreatedAt   int64    `json:"created_at"`
-			LastLoginAt *int64   `json:"last_login_at"`
-		} `json:"users"`
-	}
-	if err := json.Unmarshal(resp, &out); err != nil {
-		return err
-	}
-	if len(out.Users) == 0 {
+	if len(users) == 0 {
 		fmt.Println("(no users)")
 		return nil
 	}
 	fmt.Printf("%-20s %-16s %-20s %s\n", "NAME", "SCOPES", "CREATED", "LAST_LOGIN")
-	for _, u := range out.Users {
+	for _, u := range users {
 		lastLogin := "never"
 		if u.LastLoginAt != nil {
 			lastLogin = fmt.Sprintf("%d", *u.LastLoginAt)
@@ -152,7 +137,8 @@ func runUsersDelete(args []string) error {
 	if err := requireController(prof, "users delete"); err != nil {
 		return err
 	}
-	if _, err := tokensDelete(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users/"+*name); err != nil {
+	if err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+		DeleteUser(context.Background(), *name); err != nil {
 		return err
 	}
 	fmt.Printf("deleted user %q\n", *name)

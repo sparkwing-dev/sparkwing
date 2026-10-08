@@ -1,7 +1,7 @@
 # Pipelines
 
 Pipelines define what happens when you run
-`sparkwing run <name>` (or `sparkwing pipeline run <name>`). See the
+`sparkwing run <name>`. See the
 [SDK guide](sdk.md) for API usage and [Authoring pipelines](authoring-pipelines.md)
 for the rules enforced by `sparkwing pipeline lint`.
 
@@ -75,8 +75,7 @@ pipelines:
       pull_request:
         branches: [main]                 # declarative: records intent, not gated on
 
-  # Declarative path: the controller exposes POST /webhooks/github/{pipeline};
-  # this path is recorded, not routed
+  # Declarative path: recorded, not routed
   - name: review
     entrypoint: Review
     on:
@@ -94,17 +93,17 @@ pipelines:
 ```
 
 `branches` / `paths` / `actions` record intent: the controller does not
-read your `sparkwing.yaml`, so it dispatches whichever pipeline the
-webhook URL names. To require a checked-out branch before any step runs,
+read your `sparkwing.yaml`, so it dispatches the pipelines a team
+subscribed to the repository through the [GitHub App](github-app.md). To require a checked-out branch before any step runs,
 add `guards: {require: [git:branch=main]}` with its literal name. For pull
 requests this compares the head branch, not the base branch.
-`git:branch=default` requires default-branch metadata that controller webhook
-and local trigger claims do not supply. Branch guards do not express path
+`git:branch=default` requires default-branch metadata that trigger claims
+do not always supply. Branch guards do not express path
 restrictions, custom pull-request actions, or pull-request base-branch
 matching. See [hooks](hooks.md) for the enforcement boundary and examples.
 
-Webhook delivery is handled by the controller - see
-`POST /webhooks/github/{pipeline}` in [api](api.md). Git hooks are not
+GitHub delivery is handled by the controller through the
+[GitHub App](github-app.md). Git hooks are not
 installed automatically -- declaring an `on: pre_commit` / `pre_push` /
 `post_commit` trigger does nothing until you run `sparkwing pipeline hooks
 install`, which writes the hook files into `.git/hooks/`; see

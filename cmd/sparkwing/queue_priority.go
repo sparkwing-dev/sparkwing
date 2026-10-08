@@ -39,7 +39,6 @@ func runQueuePriority(args []string) error {
 	fs := flag.NewFlagSet(cmdQueuePriority.Path, flag.ContinueOnError)
 	run := fs.String("run", "", "run id to re-rank")
 	set := fs.String("set", "", "new priority: an integer, front, or back")
-	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdQueuePriority, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -65,7 +64,7 @@ func runQueuePriority(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), queuePriorityTimeout)
 	defer cancel()
 
-	res, err := applyQueuePriority(ctx, *home, *run, priority, mode)
+	res, err := applyQueuePriority(ctx, "", *run, priority, mode)
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			// No daemon means nothing is queued, so the run is as absent as it

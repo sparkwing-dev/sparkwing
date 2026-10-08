@@ -5,7 +5,7 @@ Sparkwing full self-host installed.
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
-{{- $unpinnedImages := or (empty .Values.controller.image.tag) (empty .Values.web.image.tag) -}}
+{{- $unpinnedImages := empty .Values.controller.image.tag -}}
 {{- if index $bundle "enabled" -}}
 {{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "runner" "image" "tag")) -}}
 {{- if index $bundle "cache" "enabled" -}}
@@ -24,8 +24,7 @@ from one compatible Sparkwing revision before treating this as runnable.
 {{- end }}
 
 Components:
-  Controller (1 replica)  -> {{ include "sparkwing-full.controller.fullname" . }}
-  Web        ({{ .Values.web.replicas }} replica(s)) -> {{ include "sparkwing-full.web.fullname" . }}
+  Controller and dashboard (1 replica) -> {{ include "sparkwing-full.controller.fullname" . }}
 {{- if index $bundle "enabled" }}
   Runner-bundle sub-chart -> see `helm get manifest {{ .Release.Name }}` for runner / cache / logs.
 {{- else }}
@@ -36,41 +35,27 @@ Reach the dashboard:
 
 {{- if .Values.ingress.enabled }}
 {{- range .Values.ingress.hosts }}
-  {{- if $.Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .host }}
+  {{ if $.Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .host }}
 {{- end }}
-{{- if and .Values.web.requireLogin (not .Values.ingress.tls) }}
+{{- if not .Values.ingress.tls }}
 
-  WARNING: web.requireLogin is enabled, but ingress.tls is empty. Sparkwing's
-  login cookies are Secure, so configure TLS before signing in.
+  WARNING: ingress.tls is empty, so the controller runs with --insecure-cookies
+  and session cookies and tokens cross every hop in plain text.
 {{- end }}
 {{- else }}
   # Port-forward (no ingress configured):
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sparkwing-full.web.fullname" . }} 8080:80
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sparkwing-full.controller.fullname" . }} 8080:80
   # then open http://localhost:8080
-{{- if .Values.web.requireLogin }}
 
-  WARNING: web.requireLogin is enabled, and Sparkwing's login cookies are
-  Secure. The HTTP port-forward can probe the service but cannot retain a
-  browser login. Configure an HTTPS ingress before signing in.
-{{- end }}
+  Session cookies are Secure. A browser that does not treat http://localhost
+  as a secure origin drops them, so sign-in over the port-forward fails there;
+  configure an HTTPS ingress for regular use.
 
   # Or expose via your own ingress / Service of type LoadBalancer.
 {{- end }}
 
 Controller in-cluster URL (for runners / external clients in the same cluster):
   {{ include "sparkwing-full.controller.serviceURL" . }}
-
-{{- if not .Values.controller.githubWebhookSecret.name }}
-
-NOTE: controller.githubWebhookSecret.name is empty -- GitHub webhook
-HMAC verification is OFF. Pre-create a Secret and set the value
-before exposing /webhooks/github/* publicly:
-
-  kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-webhook \
-    --from-literal=webhook-secret=<your-shared-secret>
-  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
-    --reuse-values --set controller.githubWebhookSecret.name=sparkwing-webhook
-{{- end }}
 
 {{- if not .Values.controller.secretsKey.name }}
 
@@ -87,9 +72,6 @@ attach a key for production installs:
 
 Inspect controller logs:
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-full.controller.fullname" . }} -f
-
-Inspect web logs:
-  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-full.web.fullname" . }} -f
 
 Confirm the controller is healthy:
   kubectl -n {{ .Release.Namespace }} run --rm -it -q probe --image=curlimages/curl -- \

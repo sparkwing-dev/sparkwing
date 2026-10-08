@@ -122,7 +122,7 @@ func TestChildEnv_OmitsEmptyAndUnavailableValues(t *testing.T) {
 func TestChildEnv_APISocketCarriesNoBearer(t *testing.T) {
 	cfg := testConfig()
 	cfg.APISocket = "/tmp/sparkwing-501-abc/api.sock"
-	base := []string{"SPARKWING_AGENT_TOKEN=inherited", "SPARKWING_TOKEN=inherited", "PATH=/usr/bin"}
+	base := []string{"SPARKWING_AGENT_TOKEN=inherited", "PATH=/usr/bin"}
 
 	env := childEnv(context.Background(), base, cfg,
 		runner.Request{RunID: "run-1", NodeID: "build"})

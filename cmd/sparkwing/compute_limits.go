@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 
 	flag "github.com/spf13/pflag"
 
@@ -98,7 +101,7 @@ func runComputeLimitsShow(args []string) error {
 	if err := requireController(prof, "cluster limits show"); err != nil {
 		return err
 	}
-	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/compute-limits")
+	resp, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).ComputeLimits(context.Background())
 	if err != nil {
 		return err
 	}
@@ -141,8 +144,8 @@ func runComputeLimitsSet(args []string) error {
 	if err := requireController(prof, "cluster limits set"); err != nil {
 		return err
 	}
-	body := map[string]any{"limits": map[string]int64{*name: *value}}
-	resp, err := tokensPut(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/compute-limits", body)
+	resp, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+		SetComputeLimits(context.Background(), map[string]int64{*name: *value})
 	if err != nil {
 		return err
 	}

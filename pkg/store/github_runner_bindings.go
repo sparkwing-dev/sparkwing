@@ -483,8 +483,8 @@ func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 
 func (g GitHubRunnerScope) nodeClause() (string, []any) {
 	inner, innerArgs := g.triggerClause("gt")
-	return ` AND team = ? AND run_id IN (SELECT gt.id FROM triggers gt WHERE 1 = 1` + inner + `)`,
-		append([]any{string(g.Team)}, innerArgs...)
+	return ` AND team = ? AND run_id IN (SELECT gt.id FROM triggers gt WHERE gt.team = ?` + inner + `)`,
+		append([]any{string(g.Team), string(g.Team)}, innerArgs...)
 }
 
 // GitHubRunnerAdmits reports whether scope admits runID: the run's trigger

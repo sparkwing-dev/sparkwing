@@ -352,16 +352,6 @@ func describeHome(home string) string {
 	return home
 }
 
-func daemonDeathCause(tail string) string {
-	lines := strings.Split(strings.TrimRight(tail, "\n"), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if s := strings.TrimSpace(lines[i]); s != "" {
-			return strings.TrimPrefix(s, "sparkwing error: ")
-		}
-	}
-	return "the daemon exited before serving"
-}
-
 func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 	sock, err := wingd.SocketPath(opts.Home)
 	if err != nil {

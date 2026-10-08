@@ -23,8 +23,24 @@ func cacheGrantServer(t *testing.T, cacheToken, grantKey string) *Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	if err := st.AsOperator().CreateTeam(t.Context(), "team-a"); err != nil {
+		t.Fatal(err)
+	}
+	team, err := st.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := team.CreateTrigger(t.Context(), store.Trigger{ID: "run-1", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`,
+		poolRunner.Name, poolRunner.TokenPrefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
+		t.Fatal(err)
+	}
 	return New(st, nil).WithCacheCredentials("http://cache.invalid", cacheToken)
 }
+
+var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes}
 
 func teamA(*http.Request) (store.Team, error) { return "team-a", nil }
 
@@ -32,9 +48,12 @@ func mintAs(t *testing.T, s *Server, p *Principal, teamOf func(*http.Request) (s
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-1/cache-grant", nil)
 	req.SetPathValue("id", "run-1")
-	if p != nil {
-		req = req.WithContext(contextWithPrincipal(req.Context(), p))
+	req.Header.Set(store.TriggerGenerationHeader, "1")
+	if p == nil {
+		pool := poolRunner
+		p = &pool
 	}
+	req = req.WithContext(contextWithPrincipal(req.Context(), p))
 	rec := httptest.NewRecorder()
 	s.handleRunCacheGrant(teamOf).ServeHTTP(rec, req)
 	return rec
@@ -116,19 +135,18 @@ func TestCacheGrantRefusesAGitHubRunnerCredential(t *testing.T) {
 func TestCacheGrantEndsWhenTheCredentialDoes(t *testing.T) {
 	s := cacheGrantServer(t, "operator-token", "grant-key")
 	expires := time.Now().Add(10 * time.Minute)
-	p := &Principal{Name: "pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes, Expires: expires}
-	body := decodeGrant(t, mintAs(t, s, p, teamA))
+	pool := poolRunner
+	pool.Expires = expires
+	body := decodeGrant(t, mintAs(t, s, &pool, teamA))
 	if body.ExpiresAt.After(expires) {
 		t.Fatalf("grant expires %s, after the credential's %s", body.ExpiresAt, expires)
 	}
 	if _, err := authwire.VerifyCacheGrant("grant-key", body.Grant, expires.Add(time.Second)); err == nil {
 		t.Fatal("the grant still verifies after the credential expired")
 	}
-	expired := &Principal{
-		Name: "pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes,
-		Expires: time.Now().Add(-time.Second),
-	}
-	if rec := mintAs(t, s, expired, teamA); rec.Code/100 == 2 {
+	expired := pool
+	expired.Expires = time.Now().Add(-time.Second)
+	if rec := mintAs(t, s, &expired, teamA); rec.Code/100 == 2 {
 		t.Fatalf("mint for an expired credential = %d, want a refusal", rec.Code)
 	}
 }

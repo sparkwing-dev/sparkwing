@@ -17,6 +17,7 @@ import (
 // stands in for a real compile: the tree the toolchain leaves behind is what
 // this test is about, and a real `go build` cannot be paused mid-link.
 const fakeGoScript = `#!/bin/sh
+if [ "$1" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi
 sleep 600 &
 echo $! > "$SPARKWING_TEST_GRANDCHILD_PID"
 echo $$ > "$SPARKWING_TEST_GO_PID"

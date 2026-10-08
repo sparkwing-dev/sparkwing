@@ -1,4 +1,4 @@
-package logs
+package logs_test
 
 import (
 	"encoding/json"
@@ -8,13 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func newHealthServer(t *testing.T, controllerURL string) *Server {
+func newHealthServer(t *testing.T, controllerURL string) *logs.Server {
 	t.Helper()
-	s, err := New(t.TempDir(), nil)
+	s, err := logs.New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -24,7 +26,7 @@ func newHealthServer(t *testing.T, controllerURL string) *Server {
 	return s
 }
 
-func healthAuthField(t *testing.T, s *Server) string {
+func healthAuthField(t *testing.T, s *logs.Server) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -107,12 +109,12 @@ func TestAnonymousPrincipalIsNotCached(t *testing.T) {
 	defer controller.Close()
 
 	s := newHealthServer(t, controller.URL)
-	s.authCacheTTL = time.Minute
+	s.SetAuthCacheTTL(time.Minute)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/logs/run-1/step-a", nil)
 	req.Header.Set("Authorization", "Bearer swu_whatever")
 	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
 
-	if _, cached := s.authCache.Load("swu_whatever"); cached {
+	if s.AuthCached("swu_whatever") {
 		t.Error("the controller's anonymous principal was cached and would be trusted for the TTL")
 	}
 }

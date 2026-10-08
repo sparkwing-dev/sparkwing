@@ -15,17 +15,13 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/agents/{name}` | `admin` |
 | `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `GET` | `/api/v1/artifacts/{key}` | `runs.read` |
-| `GET` | `/api/v1/auth/bootstrap-needed` | `public` |
 | `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |
-| `POST` | `/api/v1/auth/oauth/github/exchange` | `public` |
-| `POST` | `/api/v1/auth/oauth/github/start` | `public` |
-| `POST` | `/api/v1/auth/oauth/google/exchange` | `public` |
-| `POST` | `/api/v1/auth/oauth/google/start` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
 | `GET` | `/api/v1/capabilities` | `public` |
+| `GET` | `/api/v1/capacity/profiles` | `runs.read` |
+| `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
 | `GET` | `/api/v1/compute-limits` | `runs.read` |
 | `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
@@ -33,7 +29,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/heartbeat` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/holder` | `claim` or `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/notify` | `claim` or `runs.read` |
 | `POST` | `/api/v1/concurrency/{key}/release` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |
@@ -45,10 +40,10 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
+| `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
 | `POST` | `/api/v1/credits/reversals` | `credits.grant` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
 | `PUT` | `/api/v1/credits/settings` | `admin` |
-| `GET` | `/api/v1/credits/teams/{team}` | `admin` |
 | `GET` | `/api/v1/credits/units` | `credits.grant` |
 | `POST` | `/api/v1/credits/warnings` | `credits.grant` |
 | `GET` | `/api/v1/crons` | `runs.read` |
@@ -65,12 +60,9 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/data/commit` | `public` |
 | `POST` | `/api/v1/data/download` | `public` |
 | `POST` | `/api/v1/data/upload` | `public` |
-| `GET` | `/api/v1/egress` | `admin` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
-| `POST` | `/api/v1/gitcache/refresh` | `admin` |
-| `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
@@ -82,14 +74,11 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/me/active-team` | `authenticated` |
 | `GET` | `/api/v1/me/identities` | `authenticated` |
 | `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
-| `POST` | `/api/v1/me/identities/{provider}/link` | `authenticated` |
-| `POST` | `/api/v1/me/identities/{provider}/link/complete` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
 | `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
-| `GET` | `/api/v1/operator/session` | `operator` |
 | `GET` | `/api/v1/operator/teams` | `operator` |
 | `GET` | `/api/v1/operator/teams/{team}` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/freeze` | `operator` |
@@ -107,14 +96,11 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/pipelines/{name}/profile/observations` | `runs.state` |
 | `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
 | `POST` | `/api/v1/pipelines/{name}/profile/waits` | `runs.state` |
-| `GET` | `/api/v1/pool` | `runs.read` |
-| `POST` | `/api/v1/pool/checkout` | `admin` |
-| `POST` | `/api/v1/pool/heartbeat` | `admin` |
-| `POST` | `/api/v1/pool/return` | `admin` |
 | `GET` | `/api/v1/queue/state` | `runs.read` |
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.state` |
+| `GET` | `/api/v1/runs/grep` | `logs.read` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
 | `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
@@ -131,6 +117,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
+| `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/git-credential` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
@@ -138,6 +125,11 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/{node}/completeness` | `logs.read` |
+| `GET` | `/api/v1/runs/{id}/logs/{node}/stream` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |
@@ -206,7 +198,6 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
-| `PUT` | `/api/v1/storage/teams/{team}/free-slot` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/billing` | `runs.read` |
@@ -225,10 +216,9 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/team/git-credentials/{host}` | `team.admin` |
 | `POST` | `/api/v1/team/git-credentials/{host}/confirm` | `team.admin` |
 | `GET` | `/api/v1/team/github-app` | `runs.read` |
-| `POST` | `/api/v1/team/github-app/connect` | `team.admin` |
-| `POST` | `/api/v1/team/github-app/connect/available` | `team.admin` |
-| `POST` | `/api/v1/team/github-app/connect/complete` | `team.admin` |
-| `POST` | `/api/v1/team/github-app/connect/select` | `team.admin` |
+| `DELETE` | `/api/v1/team/github-app/automation` | `team.admin` |
+| `GET` | `/api/v1/team/github-app/automation` | `runs.read` |
+| `PUT` | `/api/v1/team/github-app/automation` | `team.admin` |
 | `GET` | `/api/v1/team/github-app/extra-repos` | `runs.read` |
 | `PUT` | `/api/v1/team/github-app/extra-repos` | `team.admin` |
 | `DELETE` | `/api/v1/team/github-app/installations/{installation_id}` | `team.admin` |
@@ -272,8 +262,6 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/users` | `admin` |
 | `POST` | `/api/v1/users` | `admin` |
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
-| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
-| `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
 | `POST` | `/internal/downloads/charge` | `public` |
 | `POST` | `/internal/egress/totals` | `public` |
 | `POST` | `/internal/storage/commit` | `public` |
@@ -281,7 +269,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
-| `POST` | `/webhooks/github/{pipeline}` | `public` |
 
 ## Logs service
 

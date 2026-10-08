@@ -47,7 +47,6 @@ Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 
 
 | Flag | Description |
 |---|---|
-| `--home DIR` | State directory |
 | `-o, --output pretty\|json\|plain` | Output format |
 | `--limit N` | Last N lines; 0 skips history (default: 40) |
 | `--follow` | Follow appended lines until interrupted |
@@ -73,7 +72,6 @@ Stops the verified owned instance, then starts the invoked binary. Preserves eff
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
 | `--allow-remote` | Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host. |
-| `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
 | `--artifact-store URL` | Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
@@ -124,7 +122,6 @@ application/json. --allow-remote widens the Host check only.
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
 | `--allow-remote` | Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host. |
-| `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
 | `--artifact-store URL` | Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
@@ -141,7 +138,7 @@ sparkwing serve start
 sparkwing serve start --addr 127.0.0.1:5000
 
 # Isolate state under a scratch dir
-sparkwing serve start --home ./sparkwing-x
+SPARKWING_HOME=/tmp/sparkwing-x sparkwing serve start
 
 # Tail CI runs from S3 (no SQLite)
 sparkwing serve start --profile ci-smoke --no-local-store --read-only
@@ -164,7 +161,6 @@ missing artifact evidence is unknown.
 | Flag | Description |
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
-| `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples
 
@@ -188,7 +184,6 @@ An absent service succeeds.
 | Flag | Description |
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
-| `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples
 

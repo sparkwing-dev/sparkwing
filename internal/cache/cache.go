@@ -60,10 +60,6 @@ type Config struct {
 
 	GitForkLimit int
 
-	WorkspaceSeedMaxAge time.Duration
-
-	MaxArtifactBytes int64
-
 	MaxCacheArchiveBytes int64
 
 	MaxStoreBytes int64
@@ -113,12 +109,9 @@ func DefaultConfig() Config {
 		SSHKeyDir:        "/etc/ssh-key",
 		GitForkLimit:     4,
 
-		MaxArtifactBytes:     DefaultMaxArtifactBytes,
 		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
 		StoreReconcile:       objectguard.DefaultCeilingReconcile,
-
-		WorkspaceSeedMaxAge: 24 * time.Hour,
-		ProxyMaxBytes:       DefaultProxyMaxBytes,
+		ProxyMaxBytes:        DefaultProxyMaxBytes,
 	}
 }
 
@@ -152,18 +145,18 @@ func New(cfg Config) (*Server, error) {
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
 	cfg.GrantKey = strings.TrimSpace(cfg.GrantKey)
 	if cfg.GrantKey != "" && cfg.GrantKey == cfg.APIToken {
-		return nil, fmt.Errorf("cache: the grant key (--grant-key or $%s) is the operator token; "+
+		return nil, fmt.Errorf("cache: the grant key (%s) is the operator token (%s); "+
 			"give it a secret of its own, because whoever holds the key signs access to every team's tree",
-			authwire.CacheGrantKeyEnv)
+			authwire.CacheGrantKeyCredential, authwire.CacheTokenCredential)
 	}
 	if cfg.APIToken == "" {
 		if !cfg.AllowUnauthenticated {
-			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
-				"or pass --allow-unauthenticated to serve the git, blob, artifact, and sync endpoints to anyone who can reach the port")
+			return nil, fmt.Errorf("cache: an API token is required: put it in " + authwire.CacheTokenCredential +
+				" under --credentials-dir, or pass --allow-unauthenticated to serve the git and blob endpoints to anyone who can reach the port")
 		}
-		log.Printf("WARNING: sparkwing-cache is serving the git, blob, artifact, and sync endpoints without authentication (--allow-unauthenticated)")
+		log.Printf("WARNING: sparkwing-cache is serving the git and blob endpoints without authentication (--allow-unauthenticated)")
 	} else {
-		log.Printf("sparkwing-cache requires a bearer token on the git, blob, artifact, and sync endpoints")
+		log.Printf("sparkwing-cache requires a bearer token on the git and blob endpoints")
 	}
 	if cfg.ProxyDir == "" {
 		cfg.ProxyDir = filepath.Join(cfg.DataDir, "proxy")
@@ -190,10 +183,7 @@ func New(cfg Config) (*Server, error) {
 	if cfg.GitForkLimit <= 0 {
 		cfg.GitForkLimit = 4
 	}
-	if cfg.WorkspaceSeedMaxAge == 0 {
-		cfg.WorkspaceSeedMaxAge = 24 * time.Hour
-	}
-	if cfg.MaxArtifactBytes < 0 || cfg.MaxCacheArchiveBytes < 0 {
+	if cfg.MaxCacheArchiveBytes < 0 {
 		return nil, fmt.Errorf("cache: an object size cap must not be negative; pass 0 to accept an object of any size")
 	}
 	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
@@ -203,7 +193,7 @@ func New(cfg Config) (*Server, error) {
 	// controller can count them, so a cache that could not ask it does not
 	// start rather than store every team's bytes uncounted.
 	if cfg.GrantKey != "" && cfg.BlobStore != "" && cfg.ControllerURL == "" {
-		return nil, fmt.Errorf("cache: --grant-key with --blob-store needs --controller, which counts what each team stores")
+		return nil, fmt.Errorf("cache: a grant key with --blob-store needs --controller, which counts what each team stores")
 	}
 	if cfg.StoreReconcile < 0 {
 		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
@@ -211,11 +201,8 @@ func New(cfg Config) (*Server, error) {
 
 	dataRoot = cfg.DataDir
 	repoDir = filepath.Join(cfg.DataDir, "repos")
-	archDir = filepath.Join(cfg.DataDir, "archives")
-	artifactsDir = filepath.Join(cfg.DataDir, "artifacts")
 	binsDir = filepath.Join(cfg.DataDir, "bins")
 	cacheDir = filepath.Join(cfg.DataDir, "cache")
-	uploadsDir = filepath.Join(cfg.DataDir, "uploads")
 	teamsDir = filepath.Join(cfg.DataDir, "teams")
 	namesFile = filepath.Join(cfg.DataDir, "repo-names.json")
 	proxyDir = cfg.ProxyDir
@@ -230,8 +217,6 @@ func New(cfg Config) (*Server, error) {
 	fetchFreshWindow = cfg.FetchFreshWindow
 	recloneCooldown = cfg.RecloneCooldown
 	gitForkSem = make(chan struct{}, cfg.GitForkLimit)
-	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
-	maxArtifactBytes = cfg.MaxArtifactBytes
 	maxCacheArchiveBytes = cfg.MaxCacheArchiveBytes
 	if cfg.ProxyMaxBytes < 0 {
 		return nil, fmt.Errorf("cache: --proxy-max-bytes must not be negative; pass 0 to leave the proxy unbounded")
@@ -266,11 +251,11 @@ func New(cfg Config) (*Server, error) {
 			store.Bucket(), store.Prefix())
 	}
 
-	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
+	log.Printf("sparkwing-cache caps one dependency archive at %d bytes "+
 		"and the whole store at %d bytes / %d objects (0 means no cap)",
-		maxArtifactBytes, maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
+		maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
 
-	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, teamsDir, proxyDir} {
+	for _, d := range []string{repoDir, binsDir, cacheDir, teamsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("cache: mkdir %s: %w", d, err)
 		}
@@ -298,7 +283,11 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{cfg: cfg}
 	// bug: instruments bind to the meter provider current when they are created, so telemetry starts first.
-	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
+	tel, err := otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache", Prometheus: true})
+	if err != nil {
+		return nil, err
+	}
+	s.tel = tel
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()
@@ -311,23 +300,12 @@ func New(cfg Config) (*Server, error) {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)
 
-	s.mux.HandleFunc("/archive", requireToken(metered(egress.ClassArtifact, handleArchive)))
-	s.mux.HandleFunc("/repos", requireToken(handleRepos))
-	s.mux.HandleFunc("/artifacts/", requireCaller(metered(egress.ClassArtifact, handleArtifacts)))
-	s.mux.HandleFunc("/file", requireToken(metered(egress.ClassArtifact, handleFile)))
-	s.mux.HandleFunc("/tree-hash", requireToken(handleTreeHash))
-	s.mux.HandleFunc("/branch-contains", requireToken(handleBranchContains))
 	s.mux.HandleFunc("/bin/", requireCaller(metered(egress.ClassArtifact, handleBin)))
 	s.mux.HandleFunc("/cache/", requireCaller(metered(egress.ClassArtifact, handleCache)))
-	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
 	s.mux.HandleFunc("/admin/teams/", requireToken(handleDeleteTeamTree))
-	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
-	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
-	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
 	s.mux.HandleFunc("/git/register", requireCaller(handleGitRegister))
-	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
 	s.mux.HandleFunc("/git/", requireCaller(metered(egress.ClassGit, handleGit)))
 
 	// safety: runner pods reach the proxy with no credential, so it stays

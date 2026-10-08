@@ -105,6 +105,11 @@ func githubAttemptExecutor(ctx context.Context, tx *storeTx, runID, principal, p
 }
 
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error {
+	return s.defaultTenant().AcknowledgeNodeExecutionStart(ctx, runID, nodeID, claimant, start)
+}
+
+// AcknowledgeNodeExecutionStart is [Store.AcknowledgeNodeExecutionStart] confined to t's team.
+func (t *Tenant) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error {
 	if len(start.ExecutorName) > maxExecutionExecutorNameLen {
 		return fmt.Errorf("%w: executor_name exceeds %d bytes", ErrInvalidInput, maxExecutionExecutorNameLen)
 	}
@@ -113,15 +118,15 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 		if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 			return ErrLockHeld
 		}
-		return s.acknowledgeTriggerExecutionStart(ctx, runID, nodeID, triggerFence, start)
+		return t.acknowledgeTriggerExecutionStart(ctx, runID, nodeID, triggerFence, start)
 	}
 	if start.ExecutorKind == ExecutorKindLocal {
-		return s.startLocalNodeExecutionAttempt(ctx, runID, nodeID, start.ExecutorID, start.AttemptOrdinal)
+		return t.startLocalNodeExecutionAttempt(ctx, runID, nodeID, start.ExecutorID, start.AttemptOrdinal)
 	}
 	if start.HolderID == "" || start.ClaimGeneration < 1 || start.AttemptOrdinal < 1 {
 		return ErrLockHeld
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -136,7 +141,7 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
        coordinator_id, claim_membership_id, executor_kind, claim_worker_id, executor_id, executor_location,
        reservation_id, retry_root_run_id, claim_generation, attempts_consumed,
        lease_expires_at, status, outcome
-  FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(), runID, nodeID).Scan(
+  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(), string(t.team), runID, nodeID).Scan(
 		&holder, &principal, &prefix, &coordinator, &membership, &kind, &executorName, &executor, &location,
 		&reservation, &root, &generation, &consumed, &lease, &status, &outcome)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -159,8 +164,8 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id, membership_id,
        executor_kind, executor_name, executor_id, executor_location, holder_id, reservation_id, started_at
   FROM node_execution_attempts
- WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
-		runID, root, nodeID, start.AttemptOrdinal).Scan(&prior.RunID, &prior.ClaimGeneration, &prior.CoordinatorID,
+ WHERE team = ? AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		string(t.team), root, nodeID, start.AttemptOrdinal).Scan(&prior.RunID, &prior.ClaimGeneration, &prior.CoordinatorID,
 		&prior.MembershipID, &prior.ExecutorKind, &prior.ExecutorName, &prior.ExecutorID, &prior.ExecutorLocation,
 		&prior.HolderID, &prior.ReservationID, &priorStarted)
 	if err == nil {
@@ -209,7 +214,7 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 		}
 	}
 	var metered bool
-	err = tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE team = (`+runTeamSQL+`) AND prefix = ?`, runID, prefix).Scan(&metered)
+	err = tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE team = (?) AND prefix = ?`, string(t.team), prefix).Scan(&metered)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -226,8 +231,8 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
     (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		runID, root, runID, nodeID, start.AttemptOrdinal, generation, coordinator, membership,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(t.team), root, runID, nodeID, start.AttemptOrdinal, generation, coordinator, membership,
 		kind, executorName, executor, location, holder, reservation, now.UnixNano()); err != nil {
 		return err
 	}
@@ -247,8 +252,8 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	           ELSE credit_billing_from
 	       END,
 	       execution_started_at = COALESCE(execution_started_at, ?)
-	 WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempts_consumed = ?`,
-		start.AttemptOrdinal, paidThrough, startedAt, startedAt, runID, nodeID, generation, consumed)
+	 WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND attempts_consumed = ?`,
+		start.AttemptOrdinal, paidThrough, startedAt, startedAt, string(t.team), runID, nodeID, generation, consumed)
 	if err != nil {
 		return err
 	}
@@ -263,13 +268,13 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	event["attempt"] = start.AttemptOrdinal
 	event["claim_generation"] = generation
 	payload, _ := json.Marshal(event)
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, start ExecutionStart) error {
+func (t *Tenant) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, start ExecutionStart) error {
 	ordinal := start.AttemptOrdinal
 	if ordinal < 1 || fence.ClaimGeneration < 1 {
 		return ErrLockHeld
@@ -281,19 +286,19 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 		}
 		localExecutor = start.ExecutorID
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
+	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
 	var consumed int
 	var root, status, outcome, location string
 	if err := tx.QueryRowContext(ctx, `SELECT attempts_consumed, retry_root_run_id,
-       status, outcome, executor_location FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(),
-		runID, nodeID).Scan(&consumed, &root, &status, &outcome, &location); err != nil {
+       status, outcome, executor_location FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(),
+		string(t.team), runID, nodeID).Scan(&consumed, &root, &status, &outcome, &location); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
 		}
@@ -336,7 +341,7 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 			}
 		}
 		var metered bool
-		err := tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE team = (`+runTeamSQL+`) AND prefix = ?`, runID, fence.Claimant.TokenPrefix).Scan(&metered)
+		err := tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE team = (?) AND prefix = ?`, string(t.team), fence.Claimant.TokenPrefix).Scan(&metered)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -353,8 +358,8 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id,
        executor_kind, executor_name, executor_id, executor_location, holder_id
   FROM node_execution_attempts
- WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
-		runID, root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
+ WHERE team = ? AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		string(t.team), root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
 		&priorKind, &priorName, &priorExecutor, &priorLocation, &priorHolder)
 	if err == nil {
 		if priorRun == runID && priorGeneration == fence.ClaimGeneration &&
@@ -376,15 +381,15 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
     (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
-		runID, root, runID, nodeID, ordinal, fence.ClaimGeneration, coordinatorID,
+VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
+		string(t.team), root, runID, nodeID, ordinal, fence.ClaimGeneration, coordinatorID,
 		kind, executorName, coordinatorID, location, holder, now.UnixNano()); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
    SET attempts_consumed = ?, execution_started_at = COALESCE(execution_started_at, ?)
- WHERE run_id = ? AND node_id = ? AND attempts_consumed = ?`,
-		ordinal, now.UnixNano(), runID, nodeID, consumed)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempts_consumed = ?`,
+		ordinal, now.UnixNano(), string(t.team), runID, nodeID, consumed)
 	if err != nil {
 		return err
 	}
@@ -398,24 +403,29 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
 	event["attempt"] = ordinal
 	event["claim_generation"] = fence.ClaimGeneration
 	payload, _ := json.Marshal(event)
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "execution_attempt_started", payload, now); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error {
+	return s.defaultTenant().FinishNodeExecutionAttempt(ctx, runID, nodeID, claimant, finish)
+}
+
+// FinishNodeExecutionAttempt is [Store.FinishNodeExecutionAttempt] confined to t's team.
+func (t *Tenant) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error {
 	if triggerFence, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
 		if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 			return ErrLockHeld
 		}
-		return s.finishTriggerExecutionAttempt(ctx, runID, nodeID, triggerFence, finish)
+		return t.finishTriggerExecutionAttempt(ctx, runID, nodeID, triggerFence, finish)
 	}
 	if finish.ExecutorKind == ExecutorKindLocal {
-		return s.finishLocalNodeExecutionAttempt(ctx, runID, nodeID, finish)
+		return t.finishLocalNodeExecutionAttempt(ctx, runID, nodeID, finish)
 	}
 	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -425,12 +435,12 @@ func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID st
 	err = tx.QueryRowContext(ctx, `SELECT a.finished_at, a.outcome, a.failure_reason
   FROM node_execution_attempts a
   JOIN nodes n ON n.run_id = a.run_id AND n.node_id = a.node_id
- WHERE a.run_id = ? AND a.node_id = ? AND a.claim_generation = ? AND a.attempt_ordinal = ?
+ WHERE a.team = ? AND a.run_id = ? AND a.node_id = ? AND a.claim_generation = ? AND a.attempt_ordinal = ?
    AND a.holder_id = ? AND a.membership_id = ? AND a.reservation_id = ?
 	  AND n.claimed_by = ? AND n.claim_principal = ? AND n.claim_token_prefix = ?
 	  AND n.claim_generation = ? AND n.claim_membership_id = ? AND n.reservation_id = ?
-	  AND `+nodeClaimLiveSQL("n.")+` AND n.`+nodeNotDone+s.forUpdate(),
-		runID, nodeID, finish.ClaimGeneration, finish.AttemptOrdinal,
+	  AND `+nodeClaimLiveSQL("n.")+` AND n.`+nodeNotDone+t.s.forUpdate(),
+		string(t.team), runID, nodeID, finish.ClaimGeneration, finish.AttemptOrdinal,
 		finish.HolderID, finish.MembershipID, finish.ReservationID,
 		finish.HolderID, claimant.Principal, claimant.TokenPrefix,
 		finish.ClaimGeneration, finish.MembershipID, finish.ReservationID, now).Scan(
@@ -449,9 +459,9 @@ func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID st
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
    SET finished_at = ?, outcome = ?, failure_reason = ?
- WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
    AND finished_at IS NULL`, now, finish.Outcome, finish.FailureReason,
-		runID, nodeID, finish.ClaimGeneration, finish.AttemptOrdinal)
+		string(t.team), runID, nodeID, finish.ClaimGeneration, finish.AttemptOrdinal)
 	if err != nil {
 		return err
 	}
@@ -465,22 +475,22 @@ func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID st
 		"attempt": finish.AttemptOrdinal, "claim_generation": finish.ClaimGeneration,
 		"outcome": finish.Outcome, "failure_reason": finish.FailureReason,
 	})
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, time.Unix(0, now)); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "execution_attempt_finished", payload, time.Unix(0, now)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, finish ExecutionAttemptFinish) error {
+func (t *Tenant) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, finish ExecutionAttemptFinish) error {
 	if finish.AttemptOrdinal < 1 || fence.ClaimGeneration < 1 {
 		return ErrLockHeld
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
+	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)
@@ -491,9 +501,9 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 	var outcome, failureReason string
 	err = tx.QueryRowContext(ctx, `SELECT finished_at, outcome, failure_reason
   FROM node_execution_attempts
- WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
-   AND coordinator_id = ? AND executor_id = ? AND holder_id = ?`+s.forUpdate(),
-		runID, nodeID, fence.ClaimGeneration, finish.AttemptOrdinal,
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
+   AND coordinator_id = ? AND executor_id = ? AND holder_id = ?`+t.s.forUpdate(),
+		string(t.team), runID, nodeID, fence.ClaimGeneration, finish.AttemptOrdinal,
 		coordinatorID, coordinatorID, "trigger:"+coordinatorID).Scan(
 		&finished, &outcome, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -511,9 +521,9 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 	now := time.Now()
 	res, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
    SET finished_at = ?, outcome = ?, failure_reason = ?
- WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
    AND finished_at IS NULL`, now.UnixNano(), finish.Outcome, finish.FailureReason,
-		runID, nodeID, fence.ClaimGeneration, finish.AttemptOrdinal)
+		string(t.team), runID, nodeID, fence.ClaimGeneration, finish.AttemptOrdinal)
 	if err != nil {
 		return err
 	}
@@ -527,7 +537,7 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 		"attempt": finish.AttemptOrdinal, "claim_generation": fence.ClaimGeneration,
 		"outcome": finish.Outcome, "failure_reason": finish.FailureReason,
 	})
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, now); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "execution_attempt_finished", payload, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -542,7 +552,7 @@ const localAttemptHolderPrefix = "local:"
 // an unbounded one from the wire would be stored unbounded.
 const maxLocalExecutorIDLen = 128
 
-func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeID, executorID string, ordinal int) (err error) {
+func (t *Tenant) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeID, executorID string, ordinal int) (err error) {
 	if ordinal < 1 || executorID == "" || len(executorID) > maxLocalExecutorIDLen {
 		return ErrLockHeld
 	}
@@ -553,18 +563,18 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
 		generation = fence.ClaimGeneration
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
+	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
 	var root, status, outcome, claimed string
 	if err := tx.QueryRowContext(ctx, `SELECT retry_root_run_id, status, outcome,
-       COALESCE(claimed_by, '') FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(),
-		runID, nodeID).Scan(&root, &status, &outcome, &claimed); err != nil {
+       COALESCE(claimed_by, '') FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(),
+		string(t.team), runID, nodeID).Scan(&root, &status, &outcome, &claimed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
 		}
@@ -586,8 +596,8 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id,
        executor_kind, executor_name, executor_id, executor_location, holder_id
   FROM node_execution_attempts
- WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
-		runID, root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
+ WHERE team = ? AND lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		string(t.team), root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
 		&priorKind, &priorName, &priorExecutor, &priorLocation, &priorHolder)
 	if err == nil {
 		if priorRun == runID && priorGeneration == generation && priorCoordinator == coordinatorID &&
@@ -602,8 +612,8 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	}
 	var recorded int
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(attempt_ordinal), 0)
-  FROM node_execution_attempts WHERE team = `+runTeamSQL+` AND lineage_root_run_id = ? AND node_id = ?`,
-		runID, root, nodeID).Scan(&recorded); err != nil {
+  FROM node_execution_attempts WHERE team = ? AND lineage_root_run_id = ? AND node_id = ?`,
+		string(t.team), root, nodeID).Scan(&recorded); err != nil {
 		return err
 	}
 	// safety: the caller numbers its own attempts against the node's retry
@@ -617,8 +627,8 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
     (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
-		runID, root, runID, nodeID, ordinal, generation, coordinatorID,
+VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
+		string(t.team), root, runID, nodeID, ordinal, generation, coordinatorID,
 		ExecutorKindLocal, executorID, executorID, executorLocationLocal,
 		holder, now.UnixNano()); err != nil {
 		return err
@@ -628,7 +638,7 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
 	// bounced node's replacement process would find that budget gone.
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
    SET execution_started_at = COALESCE(execution_started_at, ?)
- WHERE run_id = ? AND node_id = ?`, now.UnixNano(), runID, nodeID)
+ WHERE team = ? AND run_id = ? AND node_id = ?`, now.UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -641,25 +651,25 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
 	event := executionAttributionEventFields(ExecutorKindLocal, executorID, executorLocationLocal)
 	event["attempt"] = ordinal
 	event["claim_generation"] = generation
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", event, now); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "execution_attempt_started", event, now); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish ExecutionAttemptFinish) (err error) {
+func (t *Tenant) finishLocalNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish ExecutionAttemptFinish) (err error) {
 	if finish.AttemptOrdinal < 1 {
 		return ErrLockHeld
 	}
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
+	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)
@@ -670,9 +680,9 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 	var outcome, failureReason string
 	err = tx.QueryRowContext(ctx, `SELECT finished_at, outcome, failure_reason
   FROM node_execution_attempts
- WHERE run_id = ? AND node_id = ? AND attempt_ordinal = ?
-   AND coordinator_id = ? AND executor_kind = ? AND holder_id = ?`+s.forUpdate(),
-		runID, nodeID, finish.AttemptOrdinal, coordinatorID, ExecutorKindLocal,
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt_ordinal = ?
+   AND coordinator_id = ? AND executor_kind = ? AND holder_id = ?`+t.s.forUpdate(),
+		string(t.team), runID, nodeID, finish.AttemptOrdinal, coordinatorID, ExecutorKindLocal,
 		localAttemptHolderPrefix+coordinatorID).Scan(&finished, &outcome, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrLockHeld
@@ -689,10 +699,10 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 	now := time.Now()
 	res, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
    SET finished_at = ?, outcome = ?, failure_reason = ?
- WHERE run_id = ? AND node_id = ? AND attempt_ordinal = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt_ordinal = ?
    AND executor_kind = ? AND holder_id = ? AND finished_at IS NULL`,
 		now.UnixNano(), finish.Outcome, finish.FailureReason,
-		runID, nodeID, finish.AttemptOrdinal, ExecutorKindLocal,
+		string(t.team), runID, nodeID, finish.AttemptOrdinal, ExecutorKindLocal,
 		localAttemptHolderPrefix+coordinatorID)
 	if err != nil {
 		return err
@@ -707,7 +717,7 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 		"attempt": finish.AttemptOrdinal, "outcome": finish.Outcome,
 		"failure_reason": finish.FailureReason,
 	}
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", event, now); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "execution_attempt_finished", event, now); err != nil {
 		return err
 	}
 	return tx.Commit()

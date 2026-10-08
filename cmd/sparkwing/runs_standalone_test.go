@@ -51,8 +51,8 @@ func writeRun(t *testing.T, path, id string) {
 func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
 	paths := standaloneHome(t)
 	out := captureStdout(t, func() {
-		if err := runJobsReceipt(context.Background(), paths, []string{"--run", "run-alone"}); err != nil {
-			t.Fatalf("runJobsReceipt: %v", err)
+		if err := renderRunView(context.Background(), paths, runView{name: "receipt", runID: "run-alone", format: "json"}); err != nil {
+			t.Fatalf("receipt view: %v", err)
 		}
 	})
 	var rec map[string]any
@@ -70,7 +70,8 @@ func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
 func TestRunsCancel_StandaloneRunRefusesWithoutACommand(t *testing.T) {
 	paths := standaloneHome(t)
 	out := captureStdout(t, func() {
-		err := runRunsCancel(context.Background(), []string{"--run", "run-alone", "--home", paths.Root})
+		t.Setenv("SPARKWING_HOME", paths.Root)
+		err := runRunsCancel(context.Background(), []string{"--run", "run-alone"})
 		if err == nil {
 			t.Fatal("expected cancel to fail for a standalone run")
 		}

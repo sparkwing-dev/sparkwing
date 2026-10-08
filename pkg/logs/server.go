@@ -415,30 +415,6 @@ func (s *Server) whoami(ctx context.Context, credential string) (*logsPrincipal,
 	}, nil
 }
 
-// Serve starts the HTTP listener and blocks until ctx is done.
-func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error {
-	return ServeWithTokens(ctx, root, addr, "", logger)
-}
-
-// ServeWithTokens starts the HTTP listener with whoami-based auth
-// wired against the given controller URL. Empty controllerURL = auth
-// fully disabled (laptop-local).
-func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
-	return ServeWith(ctx, ServeOptions{Root: root, Addr: addr, ControllerURL: controllerURL, Logger: logger})
-}
-
-// ServePrivateWithTokens serves an owner-only local log root. Operator-chosen
-// shared and PVC roots should use [ServeWithTokens].
-func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
-	return ServeWith(ctx, ServeOptions{
-		Root:          root,
-		Addr:          addr,
-		ControllerURL: controllerURL,
-		Logger:        logger,
-		Private:       true,
-	})
-}
-
 // ServeOptions configures one logs-service listener.
 type ServeOptions struct {
 	// Root is the storage root; the service creates it if absent.

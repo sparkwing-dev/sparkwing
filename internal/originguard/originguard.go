@@ -1,7 +1,8 @@
 // Package originguard refuses browser requests that reach an unauthenticated
 // loopback server from another site: a rebound DNS name, a cross-origin
-// write, or a cross-site subresource. `sparkwing serve` and a sparkwing-web
-// dashboard without sign-in wrap their handlers in [Guard].
+// write, or a cross-site subresource. `sparkwing serve` wraps its handler in
+// [Guard]; a controller serving the dashboard wraps its API in
+// [RefuseCrossSiteWrites].
 package originguard
 
 import (
@@ -83,6 +84,40 @@ func Guard(next http.Handler, policy Policy) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// RefuseCrossSiteWrites answers 403 for a write a browser sent from another
+// site: an Origin whose host is not the request's Host, or a Sec-Fetch-Site
+// of cross-site or same-site. It serves a listener reachable under names
+// nobody configured, where [Guard] would refuse its own users. A request
+// carrying neither header is not a browser's and passes, because the attack
+// needs a victim's browser to send it.
+func RefuseCrossSiteWrites(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !mutatingMethod(r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !sameHost(origin, r.Host) {
+			http.Error(w, "forbidden: cross-site write: Origin "+origin+" is not this dashboard's host "+r.Host, http.StatusForbidden)
+			return
+		}
+		if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+			http.Error(w, "forbidden: cross-site write: Sec-Fetch-Site is "+site, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hack: a proxy may spell the scheme's default port in Host while the browser's Origin omits it.
+func sameHost(origin, host string) bool {
+	scheme, originHost, ok := splitOrigin(origin)
+	if !ok {
+		return false
+	}
+	def := ":" + originPort(scheme, "")
+	return strings.EqualFold(strings.TrimSuffix(originHost, def), strings.TrimSuffix(host, def))
 }
 
 // safety: a form or text/plain POST is a simple request a page can send

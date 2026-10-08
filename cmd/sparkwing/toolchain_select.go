@@ -169,7 +169,19 @@ func runToolchain(w io.Writer, d toolchainDecision) error {
 	}
 	fmt.Fprintf(w, "sparkwing: running %s from %s because this repo pins SDK %s and the installed sparkwing is %s\n",
 		served, tildePath(binPath), d.pin, d.installed)
-	return toolchainExecFn(binPath, os.Args[1:], setEnv(os.Environ(), toolchainActiveEnv, served))
+	return toolchainExecFn(binPath, toolchainArgs(), setEnv(os.Environ(), toolchainActiveEnv, served))
+}
+
+// safety: the replay runs from the directory -C already entered, so it gets
+// the argv after the root flags were applied; replaying -C would resolve a
+// relative operand a second time, and an older pinned CLI has no root -C.
+var toolchainReplayArgs []string
+
+func toolchainArgs() []string {
+	if toolchainReplayArgs != nil {
+		return toolchainReplayArgs
+	}
+	return os.Args[1:]
 }
 
 // safety: returns the release it actually served, which is an older one when

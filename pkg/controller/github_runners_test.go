@@ -48,7 +48,8 @@ func newGHFixture(t *testing.T) *ghFixture {
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 		WithExternalURL(ghAudience).
-		WithGitHubRunners(gh.Config(ghAudience))
+		WithGitHubRunners(gh.Config(ghAudience)).
+		WithDashboard(controller.Dashboard{})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

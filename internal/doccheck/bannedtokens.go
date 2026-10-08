@@ -88,7 +88,7 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`sparkwing pipeline add\b`),
-		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`",
+		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing repos add <path>`",
 	},
 	{
 		regexp.MustCompile(`pipeline templates\b`),
@@ -104,11 +104,9 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`pipeline new\b[^\n]*--param\b`),
-		"removed; `pipeline new --template` takes one of five shapes and renders no parameters (`--param` lives on `examples scaffold`, which registry entries are read through)",
+		"removed; `pipeline new --template` takes one of five shapes and renders no parameters; read a parameterized example with `sparkwing examples --name NAME --body`",
 	},
 }
-
-const narrativeExempt = "changelog-style.md"
 
 var bannedNarrative = []bannedPattern{
 	{
@@ -140,7 +138,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
-		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
+		if strings.Contains(path, "/migrations/") {
 			return nil
 		}
 		targets = append(targets, path)
@@ -156,10 +154,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 			return false
 		}
 		rel, _ := filepath.Rel(repoRoot, path)
-		patterns := banned
-		if filepath.Base(path) != narrativeExempt {
-			patterns = append(append([]bannedPattern{}, banned...), bannedNarrative...)
-		}
+		patterns := append(append([]bannedPattern{}, banned...), bannedNarrative...)
 		for ln, line := range strings.Split(string(data), "\n") {
 			for _, b := range patterns {
 				if m := b.re.FindString(line); m != "" {

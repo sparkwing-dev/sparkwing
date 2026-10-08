@@ -660,6 +660,9 @@ func (req CreditGrantRequest) validate() error {
 	if !ValidCreditGrantKind(req.Kind) {
 		return fmt.Errorf("credits: unknown grant kind %q", req.Kind)
 	}
+	if strings.HasPrefix(req.Reference, unappliedPrefix) {
+		return fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
+	}
 	if req.Kind != CreditGrantReversal {
 		if req.AmountMicro <= 0 {
 			return errors.New("credits: grant amount must be positive")
@@ -1698,52 +1701,16 @@ func backfillTeamCreditStateTx(ctx context.Context, tx *storeTx) error {
 	return backfillStorageWatermarkTeamTx(ctx, tx)
 }
 
-// ListCreditGrants returns grants newest first, at most limit rows and never
-// more than [CreditHistoryMaxLimit].
+// ListCreditGrants returns the default team's grants newest first, at most
+// limit rows and never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
-	rows, err := s.query(ctx, `SELECT id, kind, amount_micro, reference, reverses, created_by, created_at
-	  FROM credit_grants ORDER BY created_at DESC, id DESC LIMIT ?`, creditLimit(limit))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []CreditGrant
-	for rows.Next() {
-		var g CreditGrant
-		var created int64
-		if err := rows.Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses,
-			&g.CreatedBy, &created); err != nil {
-			return nil, err
-		}
-		g.CreatedAt = time.Unix(0, created).UTC()
-		out = append(out, g)
-	}
-	return out, rows.Err()
+	return s.defaultTenant().ListCreditGrants(ctx, limit)
 }
 
-// ListCreditCharges returns charges newest first, at most limit rows and
-// never more than [CreditHistoryMaxLimit].
+// ListCreditCharges returns the default team's charges newest first, at most
+// limit rows and never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
-	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, principal, kind,
-	         seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at
-	  FROM credit_charges ORDER BY charged_at DESC, id DESC LIMIT ?`, creditLimit(limit))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []CreditCharge
-	for rows.Next() {
-		var c CreditCharge
-		var charged int64
-		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Principal, &c.Kind,
-			&c.Seconds, &c.AmountMicro, &c.StorageBytes,
-			&c.CPUClassCores, &c.RateMicroPerSecond, &charged); err != nil {
-			return nil, err
-		}
-		c.ChargedAt = time.Unix(0, charged).UTC()
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return s.defaultTenant().ListCreditCharges(ctx, limit)
 }
 
 func creditLimit(limit int) int {
@@ -1818,7 +1785,7 @@ func reserveTriggerCreditsTx(
 	if err := refuseAboveHeadroomTx(ctx, tx, team, required, now, triggerID, ""); err != nil {
 		return err
 	}
-	principal, err := runPrincipalTx(ctx, tx, triggerID)
+	principal, err := runPrincipalTx(ctx, tx, team, triggerID)
 	if err != nil {
 		return err
 	}
@@ -2043,7 +2010,7 @@ func (s *Store) reserveNodeCreditsTx(
 		unpriced.RunID, unpriced.NodeID = runID, nodeID
 		return unpriced
 	}
-	principal, err := runPrincipalTx(ctx, tx, runID)
+	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return err
 	}
@@ -2078,8 +2045,8 @@ func (s *Store) reserveNodeCreditsTx(
 	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?, credit_billing_from = ?
-		  WHERE run_id = ? AND node_id = ?`,
-		through, class.Cores, billingFrom, runID, nodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ?`,
+		through, class.Cores, billingFrom, string(team), runID, nodeID)
 	return err
 }
 
@@ -2109,15 +2076,6 @@ type CreditChargeResult struct {
 type creditChargeTxResult struct {
 	CreditChargeResult
 	settledAt time.Time
-}
-
-// ChargeNodeCredits bills the seconds this node has run since its previous
-// charge and reports whether the balance can still pay for it. Charging is
-// idempotent within a second: a second call in the same second advances
-// nothing and writes no row. A node still inside its claim reservation is
-// charged nothing, because the reservation already paid for those seconds.
-func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
-	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, false)
 }
 
 // FinalizeNodeCredits settles a metered node when it stops running: it bills
@@ -2155,11 +2113,15 @@ func (s *Store) chargeNodeTx(
 	var anchor, class, billingFrom int64
 	var startedAt sql.NullInt64
 	var failureReason string
-	err := tx.QueryRowContext(ctx,
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return out, err
+	}
+	err = tx.QueryRowContext(ctx,
 		`SELECT credit_charged_through, credit_cpu_class, execution_started_at,
 		        credit_billing_from, failure_reason FROM nodes
-		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class, &startedAt, &billingFrom, &failureReason)
+		  WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(team), runID, nodeID).Scan(&anchor, &class, &startedAt, &billingFrom, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, notFound("node", runID+"/"+nodeID)
 	}
@@ -2181,11 +2143,7 @@ func (s *Store) chargeNodeTx(
 	if err != nil {
 		return out, err
 	}
-	principal, err := runPrincipalTx(ctx, tx, runID)
-	if err != nil {
-		return out, err
-	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
+	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return out, err
 	}
@@ -2216,8 +2174,8 @@ func (s *Store) chargeNodeTx(
 		through = nowNS + MinBillableSeconds*int64(time.Second)
 		_, err := tx.ExecContext(ctx,
 			`UPDATE nodes SET credit_billing_from = ?, credit_charged_through = ?
-			  WHERE run_id = ? AND node_id = ?`,
-			nowNS, through, runID, nodeID)
+			  WHERE team = ? AND run_id = ? AND node_id = ?`,
+			nowNS, through, string(team), runID, nodeID)
 		return out, err
 	case billingFrom == 0 || (!startedAt.Valid && platformSetupFailures[failureReason]):
 		if final && anchor != 0 {
@@ -2241,8 +2199,8 @@ func (s *Store) chargeNodeTx(
 	}
 	if through != anchor {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-			through, runID, nodeID); err != nil {
+			`UPDATE nodes SET credit_charged_through = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+			through, string(team), runID, nodeID); err != nil {
 			return out, err
 		}
 	}
@@ -2484,8 +2442,8 @@ func settleCreditExhaustionTx(
 func creditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExhaustion) (int64, error) {
 	var stamped int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT credit_exhausted_anchor FROM nodes WHERE run_id = ? AND node_id = ?`,
-		e.RunID, e.NodeID).Scan(&stamped); err != nil {
+		`SELECT credit_exhausted_anchor FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(e.Team), e.RunID, e.NodeID).Scan(&stamped); err != nil {
 		return 0, err
 	}
 	if stamped != 0 {
@@ -2498,16 +2456,16 @@ func stampCreditExhaustionAnchorTx(
 	ctx context.Context, tx *storeTx, e creditExhaustion, at int64,
 ) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
-		at, e.RunID, e.NodeID)
+		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+		at, string(e.Team), e.RunID, e.NodeID)
 	return err
 }
 
 func clearCreditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExhaustion) error {
 	_, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET credit_exhausted_anchor = 0
-		  WHERE run_id = ? AND node_id = ? AND credit_exhausted_anchor != 0`,
-		e.RunID, e.NodeID)
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND credit_exhausted_anchor != 0`,
+		string(e.Team), e.RunID, e.NodeID)
 	return err
 }
 
@@ -2573,32 +2531,41 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 	return nil
 }
 
-// AppendEventOnce writes an event unless the run or node already carries one
-// of that kind, which keeps a condition a poller re-observes every half
-// second to one row. It reports whether it wrote.
-func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
+// AppendEventOnce writes an event on a default-team run unless the run or
+// node already carries one of that kind, which keeps a condition a poller
+// re-observes every half second to one row. It reports whether it wrote.
+func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error) {
+	return s.defaultTenant().AppendEventOnce(ctx, runID, nodeID, kind, payload)
+}
+
+// AppendEventOnce is [Store.AppendEventOnce] on one of t's runs. A run of
+// another team reads as [ErrNotFound].
+func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
 	// safety: the common call finds the event already there, so the read comes
 	// before the transaction rather than inside one opened twice a second.
-	present, err := s.eventKindPresent(ctx, runID, nodeID, kind)
+	present, err := t.eventKindPresent(ctx, runID, nodeID, kind)
 	if err != nil || present {
 		return false, err
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+		return false, err
+	}
 	var existing int
 	err = tx.QueryRowContext(ctx,
-		`SELECT 1 FROM events WHERE run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
-		runID, nodeID, kind).Scan(&existing)
+		`SELECT 1 FROM events WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
+		string(t.team), runID, nodeID, kind).Scan(&existing)
 	if err == nil {
 		return false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}
-	if _, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now()); err != nil {
+	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, time.Now()); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2607,11 +2574,11 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 	return true, nil
 }
 
-func (s *Store) eventKindPresent(ctx context.Context, runID, nodeID, kind string) (bool, error) {
+func (t *Tenant) eventKindPresent(ctx context.Context, runID, nodeID, kind string) (bool, error) {
 	var existing int
-	err := s.queryRow(ctx,
-		`SELECT 1 FROM events WHERE run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
-		runID, nodeID, kind).Scan(&existing)
+	err := t.s.queryRow(ctx,
+		`SELECT 1 FROM events WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
+		string(t.team), runID, nodeID, kind).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -2633,7 +2600,7 @@ func (s *Store) CancelNodeForExhaustedCredits(
 // class the credit rate table prices, and records an event naming both sizes.
 // A claim the ledger cannot price would otherwise be retried by every poller
 // forever, so the run is told why instead of waiting on a node nobody may take.
-func (s *Store) FailNodeForUnpricedClass(
+func (t *Tenant) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
 ) error {
 	payload, err := json.Marshal(map[string]int64{
@@ -2642,11 +2609,11 @@ func (s *Store) FailNodeForUnpricedClass(
 	if err != nil {
 		return err
 	}
-	if _, err := s.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
+	if _, err := t.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
 		EventKindCreditsUnpriced, payload); err != nil {
 		return err
 	}
-	return s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
+	return t.s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
 		FailureUnpricedCPUClass, refusal.Error(), now)
 }
 
@@ -2676,6 +2643,10 @@ func (s *Store) cancelMeteredNode(
 	if err != nil {
 		return err
 	}
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
 	stoppedAt := settlement.settledAt.UnixNano()
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
    SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
@@ -2684,19 +2655,19 @@ func (s *Store) cancelMeteredNode(
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        ready_at = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
- WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-		message, reason, stoppedAt, runID, nodeID); err != nil {
+ WHERE team = ? AND run_id = ? AND node_id = ? AND `+nodeNotDone,
+		message, reason, stoppedAt, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		`DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
    SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
        failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
- WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		stoppedAt, reason, runID, nodeID); err != nil {
+ WHERE team = ? AND run_id = ? AND node_id = ? AND finished_at IS NULL`,
+		stoppedAt, reason, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	return tx.Commit()

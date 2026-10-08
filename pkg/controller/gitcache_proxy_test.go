@@ -17,62 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestGitcacheProxy_WorkspaceSeedForwardsBundleAndRetentionMarker(t *testing.T) {
-	sha := "0123456789abcdef0123456789abcdef01234567"
-	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST", r.Method)
-		}
-		if r.URL.Path != "/sync/seed" {
-			t.Fatalf("path = %s, want /sync/seed", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("repo"); got != "https://git.example.com/acme/widgets.git" {
-			t.Fatalf("repo = %q", got)
-		}
-		if got := r.URL.Query().Get("sha"); got != sha {
-			t.Fatalf("sha = %q", got)
-		}
-		if got := r.URL.Query().Get("workspace"); got != "1" {
-			t.Fatalf("workspace = %q, want 1", got)
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		if string(body) != "bundle" {
-			t.Fatalf("body = %q, want bundle", body)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer cache.Close()
-
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctrl := controller.New(st, nil).WithCacheURL(cache.URL)
-	srv := httptest.NewServer(ctrl.Handler())
-	defer srv.Close()
-
-	resp, err := http.Post(
-		srv.URL+"/api/v1/gitcache/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha,
-		"application/octet-stream",
-		strings.NewReader("bundle"),
-	)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d: %s", resp.StatusCode, body)
-	}
-}
-
 func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 	var targetRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -91,11 +35,9 @@ func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
 	defer srv.Close()
-	sha := strings.Repeat("a", 40)
 	for name, request := range map[string]*http.Request{
-		"seed": mustRequest(t, http.MethodPost,
-			srv.URL+"/api/v1/gitcache/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha,
-			strings.NewReader("private bundle")),
+		"register": mustRequest(t, http.MethodPost,
+			srv.URL+"/api/v1/gitcache/git/register?name=widgets&repo=https://git.example.com/acme/widgets.git", nil),
 		"git": mustRequest(t, http.MethodPost,
 			srv.URL+"/api/v1/gitcache/git/widgets/git-upload-pack", strings.NewReader("want")),
 	} {
@@ -264,11 +206,6 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
-		Pipeline: "build", Repo: "acme/widgets", Secret: "hook-secret",
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.CreateTrigger(ctx, store.Trigger{
 		ID: "run-remote", Pipeline: "build", Status: "running", CreatedAt: now,
 		Repo: "acme/widgets", RepoURL: repoURL, WebhookDelivery: "delivery-1",
@@ -347,7 +284,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		}
 	}
 	for name, path := range map[string]string{
-		"same-basename repository nobody connected": base + "/register?name=" +
+		"same-basename repository of another owner": base + "/register?name=" +
 			sourceurl.ClaimedRepoNameFromURL("git@github.com:other/widgets.git") +
 			"&repo=git@github.com:other/widgets.git",
 		"foreign cache name": base + "/other/info/refs?service=git-upload-pack",
@@ -416,56 +353,10 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 	}
 }
 
-func TestGitcacheProxy_AllowsSlowWorkspaceUploadBeyondDefaultDeadline(t *testing.T) {
-	var gotBody string
-	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		gotBody = string(body)
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	defer cache.Close()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
-	server.Config.ReadTimeout = 20 * time.Millisecond
-	server.Start()
-	defer server.Close()
-	reader, writer := io.Pipe()
-	go func() {
-		_, _ = writer.Write([]byte("first"))
-		time.Sleep(60 * time.Millisecond)
-		_, _ = writer.Write([]byte("second"))
-		_ = writer.Close()
-	}()
-	sha := strings.Repeat("a", 40)
-	req, err := http.NewRequest(http.MethodPost,
-		server.URL+"/api/v1/gitcache/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha, reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || gotBody != "firstsecond" {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body/cache body = %d/%q/%q", resp.StatusCode, body, gotBody)
-	}
-}
-
-// A signed delivery proves only that the sender knows the binding's secret,
-// and a team chose its own secret, so a team's binding for a repository opens
-// none of the operator's mirror of it: the mirror's name is the URL's digest,
-// the same for every team.
-func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
+// A run of a team other than the operator's opens none of the operator's
+// mirrors, even of the repository the run names: the mirror's name is the
+// URL's digest, the same for every team.
+func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	repoURL := "git@github.com:victim/app.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
@@ -493,11 +384,6 @@ func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
 	runner, _, err := tenant.CreateToken(ctx, "attacker-runner", store.TokenKindRunner,
 		[]string{controller.ScopeNodesClaim}, 0, now)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
-		Pipeline: "build", Repo: "victim/app", Secret: "attacker-chosen",
-	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
@@ -536,7 +422,7 @@ func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("a team-bound run reading the shared mirror = %d, want 403", resp.StatusCode)
+		t.Fatalf("another team's run reading the shared mirror = %d, want 403", resp.StatusCode)
 	}
 	if len(cacheRequests) != 0 {
 		t.Fatalf("cache requests = %v, want none", cacheRequests)

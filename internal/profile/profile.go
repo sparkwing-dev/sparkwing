@@ -194,12 +194,3 @@ func (c *Config) Names() []string {
 	sort.Strings(out)
 	return out
 }
-
-func HintMissing(err error, cfg *Config) string {
-	base := err.Error()
-	if cfg != nil && len(cfg.Profiles) > 0 {
-		return fmt.Sprintf("%s\n\nAvailable profiles: %v\nPass --profile <name>.",
-			base, cfg.Names())
-	}
-	return fmt.Sprintf("%s\n\nRegister a profile first:\n  sparkwing configure profiles add --name local --controller http://127.0.0.1:4344\nOr point at a remote controller:\n  sparkwing configure profiles add --name prod --controller https://api.example.dev --token swu_...", base)
-}

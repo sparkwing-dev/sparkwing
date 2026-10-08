@@ -17,7 +17,7 @@ Each top-level key is a section with one owner:
 | Section | Holds | Written by |
 |---|---|---|
 | `profiles` | named connections to controllers and storage backends, keyed by profile name | `sparkwing cloud connect`, `sparkwing configure profiles` |
-| `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths` | `sparkwing run` (auto-registration), `sparkwing configure xrepo` |
+| `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths` | `sparkwing run` (auto-registration), `sparkwing repos add` |
 | `admission` | the admission policy (`mode`, `custom`, `jev`) and the machine `budget` | you |
 | `agent` | what `sparkwing-runner agent` runs: controller, token, capacity | `sparkwing cluster runners add` |
 | `fleet` | the foreground fleet coordinator's listener and trusted `executors` | `sparkwing fleet init` |

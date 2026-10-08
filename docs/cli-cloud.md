@@ -57,7 +57,11 @@ no flag. The name resolves against the project's own profiles: block first and
 config.yaml second, so the token stays out of the checkout.
 
 The command closes with the dashboard URL the controller announces and the
-probes 'sparkwing configure profiles test' runs.
+probes 'sparkwing cloud status' runs.
+
+--no-probe writes the profile without contacting the controller: no
+reachability check, no mint, no probes. Use it to register a controller that
+is not up yet, or one that serves unauthenticated (omit both token flags).
 
 ### Flags
 
@@ -70,6 +74,7 @@ probes 'sparkwing configure profiles test' runs.
 | `--scope CSV` | Comma-separated scopes for the minted token (default: runs.read,runs.write,runs.control,triggers.read,logs.read,approvals.write) |
 | `--set-default` | Set defaults.profile in this project's .sparkwing/sparkwing.yaml |
 | `--force` | Replace an existing profile of that name |
+| `--no-probe` | Write the profile without contacting the controller |
 
 ### Examples
 
@@ -82,6 +87,9 @@ sparkwing cloud connect --controller https://api.sparkwing.example --name prod -
 
 # Store a token someone minted for you
 sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+
+# Register an unauthenticated local controller offline
+sparkwing cloud connect --controller http://127.0.0.1:4344 --name local --no-probe
 ```
 
 ## `sparkwing cloud disconnect`
@@ -122,14 +130,28 @@ Report the connection, its principal, and the probes
 
 Prints the selected profile, its controller, the principal
 and scopes the controller reports for its token, the announced dashboard URL,
-and the controller, auth, logs and gitcache probes. Exits non-zero when a probe
-fails.
+and the controller, auth, logs and gitcache probes. A profile with no
+controller reports its storage probes alone. Exits non-zero when a probe
+fails; a missing optional logs service warns without failing, and a controller
+that announces no cache pod URL omits the gitcache probe.
+
+--cluster answers "is this cluster alive?" for an operator. It adds the probes
+that read /api/v1/agents, /api/v1/triggers (status=claimed) and
+/api/v1/runs?since=24h, in three sections:
+
+  CONNECTIVITY  controller / auth / logs / gitcache
+  FLEET         agents (connected vs stale)
+  QUEUE         stuck triggers + recent-run success rate
+
+It exits 1 only when a probe fails; warnings such as a low success rate or
+stale agents leave the exit code at 0.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--profile NAME` | Profile naming the connection to report |
+| `--cluster` | Add the fleet and queue probes an operator reads |
 | `-o, --output FORMAT` | Output format: json\|table |
 
 ### Examples
@@ -140,4 +162,7 @@ sparkwing cloud status --profile prod
 
 # Machine-readable status
 sparkwing cloud status --profile prod -o json
+
+# Connectivity, fleet and queue health of a cluster
+sparkwing cloud status --profile prod --cluster
 ```

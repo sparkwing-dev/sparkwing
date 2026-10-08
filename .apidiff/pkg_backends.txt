@@ -1,6 +1,5 @@
 # pkg/backends
 
-func LayerSurfaces(base, over Surfaces) Surfaces
 type Spec struct {
 	Type string
 
@@ -36,12 +35,9 @@ type Surfaces struct {
 }
 func (s Surfaces) BinaryCache() *Spec
 func (s Surfaces) Validate(name string) error
-const TypeAzureBlob = "azure-blob"
 const TypeController = "controller"
 const TypeEnv = "env"
 const TypeFilesystem = "filesystem"
-const TypeGCS = "gcs"
-const TypeMySQL = "mysql"
 const TypeNone = "none"
 const TypePostgres = "postgres"
 const TypeS3 = "s3"

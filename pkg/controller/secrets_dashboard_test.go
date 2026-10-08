@@ -46,7 +46,7 @@ func listSecretsAs(t *testing.T, f *tenancyFixture, auth string) (int, map[strin
 // session, owners included, while an unmasked variable is plain config each
 // member reads and only an owner writes.
 func TestSecrets_DashboardSessionsWriteSecretsAndReadVariables(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	f := newTenancyFixture(t, openSQLiteStore(t))
 	masked, unmasked := true, false
 	for _, row := range []map[string]any{
 		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true, "masked": masked},
@@ -178,7 +178,7 @@ func secretsRequest(t *testing.T, f *tenancyFixture, method, path, auth string, 
 // masked value back; the operator's admin bearer still does, which is what
 // `sparkwing secret get --profile` runs on.
 func TestSecrets_MaskedValuesReachOnlyTheOperatorBearer(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	f := newTenancyFixture(t, openSQLiteStore(t))
 	now := time.Now().UTC()
 	ownerRaw, _, err := f.teamA.CreateToken(context.Background(), "a-owner", store.TokenKindUser,
 		[]string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, 0, now)
@@ -218,7 +218,7 @@ func TestSecrets_MaskedValuesReachOnlyTheOperatorBearer(t *testing.T) {
 }
 
 func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	f := newTenancyFixture(t, openSQLiteStore(t))
 	for _, req := range []struct {
 		method, path string
 		body         any
@@ -238,7 +238,7 @@ func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
 }
 
 func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	f := newTenancyFixture(t, openSQLiteStore(t))
 	for _, req := range []struct{ method, path string }{
 		{"POST", "/api/v1/team/cli-tokens"},
 		{"GET", "/api/v1/runs/" + f.runA},

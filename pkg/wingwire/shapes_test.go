@@ -298,3 +298,12 @@ func diffLines(want, got string) string {
 	}
 	return b.String()
 }
+
+func registeredTypes() []MessageType {
+	out := make([]MessageType, 0, len(messageRegistry))
+	for t := range messageRegistry {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}

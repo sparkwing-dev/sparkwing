@@ -406,10 +406,6 @@ export function parseLogLines(lines: string[]): ParsedLog {
   return { sections };
 }
 
-export function parseLogSections(rawLog: string): ParsedLog {
-  return parseLogLines(rawLog.split("\n"));
-}
-
 export function hasStepBanners(rawLog: string): boolean {
   const stripped = stripAnsi(rawLog);
   return STEP_START_RE.test(stripped);

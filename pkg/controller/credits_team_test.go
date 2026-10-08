@@ -15,9 +15,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func creditsBlockedEvents(t *testing.T, st *store.Store, runID string) int {
+func creditsBlockedEvents(t *testing.T, team *store.Tenant, runID string) int {
 	t.Helper()
-	events, err := st.ListEventsAfter(context.Background(), runID, 0, 50)
+	events, err := team.ListEventsAfter(context.Background(), runID, 0, 50)
 	if err != nil {
 		t.Fatalf("list events for %s: %v", runID, err)
 	}
@@ -81,10 +81,10 @@ func TestCreditRefusalLandsOnTheRefusedTeamsRun(t *testing.T) {
 	if _, err := c.ClaimNode(ctx, "pod-bravo", nil, time.Minute, nil); !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("bravo's claim on an empty balance = %v, want ErrInsufficientCredits", err)
 	}
-	if got := creditsBlockedEvents(t, st, "run-bravo"); got != 1 {
+	if got := creditsBlockedEvents(t, teams["bravo"], "run-bravo"); got != 1 {
 		t.Errorf("credits_blocked events on bravo's refused run = %d, want 1", got)
 	}
-	if got := creditsBlockedEvents(t, st, "run-alpha"); got != 0 {
+	if got := creditsBlockedEvents(t, teams["alpha"], "run-alpha"); got != 0 {
 		t.Errorf("bravo's refusal was recorded %d times on alpha's run", got)
 	}
 }

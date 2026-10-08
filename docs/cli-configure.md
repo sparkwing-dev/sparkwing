@@ -9,8 +9,9 @@ Every `sparkwing configure` command, flag, and argument, generated from the CLI'
 Configure laptop-local settings
 
 Configure this machine. 'init' prepares the configuration directory and
-reports its contents. 'profiles' manages controller connections.
-'xrepo' registers local repositories.
+reports its contents. 'profiles' lists and edits controller connections;
+'sparkwing cloud' adds, checks and removes them. 'sparkwing repos'
+registers local repositories.
 
 Manage controller users and tokens with 'sparkwing cluster'.
 Manage secrets with 'sparkwing secrets'.
@@ -19,7 +20,6 @@ Manage secrets with 'sparkwing secrets'.
 
 - `init` -- Set up ~/.config/sparkwing/ and report laptop-level config status
 - `profiles` -- Manage connection profiles for remote controllers
-- `xrepo` -- Manage the laptop-local repo registry
 
 ### Examples
 
@@ -32,12 +32,6 @@ sparkwing configure init -o json
 
 # List profiles
 sparkwing configure profiles list
-
-# Add a new profile
-sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN
-
-# Register the current repo with the cross-repo registry
-sparkwing configure xrepo add
 ```
 
 ## `sparkwing configure init`
@@ -101,73 +95,18 @@ refused rather than sent to the machine's profiles: set
 SPARKWING_CONFIG to a path inside that home to keep it there.
 
 Every human-driven client command (tokens, users, runs
-retry/cancel/prune/logs, gc) reads connection info from the
+retry/cancel/prune/logs) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.
 
+Add a profile with 'sparkwing cloud connect', check it with
+'sparkwing cloud status', and remove it with 'sparkwing cloud disconnect'.
+
 ### Subcommands
 
-- `add` -- Register a new connection profile
 - `list` -- Print every registered profile
-- `show` -- Print one profile's full config
-- `remove` -- Delete a profile
-- `duplicate` -- Copy one profile's config into another
+- `show` -- Print one profile's config, or the profile a command would select
 - `set` -- Update fields on an existing profile
-- `test` -- Probe controller/auth/logs/gitcache for one profile
-
-## `sparkwing configure profiles add`
-
-Register a new connection profile
-
-Creates a new entry in the profiles section of config.yaml. --name and --controller
-are required; the token is optional. --token-stdin reads the
-token from stdin and prompts without echo when stdin is a
-terminal; prefer it over --token, which is visible to other
-processes in the process list and recorded in shell history.
-Configure storage and service backends by editing config.yaml.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Profile name (unique in config.yaml) (required) |
-| `--controller URL` | Controller base URL (required) |
-| `--token TOKEN` | Bearer token, visible to other processes and shell history (omit for local/unauthed stacks) |
-| `--token-stdin` | Read the bearer token from stdin, prompting without echo on a terminal |
-
-### Examples
-
-```sh
-# Add a prod profile, prompting for the token
-sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin
-
-# Add a prod profile from a piped token
-printf %s "$TOKEN" | sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin
-
-# Add a local profile without auth
-sparkwing configure profiles add --name local --controller http://127.0.0.1:4344
-```
-
-## `sparkwing configure profiles duplicate`
-
-Copy one profile's config into another
-
-Copies the source profile into a new destination profile. The destination
-name must be unused.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--src NAME` | Source profile name (required) |
-| `--dst NAME` | Destination profile name (must not exist yet) (required) |
-
-### Examples
-
-```sh
-# Branch prod into a staging-prod profile
-sparkwing configure profiles duplicate --src prod --dst staging-prod
-```
 
 ## `sparkwing configure profiles list`
 
@@ -191,25 +130,6 @@ sparkwing configure profiles list
 
 # Agent-readable record
 sparkwing configure profiles list -o json
-```
-
-## `sparkwing configure profiles remove`
-
-Delete a profile
-
-Removes the named entry from the profiles section of config.yaml.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Profile name to remove (required) |
-
-### Examples
-
-```sh
-# Remove a stale profile
-sparkwing configure profiles remove --name old-stage
 ```
 
 ## `sparkwing configure profiles set`
@@ -246,170 +166,39 @@ sparkwing configure profiles set --name prod --controller https://api.sparkwing.
 
 ## `sparkwing configure profiles show`
 
-Print one profile's full config
+Print one profile's config, or the profile a command would select
 
-Prints all fields of the profile named by --name. Token is
+With --name, prints all fields of that config.yaml entry. The token is
 redacted unless --show-token is passed.
+
+Without --name, reports the profile a sparkwing command would resolve to and
+the chain that picked it: --profile, then SPARKWING_PROFILE, then the
+project's defaults.profile -- the resolver 'sparkwing run' and 'sparkwing
+pipeline trigger' use, so the answer matches what they would do. --profile
+NAME shows what adding that flag to your next command would select. That
+report never prints tokens.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Profile name (required) |
+| `--name NAME` | Profile name in config.yaml |
+| `--profile NAME` | Without --name: the resolution --profile NAME would make |
 | `--show-token` | Print the raw token (redacted by default) |
+| `-o, --output FORMAT` | Output format for the resolution report: pretty\|json |
 
 ### Examples
 
 ```sh
+# The profile a command would use, and why
+sparkwing configure profiles show
+
+# What --profile prod would pick
+sparkwing configure profiles show --profile prod -o json
+
 # Show a named profile
 sparkwing configure profiles show --name prod
 
 # Show a named profile with the raw token
 sparkwing configure profiles show --name prod --show-token
-```
-
-## `sparkwing configure profiles test`
-
-Probe controller/auth/logs/gitcache for one profile
-
-Sequentially checks the profile's controller (/api/v1/health),
-auth (/api/v1/runs?limit=1 + /api/v1/auth/whoami), logs
-service (if configured), and gitcache (if configured). Each
-probe prints ok / warn / fail along with latency and any
-error detail.
-
-Exit code is non-zero when any probe fails. Missing optional logs
-can warn without failing. A controller that announces no cache pod URL
-omits the gitcache probe; direct-data Cloud needs no public cache pod.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--profile NAME` | Profile name (required) |
-| `-o, --output FMT` | Output format (json\|table) |
-
-### Examples
-
-```sh
-# Probe a named profile
-sparkwing configure profiles test --profile prod
-
-# JSON for scripting
-sparkwing configure profiles test --profile prod -o json
-```
-
-## `sparkwing configure xrepo`
-
-Manage the laptop-local repo registry
-
-The registry maps pipeline names to local checkouts so
-cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
-annotations. Auto-populated when you run 'sparkwing run <pipeline>'
-in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
-
-The registry is the repos section of config.yaml: $SPARKWING_CONFIG
-(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
-~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
-is the state, cache and logs root, and a registered checkout is a
-machine-wide fact that outlives any one home. A write from a command
-running under a home of its own is refused rather than sent to the
-machine's registry: set SPARKWING_CONFIG to a path inside that home
-to keep it there.
-
-### Subcommands
-
-- `list` -- List registered checkouts and their pipelines
-- `add` -- Register a checkout
-- `remove` -- Remove a registered checkout
-- `prune` -- Remove checkouts whose pipeline directory is gone
-
-### Examples
-
-```sh
-# Register the current checkout
-sparkwing configure xrepo add
-
-# Show the fleet the registry reaches
-sparkwing configure xrepo list
-
-# Drop entries whose checkout is gone
-sparkwing configure xrepo prune
-```
-
-## `sparkwing configure xrepo add`
-
-Register a checkout
-
-Registers a checkout explicitly. The path defaults to the current directory.
-
-### Arguments
-
-- `[path]` (optional) -- Checkout path; defaults to the current directory
-
-### Examples
-
-```sh
-# Register the current checkout
-sparkwing configure xrepo add
-
-# Register another checkout
-sparkwing configure xrepo add ../service
-```
-
-## `sparkwing configure xrepo list`
-
-List registered checkouts and their pipelines
-
-Shows each registered checkout, its status, and the pipelines it provides.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: json \| table |
-| `--pipelines` | Include pipeline names (default: true) |
-
-### Examples
-
-```sh
-# List registered checkouts
-sparkwing configure xrepo list
-
-# Emit one JSON record per checkout
-sparkwing configure xrepo list -o json
-
-# Skip pipeline discovery
-sparkwing configure xrepo list --pipelines=false
-```
-
-## `sparkwing configure xrepo prune`
-
-Remove checkouts whose pipeline directory is gone
-
-Removes registered checkouts that no longer contain a .sparkwing directory.
-
-### Examples
-
-```sh
-# Remove stale registry entries
-sparkwing configure xrepo prune
-```
-
-## `sparkwing configure xrepo remove`
-
-Remove a registered checkout
-
-Removes every registry entry matching a path or basename.
-
-### Arguments
-
-- `<path-or-basename>` (required) -- Registered path or basename to remove
-
-### Examples
-
-```sh
-# Remove a checkout by basename
-sparkwing configure xrepo remove service
 ```

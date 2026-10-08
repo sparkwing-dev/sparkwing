@@ -46,7 +46,7 @@ func TestRunIDFromArgs(t *testing.T) {
 
 func TestRunsReadVerbsAcceptABareRunID(t *testing.T) {
 	const runID = "run-20260910-090000-0123456789abcdef"
-	for _, verb := range []string{"status", "errors"} {
+	for _, verb := range []string{"status"} {
 		t.Run(verb, func(t *testing.T) {
 			var asked []string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

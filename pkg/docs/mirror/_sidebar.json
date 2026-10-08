@@ -2,7 +2,7 @@
   "categories": [
     {
       "label": "Getting Started",
-      "slugs": ["getting-started", "architecture", "machine-config", "cli", "cli-reference"]
+      "slugs": ["getting-started", "architecture", "machine-config", "environment-variables", "cli", "cli-reference"]
     },
     {
       "label": "Pipelines",
@@ -22,7 +22,8 @@
         "admission",
         "local-execution",
         "ci-embedded",
-        "native-mode"
+        "native-mode",
+        "node-protocol"
       ]
     },
     {
@@ -46,8 +47,7 @@
         "hooks",
         "crons",
         "api",
-        "api-reference",
-        "mcp"
+        "api-reference"
       ]
     },
     {
@@ -62,7 +62,6 @@
         "scheduling",
         "github-actions-runners",
         "github-app",
-        "warm-pool",
         "gitcache",
         "git-credentials"
       ]
@@ -86,7 +85,6 @@
         "cli-fleet",
         "cli-info",
         "cli-pipeline",
-        "cli-profile",
         "cli-queue",
         "cli-repos",
         "cli-run",
@@ -97,5 +95,5 @@
       ]
     }
   ],
-  "excluded": ["proposals/", "migrations/", "changelog-style"]
+  "excluded": ["migrations/"]
 }

@@ -161,7 +161,7 @@ func extract(dir, lang string) ([]block, error) {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
-		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
+		if strings.Contains(path, "/migrations/") {
 			return nil
 		}
 		// #nosec G122 -- a TOCTOU swap here needs write access to the checkout this build-time check already trusts

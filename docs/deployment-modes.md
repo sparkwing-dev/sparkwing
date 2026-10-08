@@ -11,7 +11,7 @@ its own state, cache, or controller.
 | Sparkwing Cloud | none (hosted) | yes | yes | yes | tokens / sessions |
 | Self-hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
 | Shared object storage | object store | yes (read-only) | with CAS¹ | approvals + pauses, with CAS¹ | bucket IAM |
-| Postgres + object storage | object store + Postgres | yes | yes | yes | DB roles + bucket IAM |
+| Postgres + object storage | object store + Postgres | yes (read-only) | yes | yes | DB roles + bucket IAM |
 
 ¹ Shared object storage coordinates cross-runner caching, approvals, and
 debug pauses over object-store conditional-write CAS where the bucket
@@ -24,7 +24,7 @@ controller. See [shared object storage](#shared-object-storage).
 The selection lives in the profile you run under -- each profile in
 `~/.config/sparkwing/config.yaml` carries a `state` / `cache` / `logs`
 triple (see [Storage backends](backends.md)) -- and applies uniformly to
-`sparkwing run`, `sparkwing-web`, and any cluster-side binaries.
+`sparkwing run`, `sparkwing serve`, and any cluster-side binaries.
 
 ## Local
 
@@ -94,10 +94,9 @@ one, so `sparkwing.RunAndAwait` refuses with a not-supported error
 naming Postgres rather than waiting on a run that nothing starts. Run
 pipelines that spawn other pipelines on Postgres or a controller.
 
-S3 is the object store that enforces these preconditions today. The
-`gcs` and `azure-blob` state types are recognized in configuration
-but not yet implemented. Some S3-compatible gateways accept the
-precondition headers and silently ignore them; a runner probes the
+S3 is the object store that enforces these preconditions. Some
+S3-compatible gateways accept the precondition headers and silently
+ignore them; a runner probes the
 endpoint once and, when it finds the guarantee missing, falls back to
 last-write-wins -- cache reservation degrades to "every runner
 computes and uploads to the same content-addressed key" (safe by
@@ -171,17 +170,15 @@ provisions those per host, or runs a controller for that surface
 alone.
 
 Run against it with `sparkwing run <pipeline> --profile shared`, then
-point `sparkwing-web` at the same bucket:
+serve a read-only dashboard over the same bucket:
 
 ```sh
-sparkwing-web --state-spec=s3://my-org-sparkwing/state \
-              --logs-spec=s3://my-org-sparkwing/logs \
-              --artifacts-spec=s3://my-org-sparkwing/cache
+sparkwing serve start --profile shared --no-local-store --read-only
 ```
 
-This controller-free dashboard has no browser login backend. Keep it on a
-trusted network. `--require-login` fails startup unless you also provide
-`--controller URL` or select a profile with `controller.url`.
+It lists runs from the profile's cache store and reads logs from its logs
+store, on a loopback port behind the serve token. A dashboard with
+sign-in for a team comes from a controller.
 
 See [local-execution.md](local-execution.md#per-host-concurrency)
 for the host-local concurrency gate that caps how many `sparkwing run`
@@ -233,12 +230,12 @@ yaml.
 ```sh
 export SPARKWING_PG_URL="postgres://user:pass@db.example/sparkwing?sslmode=require"
 sparkwing run hello
-sparkwing-web --state-spec=postgres://...  # same DSN
+sparkwing serve start --profile shared --no-local-store --read-only
 ```
 
-The Postgres state database is not a browser session backend. Keep this
-controller-free dashboard on a trusted network, or provide a controller URL or
-controller-bearing profile before enabling `--require-login`.
+`sparkwing serve` reads the profile's object store, as in
+[shared object storage](#shared-object-storage), not the Postgres
+database. A dashboard with sign-in for a team comes from a controller.
 
 #### Schema versioning
 
@@ -343,12 +340,12 @@ sparkwing-controller --logs-url https://sparkwing-logs.example.dev
 ```
 
 The controller announces that URL on `GET /api/v1/services`, and a
-runner with no `logs:` surface of its own posts there. Without the
-announcement a runner falls back to the controller's own URL, which is
-correct only when one process serves both -- the local dashboard mounts
-the controller and the logs service on a single mux. When it is wrong,
-every append gets a 404 and the run fails naming the missing service,
-rather than losing the lines silently.
+runner with no `logs:` surface of its own posts there. The local
+dashboard, which mounts the controller and the logs service on one mux,
+announces its own URL. Without an announcement a run refuses to start,
+`sparkwing cluster worker` refuses to start, and `sparkwing pipeline
+trigger` and `sparkwing runs logs --grep` refuse to read logs, each with an error
+naming the controller and the missing logs service.
 
 #### Watching a run live without the logs service
 

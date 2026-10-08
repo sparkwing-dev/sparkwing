@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,10 +19,12 @@ var cmdRun = Command{
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name", Required: true},
 	},
-	SubcommandOrder: []string{"config"},
 }
 
-var cmdRunConfig = Command{Path: "sparkwing run config"}
+var cmdHandleTrigger = Command{
+	Path:   "sparkwing handle-trigger",
+	Hidden: true,
+}
 
 var cmdPipeline = Command{
 	Path:            "sparkwing pipeline",
@@ -63,7 +66,6 @@ func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
 		"sparkwing pipeline list",
 		"sparkwing pipeline hooks",
 		"sparkwing configure xrepo",
-		"sparkwing run-node",
 		"sparkwing handle-trigger",
 	}
 	for _, p := range wantValid {
@@ -95,7 +97,6 @@ func TestResolvePath(t *testing.T) {
 		{"unknown subcommand under group", []string{"pipeline", "sparkz"}, "sparkz"},
 		{"unknown top-level verb", []string{"nope"}, "nope"},
 		{"positional after posargs command", []string{"run", "my-pipeline"}, ""},
-		{"subcommand still wins over positional", []string{"run", "config"}, ""},
 		{"positional after leaf command", []string{"pipeline", "list", "extra"}, ""},
 		{"flag ends the walk", []string{"pipeline", "--help"}, ""},
 		{"placeholder ends the walk", []string{"configure", "xrepo", "add"}, ""},
@@ -154,8 +155,17 @@ func TestCheckCLIVerbs_PassesAndSkipsExemptDocs(t *testing.T) {
 	writeDoc(t, content, "good.md", "```bash\nsparkwing pipeline list\nsparkwing run my-pipeline --sw-dry-run\n```\n")
 	writeDoc(t, content, "cli-reference.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing totally-made-up\n```\n")
 	writeDoc(t, content, "cli-cluster.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing also-made-up\n```\n")
-	writeDoc(t, content, "mcp.md", "> STATUS: design / not yet shipped.\n```bash\nsparkwing mcp serve\n```\n")
 	if !checkCLIVerbs(content, root) {
-		t.Fatal("expected pass: real commands resolve, generated + unshipped docs are skipped")
+		t.Fatal("expected pass: real commands resolve, generated docs are skipped")
+	}
+}
+
+func TestParseInvocation_SkipsRootFlags(t *testing.T) {
+	inv, ok := parseInvocation("x.md", 1, "sparkwing -C ~/repo --profile prod pipeline list --all")
+	if !ok {
+		t.Fatal("not recognized as an invocation")
+	}
+	if got := strings.Join(inv.tokens, " "); got != "pipeline list --all" {
+		t.Errorf("tokens = %q, want the verb path after the root flags", got)
 	}
 }

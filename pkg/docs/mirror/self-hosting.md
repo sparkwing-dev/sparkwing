@@ -32,7 +32,11 @@ pipeline.
 Use the [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) for a
 shared controller, dashboard, cache, logs service, and Kubernetes runner. The
 chart requires Kubernetes and an explicitly compatible image set; its README
-lists the required values and install command.
+lists the required values and install command. The controller starts with
+`--require-auth` by default, so the render refuses unless
+`controller.bootstrapAdminToken.name` names a Secret holding the first admin
+token, or `controller.allowOpenBootstrap=true` accepts a controller that
+serves every route unauthenticated until a token exists.
 
 The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
@@ -226,8 +230,7 @@ budget grammar as local admission. The contribution defaults to `50%,50%`;
 the reserve defaults to empty because the contribution already retains half
 the machine for other work.
 
-A runner warms its Go module cache at startup from `--warm-modules` (or
-`SPARKWING_WARM_MODULES`), a comma-separated list of module paths with an
+A runner warms its Go module cache at startup from `--warm-modules`, a comma-separated list of module paths with an
 optional `@version`; it defaults to the SDK at the runner's own version, and
 `off` disables it. The warm runs in the background and a failed download only
 logs, so a cold cache never blocks a claim.
@@ -306,10 +309,10 @@ Region and credentials come from the AWS default chain (IRSA on EKS, with
 `AWS_REGION` set); no static keys are read. `SPARKWING_S3_ENDPOINT` points
 either service at an S3-compatible store.
 
-| Service | Flag | Environment | Keys |
-|---|---|---|---|
-| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `SPARKWING_CACHE_BLOB_STORE` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
-| `sparkwing-logs` | `--archive-store s3://bucket/logs` | `SPARKWING_LOGS_ARCHIVE_STORE` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
+| Service | Flag | Keys |
+|---|---|---|
+| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
+| `sparkwing-logs` | `--archive-store s3://bucket/logs` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
 
 **The cache** moves its binary, dependency-archive and artifact stores to the
 bucket. Git mirrors, workspace uploads and the registry proxy stay on
@@ -326,7 +329,7 @@ byte.
 the bucket. An append still lands in a file that grows in place and a follower
 still tails that file, so streaming is exactly what it is without a bucket and
 a running node costs the bucket nothing. A run nobody has written for
-`--archive-idle` (`SPARKWING_LOGS_ARCHIVE_IDLE`, 10 minutes by default) is uploaded as one object per node log
+`--archive-idle` (10 minutes by default) is uploaded as one object per node log
 plus two small index objects and leaves the volume; a read or an append of an
 archived run restores it first. `--retention` then deletes archived runs by the
 day of their last write: each pass is one listing of the day index while
@@ -339,13 +342,14 @@ does, in its database, and each service asks it for room before a team's
 write and charges each team's download to its day there
 ([Tenant limits](limits.md)). The store ceiling on each service covers its
 volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller`
-(`SPARKWING_CONTROLLER_URL`) and its `--api-token`, the token the controller
-holds as `SPARKWING_CACHE_TOKEN`; a cache with `--grant-key` and
-`--blob-store` refuses to start without them. The logs service reaches the
+bucket. On a multi-team deployment give the cache `--controller` and its token, the
+file `cache-token` in its `--credentials-dir`, which the controller holds as
+`SPARKWING_CACHE_TOKEN`; a cache with a `cache-grant-key` and `--blob-store`
+refuses to start without them. The logs service reaches the
 same controller through its `--controller` with the appending caller's own
 credential. Give the controller `--cache-blob-store` and
-`--logs-archive-store`, the same URLs the services use, and its hourly
+`--logs-archive-store` (or `SPARKWING_CACHE_BLOB_STORE` and
+`SPARKWING_LOGS_ARCHIVE_STORE`), the same URLs the services use, and its hourly
 storage pass lists both to reconcile the counts and expires a team's cache
 objects 30 days after their last write. The controller's role then needs
 `s3:ListBucket` and `s3:DeleteObject` on the cache's prefix and

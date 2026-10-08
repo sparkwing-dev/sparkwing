@@ -11,7 +11,7 @@ import (
 // safety: the daemon authenticates an api.sock caller by its peer uid, and
 // a bearer inherited from this process would be looked up on the daemon's
 // writing handle instead, behind whatever it is doing.
-var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN", "SPARKWING_TOKEN"}
+var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN"}
 
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {
 	env := make([]string, 0, len(base)+16)

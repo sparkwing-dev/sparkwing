@@ -143,7 +143,14 @@ type savedCardReq struct {
 	Fingerprint   string `json:"fingerprint"`
 	Brand         string `json:"brand"`
 	Last4         string `json:"last4"`
+	// safety: Stripe's signed event time for the setup's completion orders
+	// saves, so a delayed older setup cannot replace a newer card.
+	CompletedAt int64 `json:"completed_at,omitempty"`
 }
+
+// StaleCardSetupCode is the code on the 409 refusing a card setup completed
+// before the card already on file.
+const StaleCardSetupCode = "stale_card_setup"
 
 // safety: only the checkout service holds credits.grant, and it names the
 // team the Stripe session was opened for by the controller.
@@ -157,13 +164,21 @@ func (s *Server) handleSavedCard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	err := t.SaveCard(r.Context(), store.Card{
+	card := store.Card{
 		Customer: req.Customer, PaymentMethod: req.PaymentMethod, Fingerprint: req.Fingerprint,
 		Brand: req.Brand, Last4: req.Last4,
-	}, principalName(r), time.Now())
+	}
+	if req.CompletedAt > 0 {
+		card.AddedAt = time.Unix(req.CompletedAt, 0)
+	}
+	err := t.SaveCard(r.Context(), card, principalName(r), time.Now())
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
+	case errors.Is(err, store.ErrStaleCardSetup):
+		s.logger.Warn("an older card setup arrived after a newer one; keeping the newer card", "team", req.Team,
+			"completed_at", req.CompletedAt, "last4", req.Last4)
+		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: StaleCardSetupCode})
 	case err != nil:
 		s.writeInternalError(w, r, "save card", err)
 	default:
@@ -207,15 +222,30 @@ func (s *Server) handleCardPayment(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// safety: operator alerting keys on this value, so renaming it silences the
+// alert for a fraud-warned card's payment.
+const cardPaymentWarnedAlert = "card_payment_warned"
+
 func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error {
 	now := time.Now()
 	switch req.Status {
 	case cardChargeSucceeded:
-		created, err := s.store.SettleCardPayment(ctx, store.CardPayment{
+		created, warned, err := s.store.SettleCardPayment(ctx, store.CardPayment{
 			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
-		if created {
+		switch {
+		case warned != nil && warned.Repays:
+			s.logger.Error("billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return",
+				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
+				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
+				"repaid_micro", warned.RepaidMicro, "unapplied_micro", warned.UnappliedMicro)
+		case warned != nil:
+			s.logger.Error("billing alert: a payment by a card with a fraud warning granted nothing; confirm it was refunded",
+				"alert", cardPaymentWarnedAlert, "team", req.Team, "charge", req.ChargeID,
+				"payment_intent", req.PaymentIntent, "warning_id", warned.WarningID, "cents", req.AmountCents,
+				"unapplied_micro", warned.UnappliedMicro)
+		case created:
 			s.logger.Info("card charge paid", "team", req.Team, "charge", req.ChargeID,
 				"payment_intent", req.PaymentIntent, "cents", req.AmountCents)
 		}

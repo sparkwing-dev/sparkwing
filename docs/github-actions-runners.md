@@ -20,11 +20,31 @@ Only `push`, `workflow_dispatch` and `schedule` jobs on a branch (`refs/heads/..
 A binding is dangerous in either direction, so an exchange needs both sides:
 
 - An **owner** of the team binds the repository by GitHub's numeric repository id and owner id. The ids survive renames, and a repository transferred to another owner stops matching.
-- The **workflow** names the team with `--team` (or `SPARKWING_TEAM`). A team that binds a repository it does not control gets nothing, because that repository's workflows never name it.
+- The **workflow** names the team with `--team`. A team that binds a repository it does not control gets nothing, because that repository's workflows never name it.
 
 The workflow stores no secret. The job requests an ID token with `permissions: id-token: write` and the controller's external URL as the audience, and `POST /api/v1/runners/github/exchange` verifies it against GitHub's published keys (issuer `https://token.actions.githubusercontent.com`, RS256, audience, expiry). The controller refuses the exchange when it has no external URL.
 
 ## Set up a repository
+
+In **Team → GitHub**, select a repository covered by a connected installation and
+choose **Allow GitHub Actions** as a team owner. The controller resolves the
+repository and owner IDs through GitHub, then returns a workflow with the
+controller URL and canonical team slug filled in. Copy or download the workflow
+and commit it as `.github/workflows/sparkwing.yaml`.
+
+This grants worker permission separately from **Enable declarations**, which
+controls repository-managed triggers. A saved binding does not prove the workflow
+is installed or a worker has run. Other team runners retain their placement policy.
+
+The equivalent owner-session request is:
+
+```bash
+curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
+  -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
+  -d '{"repository":"acme/widgets"}'
+```
+
+When the controller has no GitHub App configured, supply both numeric IDs:
 
 1. Look up the ids:
 

@@ -19,7 +19,6 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
@@ -64,8 +63,22 @@ func probeBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, slice)
 }
 
+// DoctorGoToolchain describes the Go toolchain available to the current pipeline module.
+type DoctorGoToolchain struct {
+	Current  string `json:"current"`
+	Setting  string `json:"gotoolchain"`
+	Source   string `json:"source"`
+	Floor    string `json:"floor"`
+	Module   string `json:"module"`
+	Override string `json:"override,omitempty"`
+	Verdict  string `json:"verdict"`
+	Error    string `json:"error,omitempty"`
+}
+
 type DoctorReport struct {
 	DryRun bool `json:"dry_run"`
+
+	GoToolchain *DoctorGoToolchain `json:"go_toolchain,omitempty"`
 
 	PermissionRepairs []fssecure.Change `json:"permission_repairs,omitempty"`
 
@@ -74,10 +87,6 @@ type DoctorReport struct {
 	OrphanedRuns []string `json:"orphaned_runs,omitempty"`
 
 	StrayStepSessions []DoctorStraySession `json:"stray_step_sessions,omitempty"`
-
-	LegacyBoxSlotFilesRemoved int `json:"legacy_box_slot_files_removed"`
-
-	LiveLegacyHolders []DoctorLegacyHolder `json:"live_legacy_holders,omitempty"`
 
 	DeadConcurrencyHolders int `json:"dead_concurrency_holders"`
 	DeadConcurrencyWaiters int `json:"dead_concurrency_waiters"`
@@ -279,21 +288,14 @@ type DoctorProtocolGap struct {
 	DaemonVersion string `json:"daemon_version"`
 }
 
-type DoctorLegacyHolder struct {
-	PID   int    `json:"pid"`
-	RunID string `json:"run_id,omitempty"`
-	Lock  string `json:"lock"`
-}
-
 func (r DoctorReport) Clean() bool {
-	return !r.Daemon.Blind() &&
+	return (r.GoToolchain == nil || r.GoToolchain.Error == "") &&
+		!r.Daemon.Blind() &&
 		!r.Daemon.APIUnserved() &&
 		len(r.PermissionRepairs) == 0 &&
 		!r.PermissionAuditUnverified &&
 		len(r.OrphanedRuns) == 0 &&
 		len(r.StrayStepSessions) == 0 &&
-		r.LegacyBoxSlotFilesRemoved == 0 &&
-		len(r.LiveLegacyHolders) == 0 &&
 		r.DeadConcurrencyHolders == 0 &&
 		r.DeadConcurrencyWaiters == 0 &&
 		len(r.DanglingRunDirs) == 0 &&
@@ -370,13 +372,6 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		return report, nil
 	}
 	defer func() { _ = homeRoot.Close() }()
-	boxRoot, _, err := openDoctorChildRoot(homeRoot, "box-slots")
-	if err != nil {
-		return report, err
-	}
-	if boxRoot != nil {
-		defer func() { _ = boxRoot.Close() }()
-	}
 	runsRoot, _, err := openDoctorChildRoot(homeRoot, "runs")
 	if err != nil {
 		return report, err
@@ -399,28 +394,11 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	queueState, queueRead := probeDaemonQueueBudgeted(ctx, &report)
 	daemonLive := liveDaemonRuns(queueState, queueRead)
 
-	var boxHolders []boxslot.Holder
-	if boxRoot != nil {
-		boxHolders, err = boxslot.HoldersInRoot(boxRoot, p.BoxSlotDir())
-		if err != nil {
-			return report, err
-		}
-	}
-	legacyRuns := map[string]struct{}{}
-	for _, h := range boxHolders {
-		if h.Live && h.RunID != "" {
-			legacyRuns[h.RunID] = struct{}{}
-		}
-	}
-
-	if err := diagnoseLegacyBoxSlots(boxRoot, p.BoxSlotDir(), boxHolders, dryRun, &report); err != nil {
-		return report, err
-	}
 	if err := diagnoseStraySessions(ctx, p, st, dryRun, &report); err != nil {
 		return report, err
 	}
 	if st != nil {
-		if err := diagnoseOrphanRuns(ctx, st, daemonLive, legacyRuns, report.Daemon.Blind(), dryRun, &report); err != nil {
+		if err := diagnoseOrphanRuns(ctx, st, daemonLive, report.Daemon.Blind(), dryRun, &report); err != nil {
 			return report, err
 		}
 		if err := diagnoseDeadConcurrency(ctx, st, dryRun, &report); err != nil {
@@ -608,7 +586,6 @@ func validateDoctorMutationPaths(p paths.Paths, expectedRoot os.FileInfo, expect
 	}
 	paths := []string{
 		p.RunsDir(),
-		p.BoxSlotDir(),
 		p.StateDB(),
 		p.StateDB() + "-wal",
 		p.StateDB() + "-shm",
@@ -1179,7 +1156,7 @@ func diagnoseStraySessions(ctx context.Context, p paths.Paths, st *store.Store, 
 	return nil
 }
 
-func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacyRuns map[string]struct{}, blind, dryRun bool, report *DoctorReport) error {
+func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive map[string]struct{}, blind, dryRun bool, report *DoctorReport) error {
 	if blind {
 		return nil
 	}
@@ -1190,9 +1167,6 @@ func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacy
 	cutoff := time.Now().Add(-doctorRunOrphanGrace)
 	for _, r := range running {
 		if _, ok := daemonLive[r.ID]; ok {
-			continue
-		}
-		if _, ok := legacyRuns[r.ID]; ok {
 			continue
 		}
 		anchor := r.StartedAt
@@ -1212,65 +1186,6 @@ func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacy
 		}
 	}
 	return nil
-}
-
-func diagnoseLegacyBoxSlots(boxRoot *os.Root, displayPath string, holders []boxslot.Holder, dryRun bool, report *DoctorReport) error {
-	for _, h := range holders {
-		if h.Live {
-			report.LiveLegacyHolders = append(report.LiveLegacyHolders, DoctorLegacyHolder{
-				PID: h.PID, RunID: h.RunID, Lock: h.Path,
-			})
-		}
-	}
-	if len(report.LiveLegacyHolders) > 0 {
-		return nil
-	}
-	if boxRoot == nil {
-		return nil
-	}
-	if dryRun {
-		n, err := countRootFiles(boxRoot)
-		if err != nil {
-			return err
-		}
-		report.LegacyBoxSlotFilesRemoved = n
-		return nil
-	}
-	removed, live, err := boxslot.PurgeIfIdleInRoot(boxRoot, displayPath)
-	if err != nil {
-		return err
-	}
-	if len(live) > 0 {
-		for _, h := range live {
-			report.LiveLegacyHolders = append(report.LiveLegacyHolders, DoctorLegacyHolder{
-				PID: h.PID, RunID: h.RunID, Lock: h.Path,
-			})
-		}
-		return nil
-	}
-	report.LegacyBoxSlotFilesRemoved = removed
-	return nil
-}
-
-func countRootFiles(root *os.Root) (int, error) {
-	dir, err := root.Open(".")
-	if err != nil {
-		return 0, err
-	}
-	entries, readErr := dir.ReadDir(-1)
-	if err := dir.Close(); err != nil && readErr == nil {
-		readErr = err
-	}
-	if readErr != nil {
-		return 0, readErr
-	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && e.Name() != "coord.lock" {
-			n++
-		}
-	}
-	return n, nil
 }
 
 func diagnoseDeadConcurrency(ctx context.Context, st *store.Store, dryRun bool, report *DoctorReport) error {
@@ -1391,6 +1306,20 @@ func scanRefWorktrees(ctx context.Context, st *store.Store, homeRoot *os.Root) (
 	return stale, scanErr
 }
 
+// safety: a worktree is reclaimed only once its trigger, read in whichever
+// team owns it, has finished; a default-team read misses every other team's.
+func triggerInItsTeam(ctx context.Context, st *store.Store, id string) (*store.Trigger, error) {
+	team, err := st.AsOperator().TriggerTeam(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	tn, err := st.ForTeam(ctx, team)
+	if err != nil {
+		return nil, err
+	}
+	return tn.GetTrigger(ctx, id)
+}
+
 func scanUnreclaimedRefWorktrees(ctx context.Context, st *store.Store, root *os.Root) ([]string, error) {
 	if root == nil {
 		return nil, nil
@@ -1411,7 +1340,7 @@ func scanUnreclaimedRefWorktrees(ctx context.Context, st *store.Store, root *os.
 		if !e.IsDir() {
 			continue
 		}
-		trig, err := st.GetTrigger(ctx, e.Name())
+		trig, err := triggerInItsTeam(ctx, st, e.Name())
 		if err == nil {
 			if trig.IsFinished() {
 				stale = append(stale, e.Name())
@@ -1455,7 +1384,9 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.
 		if !e.IsDir() {
 			continue
 		}
-		_, err := st.GetRun(ctx, e.Name())
+		// safety: a run directory is kept only while some team holds a run row
+		// under its id; a deleted child's trigger outlives the run for lineage.
+		_, err := st.AsOperator().RunTeam(ctx, e.Name())
 		if err == nil {
 			continue
 		}
@@ -1487,7 +1418,7 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.
 	return nil
 }
 
-func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error {
+func RenderDoctor(w io.Writer, r DoctorReport, format string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
@@ -1495,11 +1426,20 @@ func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error 
 	case "plain":
 		return renderDoctorPlain(w, r)
 	default:
-		return renderDoctorPretty(w, r, legacyLine)
+		return renderDoctorPretty(w, r)
 	}
 }
 
 func renderDoctorPlain(w io.Writer, r DoctorReport) error {
+	if g := r.GoToolchain; g != nil {
+		fmt.Fprintf(w, "go_version\t%s\nGOTOOLCHAIN\t%s\ngo_toolchain_source\t%s\ngo_floor\t%s\ngo_floor_module\t%s\ngo_toolchain_verdict\t%s\n", g.Current, g.Setting, g.Source, g.Floor, g.Module, g.Verdict)
+		if g.Override != "" {
+			fmt.Fprintf(w, "go_toolchain_build\t%s\n", g.Override)
+		}
+		if g.Error != "" {
+			fmt.Fprintf(w, "go_toolchain_error\t%s\n", g.Error)
+		}
+	}
 	fmt.Fprintf(w, "daemon\t%s\n", r.Daemon.State)
 	wedged := 0
 	if r.Daemon.Wedged {
@@ -1514,8 +1454,6 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
 	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
 	fmt.Fprintf(w, "stray_step_sessions\t%d\n", len(r.StrayStepSessions))
-	fmt.Fprintf(w, "legacy_box_slot_files_removed\t%d\n", r.LegacyBoxSlotFilesRemoved)
-	fmt.Fprintf(w, "live_legacy_holders\t%d\n", len(r.LiveLegacyHolders))
 	fmt.Fprintf(w, "dead_concurrency_holders\t%d\n", r.DeadConcurrencyHolders)
 	fmt.Fprintf(w, "dead_concurrency_waiters\t%d\n", r.DeadConcurrencyWaiters)
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
@@ -1581,7 +1519,18 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	return nil
 }
 
-func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
+func renderDoctorGoToolchain(w io.Writer, r DoctorReport) {
+	if g := r.GoToolchain; g != nil {
+		fmt.Fprintf(w, "Go toolchain: %s; GOTOOLCHAIN=%s (set in %s); .sparkwing floor go %s\n", g.Current, g.Setting, g.Source, g.Floor)
+		fmt.Fprintf(w, "  %s\n", g.Verdict)
+		if g.Error != "" {
+			fmt.Fprintf(w, "  %s\n", g.Error)
+		}
+	}
+}
+
+func renderDoctorPretty(w io.Writer, r DoctorReport) error {
+	renderDoctorGoToolchain(w, r)
 	verb, would := "removed", ""
 	if r.DryRun {
 		verb, would = "found", " (dry run: nothing changed)"
@@ -1625,9 +1574,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			}
 			fmt.Fprintf(tw, "%s\n", line)
 		}
-	}
-	if r.LegacyBoxSlotFilesRemoved > 0 {
-		fmt.Fprintf(tw, "legacy box-slot files %s\t%d\n", verb, r.LegacyBoxSlotFilesRemoved)
 	}
 	if r.DeadConcurrencyHolders > 0 || r.DeadConcurrencyWaiters > 0 {
 		fmt.Fprintf(tw, "dead local concurrency rows %s\t%d holders, %d waiters\n",
@@ -1690,12 +1636,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			store.DisplayProfileKey(p.Pipeline), p.FloorCores, p.ChargeCores, p.GrantableCores, store.DisplayProfileKey(p.Pipeline))
 	}
 
-	if legacyLine != "" {
-		fmt.Fprintf(w, "\nwarning: %s\n", legacyLine)
-		for _, h := range r.LiveLegacyHolders {
-			fmt.Fprintf(w, "  pid %d holding %s\n", h.PID, h.Lock)
-		}
-	}
 	renderMachineBudget(w, r)
 	renderToolchains(w, r)
 	renderStandaloneStores(w, r)
@@ -1815,7 +1755,7 @@ func renderLockedOutRepos(w io.Writer, r DoctorReport) {
 func renderUngatedRepos(w io.Writer, r DoctorReport) {
 	if r.GatesSurveyError != "" {
 		fmt.Fprintf(w, "\nwarning: the gate survey could not run, so no repo here was checked for a gate\n  %s\n"+
-			"  this is not a gated fleet, it is an unread one; fix the registry and re-run, or list it with `sparkwing configure xrepo list`\n",
+			"  this is not a gated fleet, it is an unread one; fix the registry and re-run, or list it with `sparkwing repos list --checkouts`\n",
 			r.GatesSurveyError)
 		return
 	}
@@ -1837,7 +1777,7 @@ func renderUngatedRepos(w io.Writer, r DoctorReport) {
 		fmt.Fprintf(w, "  %s\n    %s\n", g.Summary(), g.Remedy())
 	}
 	if r.GatesSurveyed > 0 {
-		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks fire --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
+		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks status --prove --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
 	}
 }
 

@@ -309,16 +309,3 @@ func Registered() []string {
 	sort.Strings(names)
 	return names
 }
-
-// TypeName returns the Go type name of p, suitable for matching against
-// a sparkwing.yaml `entrypoint:` field.
-func TypeName(p any) string {
-	t := reflect.TypeOf(p)
-	if t == nil {
-		return ""
-	}
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	return t.Name()
-}

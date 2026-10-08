@@ -54,7 +54,10 @@ func TestDispatchFleetCompileFailureCleansExactSourceHelper(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_FLEET_COMPILE_FAILURE") != "1" {
 		return
 	}
-	err := dispatchRun([]string{"broken", "--sw-fleet", "--sw-dry-run", "--sw-cd", os.Getenv("SPARKWING_TEST_FLEET_REPO")})
+	if err := os.Chdir(os.Getenv("SPARKWING_TEST_FLEET_REPO")); err != nil {
+		os.Exit(4)
+	}
+	err := dispatchRun([]string{"broken", "--sw-fleet", "--sw-dry-run"})
 	if err != nil {
 		os.Exit(3)
 	}

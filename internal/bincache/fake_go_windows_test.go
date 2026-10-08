@@ -52,6 +52,10 @@ func init() {
 	if os.Getenv("SPARKWING_TEST_FAKE_GO") != "1" {
 		os.Exit(2)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "env" {
+		fmt.Fprint(os.Stdout, "auto\ngo1.26.6\noff\n")
+		os.Exit(0)
+	}
 	if log := os.Getenv("SPARKWING_TEST_GO_LOG"); log != "" {
 		line := strings.Join(os.Args[1:], " ") + "\n"
 		if os.Getenv("SPARKWING_TEST_GO_ENV") == "1" {

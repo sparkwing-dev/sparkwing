@@ -73,10 +73,10 @@ func TestAFreeTeamStoresUpToItsCacheShare(t *testing.T) {
 	if code, body := send(t, srv, http.MethodPut, "/cache/first", grant, strings.Repeat("a", 3000)); code != http.StatusCreated {
 		t.Fatalf("3000 of 3072 = %d: %s", code, body)
 	}
-	if code, _ := send(t, srv, http.MethodPost, "/artifacts/run-1?path=over.txt", grant, strings.Repeat("b", 73)); code != http.StatusRequestEntityTooLarge {
+	if code, _ := send(t, srv, http.MethodPut, "/cache/over", grant, strings.Repeat("b", 73)); code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("73 more past the share = %d, want 413", code)
 	}
-	if code, body := send(t, srv, http.MethodPost, "/artifacts/run-1?path=fits.txt", grant, strings.Repeat("b", 72)); code/100 != 2 {
+	if code, body := send(t, srv, http.MethodPut, "/cache/fits", grant, strings.Repeat("b", 72)); code/100 != 2 {
 		t.Fatalf("the last 72 bytes = %d: %s", code, body)
 	}
 	if used, reserved := ctl.Held("free", storagequota.KindCache); used != 3072 || reserved != 0 {
@@ -111,7 +111,7 @@ func TestAnOverwriteCommitsTheDifference(t *testing.T) {
 func TestAnUploadOfUnknownLengthIsCutAtTheRoomLeft(t *testing.T) {
 	srv, raw, _, ctl, token := newQuotaServer(t)
 	grant := grantFor(t, token, "free")
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/artifacts/run-1?path=big.bin",
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPut, srv.URL+"/cache/big",
 		strings.NewReader(strings.Repeat("z", 5000)))
 	req.Header.Set("Authorization", "Bearer "+grant)
 	req.ContentLength = -1

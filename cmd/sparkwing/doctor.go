@@ -11,7 +11,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -27,7 +29,6 @@ func runDoctor(args []string) error {
 	fs := flag.NewFlagSet(cmdDoctor.Path, flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "report what would be repaired without changing anything")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	timeout := fs.Duration("timeout", doctorDefaultTimeout, "budget for the daemon and local-state checks; each takes a slice of it")
 	if err := parseAndCheck(cmdDoctor, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -46,14 +47,14 @@ func runDoctor(args []string) error {
 	if *timeout <= 0 {
 		return fmt.Errorf("doctor: --timeout must be positive, got %s", *timeout)
 	}
-	p, err := homePaths(*home)
+	p, err := homePaths("")
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	report, err := diagnose(ctx, p, *home, *dryRun)
+	report, err := diagnose(ctx, p, "", *dryRun)
 	if err != nil {
 		return renderPartialDoctor(os.Stdout, report, format, fmt.Errorf("doctor: %w", err))
 	}
@@ -75,6 +76,7 @@ func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doc
 	if err != nil {
 		return report, err
 	}
+	report.GoToolchain = diagnoseGoToolchain(ctx)
 	report.ShadowedHooks = shadowedHooks(runGit)
 	surveyed, err := surveyFleet(runGit)
 	if err != nil {
@@ -99,5 +101,34 @@ func shadowedHooks(git githooks.Git) *githooks.Shadow {
 }
 
 func renderDoctor(w io.Writer, r doctorReport, format string) error {
-	return opsview.RenderDoctor(w, r, format, legacyWarningLine(len(r.LiveLegacyHolders)))
+	return opsview.RenderDoctor(w, r, format)
+}
+
+func diagnoseGoToolchain(ctx context.Context) *opsview.DoctorGoToolchain {
+	dir, err := findSparkwingDir()
+	if err != nil {
+		return nil
+	}
+	return inspectDoctorGoToolchain(ctx, dir, os.Environ())
+}
+
+func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *opsview.DoctorGoToolchain {
+	overlay := bincache.EffectiveOverlay(dir)
+	report, err := gotoolchain.Inspect(ctx, dir, env, overlay)
+	finding := &opsview.DoctorGoToolchain{
+		Current: report.Current, Setting: report.Setting, Source: report.Source,
+		Floor: report.Floor, Module: report.Module, Override: report.Override, Verdict: "ok",
+	}
+	if report.Override != "" {
+		finding.Verdict = "sparkwing will build with " + report.Override
+	}
+	if err != nil {
+		finding.Verdict = "unverified"
+		var toolchainErr *gotoolchain.Error
+		if errors.As(err, &toolchainErr) {
+			finding.Verdict = "blocked by GOTOOLCHAIN=local"
+		}
+		finding.Error = err.Error()
+	}
+	return finding
 }

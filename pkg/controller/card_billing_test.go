@@ -3,10 +3,13 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -179,6 +182,92 @@ func TestCardBilling_ADeclineIsPaidByHand(t *testing.T) {
 	}
 }
 
+// A pay-now payment by a card that drew a fraud warning on another payment
+// repays the debt, and the operator is alerted once.
+func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
+	fc, url := newFakeCheckout(t)
+	raw, pub := multiTeamLicense(t)
+	logs := &lockedBuffer{}
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		license: raw, key: pub, checkoutURL: url, checkoutToken: checkoutToken,
+		logger: slog.New(slog.NewJSONHandler(logs, nil)),
+	})
+	owner, _, _ := teamOf(f)
+	f.trust(owner.team, 0)
+	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1", "last4": "4242",
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("save card = %d", code)
+	}
+	fc.mu.Lock()
+	fc.chargeStatus, fc.declineCode = "failed", "insufficient_funds"
+	fc.mu.Unlock()
+	f.owe(owner.team, 15_000)
+	f.srv.CardBillingPass(context.Background())
+	if code := f.call("POST", "/api/v1/credits/warnings", "Bearer "+f.admin, map[string]any{
+		"payment_intent": "pi_elsewhere", "warning_id": "issfr_1", "fingerprint": "fp_flagged", "actionable": true,
+	}, nil); code >= 300 {
+		t.Fatalf("warning = %d", code)
+	}
+	if code := f.call("POST", "/api/v1/team/billing/pay", owner.auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("pay now = %d", code)
+	}
+	pays := fc.internalCalls("/internal/charge-checkout")
+	paid := map[string]any{
+		"team": owner.team, "charge_id": pays[0].Body["charge_id"], "attempt_id": pays[0].Body["attempt_id"],
+		"payment_intent": "pi_recovered", "amount_cents": 15_000, "status": "succeeded", "fingerprint": "fp_flagged",
+	}
+	for range 2 {
+		if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, paid, nil); code != http.StatusNoContent {
+			t.Fatalf("the webhook's payment = %d", code)
+		}
+	}
+	if b := f.billing(owner); b.OpenCharge != nil || b.BalanceMicro != 0 {
+		t.Fatalf("after paying = %+v, want the debt repaid", b)
+	}
+	alerts := logs.records(t, "billing alert: a card with a fraud warning repaid a debt; the team is held and any unapplied rest is the operator's to return")
+	if len(alerts) != 1 || alerts[0]["alert"] != "card_payment_warned" || alerts[0]["warning_id"] != "issfr_1" ||
+		alerts[0]["payment_intent"] != "pi_recovered" || alerts[0]["unapplied_micro"] != float64(0) {
+		t.Fatalf("alerts = %v, want one card_payment_warned", alerts)
+	}
+}
+
+// A saved card names when its setup completed, and a setup that completed
+// before the card on file is refused with stale_card_setup and changes nothing.
+func TestCardBilling_AnOlderSetupDoesNotReplaceANewerCard(t *testing.T) {
+	f, _ := billingFixture(t)
+	owner, _, _ := teamOf(f)
+	f.trust(owner.team, 0)
+	save := func(pm, last4 string, completed int64) (int, string) {
+		var refused struct {
+			Code string `json:"code"`
+		}
+		code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+			"team": owner.team, "customer": "cus_1", "payment_method": pm, "fingerprint": "fp_" + pm,
+			"last4": last4, "completed_at": completed,
+		}, &refused)
+		return code, refused.Code
+	}
+	at := time.Now().Add(time.Hour).Unix()
+	for _, c := range []struct {
+		pm, last4 string
+		completed int64
+		code      int
+		refusal   string
+	}{
+		{"pm_old", "0000", at, http.StatusNoContent, ""},
+		{"pm_new", "1111", at + 60, http.StatusNoContent, ""},
+		{"pm_old", "0000", at, http.StatusConflict, controller.StaleCardSetupCode},
+	} {
+		if code, refusal := save(c.pm, c.last4, c.completed); code != c.code || refusal != c.refusal {
+			t.Fatalf("save %s at %d = %d %q, want %d %q", c.pm, c.completed, code, refusal, c.code, c.refusal)
+		}
+	}
+	if b := f.billing(owner); b.Card == nil || b.Card.Last4 != "1111" {
+		t.Fatalf("card = %+v, want the newer card kept", b.Card)
+	}
+}
+
 // An owner lowers the budget; a budget above the largest limit is refused.
 func TestCardBilling_OwnerSetsABudget(t *testing.T) {
 	f, _ := billingFixture(t)
@@ -253,7 +342,7 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 		Capabilities []string `json:"capabilities"`
 	}
 	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+f.admin, nil, &units); code != http.StatusOK ||
-		len(units.Capabilities) != 1 || units.Capabilities[0] != "card-billing-v1" {
+		strings.Join(units.Capabilities, ",") != "card-billing-v1,paid-grant-lookup-v1,card-setup-order-v1" {
 		t.Fatalf("units = %d %+v", code, units)
 	}
 }

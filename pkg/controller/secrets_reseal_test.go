@@ -46,8 +46,8 @@ func TestResealStoredSecrets_SealsEveryTeamsRowsOnBothDialects(t *testing.T) {
 		name string
 		open func(*testing.T) *store.Store
 	}{
-		{name: "sqlite", open: openSQLiteBindingStore},
-		{name: "postgres", open: openPostgresBindingStore},
+		{name: "sqlite", open: openSQLiteStore},
+		{name: "postgres", open: openPostgresStore},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -139,7 +139,7 @@ func TestResealStoredSecrets_SealsEveryTeamsRowsOnBothDialects(t *testing.T) {
 // than answer empty.
 func TestResealStoredSecrets_RefusesAKeyThatOpensNothingStored(t *testing.T) {
 	ctx := context.Background()
-	st := openSQLiteBindingStore(t)
+	st := openSQLiteStore(t)
 	rightKey, _ := secrets.GenerateKey()
 	wrongKey, _ := secrets.GenerateKey()
 	right, _ := secrets.NewCipher(rightKey)
@@ -182,7 +182,7 @@ func TestResealStoredSecrets_RefusesAKeyThatOpensNothingStored(t *testing.T) {
 // checked.
 func TestResealStoredSecrets_RefusesWhenNoSampledEnvelopeCanJudgeTheKey(t *testing.T) {
 	ctx := context.Background()
-	st := openSQLiteBindingStore(t)
+	st := openSQLiteStore(t)
 	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestResealStoredSecrets_RefusesWhenNoSampledEnvelopeCanJudgeTheKey(t *testi
 // write the database, does not open for that team's runner.
 func TestSecrets_EnvelopeMovedToAnotherTeamDoesNotOpen(t *testing.T) {
 	ctx := context.Background()
-	st := openSQLiteBindingStore(t)
+	st := openSQLiteStore(t)
 	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}

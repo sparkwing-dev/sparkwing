@@ -278,12 +278,6 @@ func (a *appender) close() error {
 	return err
 }
 
-// Read returns all retained records, including records written by the supervisor.
-func Read(dir string) ([]Record, error) {
-	records, _, err := ReadWithStats(dir)
-	return records, err
-}
-
 // ReadWithStats returns retained records and the number of malformed or oversized lines skipped.
 func ReadWithStats(dir string) ([]Record, int, error) {
 	var records []Record

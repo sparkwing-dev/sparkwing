@@ -97,14 +97,6 @@ func TestProbe_TellsAnUnreachableSocketFromAnAbsentOne(t *testing.T) {
 	}
 }
 
-func TestDaemonDeathCause_LeadsWithTheLastLoggedReason(t *testing.T) {
-	tail := "wingd: starting\nwingd: state restored\nsparkwing error: wingd: listen /tmp/x/d.sock: bind: operation not permitted\n"
-	got := daemonDeathCause(tail)
-	if got != "wingd: listen /tmp/x/d.sock: bind: operation not permitted" {
-		t.Fatalf("daemonDeathCause = %q, want the last logged reason with its prefix stripped", got)
-	}
-}
-
 func TestDaemonUnreachable_DoesNotClaimAnUnobservedExit(t *testing.T) {
 	home := shortHome(t)
 	logPath, err := wingd.LogPath(home)

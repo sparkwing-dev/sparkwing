@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,6 +36,8 @@ type ListOpts struct {
 	Limit     int
 	Pipelines []string
 	Statuses  []string
+	Repos     []string
+	RootOnly  bool
 	Since     time.Duration
 	JSON      bool
 
@@ -48,6 +51,47 @@ type ListOpts struct {
 	Pivot      PivotOpts
 
 	Cursor string
+
+	// RenderRows, when set, receives the page the listing would print and
+	// renders it in place of the run table; the page record still follows.
+	// nodes reads a row's nodes from the store that holds it.
+	RenderRows func(rows []TaggedRun, nodes func(TaggedRun) ([]*store.Node, error)) error
+}
+
+// LatestRuns returns up to n of the newest runs the server-side part of
+// opts selects (pipeline, status, branch, SHA, repository, root-only and
+// lookback), merged across this home's standalone stores when opts reads
+// locally.
+func LatestRuns(ctx context.Context, paths Paths, opts ListOpts, n int) (latest []*store.Run, err error) {
+	if err := paths.EnsureRoot(); err != nil {
+		return nil, err
+	}
+	b, closer, err := readBackendFor(ctx, paths, opts.Profile)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, closer.Close()) }()
+	opts.Limit, opts.Cursor, opts.ByPipeline = n, "", false
+	filter, _, _, err := runsQueryFor(opts)
+	if err != nil {
+		return nil, err
+	}
+	filter.Limit = n
+	runs, err := b.ListRuns(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	rows := TagShared(runs)
+	//nolint:contextcheck // hack: mergesStandalone takes no context; ListJobs makes the same call.
+	if mergesStandalone(b, paths, opts.Profile) {
+		standalone := OpenStandaloneStores(ctx, paths)
+		defer func() { err = errors.Join(err, standalone.Close()) }()
+		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
+	}
+	if len(rows) > n {
+		rows = rows[:n]
+	}
+	return untagRuns(rows), nil
 }
 
 func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) error {
@@ -77,8 +121,9 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	rows := TagShared(runs)
 	var lister runLister = b
 	var merged bool
+	var standalone *StandaloneStores
 	if mergesStandalone(b, paths, opts.Profile) {
-		standalone := OpenStandaloneStores(ctx, paths)
+		standalone = OpenStandaloneStores(ctx, paths)
 		defer func() { _ = standalone.Close() }()
 		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
 		lister = mergedLister{backend: b, standalone: standalone}
@@ -112,6 +157,22 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 
 	rows, page := pager.page(rows, resume, sourceMore, filter.Since)
 	page.Total = totalMatching(ctx, b, filter, clientFilter, merged)
+	if opts.RenderRows != nil {
+		nodes := func(r TaggedRun) ([]*store.Node, error) {
+			if r.Store == SharedStoreLabel {
+				return b.ListNodes(ctx, r.ID)
+			}
+			held, ok := standalone.StoreFor(r.Store)
+			if !ok {
+				return nil, fmt.Errorf("standalone store %s is not open", r.Store)
+			}
+			return backend.NewStoreBackend(held, paths, nil).ListNodes(ctx, r.ID)
+		}
+		if err := opts.RenderRows(rows, nodes); err != nil {
+			return err
+		}
+		return page.write(opts.JSON && !opts.Quiet, out, os.Stderr)
+	}
 	admissionStatus := func(runID string) (admissionWaitDetail, bool) {
 		return latestAdmissionWait(ctx, b, runID)
 	}

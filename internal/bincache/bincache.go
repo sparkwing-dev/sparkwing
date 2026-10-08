@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
@@ -33,7 +35,7 @@ var ErrMiss = errors.New("remote binary cache: miss")
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-// SeedRef returns the only ref namespace accepted by the cache seed importer.
+// SeedRef names the one ref a working-tree snapshot bundle carries.
 func SeedRef(sha string) string {
 	return "refs/sparkwing-seed/" + sha
 }
@@ -200,26 +202,13 @@ func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
 	return nil
 }
 
-func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "", "")
-}
-
 // FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
 func FetchPipelineSourceWithCredentials(
 	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheGrant, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
 	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant),
-		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), "")
-}
-
-// FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
-func FetchPipelineWorkspaceSourceWithCredentials(
-	ctx context.Context,
-	gcURL, controllerURL, controllerToken, cacheGrant, repoSSH, branch, sha, parentDir string,
-) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant),
-		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), "")
+		repoSSH, branch, sha, parentDir, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), "")
 }
 
 // FetchPipelineRef fetches the pipeline source a declared ref names, under the
@@ -235,7 +224,7 @@ func FetchPipelineRef(ctx context.Context, gcURL, controllerURL, controllerToken
 	if ref == "" || strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, ": \t\r\n") {
 		return "", fmt.Errorf("invalid pipeline source ref %q", ref)
 	}
-	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant), repoSSH, "", "", parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), ref)
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant), repoSSH, "", "", parentDir, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), ref)
 }
 
 // GitcacheBearer resolves the credential a runner's cache read may carry: the controller bearer
@@ -328,7 +317,7 @@ func controllerClaimedRepoName(gcURL, controllerURL, repoURL string) string {
 	return sourceurl.ClaimedRepoNameFromURL(repoURL)
 }
 
-func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName, sourceRef string) (sparkwingDir string, err error) {
+func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir, cacheName, sourceRef string) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
@@ -375,7 +364,7 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		if inspectErr != nil {
 			return "", inspectErr
 		}
-		if rawWorkspace || workspaceCommit {
+		if workspaceCommit {
 			if err := restoreRawCheckout(ctx, workTree, sha); err != nil {
 				return "", err
 			}
@@ -585,246 +574,12 @@ func gitHTTPEnv(gcURL, token string) []string {
 	return env
 }
 
-func RefreshRepo(ctx context.Context, gcURL, token, repoURL string) error {
-	if gcURL == "" {
-		return fmt.Errorf("RefreshRepo: gitcache URL required")
-	}
-	var err error
-	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("RefreshRepo: invalid repo URL: %w", err)
-	}
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	url := strings.TrimRight(gcURL, "/") + "/git/refresh?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
-}
-
-func SeedRepo(ctx context.Context, gcURL, token, repoURL, repoDir, sha string) error {
-	if gcURL == "" {
-		return fmt.Errorf("SeedRepo: gitcache URL required")
-	}
-	var err error
-	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("SeedRepo: invalid repo URL: %w", err)
-	}
-	sha, err = validateGitObject(sha)
-	if err != nil {
-		return err
-	}
-	bundle, err := createRepoBundle(ctx, repoDir, sha)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(bundle) }()
-
-	return SeedBundle(ctx, gcURL, token, repoURL, bundle, sha)
-}
-
-// SeedBundle imports a prebuilt Git bundle into the cache under sha.
-func SeedBundle(ctx context.Context, gcURL, token, repoURL, bundle, sha string) error {
-	if strings.TrimSpace(gcURL) == "" {
-		return fmt.Errorf("SeedBundle: gitcache URL required")
-	}
-	return seedBundle(ctx, strings.TrimRight(gcURL, "/")+"/sync/seed", token, repoURL, bundle, sha, false)
-}
-
-// SeedWorkspaceBundle imports a bounded-retention working-tree bundle.
-func SeedWorkspaceBundle(ctx context.Context, gcURL, token, repoURL, bundle, sha string) error {
-	if strings.TrimSpace(gcURL) == "" {
-		return fmt.Errorf("SeedWorkspaceBundle: gitcache URL required")
-	}
-	return seedBundle(ctx, strings.TrimRight(gcURL, "/")+"/sync/seed", token, repoURL, bundle, sha, true)
-}
-
-func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) {
-	sha, err := validateGitObject(sha)
-	if err != nil {
-		return "", err
-	}
-	if out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "--verify", sha+"^{commit}").CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git verify seed commit: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	tmp, err := os.CreateTemp("", "sparkwing-repo-*.bundle")
-	if err != nil {
-		return "", err
-	}
-	path := tmp.Name()
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", err
-	}
-	_ = os.Remove(path)
-
-	ref := SeedRef(sha)
-	if out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "update-ref", ref, sha).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git seed ref: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	defer func() {
-		_ = exec.CommandContext(context.Background(), "git", "-C", repoDir, "update-ref", "-d", ref).Run()
-	}()
-
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "bundle", "create", path, ref)
-	out, err := gitCommandCombinedOutput(cmd)
-	if err != nil {
-		_ = os.Remove(path)
-		return "", fmt.Errorf("git bundle create: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return path, nil
-}
-
 func validateGitObject(sha string) (string, error) {
 	sha = strings.ToLower(strings.TrimSpace(sha))
 	if !gitObjectRE.MatchString(sha) {
 		return "", fmt.Errorf("git sha must be a 40-64 character hex object id")
 	}
 	return sha, nil
-}
-
-func RefreshRepoViaController(ctx context.Context, controllerURL, token, repoURL string) error {
-	if controllerURL == "" {
-		return fmt.Errorf("RefreshRepoViaController: controller URL required")
-	}
-	var err error
-	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("RefreshRepoViaController: invalid repo URL: %w", err)
-	}
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	url := strings.TrimRight(controllerURL, "/") + "/api/v1/gitcache/refresh?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
-}
-
-func SeedRepoViaController(ctx context.Context, controllerURL, token, repoURL, repoDir, sha string) error {
-	if controllerURL == "" {
-		return fmt.Errorf("SeedRepoViaController: controller URL required")
-	}
-	var err error
-	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("SeedRepoViaController: invalid repo URL: %w", err)
-	}
-	sha, err = validateGitObject(sha)
-	if err != nil {
-		return err
-	}
-	bundle, err := createRepoBundle(ctx, repoDir, sha)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(bundle) }()
-
-	return SeedBundleViaController(ctx, controllerURL, token, repoURL, bundle, sha)
-}
-
-// SeedBundleViaController imports a prebuilt Git bundle through the controller.
-func SeedBundleViaController(ctx context.Context, controllerURL, token, repoURL, bundle, sha string) error {
-	if strings.TrimSpace(controllerURL) == "" {
-		return fmt.Errorf("SeedBundleViaController: controller URL required")
-	}
-	return seedBundle(ctx, strings.TrimRight(controllerURL, "/")+"/api/v1/gitcache/seed", token, repoURL, bundle, sha, false)
-}
-
-// SeedWorkspaceBundleViaController imports a bounded-retention working-tree bundle through the controller.
-func SeedWorkspaceBundleViaController(ctx context.Context, controllerURL, token, repoURL, bundle, sha string) error {
-	if strings.TrimSpace(controllerURL) == "" {
-		return fmt.Errorf("SeedWorkspaceBundleViaController: controller URL required")
-	}
-	return seedBundle(ctx, strings.TrimRight(controllerURL, "/")+"/api/v1/gitcache/seed", token, repoURL, bundle, sha, true)
-}
-
-func seedBundle(ctx context.Context, endpoint, token, repoURL, bundle, sha string, workspace bool) error {
-	var err error
-	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("seed bundle: invalid repo URL: %w", err)
-	}
-	sha, err = validateGitObject(sha)
-	if err != nil {
-		return err
-	}
-	f, err := os.Open(bundle)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if info.Size() > 500<<20 {
-		return fmt.Errorf("git bundle is %d bytes; limit is %d bytes", info.Size(), int64(500<<20))
-	}
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	q.Set("sha", sha)
-	if workspace {
-		q.Set("workspace", "1")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"?"+q.Encode(), f)
-	if err != nil {
-		return err
-	}
-	req.ContentLength = info.Size()
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
 }
 
 func RepoURLFromGitHub(fullName string) string {
@@ -885,6 +640,15 @@ func (lb *lockedBuffer) Bytes() []byte {
 var pipelineBuildFlags = []string{"-trimpath", "-ldflags", "-s -w"}
 
 func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
+	return compilePipeline(ctx, sparkwingDir, dest, pipelineBuildFlags)
+}
+
+// CompileUncachedPipeline preserves debug symbols for execution without the binary cache.
+func CompileUncachedPipeline(ctx context.Context, sparkwingDir, dest string) error {
+	return compilePipeline(ctx, sparkwingDir, dest, nil)
+}
+
+func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []string) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
@@ -895,8 +659,12 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 		return err
 	}
 
-	args := append([]string{"build"}, pipelineBuildFlags...)
-	env := os.Environ()
+	args := append([]string{"build"}, flags...)
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
+	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, nil, EffectiveOverlay(sparkwingDir))
+	if err != nil {
+		return err
+	}
 	overlay := overlayModfilePath(sparkwingDir)
 	work, workPresent := goWorkInScope(sparkwingDir)
 	switch {
@@ -931,12 +699,15 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = env
-	if err := runToolchain(ctx, cmd); err != nil {
+	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
+		}
+		if explanation := gotoolchain.ExplainOutput(ctx, captured.String(), env); explanation != nil {
+			return &CompileError{Output: []byte(explanation.Error()), Err: explanation}
 		}
 		return &CompileError{Output: captured.Bytes(), Err: err}
 	}
@@ -1399,4 +1170,13 @@ func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summar
 	}
 
 	return targets, b.String(), nil
+}
+
+// EffectiveOverlay returns the overlay used when building the pipeline module.
+func EffectiveOverlay(dir string) string {
+	work, present := goWorkInScope(dir)
+	if present && goWorkCovers(work, dir) {
+		return ""
+	}
+	return overlayModfilePath(dir)
 }

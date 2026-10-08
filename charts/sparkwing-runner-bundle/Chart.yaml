@@ -9,8 +9,8 @@ description: |
   controller, this chart bundles every service that needs to live next
   to the runner so logs / artifacts / git fanout never cross the VPC
   boundary.
-  Does NOT include the controller or web SPA -- those ship in the
-  full-self-host chart (sparkwing-full).
+  Does NOT include the controller, which also serves the dashboard --
+  it ships in the full-self-host chart (sparkwing-full).
 
 # application: this chart deploys runnable workloads (Deployments,
 # Services, PVCs). A library chart would be wrong here -- there is no
@@ -20,7 +20,7 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of the appVersion below. Bump on any user-facing
 # values.yaml change or template structural change.
-version: 0.1.9
+version: 0.1.10
 
 # appVersion is retained as Helm metadata and the empty-tag fallback. The
 # current value is not a compatible public image-set guarantee; operators

@@ -33,7 +33,6 @@ func runQueue(args []string) error {
 func runQueueList(cmd Command, args []string) error {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -56,22 +55,18 @@ func runQueueList(cmd Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, Version: Version})
-	legacy, _ := liveLegacyBoxSlots(*home)
-
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: "", Version: Version})
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
 			if rerr := renderUnreachableDaemon(os.Stdout, format, err); rerr != nil {
 				return rerr
 			}
-			warnLegacy(os.Stderr, len(legacy))
 			return exitError(4, fmt.Errorf("%s: %w", cmd.Path, err))
 		}
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
 				return rerr
 			}
-			warnLegacy(os.Stderr, len(legacy))
 			return nil
 		}
 		return fmt.Errorf("%s: %w", cmd.Path, err)
@@ -79,7 +74,6 @@ func runQueueList(cmd Command, args []string) error {
 	if rerr := renderLocalQueue(os.Stdout, qs, format); rerr != nil {
 		return rerr
 	}
-	warnLegacy(os.Stderr, len(legacy))
 	return nil
 }
 
@@ -123,12 +117,6 @@ func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wing
 		return wingwire.QueueState{}, fmt.Errorf("decode queue state: %w", err)
 	}
 	return qs, nil
-}
-
-func warnLegacy(w io.Writer, n int) {
-	if line := legacyWarningLine(n); line != "" {
-		fmt.Fprintf(w, "warning: %s\n", line)
-	}
 }
 
 func renderNoDaemon(w io.Writer, format string) error {

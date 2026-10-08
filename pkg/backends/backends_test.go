@@ -7,35 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-func TestLayerSurfaces_OverWinsPerSurface(t *testing.T) {
-	base := backends.Surfaces{
-		State: &backends.Spec{Type: backends.TypeSQLite, Path: "/base.db"},
-		Cache: &backends.Spec{Type: backends.TypeFilesystem, Path: "/base/cache"},
-	}
-	over := backends.Surfaces{
-		State: &backends.Spec{Type: backends.TypeS3, Bucket: "team", Prefix: "state"},
-	}
-	eff := backends.LayerSurfaces(base, over)
-	if eff.State.Type != backends.TypeS3 || eff.State.Bucket != "team" {
-		t.Fatalf("state surface = %+v, want s3/team", eff.State)
-	}
-	if eff.Cache == nil || eff.Cache.Path != "/base/cache" {
-		t.Fatalf("cache surface = %+v, want base filesystem", eff.Cache)
-	}
-	if eff.Logs != nil {
-		t.Fatalf("logs surface = %+v, want nil", eff.Logs)
-	}
-}
-
-func TestLayerSurfaces_SameTypeFillsBlanks(t *testing.T) {
-	base := backends.Surfaces{State: &backends.Spec{Type: backends.TypeS3, Bucket: "team", Prefix: "state"}}
-	over := backends.Surfaces{State: &backends.Spec{Type: backends.TypeS3, Prefix: "override"}}
-	eff := backends.LayerSurfaces(base, over)
-	if eff.State.Bucket != "team" || eff.State.Prefix != "override" {
-		t.Fatalf("state surface = %+v, want bucket=team prefix=override", eff.State)
-	}
-}
-
 func TestValidateFields_RequiresWhatEachTypeCannotWorkWithout(t *testing.T) {
 	cases := []struct {
 		name string
@@ -44,11 +15,8 @@ func TestValidateFields_RequiresWhatEachTypeCannotWorkWithout(t *testing.T) {
 	}{
 		{"s3 without bucket", backends.Spec{Type: backends.TypeS3}, "requires bucket"},
 		{"s3 with prefix only", backends.Spec{Type: backends.TypeS3, Prefix: "runs"}, "requires bucket"},
-		{"gcs without bucket", backends.Spec{Type: backends.TypeGCS}, "requires bucket"},
-		{"azure without bucket", backends.Spec{Type: backends.TypeAzureBlob}, "requires bucket"},
 		{"filesystem without path", backends.Spec{Type: backends.TypeFilesystem}, "requires path"},
 		{"postgres without url", backends.Spec{Type: backends.TypePostgres}, "requires url or url_source"},
-		{"mysql without url", backends.Spec{Type: backends.TypeMySQL}, "requires url or url_source"},
 		{"controller without a name", backends.Spec{Type: backends.TypeController}, "requires controller"},
 		{"no type at all", backends.Spec{}, "type is required"},
 	}
@@ -96,23 +64,5 @@ func TestSurfacesValidate_RejectsBucketlessS3(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "logs") || !strings.Contains(err.Error(), "requires bucket") {
 		t.Errorf("error %q should name the logs surface and the missing bucket", err.Error())
-	}
-}
-
-func TestLayerSurfaces_PreservesController(t *testing.T) {
-	base := backends.Surfaces{Logs: &backends.Spec{Type: backends.TypeController, Controller: "prod", Prefix: "base/"}}
-	for _, controller := range []string{"", "staging"} {
-		over := backends.Surfaces{Logs: &backends.Spec{Type: backends.TypeController, Controller: controller, Prefix: "override/"}}
-		got := backends.LayerSurfaces(base, over)
-		want := controller
-		if want == "" {
-			want = "prod"
-		}
-		if got.Logs.Controller != want || got.Logs.Prefix != "override/" {
-			t.Fatalf("layered logs = %+v", got.Logs)
-		}
-		if err := got.Logs.ValidateFields("logs"); err != nil {
-			t.Fatal(err)
-		}
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -831,6 +832,12 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 			var logsBackend LogBackend
 			if opts.LogStore != nil {
 				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
+			} else {
+				logsURL, err := DiscoverLogsURL(ctx, s.BaseURL(), s.Token())
+				if err != nil {
+					return nil, err
+				}
+				logsBackend = NewHTTPLogsWithToken(logsURL, nil, s.Token(), nil)
 			}
 			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
 		default:
@@ -881,10 +888,6 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		}
 	}
 	return res, runErr
-}
-
-func DumpRunState(ctx context.Context, st *store.Store, runID string, art storage.ArtifactStore) error {
-	return dumpRunState(ctx, localState{st: st}, runID, art)
 }
 
 func dumpRunState(ctx context.Context, state StateBackend, runID string, art storage.ArtifactStore) error {
@@ -1083,6 +1086,7 @@ func parentTriggerRepoDir() string {
 
 func maskerForInvokeArgs(reg *sparkwing.Registration, invokeArgs map[string]string) *secrets.Masker {
 	masker := secrets.NewMasker()
+	masker.Register(agentToken)
 	for _, v := range reg.SecretValues(invokeArgs) {
 		masker.Register(v)
 	}
@@ -3065,6 +3069,10 @@ type snapshotNode struct {
 
 	Modifiers *snapshotModifiers `json:"modifiers,omitempty"`
 
+	// safety: beside modifiers, not in them, because the controller decodes
+	// modifiers strictly and an older one would refuse the whole plan.
+	DirCaches []depcache.Spec `json:"dir_caches,omitempty"`
+
 	Work *snapshotWork `json:"work,omitempty"`
 
 	SpecHash string `json:"spec_hash,omitempty"`
@@ -3199,6 +3207,8 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		ClaimWaitMS:    p.ClaimWaitValue().Milliseconds(),
 		Requires:       slices.Clone(meta.PipelineRequires),
 		Secrets:        meta.Secrets,
+		// safety: an empty plan still writes "nodes": [], the shape every SDK and reader expects.
+		Nodes: []snapshotNode{},
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
 		snap.PlanConc = &snapshotConc{
@@ -3241,6 +3251,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			}
 		}
 		sn.Modifiers = nodeModifiersSnapshot(n)
+		sn.DirCaches = nodeDirCaches(n)
 		if w := n.Work(); w != nil {
 			work, err := walker.walk(w, n.ResultStep())
 			if err != nil {
@@ -3266,6 +3277,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			Groups:       p.JobGroupNames(rec.ID()),
 			OnFailureOf:  n.ID(),
 			Modifiers:    nodeModifiersSnapshot(rec),
+			DirCaches:    nodeDirCaches(rec),
 			PipelineRefs: snapshotPipelineRefs(rec.PipelineRefs()),
 		}
 		if w := rec.Work(); w != nil {

@@ -63,7 +63,7 @@ func TestUpdatePlanSnapshot_BodyLimit(t *testing.T) {
 func TestLoopbackUpdatePlanSnapshot_BodyLimit(t *testing.T) {
 	backend := s3state.New(newMemArt())
 	t.Cleanup(func() { _ = backend.Close() })
-	c, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, nil)
+	c, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil)
 
 	ctx := context.Background()
 	if err := c.CreateRun(ctx, store.Run{

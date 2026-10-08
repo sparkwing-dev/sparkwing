@@ -8,26 +8,23 @@ Every `sparkwing cluster` command, flag, and argument, generated from the CLI's 
 
 Operate and inspect the sparkwing cluster
 
-Inspect controller health, executors, admission, users, tokens, images,
-and webhooks. Select the controller with --profile NAME.
-Configure profiles with 'sparkwing configure profiles'.
+Inspect and operate a controller's executors, triggers, admission, users and
+tokens. Select the controller with --profile NAME; connect one with
+'sparkwing cloud connect' and check its health with 'sparkwing cloud status
+--cluster'.
 
-'worker' executes queued triggers on this machine. 'gc' removes stale
-warm-runner storage. Manage secrets with 'sparkwing secrets' and the
-local dashboard with 'sparkwing serve'.
+'worker' executes queued triggers on this machine. Manage secrets with
+'sparkwing secrets' and the local dashboard with 'sparkwing serve'.
 
 ### Subcommands
 
-- `status` -- Connectivity + fleet + queue health check against a remote cluster
 - `agents` -- Inspect the controller's fleet view
 - `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
-- `gc` -- Sweep stale warm-PVC state
+- `triggers` -- List or inspect controller triggers
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
 - `limits` -- Read and set the compute guards
-- `image` -- Rollout helpers for images referenced by a gitops repo
-- `webhooks` -- Connect, inspect, and replay GitHub webhooks
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
 - `object-store` -- Operate the controller's object-store request budget
 
@@ -35,7 +32,7 @@ local dashboard with 'sparkwing serve'.
 
 ```sh
 # Cluster health summary
-sparkwing cluster status --profile prod
+sparkwing cloud status --profile prod --cluster
 
 # List fleet agents
 sparkwing cluster agents list --profile prod
@@ -165,115 +162,6 @@ command narrows to one namespace.
 sparkwing cluster concurrency --namespace deploy-prod --profile prod
 ```
 
-## `sparkwing cluster gc`
-
-Sweep stale warm-PVC state
-
-Operator-facing manual invocation of the warm-PVC sweep.
-Normally fires at 'sparkwing cluster worker' startup; exposed as a subcommand
-so operators can trigger it against a running pod via kubectl
-exec during incident response.
-
-When --profile is omitted, the run-directory sweep is skipped; the
-mtime-based git/ and tmp/ sweeps still run and free disk. Supply
---profile to enable the full sweep.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--root DIR` | Warm-PVC root (default: $SPARKWING_HOME resolution) |
-| `--profile NAME` | Profile name; without it run-dir sweep is skipped |
-
-### Examples
-
-```sh
-# mtime-only sweep in-pod (no controller)
-sparkwing cluster gc
-
-# Full sweep against prod controller
-sparkwing cluster gc --profile prod
-
-# Target a specific warm root
-sparkwing cluster gc --root /var/lib/sparkwing --profile prod
-```
-
-## `sparkwing cluster image`
-
-Rollout helpers for images referenced by a gitops repo
-
-Update an image tag in a GitOps repository, commit and push the change,
-sync ArgoCD, and wait for rollout. Publish the image before using these
-commands.
-
-### Subcommands
-
-- `rollout` -- Bump a kustomization image tag, commit+push, sync ArgoCD, optionally wait
-
-### Examples
-
-```sh
-# Update the example runner image
-sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
-```
-
-## `sparkwing cluster image rollout`
-
-Bump a kustomization image tag, commit+push, sync ArgoCD, optionally wait
-
-Rewrites the newTag: field for the image whose entry in the
-gitops repo's kustomization.yaml matches --image (suffix match
-against the ECR / registry URL), commits + pushes the change,
-optionally triggers an ArgoCD sync, and optionally blocks on
-kubectl rollout status.
-
-Gitops repo resolution order:
-  1. --gitops-repo PATH explicit flag
-  2. SPARKWING_GITOPS_REPO explicit environment configuration
-
-If neither is set, rollout exits before reading or changing a repository.
-Sparkwing never guesses a path from the user's home-directory layout.
-
-The command is idempotent: if the newTag already matches --tag
-there is nothing to commit, and the pipeline continues to sync
-+ wait without error. Use --dry-run to preview the plan without
-writing, committing, pushing, syncing, or waiting.
-
-Tool requirements:
-  - argocd missing  -> sync is skipped with a one-line notice
-  - kubectl missing -> --wait / --tail-logs error before side effects
-
-This verb does not build or push the image itself. The consumer
-pipeline that produced --tag is responsible for publishing the
-image to the registry before calling rollout.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--image NAME` | Short image name (matches the suffix of the ECR URL) (required) |
-| `--tag TAG` | New tag to write in kustomization.yaml (required) |
-| `--gitops-repo PATH` | Gitops repo path (or SPARKWING_GITOPS_REPO) |
-| `--namespace NS` | Kubernetes namespace for rollout status + logs (default: sparkwing) |
-| `--argocd-app NAME` | ArgoCD app name (default: derived from --image) |
-| `--message MSG` | Commit message (default: 'chore: bump <image> to <tag>') |
-| `--wait` | Block until 'kubectl rollout status deployment/<image>' returns |
-| `--tail-logs` | After rollout, 'kubectl logs -f -l app=<image>' until ctrl-c |
-| `--dry-run` | Print what would happen without writing, committing, pushing, or syncing |
-
-### Examples
-
-```sh
-# Preview the example runner image update
-sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --dry-run
-
-# Bump and wait for the rollout
-sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
-
-# Bump, sync, wait, then tail pod logs
-sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs
-```
-
 ## `sparkwing cluster limits`
 
 Read and set the compute guards
@@ -370,7 +258,7 @@ The controller counts every object-store request it makes, by class
 (put, get, list, delete), against a per-minute rate and a per-day
 budget. A class that spends either budget trips: writes of that class
 fail closed and reads keep serving until their own budget trips. The
-state appears on 'sparkwing cluster status' and on the controller's
+state appears on 'sparkwing cloud status' and on the controller's
 Prometheus metrics as sparkwing_object_store_requests_total,
 sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
 
@@ -575,44 +463,6 @@ replaces it.
 sparkwing cluster runners remove --profile prod
 ```
 
-## `sparkwing cluster status`
-
-Connectivity + fleet + queue health check against a remote cluster
-
-Answers "is this cluster alive?" in one command. Runs the
-connectivity / auth probes from 'profiles test' plus cluster-
-state probes that hit /api/v1/agents, /api/v1/pool,
-/api/v1/triggers (status=claimed), and /api/v1/runs?since=24h.
-
-Sections:
-
-  CONNECTIVITY  controller / auth / logs / gitcache
-  FLEET         agents (connected vs stale) + warm-runner pool
-  QUEUE         stuck triggers + recent-run success rate
-
-Exit 0 when every probe is ok or warn; exit 1 when any probe
-fails (auth reject, controller down, HTTP 5xx). Warnings are
-informational -- low success rate, empty pool, stale agents --
-and don't change the exit code so scripts can still condition
-on "is the cluster reachable at all?".
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--profile NAME` | Profile name (required) |
-| `-o, --output FMT` | Output format: pretty\|json |
-
-### Examples
-
-```sh
-# Quick-check prod
-sparkwing cluster status --profile prod
-
-# Structured output for a status dashboard
-sparkwing cluster status --profile prod -o json
-```
-
 ## `sparkwing cluster tokens`
 
 Manage controller API tokens
@@ -627,7 +477,6 @@ save it before leaving this command.
 - `create` -- Mint a new API token
 - `list` -- List token prefixes + metadata
 - `revoke` -- Mark a token revoked
-- `lookup` -- Print metadata for a single token
 - `rotate` -- Mint a replacement token with a grace window
 
 ## `sparkwing cluster tokens create`
@@ -675,10 +524,13 @@ scope check. An empty scope set renders as "-".
 Use -o json to get a structured array with explicit
 scope arrays, suitable for piping into jq.
 
+--prefix PREFIX prints the full record of one token as indented JSON.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--prefix PREFIX` | Print the full record of the token with this non-secret prefix |
 | `--type KIND` | Filter by token type |
 | `--include-revoked` | Include revoked tokens in the output |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
@@ -690,32 +542,14 @@ scope arrays, suitable for piping into jq.
 # List all active tokens
 sparkwing cluster tokens list --profile prod
 
+# One token's full record
+sparkwing cluster tokens list --prefix swu_abc123 --profile prod
+
 # Audit every revoked service token
 sparkwing cluster tokens list --type service --include-revoked --profile prod
 
 # Inspect the warm-runner pool token's scopes as JSON
 sparkwing cluster tokens list --profile prod -o json | jq 'select(.principal=="agent:fictional-runner") | .scopes'
-```
-
-## `sparkwing cluster tokens lookup`
-
-Print metadata for a single token
-
-Prints the JSON metadata for a token given its non-secret prefix. Useful for
-confirming principal + scopes before revoking or rotating.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--prefix PREFIX` | Non-secret token prefix (required) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Inspect a token before revoking
-sparkwing cluster tokens lookup --prefix a1b2c3d4 --profile prod
 ```
 
 ## `sparkwing cluster tokens revoke`
@@ -765,12 +599,107 @@ window short.
 sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
 ```
 
+## `sparkwing cluster triggers`
+
+List or inspect controller triggers
+
+Inspect the controller's queue of pipeline triggers. 'list' shows pending,
+claimed, and completed entries. 'get' reads one trigger by identifier.
+Select the controller with --profile NAME.
+
+Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.
+
+### Subcommands
+
+- `list` -- List pending / claimed / done / failed triggers
+- `get` -- Inspect one trigger's full metadata by id
+
+### Examples
+
+```sh
+# List pending triggers on prod
+sparkwing cluster triggers list --profile prod --status pending
+
+# Inspect one trigger
+sparkwing cluster triggers get --id run-fictional --profile prod
+
+# Submit a trigger
+sparkwing pipeline trigger fictional-deploy --profile prod
+```
+
+## `sparkwing cluster triggers get`
+
+Inspect one trigger's full metadata by id
+
+Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
+git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
+json emits the raw response.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--id TRIGGER_ID` | Trigger / run identifier (the value 'pipeline trigger' prints) (required) |
+| `-o, --output FORMAT` | Output format: json emits the raw response |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Inspect one trigger
+sparkwing cluster triggers get --id run-fictional --profile prod
+
+# Raw JSON for scripting
+sparkwing cluster triggers get --id run-fictional --profile prod -o json
+```
+
+## `sparkwing cluster triggers list`
+
+List pending / claimed / done / failed triggers
+
+Queries GET /api/v1/triggers on the selected profile's
+controller. Empty filters return the most recent 20 entries
+across all statuses.
+
+Useful when the queue looks stuck ("why isn't my trigger being
+claimed?"): --status pending shows unclaimed work, --status
+claimed shows what a worker has in-flight. The repo filter
+matches GITHUB_REPOSITORY on the trigger env so webhook-driven
+entries match the selected repository; that value is not indexed, so the
+search covers the newest 5,000 triggers matching the other filters and
+an older entry is not reported.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--status STATUS` | Filter by status: pending \| claimed \| done \| failed |
+| `--pipeline NAME` | Filter by pipeline name |
+| `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
+| `--limit N` | Maximum triggers to show (default: 20) |
+| `-q, --quiet` | Print only trigger ids, newline-separated |
+| `-o, --output FORMAT` | Output format: json emits the raw triggers array |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Recent triggers on prod
+sparkwing cluster triggers list --profile prod
+
+# Just pending
+sparkwing cluster triggers list --profile prod --status pending
+
+# Pipeline-specific, JSON
+sparkwing cluster triggers list --profile prod --pipeline fictional-build --limit 5 -o json
+```
+
 ## `sparkwing cluster users`
 
 Manage dashboard login users
 
 Seeds admin credentials in the controller's users table, used
-by the web pod's login flow. Connection info comes from the
+by the dashboard's password sign-in. Connection info comes from the
 profile named by --profile.
 
 ### Subcommands
@@ -858,186 +787,14 @@ user in the controller's users table.
 sparkwing cluster users list --profile prod
 ```
 
-## `sparkwing cluster webhooks`
-
-Connect, inspect, and replay GitHub webhooks
-
-Manage GitHub webhooks through the installed 'gh' command and its
-credentials. 'connect' registers a repository against a pipeline on both
-sides and 'disconnect' removes it; the deliveries view joins delivery
-records with Sparkwing triggers and run outcomes.
-
-### Subcommands
-
-- `connect` -- Connect a GitHub repository to a pipeline
-- `disconnect` -- Remove a repository's webhook and its controller binding
-- `list` -- List GitHub hooks configured on a repo
-- `deliveries` -- List recent deliveries for a hook, joined with trigger state
-- `replay` -- Queue a redelivery of a specific delivery UUID
-
-### Examples
-
-```sh
-# Connect a repository to a pipeline
-sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build
-
-# List hooks on a repo
-sparkwing cluster webhooks list --repo your-org/my-app
-
-# Recent deliveries for a hook
-sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
-```
-
-## `sparkwing cluster webhooks connect`
-
-Connect a GitHub repository to a pipeline
-
-Registers both sides of a webhook in one command. It generates a
-signing secret, stores the binding on the controller, creates or
-updates the repository's webhook through 'gh' so it posts to the
-controller's delivery URL for this pipeline, and asks GitHub for a
-ping so the answer the controller gave is part of the output.
-
-The secret is never printed and never passed in a command line; the
-controller stores it and verifies every delivery's HMAC against it.
-Re-running the command rotates the secret on both sides.
-
-The delivery URL comes from the controller: its --external-url when
-it announces one, and otherwise the URL this command reached it at.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo OWNER/NAME` | GitHub repo (owner can be omitted if gh has a default) (required) |
-| `--pipeline NAME` | Pipeline the deliveries fire (required) |
-| `--events LIST` | Comma-separated GitHub events (default: push,pull_request) |
-| `--profile NAME` | Profile name (the controller that stores the binding) (required) |
-
-### Examples
-
-```sh
-# Connect push and pull-request triggers
-sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build
-
-# Connect pushes only
-sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push
-```
-
-## `sparkwing cluster webhooks deliveries`
-
-List recent deliveries for a hook, joined with trigger state
-
-Fetches recent deliveries via 'gh api' and, for each one,
-looks up the matching sparkwing trigger by GITHUB_DELIVERY env
-stamp. Surfaces TRIGGER_ID + RUN_STATUS columns so operators
-see GitHub-side status alongside the run it produced.
-
---since filters deliveries client-side (GitHub's API does not
-take a time filter). Default: 24h.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo OWNER/NAME` | GitHub repo (required) |
-| `--hook N` | GitHub hook id from 'webhooks list' (required) |
-| `--since DURATION` | Only deliveries newer than this (default: 24h) |
-| `-o, --output FMT` | Output format (json\|table) |
-| `--profile NAME` | Profile name (used for trigger/run lookups) (required) |
-
-### Examples
-
-```sh
-# Recent deliveries for a hook
-sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
-```
-
-## `sparkwing cluster webhooks disconnect`
-
-Remove a repository's webhook and its controller binding
-
-Removes the binding the controller verifies deliveries against, then
-deletes the webhook on GitHub through 'gh'. The controller answers with
-the webhook it was bound to, so a repository connected to two
-controllers under the same pipeline name loses only this one. A webhook
-written by hand is matched by its pipeline path instead, and every
-deleted hook is printed with its URL.
-
-Either side already being absent is reported rather than failing, so a
-half-finished connect is cleaned up by running this once.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo OWNER/NAME` | GitHub repo (required) |
-| `--pipeline NAME` | Pipeline the webhook fires (required) |
-| `--profile NAME` | Profile name (the controller holding the binding) (required) |
-
-### Examples
-
-```sh
-# Disconnect a repository
-sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build
-```
-
-## `sparkwing cluster webhooks list`
-
-List GitHub hooks configured on a repo
-
-Calls 'gh api /repos/OWNER/NAME/hooks' and prints id, derived
-pipeline, active flag, last-delivery status, and URL.
-
-The PIPELINE column is parsed from the hook URL path
-(/webhooks/github/<pipeline>). Hooks posting to the older
-unscoped /webhooks/github endpoint render as "(unscoped)"
-so operators can spot them for cleanup. Non-sparkwing hooks
-render as "(non-sparkwing)".
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo OWNER/NAME` | GitHub repo (owner can be omitted if gh has a default) (required) |
-| `-o, --output FMT` | Output format (json\|table) |
-
-### Examples
-
-```sh
-# List hooks on a repo
-sparkwing cluster webhooks list --repo your-org/my-app
-```
-
-## `sparkwing cluster webhooks replay`
-
-Queue a redelivery of a specific delivery UUID
-
-Requests another attempt for the selected GitHub webhook delivery.
-Read the hook's deliveries to inspect the resulting attempt.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--repo OWNER/NAME` | GitHub repo (required) |
-| `--hook N` | GitHub hook id (required) |
-| `--delivery UUID` | Delivery GUID to redeliver (required) |
-
-### Examples
-
-```sh
-# Redeliver a webhook attempt
-sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --delivery 00000000-0000-4000-8000-000000000001
-```
-
 ## `sparkwing cluster worker`
 
 Claim triggers from a profile's controller and run them in-process
 
 Polls the trigger queue at the selected profile's
 controller and executes each claimed trigger in-process on this host.
-Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
+For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
+--trigger-runner k8s|warm, which carries the image and service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing serve start' via --profile local.

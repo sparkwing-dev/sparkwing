@@ -99,17 +99,25 @@ const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 // under its own ref and reads its own, its pull request's base, then the
 // default branch, and other callers use only the unscoped objects.
 func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (repo, write string, read []string, err error) {
-	if grant.Claim == nil || grant.Claim.Kind != authwire.CacheClaimToken {
+	if grant.Claim.Kind != authwire.CacheClaimToken {
 		return "", "", []string{""}, nil
 	}
-	trigger, err := s.store.GetTrigger(ctx, grant.Run)
+	tenant, err := s.tenantForTeam(ctx, store.Team(grant.Team))
+	if err != nil {
+		return "", "", nil, err
+	}
+	trigger, err := tenant.GetTrigger(ctx, grant.Run)
 	if err != nil {
 		return "", "", nil, err
 	}
 	if trigger.Team != store.Team(grant.Team) {
 		return "", "", nil, errors.New("the cache grant's run belongs to another team")
 	}
-	repoID, err := s.store.TriggerRepoID(ctx, trigger.Team, grant.Run)
+	return s.triggerCacheScope(ctx, trigger)
+}
+
+func (s *Server) triggerCacheScope(ctx context.Context, trigger *store.Trigger) (repo, write string, read []string, err error) {
+	repoID, err := s.store.TriggerRepoID(ctx, trigger.Team, trigger.ID)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -117,10 +125,7 @@ func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (rep
 		repo = "github:" + strconv.FormatInt(repoID, 10)
 	}
 	env := trigger.TriggerEnv
-	own := env["GITHUB_REF"]
-	if own == "" && trigger.GitBranch != "" {
-		own = "refs/heads/" + trigger.GitBranch
-	}
+	own := triggerOwnRef(trigger)
 	refs := []string{}
 	for _, ref := range []string{own, branchRef(env[sparkwing.EnvPRBaseRef]), branchRef(env[EnvDefaultBranch])} {
 		if ref != "" && !slices.Contains(refs, ref) {
@@ -128,6 +133,13 @@ func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (rep
 		}
 	}
 	return repo, own, refs, nil
+}
+
+func triggerOwnRef(trigger *store.Trigger) string {
+	if ref := trigger.TriggerEnv["GITHUB_REF"]; ref != "" {
+		return ref
+	}
+	return branchRef(trigger.GitBranch)
 }
 
 func branchRef(branch string) string {
@@ -149,7 +161,7 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		return directCaller{}, false
 	}
 	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
-	if err != nil || grant.Claim == nil {
+	if err != nil {
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}

@@ -37,7 +37,7 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	if claimed.ID != "t-acme" || claimed.Team != "acme" {
 		t.Fatalf("claimed %s team = %q, want t-acme in acme", claimed.ID, claimed.Team)
 	}
-	read, err := s.GetTrigger(ctx, "t-acme")
+	read, err := acme.GetTrigger(ctx, "t-acme")
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}

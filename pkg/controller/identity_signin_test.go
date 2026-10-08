@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -170,41 +171,58 @@ func TestSignInRefusesAnEmailGoogleHasNotVerified(t *testing.T) {
 	f := newIdentityFixture(t)
 	p := person("g-eve", "eve@example.com", "Eve")
 	p.EmailVerified = false
-	var start struct{ Verifier string }
-	f.call("POST", "/api/v1/auth/oauth/google/start", "", map[string]string{"redirect_uri": dashRedirect}, &start)
-	code := f.call("POST", "/api/v1/auth/oauth/google/exchange", "", map[string]string{
-		"code": f.google.Code(p, start.Verifier, dashRedirect), "verifier": start.Verifier, "redirect_uri": dashRedirect,
-	}, nil)
+	code := f.oauthSignIn("google", func(verifier string) string { return f.google.Code(p, verifier, dashRedirect) }, nil)
 	if code != http.StatusForbidden {
-		t.Fatalf("exchange with an unverified email = %d, want 403", code)
+		t.Fatalf("sign-in with an unverified email = %d, want 403", code)
 	}
 }
 
 // The code is bound to the verifier of the flow that started it, so a code
-// minted for one flow and replayed with another flow's verifier is refused.
+// minted for one flow and replayed into another browser's callback is refused.
 func TestExchangeRefusesAnotherFlowsVerifier(t *testing.T) {
 	f := newIdentityFixture(t)
-	code := f.google.Code(person("g-m", "mallory@example.com", "Mallory"), "attacker-verifier", dashRedirect)
-	status := f.call("POST", "/api/v1/auth/oauth/google/exchange", "", map[string]string{
-		"code": code, "verifier": "victim-verifier", "redirect_uri": dashRedirect,
+	mallory := person("g-m", "mallory@example.com", "Mallory")
+	status := f.oauthSignIn("google", func(string) string {
+		return f.google.Code(mallory, "attacker-verifier", dashRedirect)
 	}, nil)
 	if status != http.StatusUnauthorized {
-		t.Fatalf("exchange = %d, want 401", status)
+		t.Fatalf("sign-in = %d, want 401", status)
 	}
 }
 
 func TestOAuthRefusesARedirectOffTheAllowlist(t *testing.T) {
 	f := newIdentityFixture(t)
-	evil := "https://evil.example/auth/google/callback"
-	if code := f.call("POST", "/api/v1/auth/oauth/google/start", "",
-		map[string]string{"redirect_uri": evil}, nil); code != http.StatusBadRequest {
-		t.Fatalf("start with an unlisted redirect = %d, want 400", code)
+	get := func(host, path string, cookies ...*http.Cookie) int {
+		req, err := http.NewRequest(http.MethodGet, f.url+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = host
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		resp, err := noRedirects.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
 	}
-	code := f.google.Code(person("g-x", "x@example.com", "X"), "v", evil)
-	if status := f.call("POST", "/api/v1/auth/oauth/google/exchange", "", map[string]string{
-		"code": code, "verifier": "v", "redirect_uri": evil,
-	}, nil); status != http.StatusBadRequest {
-		t.Fatalf("exchange with an unlisted redirect = %d, want 400", status)
+	if code := get("evil.example", "/auth/google/start"); code != http.StatusBadRequest {
+		t.Fatalf("start from an unlisted host = %d, want 400", code)
+	}
+	start := f.browserGet("/auth/google/start")
+	flow := responseCookie(start, "__Host-sw_oauth")
+	authorize, err := url.Parse(start.Header.Get("Location"))
+	if flow == nil || err != nil {
+		t.Fatalf("start = %d %q", start.StatusCode, start.Header.Get("Location"))
+	}
+	evil := "http://evil.example/auth/google/callback"
+	code := f.google.Code(person("g-x", "x@example.com", "X"), flowVerifier(t, flow), evil)
+	if status := get("evil.example", "/auth/google/callback?"+url.Values{
+		"code": {code}, "state": {authorize.Query().Get("state")},
+	}.Encode(), flow); status != http.StatusBadRequest {
+		t.Fatalf("callback on an unlisted host = %d, want 400", status)
 	}
 }
 
@@ -339,8 +357,7 @@ func TestUnusableLicensesLeaveTeamsDisabled(t *testing.T) {
 			if caps.Teams.Enabled || len(caps.Auth.Providers) != 0 {
 				t.Fatalf("capabilities = %+v, want teams disabled and no providers", caps)
 			}
-			if code := f.call("POST", "/api/v1/auth/oauth/google/start", "",
-				map[string]string{"redirect_uri": dashRedirect}, nil); code != http.StatusNotFound {
+			if code := f.browserGet("/auth/google/start").StatusCode; code != http.StatusNotFound {
 				t.Fatalf("start = %d, want 404", code)
 			}
 		})

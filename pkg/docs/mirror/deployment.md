@@ -61,8 +61,8 @@ The runner's CPU and memory ceilings still cap both, and the pod carries
 pool therefore needs N-vCPU machines with 4 GiB per vCPU, such as EC2's
 general-purpose families, and a kubelet reservation no larger than 110 pods
 leaves. A band Job refuses a node that holds another Job, and with
-`--runner-team-nodes` on `handle-trigger` (env: `SPARKWING_RUNNER_TEAM_NODES`,
-off by default) it also selects `sparkwing.dev/team-node` with its run's
+`sparkwing-runner runner --team-nodes` (the Helm value `runner.teamNodes`; off by default, and handed to each
+trigger as `handle-trigger --runner-team-nodes`) it also selects `sparkwing.dev/team-node` with its run's
 team. Turn it on only for a pool with an `Exists` requirement on that key:
 Karpenter then labels each node it boots with the team that asked, and only
 that team's Jobs reuse it. A band of static nodes without the label takes no
@@ -92,7 +92,7 @@ profiles:
       token: <api-token>
 ```
 
-Register profiles with `sparkwing configure profiles add`.
+Register profiles with `sparkwing cloud connect`.
 
 ## Deploy Strategies
 

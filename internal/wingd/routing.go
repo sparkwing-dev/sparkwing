@@ -325,22 +325,6 @@ func (d *Daemon) cancelWaiterLocked(runID string) []admission.Event {
 	return d.ledger.CancelWaiter(runID)
 }
 
-func requestFromWaiter(w admission.WaiterState) admission.Request {
-	req := admission.Request{
-		ID:          w.RequestID,
-		OwnerID:     w.OwnerID,
-		Priority:    w.Priority,
-		Cores:       float64(w.MilliCores) / 1000.0,
-		SoftCores:   w.SoftCores,
-		StrictCores: w.StrictCores,
-		MemoryBytes: w.MemoryBytes,
-	}
-	for _, c := range w.Claims {
-		req.Semaphores = append(req.Semaphores, admission.SemaphoreClaim(c))
-	}
-	return req
-}
-
 func (d *Daemon) waiterCountLocked() int {
 	return len(d.ledger.Snapshot().Waiters)
 }

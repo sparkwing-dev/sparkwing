@@ -135,7 +135,7 @@ func TestRenderDoctorPretty_ReportsMachineBudget(t *testing.T) {
 		t.Fatal("a machine budget made the sweep unclean; a setting is not a fault")
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "pretty", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "pretty"); err != nil {
 		t.Fatalf("render doctor: %v", err)
 	}
 	out := buf.String()
@@ -155,7 +155,7 @@ func TestRenderDoctorPretty_EnvBudgetWarnsItDies(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, r, "pretty", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "pretty"); err != nil {
 		t.Fatalf("render doctor: %v", err)
 	}
 	if !strings.Contains(buf.String(), "dies with the daemon") {
@@ -165,7 +165,7 @@ func TestRenderDoctorPretty_EnvBudgetWarnsItDies(t *testing.T) {
 
 func TestRenderDoctorPlain_StatesBudgetEitherWay(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "plain"); err != nil {
 		t.Fatalf("render doctor: %v", err)
 	}
 	if !strings.Contains(buf.String(), "machine_budget\tunset") {
@@ -180,7 +180,7 @@ func TestRenderDoctorPlain_StatesBudgetEitherWay(t *testing.T) {
 			IgnoreExternal: true,
 		},
 	}
-	if err := opsview.RenderDoctor(&buf, r, "plain", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, r, "plain"); err != nil {
 		t.Fatalf("render doctor: %v", err)
 	}
 	if !strings.Contains(buf.String(), "machine_budget\tconfig\t/home/op/.config/sparkwing/config.yaml admission.budget\t1") {

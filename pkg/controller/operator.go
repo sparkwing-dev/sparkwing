@@ -33,9 +33,8 @@ func (s *Server) WithOperatorAccounts(ids []string) *Server {
 // sign-in and never a credential that automation can hold.
 func (s *Server) requireOperator(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := PrincipalFromContext(r.Context())
-		set := s.operators.Load()
-		if !ok || p.session == "" || p.AccountID == "" || set == nil || !(*set)[p.AccountID] {
+		p, _ := PrincipalFromContext(r.Context())
+		if !s.operatorSession(p) {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code: "forbidden", Message: "the operator console needs the operator's own signed-in account",
 			})
@@ -45,14 +44,14 @@ func (s *Server) requireOperator(next http.HandlerFunc) http.Handler {
 	})
 }
 
+func (s *Server) operatorSession(p *Principal) bool {
+	set := s.operators.Load()
+	return p != nil && p.session != "" && p.AccountID != "" && set != nil && (*set)[p.AccountID]
+}
+
 func operatorActor(r *http.Request) string {
 	p, _ := PrincipalFromContext(r.Context())
 	return p.Name
-}
-
-func (s *Server) handleOperatorSession(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
-	writeJSON(w, http.StatusOK, map[string]string{"account_id": p.AccountID, "name": p.Name})
 }
 
 type operatorTeamMatchJSON struct {

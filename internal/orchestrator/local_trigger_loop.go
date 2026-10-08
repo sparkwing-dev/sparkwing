@@ -483,7 +483,7 @@ func pinnedTriggerBinary(trig *store.Trigger) (string, error) {
 		return "", fmt.Errorf(
 			"the pipeline binary this cron schedule pinned is gone from %s, and the pin is what keeps an "+
 				"updated checkout from changing what runs: %w. Re-run `sparkwing crons install` to pin the "+
-				"checkout as it stands, or `sparkwing crons unlock` to follow it", path, err)
+				"checkout as it stands, or `sparkwing crons set <name> --unpin` to follow it", path, err)
 	}
 	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
 		return "", fmt.Errorf(
@@ -503,7 +503,7 @@ func pinnedTriggerBinary(trig *store.Trigger) (string, error) {
 			"the pipeline binary this cron schedule pinned at %s has been replaced: it hashes to %s, and the "+
 				"schedule was armed against %s. The pin is what keeps an unattended run from executing something "+
 				"nobody approved, so this run is refused; re-run `sparkwing crons install` to pin the checkout as "+
-				"it stands, or `sparkwing crons unlock` to follow it", path, got, want)
+				"it stands, or `sparkwing crons set <name> --unpin` to follow it", path, got, want)
 	}
 	return path, nil
 }
@@ -609,7 +609,7 @@ func locateRetryRepo(ctx context.Context, trig *store.Trigger) (string, error) {
 func unlocatableChildError(pipeline string) error {
 	return fmt.Errorf("locate %q: not declared by the running project, absent from the repo "+
 		"registry, and this run has no git identity to resolve a sibling checkout from. Give the "+
-		"project a git remote, register the defining repo with `sparkwing configure xrepo add <path>`, "+
+		"project a git remote, register the defining repo with `sparkwing repos add <path>`, "+
 		"or pass sparkwing.WithFreshRepo(\"owner/name\") for a cross-repo await",
 		pipeline)
 }

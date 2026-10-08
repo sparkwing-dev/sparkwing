@@ -8,10 +8,10 @@ import (
 
 func TestXrepoSubcommandsAreRegistered(t *testing.T) {
 	want := map[string]bool{
-		"sparkwing configure xrepo list":   false,
-		"sparkwing configure xrepo add":    false,
-		"sparkwing configure xrepo remove": false,
-		"sparkwing configure xrepo prune":  false,
+		"sparkwing repos list":   false,
+		"sparkwing repos add":    false,
+		"sparkwing repos remove": false,
+		"sparkwing repos prune":  false,
 	}
 	for _, command := range allCommands {
 		if _, ok := want[command.Path]; ok {
@@ -29,20 +29,20 @@ func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
 	t.Parallel()
 	bin := buildSubmitCLI(t)
 
-	parent, err := exec.Command(bin, "configure", "xrepo", "--help").CombinedOutput()
+	parent, err := exec.Command(bin, "repos", "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("xrepo help: %v\n%s", err, parent)
 	}
-	if !strings.Contains(string(parent), "list    List registered checkouts and their pipelines") {
+	if !strings.Contains(string(parent), "add     Register a checkout") {
 		t.Fatalf("xrepo help does not use the registered child synopsis:\n%s", parent)
 	}
 
-	leaf, err := exec.Command(bin, "configure", "xrepo", "list", "--help").CombinedOutput()
+	leaf, err := exec.Command(bin, "repos", "list", "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("xrepo list help: %v\n%s", err, leaf)
 	}
 	for _, want := range []string{
-		"sparkwing configure xrepo list [flags]",
+		"sparkwing repos list [flags]",
 		"--output FORMAT",
 		"[optional]",
 	} {
@@ -51,11 +51,11 @@ func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
 		}
 	}
 
-	add, err := exec.Command(bin, "configure", "xrepo", "add", "--help").CombinedOutput()
+	add, err := exec.Command(bin, "repos", "add", "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("xrepo add help: %v\n%s", err, add)
 	}
-	if !strings.Contains(string(add), "sparkwing configure xrepo add [path] [flags]") {
+	if !strings.Contains(string(add), "sparkwing repos add [path] [flags]") {
 		t.Fatalf("xrepo add help does not render its optional path once:\n%s", add)
 	}
 }
@@ -74,13 +74,13 @@ func TestXrepoRegistryDescribesRuntimeInputs(t *testing.T) {
 		t.Errorf("%s is missing --%s", command.Path, name)
 	}
 
-	assertFlag(t, cmdConfigureXrepoList, "output", "o")
-	assertFlag(t, cmdConfigureXrepoList, "pipelines", "")
+	assertFlag(t, cmdReposList, "output", "o")
+	assertFlag(t, cmdReposList, "pipelines", "")
 
-	if len(cmdConfigureXrepoAdd.PosArgs) != 1 || cmdConfigureXrepoAdd.PosArgs[0].Required {
-		t.Fatalf("xrepo add positional arguments = %#v, want one optional path", cmdConfigureXrepoAdd.PosArgs)
+	if len(cmdReposAdd.PosArgs) != 1 || cmdReposAdd.PosArgs[0].Required {
+		t.Fatalf("xrepo add positional arguments = %#v, want one optional path", cmdReposAdd.PosArgs)
 	}
-	if len(cmdConfigureXrepoRemove.PosArgs) != 1 || !cmdConfigureXrepoRemove.PosArgs[0].Required {
-		t.Fatalf("xrepo remove positional arguments = %#v, want one required path or basename", cmdConfigureXrepoRemove.PosArgs)
+	if len(cmdReposRemove.PosArgs) != 1 || !cmdReposRemove.PosArgs[0].Required {
+		t.Fatalf("xrepo remove positional arguments = %#v, want one required path or basename", cmdReposRemove.PosArgs)
 	}
 }

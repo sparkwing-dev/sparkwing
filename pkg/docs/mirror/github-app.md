@@ -26,7 +26,7 @@ The controller refuses to start with some of the App settings and not the others
 
 ### GitHub App settings
 
-The examples use the hosted deployment's hosts: the dashboard at `console.sparkwing.dev` and the controller at `api.sparkwing.dev`. A self-hosted deployment puts its own dashboard and controller external URL in their place.
+The examples use the hosted deployment's hosts: the dashboard at `console.sparkwing.dev` and the API at `api.sparkwing.dev`. Both route to the controller, which serves the dashboard and the API on one listener. A self-hosted deployment puts its own dashboard URL (`--dashboard-url` or `SPARKWING_DASHBOARD_URL`) and controller external URL (`--external-url` or `SPARKWING_EXTERNAL_URL`) in their place, and may use one host for both.
 
 - **Webhook**: active. URL `https://api.sparkwing.dev/webhooks/github-app`. Secret: the webhook secret above.
 - **Setup URL**: `https://console.sparkwing.dev/github/app/setup`, with **Redirect on update** checked.
@@ -41,14 +41,14 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 
 Only a team owner connects, and only as a signed-in account with a linked GitHub identity, which a Google-first account adds from **Account -> Linked sign-ins** ([linked sign-ins](auth.md#linked-sign-ins)). Unlinking that GitHub sign-in later leaves the installations the account connected bound to their teams. In the dashboard, the owner opens **Team -> GitHub** and chooses **Connect GitHub**; the tab appears when `GET /api/v1/capabilities` reports `github_app`. Readers and editors see the same tab read-only.
 
-1. The dashboard calls `POST /api/v1/team/github-app/connect {redirect_uri}` and gets `{install_url, authorize_url, state, verifier}`. It keeps `state` and `verifier` in a short-lived `__Host-` cookie and sends the browser to `install_url`.
-2. GitHub returns the browser to the setup URL with `installation_id`, `setup_action` and `state`. The dashboard checks `state` against its cookie, keeps `installation_id` in the cookie, and sends the browser to `authorize_url`.
-3. GitHub returns the browser to the callback with `code` and `state`. The dashboard checks `state` again and calls `POST /api/v1/team/github-app/connect/complete {state, verifier, code, installation_id, redirect_uri}`.
+1. **Connect GitHub** posts to the controller's `/github/app/connect` with the session's CSRF token. The controller creates the install URL, the authorize URL, a state and a PKCE verifier, keeps the state and verifier in a short-lived `__Host-` cookie, and sends the browser to the install URL.
+2. GitHub returns the browser to the setup URL, `/github/app/setup`, with `installation_id`, `setup_action` and `state`. The controller checks `state` against the cookie, keeps `installation_id` in the cookie, and sends the browser to the authorize URL.
+3. GitHub returns the browser to the callback, `/github/app/callback`, with `code` and `state`. The controller checks `state` again, keeps the code in the cookie, and moves on to `/github/app/complete`, a same-site request that carries the session and binds the installation.
 
-The `installation_id` the dashboard sends is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the dashboard origin before `connect/complete` uses the session. A setup return with `setup_action=request` means an organization owner must approve the install; the dashboard says so and the owner connects again after the approval.
+The `installation_id` the controller binds is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the controller's own origin before the session is used. A setup return with `setup_action=request` means an organization owner must approve the install; the controller's page says so and the owner connects again after the approval.
 
 When an administrator changes repository access on GitHub outside a connect flow,
-GitHub returns to the setup URL with `setup_action=update`, and the dashboard
+GitHub returns to the setup URL with `setup_action=update`, and the controller
 opens **Team → GitHub** with “Repository access updated on GitHub”.
 
 The controller binds the installation to the caller's active team only when all of these hold:
@@ -72,7 +72,39 @@ An installation stops being bound when GitHub reports it deleted, when a team ow
 
 ## Runs from GitHub events
 
-A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block. Each additional option defaults to `false`:
+### Repository-managed triggers
+
+In **Team → GitHub**, select a connected repository, review its declared pipelines,
+and choose **Enable declarations**. Connecting an installation alone does not enable
+repository automation. The controller reads `.sparkwing/sparkwing.yaml` at the
+verified default-branch head without compiling or executing repository Go code.
+Subsequent signed deliveries use those declarations; execution stays pinned to the
+event's commit. Feature-branch and PR-head configuration cannot authorize a run.
+
+`GET /api/v1/team/github-app/automation?repository=owner/name` previews the
+configuration, source SHA, default branch, consent state and pipeline filters.
+An owner enables it with `PUT /api/v1/team/github-app/automation {repository}`
+and revokes it with `DELETE /api/v1/team/github-app/automation?repository_id=<id>`.
+GET without a repository lists enabled repositories. Discovery is read-only.
+
+Supported declarations are `on.push.branches` and
+`on.pull_request.actions`/`branches` (the PR base branch). Empty branch filters
+match all branches. Empty PR actions select `opened`, `synchronize` and `reopened`;
+`closed` and `ready_for_review` are also supported. Patterns use Go `path.Match`:
+`*` does not cross `/`. Recursive `**`, negative patterns, changed-path filters
+and unsupported PR actions produce an explicit unsupported status instead of
+broader execution. Other event types remain configured through manual subscriptions.
+
+Missing, invalid, unsupported or unreadable configuration starts no automatic
+runs. The preview explains the problem; refresh discovery after fixing it.
+Temporary discovery failures preserve saved consent. Removing repository access or
+disconnecting its installation revokes consent; reconnecting requires enabling it
+again. Existing manual subscriptions take precedence for their pipeline name,
+including events their filters exclude. The preview marks these manual overrides.
+
+### Manual subscriptions
+
+The **Advanced** section retains explicit subscriptions. A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request, branches, base_branches, ...}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull request `opened`, `synchronize` and `reopened` events. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 tag patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly. Each additional option defaults to `false`:
 
 | Option | Event |
 | --- | --- |
@@ -86,7 +118,7 @@ A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/t
 
 The subscription follows GitHub's repository id across a rename. A `repository` `renamed` or `transferred` delivery updates its displayed name and installation when the new installation belongs to the same team and covers the repository. No pipeline runs from the repository event itself.
 
-`POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For each subscribed event it creates one trigger in that team per pipeline, recording the branch or tag ref, commit, repository and installation id. The controller resolves release tags and branch refs through a repository-restricted installation token before dispatch. The operator webhook at `POST /webhooks/github/{pipeline}` acknowledges tag pushes without starting runs.
+`POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For each subscribed event it creates one trigger in that team per pipeline, recording the branch or tag ref, commit, repository and installation id. The controller resolves release tags and branch refs through a repository-restricted installation token before dispatch.
 
 Runs expose `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_REF_TYPE` and `GITHUB_ACTION`. Tag push triggers carry `GITHUB_REF=refs/tags/<tag>`, `GITHUB_REF_TYPE=tag` and `GITHUB_TAG=<tag>`, and a tag node also gets `GITHUB_REF_NAME=<tag>`. Branch push triggers carry `GITHUB_REF=refs/heads/<branch>` and `GITHUB_REF_TYPE=branch`. PR runs also expose `GITHUB_LABEL` and `GITHUB_MERGED` (`true` or `false`), along with the existing `GITHUB_PR_*` fields. Release runs expose `GITHUB_TAG_NAME`. PR refs are `refs/pull/<number>/head`; release refs are `refs/tags/<tag>`; branch events expose `refs/heads/<branch>`, including the deleted branch. OIDC trigger claims use `push`, `pull_request`, `release`, `create` or `delete` with those refs.
 
@@ -99,7 +131,9 @@ A delivery starts nothing, and is acknowledged with the reason, when:
 - the event carries no such time, or one the controller cannot read, since nothing then shows it is not older than the binding; release uses `published_at`, and branch events use the repository's `pushed_at` or `updated_at`;
 - GitHub no longer reports the installation as covering the repository. The controller asks GitHub on every delivery that would start a run, never from a cached answer.
 
-The controller remembers the digest of every signed body that started runs, for 90 days and for every team. A delivery with the same body answers 200 with status `duplicate` and the runs it started in the current team, before it is counted against any cap, so GitHub's redelivery and a replay after the installation moves teams start nothing. Within a team, each trigger's replay key (a digest of the pipeline and the signed body) and delivery key (the delivery id and pipeline) still refuse a second copy of a run.
+The controller remembers the digest of every signed body that started runs, for 90 days and for every team. A delivery with the same body answers 200 with status `duplicate` and the runs it started in the current team, before it is counted against any cap, so GitHub's redelivery and a replay after the installation moves teams start nothing. Within a team, each trigger's replay key (a digest of the pipeline and the signed body) and delivery key (the delivery id and pipeline) still refuse a second copy of a run. Because a digest is forgotten after those 90 days, a run-starting delivery whose event time is older than that answers 409 and logs `github app delivery refused: older than the replay window`. The event time is the signed body's `repository.pushed_at` for push, `create` and `delete` (or `repository.updated_at` when later), `release.published_at` for releases, and `pull_request.updated_at` for pull requests. GitHub redelivers only recent deliveries, so the refusal reaches only a replay of captured bytes.
+
+GitHub signs the body but not the `X-GitHub-Event` header, so the controller also binds every verified body to the event it first arrived as, whether or not it started anything, and keeps that binding for the same 90 days. The same body sent again under another event name answers 409 and is not read. An `installation` event must name this App's id in its installation object, which only installation events carry.
 
 Each run a delivery creates spends one of the team's hourly runs (`--max-runs-per-principal-hour`, see [security](security.md)), from the same budget the team's API submissions spend. When the budget runs out before the first run, the delivery answers 429 with `Retry-After`. When it runs out partway, the runs already created stand, the rest are listed with status `shed`, and the delivery is not remembered. A redelivery answers the runs it already started as `duplicate` without spending anything, and spends the budget only on the runs that were shed.
 
@@ -135,7 +169,7 @@ The fetch inherits the token on a pipe, and a credential helper scoped to `https
 
 ## Check runs
 
-Each run the App started reports as one check run named `sparkwing/<pipeline>` on the commit it builds: the pushed commit, or a pull request's head. Only runs whose trigger the App webhook created report this way; the operator's `GITHUB_TOKEN` reporter keeps posting commit statuses for operator webhook bindings, unchanged.
+Each run the App started reports as one check run named `sparkwing/<pipeline>` on the commit it builds: the pushed commit, or a pull request's head. Only runs whose trigger the App webhook created report this way; runs from the CLI, the API or a schedule report nothing to GitHub.
 
 The check run is created `queued` when the run is dispatched, moves to `in_progress` when a runner starts it, and ends `completed` with one of these conclusions:
 

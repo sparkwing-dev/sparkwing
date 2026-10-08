@@ -79,6 +79,9 @@ func (s *Server) handleSetMemberRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if store.Role(req.Role).Valid() {
+		noteAuditTarget(r.Context(), "role", req.Role)
+	}
 	revoked, err := t.SetMemberRole(r.Context(), p.AccountID, r.PathValue("user_id"), store.Role(req.Role), time.Now())
 	if err != nil {
 		writeIdentityError(w, s, r, "set member role", err)
@@ -166,6 +169,8 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, s, r, "invite", err)
 		return
 	}
+	noteAuditTarget(r.Context(), "invitation_id", inv.ID)
+	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
 	sent := s.mailInvitation(r.Context(), p, t, inv, accept)
 	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
@@ -349,15 +354,26 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 	s.logger.Info("runner token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)
 	writeJSON(w, http.StatusCreated, runnerTokenResp{
 		Token: raw, Prefix: tok.Prefix,
-		Command: "SPARKWING_AGENT_TOKEN=" + raw + " " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name, allow),
+		Command: runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name, allow),
 	})
+}
+
+// safety: the connect command stores the token in a file, never on the runner's
+// command line, where any local user can read it; the old file goes first,
+// because umask sets only a new file's mode, and && keeps a failed removal from
+// writing the token into that old file (set -e is off inside an && operand).
+const runnerCredentialsDir = `"$HOME/.config/sparkwing/runner-credentials"`
+
+func runnerTokenSetup(raw string) string {
+	file := runnerCredentialsDir + "/agent-token"
+	return "(umask 077 && mkdir -p " + runnerCredentialsDir + " && rm -f " + file + " && printf '%s' " + raw + " > " + file + ")"
 }
 
 // hack: --metrics-addr= because a second runner on a machine would collide on its port; no
 // --gitcache since the git cache is the operator's; --logs only when announced, since the
 // controller serves no logs route. Patterns are single-quoted because '*' is a shell glob.
 func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist) string {
-	cmd := "sparkwing-runner runner --controller " + controllerURL
+	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
 	if logsURL != "" {
 		cmd += " --logs " + strings.TrimRight(logsURL, "/")
 	}

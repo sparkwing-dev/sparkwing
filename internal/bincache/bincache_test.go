@@ -87,7 +87,7 @@ func installFakeGo(t *testing.T) string {
 	if installNativeFakeGo(t, binDir, log, false, "", "") {
 		return log
 	}
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n" +
+	script := "#!/bin/sh\n" + fakeGoEnvProbe + "printf '%s\\n' \"$*\" >> " + log + "\n" +
 		"while [ $# -gt 0 ]; do\n" +
 		"  if [ \"$1\" = \"-o\" ]; then\n" +
 		"    shift\n" +
@@ -206,7 +206,7 @@ func installFakeGoLoggingEnv(t *testing.T) string {
 	if installNativeFakeGo(t, binDir, log, true, "", "") {
 		return log
 	}
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/sh\n" + fakeGoEnvProbe +
 		"printf 'ARGV %s\\n' \"$*\" >> " + log + "\n" +
 		"printf 'GOWORK %s\\n' \"${GOWORK}\" >> " + log + "\n" +
 		"while [ $# -gt 0 ]; do\n" +
@@ -310,7 +310,7 @@ func installFailingGo(t *testing.T, stderrLine, stdoutLine string) {
 	if installNativeFakeGo(t, binDir, "", false, stdoutLine, stderrLine) {
 		return
 	}
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/sh\n" + fakeGoEnvProbe +
 		"printf '%s\\n' " + shQuote(stdoutLine) + "\n" +
 		"printf '%s\\n' " + shQuote(stderrLine) + " 1>&2\n" +
 		"exit 1\n"
@@ -490,3 +490,5 @@ func TestPipelineCacheKey_IncludesWebPackage(t *testing.T) {
 		t.Fatal("editing a web package reused the old binary cache key")
 	}
 }
+
+const fakeGoEnvProbe = "if [ \"$1\" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi\n"

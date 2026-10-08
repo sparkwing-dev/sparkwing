@@ -18,7 +18,6 @@ func TestResolveCloneURL_NoCache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	t.Setenv("SPARKWING_GITCACHE", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 
 	prev := gitcacheProbeURL
@@ -33,7 +32,6 @@ func TestResolveCloneURL_NoCache(t *testing.T) {
 }
 
 func TestResolveCloneURL_StubServerNotHealthy(t *testing.T) {
-	t.Setenv("SPARKWING_GITCACHE", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +51,6 @@ func TestResolveCloneURL_StubServerNotHealthy(t *testing.T) {
 }
 
 func TestResolveCloneURL_StubServerHealthy(t *testing.T) {
-	t.Setenv("SPARKWING_GITCACHE", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,8 +76,7 @@ func TestResolveCloneURL_StubServerHealthy(t *testing.T) {
 }
 
 func TestResolveCloneURL_EnvOverride(t *testing.T) {
-	t.Setenv("SPARKWING_GITCACHE", "http://cache.local:9999/")
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", "http://cache.local:9999/")
 
 	upstream := "https://github.com/owner/repo.git"
 	got, _, _ := resolveCloneURL(context.Background(), upstream)
@@ -139,8 +135,7 @@ func TestCloneThroughSecuredGitcache(t *testing.T) {
 			cached := bareTestRepo(t, root, newTestRepo(t, filepath.Join(root, "cached"), "cached.txt"))
 			srv, seen := tokenedGitcache(t, "s3cret", cached)
 
-			t.Setenv("SPARKWING_GITCACHE", srv.URL)
-			t.Setenv("SPARKWING_GITCACHE_URL", "")
+			t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 			t.Setenv("SPARKWING_CACHE_TOKEN", c.token)
 
 			dest := filepath.Join(root, "dest")
@@ -167,8 +162,7 @@ func TestCloneFallsBackWhenTheCacheDoesNotServeTheName(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	t.Setenv("SPARKWING_GITCACHE", srv.URL)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
@@ -188,8 +182,7 @@ func TestCloneFallsBackWhenTheCacheAnswersAServerError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	t.Setenv("SPARKWING_GITCACHE", srv.URL)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
@@ -208,8 +201,7 @@ func TestCloneFallsBackWhenTheCacheIsUnreachable(t *testing.T) {
 	url := dead.URL
 	dead.Close()
 
-	t.Setenv("SPARKWING_GITCACHE", url)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", url)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
@@ -229,8 +221,7 @@ func TestCloneLeavesAPreexistingDestinationAlone(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	t.Setenv("SPARKWING_GITCACHE", srv.URL)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
@@ -365,7 +356,6 @@ func TestProbedCacheNeverSeesTheBearer(t *testing.T) {
 	cached := bareTestRepo(t, root, newTestRepo(t, filepath.Join(root, "cached"), "cached.txt"))
 	srv, seen := probingGitcache(t, "s3cret", cached)
 
-	t.Setenv("SPARKWING_GITCACHE", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
@@ -391,7 +381,6 @@ func TestGitcacheURLEnvRoutesClonesThroughTheCache(t *testing.T) {
 	cached := bareTestRepo(t, root, newTestRepo(t, filepath.Join(root, "cached"), "cached.txt"))
 	srv, seen := tokenedGitcache(t, "s3cret", cached)
 
-	t.Setenv("SPARKWING_GITCACHE", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
@@ -415,8 +404,7 @@ func TestCloneFallsBackWhenTheCacheRedirects(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("SPARKWING_GITCACHE", srv.URL)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
 	dest := filepath.Join(root, "dest")
@@ -434,8 +422,7 @@ func TestFetchAfterCachedCloneCarriesTheBearer(t *testing.T) {
 	cached := bareTestRepo(t, root, newTestRepo(t, filepath.Join(root, "cached"), "cached.txt"))
 	srv, seen := tokenedGitcache(t, "s3cret", cached)
 
-	t.Setenv("SPARKWING_GITCACHE", srv.URL)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
 	dest := filepath.Join(root, "dest")
@@ -454,8 +441,7 @@ func TestFetchLeavesANonCacheOriginAlone(t *testing.T) {
 	root := t.TempDir()
 	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
 
-	t.Setenv("SPARKWING_GITCACHE", "http://cache.local:9999")
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_GITCACHE_URL", "http://cache.local:9999")
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
 	dest := filepath.Join(root, "dest")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -91,25 +92,48 @@ func commandHelp(args []string) (*Command, bool) {
 	return selected, help || selected == &cmdSparkwing
 }
 
-func moveRootOutput(args []string) ([]string, error) {
-	end := 0
+// safety: flags before the verb move after it so the verb parses them as its
+// own; -C applies first because every later lookup reads the working directory.
+func moveRootFlags(args []string) ([]string, error) {
+	end, chdir, hasOutput := 0, "", false
+	var moved []string
+flags:
 	for end < len(args) {
 		arg := args[end]
-		if arg == "--output" || arg == "-o" {
-			if end+1 >= len(args) {
-				return args, nil
-			}
+		takesValue := arg == "--output" || arg == "-o" || arg == "--profile" || arg == "-C"
+		switch {
+		case takesValue && end+1 >= len(args):
+			return nil, fmt.Errorf("%s requires a value", arg)
+		case arg == "-C":
+			chdir = args[end+1]
 			end += 2
-		} else if strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2) {
+		case strings.HasPrefix(arg, "-C=") || (strings.HasPrefix(arg, "-C") && len(arg) > 2):
+			chdir = strings.TrimPrefix(strings.TrimPrefix(arg, "-C"), "=")
 			end++
-		} else {
-			break
+		case takesValue:
+			hasOutput = hasOutput || arg != "--profile"
+			moved = append(moved, arg, args[end+1])
+			end += 2
+		case strings.HasPrefix(arg, "--profile="):
+			moved = append(moved, arg)
+			end++
+		case strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2):
+			hasOutput = true
+			moved = append(moved, arg)
+			end++
+		default:
+			break flags
 		}
 	}
-	if end == 0 || end == len(args) {
-		return args, nil
+	if chdir != "" {
+		if err := os.Chdir(chdir); err != nil {
+			return nil, fmt.Errorf("-C %q: %w", chdir, err)
+		}
 	}
 	rest := args[end:]
+	if len(moved) == 0 || len(rest) == 0 {
+		return append(moved, rest...), nil
+	}
 	path, slot := "sparkwing", 0
 	for slot < len(rest) {
 		candidate, found := path+" "+rest[slot], false
@@ -124,8 +148,8 @@ func moveRootOutput(args []string) ([]string, error) {
 		}
 		slot++
 	}
-	if path == "sparkwing run" || path == "sparkwing pipeline run" {
-		if !wantsHelp(args) {
+	if path == "sparkwing run" {
+		if hasOutput && !wantsHelp(rest) {
 			return nil, fmt.Errorf("%s: -o/--output does not select a run's stream. The stream is pretty on a terminal "+
 				"and NDJSON when piped, and SPARKWING_LOG_FORMAT overrides that; flags for the pipeline itself go after --", path)
 		}
@@ -133,9 +157,9 @@ func moveRootOutput(args []string) ([]string, error) {
 			slot++
 		}
 	}
-	moved := append([]string{}, rest[:slot]...)
-	moved = append(moved, args[:end]...)
-	return append(moved, rest[slot:]...), nil
+	out := append([]string{}, rest[:slot]...)
+	out = append(out, moved...)
+	return append(out, rest[slot:]...), nil
 }
 
 func writeDocument(w io.Writer, slug, text, mode string) error {

@@ -4,24 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/inprocdispatch"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -35,9 +29,7 @@ func TestTrigger_Validation(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	capture := &captureDispatcher{}
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(capture)
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -65,9 +57,7 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	capture := &captureDispatcher{}
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(capture)
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -80,7 +70,7 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	}
 }
 
-func TestTrigger_NoopDispatcher(t *testing.T) {
+func TestTrigger_RecordsARunForRunnersToClaim(t *testing.T) {
 	dir := t.TempDir()
 	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -88,9 +78,7 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	capture := &captureDispatcher{}
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(capture)
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -126,9 +114,7 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	}
 	defer st.Close()
 
-	capture := &captureDispatcher{}
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(capture)
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -176,9 +162,7 @@ func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	capture := &captureDispatcher{}
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(capture)
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -234,93 +218,6 @@ func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 		if trigger.TriggerEnv[key] != want {
 			t.Fatalf("%s = %q, want %q", key, trigger.TriggerEnv[key], want)
 		}
-	}
-}
-
-func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
-	registerPipeline("trigger-e2e", func() sparkwing.Pipeline[sparkwing.NoInputs] { return triggerE2EPipe{} })
-
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srv := controller.New(st, nil)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	paths := orchestrator.PathsAt(dir)
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatal(err)
-	}
-	local := orchestrator.LocalBackends(paths, st, nil)
-	backends := orchestrator.Backends{
-		State:       client.New(ts.URL, nil),
-		Logs:        local.Logs,
-		Concurrency: local.Concurrency,
-	}
-	srv.WithDispatcher(inprocdispatch.InProcessDispatcher{Backends: backends})
-
-	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "trigger-e2e",
-		"trigger":  map[string]string{"source": "github"},
-		"git":      map[string]string{"branch": "main", "sha": "abc1230000000000000000000000000000000000"},
-	})
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("trigger status=%d want 202 (body: %s)", resp.StatusCode, body)
-	}
-	var body struct {
-		RunID string `json:"run_id"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&body)
-	if body.RunID == "" {
-		t.Fatal("empty run_id")
-	}
-
-	poll := time.NewTicker(20 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-	var finalRun *store.Run
-	for finalRun == nil {
-		run, err := st.GetRun(context.Background(), body.RunID)
-		switch {
-		case err == nil && run.FinishedAt != nil:
-			finalRun = run
-		case err == nil:
-		case errors.Is(err, store.ErrNotFound):
-		default:
-			t.Fatalf("GetRun: %v", err)
-		}
-		if finalRun != nil {
-			continue
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatalf("run %s never finished within deadline", body.RunID)
-		}
-	}
-	if finalRun.Status != "success" {
-		t.Errorf("run status=%q want success (err=%q)", finalRun.Status, finalRun.Error)
-	}
-	if finalRun.TriggerSource != "github" {
-		t.Errorf("trigger_source=%q want github", finalRun.TriggerSource)
-	}
-
-	nodes, err := st.ListNodes(context.Background(), body.RunID)
-	if err != nil {
-		t.Fatalf("ListNodes: %v", err)
-	}
-	if len(nodes) != 1 {
-		t.Errorf("nodes=%d want 1", len(nodes))
-	}
-	if nodes[0].Outcome != string(sparkwing.Success) {
-		t.Errorf("node outcome=%q want success", nodes[0].Outcome)
 	}
 }
 
@@ -429,70 +326,6 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	}
 }
 
-func TestTrigger_DispatcherError(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srv := controller.New(st, nil)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	srv.WithDispatcher(&failingDispatcher{})
-
-	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "x",
-		"trigger":  map[string]string{"source": "manual"},
-	})
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status=%d want 500", resp.StatusCode)
-	}
-}
-
-type triggerE2EPipe struct{ sparkwing.Base }
-
-func (triggerE2EPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "work", func(ctx context.Context) error {
-		sparkwing.Info(ctx, "work via webhook trigger")
-		return nil
-	})
-	return nil
-}
-
-type failingDispatcher struct {
-	called atomic.Int32
-}
-
-func (f *failingDispatcher) Dispatch(_ context.Context, _ controller.RunRequest) error {
-	f.called.Add(1)
-	return errors.New("dispatcher broken")
-}
-
-type captureDispatcher struct {
-	mu   sync.Mutex
-	last controller.RunRequest
-}
-
-func (c *captureDispatcher) Dispatch(_ context.Context, req controller.RunRequest) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.last = req
-	return nil
-}
-
-var registerOnce sync.Map
-
-func registerPipeline(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]) {
-	if _, loaded := registerOnce.LoadOrStore(name, struct{}{}); loaded {
-		return
-	}
-	sparkwing.Register[sparkwing.NoInputs](name, factory)
-}
-
 func postJSON(t *testing.T, url string, body any) *http.Response {
 	t.Helper()
 	buf, err := json.Marshal(body)
@@ -516,7 +349,6 @@ func TestTrigger_RequiresJSONContentType(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(&captureDispatcher{})
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -564,7 +396,6 @@ func TestTrigger_ValidatesRepoURL(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(&captureDispatcher{})
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -604,7 +435,6 @@ func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(&captureDispatcher{})
 	srv := httptest.NewServer(srvController.Handler())
 	t.Cleanup(srv.Close)
 
@@ -660,7 +490,6 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	}
 
 	srvController := controller.New(st, nil).EnableAuthFromStore()
-	srvController.WithDispatcher(&captureDispatcher{})
 	srv := httptest.NewServer(srvController.Handler())
 	t.Cleanup(srv.Close)
 
@@ -793,7 +622,6 @@ func TestTriggerAndCreateRunRejectAGitSHAThatIsNotAnObjectID(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(&captureDispatcher{})
 	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
@@ -851,7 +679,6 @@ func TestTrigger_RefusesATriggerThatNamesTwoRepositories(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	srvController := controller.New(st, nil)
-	srvController.WithDispatcher(&captureDispatcher{})
 	srv := httptest.NewServer(srvController.Handler())
 	t.Cleanup(srv.Close)
 

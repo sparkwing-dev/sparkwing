@@ -9,12 +9,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const gcTimeout = 5 * time.Second
 
-const gcGitDirAge = 7 * 24 * time.Hour
+const gcMirrorAge = 7 * 24 * time.Hour
 
 const gcTmpFileAge = 24 * time.Hour
 
@@ -52,11 +53,11 @@ func GCWarmRoot(ctx context.Context, root string, ctrl TerminalRunLister, logger
 
 	now := time.Now()
 
-	gitDirs, gitBytes := sweepAgeOldest(sweepCtx, filepath.Join(root, "git"), now.Add(-gcGitDirAge), true, logger)
+	gitDirs, gitBytes := bincache.SweepDirectMirrors(sweepCtx, filepath.Join(root, "source-direct"), now.Add(-gcMirrorAge))
 	stats.GitDirsRemoved = gitDirs
 	stats.BytesFreed += gitBytes
 
-	tmpEntries, tmpBytes := sweepAgeOldest(sweepCtx, filepath.Join(root, "tmp"), now.Add(-gcTmpFileAge), false, logger)
+	tmpEntries, tmpBytes := sweepAgeOldest(sweepCtx, filepath.Join(root, "tmp"), now.Add(-gcTmpFileAge), logger)
 	stats.TmpEntriesRemoved = tmpEntries
 	stats.BytesFreed += tmpBytes
 
@@ -72,7 +73,7 @@ func GCWarmRoot(ctx context.Context, root string, ctrl TerminalRunLister, logger
 	return stats, nil
 }
 
-func sweepAgeOldest(ctx context.Context, dir string, cutoff time.Time, dirsOnly bool, logger *slog.Logger) (int, int64) {
+func sweepAgeOldest(ctx context.Context, dir string, cutoff time.Time, logger *slog.Logger) (int, int64) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -85,9 +86,6 @@ func sweepAgeOldest(ctx context.Context, dir string, cutoff time.Time, dirsOnly 
 	for _, e := range entries {
 		if ctx.Err() != nil {
 			return removed, bytes
-		}
-		if dirsOnly && !e.IsDir() {
-			continue
 		}
 		info, err := e.Info()
 		if err != nil {

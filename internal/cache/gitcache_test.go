@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -18,8 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -37,390 +34,6 @@ func TestHandleHealth(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestArtifactUpload(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	body := strings.NewReader("test content")
-	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=coverage/report.html", body)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	data, err := os.ReadFile(filepath.Join(artifactsDir, "job123", "coverage", "report.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "test content" {
-		t.Errorf("expected 'test content', got %s", data)
-	}
-}
-
-func TestArtifactUpload_MissingPath(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123", nil)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 400 {
-		t.Errorf("expected 400 without path, got %d", w.Code)
-	}
-}
-
-func TestArtifactUpload_DirectoryTraversal(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=../../etc/passwd", strings.NewReader("evil"))
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 400 {
-		t.Errorf("expected 400 for traversal, got %d", w.Code)
-	}
-}
-
-func TestArtifactList(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	os.MkdirAll(filepath.Join(artifactsDir, "job123", "sub"), 0o755)
-	os.WriteFile(filepath.Join(artifactsDir, "job123", "a.txt"), nil, 0o644)
-	os.WriteFile(filepath.Join(artifactsDir, "job123", "sub", "b.txt"), nil, 0o644)
-
-	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123", nil)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	var files []string
-	json.NewDecoder(w.Body).Decode(&files)
-	if len(files) != 2 {
-		t.Errorf("expected 2 files, got %d: %v", len(files), files)
-	}
-}
-
-func TestArtifactList_Empty(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	req := httptest.NewRequest(http.MethodGet, "/artifacts/nonexistent", nil)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	var files []string
-	json.NewDecoder(w.Body).Decode(&files)
-	if len(files) != 0 {
-		t.Errorf("expected empty, got %v", files)
-	}
-}
-
-func TestArtifactDownload_SingleFile(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	os.MkdirAll(filepath.Join(artifactsDir, "job123"), 0o755)
-	os.WriteFile(filepath.Join(artifactsDir, "job123", "report.html"), []byte("html content"), 0o644)
-
-	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*.html", nil)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	body, _ := io.ReadAll(w.Body)
-	if !strings.Contains(string(body), "html content") {
-		t.Errorf("expected html content, got %s", body)
-	}
-}
-
-func TestArtifactUpload_LogEscapesTheCallerPath(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	var logged bytes.Buffer
-	oldWriter := log.Writer()
-	log.SetOutput(&logged)
-	defer log.SetOutput(oldWriter)
-
-	name, escaped := "a\nfake.txt", `a\nfake.txt`
-	if runtime.GOOS == "windows" {
-		name, escaped = "a\u2028fake.txt", `a\u2028fake.txt`
-	}
-	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path="+url.QueryEscape(name), strings.NewReader("x"))
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if !strings.Contains(logged.String(), escaped) {
-		t.Errorf("log line did not escape the separator: %q", logged.String())
-	}
-}
-
-func TestArtifactDownload_OptionLikeNameIsNotATarFlag(t *testing.T) {
-	if _, err := exec.LookPath("tar"); err != nil {
-		t.Skip("tar is not on PATH")
-	}
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	job := filepath.Join(artifactsDir, "job123")
-	if err := os.MkdirAll(job, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	names := []string{"--sparkwing-not-an-option", "report.txt"}
-	for _, name := range names {
-		if err := os.WriteFile(filepath.Join(job, name), []byte("content"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*", nil)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var got []string
-	tr := tar.NewReader(w.Body)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("read tar stream: %v", err)
-		}
-		got = append(got, hdr.Name)
-	}
-	for _, name := range names {
-		if !slices.Contains(got, name) {
-			t.Errorf("archive %v is missing %q", got, name)
-		}
-	}
-}
-
-func TestArtifactDownload_NotFound(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	os.MkdirAll(filepath.Join(artifactsDir, "job123"), 0o755)
-
-	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*.xyz", nil)
-	w := httptest.NewRecorder()
-	handleArtifacts(w, req)
-
-	if w.Code != 404 {
-		t.Errorf("expected 404 for no matches, got %d", w.Code)
-	}
-}
-
-func TestValidateGitRef(t *testing.T) {
-	valid := []string{"main", "feature/foo", "v1.0.0", "release-2.3", "HEAD"}
-	for _, ref := range valid {
-		if err := validateGitRef(ref); err != nil {
-			t.Errorf("expected %q to be valid, got: %v", ref, err)
-		}
-	}
-
-	invalid := []string{
-		"", "; rm -rf /", "main$(evil)", "branch name", "a..b", "--format=evil",
-		"--show-toplevel", "--all", "--git-dir", "-x",
-	}
-	for _, ref := range invalid {
-		if err := validateGitRef(ref); err == nil {
-			t.Errorf("expected %q to be invalid", ref)
-		}
-	}
-}
-
-func TestArtifactUpload_AbsolutePath(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	paths := []string{"/etc/passwd"}
-	if runtime.GOOS == "windows" {
-		paths = append(paths, `C:\outside`, `C:outside`, `\outside`, `\\server\share\outside`)
-	}
-	for _, path := range paths {
-		req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path="+url.QueryEscape(path), strings.NewReader("evil"))
-		w := httptest.NewRecorder()
-		handleArtifacts(w, req)
-		if w.Code != 400 {
-			t.Errorf("expected 400 for rooted path %q, got %d", path, w.Code)
-		}
-	}
-}
-
-func TestArtifactUpload_AtPrefixedPath(t *testing.T) {
-	oldDir := artifactsDir
-	artifactsDir = t.TempDir()
-	defer func() { artifactsDir = oldDir }()
-
-	for _, p := range []string{"@inline.tar", "sub/@inline.tar"} {
-		req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path="+p, strings.NewReader("evil"))
-		w := httptest.NewRecorder()
-		handleArtifacts(w, req)
-
-		if w.Code != 400 {
-			t.Errorf("expected 400 for %q, got %d", p, w.Code)
-		}
-	}
-}
-
-func TestUploadDownload_PercentEncodedDotDotIsNoExistenceOracle(t *testing.T) {
-	oldDir := uploadsDir
-	uploadsDir = t.TempDir()
-	defer func() { uploadsDir = oldDir }()
-
-	present := filepath.Join(filepath.Dir(uploadsDir), "present.tar.gz")
-	if err := os.WriteFile(present, []byte("secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Remove(present) })
-
-	for _, name := range []string{"present", "absent"} {
-		req := httptest.NewRequest(http.MethodGet, "/uploads/%2e%2e/"+name+".tar.gz", nil)
-		w := httptest.NewRecorder()
-		handleUploadDownload(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("%s: expected 400, got %d (%s)", name, w.Code, strings.TrimSpace(w.Body.String()))
-		}
-		if !strings.Contains(w.Body.String(), "invalid upload ID") {
-			t.Errorf("%s: body %q does not name the rejected id", name, strings.TrimSpace(w.Body.String()))
-		}
-	}
-}
-
-func TestShortClampsARefShorterThanEight(t *testing.T) {
-	cases := []struct{ ref, want string }{
-		{"", ""},
-		{"a", "a"},
-		{"abcdefg", "abcdefg"},
-		{"abcdefgh", "abcdefgh"},
-		{strings.Repeat("a", 40), "aaaaaaaa"},
-	}
-	for _, c := range cases {
-		if got := short(c.ref); got != c.want {
-			t.Errorf("short(%q) = %q, want %q", c.ref, got, c.want)
-		}
-	}
-}
-
-func TestSyncNegotiateRejectsACommitThatIsNotAnObjectID(t *testing.T) {
-	repoURL, bareRepo, _ := gitcacheFixture(t)
-	head := strings.TrimSpace(string(mustGitOut(t, bareRepo, "rev-parse", "main")))
-
-	for _, commit := range []string{"-x", "--upload-pack=evil", "main", head[:7]} {
-		req := httptest.NewRequest(http.MethodPost, "/sync/negotiate",
-			strings.NewReader(`{"repo":"`+repoURL+`","commits":["`+commit+`"]}`))
-		w := httptest.NewRecorder()
-		handleSyncNegotiate(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("commit %q: status %d, want 400", commit, w.Code)
-		}
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/sync/negotiate",
-		strings.NewReader(`{"repo":"`+repoURL+`","commits":["`+head+`"]}`))
-	w := httptest.NewRecorder()
-	handleSyncNegotiate(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"found":true`) {
-		t.Errorf("full object id: status %d body %q, want the recorded ancestor", w.Code, strings.TrimSpace(w.Body.String()))
-	}
-}
-
-func TestSyncNegotiateRejectsMoreCommitsThanTheForkCap(t *testing.T) {
-	repoURL, _, _ := gitcacheFixture(t)
-
-	commits := make([]string, maxNegotiateCommits+1)
-	for i := range commits {
-		commits[i] = fmt.Sprintf("%040x", i)
-	}
-	payload, err := json.Marshal(map[string]any{"repo": repoURL, "commits": commits})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/sync/negotiate", bytes.NewReader(payload))
-	w := httptest.NewRecorder()
-	handleSyncNegotiate(w, req)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "at most") {
-		t.Errorf("status %d body %q, want 400 naming the cap", w.Code, strings.TrimSpace(w.Body.String()))
-	}
-}
-
-func TestSyncSeedRejectsARepoURLTheMirrorMayNotFetch(t *testing.T) {
-	gitcacheFixture(t)
-
-	sha := strings.Repeat("a", 40)
-	for _, repo := range []string{
-		"http://attacker.example/x.git",
-		"file:///tmp/repo",
-		"https://127.0.0.1/repo.git",
-	} {
-		req := httptest.NewRequest(http.MethodPost, "/sync/seed?repo="+url.QueryEscape(repo)+"&sha="+sha, nil)
-		w := httptest.NewRecorder()
-		handleSyncSeed(w, req)
-		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid repo URL") {
-			t.Errorf("repo %q: status %d body %q, want 400 rejecting the URL",
-				repo, w.Code, strings.TrimSpace(w.Body.String()))
-		}
-	}
-}
-
-func TestRefArgsStillResolveAfterTheOptionTerminator(t *testing.T) {
-	repoURL, bareRepo, _ := gitcacheFixture(t)
-	head := strings.TrimSpace(string(mustGitOut(t, bareRepo, "rev-parse", "main")))
-
-	for _, query := range []string{"&", "&path=pipelines.yaml"} {
-		req := httptest.NewRequest(http.MethodGet, "/tree-hash?repo="+repoURL+"&branch=main"+query, nil)
-		w := httptest.NewRecorder()
-		handleTreeHash(w, req)
-		if w.Code != http.StatusOK || !gitObjectRE.MatchString(strings.TrimSpace(w.Body.String())) {
-			t.Errorf("tree-hash%q: status %d body %q, want one object id", query, w.Code, strings.TrimSpace(w.Body.String()))
-		}
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/branch-contains?repo="+repoURL+"&branch=main&commit="+head, nil)
-	w := httptest.NewRecorder()
-	handleBranchContains(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("branch-contains: status %d, want 200", w.Code)
-	}
-}
-
-func TestGitObjectRE_AcceptsOnlyAnObjectID(t *testing.T) {
-	valid := []string{strings.Repeat("a", 40), strings.Repeat("0", 64), strings.Repeat("F", 40)}
-	for _, sha := range valid {
-		if !gitObjectRE.MatchString(sha) {
-			t.Errorf("expected %q to be a git object id", sha)
-		}
-	}
-
-	invalid := []string{"", ".", "..", "/data/repos", "../../etc/passwd", "HEAD", strings.Repeat("z", 40)}
-	for _, sha := range invalid {
-		if gitObjectRE.MatchString(sha) {
-			t.Errorf("expected %q not to be a git object id", sha)
-		}
 	}
 }
 
@@ -452,7 +65,7 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	repoNames["auto-clone-fixture"] = upstream
 	repoNamesMu.Unlock()
 
-	bare, err := resolveGitRepo("auto-clone-fixture")
+	bare, err := resolveGitRepo("auto-clone-fixture", false)
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
 	}
@@ -460,7 +73,7 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 		t.Fatalf("cloned bare missing HEAD: %v", err)
 	}
 
-	bare2, err := resolveGitRepo("auto-clone-fixture")
+	bare2, err := resolveGitRepo("auto-clone-fixture", false)
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)
 	}
@@ -469,7 +82,7 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	}
 }
 
-func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
+func TestResolveGitRepo_AutoCloneFailureNamesTheWayOut(t *testing.T) {
 	resetFetchState(t)
 	root := t.TempDir()
 	oldRepoDir := repoDir
@@ -488,223 +101,12 @@ func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
 	repoNames["bad-url-fixture"] = "/this/path/does/not/exist.git"
 	repoNamesMu.Unlock()
 
-	_, err := resolveGitRepo("bad-url-fixture")
+	_, err := resolveGitRepo("bad-url-fixture", false)
 	if err == nil {
 		t.Fatal("expected error from auto-clone of bogus URL")
 	}
-	if !strings.Contains(err.Error(), "/sync/seed") {
-		t.Fatalf("error should still point operators at /sync/seed; got %v", err)
-	}
-}
-
-func TestSyncSeed_ImportsOnlyRequestedWorkspaceRef(t *testing.T) {
-	root := t.TempDir()
-	src := filepath.Join(root, "src")
-	runGit(t, src, "init")
-	runGit(t, src, "config", "user.email", "sparkwing@example.invalid")
-	runGit(t, src, "config", "user.name", "Sparkwing Test")
-	if err := os.WriteFile(filepath.Join(src, "wanted.txt"), []byte("wanted\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, src, "add", "wanted.txt")
-	runGit(t, src, "commit", "-m", "wanted")
-	wanted := strings.TrimSpace(runGit(t, src, "rev-parse", "HEAD"))
-	if err := os.WriteFile(filepath.Join(src, "private.txt"), []byte("private\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, src, "add", "private.txt")
-	runGit(t, src, "commit", "-m", "private")
-	private := strings.TrimSpace(runGit(t, src, "rev-parse", "HEAD"))
-	runGit(t, src, "update-ref", "refs/sparkwing-seed/"+wanted, wanted)
-	runGit(t, src, "update-ref", "refs/sparkwing-seed/"+private, private)
-	bundle := filepath.Join(root, "seed.bundle")
-	runGit(t, src, "bundle", "create", bundle, "refs/sparkwing-seed/"+wanted, "refs/sparkwing-seed/"+private)
-
-	oldRepoDir := repoDir
-	oldNamesFile := namesFile
-	repoDir = filepath.Join(root, "cache")
-	namesFile = filepath.Join(root, "names.json")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		repoDir = oldRepoDir
-		namesFile = oldNamesFile
-	})
-
-	seed := func(workspace bool) {
-		f, err := os.Open(bundle)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = f.Close() }()
-		path := "/sync/seed?repo=https://git.example.com/acme/widgets.git&sha=" + wanted
-		if workspace {
-			path += "&workspace=1"
-		}
-		req := httptest.NewRequest(http.MethodPost, path, f)
-		w := httptest.NewRecorder()
-		handleSyncSeed(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("workspace=%v status = %d: %s", workspace, w.Code, w.Body.String())
-		}
-	}
-	seed(false)
-	seed(true)
-
-	bareRepo := filepath.Join(repoDir, repoHash("https://git.example.com/acme/widgets.git")+".git")
-	if got := strings.TrimSpace(runGit(t, bareRepo, "config", "--get", "remote.origin.url")); got != "https://git.example.com/acme/widgets.git" {
-		t.Fatalf("seed origin = %q", got)
-	}
-	runGit(t, bareRepo, "cat-file", "-e", wanted+"^{commit}")
-	workspaceRefs := strings.Fields(runGit(t, bareRepo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
-	if len(workspaceRefs) != 1 || !strings.HasSuffix(workspaceRefs[0], "/"+wanted) {
-		t.Fatalf("workspace refs = %v", workspaceRefs)
-	}
-	if out, err := exec.Command("git", "-C", bareRepo, "show-ref", "--verify", "refs/sparkwing-seed/"+wanted).CombinedOutput(); err != nil {
-		t.Fatalf("ordinary seed ref was removed: %v: %s", err, out)
-	}
-	if out, err := exec.Command("git", "-C", bareRepo, "show-ref", "--verify", "refs/sparkwing-workspace-incoming/"+wanted).CombinedOutput(); err == nil {
-		t.Fatalf("workspace import ref was retained: %s", out)
-	}
-	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", private+"^{commit}").CombinedOutput(); err == nil {
-		t.Fatalf("private commit was imported unexpectedly: %s", out)
-	}
-	runGit(t, bareRepo, "config", "url.file://"+src+".insteadOf", "https://git.example.com/acme/widgets.git")
-	if out, err := mirrorFetch(time.Second*10, bareRepo); err != nil {
-		t.Fatalf("refresh seeded mirror: %v: %s", err, out)
-	}
-	branch := strings.TrimSpace(runGit(t, src, "symbolic-ref", "HEAD"))
-	if got := strings.TrimSpace(runGit(t, bareRepo, "rev-parse", branch)); got != private {
-		t.Fatalf("refreshed branch = %s, want upstream %s", got, private)
-	}
-}
-
-func TestSyncSeed_PrunesRejectedWorkspaceObject(t *testing.T) {
-	root := t.TempDir()
-	source := filepath.Join(root, "source")
-	runGit(t, source, "init")
-	if err := os.WriteFile(filepath.Join(source, "blob"), []byte("not a commit"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sha := strings.TrimSpace(runGit(t, source, "hash-object", "-w", "blob"))
-	ref := "refs/sparkwing-seed/" + sha
-	runGit(t, source, "update-ref", ref, sha)
-	bundle := filepath.Join(root, "blob.bundle")
-	runGit(t, source, "bundle", "create", bundle, ref)
-
-	oldRepoDir := repoDir
-	oldNamesFile := namesFile
-	repoDir = filepath.Join(root, "cache")
-	namesFile = filepath.Join(root, "names.json")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		repoDir = oldRepoDir
-		namesFile = oldNamesFile
-	})
-
-	f, err := os.Open(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = f.Close() }()
-	request := httptest.NewRequest(http.MethodPost,
-		"/sync/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha, f)
-	response := httptest.NewRecorder()
-	handleSyncSeed(response, request)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", response.Code, response.Body.String())
-	}
-	bareRepo := filepath.Join(repoDir, repoHash("https://git.example.com/acme/widgets.git")+".git")
-	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", sha).CombinedOutput(); err == nil {
-		t.Fatalf("rejected workspace object survived cleanup: %s", out)
-	}
-}
-
-func TestRetainWorkspaceSeedRejectsNewSnapshotAtCapacity(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo.git")
-	runGit(t, repo, "init", "--bare")
-	source := filepath.Join(t.TempDir(), "source")
-	runGit(t, source, "init")
-	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
-	runGit(t, source, "config", "user.name", "Sparkwing Test")
-	var shas []string
-	for i := range 3 {
-		if err := os.WriteFile(filepath.Join(source, "value"), []byte{byte('0' + i)}, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		runGit(t, source, "add", "value")
-		runGit(t, source, "commit", "-m", string(rune('a'+i)))
-		sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
-		shas = append(shas, sha)
-		runGit(t, repo, "fetch", source, sha)
-		seedRef := "refs/sparkwing-workspace-incoming/" + sha
-		if i == 2 {
-			runGit(t, repo, "update-ref", "refs/sparkwing-seed/"+sha, sha)
-		}
-		runGit(t, repo, "update-ref", seedRef, sha)
-		err := retainWorkspaceSeed(repo, seedRef, sha, 2, 24*time.Hour)
-		if i < 2 && err != nil {
-			t.Fatal(err)
-		}
-		if i == 2 && (err == nil || !strings.Contains(err.Error(), "limit 2")) {
-			t.Fatalf("third retain error = %v, want capacity rejection", err)
-		}
-	}
-	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
-	if len(refs) != 2 {
-		t.Fatalf("workspace refs = %v, want cap 2", refs)
-	}
-	for _, sha := range shas[:2] {
-		if !slices.ContainsFunc(refs, func(ref string) bool { return strings.HasSuffix(ref, "/"+sha) }) {
-			t.Fatalf("admitted snapshot %s was evicted: %v", sha, refs)
-		}
-	}
-	for _, sha := range shas {
-		if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/sparkwing-workspace-incoming/"+sha).CombinedOutput(); err == nil {
-			t.Fatalf("workspace import ref %s retained: %s", sha, out)
-		}
-	}
-	if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/sparkwing-seed/"+shas[2]).CombinedOutput(); err != nil {
-		t.Fatalf("ordinary seed ref was removed on workspace rejection: %v: %s", err, out)
-	}
-	runGit(t, repo, "update-ref", "-d", "refs/sparkwing-seed/"+shas[2])
-	pruneUnreachableSeedObjects(repo)
-	if out, err := exec.Command("git", "-C", repo, "cat-file", "-e", shas[2]+"^{commit}").CombinedOutput(); err == nil {
-		t.Fatalf("rejected workspace object remained after its ordinary ref was removed: %s", out)
-	}
-}
-
-func TestRetainWorkspaceSeedRefreshesOneRefPerSnapshot(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo.git")
-	runGit(t, repo, "init", "--bare")
-	source := filepath.Join(t.TempDir(), "source")
-	runGit(t, source, "init")
-	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
-	runGit(t, source, "config", "user.name", "Sparkwing Test")
-	if err := os.WriteFile(filepath.Join(source, "value"), []byte("same"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, source, "add", "value")
-	runGit(t, source, "commit", "-m", "same")
-	sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
-	runGit(t, repo, "fetch", source, sha)
-	seedRef := "refs/sparkwing-workspace-incoming/" + sha
-	runGit(t, repo, "update-ref", "refs/sparkwing-seed/"+sha, sha)
-	for range 3 {
-		runGit(t, repo, "update-ref", seedRef, sha)
-		if err := retainWorkspaceSeed(repo, seedRef, sha, 2, 24*time.Hour); err != nil {
-			t.Fatal(err)
-		}
-	}
-	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
-	if len(refs) != 1 || !strings.HasSuffix(refs[0], "/"+sha) {
-		t.Fatalf("workspace refs = %v, want one refreshed ref", refs)
-	}
-	if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/sparkwing-seed/"+sha).CombinedOutput(); err != nil {
-		t.Fatalf("ordinary seed ref was removed on workspace success: %v: %s", err, out)
+	if !strings.Contains(err.Error(), "re-register") || strings.Contains(err.Error(), "/sync/seed") {
+		t.Fatalf("error should point operators at re-registering, not a removed route; got %v", err)
 	}
 }
 
@@ -740,16 +142,6 @@ func TestRepoHash_Different(t *testing.T) {
 	h2 := repoHash("git@github.com:user/repo2.git")
 	if h1 == h2 {
 		t.Error("different URLs should produce different hashes")
-	}
-}
-
-func TestContains(t *testing.T) {
-	s := []string{"a", "b", "c"}
-	if !contains(s, "b") {
-		t.Error("should contain b")
-	}
-	if contains(s, "d") {
-		t.Error("should not contain d")
 	}
 }
 
@@ -978,15 +370,15 @@ func newTestServer(t *testing.T, token string) *httptest.Server {
 func newTestServerConfig(t *testing.T, cfg Config) *httptest.Server {
 	t.Helper()
 	saved := struct {
-		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir string
-		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken        string
+		dataRoot, repoDir, binsDir, cacheDir     string
+		namesFile, proxyDir, sshKeyDir, apiToken string
 	}{
-		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir,
-		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken,
+		dataRoot, repoDir, binsDir, cacheDir,
+		namesFile, proxyDir, sshKeyDir, apiToken,
 	}
 	t.Cleanup(func() {
-		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.archDir, saved.artifactsDir, saved.binsDir, saved.cacheDir
-		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken = saved.uploadsDir, saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
+		dataRoot, repoDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.binsDir, saved.cacheDir
+		namesFile, proxyDir, sshKeyDir, apiToken = saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
 	})
 
 	root := t.TempDir()
@@ -1018,19 +410,12 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 		{method: http.MethodGet, path: "/bin/deadbeef-cafebabe", guarded: true},
 		{method: http.MethodPut, path: "/bin/deadbeef-cafebabe", guarded: true},
 		{method: http.MethodPut, path: "/cache/lint", guarded: true},
-		{method: http.MethodPost, path: "/upload", guarded: true},
-		{method: http.MethodGet, path: "/uploads/abc", guarded: true},
-		{method: http.MethodPost, path: "/sync/negotiate", guarded: true},
-		{method: http.MethodPost, path: "/sync/seed", guarded: true},
-		{method: http.MethodPost, path: "/artifacts/job1?path=out.txt", guarded: true},
-		{method: http.MethodGet, path: "/artifacts/job1", guarded: true},
-		{method: http.MethodGet, path: "/archive?repo=x&branch=main", guarded: true},
-		{method: http.MethodGet, path: "/repos", guarded: true},
-		{method: http.MethodGet, path: "/file?repo=x&branch=main&path=go.mod", guarded: true},
-		{method: http.MethodGet, path: "/tree-hash?repo=x&branch=main&path=.", guarded: true},
-		{method: http.MethodGet, path: "/branch-contains?repo=x&branch=main&commit=abc", guarded: true},
+		{method: http.MethodGet, path: "/cache/lint", guarded: true},
+		{method: http.MethodPost, path: "/admin/store-ceiling/thaw", guarded: true},
+		{method: http.MethodPost, path: "/admin/store-ceiling/measure", guarded: true},
+		{method: http.MethodDelete, path: "/admin/teams/acme", guarded: true},
+		{method: http.MethodPost, path: "/git/app/git-upload-pack", guarded: true},
 		{method: http.MethodPost, path: "/git/register?name=app&repo=https://example.com/a.git", guarded: true},
-		{method: http.MethodPost, path: "/git/refresh?name=app", guarded: true},
 		{method: http.MethodGet, path: "/git/app/info/refs?service=git-upload-pack", guarded: true},
 		{method: http.MethodGet, path: "/health", guarded: false},
 		{method: http.MethodGet, path: "/stats", guarded: false},
@@ -1058,77 +443,6 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 			})
 		}
 	})
-}
-
-func TestArtifactUploadRejectsAJobIDThatEscapesTheRoot(t *testing.T) {
-	srv := newTestServer(t, "s3cret")
-
-	const key = "deadbeef-cafebabe"
-	const escape = "/artifacts/..%2f..%2fx?path=bins/" + key
-	body := "#!/bin/sh\nid\n"
-
-	anon, err := http.NewRequest(http.MethodPost, srv.URL+escape, strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := srv.Client().Do(anon)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("anonymous traversal upload = %d, want 401", resp.StatusCode)
-	}
-
-	authed, err := http.NewRequest(http.MethodPost, srv.URL+escape, strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	authed.Header.Set("Authorization", "Bearer s3cret")
-	resp, err = srv.Client().Do(authed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("authenticated traversal upload = %d, want 400", resp.StatusCode)
-	}
-
-	if _, err := os.Stat(filepath.Join(binsDir, key)); !os.IsNotExist(err) {
-		t.Fatalf("artifact upload wrote into the binary cache: %v", err)
-	}
-	entries, err := os.ReadDir(binsDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("bins dir = %v, want empty", entries)
-	}
-}
-
-func TestArtifactUploadKeepsAValidJobInsideItsDirectory(t *testing.T) {
-	srv := newTestServer(t, "s3cret")
-
-	req, err := http.NewRequest(http.MethodPost, srv.URL+"/artifacts/job-1?path=out/report.txt", strings.NewReader("hello"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer s3cret")
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("upload = %d, want 200", resp.StatusCode)
-	}
-	got, err := os.ReadFile(filepath.Join(artifactsDir, "job-1", "out", "report.txt"))
-	if err != nil {
-		t.Fatalf("read artifact: %v", err)
-	}
-	if string(got) != "hello" {
-		t.Errorf("artifact = %q, want %q", got, "hello")
-	}
 }
 
 func TestNewRejectsAWhitespaceOnlyAPIToken(t *testing.T) {
@@ -1227,7 +541,7 @@ func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
 func TestEveryResponseCarriesNosniff(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 
-	for _, path := range []string{"/health", "/repos", "/metrics"} {
+	for _, path := range []string{"/health", "/bin/deadbeef-cafebabe", "/metrics"} {
 		resp, err := srv.Client().Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -1236,45 +550,6 @@ func TestEveryResponseCarriesNosniff(t *testing.T) {
 		if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 			t.Errorf("%s X-Content-Type-Options = %q, want nosniff", path, got)
 		}
-	}
-}
-
-func TestArtifactDownloadServesAnAttachment(t *testing.T) {
-	srv := newTestServer(t, "s3cret")
-
-	upload, err := http.NewRequest(http.MethodPost, srv.URL+"/artifacts/job-1?path=report.html",
-		strings.NewReader("<script>alert(1)</script>"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	upload.Header.Set("Authorization", "Bearer s3cret")
-	resp, err := srv.Client().Do(upload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("upload = %d, want 200", resp.StatusCode)
-	}
-
-	download, err := http.NewRequest(http.MethodGet, srv.URL+"/artifacts/job-1?glob=report.html", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	download.Header.Set("Authorization", "Bearer s3cret")
-	resp, err = srv.Client().Do(download)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("download = %d, want 200", resp.StatusCode)
-	}
-	if got := resp.Header.Get("Content-Type"); got != "application/octet-stream" {
-		t.Errorf("Content-Type = %q, want application/octet-stream", got)
-	}
-	if got := resp.Header.Get("Content-Disposition"); got != `attachment; filename="report.html"` {
-		t.Errorf("Content-Disposition = %q, want an attachment", got)
 	}
 }
 
@@ -1434,118 +709,6 @@ func TestAutoRegisterSkipsAnInvalidName(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRefExpired(t *testing.T) {
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	ref := func(age time.Duration) string {
-		return fmt.Sprintf("%s%020d/%s", workspaceRefPrefix, now.Add(-age).UnixNano(), strings.Repeat("a", 40))
-	}
-	for _, tc := range []struct {
-		name    string
-		ref     string
-		maxAge  time.Duration
-		expired bool
-	}{
-		{name: "older than the window", ref: ref(48 * time.Hour), maxAge: 24 * time.Hour, expired: true},
-		{name: "inside the window", ref: ref(time.Hour), maxAge: 24 * time.Hour},
-		{name: "expiry disabled", ref: ref(48 * time.Hour), maxAge: 0},
-		{name: "unparsable stamp", ref: workspaceRefPrefix + "not-a-stamp/abc", maxAge: 24 * time.Hour},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := workspaceRefExpired(tc.ref, workspaceRefPrefix, now, tc.maxAge); got != tc.expired {
-				t.Errorf("workspaceRefExpired = %t, want %t", got, tc.expired)
-			}
-		})
-	}
-}
-
-func TestRetainWorkspaceSeedExpiresRefsPastTheMaxAge(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo.git")
-	runGit(t, repo, "init", "--bare")
-	source := filepath.Join(t.TempDir(), "source")
-	runGit(t, source, "init")
-	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
-	runGit(t, source, "config", "user.name", "Sparkwing Test")
-	runGit(t, source, "commit", "--allow-empty", "-m", "snapshot")
-	sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
-	runGit(t, repo, "fetch", source, sha)
-
-	stale := fmt.Sprintf("%s%020d/%s", workspaceRefPrefix, time.Now().Add(-72*time.Hour).UnixNano(), strings.Repeat("b", 40))
-	runGit(t, repo, "update-ref", stale, sha)
-	seedRef := "refs/sparkwing-workspace-incoming/" + sha
-	runGit(t, repo, "update-ref", seedRef, sha)
-
-	if err := retainWorkspaceSeed(repo, seedRef, sha, 1, 24*time.Hour); err != nil {
-		t.Fatalf("retainWorkspaceSeed: %v", err)
-	}
-
-	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", workspaceRefPrefix))
-	if len(refs) != 1 {
-		t.Fatalf("retained refs = %v, want only the new snapshot", refs)
-	}
-	if refs[0] == stale {
-		t.Errorf("retained the expired ref %s", stale)
-	}
-}
-
-func TestRetainWorkspaceSeedArchivesExpiredRefsSoARetryStillFindsTheSnapshot(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo.git")
-	runGit(t, repo, "init", "--bare")
-	source := filepath.Join(t.TempDir(), "source")
-	runGit(t, source, "init")
-	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
-	runGit(t, source, "config", "user.name", "Sparkwing Test")
-	runGit(t, source, "commit", "--allow-empty", "-m", "old snapshot")
-	old := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
-	runGit(t, source, "commit", "--allow-empty", "-m", "new snapshot")
-	fresh := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
-	runGit(t, repo, "fetch", source, old, fresh)
-
-	stale := fmt.Sprintf("%s%020d/%s", workspaceRefPrefix, time.Now().Add(-72*time.Hour).UnixNano(), old)
-	runGit(t, repo, "update-ref", stale, old)
-	seedRef := "refs/sparkwing-workspace-incoming/" + fresh
-	runGit(t, repo, "update-ref", seedRef, fresh)
-
-	if err := retainWorkspaceSeed(repo, seedRef, fresh, 128, 24*time.Hour); err != nil {
-		t.Fatalf("retainWorkspaceSeed: %v", err)
-	}
-	pruneUnreachableSeedObjects(repo)
-
-	archived := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", workspaceArchiveRefPrefix))
-	if len(archived) != 1 || !strings.HasSuffix(archived[0], "/"+old) {
-		t.Fatalf("archived refs = %v, want the expired snapshot", archived)
-	}
-	if out, err := gitCmd("-C", repo, "cat-file", "-e", old+"^{commit}"); err != nil {
-		t.Errorf("expired snapshot object was pruned: %v %s", err, out)
-	}
-}
-
-func TestPruneWorkspaceArchiveDropsRefsPastTheArchiveWindow(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo.git")
-	runGit(t, repo, "init", "--bare")
-	source := filepath.Join(t.TempDir(), "source")
-	runGit(t, source, "init")
-	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
-	runGit(t, source, "config", "user.name", "Sparkwing Test")
-	runGit(t, source, "commit", "--allow-empty", "-m", "snapshot")
-	sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
-	runGit(t, repo, "fetch", source, sha)
-
-	now := time.Now().UTC()
-	inside := fmt.Sprintf("%s%020d/%s", workspaceArchiveRefPrefix, now.Add(-48*time.Hour).UnixNano(), sha)
-	outside := fmt.Sprintf("%s%020d/%s", workspaceArchiveRefPrefix, now.Add(-30*24*time.Hour).UnixNano(), sha)
-	runGit(t, repo, "update-ref", inside, sha)
-	runGit(t, repo, "update-ref", outside, sha)
-
-	if err := pruneWorkspaceArchive(repo, 128, 24*time.Hour, now); err != nil {
-		t.Fatalf("pruneWorkspaceArchive: %v", err)
-	}
-
-	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", workspaceArchiveRefPrefix))
-	if len(refs) != 1 || refs[0] != inside {
-		t.Errorf("archived refs = %v, want only %s", refs, inside)
-	}
-}
-
 func TestMetricsDoNotEnumerateMirrors(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 	isolateRepoNames(t)
@@ -1618,6 +781,38 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stage SSH key") {
 		t.Fatalf("err = %v, want it to name the staging step", err)
+	}
+}
+
+func TestSetupSSHKeepsTheOperatorsGitSSHCommand(t *testing.T) {
+	saved := sshKeyDir
+	t.Cleanup(func() { sshKeyDir = saved })
+	root := t.TempDir()
+	sshKeyDir = filepath.Join(root, "key")
+	if err := os.MkdirAll(sshKeyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sshKeyDir, "id_ed25519"), []byte("private-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	const operator = "ssh -i /etc/ssh-key/id_ed25519 -o IdentitiesOnly=yes"
+	t.Setenv("GIT_SSH_COMMAND", operator)
+	if err := setupSSH(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GIT_SSH_COMMAND"); got != operator {
+		t.Fatalf("GIT_SSH_COMMAND = %q, want the operator's %q", got, operator)
+	}
+
+	t.Setenv("GIT_SSH_COMMAND", "")
+	if err := setupSSH(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GIT_SSH_COMMAND"); !strings.Contains(got, "-o IdentitiesOnly=yes") {
+		t.Fatalf("GIT_SSH_COMMAND = %q, want it to offer only the staged key", got)
 	}
 }
 

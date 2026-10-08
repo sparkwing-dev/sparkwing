@@ -2,8 +2,8 @@
 
 Pipelines fire from several sources:
 
-1. **Webhooks** -- the controller matches an incoming GitHub event
-   against `on:` blocks under `pipelines:` in `.sparkwing/sparkwing.yaml`.
+1. **GitHub App** -- a GitHub event runs the pipelines a team subscribed
+   to the repository through the [GitHub App](github-app.md).
 2. **Manual / API invocation** -- `sparkwing run <pipeline>` for local
    execution, `sparkwing pipeline trigger <pipeline> --profile prof` for
    remote dispatch.
@@ -14,7 +14,7 @@ Pipelines fire from several sources:
    uninstall / status are explicit verbs, and unmanaged hooks the user
    wrote by hand are left alone.
 
-## Webhook triggers
+## GitHub triggers
 
 ```yaml
 # .sparkwing/sparkwing.yaml
@@ -30,14 +30,15 @@ pipelines:
 
 The trigger keys that go under `on:` -- and their fields -- are listed
 in the generated [config-reference.md](config-reference.md); this page
-covers how each fires. See [api.md](api.md) for
-`POST /webhooks/github/{pipeline}` and HMAC verification.
+covers how each fires.
 
-Both `push` and `pull_request` arrive on the same GitHub webhook
-endpoint (`POST /webhooks/github/{pipeline}`) and fire the pipeline the
-URL names. The controller does not read your `sparkwing.yaml`, so the
-`branches` / `paths` / `actions` filters under `on:` are declarative:
-they document intent, but the controller does not gate on them.
+GitHub events reach the controller through the [GitHub App](github-app.md):
+a team owner connects the App's installation and subscribes each pipeline to
+a repository, choosing its events and branch filters there. The controller
+does not read your `sparkwing.yaml`, so the `branches` / `paths` / `actions`
+filters under `on:` are declarative: they document intent, but the
+controller does not gate on them. The subscription's own `branches` and
+`base_branches` filters are what the controller applies.
 
 When the policy concerns the branch Sparkwing checks out, enforce it at
 run start with a pipeline guard. The guard blocks before any step runs:
@@ -48,7 +49,7 @@ pipelines:
     entrypoint: Deploy
     on:
       push:
-        branches: [main] # documents the intended webhook delivery
+        branches: [main] # documents the intended GitHub event
     guards:
       require: [git:branch=main]
 ```
@@ -56,94 +57,27 @@ pipelines:
 The literal name must match the checked-out head. For pull requests that is
 the head branch, not the base named by `pull_request.branches`.
 `git:branch=default` matches only when the dispatch supplies default-branch
-metadata; controller webhook and local trigger claims do not supply it, so
-use an explicit name for those paths. Branch guards do not implement path
+metadata, which trigger claims do not always supply, so use an explicit
+name. Branch guards do not implement path
 filters, custom pull-request action filters, or pull-request base-branch
 matching. Enforce those policies at the event source or in pipeline code;
 do not treat the `on:` fields as authorization controls.
 
 ### Connecting a repository
 
-One command registers both sides:
+In the dashboard, a team owner opens **Team -> GitHub**, connects the App's
+installation, and adds a subscription naming the repository, the pipeline and
+its events. The same subscription is
+`PUT /api/v1/team/github-app/triggers`:
 
 ```bash
-sparkwing cluster webhooks connect --profile prod \
-  --repo your-org/my-app --pipeline build-deploy
+curl -sS -X PUT https://<controller>/api/v1/team/github-app/triggers \
+  -H "Authorization: Bearer $SPARKWING_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":"your-org/my-app","pipeline":"build-deploy","push":true,"pull_request":true,"branches":["main"]}'
 ```
 
-It generates a 32-byte secret, stores the binding on the controller, creates
-the repository's webhook through the `gh` CLI so it posts to the controller's
-delivery URL for that pipeline, and asks GitHub to ping it. The output names
-the delivery URL, the hook id, the events, and the status the controller
-answered the ping with. A ping the controller refused fails the command, so a
-wrong URL or an unreachable controller is reported at connect time rather than
-at the first push.
-
-`--events` selects the events (default `push,pull_request`). Running connect
-again on the same repository and pipeline updates that webhook in place and
-rotates the secret on both sides. The secret is never printed, never passed on
-a command line, and no route reads it back; it reaches `gh` on stdin and the
-controller seals it with the secrets key when one is configured.
-
-```bash
-sparkwing cluster webhooks disconnect --profile prod \
-  --repo your-org/my-app --pipeline build-deploy
-```
-
-Disconnect removes the binding and then deletes the webhook on GitHub. The
-controller answers with the webhook it was bound to, so a repository
-connected to two controllers under the same pipeline name loses only this
-one; a webhook written by hand is matched by its pipeline path instead. Every
-deleted hook is printed with its URL, and either side already being absent is
-reported rather than failing.
-
-The delivery URL comes from the controller. Start it with `--external-url`
-(env `SPARKWING_EXTERNAL_URL`) set to the base URL GitHub reaches it at; a
-controller without one answers with the URL the connect request arrived at,
-which is right whenever the operator reaches the controller where GitHub does.
-
-The command needs `gh` authenticated with admin rights on the repository, and
-a profile whose controller token carries the `admin` scope.
-
-### Where the secret and the allow-list live
-
-The controller resolves each delivery against the bindings it stores and
-the document in its environment:
-
-1. The bindings `sparkwing cluster webhooks connect` stores, one row per
-   pipeline and repository.
-2. The `GITHUB_WEBHOOK_BINDINGS` document in the controller's environment,
-   which names per-pipeline repository allow-lists and per-pipeline or
-   per-repository secrets, plus the single `GITHUB_WEBHOOK_SECRET`.
-
-Stored bindings add to the document rather than replacing it. For one
-pipeline and repository the stored secret wins, and the stored binding allows
-that repository whatever the document says, including a document entry that
-refuses every repository. Everywhere else the document still decides: a
-pipeline it names keeps its allow-list, a repository it gives a secret keeps
-that secret, and a pipeline it does not name stays unchecked, so connecting
-one repository never starts refusing deliveries an existing install accepts.
-
-### The manual equivalent
-
-Without the `gh` CLI, do the same three things by hand:
-
-1. Add a webhook on the repository (Settings, Webhooks, Add webhook) with the
-   payload URL `https://<controller>/webhooks/github/<pipeline>`, content type
-   `application/json`, a secret you generate, and the `push` and
-   `pull request` events.
-2. Give the controller that secret: name the pipeline and repository in the
-   `GITHUB_WEBHOOK_BINDINGS` document, or post the binding yourself:
-
-   ```bash
-   curl -sS -X POST https://<controller>/api/v1/webhooks/github/bindings \
-     -H "Authorization: Bearer $SPARKWING_TOKEN" \
-     -H 'Content-Type: application/json' \
-     -d '{"pipeline":"build-deploy","repo":"your-org/my-app","secret":"<secret>"}'
-   ```
-
-3. Redeliver the ping from the webhook's Recent Deliveries tab and check the
-   controller answered 200.
+[GitHub App](github-app.md) lists every event and filter a subscription takes.
 
 ## Pull request triggers
 
@@ -158,15 +92,15 @@ pipelines:
         branches: [main]               # declarative: PRs targeting main
 ```
 
-A `pull_request` trigger fires on the `opened`, `synchronize`, and
+A subscription with `pull_request` fires on the `opened`, `synchronize`, and
 `reopened` actions -- the ones that change the diff. A pull request whose
 head repository is not its base repository, or whose head repository was
 deleted, starts nothing: the controller acknowledges it as ignored, because
 a fork's code would run with the team's runner token and secrets in reach. Other actions
-(`labeled`, `closed`, `edited`, ...) are acknowledged and ignored, so a
-gate does not re-run every time someone relabels the PR. This default
-action set is applied by the controller; a configured `actions` field
-records intent and does not replace that set.
+(`labeled`, `closed`, `edited`, ...) start nothing unless the subscription
+selects them, so a gate does not re-run every time someone relabels the PR. A
+configured `actions` field under `on:` records intent and does not change
+what the subscription selects.
 
 The run checks out the **PR head** commit. The pipeline reads the PR
 context from `RunContext.Trigger.PullRequest`:
@@ -185,25 +119,10 @@ func (p *PRGate) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.Run
 }
 ```
 
-**Status reporting.** Set `GITHUB_TOKEN` on the controller to report
-`pull_request` webhook runs to their head commits. The token needs
-**Commit statuses: Read and write** on every repository the controller
-serves (or `repo:status` for a classic token). An empty token disables
-reporting.
-
-Each pipeline uses one context named `sparkwing/<pipeline>`. The
-controller posts `pending` after dispatch, then `success`, `failure`, or
-`error` when the run finishes. Set `SPARKWING_DASHBOARD_URL` to the public
-dashboard base URL to make each status link to `/runs?run=<run-id>`;
-the URL must use HTTP or HTTPS, include a host, and omit credentials, a
-query, and a fragment. Omitted or invalid values publish statuses without a
-target link. Status delivery is best-effort: GitHub errors are logged and
-never change webhook admission or the run result. Push, manual, and retry
-runs do not publish statuses. When overlapping or redelivered webhooks target
-the same commit and pipeline, the newest accepted run owns the status;
-terminal updates from superseded runs are ignored. Programs serving
-`controller.Server.Handler` directly must call `Server.Shutdown`; `ServeWith`
-does this automatically.
+**Status reporting.** Each run the App started reports as one check run
+named `sparkwing/<pipeline>` on the commit it builds; see
+[GitHub App](github-app.md#check-runs). Set `SPARKWING_DASHBOARD_URL` to the
+public dashboard base URL to make each check run link to `/runs?run=<run-id>`.
 
 ## Manual / API invocation
 
@@ -213,8 +132,8 @@ sparkwing run build-deploy --profile prod                   # local, state via p
 sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
 ```
 
-`sparkwing runs triggers list --profile prod` surfaces pending / claimed /
-done triggers on the controller; `sparkwing runs triggers get --id ...`
+`sparkwing cluster triggers list --profile prod` surfaces pending / claimed /
+done triggers on the controller; `sparkwing cluster triggers get --id ...`
 inspects one. To fire a fresh trigger (the sparkwing equivalent of
 `gh workflow run`), use `sparkwing pipeline trigger <pipeline> --profile PROF`.
 
@@ -236,7 +155,7 @@ Then install the hooks once per checkout:
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
 sparkwing pipeline hooks status      # report declared, installed, and missing hooks
-sparkwing pipeline hooks survey      # report which registered repos git gates at all
+sparkwing pipeline hooks status --all      # report which registered repos git gates at all
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
@@ -292,7 +211,7 @@ through a forwarder in each repository's own hook directory, so `prepare-commit-
 and friends still fire, and a repository is never asked to choose between its
 gate and the machine's hooks.
 
-Two failures follow from breaking the rule, and `hooks survey` names both:
+Two failures follow from breaking the rule, and `hooks status --all` names both:
 a repository whose hooks are **shadowed** by the global path holds a full set of
 gates and runs none, and one whose `core.hooksPath` points at a **sibling
 repository** runs that repository's gates instead of its own.
@@ -327,7 +246,7 @@ If the repository already sets its own `core.hooksPath` pointing somewhere
 else, install leaves it alone -- that setting was deliberate -- and warns
 without publishing dormant candidate hooks. Clear it with
 `git -C <repo> config --unset core.hooksPath` and re-run
-`sparkwing pipeline hooks install --repo <repo>`.
+`sparkwing -C <repo> pipeline hooks install`.
 
 Claiming `core.hooksPath` is also what would stop a global hook firing if
 nothing in `.git/hooks` hands off to it, so install refuses the claim while
@@ -344,12 +263,12 @@ to restore them.
 
 ### Which repositories are gated at all
 
-One repository at a time is how a repository gets forgotten. `hooks survey`
+One repository at a time is how a repository gets forgotten. `hooks status --all`
 answers for every checkout in the local registry at once:
 
 ```bash
-sparkwing pipeline hooks survey            # every registered repo, classified
-sparkwing pipeline hooks survey --ungated  # just the ones accepting ungated commits
+sparkwing pipeline hooks status --all            # every registered repo, classified
+sparkwing pipeline hooks status --all --ungated  # just the ones accepting ungated commits
 sparkwing pipeline hooks install --fleet   # arm all of them
 ```
 
@@ -390,7 +309,7 @@ repository's own override first -- install treats a repository-scoped
 
 ```bash
 git -C <repo> config --unset core.hooksPath
-sparkwing pipeline hooks install --repo <repo>
+sparkwing -C <repo> pipeline hooks install
 ```
 
 `sparkwing doctor` reports the ungated ones too, including on a run that finds
@@ -414,8 +333,8 @@ fully installed and refuses nothing, and a borrowed one inspects as installing
 nothing and refuses everything. Only a commit settles it.
 
 ```bash
-sparkwing pipeline hooks fire            # this repo: make the gate refuse a commit
-sparkwing pipeline hooks fire --fleet    # every registered repo
+sparkwing pipeline hooks status --prove            # this repo: make the gate refuse a commit
+sparkwing pipeline hooks status --prove --fleet    # every registered repo
 ```
 
 `fire` stages a file and commits it with the gate told to refuse, then reports
@@ -455,7 +374,7 @@ than among them, because a sweep that reports it as armed reports a gated
 fleet while every commit in that repository still goes unchecked.
 
 The list is the machine's repo registry -- the `repos` section of
-`~/.config/sparkwing/config.yaml`, which `sparkwing configure xrepo add <dir>`
+`~/.config/sparkwing/config.yaml`, which `sparkwing repos add <dir>`
 writes to and which can name
 `fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
 extent of the survey: a checkout the registry does not reach is not surveyed,

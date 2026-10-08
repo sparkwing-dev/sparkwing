@@ -35,7 +35,7 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	}
 
 	if help {
-		text := fmt.Sprintf("Print a pipeline's declared secrets with provenance.\n\nUSAGE\n  sparkwing run %s config [-o pretty|json]\n\nFLAGS\n  -o, --output  Output format: pretty|json\n  -h, --help    Show this help\n", pipeline)
+		text := fmt.Sprintf("Print a pipeline's declared secrets with provenance.\n\nUSAGE\n  sparkwing pipeline describe --name %s --secrets [-o pretty|json]\n\nFLAGS\n  -o, --output  Output format: pretty|json\n  -h, --help    Show this help\n", pipeline)
 		if format == "json" {
 			return json.NewEncoder(os.Stdout).Encode(map[string]string{"kind": "help", "text": text})
 		}

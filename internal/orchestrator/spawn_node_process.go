@@ -90,10 +90,7 @@ func (h *nodeSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID stri
 	}
 
 	if err := h.backends.State.AddNodeMetricSample(ctx, h.runID, parentNodeID, store.MetricSample{Kind: store.MetricUnknown, TS: time.Now()}); err != nil {
-		retainMetricError(ctx, err)
-		wrapped := fmt.Errorf("record parent accounting before spawn: %w", err)
-		h.runner.markFailed(ctx, h.runID, childID, wrapped)
-		return nil, wrapped
+		recordSampleLoss(ctx, err)
 	}
 	res := h.runner.RunNode(ctx, runner.Request{
 		RunID:    h.runID,

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -23,22 +21,7 @@ type versionRow struct {
 	Notes    string `json:"notes,omitempty"`
 }
 
-func runDocsVersions(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsVersions.Path, flag.ContinueOnError)
-	var output string
-	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	registerWebFlags(fs, &wf, false)
-	if err := parseAndCheck(cmdDocsVersions, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("docs versions: unexpected positional %q", fs.Arg(0))
-	}
-
+func renderDocsVersions(wf docsWebFlags, output string) error {
 	embedded := embeddedDocVersions()
 	cliVersion := embeddedVersion()
 
@@ -60,7 +43,7 @@ func runDocsVersions(args []string) error {
 		client.NoCache = wf.noCache
 		v, err := client.Versions(ctx)
 		if err != nil {
-			return fmt.Errorf("docs versions --web: %w", err)
+			return fmt.Errorf("docs list --versions --web: %w", err)
 		}
 		for _, ver := range v.Versions {
 			if i, ok := seen[ver]; ok {

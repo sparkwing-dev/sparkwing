@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
-
-	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -31,25 +28,7 @@ type healthReport struct {
 	Warnings int `json:"warnings"`
 }
 
-func runHealth(args []string) error {
-	fs := flag.NewFlagSet(cmdHealth.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name")
-	outputFormat := fs.StringP("output", "o", "", "output format: pretty | json")
-	if err := parseAndCheck(cmdHealth, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+func reportClusterHealth(ctx context.Context, prof *profile.Profile, outputFormat string) error {
 	report := healthReport{Profile: prof.Name, OK: true}
 	report.Sections = []healthSection{
 		{
@@ -65,7 +44,6 @@ func runHealth(args []string) error {
 			Name: "FLEET",
 			Probes: []profileProbeResult{
 				probeAgentsFleet(ctx, prof),
-				probePool(ctx, prof),
 			},
 		},
 		{
@@ -88,7 +66,7 @@ func runHealth(args []string) error {
 		}
 	}
 
-	if *outputFormat == "json" {
+	if outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		if err := enc.Encode(report); err != nil {
 			return err
@@ -170,67 +148,6 @@ func probeAgentsFleet(ctx context.Context, prof *profile.Profile) profileProbeRe
 		r.Status = "ok"
 		r.Detail = fmt.Sprintf("%d connected", connected)
 	}
-	return r
-}
-
-func probePool(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "pool", Target: prof.ControllerURL()}
-	if prof.ControllerURL() == "" {
-		r.Status = "fail"
-		r.Detail = "no controller URL in profile"
-		return r
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(prof.ControllerURL(), "/")+"/api/v1/pool", nil)
-	if err != nil {
-		r.Status = "fail"
-		r.Detail = err.Error()
-		return r
-	}
-	if prof.ControllerToken() != "" {
-		req.Header.Set("Authorization", "Bearer "+prof.ControllerToken())
-	}
-	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
-	r.LatencyMS = time.Since(start).Milliseconds()
-	if err != nil {
-		r.Status = "fail"
-		r.Detail = err.Error()
-		return r
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		r.Status = "fail"
-		r.Detail = fmt.Sprintf("GET /api/v1/pool -> %s", resp.Status)
-		return r
-	}
-	var out struct {
-		Entries []struct {
-			Status string `json:"status"`
-		} `json:"entries"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		r.Status = "fail"
-		r.Detail = fmt.Sprintf("decode pool response: %v", err)
-		return r
-	}
-	capacity := len(out.Entries)
-	inUse, idle := 0, 0
-	for _, e := range out.Entries {
-		switch e.Status {
-		case "in_use", "checked-out", "running":
-			inUse++
-		case "idle", "ready":
-			idle++
-		}
-	}
-	if capacity == 0 {
-		r.Status = "warn"
-		r.Detail = "pool empty (K8s Runner fallback only)"
-		return r
-	}
-	r.Status = "ok"
-	r.Detail = fmt.Sprintf("cap=%d idle=%d in-use=%d", capacity, idle, inUse)
 	return r
 }
 
@@ -324,4 +241,11 @@ func probeRecentRuns(ctx context.Context, prof *profile.Profile) profileProbeRes
 	}
 	r.Detail = detail
 	return r
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }

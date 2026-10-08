@@ -569,7 +569,6 @@ var productTestUnset = []string{
 	"SPARKWING_NODE_ID",
 	"SPARKWING_PARENT_LIVENESS_FD",
 	"SPARKWING_RUN_ID",
-	"SPARKWING_TOKEN",
 }
 
 // safety: the injected names a suite may keep, each because it names no

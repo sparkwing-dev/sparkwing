@@ -84,7 +84,7 @@ func TestWindowsVerifyKeepsRaceFailuresAndRunsLaterChecksInOrder(t *testing.T) {
 func TestWindowsVerifySelectsNativeRegressionFixtures(t *testing.T) {
 	selection := regexp.MustCompile(windowsVerifyRuntimeTests)
 	for _, relative := range []string{
-		"internal/runners/local/process_windows_test.go", "sparkwing/exec_windows_test.go", "sparkwing/depcache_npm_test.go",
+		"internal/runners/local/process_windows_test.go", "sparkwing/exec_windows_test.go", "internal/depcache/depcache_npm_test.go",
 		"internal/wingd/client/query_absent_windows_test.go", "internal/orchestrator/run_handle_windows_test.go",
 	} {
 		source, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", filepath.FromSlash(relative)), nil, 0)

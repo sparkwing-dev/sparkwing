@@ -107,7 +107,11 @@ compiles the triggering branch and runs its binary with the runner's
 `SPARKWING_AGENT_TOKEN` in the environment
 (`internal/cluster/trigger_loop.go`), which is the runner's own credential
 rather than a per-node capability, and none of the child-environment filtering
-above applies to it. `sparkwing cluster runners add` never sets that flag, so a
+above applies to it. The pipeline binary removes the token from its own
+environment at start and masks it in node output
+(`internal/orchestrator/agent_token.go`), so commands the team's code starts do
+not inherit it, but the team's code runs in the process that holds it, and
+`/proc/<pid>/environ` still shows the value the process started with. `sparkwing cluster runners add` never sets that flag, so a
 desktop enrolled by the installer does not take that path.
 
 **The contribution cap.** A runner's `--contribution` value caps the headroom it

@@ -77,6 +77,13 @@ prints the dashboard URL. An administrator mints those tokens with
 `--admin-token-stdin`. See
 [getting-started.md](docs/getting-started.md#sparkwing-cloud).
 
+Pipeline builds satisfy the Go floor declared in `.sparkwing/go.mod` and
+its resolved overlay. Sparkwing raises an older fixed `GOTOOLCHAIN` pin for
+builds; pipeline steps retain your pin. With `GOTOOLCHAIN=local`, install a
+sufficient Go or permit toolchain downloads. `sparkwing doctor` reports the
+running Go, floor, pin source, and fix. See
+[Go toolchain floor](docs/sparks.md#go-toolchain-floor).
+
 `sparkwing info` surveys the current repo and suggests next commands.
 `sparkwing docs list` browses the embedded reference (offline,
 version-locked).

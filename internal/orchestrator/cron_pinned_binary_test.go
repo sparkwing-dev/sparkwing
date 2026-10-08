@@ -78,7 +78,7 @@ func TestDispatchLocalTrigger_FailsWhenThePinnedBinaryIsGone(t *testing.T) {
 	if err == nil {
 		t.Fatal("a pin whose binary is gone dispatched anyway")
 	}
-	for _, want := range []string{missing, "crons install", "crons unlock"} {
+	for _, want := range []string{missing, "crons install", "crons set <name> --unpin"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q is missing %q", err, want)
 		}

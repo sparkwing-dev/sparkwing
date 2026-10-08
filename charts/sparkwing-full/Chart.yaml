@@ -2,9 +2,9 @@ apiVersion: v2
 name: sparkwing-full
 description: |
   Full self-host Helm chart for Sparkwing -- deploys the complete OSS
-  stack into a single cluster: sparkwing-controller (orchestrator) +
-  sparkwing-web (dashboard SPA host) + the runner-side bundle
-  (runner + cache + logs) via a sub-chart dependency.
+  stack into a single cluster: sparkwing-controller (orchestrator and
+  dashboard) + the runner-side bundle (runner + cache + logs) via a
+  sub-chart dependency.
 
   This is the chart referenced in decision 0001 ("Enterprise
   self-host" topology) for operators who want everything in one
@@ -25,7 +25,7 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of appVersion. Bump on any user-facing values.yaml
 # change or template structural change.
-version: 0.1.13
+version: 0.2.0
 
 # appVersion is retained as Helm metadata and the empty-tag fallback. The
 # current value is not a compatible public image-set guarantee; operators
@@ -51,7 +51,7 @@ maintainers:
 # The runner-side bundle is a separate chart so it can also be
 # installed standalone (Cloud + self-hosted-runners topology). Here
 # we pull it in as a sub-chart so one release owns the controller,
-# web, runner, cache, and logs manifests.
+# runner, cache, and logs manifests.
 #
 # repository: file://../sparkwing-runner-bundle
 #   Local sibling-directory dependency. After `helm dep up`, the
@@ -65,9 +65,9 @@ maintainers:
 # work from the in-cluster controller.
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.9"
+    version: "0.1.10"
     repository: "file://../sparkwing-runner-bundle"
     # condition lets operators disable the runner side entirely
     # (e.g. they already have runners deployed elsewhere and just
-    # want this chart to manage controller+web).
+    # want this chart to manage the controller).
     condition: sparkwing-runner-bundle.enabled

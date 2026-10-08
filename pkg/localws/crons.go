@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
@@ -68,7 +70,7 @@ func (a *cronsAPI) overview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "list cron schedules: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	out := crons.OverviewView{Health: crons.NewHealthView(health), Schedules: make([]crons.ScheduleView, 0, len(rows))}
+	out := api.OverviewView{Health: crons.NewHealthView(health), Schedules: make([]api.ScheduleView, 0, len(rows))}
 	for _, row := range rows {
 		out.Schedules = append(out.Schedules, crons.NewScheduleView(row))
 	}
@@ -97,9 +99,9 @@ func (a *cronsAPI) detail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read upcoming instants: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	out := crons.DetailView{
+	out := api.DetailView{
 		Schedule: crons.NewScheduleView(row),
-		Fires:    make([]crons.FireView, 0, len(fires)),
+		Fires:    make([]api.FireView, 0, len(fires)),
 		Upcoming: make([]string, 0, len(upcoming)),
 	}
 	for _, fire := range fires {
@@ -145,7 +147,7 @@ func (a *cronsAPI) setPaused(w http.ResponseWriter, r *http.Request, paused bool
 	if !ok {
 		return
 	}
-	writeJSON(w, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, api.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
 func (a *cronsAPI) runNow(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +171,7 @@ func (a *cronsAPI) runNow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, crons.RunEnvelope{RunID: runID, Schedule: crons.NewScheduleView(row)})
+	writeJSON(w, api.RunEnvelope{RunID: runID, Schedule: crons.NewScheduleView(row)})
 }
 
 // safety: the dashboard never ticks and never launches in process, so this service carries

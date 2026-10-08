@@ -26,20 +26,12 @@ func runProfiles(args []string) error {
 		return errors.New("profiles: subcommand required")
 	}
 	switch args[0] {
-	case "add":
-		return runProfilesAdd(args[1:])
-	case "list", "ls":
+	case "list":
 		return runProfilesList(args[1:])
 	case "show":
 		return runProfilesShow(args[1:])
-	case "remove", "rm", "delete":
-		return runProfilesRemove(args[1:])
-	case "duplicate", "dup":
-		return runProfilesDuplicate(args[1:])
 	case "set":
 		return runProfilesSet(args[1:])
-	case "test":
-		return runProfilesTest(args[1:])
 	default:
 		PrintHelp(cmdProfiles, os.Stderr)
 		return fmt.Errorf("profiles: unknown subcommand %q", args[0])
@@ -56,45 +48,6 @@ func loadCfg() (*profile.Config, string, error) {
 		return nil, path, err
 	}
 	return cfg, path, nil
-}
-
-func runProfilesAdd(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesAdd.Path, flag.ContinueOnError)
-	name := fs.String("name", "", "profile name (unique in config.yaml)")
-	controller := fs.String("controller", "", "controller base URL (required for remote dispatch)")
-	token := fs.String("token", "", "bearer token, visible to other processes in the process list and shell history (optional -- omit for unauthed controllers)")
-	tokenStdin := fs.Bool("token-stdin", false, "read the bearer token from stdin, prompting without echo when stdin is a terminal")
-	if err := parseAndCheck(cmdProfilesAdd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-
-	cfg, path, err := loadCfg()
-	if err != nil {
-		return err
-	}
-	if _, existed := cfg.Profiles[*name]; existed {
-		return fmt.Errorf("profiles add: %q already exists (use `profiles remove` first, or `profiles duplicate` into a new name)", *name)
-	}
-	if *tokenStdin {
-		read, err := readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("bearer token for %q", *name))
-		if err != nil {
-			return err
-		}
-		*token = read
-	}
-	p := &profile.Profile{Name: *name}
-	if *controller != "" || *token != "" {
-		p.Controller = &profile.ControllerSpec{URL: *controller, Token: *token}
-	}
-	cfg.Profiles[*name] = p
-	if err := profile.Save(path, cfg); err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stdout, "added profile %q at %s\n", *name, path)
-	return nil
 }
 
 type profileIndex struct {
@@ -125,7 +78,7 @@ func runProfilesList(args []string) error {
 
 	if len(cfg.Profiles) == 0 {
 		fmt.Fprintln(os.Stderr, "no profiles configured")
-		fmt.Fprintf(os.Stderr, "expected at %s -- register one with `sparkwing configure profiles add --name NAME --controller URL`\n", path)
+		fmt.Fprintf(os.Stderr, "expected at %s -- connect one with `sparkwing cloud connect --controller URL`\n", path)
 		return nil
 	}
 	index := make([]profileIndex, 0, len(cfg.Profiles))
@@ -160,19 +113,30 @@ func runProfilesShow(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesShow.Path, flag.ContinueOnError)
 	nameFlag := fs.String("name", "", "profile name")
 	showToken := fs.Bool("show-token", false, "print the raw token (redacted by default)")
+	profileName := fs.String("profile", "", "without --name: which profile --profile NAME would select")
+	output := fs.StringP("output", "o", "pretty", "output format: pretty | json")
 	if err := parseAndCheck(cmdProfilesShow, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	cfg, _, err := loadCfg()
-	if err != nil {
-		return err
+	if fs.NArg() > 0 {
+		return fmt.Errorf("profiles show: unexpected positional %q (use --name or --profile)", fs.Arg(0))
 	}
 	name := *nameFlag
 	if name == "" {
-		return errors.New("profiles show: pass --name NAME")
+		return showSelectedProfile(*profileName, *output)
+	}
+	if fs.Changed("profile") {
+		return errors.New("profiles show: --name and --profile select different reports; pass one")
+	}
+	if fs.Changed("output") && *output == "json" {
+		return errors.New("profiles show --name: prints text; use `sparkwing configure profiles list -o json` for records")
+	}
+	cfg, _, err := loadCfg()
+	if err != nil {
+		return err
 	}
 	p, ok := cfg.Profiles[name]
 	if !ok {
@@ -186,31 +150,6 @@ func runProfilesShow(args []string) error {
 	} else {
 		fmt.Fprintf(os.Stdout, "token:      %s\n", redactToken(p.ControllerToken()))
 	}
-	return nil
-}
-
-func runProfilesRemove(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesRemove.Path, flag.ContinueOnError)
-	nameFlag := fs.String("name", "", "profile name to remove")
-	if err := parseAndCheck(cmdProfilesRemove, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	name := *nameFlag
-	cfg, path, err := loadCfg()
-	if err != nil {
-		return err
-	}
-	if _, ok := cfg.Profiles[name]; !ok {
-		return fmt.Errorf("profiles remove: %q not found", name)
-	}
-	delete(cfg.Profiles, name)
-	if err := profile.Save(path, cfg); err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stdout, "removed profile %q\n", name)
 	return nil
 }
 
@@ -258,42 +197,6 @@ func runProfilesSet(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "updated profile %q\n", name)
-	return nil
-}
-
-func runProfilesDuplicate(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesDuplicate.Path, flag.ContinueOnError)
-	srcFlag := fs.String("src", "", "source profile name")
-	dstFlag := fs.String("dst", "", "destination profile name (must not exist yet)")
-	if err := parseAndCheck(cmdProfilesDuplicate, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	src := *srcFlag
-	dst := *dstFlag
-	if src == dst {
-		return errors.New("profiles duplicate: SRC and DST must differ")
-	}
-	cfg, path, err := loadCfg()
-	if err != nil {
-		return err
-	}
-	p, ok := cfg.Profiles[src]
-	if !ok {
-		return fmt.Errorf("profiles duplicate: %q not found", src)
-	}
-	if _, exists := cfg.Profiles[dst]; exists {
-		return fmt.Errorf("profiles duplicate: %q already exists", dst)
-	}
-	cp := *p
-	cp.Name = dst
-	cfg.Profiles[dst] = &cp
-	if err := profile.Save(path, cfg); err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stdout, "duplicated %q -> %q (inspect it with `sparkwing configure profiles show --name %s`, then edit config.yaml or remove and re-add it)\n", src, dst, dst)
 	return nil
 }
 

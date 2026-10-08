@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -28,9 +27,6 @@ type templateDetailJSON struct {
 }
 
 func runExamples(args []string) error {
-	if len(args) > 0 && args[0] == "scaffold" {
-		return runExampleScaffold(args[1:])
-	}
 	fs := flag.NewFlagSet(cmdExamples.Path, flag.ContinueOnError)
 	var output, category, cloud, name string
 	var body bool
@@ -355,34 +351,6 @@ func applicabilityLine(a templates.Applicability) string {
 		parts = append(parts, "cloud-agnostic")
 	}
 	return strings.Join(parts, "  ")
-}
-
-func runExampleScaffold(args []string) error {
-	fs := flag.NewFlagSet(cmdExampleScaffold.Path, flag.ContinueOnError)
-	name := fs.String("name", "", "example to materialize")
-	params := fs.StringArray("param", nil, "example parameter, k=v (repeatable)")
-	if err := parseAndCheck(cmdExampleScaffold, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *name == "" {
-		return errors.New("examples scaffold: --name is required")
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	sparkwingDir, ok := walkUpForSparkwing(cwd)
-	bootstrapped := !ok
-	if !ok {
-		if err := bootstrapDotSparkwingOpts(cwd, filepath.Join(cwd, ".sparkwing"), true); err != nil {
-			return err
-		}
-		sparkwingDir = filepath.Join(cwd, ".sparkwing")
-	}
-	return scaffoldFromRegistry(sparkwingDir, *name, *name, *params, false, bootstrapped)
 }
 
 func builtinShapeNames() []string {

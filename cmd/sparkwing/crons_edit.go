@@ -20,40 +20,23 @@ type cronsDisarmReport struct {
 	Name     string `json:"name"`
 }
 
-func runCronsDisarm(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsDisarm.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmdCronsDisarm, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 1 {
-		PrintHelp(cmdCronsDisarm, os.Stderr)
-		return errors.New("crons disarm: one schedule name is required")
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsDisarm.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return runCronsDisarmProfile(*on, fs.Arg(0), format)
+func runCronsDisarmOne(name, format, profileName string) error {
+	if profileName != "" {
+		return runCronsDisarmProfile(profileName, name, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
-		return fmt.Errorf("crons disarm: %w", err)
+		return fmt.Errorf("crons uninstall: %w", err)
 	}
 	defer release()
 
 	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
+	sched, err := session.svc.Resolve(ctx, name)
 	if err != nil {
 		return err
 	}
 	if err := session.svc.Disarm(ctx, sched.ID); err != nil {
-		return fmt.Errorf("crons disarm: %w", err)
+		return fmt.Errorf("crons uninstall: %w", err)
 	}
 	report := cronsDisarmReport{Schedule: sched.ID, Name: crons.DisplayName(sched)}
 	switch format {
@@ -67,78 +50,20 @@ func runCronsDisarm(args []string) error {
 	return nil
 }
 
-func runCronsLock(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsLock.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmdCronsLock, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 1 {
-		PrintHelp(cmdCronsLock, os.Stderr)
-		return errors.New("crons lock: one schedule name is required")
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsLock.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return cronsRemotePinError("lock")
-	}
-	session, release, err := openCrons("")
-	if err != nil {
-		return fmt.Errorf("crons lock: %w", err)
-	}
-	defer release()
-
+func runCronsPin(session *cronsSession, name, format string, pin bool) error {
 	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
+	sched, err := session.svc.Resolve(ctx, name)
 	if err != nil {
 		return err
 	}
-	if _, err := session.svc.Lock(ctx, sched.ID, cronsProver(false)); err != nil {
-		return fmt.Errorf("crons lock: %w", err)
-	}
-	return emitCronsRow(ctx, session, sched.ID, format, "pinned")
-}
-
-func runCronsUnlock(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsUnlock.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmdCronsUnlock, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
+	if pin {
+		if _, err := session.svc.Lock(ctx, sched.ID, cronsProver(false)); err != nil {
+			return fmt.Errorf("crons set --pin: %w", err)
 		}
-		return err
-	}
-	if fs.NArg() != 1 {
-		PrintHelp(cmdCronsUnlock, os.Stderr)
-		return errors.New("crons unlock: one schedule name is required")
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUnlock.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return cronsRemotePinError("unlock")
-	}
-	session, release, err := openCrons("")
-	if err != nil {
-		return fmt.Errorf("crons unlock: %w", err)
-	}
-	defer release()
-
-	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
-	if err != nil {
-		return err
+		return emitCronsRow(ctx, session, sched.ID, format, "pinned")
 	}
 	if _, err := session.svc.Unlock(ctx, sched.ID); err != nil {
-		return fmt.Errorf("crons unlock: %w", err)
+		return fmt.Errorf("crons set --unpin: %w", err)
 	}
 	return emitCronsRow(ctx, session, sched.ID, format, "unpinned")
 }
@@ -150,6 +75,18 @@ func runCronsSet(args []string) error {
 	overlap := fs.String("overlap", "", "what a due instant does while the previous run is going: skip|queue")
 	catchUp := fs.String("catch-up", "", "how late a due instant may still fire, such as 6h")
 	argsFlag := fs.StringArray("arg", nil, "argument the launch passes, k=v (repeatable; replaces the declared set)")
+	// safety: each action acts on the schedule as a whole, so it stands alone
+	// on a call instead of mixing with an override edit.
+	actionFlags := []struct {
+		name string
+		set  *bool
+	}{
+		{"pin", fs.Bool("pin", false, "pin the schedule to the checkout as it stands")},
+		{"unpin", fs.Bool("unpin", false, "let the schedule follow the checkout again")},
+		{"pause", fs.Bool("pause", false, "stop the schedule firing, keeping it armed")},
+		{"resume", fs.Bool("resume", false, "let a paused schedule fire again")},
+		{"reset", fs.Bool("reset", false, "drop this host's override")},
+	}
 	outFmt := cronsOutputFlag(fs)
 	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsSet, fs, args); err != nil {
@@ -190,12 +127,37 @@ func runCronsSet(args []string) error {
 		}
 		fields.Args = parsed
 	}
-	if fields.Empty() {
+	var actions []string
+	for _, a := range actionFlags {
+		if *a.set {
+			actions = append(actions, "--"+a.name)
+		}
+	}
+	switch {
+	case len(actions) > 1 || (len(actions) == 1 && !fields.Empty()):
+		return fmt.Errorf("crons set: %s each stand alone; "+
+			"--cron, --tz, --overlap, --catch-up and --arg edit the override in a call of their own",
+			strings.Join(actions, ", "))
+	case len(actions) == 0 && fields.Empty():
 		PrintHelp(cmdCronsSet, os.Stderr)
-		return errors.New("crons set: name at least one of --cron, --tz, --overlap, --catch-up or --arg")
+		return errors.New("crons set: name at least one of --cron, --tz, --overlap, --catch-up or --arg, " +
+			"or one of --pin, --unpin, --pause, --resume or --reset")
+	}
+	name := fs.Arg(0)
+	action := ""
+	if len(actions) == 1 {
+		action = actions[0]
 	}
 	if *on != "" {
-		return runCronsSetProfile(*on, fs.Arg(0), format, cronsOverrideRequest(fields))
+		switch action {
+		case "--pin", "--unpin":
+			return cronsRemotePinError(action)
+		case "--pause", "--resume":
+			return runCronsPauseResumeProfile(*on, name, format, action == "--pause")
+		case "--reset":
+			return runCronsResetProfile(*on, name, format)
+		}
+		return runCronsSetProfile(*on, name, format, cronsOverrideRequest(fields))
 	}
 
 	session, release, err := openCrons("")
@@ -204,8 +166,16 @@ func runCronsSet(args []string) error {
 	}
 	defer release()
 
+	switch action {
+	case "--pin", "--unpin":
+		return runCronsPin(session, name, format, action == "--pin")
+	case "--pause", "--resume":
+		return runCronsPauseResume(session, name, format, action == "--pause")
+	case "--reset":
+		return runCronsReset(session, name, format)
+	}
 	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
+	sched, err := session.svc.Resolve(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -216,41 +186,15 @@ func runCronsSet(args []string) error {
 	return renderCronsOverride(row, format)
 }
 
-func runCronsReset(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsReset.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmdCronsReset, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 1 {
-		PrintHelp(cmdCronsReset, os.Stderr)
-		return errors.New("crons reset: one schedule name is required")
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsReset.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return runCronsResetProfile(*on, fs.Arg(0), format)
-	}
-	session, release, err := openCrons("")
-	if err != nil {
-		return fmt.Errorf("crons reset: %w", err)
-	}
-	defer release()
-
+func runCronsReset(session *cronsSession, name, format string) error {
 	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
+	sched, err := session.svc.Resolve(ctx, name)
 	if err != nil {
 		return err
 	}
 	row, err := session.svc.ClearOverride(ctx, sched.ID)
 	if err != nil {
-		return fmt.Errorf("crons reset: %w", err)
+		return fmt.Errorf("crons set --reset: %w", err)
 	}
 	return renderCronsOverride(row, format)
 }

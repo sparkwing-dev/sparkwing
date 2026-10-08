@@ -91,7 +91,6 @@ func startLoopbackController(
 func startLoopbackShim(
 	state StateBackend,
 	concurrency ConcurrencyBackend,
-	art storage.ArtifactStore,
 	runID string,
 	logger *slog.Logger,
 ) (*loopbackController, error) {
@@ -104,8 +103,7 @@ func startLoopbackShim(
 	}
 
 	shim := controller.NewLoopback(state, runID, token, logger).
-		WithConcurrency(concurrency).
-		WithArtifactStore(art)
+		WithConcurrency(concurrency)
 
 	url, srv, err := serveLoopback(shim.Handler(), runID, logger)
 	if err != nil {
@@ -128,7 +126,7 @@ func serveLoopback(h http.Handler, runID string, logger *slog.Logger) (string, *
 		return "", nil, fmt.Errorf("loopback controller: listen: %w", err)
 	}
 	srv := &http.Server{
-		Handler:           h,
+		Handler:           (&nodeProtocolCheck{logger: logger}).wrap(h),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

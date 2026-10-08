@@ -616,3 +616,54 @@ func TestDirectSparkwingDirAcceptsACheckoutReachedThroughASymlink(t *testing.T) 
 		t.Fatalf("directSparkwingDir = %s, want %s", dir, want)
 	}
 }
+
+// FetchPipelineSourceDirect checks out repoURL at sha under workDir and
+// returns the checkout's .sparkwing directory. With a credential the fetch
+// presents only that credential and reads none of this machine's git config,
+// ssh agent or keys; the zero credential fetches with this process's own git
+// config and credentials, which only an owner-fenced runner may do. Fetched
+// objects stay in a mirror under the Sparkwing home keyed by the remote, so a
+// later run of the same repository fetches only what it lacks. An empty sha
+// takes the tip of branch.
+func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
+	opts := defaultDirectOptions()
+	opts.cred = cred
+	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
+}
+
+func TestSweepDirectMirrorsKeepsHeldAndCheckedOutMirrors(t *testing.T) {
+	root := t.TempDir()
+	opts := httpOnly
+	stale := time.Now().Add(-30 * 24 * time.Hour)
+	idle, shaIdle := directTestRepo(t, sparkwingTree(t))
+	held, shaHeld := directTestRepo(t, sparkwingTree(t))
+	inUse, shaInUse := directTestRepo(t, sparkwingTree(t))
+	checkoutAndRelease(t, root, idle, shaIdle, opts)
+	checkoutAndRelease(t, root, held, shaHeld, opts)
+	if err := directCheckout(context.Background(), root, inUse, "main", shaInUse,
+		filepath.Join(t.TempDir(), "run"), opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, remote := range []string{idle, held, inUse} {
+		if err := os.Chtimes(directMirrorPath(root, remote), stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lock, err := os.OpenFile(directMirrorPath(root, held)+".lock", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	if _, err := cacheLock(lock, cacheLockShared); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, freed := SweepDirectMirrors(context.Background(), root, time.Now().Add(-7*24*time.Hour))
+	if removed != 1 || freed <= 0 || mirrorExists(root, idle) {
+		t.Fatalf("sweep removed %d (%d bytes), idle mirror kept=%v; want only the idle one gone",
+			removed, freed, mirrorExists(root, idle))
+	}
+	if !mirrorExists(root, held) || !mirrorExists(root, inUse) {
+		t.Fatalf("mirrors held=%v inUse=%v, want both kept", mirrorExists(root, held), mirrorExists(root, inUse))
+	}
+}

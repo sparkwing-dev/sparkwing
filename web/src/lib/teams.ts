@@ -391,9 +391,10 @@ export function runnerConnectCommand(
   if (minted.command) return minted.command;
   const quoted = (s: string) =>
     /^[A-Za-z0-9._:/@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+  const dir = '"$HOME/.config/sparkwing/runner-credentials"';
   return [
-    `SPARKWING_AGENT_TOKEN=${quoted(minted.token)}`,
-    "sparkwing-runner runner",
+    `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' ${quoted(minted.token)} > ${dir}/agent-token) &&`,
+    `sparkwing-runner runner --credentials-dir ${dir}`,
     `--controller ${controllerURLPlaceholder}`,
     ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),
     "--also-claim-triggers --max-claims-before-restart 0 --metrics-addr=",

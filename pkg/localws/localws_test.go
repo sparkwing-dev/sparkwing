@@ -57,6 +57,22 @@ func TestRun_LogStore_EndToEnd(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
+	paths := orchestrator.PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// safety: a log read is answered only for a run this store records, because the team boundary checks the run.
+	if err := seed.CreateRun(context.Background(), store.Run{ID: "run1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	addr := startLocalws(t, Options{
 		Home:          home,
 		LogStore:      ls,
@@ -210,40 +226,6 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 	defer resp4.Body.Close()
 	if resp4.StatusCode == http.StatusOK || resp4.StatusCode == http.StatusNoContent {
 		t.Errorf("cancel status = %d, want non-2xx (no controller in s3-only mode)", resp4.StatusCode)
-	}
-}
-
-func TestRun_ArtifactsEndpoint(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-
-	home := t.TempDir()
-	artRoot := filepath.Join(t.TempDir(), "remote-art")
-	as, err := fs.NewArtifactStore(artRoot)
-	if err != nil {
-		t.Fatalf("NewArtifactStore: %v", err)
-	}
-	if err := as.Put(context.Background(), "abcd1234",
-		readerOf("hello-artifact")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-
-	addr := startLocalws(t, Options{
-		Home:               home,
-		ArtifactStore:      as,
-		ArtifactStoreLabel: "fs",
-	})
-
-	resp := mustGet(t, "http://"+addr+"/api/v1/artifacts/abcd1234")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "hello-artifact" {
-		t.Errorf("body = %q", body)
 	}
 }
 

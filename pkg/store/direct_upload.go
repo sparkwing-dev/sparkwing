@@ -210,7 +210,7 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	// safety: a released reservation, such as one whose presign failed, frees
 	// its slot even though its upload row stays until expiry.
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM uploads u WHERE u.team = ? AND u.committed_at = 0 AND u.expires_at > ?
-        AND EXISTS (SELECT 1 FROM storage_reservations r WHERE r.id = u.id)`,
+        AND EXISTS (SELECT 1 FROM storage_reservations r WHERE r.team = u.team AND r.id = u.id)`,
 		string(req.Team), req.Now.UnixNano()).Scan(&pending); err != nil {
 		return Upload{}, err
 	}

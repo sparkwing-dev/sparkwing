@@ -60,15 +60,15 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `branches` | `[]string` | no | Branches records the intended push branch globs. It does not gate webhook dispatch. |
-| `paths` | `[]string` | no | Paths records the intended changed-path globs. It does not gate webhook dispatch. |
+| `branches` | `[]string` | no | Branches filters repository automation with Go path.Match globs. |
+| `paths` | `[]string` | no | Paths requires complete changed-file evidence; repository automation refuses declarations with this filter. |
 
 ## `on.pull_request`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `actions` | `[]string` | no | Actions records the intended pull_request actions. The controller applies its opened, synchronize, and reopened set independently. |
-| `branches` | `[]string` | no | Branches records the intended pull-request base branch globs. It does not gate webhook dispatch. |
+| `actions` | `[]string` | no | Actions defaults to opened, synchronize, and reopened. Repository automation also supports closed and ready_for_review. |
+| `branches` | `[]string` | no | Branches filters the pull request's base branch with Go path.Match globs. |
 
 ## `on.schedule`
 

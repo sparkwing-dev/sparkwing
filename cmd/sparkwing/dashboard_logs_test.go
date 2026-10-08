@@ -26,7 +26,8 @@ func TestServeLogsBoundsRecordsAndPreservesPlain(t *testing.T) {
 	}
 	for _, mode := range []string{"json", "plain", "pretty"} {
 		output := captureStdout(t, func() {
-			if err := runSparkwing([]string{"serve", "logs", "--home", home, "-o", mode}); err != nil {
+			t.Setenv("SPARKWING_HOME", home)
+			if err := runSparkwing([]string{"serve", "logs", "-o", mode}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -47,7 +48,8 @@ func TestServeLogsBoundsRecordsAndPreservesPlain(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := captureStdout(t, func() {
-		if err := runDashboardLogs([]string{"--home", home, "-o", "json"}); err != nil {
+		t.Setenv("SPARKWING_HOME", home)
+		if err := runDashboardLogs([]string{"-o", "json"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -65,7 +67,8 @@ func TestServeLogsFollowEmitsAppendsAndCancels(t *testing.T) {
 	if err := os.WriteFile(path, []byte("first\npar"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	command := outputContractCommand(t, "serve", "logs", "--home", home, "--follow", "-o", "json")
+	command := outputContractCommand(t, "serve", "logs", "--follow", "-o", "json")
+	command.Env = setEnv(command.Env, "SPARKWING_HOME", home)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +148,8 @@ func TestServeLogsZeroSkipsHistoryAndHugeLineIsExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := captureStdout(t, func() {
-		if err := runDashboardLogs([]string{"--home", home, "--limit", "0", "-o", "json"}); err != nil {
+		t.Setenv("SPARKWING_HOME", home)
+		if err := runDashboardLogs([]string{"--limit", "0", "-o", "json"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -153,7 +157,8 @@ func TestServeLogsZeroSkipsHistoryAndHugeLineIsExplicit(t *testing.T) {
 		t.Fatalf("limit0 emitted history: %q", output)
 	}
 	output = captureStdout(t, func() {
-		if err := runDashboardLogs([]string{"--home", home, "-o", "json"}); err != nil {
+		t.Setenv("SPARKWING_HOME", home)
+		if err := runDashboardLogs([]string{"-o", "json"}); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -6,25 +6,20 @@ Every `sparkwing update` command, flag, and argument, generated from the CLI's o
 
 ## `sparkwing update`
 
-Update the CLI binary or this project's SDK pin
+Update the CLI binary
 
-CLI is the default target; --cli selects it explicitly. --sdk selects
-this project's .sparkwing/go.mod pin. Targets are mutually exclusive.
-Both resolve the latest published GitHub release unless --version names a
-specific release tag.
+Updates the CLI binary; --cli names that target explicitly. It resolves the
+latest published GitHub release unless --version names a specific release
+tag. Bump this project's .sparkwing/go.mod SDK pin with
+'sparkwing repos update --in-place'.
 
 CLI updates verify Ed25519 signatures, the release digest and the version the
 staged binary reports before atomic replacement. Verification failure is
 terminal. --force permits a downgrade;
---override-hold crosses an operator CLI hold. Both flags are CLI-only.
-
-SDK updates run native go get for the resolved release, then go mod tidy.
-Go retains its toolchain selection, module verification and dependency rules.
-The CLI binary and operator CLI hold are unchanged.
+--override-hold crosses an operator CLI hold.
 
 --check reads installed identity and release metadata without installing,
-running Go, changing module files or writing caches. It honors the selected
-target and --version. Exit 0 means current or ahead, 1 means an update is
+running Go, changing module files or writing caches. It honors --version. Exit 0 means current or ahead, 1 means an update is
 available, and 2 means unknown, diverged or a check failure. Local SDK
 replacements and unverified CLI provenance are reported as unknown.
 A check does not verify downloadable assets or promise installation will work.
@@ -38,11 +33,10 @@ print the resulting version.
 
 | Flag | Description |
 |---|---|
-| `--cli` | Update the CLI binary (default target) |
-| `--sdk` | Update this project's .sparkwing/go.mod SDK pin |
+| `--cli` | Update the CLI binary (the only target; optional) |
 | `--check` | Compare the selected target without changing it |
-| `--force` | Allow CLI downgrade (--cli only) |
-| `--override-hold` | Cross an operator CLI version hold (--cli only) |
+| `--force` | Allow a CLI downgrade |
+| `--override-hold` | Cross an operator CLI version hold |
 | `--version TAG` | Canonical release tag; omit for latest published release |
 | `-o, --output FORMAT` | pretty \| json \| plain |
 
@@ -54,12 +48,6 @@ sparkwing update --check
 
 # Update the CLI
 sparkwing update --cli
-
-# Check this project's SDK pin
-sparkwing update --sdk --check
-
-# Update the SDK pin
-sparkwing update --sdk
 
 # Check a specific CLI release
 sparkwing update --cli --check --version v9.8.7

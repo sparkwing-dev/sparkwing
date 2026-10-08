@@ -814,7 +814,7 @@ func (s *Service) pinnedBinaryReady(sched store.CronSchedule) error {
 	if _, err := os.Stat(sched.LockedBinary); err != nil {
 		return fmt.Errorf(
 			"the pinned pipeline binary at %s is gone; re-run `sparkwing crons install` to pin the checkout again, "+
-				"or `sparkwing crons unlock` to follow it", sched.LockedBinary)
+				"or `sparkwing crons set %s --unpin` to follow it", sched.LockedBinary, DisplayName(sched))
 	}
 	return nil
 }
@@ -822,7 +822,7 @@ func (s *Service) pinnedBinaryReady(sched store.CronSchedule) error {
 // ScheduleEnvKey carries the id of the cron schedule that launched a run, so
 // one run traces back to the cadence that asked for it. The cron_fires table is
 // the authoritative join; this key answers the question from the run's own row,
-// which is where an operator reading `runs get` starts.
+// which is where an operator reading `runs status -o json` starts.
 const ScheduleEnvKey = "_SPARKWING_CRON_SCHEDULE"
 
 // PinnedBinaryEnvKey carries the pipeline binary a locked cron schedule pinned

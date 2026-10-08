@@ -118,8 +118,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
 	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
-	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
-		"binding of the pipeline is a candidate until its secret verifies the signature",
 	"(*Store).DeleteAccount": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
 	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
@@ -146,218 +144,232 @@ var reviewedUnscopedSQL = map[string]string{
 		"another team is refused; a dispute id is unique across teams",
 	"(*Store).DisputeTeam": "asks which team a dispute's hold is on, so an operator's release that names only the " +
 		"dispute answers with that team; a dispute id is unique across teams",
+	"applyMigrationSQLite": "the SQLite schema ladder rewrites every team's rows, and its early steps run before the team " +
+		"column exists",
+	"(*Store).applyMigrationPostgresTx": "the PostgreSQL schema ladder rewrites every team's rows, and its early steps run " +
+		"before the team column exists",
+	"applyFleetMigrationSQLite":   "a schema step that backfills every team's node offer and attempt columns",
+	"applyFleetMigrationPostgres": "a schema step that backfills every team's node offer and attempt columns",
+	"addNodeMetricsRunCascadePostgres": "a schema repair that drops node metric rows whose run is gone in any team before " +
+		"it adds the cascade",
+	"backfillAgentLossRetryNodeSourcesTx": "a schema step that records every team's pre-snapshot agent-loss retries as " +
+		"deny-all, before the source table carries a team",
+	"backfillRunAnnotationRollup": "an open-time backfill of every team's run annotation rollup, which also runs as schema " +
+		"v1 before the team column exists",
+	"gatherRunAnnotations": "reads one run's node and step annotations for the open-time rollup backfill, which names the " +
+		"run from its own scan and predates the team column",
+	"scrubSecretInputHashes": "a schema step that strips secret input hashes from every team's run invocations",
+	"rehashSessions": "a schema step that drops every team's sessions minted under the retired digest, so each signs in " +
+		"again",
+	"duplicateGrantReferences": "a migration check that finds grant references repeated anywhere, because the index it " +
+		"gates is created over the whole table",
+	"duplicateTokenPrefixes": "a migration check that finds token prefixes repeated anywhere, because a token prefix is " +
+		"unique across teams",
+	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
+		"sweep that only reaped one team would leave the rest held",
+	"(*Store).reapQueueExpiredRuns": "the queue-deadline sweep ends every team's runs no claimant took; each write names a " +
+		"run its own scan selected by global id",
+	"(*Store).reapStalePendingRuns": "the stale-run sweep fails every team's pending runs whose trigger is gone or " +
+		"finished; each write names a run its own scan selected by global id",
+	"(*Store).reapStaleRunningRuns": "the stale-run sweep fails every team's running runs no orchestrator heartbeats",
+	"(*Store).reapTimedOutApprovals": "the approval sweep resolves every team's approvals past their timeout; each write " +
+		"names an approval its own scan selected",
+	"(*Store).reconcileOrphanedLocalRuns": "the orphan sweep fails every team's runs whose orchestrator stopped " +
+		"heartbeating, and cancels pending nodes left under any terminal run",
+	"(*Store).orphanedRunsQuery": "the orphan sweep's scan of every team's running runs, with each run's own nodes' " +
+		"heartbeats",
+	"(*Store).cascadeOrphanedNodes": "fails the open nodes of a run an orphan sweep selected by global id from its own " +
+		"scan",
+	"(*Store).failNodesInRun": "the trigger-claim sweep fails the open nodes of a run it reaped; the global run id comes " +
+		"off that sweep's own scan",
+	"(*Store).failStaleQueuedNodes": "the queue-wait sweep fails every team's ready nodes no runner claimed in time",
+	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails and retries every team's nodes whose runner lease " +
+		"lapsed; each write names a node its own locked scan selected",
+	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
+		"its own scan selected",
+	"(*Store).expirePendingAgentLossRetriesTx": "expires every team's agent-loss retries past their deadline, " +
+		"because a claim that expired only its own team's would leave the rest queued past it",
+	"(*Store).ListExpiredClaims": "the local trigger consumer's sweep lists every lapsed trigger claim on the store before " +
+		"judging each one",
+	"(*Store).FinishLapsedClaim": "closes a lapsed trigger claim the local consumer's sweep selected by global id; the run " +
+		"it checks is the trigger's own",
+	"(*Store).PruneRunsOlderThan": "the run retention window is the deployment's, so the prune finds every team's expired " +
+		"runs",
+	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
+	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
+	"(*Store).sweepTable": "the retention sweep deletes every team's events and node metrics past the window that the " +
+		"run's own retention allows",
+	"(*Store).expireRunStorage": "the storage retention pass frees one expired run's events and usage, named by the global " +
+		"run id and principal its own scan selected",
+	"(*Store).retainingPrincipals": "the storage pass lists every team's retaining principals with their teams and charges " +
+		"each against that team",
+	"txLiveRunningRunIDs": "the concurrency reapers ask which of the runs they found in any team are still live",
+	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
+		"account deletion can tell sole ownership from shared",
+	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +
+		"with their teams, and frees each in that team",
+	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
+		"team's runs",
+	"(*Store).prepareNextExecutorClaim": "reads the candidate nodes the claim scan's runtime predicate already scoped to " +
+		"the claimant's one team",
+	"(*Store).loadExecutorPreparePlans": "reads the run rows of candidates the claim scan already scoped to the claimant's " +
+		"team, and returns each run's team",
+	"(*Store).loadExecutorPrepareProfiles": "the team predicate is built at run time, one per profile identity, from the " +
+		"team each candidate's run row carries",
+	"(*Store).rejectUnattestedExecutorOffer": "reads the node an offer names after assertClaimantOwnsNode proved it in the " +
+		"claimant's team",
+	"(*Store).recordExecutorOfferAt": "records an offer on a node assertClaimantOwnsNode proved in the claimant's team; " +
+		"the offer row takes the run's team, and the conflict checks span teams because an executor's slots and " +
+		"reservations are the deployment's",
+	"claimedExecutorOffer":     "reads the node an offer names after assertClaimantOwnsNode proved it in the claimant's team",
+	"nodeExecutorOfferCountTx": "counts the offers on one node the offer path already proved in the claimant's team",
+	"(*Store).awardBestExecutorOffer": "awards a node the offer path or a team-bounded finalize route named by global id; " +
+		"every offer on it was recorded after assertClaimantOwnsNode, and the winner's other offers are keyed by its " +
+		"own credential",
+	"(*Store).expireNodeExecutorOffersTx": "expires lapsed offers on the one node an award names by global id",
+	"(*Store).expireConflictingExecutorOffersTx": "expires lapsed offers that hold the same executor slot or reservation, " +
+		"which are the deployment's and shared by every team's offers",
+	"(*Store).finalizeExecutorClaimRoundAt": "closes the offer round of a node named by global id under the team boundary " +
+		"of the finalize route or by the local fleet's own coordinator",
+	"(*Store).claimReadyNodeForExecutorTx": "claims a node the claim scan's runtime predicate selected in the claimant's " +
+		"team; the slot and budget counts span teams because an executor's capacity is the deployment's",
+	"(*Store).executorEligibility": "counts an executor's live claims in every team, because its capacity is the " +
+		"deployment's and every team's claims use it",
+	"(*Store).executorEligibilityTx": "counts an executor's live claims in every team, because its capacity is the " +
+		"deployment's and every team's claims use it",
+	"(*Store).loadExecutorUsage": "loads every executor's live claim usage across teams, because executor capacity is the " +
+		"deployment's",
+	"loadExecutorUsageTx": "loads every executor's live claim usage across teams, because executor capacity is the " +
+		"deployment's",
+	"(*Store).schedulingSummaryTx": "reads the node and run a claim, offer or award names by global id, and returns the " +
+		"run's team for the checks that follow",
+	"(*Store).ValidateExecutorClaimReservation": "matches the node's live claim against the exact claimant credential and " +
+		"reservation, and a token prefix is unique across teams",
+	"(*Store).buildNodeExecutionPolicyTx": "builds the execution policy of the node a scoped claim just awarded, from that " +
+		"node's own run and plan",
+	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
+		"run's team",
+	"(*Store).TriggerClaimFenceIsLive": "matches the trigger's live claim against the exact claimant credential and " +
+		"generation, and a token prefix is unique across teams",
+	"(*Store).NodeClaimFenceIsLive": "matches the node's live claim against the exact holder, credential, reservation and " +
+		"generation, and a token prefix is unique across teams",
+	"(*Store).NodeExecutionAttemptIsLive": "matches the node's live claim and open attempt against the exact holder, " +
+		"credential and generation, and a token prefix is unique across teams",
+	"(*Store).NodeExecutionAttemptBelongsToLiveClaim": "matches the node's live claim and its attempt against the exact " +
+		"holder, credential and generation, and a token prefix is unique across teams",
+	"(*Store).TriggerExecutionAttemptIsLive": "matches the trigger's live claim and open attempt against the exact " +
+		"claimant credential and generation, and a token prefix is unique across teams",
+	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim": "matches the trigger's live claim and its attempt against the " +
+		"exact claimant credential and generation, and a token prefix is unique across teams",
+	"(*Store).PrincipalHoldsNodeClaim": "matches the node's live claim against the exact claimant credential, and a token " +
+		"prefix is unique across teams",
+	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
+		"a token prefix is unique across teams",
+	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
+		"token prefix is unique across teams",
+	"(*Store).PrincipalHoldsProfileClaim": "matches a live claim of the exact claimant credential on the pipeline's runs " +
+		"or triggers; a token prefix is unique across teams and a claim only reaches its own team's work",
+	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +
+		"answer scoped to the asker is no answer; a token prefix is unique across teams",
+	"(*Store).ClaimedRunsFor": "asks which teams' runs the exact claimant credential holds live work in, so an answer " +
+		"scoped to the asker is no answer; a token prefix is unique across teams",
+	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
+		"selected, in the order the claim path names, and read nothing back",
+	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
+		"team's handle; an answer scoped to the asker is no answer",
+	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
+		"through that team's handle; an answer scoped to the asker is no answer",
+	"(*Store).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
+		"the deployment's alarm; the route serves it to an admin only",
+	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
+		"team's claimed cloud runners",
+	"(*Store).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
+	"(*Store).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
+	"(*Store).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
+	"(*Store).CreditLedgerTotals": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
+		"grants, charges and reservations and name none",
+	"(*Store).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
+		"principal",
+	"(*Store).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
+		"principal",
+	"(*Store).ListEgressUsage": "the controller restores the deployment's egress meter, which counts every principal, " +
+		"before it serves",
+	"(*Store).RecordEgressUsage": "the controller persists the deployment's egress meter for every principal it counted; " +
+		"each principal names its own team",
+	"(*Store).selectTokensByPrefix": "authenticates a presented token by its prefix before its team is known; a token " +
+		"prefix is unique across teams and the row it returns carries its team",
+	"selectTokensByPrefixTx": "reads the credential the operator's rotate names by its prefix, which is unique across " +
+		"teams, and returns the row with its team",
+	"(*Store).rotateToken": "the operator rotates one credential named by its prefix, which is unique across teams; the " +
+		"replacement is minted into the old token's own team",
+	"(*Store).RevokeToken": "the operator revokes one credential named by its prefix, which is unique across teams; the " +
+		"admin scope is the deployment operator's and no team membership grants it",
+	"(*Store).ListTokens": "the operator's credential listing spans every team and returns each token's team; the admin " +
+		"scope is the deployment operator's and no team membership grants it",
+	"(*Store).SetTokenMetered": "the operator marks one credential as metered by its prefix, which is unique across teams; " +
+		"the admin scope is the deployment operator's",
+	"(*Store).TokenMetered": "reads whether one credential pays credits by its prefix, which is unique across teams, so " +
+		"the answer is that credential's own",
+	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
+		"the answer is that credential's own",
+	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
+		"exists in any team, because an install with any credential already has an operator path",
+	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
+		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
+		"a backfill would read every quota as unlimited",
+	"(*Store).storageQuotaRow": "storage quotas are keyed by the charged principal, team:<slug> for every team but the " +
+		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
+		"a backfill would read every quota as unlimited",
+	"storageQuotaForTx": "storage quotas are keyed by the charged principal, team:<slug> for every team but the default, " +
+		"so the principal names the team; no writer sets their team column yet, and scoping these reads before a " +
+		"backfill would read every quota as unlimited",
+	"(*Store).StorageUsageFor": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
+		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
+		"a backfill would read every quota as unlimited",
+	"(*Store).StorageRetainedBytes": "storage usage rows are keyed by the charged principal, team:<slug> for every team " +
+		"but the default, so the principal names the team; no writer sets their team column yet, and scoping these " +
+		"reads before a backfill would read every quota as unlimited",
+	"(*Store).SetStorageQuota": "the operator sets a quota by principal; storage quotas are keyed by the charged " +
+		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
+		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
+	"(*Store).SetStorageAllowance": "the operator sets an allowance by principal; storage quotas are keyed by the charged " +
+		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
+		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
+	"(*Store).createAgentLossRetryTx": "the expired-claim reaper files a lost node's retry for the source run its own scan " +
+		"selected by global id; the retry's trigger and run take the source run's team",
+	"(*Store).mergeAgentLossRetryTx": "the expired-claim reaper folds another lost node into the retry it already filed " +
+		"for the same source run, named by global id",
+	"snapshotAgentLossRetryNodesTx": "copies one source run's nodes onto the retry the reaper filed for it, by global id, " +
+		"and also runs as the v31 schema step before the team column exists",
+	"persistAgentLossRetryNodeSourceTx": "writes one source node's snapshot for the retry the reaper filed, by global id, " +
+		"and also runs as the v31 schema step before the team column exists",
+	"loadAgentLossRetryNodeSourceTx": "reads the snapshot a retry was filed with by the retry's global id, on the reaper's " +
+		"path and in the v31 schema step that predates the team column",
+	"(*Store).requiredAgentLossRetryNodeSourceTx": "the deny-all markers a pre-snapshot retry carries were written before " +
+		"the team column, so scoping this read to a team would let a legacy retry run unrefused; the retry id is global " +
+		"and its node read follows",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
 // its entries and lowers unportedSQLSize in the same commit, so an entry
 // cannot be added without a reviewer seeing the number move.
 var unportedSQL = []string{
-	"(*Store).AcknowledgeNodeExecutionStart",
-	"(*Store).ActiveExecutorActivity",
-	"(*Store).AddNodeMetricSample",
-	"(*Store).AddNodeUsage",
-	"(*Store).AppendEventOnce",
-	"(*Store).AppendNodeAnnotation",
-	"(*Store).AppendStepAnnotation",
-	"(*Store).CacheExcludedCounts",
-	"(*Store).CancelPendingTrigger",
-	"(*Store).ComputeAlarmState",
-	"(*Store).ComputeUsage",
-	"(*Store).ConsumeNodeBounce",
-	"(*Store).CountActiveRunners",
-	"(*Store).CountNodesByQueueState",
-	"(*Store).CountPendingNodes",
-	"(*Store).CountPendingTriggers",
 	"(*Store).CountUsers",
-	"(*Store).CreateApproval",
-	"(*Store).CreateDebugPause",
 	"(*Store).CreateFirstUser",
 	"(*Store).CreateSession",
-	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
-	"(*Store).CreditLedgerTotals",
-	"(*Store).DeleteRun",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
-	"(*Store).ExpireSessions",
-	"(*Store).FindSpawnedChildTriggerID",
-	"(*Store).FindTriggerByIdempotencyKey",
-	"(*Store).FindTriggerByWebhookReplay",
-	"(*Store).FinishLapsedClaim",
-	"(*Store).FinishNodeExecutionAttempt",
-	"(*Store).FinishNodeStep",
-	"(*Store).finishNode",
-	"(*Store).FinishRunAtGeneration",
-	"(*Store).FinishRunsIfActive",
-	"(*Store).FinishTrigger",
-	"(*Store).FinishTriggerAtGeneration",
-	"(*Store).GetActiveDebugPause",
-	"(*Store).GetApproval",
-	"(*Store).GetNode",
-	"(*Store).GetNodeDispatch",
-	"(*Store).GetRun",
-	"(*Store).GetTrigger",
-	"(*Store).HeartbeatTrigger",
-	"(*Store).ListApprovalsForRun",
-	"(*Store).ListCreditCharges",
-	"(*Store).ListCreditGrants",
-	"(*Store).ListDebugPauses",
-	"(*Store).ListEgressUsage",
-	"(*Store).ListEventsAfter",
-	"(*Store).ListExpiredClaims",
 	"(*Store).ListLegacyAgentClaims",
-	"(*Store).ListNodeBounces",
-	"(*Store).ListNodeDispatches",
-	"(*Store).ListNodeMetricsPage",
-	"(*Store).ListNodeSteps",
-	"(*Store).ListNodes",
-	"(*Store).ListPendingApprovals",
-	"(*Store).ListPendingTriggersForParent",
-	"(*Store).ListSpawnedChildrenByRun",
-	"(*Store).ListStorageQuotas",
-	"(*Store).ListTokens",
 	"(*Store).ListUsers",
-	"(*Store).NodeClaimFenceIsLive",
-	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
-	"(*Store).NodeExecutionAttemptIsLive",
-	"(*Store).NodeSettlement",
-	"(*Store).PendingNodeBounce",
-	"(*Store).ClaimedRunFor",
-	"(*Store).ClaimedRunsFor",
-	"(*Store).PrincipalHoldsNodeClaim",
-	"(*Store).PrincipalHoldsPipelineClaim",
-	"(*Store).PrincipalHoldsProfileClaim",
-	"(*Store).PrincipalHoldsRunClaim",
-	"(*Store).PrincipalHoldsTriggerClaim",
-	"(*Store).PruneEgressUsage",
-	"(*Store).PruneRunsOlderThan",
-	"(*Store).ReapExpiredNodeClaims",
-	"(*Store).RecordEgressUsage",
-	"(*Store).ReleaseClaimAtGeneration",
-	"(*Store).ReleaseDebugPause",
-	"(*Store).RequestCancel",
-	"(*Store).RequestNodeBounce",
-	"(*Store).RequeueUnstartedClaim",
-	"(*Store).ResetNodeForAutoRetry",
-	"(*Store).ResolveApproval",
-	"(*Store).RevokeNodeReady",
-	"(*Store).RevokeToken",
-	"(*Store).RunExceedsWallClock",
-	"(*Store).SetNodeArtifactManifest",
-	"(*Store).SetNodeArtifactManifestCharged",
-	"(*Store).SetNodeStatus",
-	"(*Store).SetNodeSummary",
-	"(*Store).SetRetriedAs",
-	"(*Store).SetStepSummary",
-	"(*Store).SetStorageAllowance",
-	"(*Store).SetStorageQuota",
-	"(*Store).SetTokenMetered",
-	"(*Store).SkipNodeStep",
-	"(*Store).StartNode",
-	"(*Store).StartNodeStep",
-	"(*Store).StorageRetainedBytes",
-	"(*Store).StorageUsageFor",
-	"(*Store).TokenMetered",
-	"(*Store).TopStorageTeams",
-	"(*Store).TouchNodeHeartbeat",
-	"(*Store).TouchRunHeartbeat",
-	"(*Store).TriggerClaimFenceIsLive",
-	"(*Store).TriggerClaimGeneration",
-	"(*Store).TriggerClaimant",
-	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim",
-	"(*Store).TriggerExecutionAttemptIsLive",
-	"(*Store).UpdateNodeActivity",
-	"(*Store).UpdateNodeDeps",
-	"(*Store).ValidateExecutorClaimReservation",
 	"(*Store).VerifyUser",
-	"(*Store).WriteNodeDispatch",
-	"(*Store).acknowledgeTriggerExecutionStart",
-	"(*Store).applyMigrationPostgresTx",
-	"(*Store).assertNodeMutationFenceTx",
-	"(*Store).awardBestExecutorOffer",
-	"(*Store).buildNodeExecutionPolicyTx",
-	"(*Store).cancelMeteredNode",
-	"(*Store).cascadeOrphanedNodes",
-	"(*Store).chargeNodeTx",
-	"(*Store).chargeStorageTx",
-	"(*Store).claimReadyNodeForExecutorTx",
-	"(*Store).createAgentLossRetryTx",
-	"(*Store).eventKindPresent",
-	"(*Store).executorEligibility",
-	"(*Store).executorEligibilityTx",
-	"(*Store).expireConflictingExecutorOffersTx",
-	"(*Store).expireNodeExecutorOffersTx",
-	"(*Store).expirePendingAgentLossRetriesTx",
-	"(*Store).expireRunStorage",
-	"(*Store).failNodesInRun",
-	"(*Store).failStaleQueuedNodes",
-	"(*Store).finalizeExecutorClaimRoundAt",
-	"(*Store).finishLocalNodeExecutionAttempt",
-	"(*Store).finishTriggerExecutionAttempt",
-	"(*Store).loadExecutorPreparePlans",
-	"(*Store).loadExecutorPrepareProfiles",
-	"(*Store).loadExecutorUsage",
 	"(*Store).lookupUser",
-	"(*Store).markNodeReady",
-	"(*Store).mergeAgentLossRetryTx",
 	"(*Store).mintCSRFKey",
-	"(*Store).orphanedRunsQuery",
-	"(*Store).prepareNextExecutorClaim",
-	"(*Store).reapExpiredTriggers",
-	"(*Store).reapQueueExpiredRuns",
-	"(*Store).reapStalePendingRuns",
-	"(*Store).reapStaleRunningRuns",
-	"(*Store).reapTimedOutApprovals",
-	"(*Store).reconcileOrphanedLocalRuns",
-	"(*Store).recordExecutorOfferAt",
-	"(*Store).recoverExpiredNodeClaims",
-	"(*Store).rejectUnattestedExecutorOffer",
-	"(*Store).requiredAgentLossRetryNodeSourceTx",
-	"(*Store).reserveNodeCreditsTx",
-	"(*Store).retainingPrincipals",
-	"(*Store).rotateToken",
-	"(*Store).schedulingSummaryTx",
-	"(*Store).selectTokensByPrefix",
-	"(*Store).startLocalNodeExecutionAttempt",
-	"(*Store).storageQuotaRow",
-	"(*Store).sweepTable",
-	"addNodeMetricsRunCascadePostgres",
-	"appendEventTx",
-	"appendRunAnnotation",
-	"applyFleetMigrationPostgres",
-	"applyFleetMigrationSQLite",
-	"applyMigrationSQLite",
-	"backfillAgentLossRetryNodeSourcesTx",
-	"backfillRunAnnotationRollup",
-	"bridgeLegacyFleetSQLite",
-	"claimedExecutorOffer",
-	"clearCreditExhaustionAnchorTx",
-	"creditExhaustionAnchorTx",
-	"duplicateGrantReferences",
-	"duplicateTokenPrefixes",
-	"gatherRunAnnotations",
 	"livePrefixesForPrincipal",
-	"loadAgentLossRetryNodeSourceTx",
-	"loadExecutorUsageTx",
-	"lockRunRow",
-	"nodeChargeTx",
-	"nodeExecutorOfferCountTx",
-	"persistAgentLossRetryNodeSourceTx",
-	"rehashSessions",
-	"runElapsedSecondsTx",
-	"runPrincipalTx",
-	"scrubSecretInputHashes",
-	"selectTokensByPrefixTx",
-	"snapshotAgentLossRetryNodesTx",
-	"stampCreditExhaustionAnchorTx",
-	"storageQuotaForTx",
-	"tokenMeteredTx",
-	"txLiveRunningRunIDs",
-	"validateLegacyFleetShape",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 202
+const unportedSQLSize = 12
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
@@ -403,11 +415,18 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		if len(tables) == 0 {
 			continue
 		}
-		if statementCarriesTeam(stmt.text) {
+		unscoped := unscopedSubqueries(stmt.text)
+		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
 			continue
 		}
 		if exemptFromScope(stmt.key) {
 			seen[stmt.key] = true
+			continue
+		}
+		if len(unscoped) > 0 {
+			t.Errorf("%s: statement in %s has a subquery touching %s with no team predicate of its own.\n"+
+				"Scope the subquery, or add %q to reviewedUnscopedSQL with the reason it crosses teams.\n\t%s",
+				stmt.pos, stmt.key, strings.Join(tenantTablesTouchedBy(unscoped[0]), ", "), stmt.key, collapse(unscoped[0]))
 			continue
 		}
 		t.Errorf("%s: statement in %s touches %s with no team predicate.\n"+
@@ -507,10 +526,22 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"conflict guard with team", `INSERT INTO secrets (team, name) VALUES (?,?) ON CONFLICT (name) DO UPDATE SET v = 1 WHERE secrets.team = excluded.team`, true},
 		{"postgres placeholder", `SELECT id FROM runs WHERE team = $1`, true},
 		{"operator table", `SELECT value FROM sparkwing_meta WHERE key = ?`, true},
+		{"unscoped subquery under a scoped statement", `INSERT INTO nodes (team, run_id, x) VALUES (?, ?, (SELECT x FROM runs WHERE id = ?))`, false},
+		{"scoped subquery", `INSERT INTO nodes (team, run_id, x) VALUES (?, ?, (SELECT x FROM runs WHERE team = ? AND id = ?))`, true},
+		{"unscoped exists", `SELECT id FROM nodes WHERE team = ? AND EXISTS (SELECT 1 FROM runs r WHERE r.id = nodes.run_id)`, false},
+		{"unscoped nested subquery", `SELECT id FROM nodes WHERE team = ? AND run_id IN (SELECT id FROM runs WHERE team = ? AND retry_of IN (SELECT id FROM runs WHERE id = ?))`, false},
+		{"subquery deriving the team", `INSERT INTO nodes (team, run_id) VALUES ((SELECT team FROM runs WHERE id = ?), ?)`, true},
+		{"predicate only in a select-list subquery", `SELECT (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id) FROM nodes WHERE run_id = ?`, false},
+		{"outer filtered by a scoped IN", `SELECT run_id FROM approvals WHERE resolved_at IS NULL AND run_id IN (SELECT id FROM runs WHERE team = ?)`, true},
+		{"outer filtered by a scoped EXISTS", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, true},
+		{"scoped subquery in a SET clause", `UPDATE nodes SET x = (SELECT x FROM runs WHERE team = ? AND id = ?) WHERE run_id = ?`, false},
+		{"outer reading no table", `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?), (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`, true},
+		{"parenthesis in a literal", `SELECT id FROM runs WHERE team = ? AND note = '(' AND id IN (SELECT run_id FROM nodes WHERE team = ?)`, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			unscoped := len(tenantTablesTouchedBy(c.sql)) > 0 && !statementCarriesTeam(c.sql)
+			unscoped := len(tenantTablesTouchedBy(c.sql)) > 0 &&
+				(!outerCarriesTeam(c.sql) || len(unscopedSubqueries(c.sql)) > 0)
 			if unscoped == c.scope {
 				t.Errorf("sql %q: guard says scoped=%v, want %v", c.sql, !unscoped, c.scope)
 			}
@@ -539,7 +570,8 @@ func tenantTablesTouchedBy(sql string) []string {
 
 // safety: reads one statement's text, so a statement joining two tenant
 // tables passes on a single predicate; this is the guard's floor, not a
-// proof that every table in the statement is scoped.
+// proof that every table in the statement is scoped. A subquery is judged
+// on its own by unscopedSubqueries.
 func statementCarriesTeam(sql string) bool {
 	if cols := insertColumnsRe.FindStringSubmatch(sql); cols != nil {
 		if !slices.ContainsFunc(strings.Split(cols[1], ","), func(c string) bool {
@@ -562,6 +594,93 @@ func statementCarriesTeam(sql string) bool {
 		return true
 	}
 	return teamPredicateRe.MatchString(sql)
+}
+
+// safety: an outer predicate says nothing about a subquery reading another tenant table by a bare id, and
+// a predicate inside a subquery says nothing about the outer rows, so the statement and each parenthesized
+// SELECT are judged on their own text. A subquery selecting only the team column is exempt: asking which
+// team owns an id is how a write takes its row's team.
+func unscopedSubqueries(sql string) []string {
+	var out []string
+	for _, sub := range splitSubqueries(sql).subs {
+		if len(tenantTablesTouchedBy(sub)) == 0 || teamPredicateRe.MatchString(sub) || teamDerivationRe.MatchString(sub) {
+			continue
+		}
+		out = append(out, sub)
+	}
+	return out
+}
+
+// safety: a scoped subquery behind IN or EXISTS filters the outer rows to the team, so it scopes the outer
+// statement; one in a select list or a SET clause does not, and is cut out before the outer is judged.
+func outerCarriesTeam(sql string) bool {
+	outer := splitSubqueries(sql).outer
+	return len(tenantTablesTouchedBy(outer)) == 0 || statementCarriesTeam(outer)
+}
+
+var teamDerivationRe = regexp.MustCompile(`(?is)^\s*SELECT\s+(?:[a-z_][a-z0-9_]*\.)?team\s+FROM\b`)
+
+var subqueryStartRe = regexp.MustCompile(`(?is)^\s*(?:SELECT|WITH)\b`)
+
+var filterBeforeRe = regexp.MustCompile(`(?is)\b(?:IN|EXISTS)\s*$`)
+
+type splitSQL struct {
+	outer string
+	subs  []string
+}
+
+// safety: skips quoted literals, because a parenthesis inside a string is
+// not one of the statement's and would misalign every span after it.
+func splitSubqueries(sql string) splitSQL {
+	type span struct{ from, to int }
+	var open []int
+	var spans []span
+	inQuote := false
+	for i := 0; i < len(sql); i++ {
+		switch c := sql[i]; {
+		case c == '\'':
+			inQuote = !inQuote
+		case inQuote:
+		case c == '(':
+			open = append(open, i)
+		case c == ')' && len(open) > 0:
+			from := open[len(open)-1] + 1
+			open = open[:len(open)-1]
+			if subqueryStartRe.MatchString(sql[from:i]) {
+				spans = append(spans, span{from, i})
+			}
+		}
+	}
+	own := func(sp span) string {
+		b := []byte(sql[sp.from:sp.to])
+		for _, inner := range spans {
+			if inner.from > sp.from && inner.to < sp.to {
+				for j := inner.from - sp.from; j < inner.to-sp.from; j++ {
+					b[j] = ' '
+				}
+			}
+		}
+		return string(b)
+	}
+	outer := []byte(sql)
+	var out splitSQL
+	for _, sp := range spans {
+		text := own(sp)
+		out.subs = append(out.subs, text)
+		nested := slices.ContainsFunc(spans, func(o span) bool { return o.from < sp.from && o.to > sp.to })
+		if nested {
+			continue
+		}
+		fill := byte(' ')
+		for j := sp.from; j < sp.to; j++ {
+			outer[j] = fill
+		}
+		if filterBeforeRe.MatchString(sql[:sp.from-1]) && teamPredicateRe.MatchString(text) {
+			copy(outer[sp.from:], " team = ? ")
+		}
+	}
+	out.outer = string(outer)
+	return out
 }
 
 // safety: substitutes the package-level constants holding statement

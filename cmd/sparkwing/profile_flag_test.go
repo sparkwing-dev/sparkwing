@@ -88,3 +88,26 @@ profiles:
 		t.Error("unexpected help-requested error")
 	}
 }
+
+func TestResolveProfileChain_FlagThenEnvThenProjectDefault(t *testing.T) {
+	writeProfilesFixture(t, `
+profiles:
+  prod: { controller: { url: https://api.example.dev } }
+  dev: { controller: { url: https://dev.example.dev } }
+`)
+	t.Chdir(t.TempDir())
+	t.Setenv("SPARKWING_PROFILE", "dev")
+	p, chain, _, err := resolveProfileChain("prod")
+	if err != nil || p.Name != "prod" || chain.Source != "flag" {
+		t.Fatalf("flag: %v %+v %v", p, chain, err)
+	}
+	p, chain, _, err = resolveProfileChain("")
+	if err != nil || p.Name != "dev" || chain.Source != "env" {
+		t.Fatalf("env: %v %+v %v", p, chain, err)
+	}
+	t.Setenv("SPARKWING_PROFILE", "")
+	p, chain, _, err = resolveProfileChain("")
+	if err != nil || p != nil || chain.Source != "none" {
+		t.Fatalf("none: %v %+v %v", p, chain, err)
+	}
+}

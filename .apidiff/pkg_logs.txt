@@ -148,7 +148,6 @@ type SearchResult struct {
 	Line    int
 	Content string
 }
-func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error
 type ServeOptions struct {
 	Root string
 
@@ -168,9 +167,7 @@ type ServeOptions struct {
 
 	Archive *ArchiveOptions
 }
-func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 func ServeWith(ctx context.Context, opts ServeOptions) error
-func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 type Server struct {
 }
 func (s *Server) ArchiveOnce(ctx context.Context, now time.Time) (int, error)
@@ -193,7 +190,7 @@ const StateStreaming = "streaming"
 const StateUnconfirmed = "unconfirmed"
 const StateUnknown = "unknown"
 const StoreCeilingRemedy = "Delete a run with DELETE /api/v1/logs/{runID}, or set --retention " +
-	"(SPARKWING_LOGS_RETENTION) so the sweeper does; both measure the store again, so appends " +
+	"so the sweeper does; both measure the store again, so appends " +
 	"resume as soon as it is back under the ceiling. Raise --max-store-bytes or --max-store-objects " +
 	"to accept more."
 const StoreCeilingSubject = "the log store"

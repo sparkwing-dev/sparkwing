@@ -21,7 +21,7 @@ func (s *Server) claimRunSource(w http.ResponseWriter, r *http.Request) (claimed
 		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
 		return claimedRunSource{}, tok, false
 	}
-	trigger, err := s.store.GetTrigger(r.Context(), tok.RunID)
+	trigger, err := tenant.GetTrigger(r.Context(), tok.RunID)
 	if err != nil || store.NormalizeTeam(trigger.Team) != tok.Team {
 		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
 		return claimedRunSource{}, tok, false

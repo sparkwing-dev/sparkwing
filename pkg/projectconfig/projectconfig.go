@@ -152,6 +152,10 @@ func Parse(raw []byte) (*Config, error) {
 		}
 		return nil, fmt.Errorf("parse sparkwing.yaml: %w", err)
 	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, errors.New("parse sparkwing.yaml: expected one YAML document")
+	}
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}

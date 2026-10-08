@@ -25,7 +25,7 @@ func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error {
 // trigger behind for a worker to claim. It maps the same duplicate-key
 // errors [Tenant.CreateTrigger] does.
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error {
-	return t.createTriggerWithRun(ctx, trig, r, "", "", "")
+	return t.createTriggerWithRun(ctx, trig, r, "", "", "", nil)
 }
 
 // CreateSourceTriggerWithRun binds an uploaded source once in the same
@@ -34,10 +34,10 @@ func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r
 	if _, ok := SourceKeyDigest(key); !ok || principal == "" || tokenPrefix == "" {
 		return ErrInvalidInput
 	}
-	return t.createTriggerWithRun(ctx, trig, r, key, principal, tokenPrefix)
+	return t.createTriggerWithRun(ctx, trig, r, key, principal, tokenPrefix, nil)
 }
 
-func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, sourceKey, principal, tokenPrefix string) error {
+func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, sourceKey, principal, tokenPrefix string, automation *GitHubAppAutomation) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -48,6 +48,11 @@ func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, 
 	}
 	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
 		return err
+	}
+	if automation != nil {
+		if err := t.checkGitHubAppAutomationTx(ctx, tx, *automation); err != nil {
+			return err
+		}
 	}
 	if err := routeRunDispatchTx(ctx, tx, t.team, trig, time.Now()); err != nil {
 		return err
@@ -124,14 +129,16 @@ func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key 
 	if err != nil {
 		return nil, err
 	}
-	return t.s.GetTrigger(ctx, id)
+	return t.GetTrigger(ctx, id)
 }
 
 // FindTriggerByWebhookReplay returns the trigger in t's team a refused
-// webhook delivery collided with, as [Store.FindTriggerByWebhookReplay]
-// does. The delivery id is an unsigned header, so a delivery signed for
-// one team naming another team's delivery id reads as not found rather
-// than as that team's run.
+// webhook delivery collided with: the one holding replayKey, or failing
+// that the one holding delivery. It reports [ErrNotFound] when neither
+// is stored, so a redelivery is answered with the run the first delivery
+// produced rather than a bare refusal. The delivery id is an unsigned
+// header, so a delivery signed for one team naming another team's
+// delivery id reads as not found rather than as that team's run.
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
 	if replayKey == "" && delivery == "" {
 		return nil, notFound("trigger for webhook delivery", delivery)
@@ -150,7 +157,7 @@ func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deli
 	if err != nil {
 		return nil, err
 	}
-	return t.s.GetTrigger(ctx, id)
+	return t.GetTrigger(ctx, id)
 }
 
 // CountPendingTriggers returns how many of t's triggers are waiting to be

@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sparkwing node protocol: describe document",
+  "description": "What an SDK process answers to the describe and plan requests of docs/node-protocol.md. A property whose description starts with 'Target:' is part of the contract the engine-hosted model needs and no SDK emits yet; every other property is emitted today.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "description": "Target: the node protocol version the SDK speaks, the same value it sends in the Sparkwing-Node-Protocol header."
+    },
+    "pipelines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pipeline" },
+      "description": "Target: the envelope around the array `--describe` writes today."
+    }
+  },
+  "required": ["protocol", "pipelines"],
+  "additionalProperties": false,
+  "$defs": {
+    "pipeline": {
+      "type": "object",
+      "description": "One registered pipeline, as `<binary> --describe` writes each array element.",
+      "properties": {
+        "name": { "type": "string" },
+        "short": { "type": "string" },
+        "help": { "type": "string" },
+        "examples": { "type": "array", "items": { "$ref": "#/$defs/example" } },
+        "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
+        "env_vars": { "type": "array", "items": { "$ref": "#/$defs/envVar" } },
+        "extra": { "type": "boolean", "description": "The pipeline accepts flags it does not declare." },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "risks_by_step": { "type": "array", "items": { "$ref": "#/$defs/stepRisks" } }
+      },
+      "required": ["name", "args"],
+      "additionalProperties": false
+    },
+    "example": {
+      "type": "object",
+      "properties": {
+        "comment": { "type": "string" },
+        "command": { "type": "string" }
+      },
+      "required": ["comment", "command"],
+      "additionalProperties": false
+    },
+    "arg": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "go_name": { "type": "string", "description": "The declaring field's name in the SDK's own language." },
+        "short": { "type": "string" },
+        "type": { "enum": ["string", "bool", "int", "int64", "float64", "duration", "[]string"] },
+        "required": { "type": "boolean" },
+        "desc": { "type": "string" },
+        "default": { "type": "string" },
+        "enum": { "type": "array", "items": { "type": "string" } },
+        "secret": { "type": "boolean" },
+        "job_id": { "type": "string" }
+      },
+      "required": ["name", "go_name", "type", "required"],
+      "additionalProperties": false
+    },
+    "envVar": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "default": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "stepRisks": {
+      "type": "object",
+      "properties": {
+        "node_id": { "type": "string" },
+        "step_id": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["node_id", "step_id", "labels"],
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object",
+      "description": "One run's plan, as `<binary> plan --json` writes it: the nodes, their edges and each node's execution envelope.",
+      "properties": {
+        "protocol": { "type": "string", "description": "Target: the node protocol version, as at the top level." },
+        "pipeline": { "type": "string" },
+        "run_id": { "type": "string" },
+        "priority": { "type": "integer" },
+        "claim_wait_ms": { "type": "integer" },
+        "admission_class": { "type": "string" },
+        "requires": { "type": "array", "items": { "type": "string" }, "description": "Runner labels the whole pipeline requires." },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "plan_concurrency": { "$ref": "#/$defs/concurrencyKey" },
+        "plan_concurrency_groups": { "type": "array", "items": { "$ref": "#/$defs/concurrencyKey" } },
+        "plan_resources": { "$ref": "#/$defs/resources" },
+        "secrets": { "type": "array", "items": { "$ref": "#/$defs/secret" } },
+        "source": { "$ref": "#/$defs/source" }
+      },
+      "required": ["pipeline", "run_id", "nodes"],
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "depth": { "type": "integer" },
+        "tags": { "type": "boolean" },
+        "submodules": { "type": "boolean" },
+        "lfs": { "type": "boolean" }
+      },
+      "required": ["depth"],
+      "additionalProperties": false
+    },
+    "secret": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "required": { "type": "boolean" },
+        "optional": { "type": "boolean" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "concurrencyKey": {
+      "type": "object",
+      "properties": { "key": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "cores": { "type": "number" },
+        "memory_bytes": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "description": "One node of the plan. `deps` and `optional_deps` are its edges.",
+      "properties": {
+        "id": { "type": "string" },
+        "deps": { "type": ["array", "null"], "items": { "type": "string" } },
+        "optional_deps": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "outputs": { "type": "array", "items": { "type": "string" }, "description": "Artifact globs the node publishes." },
+        "consumes": { "type": "array", "items": { "$ref": "#/$defs/consume" }, "description": "Artifacts the node stages from a producer before it starts." },
+        "groups": { "type": "array", "items": { "type": "string" } },
+        "dynamic": { "type": "boolean" },
+        "approval": { "$ref": "#/$defs/approval" },
+        "on_failure_of": { "type": "string" },
+        "modifiers": { "$ref": "#/$defs/modifiers" },
+        "work": { "$ref": "#/$defs/work" },
+        "spec_hash": { "type": "string" },
+        "pipeline_refs": { "type": "array", "items": { "$ref": "#/$defs/pipelineRef" } },
+        "dir_caches": { "type": "array", "items": { "$ref": "#/$defs/dirCache" }, "description": "Today: dependency-cache directories declared with CacheDir; the engine's node executor restores them before the node starts and saves them after it succeeds." },
+        "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Target: dependency-cache directories the host restores before the node starts and saves after it succeeds." },
+        "memo_key": { "$ref": "#/$defs/memoKey", "description": "Target: declarative memo key inputs the host hashes." },
+        "closures": { "$ref": "#/$defs/closures", "description": "Target: ids of the closures the host asks the SDK to evaluate." },
+        "tools": { "type": "array", "items": { "type": "string" }, "description": "Target: tool names the node needs on PATH." }
+      },
+      "required": ["id", "deps"],
+      "additionalProperties": false
+    },
+    "consume": {
+      "type": "object",
+      "properties": {
+        "producer": { "type": "string" },
+        "into": { "type": "string" }
+      },
+      "required": ["producer"],
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "properties": {
+        "message": { "type": "string" },
+        "timeout_ms": { "type": "integer" },
+        "on_timeout": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "pipelineRef": {
+      "type": "object",
+      "properties": {
+        "pipeline": { "type": "string" },
+        "node": { "type": "string" }
+      },
+      "required": ["pipeline", "node"],
+      "additionalProperties": false
+    },
+    "dirCache": {
+      "type": "object",
+      "description": "One CacheDir declaration as the Go SDK serializes it today.",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "resolver": { "type": "string", "enum": ["gomod", "npm"] },
+        "key_scope": { "type": "string" },
+        "key_files": { "type": ["array", "null"], "items": { "type": "string" } }
+      },
+      "required": ["name", "key_files"],
+      "additionalProperties": false
+    },
+    "modifiers": {
+      "type": "object",
+      "description": "The node's execution envelope. Durations are integer milliseconds; an absent field is the zero value.",
+      "properties": {
+        "retry": { "type": "integer", "minimum": 0 },
+        "retry_backoff_ms": { "type": "integer", "minimum": 0 },
+        "retry_auto": { "type": "boolean" },
+        "timeout_ms": { "type": "integer", "minimum": 0 },
+        "no_progress_timeout_ms": { "type": "integer", "minimum": 0 },
+        "runs_on": { "type": "array", "items": { "type": "string" }, "description": "Runner labels the node requires." },
+        "prefers": { "type": "array", "items": { "type": "string" } },
+        "when_runner": { "type": "array", "items": { "type": "string" } },
+        "cache": { "type": "boolean", "description": "The node is memoized." },
+        "cache_ttl_ms": { "type": "integer", "minimum": 0 },
+        "conc_group": { "type": "string" },
+        "conc_capacity": { "type": "integer" },
+        "conc_cost": { "type": "integer" },
+        "conc_scope": { "type": "string" },
+        "conc_on_limit": { "type": "string" },
+        "conc_queue_timeout_ms": { "type": "integer" },
+        "conc_cancel_timeout_ms": { "type": "integer" },
+        "res_cores": { "type": "number" },
+        "res_memory_bytes": { "type": "integer" },
+        "inline": { "type": "boolean" },
+        "optional": { "type": "boolean" },
+        "continue_on_error": { "type": "boolean" },
+        "on_failure": { "type": "string", "description": "Id of the node that runs when this one fails." },
+        "has_before_run": { "type": "boolean" },
+        "has_after_run": { "type": "boolean" },
+        "has_skip_if": { "type": "boolean" },
+        "has_verify": { "type": "boolean", "description": "Target: the node carries a Verify closure." }
+      },
+      "additionalProperties": false
+    },
+    "work": {
+      "type": "object",
+      "description": "The steps inside a node. `needs` on a step or spawn is its edge.",
+      "properties": {
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+        "spawns": { "type": "array", "items": { "$ref": "#/$defs/spawn" } },
+        "spawn_each": { "type": "array", "items": { "$ref": "#/$defs/spawnEach" } },
+        "step_groups": { "type": "array", "items": { "$ref": "#/$defs/stepGroup" } },
+        "result_step": { "type": "string" },
+        "failure_policy": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "step": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "needs": { "type": "array", "items": { "type": "string" } },
+        "is_result": { "type": "boolean" },
+        "has_skip_if": { "type": "boolean" },
+        "finally": { "type": "boolean" },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "continue_on_error": { "type": "boolean", "description": "Target: a failure of this step does not fail the node." },
+        "optional": { "type": "boolean", "description": "Target: the step may be skipped without failing the node." },
+        "closures": { "$ref": "#/$defs/closures", "description": "Target: ids of the step's closures." }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "spawn": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "needs": { "type": "array", "items": { "type": "string" } },
+        "target_job": { "type": "string" },
+        "target_work": { "$ref": "#/$defs/work" },
+        "has_skip_if": { "type": "boolean" }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "spawnEach": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "needs": { "type": "array", "items": { "type": "string" } },
+        "target_job": { "type": "string" },
+        "item_template_work": { "$ref": "#/$defs/work" },
+        "note": { "type": "string" }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "stepGroup": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "members": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["members"],
+      "additionalProperties": false
+    },
+    "cache": {
+      "type": "object",
+      "description": "Target: one dependency-cache directory. Exactly one of path and resolver is set.",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "resolver": { "enum": ["gomod", "npm"], "description": "A cache location the host resolves with the toolchain, such as `go env GOMODCACHE`." },
+        "key_files": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "key_files"],
+      "additionalProperties": false
+    },
+    "memoKey": {
+      "type": "object",
+      "description": "Target: memo key inputs. The host hashes files, env and const together; closure names a CacheKeyFn whose string the host namespaces.",
+      "properties": {
+        "files": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "array", "items": { "type": "string" } },
+        "const": { "type": "array", "items": { "type": "string" } },
+        "closure": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "closures": {
+      "type": "object",
+      "description": "Target: closure ids. Each id is opaque to the host and unique within the plan.",
+      "properties": {
+        "skip_if": { "type": "array", "items": { "type": "string" } },
+        "before_run": { "type": "array", "items": { "type": "string" } },
+        "after_run": { "type": "array", "items": { "type": "string" } },
+        "verify": { "type": "string" },
+        "cache_key": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,4 +1,4 @@
-package logs
+package logs_test
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
@@ -90,7 +92,7 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logs, err := New(t.TempDir(), nil)
+	logs, err := logs.New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

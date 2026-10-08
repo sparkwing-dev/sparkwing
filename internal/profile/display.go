@@ -1,9 +1,6 @@
 package profile
 
 import (
-	"os"
-	"strings"
-
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -17,7 +14,7 @@ func SpecString(s *backends.Spec) string {
 			return "sqlite:" + s.Path
 		}
 		return "sqlite"
-	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
+	case backends.TypeS3:
 		out := s.Type + "://" + s.Bucket
 		if s.Prefix != "" {
 			out += "/" + s.Prefix
@@ -27,7 +24,7 @@ func SpecString(s *backends.Spec) string {
 		return "filesystem:" + s.Path
 	case backends.TypeController:
 		return "controller://" + s.Controller
-	case backends.TypePostgres, backends.TypeMySQL:
+	case backends.TypePostgres:
 		if s.URLSource != "" {
 			return s.Type + ":" + s.URLSource
 		}
@@ -53,17 +50,4 @@ func (p *Profile) SurfaceStrings() (state, logs, cache string) {
 		state = "sqlite"
 	}
 	return state, SpecString(surf.Logs), SpecString(surf.Cache)
-}
-
-func DisplayDefaultPath() string {
-	path, err := DefaultPath()
-	if err != nil || path == "" {
-		return "config.yaml"
-	}
-	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
-		if rest, ok := strings.CutPrefix(path, home+"/"); ok {
-			return "~/" + rest
-		}
-	}
-	return path
 }

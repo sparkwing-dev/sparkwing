@@ -64,7 +64,7 @@ func floorsBeforeProtocol3() wingwire.ProtocolFloors {
 func renderPretty(t *testing.T, r DoctorReport) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := RenderDoctor(&buf, r, "", ""); err != nil {
+	if err := RenderDoctor(&buf, r, ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	return buf.String()

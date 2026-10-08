@@ -1,19 +1,17 @@
 package cluster
 
 import (
-	"context"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 // safety: the pipeline binary is the team's own code, so it inherits no launcher
 // credentials, only the runtime, non-credential settings, its run's grant, and the
 // bearer execHandleTrigger chose: the broker capability, or for a Kubernetes or
 // warm runner the runner token its Jobs need.
-func triggerChildEnv(ctx context.Context, base []string, opts TriggerLoopOptions, cacheGrant string) []string {
+func triggerChildEnv(base []string, opts TriggerLoopOptions, cacheGrant string) []string {
 	out := make([]string, 0, len(base)+6)
 	for _, item := range base {
 		name, value, ok := strings.Cut(item, "=")
@@ -39,9 +37,6 @@ func triggerChildEnv(ctx context.Context, base []string, opts TriggerLoopOptions
 	if cacheGrant != "" {
 		out = append(out, authwire.CacheGrantEnv+"="+cacheGrant)
 	}
-	if tp := otelutil.TraceParentEnv(ctx); tp != "" {
-		out = append(out, tp)
-	}
 	return out
 }
 
@@ -55,7 +50,6 @@ var triggerChildSets = map[string]bool{
 	"SPARKWING_HOME":           true,
 	authwire.CacheGrantEnv:     true,
 	authwire.CacheTokenEnv:     true,
-	"TRACEPARENT":              true,
 }
 
 var triggerChildRuntimeEnv = map[string]bool{

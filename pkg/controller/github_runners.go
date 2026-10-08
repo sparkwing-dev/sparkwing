@@ -367,6 +367,25 @@ func (s *Server) handleAddGitHubRunnerBinding(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if s.githubApp != nil {
+		_, repo, err := s.resolveGitHubAppRepository(r.Context(), t, req.Repository)
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrInvalidInput):
+				writeError(w, http.StatusBadRequest, err)
+			case errors.Is(err, store.ErrNotFound):
+				writeError(w, http.StatusForbidden, errors.New("the team's GitHub App installation does not cover this repository"))
+			default:
+				writeError(w, http.StatusBadGateway, errors.New("GitHub repository coverage could not be verified"))
+			}
+			return
+		}
+		if (req.RepositoryID != 0 && req.RepositoryID != repo.ID) || (req.RepositoryOwnerID != 0 && req.RepositoryOwnerID != repo.Owner.ID) {
+			writeError(w, http.StatusBadRequest, errors.New("repository identity differs from GitHub"))
+			return
+		}
+		req.Repository, req.RepositoryID, req.RepositoryOwnerID = repo.FullName, repo.ID, repo.Owner.ID
+	}
 	b, err := t.AddGitHubRunnerBinding(r.Context(), store.GitHubRunnerBinding{
 		Repository: req.Repository, RepositoryID: req.RepositoryID, RepositoryOwnerID: req.RepositoryOwnerID,
 		CreatedBy: p.AccountID,

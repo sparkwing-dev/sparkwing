@@ -13,7 +13,12 @@ import (
 
 func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, ".sparkwing")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +27,7 @@ func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCacheExplain([]string{"--dir", dir, "-o", "json"})
+		runErr = runCacheExplain([]string{"-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache explain: %v", runErr)
@@ -186,5 +191,34 @@ func TestCachePruneRejectsOutputBeforeMutation(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("prune calls = %d, want 0 before output validation", calls)
+	}
+}
+
+func TestCacheExplainFindsTheModuleFromASubdirectory(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	root := t.TempDir()
+	dir := filepath.Join(root, ".sparkwing")
+	sub := filepath.Join(root, "services", "api")
+	for _, d := range []string{dir, sub} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCacheExplain([]string{"-o", "json"})
+	})
+	if runErr != nil {
+		t.Fatalf("cache explain from a subdirectory: %v", runErr)
+	}
+	if payload := decodeCachePayload(t, out); payload["dir"] != dir {
+		t.Fatalf("explain dir = %v, want the module above the working directory %s", payload["dir"], dir)
 	}
 }

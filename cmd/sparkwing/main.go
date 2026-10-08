@@ -14,6 +14,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -116,13 +117,6 @@ func dispatchRun(args []string) error {
 	}
 	var err error
 
-	runnerArgs := passthrough
-	if separator := slices.Index(runnerArgs, "--"); separator >= 0 {
-		runnerArgs = runnerArgs[:separator]
-	}
-	if err := checkRetiredWhereFlags(runnerArgs, nil); err != nil {
-		return err
-	}
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
 	}
@@ -149,22 +143,15 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	projectStart := flags.changeDir
-	if projectStart == "" {
-		if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
-			projectStart = cwd
-		}
+	projectStart := ""
+	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
+		projectStart = cwd
 	}
 	if err := projectconfig.CheckLegacy(projectStart); err != nil {
 		return err
 	}
 
-	var dir string
-	if flags.changeDir != "" {
-		dir, err = findSparkwingDirFrom(flags.changeDir)
-	} else {
-		dir, err = findSparkwingDir()
-	}
+	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
 	}
@@ -259,6 +246,13 @@ func dispatchRun(args []string) error {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
 	var fleetSnapshot *worktreeSnapshot
+	run := newPipelineRun(dir, compileOptions{
+		NoUpdate:     flags.noUpdate || flags.fleet,
+		ExecutionDir: executionDir,
+		AfterChild:   afterChild,
+	})
+	defer run.stop()
+	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
 	if flags.fleet {
 		configPath, err := userconfig.Path()
 		if err != nil {
@@ -277,7 +271,7 @@ func dispatchRun(args []string) error {
 		// safety: the orchestrator takes its fleet config path from this variable
 		// alone, so it reads the file validated here.
 		env = setEnv(env, userconfig.PathEnv, configPath)
-		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
+		if err := resolveSparks(run.ctx, dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 			return err
 		}
 		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir), flags.allowSecretFiles)
@@ -331,12 +325,9 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, orchestrator.PriorityEnv, priority)
 	}
 
-	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate || flags.fleet,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
-	})
-	defer run.stop()
+	run.sparkwingDir = dir
+	run.opts.ExecutionDir = executionDir
+	run.opts.AfterChild = afterChild
 	if err := run.materialize(env); err != nil {
 		return run.finish(err)
 	}
@@ -374,10 +365,11 @@ func removeEnv(env []string, key string) []string {
 }
 
 func runSparkwing(args []string) error {
-	args, err := moveRootOutput(args)
+	args, err := moveRootFlags(args)
 	if err != nil {
 		return err
 	}
+	toolchainReplayArgs = args
 	if cmd, ok := commandHelp(args); ok {
 		requested, _, err := requestedOutput(args)
 		if err != nil {
@@ -398,8 +390,6 @@ func runSparkwing(args []string) error {
 		return runPipeline(args[1:])
 	case "run":
 		return dispatchRun(args[1:])
-	case "run-node":
-		return orchestrator.RunNodeCommand(args[1:])
 	case "runs":
 		return runJobs(args[1:])
 	case "queue":
@@ -408,8 +398,6 @@ func runSparkwing(args []string) error {
 		return runCache(args[1:])
 	case "daemon":
 		return runDaemon(args[1:])
-	case "profile":
-		return runProfileCmd(args[1:])
 
 	case "serve":
 		return runDashboard(args[1:])
@@ -457,24 +445,8 @@ func runSparkwing(args []string) error {
 		return runDashboardSupervise(args[1:])
 	case consumerSpawnVerb:
 		return runRunsConsumeDetached(args[1:])
-	case "_complete-profiles":
-		return runInternalCompleteProfiles(args[1:])
-	case "_complete-pipelines":
-		return runInternalCompletePipelines(args[1:])
-	case "_complete-flags":
-		return runInternalCompleteFlags(args[1:])
-	case "_complete-verbs":
-		return runInternalCompleteVerbs(args[1:])
-	case "_complete-hint":
-		return runInternalCompleteHint(args[1:])
-	case "_complete-pipeline-flags":
-		return runInternalCompletePipelineFlags(args[1:])
-	case "_complete-targets":
-		return runInternalCompleteTargets(args[1:])
-	case "_complete-runners":
-		return runInternalCompleteRunners(args[1:])
-	case "_complete-profiles-for-pipeline":
-		return runInternalCompleteProfilesForPipeline(args[1:])
+	case "__complete":
+		return runInternalComplete(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdSparkwing, os.Stdout)
 		return nil
@@ -513,26 +485,20 @@ func runCluster(args []string) error {
 		return nil
 	}
 	switch args[0] {
-	case "status":
-		return runHealth(args[1:])
 	case "agents":
 		return runAgents(args[1:])
 	case "runners":
 		return runRunners(args[1:])
 	case "worker":
 		return runWorker(args[1:])
-	case "gc":
-		return runGC(args[1:])
+	case "triggers":
+		return runTriggers(args[1:])
 	case "users":
 		return runUsers(args[1:])
 	case "tokens":
 		return runTokens(args[1:])
 	case "limits":
 		return runComputeLimits(args[1:])
-	case "image":
-		return runImage(args[1:])
-	case "webhooks":
-		return runWebhooks(args[1:])
 	case "concurrency":
 		return runConcurrency(args[1:])
 	case "object-store":
@@ -556,8 +522,6 @@ func runConfigure(args []string) error {
 		return runConfigureInit(args[1:])
 	case "profiles":
 		return runProfiles(args[1:])
-	case "xrepo":
-		return runXrepo(args[1:])
 	default:
 		PrintHelp(cmdConfigure, os.Stderr)
 		return fmt.Errorf("configure: unknown subcommand %q", args[0])
@@ -583,8 +547,6 @@ func runJobs(args []string) error {
 		return runRunsApprovals(contextValue, paths, args[1:])
 	case "annotations":
 		return runRunsAnnotations(contextValue, paths, args[1:])
-	case "triggers":
-		return runTriggers(args[1:])
 	case "list":
 		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
 		limit := fs.Int("limit", 20, "runs per page")
@@ -606,9 +568,12 @@ func runJobs(args []string) error {
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
+		repos := multiFlagVar(fs, "repo", "filter by repository owner/name (repeatable)")
+		rootOnly := fs.Bool("root-only", false, "exclude child runs")
+		wait := fs.Bool("wait", false, "block until at least one run matches")
+		waitTimeout := fs.Duration("wait-timeout", 2*time.Minute, "give up (exit 2) after this long when --wait is set")
+		watch := fs.BoolP("watch", "w", false, "keep polling and print each newer matching run as it appears")
+		groupBy := fs.String("group-by", "", "with --status failed: one failure row per run, or cluster by step or node (run|step|node)")
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -680,6 +645,8 @@ func runJobs(args []string) error {
 			Limit:      *limit,
 			Pipelines:  pipelineSet,
 			Statuses:   statusInc,
+			Repos:      *repos,
+			RootOnly:   *rootOnly,
 			Since:      *since,
 			JSON:       resolvedFormat == "json",
 			Quiet:      *quiet,
@@ -697,7 +664,24 @@ func runJobs(args []string) error {
 			return profileErr
 		}
 		listOptions.Profile = p
-		return orchestrator.ListJobs(contextValue, paths, listOptions, os.Stdout)
+		if *groupBy != "" {
+			return listFailures(contextValue, paths, listOptions, *groupBy, resolvedFormat == "json")
+		}
+		if (*wait || *watch) && clientSideFilter(compiled) {
+			return errors.New("runs list: --wait and --watch match on --pipeline, --status, --branch, --sha, --repo, --root-only and --since only")
+		}
+		if *wait {
+			if err := waitForMatchingRun(contextValue, paths, listOptions, *waitTimeout); err != nil {
+				return err
+			}
+		}
+		if err := orchestrator.ListJobs(contextValue, paths, listOptions, os.Stdout); err != nil {
+			return err
+		}
+		if *watch {
+			return watchNewRuns(contextValue, paths, listOptions, resolvedFormat == "json")
+		}
+		return nil
 
 	case "status":
 		fs := flag.NewFlagSet(cmdJobsStatus.Path, flag.ContinueOnError)
@@ -708,9 +692,10 @@ func runJobs(args []string) error {
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
+		view := fs.String("view", "", "render one view of the run: summary|timeline|receipt|errors|tree")
+		timeout := fs.Duration("timeout", 0, "with --follow, give up (exit 2) after this long; 0 waits without limit")
+		poll := fs.Duration("poll", 3*time.Second, "with --timeout, -o json or --view, the poll interval while following")
+		width := fs.Int("width", 60, "timeline bar width in characters (--view timeline)")
 		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -726,13 +711,39 @@ func runJobs(args []string) error {
 		if err != nil {
 			return err
 		}
+		if *view == "receipt" && fs.Changed("output") && resolvedFormat != "json" {
+			return errors.New("runs status: --view receipt only renders json")
+		}
+		if *timeout != 0 && !*follow {
+			return errors.New("runs status: --timeout needs --follow")
+		}
 		statusOptions := orchestrator.StatusOpts{JSON: resolvedFormat == "json", Follow: *follow, Steps: *steps}
 		p, profileErr := resolveProfileFlag(*profileName)
 		if profileErr != nil {
 			return profileErr
 		}
 		statusOptions.Profile = p
-		if err := orchestrator.JobStatus(contextValue, paths, *runID, statusOptions, os.Stdout); err != nil {
+		if *follow && (*timeout > 0 || resolvedFormat != "pretty" || *view != "") {
+			if err := waitForTerminalRun(contextValue, paths, p, *runID, *timeout, *poll); err != nil {
+				return err
+			}
+			statusOptions.Follow = false
+		}
+		if *view != "" {
+			v := runView{name: *view, runID: *runID, format: resolvedFormat, steps: *steps, width: *width}
+			if *view == "receipt" {
+				v.format = "json"
+			}
+			if p != nil && (*profileName != "" || p.ControllerURL() != "") {
+				if err := requireController(p, "runs status --view"); err != nil {
+					return err
+				}
+				v.remote = p
+			}
+			if err := renderRunView(contextValue, paths, v); err != nil {
+				return err
+			}
+		} else if err := orchestrator.JobStatus(contextValue, paths, *runID, statusOptions, os.Stdout); err != nil {
 			return err
 		}
 		if *exitZero {
@@ -756,14 +767,12 @@ func runJobs(args []string) error {
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
 		grep := fs.String("grep", "", "substring filter (server-side in cluster mode)")
-		since := fs.Duration("since", 0,
-			"only include output from nodes whose StartedAt >= now-D (5m, 1h, and similar durations)")
+		since := lookbackDuration(fs, "since", 0,
+			"only include output from nodes whose StartedAt >= now-D; with --grep and no --run, only runs newer than D (5m, 1h, 7d, and similar durations)")
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
 		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
 		noEvents := fs.Bool("no-events", false, "show node output only")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
+		search := addLogSearchFlags(fs)
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -774,6 +783,15 @@ func runJobs(args []string) error {
 		resolvedFormat, err := resolveTTYAwareOutput(*outputFormat, "runs logs")
 		if err != nil {
 			return err
+		}
+		if *runID == "" && *grep == "" {
+			return errors.New("runs logs: --run is required; pass --grep without --run to search across runs")
+		}
+		if *runID == "" && *grep != "" {
+			return searchRunLogs(contextValue, paths, fs, search, *grep, *since, *profileName, resolvedFormat)
+		}
+		if search.changed(fs) {
+			return errors.New("runs logs: --pipeline, --status, --branch, --sha, --started-after, --started-before, --limit, --max-matches and --quiet search across runs; pass --grep without --run")
 		}
 		if *tail > 0 && *head > 0 {
 			return errors.New("runs logs: --tail and --head cannot be combined")
@@ -799,42 +817,6 @@ func runJobs(args []string) error {
 		options.Profile = p
 		return orchestrator.JobLogs(contextValue, paths, *runID, options, os.Stdout)
 
-	case "errors":
-		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
-		runID := fs.String("run", "", "run identifier")
-		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
-		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
-			return err
-		}
-		if err := parseAndCheck(cmdJobsErrors, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		id, idErr := runIDFromArgs(cmdJobsErrors.Path, fs.Args(), *runID)
-		if idErr != nil {
-			return idErr
-		}
-		*runID = normalizeRunID(id)
-		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs errors")
-		if err != nil {
-			return err
-		}
-		emitJSON := resolvedFormat == "json"
-		if *profileName != "" {
-			prof, profileErr := resolveProfile(*profileName)
-			if profileErr != nil {
-				return profileErr
-			}
-			if err := requireController(prof, "runs errors"); err != nil {
-				return err
-			}
-			return orchestrator.JobErrorsRemote(contextValue, prof.ControllerURL(), prof.ControllerToken(), *runID, emitJSON, os.Stdout)
-		}
-		return orchestrator.JobErrors(contextValue, paths, *runID, emitJSON, os.Stdout)
-
 	case "consumer":
 		return runRunsConsumer(args[1:])
 	case "cancel":
@@ -846,28 +828,8 @@ func runJobs(args []string) error {
 	case "prune":
 		return runRunsPrune(contextValue, args[1:])
 
-	case "failures":
-		return runJobsFailures(contextValue, paths, args[1:])
 	case "stats":
 		return runJobsStats(contextValue, paths, args[1:])
-	case "last":
-		return runJobsLast(contextValue, paths, args[1:])
-	case "tree":
-		return runJobsTree(contextValue, paths, args[1:])
-	case "get":
-		return runJobsGet(contextValue, paths, args[1:])
-	case "receipt":
-		return runJobsReceipt(contextValue, paths, args[1:])
-	case "wait":
-		return runJobsWait(contextValue, paths, args[1:])
-	case "find":
-		return runJobsFind(contextValue, paths, args[1:])
-	case "timeline":
-		return runJobsTimeline(contextValue, paths, args[1:])
-	case "summary":
-		return runJobsSummary(contextValue, paths, args[1:])
-	case "grep":
-		return runJobsGrep(contextValue, paths, args[1:])
 	default:
 		return fmt.Errorf("runs: unknown command %q", args[0])
 	}

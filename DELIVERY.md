@@ -14,10 +14,27 @@ launcher when testing isolated tool state.
 
 ## Checks
 
+### Cutting a release
+
+A release is a tag push. The `release` pipeline resolves the version, renames
+`## [Unreleased]` in CHANGELOG.md to the version, commits that from a clean
+tree, checks the section covers any schema or wire change since the previous
+tag, and pushes the branch and an annotated `vX.Y.Z` tag. Run it from the
+sparkwing checkout under a temporary home, which the pipeline requires so a
+newer embedded schema cannot migrate the operational runs store:
+
+```bash
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
+```
+
+`push-tag` declares the `destructive` and `prod` risk labels, so only the
+second command tags and pushes. The tag push starts the hosted release below.
+
 ### Release build and publication
 
 The hosted release builds the dashboard once and shares it with six target
-jobs. Each target compiles its supported commands in one Go cache; all 28
+jobs. Each target compiles its supported commands in one Go cache; all 24
 binary outputs remain available. Linux image packaging copies those same
 executables through the Dockerfiles' `release` stage. The default Dockerfile
 target still builds from source.
@@ -81,7 +98,8 @@ file. Other syntax and workflow checks remain active.
   policy at 3 seconds, `pre-push` the fast tier with a one-minute hard limit,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 10 minutes for build, full lint, the short test suite,
-  published-version and SDK-pin checks, and changelog-link checks in parallel.
+  published-version, Go-directive and SDK-pin checks, and changelog-link checks
+  in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
@@ -175,7 +193,7 @@ file. Other syntax and workflow checks remain active.
   coverage. The ten-minute budget keeps the entire short suite and its
   checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
-  week, and `sparkwing runs timeline --run <id> --steps` breaks one run into
+  week, and `sparkwing runs status <id> --view timeline --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
   by repo before reading a per-pipeline figure as this one's.
 - **The short test class:** the release cut runs `go test -short`. Use
@@ -380,6 +398,14 @@ file. Other syntax and workflow checks remain active.
   function, duration, select arm and exact marker, and fails if an exception
   disappears or changes or a marker has no approved wait. New waits and sleeps
   still fail.
+- **Go directive policy:** the release cut and `pre-release`, beside its version
+  checks, reject patch-level Go requirements in the published root module and
+  any `go.mod` shipped in the template registry. `go 1.26` and `go 1.26.0`
+  pass; `go 1.26.3` fails. Pipeline and fixture modules are excluded. Init and
+  pipeline scaffolding share a generator that takes only the running Go
+  version's major and minor; this step runs a focused scaffold test against a
+  patch-version toolchain to check the generated module through pipeline creation.
+
 - **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
@@ -549,14 +575,14 @@ file. Other syntax and workflow checks remain active.
   sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
   collapses it into one block and re-syncs the mirror.
 - **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `docs/changelog-style.md`. Mark breaking changes and supply migration
+  follows `CHANGELOG-STYLE.md`. Mark breaking changes and supply migration
   guidance before release. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local
   `release` pipeline checks the chosen version against origin tags, checks the
-  clean tree, and verifies published module freshness, coherent SDK pins and
-  changelog links in the fixed ten-minute build/lint/short-test class. It then
+  clean tree, and verifies published module freshness, Go directive policy,
+  coherent SDK pins and changelog links in the fixed ten-minute build/lint/short-test class. It then
   renames `[Unreleased]`, rolls the migration guide, validates the resulting
   section and guide before committing, and checks schema/wire change coverage.
   All refusals precede push-tag. Freshness checks published versions, not the

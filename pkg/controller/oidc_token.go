@@ -127,7 +127,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "oidc token: read run", err)
 		return
 	}
-	trig, err := s.store.GetTrigger(r.Context(), runID)
+	trig, err := tn.GetTrigger(r.Context(), runID)
 	if errors.Is(err, store.ErrNotFound) {
 		trig = nil
 	} else if err != nil {
@@ -169,25 +169,8 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 		c.Pipeline = trig.Pipeline
 		branch, sha = trig.GitBranch, trig.GitSHA
 		owner, repo, repoURL = trig.GithubOwner, trig.GithubRepo, trig.RepoURL
-		// safety: the event name is reserved to the signed webhook, which records
-		// it at intake; a github source without one proves neither event.
-		event := trig.TriggerEnv[sparkwing.EnvGitHubEventName]
-		switch {
-		case trig.TriggerSource == oidcWebhookSource && event == githubEventPush:
-			c.Trigger = oidcTriggerPush
-		case trig.TriggerSource == oidcWebhookSource && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
-			c.Trigger = oidcTriggerPR
-		case trig.TriggerSource == oidcWebhookSource && event == "release" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/tags/"):
-			c.Trigger = oidcTriggerRelease
-		case trig.TriggerSource == oidcWebhookSource && event == "create" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
-			c.Trigger = oidcTriggerCreate
-		case trig.TriggerSource == oidcWebhookSource && event == "delete" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
-			c.Trigger = oidcTriggerDelete
-		// safety: submitters cannot set the schedule key, which the intake
-		// strips, so a "schedule" source without it is a submitter's word.
-		case trig.TriggerSource == cronTriggerSource && trig.TriggerEnv[crons.ScheduleEnvKey] != "":
-			c.Trigger = oidcTriggerCron
-		}
+		c.RepositoryID = trig.GithubRepoID
+		c.Trigger = oidcTriggerKind(trig)
 	}
 	switch {
 	case c.Trigger == oidcTriggerPR:
@@ -205,6 +188,30 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 	c.SHA = sha
 	c.Repository = canonicalRepository(owner, repo, repoURL)
 	return c
+}
+
+func oidcTriggerKind(trig *store.Trigger) string {
+	// safety: the event name is reserved to the signed App webhook, which records it with the
+	// repository id at intake; a github source without both proves no event and no repository.
+	event := trig.TriggerEnv[sparkwing.EnvGitHubEventName]
+	signed := trig.TriggerSource == oidcWebhookSource && trig.GithubRepoID > 0
+	switch {
+	case signed && event == githubEventPush:
+		return oidcTriggerPush
+	case signed && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
+		return oidcTriggerPR
+	case signed && event == "release" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/tags/"):
+		return oidcTriggerRelease
+	case signed && event == "create" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
+		return oidcTriggerCreate
+	case signed && event == "delete" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
+		return oidcTriggerDelete
+	// safety: submitters cannot set the schedule key, which the intake
+	// strips, so a "schedule" source without it is a submitter's word.
+	case trig.TriggerSource == cronTriggerSource && trig.TriggerEnv[crons.ScheduleEnvKey] != "":
+		return oidcTriggerCron
+	}
+	return oidcTriggerManual
 }
 
 func pullNumber(env map[string]string) string {

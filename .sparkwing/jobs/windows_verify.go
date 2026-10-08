@@ -83,7 +83,7 @@ func runWindowsVerifyRuntime(ctx context.Context) error {
 	}
 	command := shellQuoteAll([]string{
 		"go", "test", "-race", "-p", "2", "-timeout", "5m", "-count=1", "-run", windowsVerifyRuntimeTests,
-		"./internal/runners/local", "./sparkwing", "./internal/wingd/client", "./internal/orchestrator",
+		"./internal/runners/local", "./sparkwing", "./internal/depcache", "./internal/wingd/client", "./internal/orchestrator",
 	})
 	return runWindowsVerifyIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))
 }

@@ -2,13 +2,9 @@ package main
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -24,8 +20,6 @@ var repoDocs = []string{"../../README.md"}
 
 var docCommand = regexp.MustCompile(`^sparkwing((?: [a-z][a-z-]*\b)+)`)
 
-var intentPages = []string{"mcp", "proposals/"}
-
 var versionedPages = []string{"changelog", "migrations/"}
 
 func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
@@ -36,7 +30,7 @@ func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
 	}
 	read := 0
 	for _, e := range pages {
-		if matchesAny(e.Slug, intentPages) || matchesAny(e.Slug, versionedPages) {
+		if matchesAny(e.Slug, versionedPages) {
 			continue
 		}
 		body, err := docs.ReadRaw(e.Slug)
@@ -55,7 +49,7 @@ func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
 }
 
 func TestEveryPageExemptionMatchesAPageThatExists(t *testing.T) {
-	for _, prefix := range append(append([]string{}, intentPages...), versionedPages...) {
+	for _, prefix := range versionedPages {
 		matched := false
 		for _, e := range docs.List() {
 			if matchesAny(e.Slug, []string{prefix}) {
@@ -69,39 +63,9 @@ func TestEveryPageExemptionMatchesAPageThatExists(t *testing.T) {
 	}
 }
 
-func TestIntentPagesDeclareThatTheyAreNotShipped(t *testing.T) {
-	for _, e := range docs.List() {
-		if !matchesAny(e.Slug, intentPages) {
-			continue
-		}
-		body, err := docs.ReadRaw(e.Slug)
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Slug, err)
-		}
-		if !declaresStatus(body) {
-			t.Errorf("docs page %q is exempt from the dispatch check as an intent page, "+
-				"but carries no status line saying what is and is not shipped", e.Slug)
-		}
-	}
-}
-
 func matchesAny(slug string, entries []string) bool {
 	for _, e := range entries {
 		if slug == e || (strings.HasSuffix(e, "/") && strings.HasPrefix(slug, e)) {
-			return true
-		}
-	}
-	return false
-}
-
-func declaresStatus(body string) bool {
-	lines := strings.Split(body, "\n")
-	if len(lines) > 14 {
-		lines = lines[:14]
-	}
-	for _, line := range lines {
-		trimmed := strings.ToLower(strings.TrimLeft(strings.TrimSpace(line), ">*# "))
-		if strings.HasPrefix(trimmed, "status") {
 			return true
 		}
 	}
@@ -166,10 +130,9 @@ func TestShippedProseDropsDesignRegionsAndRefusesUnbalancedMarkers(t *testing.T)
 
 func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 	dispatch := map[string]docDispatch{
-		"sparkwing run":        {acceptsPositionals: true},
-		"sparkwing run config": {},
-		"sparkwing docs":       {},
-		"sparkwing docs read":  {},
+		"sparkwing run":       {acceptsPositionals: true},
+		"sparkwing docs":      {},
+		"sparkwing docs read": {},
 	}
 	cases := []struct {
 		name string
@@ -180,7 +143,7 @@ func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 		{"fenced invocation of a missing verb", "```sh\nsparkwing teleport\n```", []string{"sparkwing teleport"}},
 		{"unlabelled fence is read as commands", "```\nsparkwing teleport\n```", []string{"sparkwing teleport"}},
 		{"inline invocation", "Run `sparkwing teleport` first.", []string{"sparkwing teleport"}},
-		{"a subcommand resolves to its parent path", "`sparkwing docs read --topic mcp`", nil},
+		{"a subcommand resolves to its parent path", "`sparkwing docs read --topic auth`", nil},
 		{"unknown child of a group is refused", "`sparkwing docs teleport`", []string{"sparkwing docs teleport"}},
 		{"arguments are not verbs", "`sparkwing run my-pipeline`", nil},
 		{"prose mention is not an invocation", "the sparkwing dashboard shows runs", nil},
@@ -230,25 +193,11 @@ func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 func invocationCount(units []string) int {
 	n := 0
 	for _, unit := range units {
-		if docCommand.MatchString(unit) {
+		if docCommand.MatchString(stripRootFlags(unit)) {
 			n++
 		}
 	}
 	return n
-}
-
-func TestEveryRegistryTopLevelVerbIsDispatched(t *testing.T) {
-	switchCases := topLevelSwitchCases(t)
-	for _, c := range allCommands {
-		words := strings.Fields(c.Path)
-		if len(words) < 2 {
-			continue
-		}
-		if !switchCases[words[1]] {
-			t.Errorf("the registry declares %q but runSparkwing has no case %q",
-				c.Path, words[1])
-		}
-	}
 }
 
 type docDispatch struct {
@@ -266,7 +215,7 @@ func undispatched(units []string, dispatch map[string]docDispatch) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, unit := range units {
-		m := docCommand.FindStringSubmatch(unit)
+		m := docCommand.FindStringSubmatch(stripRootFlags(unit))
 		if m == nil {
 			continue
 		}
@@ -385,50 +334,8 @@ func dispatchedPaths(t *testing.T) map[string]docDispatch {
 	for _, c := range allCommands {
 		out[c.Path] = docDispatch{acceptsPositionals: len(c.PosArgs) > 0}
 	}
-	for verb := range topLevelSwitchCases(t) {
-		if _, exists := out["sparkwing "+verb]; !exists {
-			out["sparkwing "+verb] = docDispatch{}
-		}
-	}
 	if len(out) < 2 {
 		t.Fatal("the command registry is empty, so this check proves nothing")
-	}
-	return out
-}
-
-func topLevelSwitchCases(t *testing.T) map[string]bool {
-	t.Helper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "main.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse main.go: %v", err)
-	}
-	out := map[string]bool{}
-	ast.Inspect(file, func(n ast.Node) bool {
-		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "runSparkwing" {
-			return true
-		}
-		ast.Inspect(fn, func(inner ast.Node) bool {
-			cc, ok := inner.(*ast.CaseClause)
-			if !ok {
-				return true
-			}
-			for _, e := range cc.List {
-				lit, ok := e.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					continue
-				}
-				if v, err := strconv.Unquote(lit.Value); err == nil && !strings.HasPrefix(v, "-") {
-					out[v] = true
-				}
-			}
-			return true
-		})
-		return false
-	})
-	if len(out) == 0 {
-		t.Fatal("no case values found in runSparkwing, so this check proves nothing")
 	}
 	return out
 }
@@ -440,8 +347,8 @@ func TestHonestyCheckUsesCurrentCommandGroups(t *testing.T) {
 		want       string
 	}{
 		{"sparkwing docs teleport", "sparkwing docs teleport"},
-		{"sparkwing docs cache teleport", "sparkwing docs cache teleport"},
-		{"sparkwing docs cache info", ""},
+		{"sparkwing pipeline hooks teleport", "sparkwing pipeline hooks teleport"},
+		{"sparkwing pipeline hooks status", ""},
 		{"sparkwing run my-pipeline", ""},
 		{"sparkwing run config", ""},
 	} {
@@ -452,4 +359,13 @@ func TestHonestyCheckUsesCurrentCommandGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+var rootFlagPrefix = regexp.MustCompile(`^sparkwing((?:\s+(?:-C|--profile|-o|--output)(?:=|\s+)\S+)+)`)
+
+func stripRootFlags(unit string) string {
+	if m := rootFlagPrefix.FindStringSubmatchIndex(unit); m != nil {
+		return "sparkwing" + unit[m[3]:]
+	}
+	return unit
 }

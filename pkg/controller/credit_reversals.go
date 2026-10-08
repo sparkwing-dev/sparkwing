@@ -25,14 +25,46 @@ type creditUnitsJSON struct {
 // card payments and payment warnings.
 const CardBillingCapability = "card-billing-v1"
 
+// PaidGrantLookupCapability names GET /api/v1/credits/payments/{reference},
+// which reports the team a payment was granted to without writing anything.
+const PaidGrantLookupCapability = "paid-grant-lookup-v1"
+
+// CardSetupOrderCapability names the saved card's completed_at field, which
+// refuses a setup completed before the card on file. A controller without it
+// refuses the field as unknown.
+const CardSetupOrderCapability = "card-setup-order-v1"
+
+// UnknownPaymentCode is the code on the payment lookup's 404 when no paid
+// grant carries the reference. Any other 404 means the route is not served.
+const UnknownPaymentCode = "unknown_payment"
+
 // safety: Checkout and ledger must agree on the micro-credit unit before converting a payment.
 func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, creditUnitsJSON{
 		MicroPerCredit:   store.MicroCreditsPerCredit,
 		CreditsPerDollar: store.CreditsPerDollar,
 		MicroPerCent:     store.MicroCreditsPerCent,
-		Capabilities:     []string{CardBillingCapability},
+		Capabilities:     []string{CardBillingCapability, PaidGrantLookupCapability, CardSetupOrderCapability},
 	})
+}
+
+type paidGrantJSON struct {
+	Team string `json:"team"`
+}
+
+// safety: the checkout service asks this before refunding a refused card, so
+// a payment the ledger already settled is not refunded after a lost reply.
+func (s *Server) handlePaidGrantLookup(w http.ResponseWriter, r *http.Request) {
+	team, found, err := s.store.PaidGrantTeam(r.Context(), r.PathValue("reference"))
+	if err != nil {
+		s.writeInternalError(w, r, "paid grant lookup", err)
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, codedErrorJSON{Error: "no paid grant carries this reference", Code: UnknownPaymentCode})
+		return
+	}
+	writeJSON(w, http.StatusOK, paidGrantJSON{Team: string(team)})
 }
 
 type reversePaymentReq struct {
@@ -75,6 +107,9 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, store.ErrUnknownPayment):
 		writeError(w, http.StatusNotFound, err)
+		return
+	case errors.Is(err, store.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err)
 		return
 	case s.writeDisputeConflict(w, r, err, req.Reference, req.PaymentID):
 		return

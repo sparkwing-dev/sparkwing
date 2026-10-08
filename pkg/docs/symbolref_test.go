@@ -24,7 +24,7 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 			return err
 		}
 		slashPath := filepath.ToSlash(p)
-		if strings.Contains(slashPath, "/migrations/") || strings.Contains(slashPath, "/proposals/") {
+		if strings.Contains(slashPath, "/migrations/") {
 			return nil
 		}
 		docFiles = append(docFiles, p)

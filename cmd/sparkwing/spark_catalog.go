@@ -40,7 +40,6 @@ type sparkCatalogBlock struct {
 
 func runSparksCatalog(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksCatalog.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	library := fs.String("library", "", "spark library module path (default: "+sparksCoreModule+")")
 	pathFlag := fs.String("path", "", "read a library checkout on disk instead of downloading it")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
@@ -60,9 +59,11 @@ func runSparksCatalog(args []string) error {
 	if err != nil {
 		return err
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	// safety: a catalog read needs no project; without one it downloads into
+	// the temp directory and reads the latest release.
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		sparkwingDir = ""
 	}
 
 	source := ""

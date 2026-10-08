@@ -76,7 +76,7 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 		runFormatCheck(ctx, jobsDir),
 		runCheck(ctx, CheckCompile, proj, "go", "build", "./..."),
 		runCheck(ctx, CheckVet, proj, "go", "vet", "./..."),
-		runCheck(ctx, CheckExplain, tmp, s.Sparkwing, "pipeline", "explain", "--all", "-o", "json"),
+		runCheck(ctx, CheckExplain, tmp, s.Sparkwing, "pipeline", "plan", "--static", "--all", "-o", "json"),
 		runCheck(ctx, CheckLint, tmp, s.Sparkwing, "pipeline", "lint", "--all", "-o", "json"),
 	}
 	return checks, nil

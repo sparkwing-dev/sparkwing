@@ -302,7 +302,7 @@ func coerceRecoveryArg(caller, id string, x any) Workable {
 
 // LintWarnings returns the non-fatal Plan-time advisories accumulated
 // while building this Plan. Surfaced by the orchestrator at dispatch
-// and by `sparkwing pipeline explain --all`.
+// and by `sparkwing pipeline plan --static --all`.
 func (p *Plan) LintWarnings() []LintWarning {
 	p.mu.Lock()
 	defer p.mu.Unlock()

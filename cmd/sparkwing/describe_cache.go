@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,29 +96,6 @@ func writeDescribeCache(ctx context.Context, sparkwingDir, binPath string) error
 		return fmt.Errorf("run %s --describe: %w", binPath, err)
 	}
 	return storeDescribe(sparkwingDir, key, out)
-}
-
-// safety: the binary cache holds no build when the operator asked for `go run
-// .`, so the declarations come from the source the same way the run will. A
-// binary that cannot describe itself is tolerated here exactly as it is on the
-// cached path.
-func ensureDescribeFromSource(ctx context.Context, sparkwingDir, key string, env []string) {
-	if _, err := os.Stat(describeCachePath(key)); err == nil {
-		return
-	}
-	// #nosec G702 -- this intentionally executes the operator-selected pipeline source with fixed arguments.
-	cmd := exec.CommandContext(ctx, "go", "run", ".", "--describe")
-	cmd.Dir = sparkwingDir
-	cmd.Env = env
-	cmd.Stderr = os.Stderr
-	out, err := cmd.Output()
-	if err != nil {
-		slog.Default().Debug("describe from source failed", "err", err, "hash", key)
-		return
-	}
-	if err := storeDescribe(sparkwingDir, key, out); err != nil {
-		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
-	}
 }
 
 func storeDescribe(sparkwingDir, key string, raw []byte) error {

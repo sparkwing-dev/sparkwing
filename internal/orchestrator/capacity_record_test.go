@@ -548,3 +548,47 @@ func TestRecordRunProfile_NoSamplesWritesNothing(t *testing.T) {
 		t.Errorf("expected no profile for a run with no samples, got %+v", rollup)
 	}
 }
+
+func TestRecordRunProfilePartialKeepsExactUsageAndRaisesOnly(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx := t.Context()
+	start := time.Now()
+	if err := st.CreateRun(ctx, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"build", ""} {
+		if err := st.RecordProfileObservation(ctx, "demo", id, store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1000}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.AddNodeUsage(ctx, "partial", "build", store.NodeUsage{CPUTime: 500 * time.Millisecond, Wall: time.Second, MaxRSSBytes: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddNodeMetricSample(ctx, "partial", "build", store.MetricSample{Kind: store.MetricPartial, TS: start}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "partial", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	recordRunProfile(ctx, localState{st: st}, "demo", "partial", nil, "", runCharge{}, false, start, start.Add(time.Second))
+	for _, id := range []string{"build", ""} {
+		p, err := st.GetPipelineProfile(ctx, "demo", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.SampleCount != 1 || p.PeakCores != 1 || p.SustainedCores != 1 || p.PeakMemoryBytes != 2000 {
+			t.Fatalf("partial profile %q = %+v", id, p)
+		}
+	}
+}

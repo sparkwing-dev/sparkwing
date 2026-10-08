@@ -91,7 +91,7 @@ func quietNoticeVerb(verb string) bool {
 		return true
 	}
 	switch verb {
-	case "completion", "doctor", "handle-trigger", "wingd", "update", "version", "serve":
+	case "completion", "doctor", "handle-trigger", "wingd", "update", "repos", "version", "serve":
 		return true
 	}
 	return false

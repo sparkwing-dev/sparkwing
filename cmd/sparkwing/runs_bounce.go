@@ -21,7 +21,6 @@ func runRunsBounce(ctx context.Context, args []string) error {
 	runID := fs.String("run", "", "run id owning the node")
 	nodeID := fs.String("node", "", "node id to bounce")
 	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
-	home := fs.String("home", "", "sparkwing home holding the run (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsBounce, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -36,7 +35,7 @@ func runRunsBounce(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s: --run RUN_ID and --node NODE_ID are required", cmdJobsBounce.Path)
 	}
 
-	bouncer, cleanup, err := resolveNodeBouncer(ctx, *on, *home, id)
+	bouncer, cleanup, err := resolveNodeBouncer(ctx, *on, "", id)
 	if err != nil {
 		return err
 	}

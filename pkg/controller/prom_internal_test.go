@@ -16,6 +16,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -633,3 +635,34 @@ func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
 		t.Error("the finish left the charge window open, so the node holds a reservation forever")
 	}
 }
+
+// safety: read from the collectors the registry serves rather than from the
+// exposition, so a metric that has minted no child yet is still checked.
+func describedMetrics() map[string][]string {
+	descs := make(chan *prometheus.Desc, 64)
+	out := map[string][]string{}
+	for _, c := range sparkwingCollectors {
+		go func() {
+			c.Describe(descs)
+			close(descs)
+		}()
+		for d := range descs {
+			m := describedNameRE.FindStringSubmatch(d.String())
+			if m == nil {
+				continue
+			}
+			var labels []string
+			for _, l := range strings.Split(m[2], ",") {
+				if l = strings.TrimSpace(l); l != "" {
+					labels = append(labels, l)
+				}
+			}
+			slices.Sort(labels)
+			out[m[1]] = labels
+		}
+		descs = make(chan *prometheus.Desc, 64)
+	}
+	return out
+}
+
+var describedNameRE = regexp.MustCompile(`fqName: "([^"]+)".*variableLabels: \{([^}]*)\}`)

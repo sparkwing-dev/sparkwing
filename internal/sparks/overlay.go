@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+
 	"golang.org/x/mod/modfile"
 )
 
@@ -26,6 +28,7 @@ func goBin() string {
 }
 
 func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]string) (bool, error) {
+	ctx = gotoolchain.WithSession(ctx, nil, nil)
 	if sparkwingDir == "" {
 		return false, errors.New("sparks: sparkwingDir must not be empty")
 	}
@@ -145,12 +148,19 @@ func materializeSum(ctx context.Context, workDir, overlayPath, sumPath string) e
 		)
 		return nil
 	}
+	env, err := gotoolchain.BuildEnv(ctx, workDir, nil, overlayPath)
+	if err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, goBin(), "mod", "download",
 		"-modfile="+overlayPath, "all")
 	cmd.Dir = workDir
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if explanation := gotoolchain.ExplainOutput(ctx, string(out), env); explanation != nil {
+			return explanation
+		}
 		return fmt.Errorf("sparks: go mod download -modfile=%s all: %w: %s",
 			overlayPath, err, string(out))
 	}

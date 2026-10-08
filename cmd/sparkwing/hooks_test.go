@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -465,7 +467,7 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
 	})
 	if !strings.Contains(out, "pre-commit -> lint") ||
 		!strings.Contains(out, "pipelines declare pre-push but no gate is installed") ||
-		!strings.Contains(out, "sparkwing pipeline hooks install --repo "+repo) {
+		!strings.Contains(out, "sparkwing -C "+repo+" pipeline hooks install") {
 		t.Fatalf("status did not identify and remedy the missing declared hook:\n%s", out)
 	}
 }
@@ -644,7 +646,7 @@ func dispatchesCommand(cmdline string) bool {
 	for _, c := range allCommands {
 		registered[c.Path] = true
 	}
-	words := strings.Fields(cmdline)
+	words := strings.Fields(stripRootFlags(cmdline))
 	for n := len(words); n >= 2; n-- {
 		if registered[strings.Join(words[:n], " ")] {
 			return true
@@ -682,4 +684,82 @@ func readRepoFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
+	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}, false, ""))
+	captureStdout(t, func() {
+		if err := runIn(t, filepath.Join(repo, ".sparkwing"), runHooksUninstall); err != nil {
+			t.Fatalf("hooks uninstall with no sparkwing.yaml or go.mod: %v", err)
+		}
+	})
+	if _, err := os.Stat(hook); !os.IsNotExist(err) {
+		t.Fatalf("managed hook survived uninstall: %v", err)
+	}
+}
+
+func TestHooksUninstallStopsAtAnUninspectableDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny directory traversal on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root traverses a mode-000 directory")
+	}
+	root := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(root, "app")
+	inner := filepath.Join(locked, "src")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(inner)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	_, err := resolveCleanupRoot()
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("cleanup discovery under an uninspectable directory = %v, want the inspection error", err)
+	}
+}
+
+func TestDiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	stateDir := filepath.Join(home, ".sparkwing")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "sparkwing.yaml"), []byte("sparks: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(home, "code", "app")
+	if out, err := exec.Command("git", "init", "-q", checkout).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if _, ok, err := nearestDotSparkwing(checkout); ok || err != nil {
+		t.Fatalf("project discovery adopted the default state dir: ok=%v err=%v", ok, err)
+	}
+	t.Chdir(checkout)
+	root, err := resolveCleanupRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := filepath.EvalSymlinks(checkout); root != want && root != checkout {
+		t.Fatalf("cleanup discovery = %s, want the checkout %s, not the home holding the default state dir", root, checkout)
+	}
 }

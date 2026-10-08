@@ -73,10 +73,6 @@ func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float6
 	return stat, byRoot, measured, nil
 }
 
-func (d *Daemon) applyHeadroom(stat HostStat) {
-	d.applyHeadroomSample(stat, nil, true)
-}
-
 func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
 	now := d.now()

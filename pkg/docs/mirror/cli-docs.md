@@ -17,18 +17,16 @@ JSON indexes end with a typed page summary and continuation cursor.
 Selected reads return JSON document records when piped. Explicit
 --output plain prints the original Markdown. Use --web and --version
 on list/read when comparing another published version.
-Guides group related topics; all is an explicit exhaustive export.
+docs list --guides names the task-sized topic sets, docs list --versions
+the doc versions this CLI knows, and docs read --all is an explicit
+exhaustive export. The --web fetch cache lives under `sparkwing cache info --docs`.
 
 ### Subcommands
 
 - `list` -- Enumerate every doc topic
 - `read` -- Read one document
-- `guides` -- List the task-sized doc sets (--guide on `docs read`)
-- `all` -- Read every embedded document
 - `search` -- Find the section that answers a question
 - `migrations` -- Per-version migration guides (agent-friendly)
-- `versions` -- List doc versions known to this CLI (and sparkwing.dev with --web)
-- `cache` -- Inspect or clear the on-disk cache used by --web
 
 ### Examples
 
@@ -49,132 +47,13 @@ sparkwing docs read --topic pipelines --version v0.3.0 --web
 sparkwing docs search --query "warm pool"
 
 # List migration guides this CLI knows
-sparkwing docs migrations list
+sparkwing docs migrations
 
 # Pipe every guide up to v0.4.0 into context
-sparkwing docs migrations between --to v0.4.0
+sparkwing docs migrations --to v0.4.0
 
 # List every version available online
-sparkwing docs versions --web
-```
-
-## `sparkwing docs all`
-
-Read every embedded document
-
-Reads every embedded document, one JSON record per page when piped.
---output plain prints the full Markdown corpus with page headers.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
-
-### Examples
-
-```sh
-# Explicit exhaustive document export
-sparkwing docs all
-```
-
-## `sparkwing docs cache`
-
-Inspect or clear the on-disk cache used by --web
-
---web fetches are cached to $XDG_CACHE_HOME/sparkwing/web/ (or
-~/.cache/sparkwing/web/). The cache mirrors the URL path, so you
-can `cat` the cached files directly when debugging.
-
-Use `cache info` to see size / counts; use `cache clear` to wipe it.
-
-### Subcommands
-
-- `info` -- Print cache dir, total size, per-resource breakdown
-- `clear` -- Remove every cached file
-
-### Examples
-
-```sh
-# How big is the cache?
-sparkwing docs cache info
-
-# Force-refresh on next --web call
-sparkwing docs cache clear
-```
-
-## `sparkwing docs cache clear`
-
-Remove every cached file
-
-Deletes every file under the cache directory. Safe: the
-implementation refuses to remove paths that don't resolve inside
-the cache dir, so a stray symlink in the cache can't escape.
-
-Useful when a cached versions.json or index.json has gone stale
-faster than the 24h TTL window, or when debugging --web behavior.
-
-### Examples
-
-```sh
-# Wipe the cache
-sparkwing docs cache clear
-```
-
-## `sparkwing docs cache info`
-
-Print cache dir, total size, per-resource breakdown
-
-Walks the cache and prints a summary: total size, file counts
-broken down by doc / migration / index, and the freshness state of
-the cached versions.json (24h TTL).
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Human-readable
-sparkwing docs cache info
-
-# Agent-readable
-sparkwing docs cache info -o json
-```
-
-## `sparkwing docs guides`
-
-List the task-sized doc sets (--guide on `docs read`)
-
-A guide is a named set of topics that answer one task
-together, for the case where reading a single page leaves you one
-lookup short. `sparkwing docs read --guide authoring` returns the
-whole set in one call.
-
-Guides carry narrative topics only. The generated references
-(sdk-reference, cli-reference) are lookup tables instead of pages to
-read end to end; reach those with `sparkwing docs search`.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# What sets exist
-sparkwing docs guides
-
-# Read the authoring set
-sparkwing docs read --guide authoring
-
-# Agent-readable
-sparkwing docs guides -o json
+sparkwing docs list --versions --web
 ```
 
 ## `sparkwing docs list`
@@ -187,10 +66,23 @@ JSON ends with a kind:page record; continue with --cursor and the same
 filters. --limit 0 emits every match. Bodies belong to docs read.
 The embedded copy matches this binary; --web reads another version.
 
+--guides lists the task-sized topic sets instead: each guide is a named set
+of narrative topics that answer one task together, and
+`sparkwing docs read --guide NAME` returns the whole set in one call.
+The generated references (sdk-reference, cli-reference) are lookup tables
+rather than pages to read end to end; reach those with `sparkwing docs search`.
+
+--versions lists the binary's embedded documentation version and its
+migration-guide versions; with --web it merges in the versions published on
+sparkwing.dev. Use a returned version with `sparkwing docs read --web --version`.
+--guides takes only --output; --versions takes --web and --no-cache.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--guides` | List the task-sized topic sets (`docs read --guide`) instead of topics |
+| `--versions` | List the doc versions this CLI knows (and sparkwing.dev with --web) instead of topics |
 | `-q, --query TEXT` | Match words in slug, title and summary |
 | `--limit N` | Maximum records; 0 returns every remaining match (default: 40) |
 | `--cursor CURSOR` | Continue after next_cursor with the same filters and binary version |
@@ -213,128 +105,51 @@ sparkwing docs list --limit 0 -o plain
 
 # List the v0.3.0 corpus from sparkwing.dev
 sparkwing docs list --web --version v0.3.0
+
+# What guide sets exist
+sparkwing docs list --guides
+
+# Doc versions embedded in this CLI
+sparkwing docs list --versions
+
+# Every version available online
+sparkwing docs list --versions --web -o json
 ```
 
 ## `sparkwing docs migrations`
 
 Per-version migration guides (agent-friendly)
 
-Read the migration guides embedded in this binary. Use 'list' to find a
-version, 'read' for one guide, or 'between' for every guide in a version
-range.
+With no flag, lists each migration guide bundled with this binary in
+descending semver order, with date, size and one-line summary parsed from
+docs/migrations/README.md; --output json is an array of
+{version, date, summary, slug, bytes}. When this CLI is older than the newest
+embedded guide a one-line stderr note suggests updating.
 
-### Subcommands
+--version V (or a positional vX.Y.Z) reads that one guide as a JSON document
+record when piped; --output plain prints its raw Markdown. Cross-doc links are
+rewritten into `sparkwing docs read --topic <slug>` form.
 
-- `list` -- Table of every embedded migration guide
-- `read` -- Print one migration guide's markdown to stdout
-- `between` -- Concatenate every guide in a version range into one blob
+--from A and --to B concatenate every guide with a version greater than A and
+at most B, in ascending order, into one blob: Markdown output separates guides
+with horizontal rules and names the range in its heading. --from defaults to
+v0.0.0 and --to to the highest embedded version, so --from v0.0.0 alone is
+every guide this CLI knows.
 
-### Examples
-
-```sh
-# List embedded migration guides
-sparkwing docs migrations list
-
-# Read one guide
-sparkwing docs migrations read --version v0.4.0
-
-# Every guide upgrading from v0.3.0 to v0.4.0
-sparkwing docs migrations between --from v0.3.0 --to v0.4.0
-
-# Every guide this CLI knows (one-shot agent context)
-sparkwing docs migrations between
-```
-
-## `sparkwing docs migrations between`
-
-Concatenate every guide in a version range into one blob
-
-Returns guides with versions greater than --from and at most --to, in
-ascending version order. Markdown output separates guides with horizontal
-rules and identifies the selected range in its heading.
-
---from defaults to v0.0.0. --to defaults to the highest embedded version.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--from vX.Y.Z` | Exclusive lower bound (default v0.0.0) |
-| `--to vA.B.C` | Inclusive upper bound (default = latest embedded version) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--web` | Fetch every guide in the range from sparkwing.dev |
-| `--no-cache` | With --web, bypass the on-disk cache for this invocation |
-
-### Examples
-
-```sh
-# Every guide for a v0.3.0 -> v0.4.0 jump
-sparkwing docs migrations between --from v0.3.0 --to v0.4.0
-
-# Every guide up to a target version
-sparkwing docs migrations between --to v0.4.0
-
-# Every guide this CLI knows (one-shot agent context)
-sparkwing docs migrations between
-
-# Full range from sparkwing.dev (includes versions outside this binary's embedded versions)
-sparkwing docs migrations between --web
-```
-
-## `sparkwing docs migrations list`
-
-Table of every embedded migration guide
-
-Lists each migration guide bundled with this binary in
-descending semver order, with date and one-line summary parsed
-from docs/migrations/README.md. Use --output json for an
-agent-readable array of {version, date, summary, slug, bytes}.
-
-When the CLI's own version is older than the newest embedded
-guide a one-line stderr note suggests rebuilding.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--web` | Fetch the index from sparkwing.dev/migrations/index.json instead of the embed |
-| `--no-cache` | With --web, bypass the on-disk cache for this invocation |
-
-### Examples
-
-```sh
-# Human-readable table
-sparkwing docs migrations list
-
-# Agent-readable
-sparkwing docs migrations list -o json
-
-# Version-per-line for shell loops
-sparkwing docs migrations list -o plain
-
-# Online (every release on sparkwing.dev)
-sparkwing docs migrations list --web
-```
-
-## `sparkwing docs migrations read`
-
-Print one migration guide's markdown to stdout
-
-Reads a single migration guide as a JSON document record when piped.
-Use --output plain for its raw Markdown. Cross-doc links to other topics are
-rewritten into `sparkwing docs read --topic <slug>` form
-(same transform as `sparkwing docs read`).
+--web reads sparkwing.dev instead of the embedded corpus, for the list, one
+guide, or a range.
 
 ### Arguments
 
-- `[vX.Y.Z]` (optional) -- Migration guide version, when --version is not supplied
+- `[vX.Y.Z]` (optional) -- Migration guide version to read, when --version is not supplied
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--version vX.Y.Z` | Migration guide version (vX.Y.Z). Positional fallback accepted. |
+| `--version vX.Y.Z` | Read this one guide. Positional fallback accepted. |
+| `--from vX.Y.Z` | Concatenate the guides after this version (exclusive; default v0.0.0) |
+| `--to vA.B.C` | Concatenate the guides up to this version (inclusive; default = latest embedded version) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
@@ -342,14 +157,29 @@ rewritten into `sparkwing docs read --topic <slug>` form
 ### Examples
 
 ```sh
-# Read the v0.4.0 guide
-sparkwing docs migrations read --version v0.4.0
+# List embedded migration guides
+sparkwing docs migrations
+
+# Version-per-line for shell loops
+sparkwing docs migrations -o plain
+
+# Read one guide
+sparkwing docs migrations --version v0.4.0
 
 # Positional shortcut
-sparkwing docs migrations read v0.4.0
+sparkwing docs migrations v0.4.0
 
-# Read v0.5.0 from sparkwing.dev (outside this binary's embedded versions)
-sparkwing docs migrations read --version v0.5.0 --web
+# Every guide upgrading from v0.3.0 to v0.4.0
+sparkwing docs migrations --from v0.3.0 --to v0.4.0
+
+# Every guide this CLI knows (one-shot agent context)
+sparkwing docs migrations --from v0.0.0
+
+# Read v0.5.0 from sparkwing.dev
+sparkwing docs migrations --version v0.5.0 --web
+
+# Every release on sparkwing.dev
+sparkwing docs migrations --web
 ```
 
 ## `sparkwing docs read`
@@ -367,14 +197,19 @@ Default source is the binary's embedded corpus. Use --web to fetch
 from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 --version latest.
 
+--all reads every embedded document, one JSON record per page when piped;
+--output plain prints the full Markdown corpus with page headers. It takes no
+other selection or source flag.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--all` | Read every embedded document (explicit exhaustive export) |
 | `--section START_LINE` | Read one embedded section returned by search |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
 | `--topic NAME` | Topic name from docs list |
-| `--guide NAME` | Read a task-sized set of topics instead of one (`sparkwing docs guides`) |
+| `--guide NAME` | Read a task-sized set of topics instead of one (`sparkwing docs list --guides`) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--version vX.Y.Z` | Doc version (vX.Y.Z or latest). Defaults to this CLI's embedded version. |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
@@ -396,6 +231,9 @@ sparkwing docs read --topic pipelines --version v0.3.0 --web
 
 # Always fetch the freshest version
 sparkwing docs read --topic pipelines --version latest --web
+
+# Explicit exhaustive document export
+sparkwing docs read --all
 ```
 
 ## `sparkwing docs search`
@@ -437,33 +275,4 @@ sparkwing docs search -q approval -o json
 
 # Matching topic metadata
 sparkwing docs search -q "warm pool" --topics
-```
-
-## `sparkwing docs versions`
-
-List doc versions known to this CLI (and sparkwing.dev with --web)
-
-Lists the binary's embedded documentation version and migration-guide
-versions. With --web, also fetches published versions from sparkwing.dev.
-Use a returned version with 'sparkwing docs read --web --version'.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--web` | Merge in sparkwing.dev/versions.json (network) |
-| `--no-cache` | With --web, bypass the on-disk cache for this invocation |
-
-### Examples
-
-```sh
-# Embedded only (default)
-sparkwing docs versions
-
-# Every version available online
-sparkwing docs versions --web
-
-# Agent-readable JSON
-sparkwing docs versions --web -o json
 ```

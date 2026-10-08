@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,8 +19,6 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
-
-	storagefs "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -699,40 +696,6 @@ func requireUnknownFeature(t *testing.T, path string) {
 	}
 	if _, err := store.Open(path); err == nil {
 		t.Fatal("the store still opens after an unknown requirement was stamped")
-	}
-}
-
-func TestWingdAPI_ArtifactRouteFollowsTheConfiguredStore(t *testing.T) {
-	probe := func(api *wingdAPI, path string) int {
-		t.Helper()
-		req, err := http.NewRequest(http.MethodGet, apiBaseURL+path, nil)
-		if err != nil {
-			t.Fatalf("request: %v", err)
-		}
-		rec := httptest.NewRecorder()
-		api.route(rec, req)
-		return rec.Code
-	}
-
-	home := wingdTestHome(t)
-	runs, err := NewHeldRunStore(home)
-	if err != nil {
-		t.Fatalf("held run store: %v", err)
-	}
-	t.Cleanup(func() { _ = runs.Close() })
-
-	art, err := storagefs.NewArtifactStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("artifact store: %v", err)
-	}
-	withStore := newWingdAPI(runs, art, nil, testKeyring(t))
-	if got := probe(withStore, "/api/v1/artifacts/some-key"); got == http.StatusNotFound {
-		t.Fatal("a daemon that configured an artifact store reported its artifact route unsupported")
-	}
-
-	without := newWingdAPI(runs, nil, nil, testKeyring(t))
-	if got := probe(without, "/api/v1/artifacts/some-key"); got != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 from a daemon with no artifact store", got)
 	}
 }
 

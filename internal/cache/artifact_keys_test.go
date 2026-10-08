@@ -3,6 +3,7 @@ package cache
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,8 +27,12 @@ func TestArtifactKeysThroughCacheAdapter(t *testing.T) {
 			teamA, teamB := grantFor(t, token, "team-a"), grantFor(t, token, "team-b")
 			store := sparkwingcache.New(srv.URL, teamA, srv.Client())
 			digest := strings.Repeat("a", 64)
-			for _, key := range []string{"artifacts/blobs/" + digest, "artifacts/manifests/" + digest, "deadbeef-cafebabe", "deadbeef.sha256"} {
-				if err := store.Put(t.Context(), key, strings.NewReader(key)); err != nil {
+			blobBody, manifestBody := "blob bytes", "manifest bytes"
+			blobKey, manifestKey := "artifacts/blobs/"+sha256Hex(blobBody), "artifacts/manifests/"+sha256Hex(manifestBody)
+			bodies := map[string]string{blobKey: blobBody, manifestKey: manifestBody, "deadbeef-cafebabe": "deadbeef-cafebabe", "deadbeef.sha256": "deadbeef.sha256"}
+			for _, key := range []string{blobKey, manifestKey, "deadbeef-cafebabe", "deadbeef.sha256"} {
+				content := bodies[key]
+				if err := store.Put(t.Context(), key, strings.NewReader(content)); err != nil {
 					t.Fatalf("Put %s: %v", key, err)
 				}
 				rc, err := store.Get(t.Context(), key)
@@ -36,7 +41,7 @@ func TestArtifactKeysThroughCacheAdapter(t *testing.T) {
 				}
 				got, err := io.ReadAll(rc)
 				rc.Close()
-				if err != nil || string(got) != key {
+				if err != nil || string(got) != content {
 					t.Fatalf("Get %s = %q, %v", key, got, err)
 				}
 				if found, err := store.Has(t.Context(), key); err != nil || !found {
@@ -48,14 +53,18 @@ func TestArtifactKeysThroughCacheAdapter(t *testing.T) {
 					if bearer == teamB {
 						want = http.StatusNotFound
 					}
-					if code != want || strings.Contains(body, key) {
+					if code != want || strings.Contains(body, content) {
 						t.Fatalf("other caller read %s: %d %q", key, code, body)
 					}
 				}
-				if code, body := send(t, srv, http.MethodPut, "/bin/"+key, teamB, "other team"); code != http.StatusCreated {
+				wantPut := http.StatusCreated
+				if strings.HasPrefix(key, "artifacts/") {
+					wantPut = http.StatusBadRequest
+				}
+				if code, body := send(t, srv, http.MethodPut, "/bin/"+key, teamB, "other team"); code != wantPut {
 					t.Fatalf("team B Put: %d %s", code, body)
 				}
-				if _, body := send(t, srv, http.MethodGet, "/bin/"+key, teamA, ""); body != key {
+				if _, body := send(t, srv, http.MethodGet, "/bin/"+key, teamA, ""); body != content {
 					t.Fatalf("team B replaced %s: %q", key, body)
 				}
 				req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/bin/"+key, nil)
@@ -65,7 +74,7 @@ func TestArtifactKeysThroughCacheAdapter(t *testing.T) {
 					t.Fatal(err)
 				}
 				resp.Body.Close()
-				sum := sha256.Sum256([]byte(key))
+				sum := sha256.Sum256([]byte(content))
 				if want := "sha-256=" + base64.StdEncoding.EncodeToString(sum[:]); resp.Header.Get("Digest") != want {
 					t.Fatalf("digest %q, want %q", resp.Header.Get("Digest"), want)
 				}
@@ -75,17 +84,22 @@ func TestArtifactKeysThroughCacheAdapter(t *testing.T) {
 					t.Errorf("accepted invalid key %q", key)
 				}
 			}
-			for _, key := range []string{"artifacts/blobs/" + digest, "artifacts/manifests/" + digest} {
-				if code, body := send(t, srv, http.MethodGet, "/bin/"+key, teamA, ""); code != http.StatusOK || body != key {
+			for _, key := range []string{blobKey, manifestKey} {
+				if code, body := send(t, srv, http.MethodGet, "/bin/"+key, teamA, ""); code != http.StatusOK || body != bodies[key] {
 					t.Fatalf("namespace collision: %s = %d %q", key, code, body)
 				}
-				if err := store.Delete(t.Context(), key); err != nil {
-					t.Fatal(err)
+				if err := store.Delete(t.Context(), key); err == nil {
+					t.Fatalf("a grant deleted the shared artifact %s", key)
 				}
-				if found, err := store.Has(t.Context(), key); err != nil || found {
-					t.Fatalf("deleted Has = %v %v", found, err)
+				if found, err := store.Has(t.Context(), key); err != nil || !found {
+					t.Fatalf("Has after a refused delete = %v %v", found, err)
 				}
 			}
 		})
 	}
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }

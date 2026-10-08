@@ -15,7 +15,6 @@ type service struct {
 
 var services = []service{
 	{"sparkwing-controller", filepath.Join("cmd", "sparkwing-controller", "main.go")},
-	{"sparkwing-web", filepath.Join("cmd", "sparkwing-web", "main.go")},
 	{"sparkwing-logs", filepath.Join("cmd", "sparkwing-logs", "main.go")},
 }
 
@@ -47,7 +46,7 @@ func checkServicePorts(contentDir, repoRoot string) bool {
 		if werr != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return werr
 		}
-		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
+		if strings.Contains(path, "/migrations/") {
 			return nil
 		}
 		// #nosec G122 -- a TOCTOU swap here needs write access to the checkout this build-time check already trusts

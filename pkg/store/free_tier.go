@@ -168,17 +168,19 @@ func lockFreeTierTx(ctx context.Context, tx *storeTx) error {
 // safety: the caller holds the free-tier lock. The slot starts from the event bytes the team already
 // retains, so a team whose credits ran out is held to what it stored while funded.
 func takeFreeSlotTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (bool, error) {
-	limit, err := creditSettingTx(ctx, tx, metaKeyFreeTeamSlots, DefaultFreeTeamSlots)
+	open, err := freeSlotOpenTx(ctx, tx)
 	if err != nil {
 		return false, err
+	}
+	if !open {
+		return rowPresentTx(ctx, tx, `SELECT 1 FROM free_slots WHERE team = ?`, string(team))
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO free_slots (team, taken_at, event_bytes)
 SELECT ?, ?, (SELECT COALESCE(SUM(u.bytes), 0)
                 FROM storage_run_usage u JOIN runs r ON r.id = u.run_id WHERE r.team = ?)
- WHERE (SELECT COUNT(*) FROM free_slots) < ?
-   AND NOT EXISTS (SELECT 1 FROM free_slots WHERE team = ?)`,
-		string(team), now.UnixNano(), string(team), limit, string(team)); err != nil {
+ WHERE NOT EXISTS (SELECT 1 FROM free_slots WHERE team = ?)`,
+		string(team), now.UnixNano(), string(team), string(team)); err != nil {
 		return false, err
 	}
 	return rowPresentTx(ctx, tx, `SELECT 1 FROM free_slots WHERE team = ?`, string(team))
@@ -261,8 +263,7 @@ UPDATE free_slots SET event_bytes = CASE WHEN event_bytes + ? > 0 THEN event_byt
 	return err
 }
 
-// GrantFreeSlot gives team a free-tier slot whether or not one is free. It
-// is how an operator admits a team while the tier is full.
+// GrantFreeSlot gives team a free-tier slot whether or not one is free.
 func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error) {
 	team = NormalizeTeam(team)
 	if err := ValidateSlug(string(team)); err != nil {

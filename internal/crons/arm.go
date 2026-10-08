@@ -540,7 +540,7 @@ func sameArgs(a, b map[string]string) bool {
 // Refresh only ever republishes rows that already exist. A pipeline that starts
 // declaring a schedule is armed by `sparkwing crons install`, because which
 // host evaluates a schedule is a decision an operator makes on that host, and a
-// schedule `crons disarm` removed is gone from the store, so nothing here can
+// schedule `crons uninstall --name` removed is gone from the store, so nothing here can
 // bring it back. A row the repository had stopped declaring is different: it is
 // still in the store, so a repository that declares it again republishes it and
 // it fires once more, as long as it follows the checkout.

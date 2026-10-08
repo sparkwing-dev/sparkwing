@@ -16,21 +16,6 @@ func (s *stringSliceFlag) Set(v string) error {
 	return nil
 }
 
-func splitEnvList(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
 func parseK8sNodeSelector(values []string) (map[string]string, error) {
 	if len(values) == 0 {
 		return nil, nil

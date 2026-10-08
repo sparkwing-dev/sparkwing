@@ -112,7 +112,7 @@ and hands each node subprocess the same socket; the child runs it
 dispatches and any node replayed from it choose the same way. No process
 in a hosted run holds the file open, so the store's schema is out of a
 pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
-runs`, `sparkwing jobs`, `sparkwing doctor`, the dashboard -- are the
+runs`, `sparkwing doctor`, the dashboard -- are the
 installed build or a peer of it and still open it directly.
 
 A run the daemon cannot serve opens a store of its own instead, which is
@@ -185,7 +185,7 @@ For scripting, `--sw-output json` gives `{run_id, log_path, ...}` and
 
 ```bash
 RUN=$(sparkwing run build --sw-detached --sw-output plain)
-sparkwing runs wait --run "$RUN"
+sparkwing runs status "$RUN" --follow --timeout 10m
 ```
 
 Sparkwing's own flags all carry the `--sw-` prefix and all sit after the
@@ -328,7 +328,7 @@ values that should remain independent of a caller's ambient environment.
 
 #### Which checkout runs
 
-The checkout you are standing in wins, and `--sw-cd PATH` points at a
+The checkout you are standing in wins, and `sparkwing -C PATH run` points at a
 different one. Only if neither declares the pipeline does the repo
 registry get consulted. The chosen directory is recorded on the run, so
 the consumer executes the tree you launched from even when a second
@@ -437,7 +437,8 @@ whose node is gone: `sparkwing run` before it dispatches, the admission
 daemon when a run's connection drops without a clean finish, and
 `sparkwing doctor`, which lists what it ended under `stray step sessions`
 and only reports under `--dry-run`. Each session ended this way appends a
-`stray_session_reaped` event to its node. The sweep is keyed on the
+`stray_session_reaped` event to its node, carrying the step's command line
+with the run's secret values masked as they were when the step started. The sweep is keyed on the
 session and the node's process incarnation, never on a process name, so
 a live run's work is never touched and a reused pid is never signalled.
 Steps do not get to daemonize by accident: a process that leaves its step
@@ -515,7 +516,7 @@ pipeline guard leaves no run row.
 
 Add `--working-tree` to run current tracked edits and untracked non-ignored
 files remotely without committing or pushing them. Sparkwing freezes those
-bytes as a synthetic Git commit, requires the bundle seed to finish before it
+bytes as a synthetic Git commit, requires the bundle upload to finish before it
 admits the trigger, and prints the base SHA, snapshot SHA, file count, and
 bundle size. The source checkout's HEAD, refs, index, and object database stay
 unchanged. The bundle limit is 500 MiB.
@@ -524,8 +525,7 @@ the materialized checkout. A symlink at `.sparkwing` is refused before compilati
 The remote checkout is clean and detached at the synthetic SHA; file contents
 match the laptop, but staged-versus-unstaged state is intentionally flattened.
 Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories
-fail before upload. Workspace seed refs are capped at 128 distinct snapshots
-per repository; a full cache rejects a new snapshot before trigger admission.
+fail before upload.
 
 Before the upload, Sparkwing reads the snapshot manifest for secret-shaped
 files and refuses the trigger when it finds any, because the snapshot travels
@@ -579,7 +579,7 @@ guard and token.
 An off-cluster machine can claim only these triggers and compile them locally:
 
 ```bash
-SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+sparkwing-runner runner --credentials-dir="$HOME/.config/sparkwing/runner-credentials" \
   --controller=https://sparkwing.example.com \
   --logs=https://sparkwing.example.com \
   --gitcache=https://sparkwing.example.com/api/v1/gitcache \
@@ -588,16 +588,16 @@ SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
   --metrics-addr= --max-claims-before-restart=0
 ```
 
-The source proxy and trigger claim require the current admin-capable runner
-token. Login-enabled dashboard ingress passes this machine bearer directly to
+The runner reads its token from the file `agent-token` in its
+`--credentials-dir`; create it with mode `0600`. The source proxy and trigger
+claim require the current admin-capable runner token. Login-enabled dashboard ingress passes this machine bearer directly to
 the controller without a browser session or CSRF token. The process opens no
 listener. A private direct cache URL can replace the controller proxy when the
-machines already share a LAN, VPN, or tailnet. Direct cache binary and seed
-writes use only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never
-sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct
-cache on a trusted private network. Upload and pack streams have
-a 30-minute server window; the CLI gives a direct upload two minutes before a
-fresh 15-minute controller fallback. Manual retries and same-repository
+machines already share a LAN, VPN, or tailnet. Direct cache binary writes use
+only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never sent to that
+raw cache. Raw Git reads have no cache-level auth, so keep a direct cache on a
+trusted private network. Pack streams have a 30-minute server window, and the
+CLI gives a working-tree upload 15 minutes. Manual retries and same-repository
 `RunAndAwait` children retain the original `pipeline-working-tree@<host>`
 placement source.
 Do not leave an unrestricted cluster runner racing for the same trigger source
@@ -617,7 +617,10 @@ machine's own git config and credentials. The dashboard's machines page asks
 which repositories the machine may build and prints this command:
 
 ```bash
-SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+(umask 077 && mkdir -p "$HOME/.config/sparkwing/runner-credentials" &&
+  rm -f "$HOME/.config/sparkwing/runner-credentials/agent-token" &&
+  printf '%s' swr_... > "$HOME/.config/sparkwing/runner-credentials/agent-token") &&
+sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials" \
   --controller https://sparkwing.example.com --logs https://logs.example.com \
   --allow-repo 'github.com/acme/*' \
   --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= \
@@ -875,8 +878,9 @@ mid-node: nothing releases a claim, so the node waits out the lease before the
 reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten
 minutes past the node's own `.Timeout()` where it declared one and six hours
 otherwise, so a wedged pod cannot outlive the run that wanted it.
-`--k8s-job-deadline` (env `SPARKWING_K8S_JOB_DEADLINE`, a Go duration of at
-least a minute) moves that six hours. A no-progress timeout measures silence
+`sparkwing-runner runner --deadline` (a Go duration of at least a minute,
+which the Helm value `runner.jobDeadline` sets) moves that six hours; the runner hands it to each trigger as
+`handle-trigger --k8s-job-deadline`. A no-progress timeout measures silence
 rather than elapsed time, so it deliberately does not bound the Job. A node
 Kubernetes kills at the deadline fails with `timeout` and an error naming the
 deadline, which is how an operator tells it from a pod that crashed.
@@ -889,15 +893,13 @@ Job lifecycle and pod-read permissions the Kubernetes fallback calls.
 `sparkwing-runner-bundle.runner.triggerRunner.labels` declares fallback Job
 capabilities; a manually launched trigger worker repeats
 `--trigger-runner-label` for the same values.
-For a manually launched runner, `SPARKWING_RUNNER_SA` supplies the service
-account used by `--runner k8s`, `--trigger-runner k8s`, and warm fallback Jobs;
-the matching command-line flags take precedence.
+For a manually launched runner, `--trigger-runner-sa` names the service
+account used by `--trigger-runner k8s` and warm fallback Jobs.
 
 On Kubernetes a pipeline's `.Resources()` pin becomes the Job pod's requests
-and limits, so an operator bounds it: `--k8s-cpu-ceiling` and
-`--k8s-memory-ceiling` (or `SPARKWING_K8S_CPU_CEILING` and
-`SPARKWING_K8S_MEMORY_CEILING`, which the Helm values
-`runner.jobCeiling.cpu` and `runner.jobCeiling.memory` set) take Kubernetes
+and limits, so an operator bounds it: `sparkwing-runner runner
+--cpu-ceiling` and `--memory-ceiling`, which the Helm values
+`runner.jobCeiling.cpu` and `runner.jobCeiling.memory` set, take Kubernetes
 quantities such as `8` and `16Gi`. A pin or a measured charge above the
 ceiling is clamped to it, burst limit included, and the runner logs the pin,
 the ceiling, and the size it settled on, and writes the same line to the run
@@ -1290,11 +1292,11 @@ failing, because a commit hook is not the place to fail for a reservation
 nothing else on the box is honoring either. What every standalone run
 loses is the same thing: host CPU and memory are not arbitrated, so a
 standalone run and a hosted one may oversubscribe the box. The read verbs
-still find it. `sparkwing runs list`, `jobs`, `runs find`, and
-`runs failures` merge this home's own `state.db` with every standalone
-store and mark each row with the store it came from; `runs status`,
-`runs get`, `runs receipt`, `runs summary`, and `runs timeline` look an id
-up in the shared store first and then in each standalone store. The
+still find it. `sparkwing runs list`, including `--wait` and
+`--group-by`, merges this home's own `state.db` with every standalone
+store and marks each row with the store it came from; `runs status` and
+each of its `--view` renderings look an id up in the shared store first
+and then in each standalone store. The
 dashboard reads `state.db` alone and does not see the run.
 
 Some failures are still failures. A daemon whose runs store is unreadable

@@ -20,6 +20,7 @@ entries=0
 if [[ -d "${GOMODCACHE:-}" ]]; then
   entries="$(find "$GOMODCACHE" -mindepth 1 -maxdepth 1 | wc -l | tr -d '[:space:]')"
 fi
+if [[ "${1:-}" == -C ]]; then shift 2; fi
 printf '%s\t%s\t%s\t%s\t%s\n' "$1" "${HOME:-}" "${GOMODCACHE:-}" "${SPARKWING_HOME:-}" "$entries" >>"$INSTALL_TO_GREEN_TRACE"
 case "$1 ${2:-}" in
   "version -o")
@@ -36,7 +37,7 @@ case "$1 ${2:-}" in
     fi
     printf 'ok\n'
     ;;
-  "pipeline explain") printf 'ok\n' ;;
+  "pipeline plan") printf 'ok\n' ;;
   "daemon stop") printf 'stopped\n' ;;
   "run demo")
     case "${INSTALL_TO_GREEN_STUB_RUN:-green}" in

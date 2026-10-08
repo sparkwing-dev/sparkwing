@@ -27,43 +27,6 @@ reaches any controller you can reach, including one a team runs itself.
   [`architecture.md`](architecture.md) and
   [`deployment.md`](deployment.md) cover the in-cluster picture.
 
-## Map
-
-```
-docs/
-  getting-started.md     install, quick start, run targets
-  sdk.md                 Go DSL: Plan, Job, Work, Step, modifiers
-  pipelines.md           pipeline YAML, registration, triggers
-  authoring-pipelines.md idiomatic Plan/Work authoring
-  artifacts.md           moving files between nodes
-  cli.md                 sparkwing CLI command-group guide
-  api.md                 controller HTTP API reference
-  architecture.md        in-cluster deployment architecture
-  deployment.md          deploy targets, gitops, ArgoCD, registries
-  deployment-modes.md    the two paths, then the advanced shapes underneath
-  self-hosting.md        supported local and Kubernetes deployment paths
-  ci-embedded.md         run pipelines inside an existing CI job
-  local-execution.md     how local vs remote execution interact
-  native-mode.md         the laptop model (detached dashboard)
-  hooks.md               triggers (webhooks + opt-in pipeline hooks)
-  scheduling.md          runner labels, .Requires/.Prefers/.WhenRunner
-  crons.md               local cron schedules: arming a host, the tick, inspecting
-  warm-pool.md           warm PVC pool
-  caching.md             node-level Cache modifier (.Cache / MemoizeOption)
-  backends.md            per-profile state / cache / logs destinations
-  build-caching.md       Docker / BuildKit / proxy caching layers
-  fast-builds.md         performance best practices
-  gitcache.md            sparkwing-cache: git HTTP, blobs, package proxy
-  sparks.md              spark library dependency management
-  sparks-core.md         the canonical sparks-* helper bundle
-  versioning.md          versioning policy, plugin compatibility, SDK extraction roadmap
-  auth.md                principal + scope + argon2 token model
-  security.md            transport, rate limiting, secret management
-  threat-model.md        running another person's branch on your machine
-  observability.md       failure reasons, resource metrics, OTel
-  mcp.md                 MCP server for AI agents
-```
-
 Generated reference (do not hand-edit; regenerated from code and
 drift-gated):
 
@@ -81,8 +44,8 @@ Every top-level verb is listed with a one-line synopsis in
 [cli-reference.md](cli-reference.md), generated from the command
 registry; `sparkwing commands` prints the same index offline (`-o json`
 for the machine-readable index, one record per line -- narrow with
-`--path` or cut with `head`). Cross-repo registry lives under `configure
-xrepo`; sparks library management under `pipeline sparks`. Run any verb
+`--path` or cut with `head`). The cross-repo registry lives under `repos`;
+sparks library management under `pipeline sparks`. Run any verb
 with `--help` for its full spec.
 
 ## Repo-local helpers vs sparkwing

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -59,10 +60,8 @@ func OpenArtifactStoreFromSpec(ctx context.Context, spec backends.Spec, lookup P
 			return nil, err
 		}
 		return sparkwingcache.New(url, token, nil), nil
-	case backends.TypeGCS, backends.TypeAzureBlob:
-		return nil, unimplemented("cache", spec.Type)
 	default:
-		return nil, fmt.Errorf("cache backend type %q is not recognized", spec.Type)
+		return nil, fmt.Errorf("cache backend type %q is not supported (use filesystem, s3 or controller)", spec.Type)
 	}
 }
 
@@ -100,10 +99,8 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 			url = spec.URL
 		}
 		return sparkwinglogs.New(url, nil, token), nil
-	case backends.TypeGCS, backends.TypeAzureBlob:
-		return nil, unimplemented("logs", spec.Type)
 	default:
-		return nil, fmt.Errorf("logs backend type %q is not recognized", spec.Type)
+		return nil, fmt.Errorf("logs backend type %q is not supported (use filesystem, s3, stdout or controller)", spec.Type)
 	}
 }
 
@@ -165,18 +162,14 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 			return nil, err
 		}
 		return client.NewWithToken(url, nil, token), nil
-	case backends.TypeGCS, backends.TypeAzureBlob:
-		return nil, unimplemented("state", spec.Type)
 	case backends.TypePostgres:
 		dsn, err := resolveStateDSN("postgres", spec.URL, spec.URLSource)
 		if err != nil {
 			return nil, err
 		}
 		return store.OpenPostgres(ctx, dsn)
-	case backends.TypeMySQL:
-		return nil, unimplemented("state", spec.Type)
 	default:
-		return nil, fmt.Errorf("state backend type %q is not recognized", spec.Type)
+		return nil, fmt.Errorf("state backend type %q is not supported (use sqlite, postgres, s3 or controller)", spec.Type)
 	}
 }
 
@@ -211,30 +204,11 @@ func logOutboxUnavailable(log *slog.Logger, err error) {
 }
 
 func outboxDBPath() (string, error) {
-	if root := os.Getenv("SPARKWING_HOME"); root != "" {
-		return filepath.Join(root, "outbox.db"), nil
-	}
-	if underTest() {
-		return filepath.Join(testSandbox(), ".sparkwing", "outbox.db"), nil
-	}
-	home, err := os.UserHomeDir()
+	p, err := paths.DefaultPaths()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".sparkwing", "outbox.db"), nil
-}
-
-func underTest() bool {
-	base := filepath.Base(os.Args[0])
-	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
-}
-
-func testSandbox() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-test-home-%d", os.Getpid()))
-}
-
-func unimplemented(surface, t string) error {
-	return fmt.Errorf("%s backend type %q is recognized but not implemented in this build", surface, t)
+	return filepath.Join(p.Root, "outbox.db"), nil
 }
 
 func resolveStateDSN(surface, url, urlSource string) (string, error) {

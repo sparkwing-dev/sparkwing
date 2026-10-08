@@ -25,7 +25,7 @@ profiles:
   team: { state: { type: s3, bucket: team, prefix: state } }
 `)
 	out := captureStdout(t, func() {
-		if err := runProfileCmd(nil); err != nil {
+		if err := runProfilesShow(nil); err != nil {
 			t.Errorf("profile: %v", err)
 		}
 	})
@@ -41,7 +41,7 @@ profiles:
   team: { state: { type: s3, bucket: team, prefix: state } }
 `)
 	out := captureStdout(t, func() {
-		if err := runProfileCmd([]string{"--profile", "team", "--output", "pretty"}); err != nil {
+		if err := runProfilesShow([]string{"--profile", "team", "--output", "pretty"}); err != nil {
 			t.Errorf("profile: %v", err)
 		}
 	})
@@ -58,7 +58,7 @@ func TestProfileCmd_NotFound(t *testing.T) {
 profiles:
   prod: { controller: { url: https://api.example.dev } }
 `)
-	err := runProfileCmd([]string{"--profile", "bogus"})
+	err := runProfilesShow([]string{"--profile", "bogus"})
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -73,7 +73,7 @@ profiles:
   prod: { controller: { url: https://api.example.dev, token: swu_secret } }
 `)
 	out := captureStdout(t, func() {
-		if err := runProfileCmd([]string{"--profile", "prod", "-o", "json"}); err != nil {
+		if err := runProfilesShow([]string{"--profile", "prod", "-o", "json"}); err != nil {
 			t.Errorf("profile: %v", err)
 		}
 	})
@@ -97,11 +97,11 @@ profiles:
 
 func TestProfileCmd_RejectsPositionalArg(t *testing.T) {
 	setProfileCmdFixture(t, "profiles:\n  prod: { controller: { url: https://x } }\n")
-	err := runProfileCmd([]string{"prod"})
+	err := runProfilesShow([]string{"prod"})
 	if err == nil {
 		t.Fatal("expected error on positional arg")
 	}
-	if !strings.Contains(err.Error(), "takes no arguments") {
+	if !strings.Contains(err.Error(), "unexpected positional") {
 		t.Errorf("message = %q", err.Error())
 	}
 }

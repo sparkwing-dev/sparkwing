@@ -139,6 +139,8 @@ type PipelineProfile struct {
 // ProfileObservation is one run's contribution to a profile: how long the
 // work took and the peak host resources it drew.
 type ProfileObservation struct {
+	// Partial marks resource readings as lower bounds; they can only raise a profile.
+	Partial         bool
 	Duration        time.Duration
 	PeakCores       float64
 	PeakMemoryBytes int64
@@ -177,6 +179,9 @@ type profileSample struct {
 	C float64 `json:"c"`
 	M int64   `json:"m"`
 	S float64 `json:"s,omitempty"`
+	// safety: a partial measurement raises the percentiles but never counts
+	// toward graduation, which would drop the measuring safety margin.
+	P bool `json:"p,omitempty"`
 }
 
 const profileSchemaCurrent = 11
@@ -202,11 +207,13 @@ type profileMutState struct {
 
 // RecordProfileObservation folds one run's observation into the
 // (pipeline, node) profile. A clean run ages into the windowed percentiles
-// as before; a contended run feeds the demand floor only (raising or
-// decaying it toward its evidence), leaving the window, peaks, and sample
+// as before; partial readings enter only when they raise a resource dimension,
+// with the other dimensions held at their current values. A contended run
+// feeds the demand floor only, leaving the window, peaks, and sample
 // count untouched so contention never sets a measured price or graduates a
 // version. A plan-hash change clears the
-// version's learned window and floor and carries its peak and sustained
+// version's learned window and floor (except a partial contended floor)
+// and carries its peak and sustained
 // figures into the Prev pair, so the changed version re-measures from a warm
 // start at what its predecessor was charged.
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
@@ -246,6 +253,14 @@ func (t *Tenant) recordProfileObservation(ctx context.Context, pipeline, nodeID 
 	if err != nil {
 		return err
 	}
+	if obs.Partial && !obs.Contended {
+		if obs.PeakCores <= st.peakCores && sustainedOrPeak(obs) <= st.sustainedCores && obs.PeakMemoryBytes <= st.peakMemoryBytes {
+			return tx.Commit()
+		}
+		obs.SustainedCores = math.Max(sustainedOrPeak(obs), st.sustainedCores)
+		obs.PeakCores = math.Max(obs.PeakCores, st.peakCores)
+		obs.PeakMemoryBytes = max(obs.PeakMemoryBytes, st.peakMemoryBytes)
+	}
 	planHash := st.planHash
 	floorCores, floorMemoryBytes := st.floorCores, st.floorMemoryBytes
 	prevPeakCores, prevPeakMemoryBytes := st.prevPeakCores, st.prevPeakMemoryBytes
@@ -267,13 +282,18 @@ func (t *Tenant) recordProfileObservation(ctx context.Context, pipeline, nodeID 
 
 	cpuMeasured := obs.CPUMeasured
 	if obs.Contended {
-		floorCores = foldFloor(floorCores, obs.FloorCores)
-		floorMemoryBytes = max(obs.FloorMemoryBytes, floorMemoryBytes/2)
+		if obs.Partial {
+			floorCores = math.Max(st.floorCores, obs.FloorCores)
+			floorMemoryBytes = max(st.floorMemoryBytes, obs.FloorMemoryBytes)
+		} else {
+			floorCores = foldFloor(floorCores, obs.FloorCores)
+			floorMemoryBytes = max(obs.FloorMemoryBytes, floorMemoryBytes/2)
+		}
 		cpuMeasured = st.cpuMeasured || obs.CPUMeasured
 	} else {
 		window = append(window, profileSample{
 			D: obs.Duration.Nanoseconds(), C: obs.PeakCores, M: obs.PeakMemoryBytes,
-			S: sustainedOrPeak(obs),
+			S: sustainedOrPeak(obs), P: obs.Partial,
 		})
 		if len(window) > profileWindow {
 			window = window[len(window)-profileWindow:]
@@ -307,7 +327,7 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
     prev_sustained_cores  = excluded.prev_sustained_cores`,
 		string(t.team), pipeline, nodeID,
 		prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
-		prof.PeakCores, prof.PeakMemoryBytes, len(window),
+		prof.PeakCores, prof.PeakMemoryBytes, prof.SampleCount,
 		boolToInt(cpuMeasured), time.Now().UnixNano(), raw,
 		planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
 		prof.SustainedCores, prevSustainedCores)
@@ -724,6 +744,11 @@ SELECT pipeline, node_id, ` + profileColumns + `
 // or "" for every pipeline. Pipelines with no cache-dominant runs are absent
 // from the map.
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
+	return s.defaultTenant().CacheExcludedCounts(ctx, pipeline, cachedOutcome, fraction)
+}
+
+// CacheExcludedCounts is [Store.CacheExcludedCounts] confined to t's team.
+func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
 	q := `
 SELECT r.pipeline, COUNT(*)
   FROM (
@@ -731,17 +756,18 @@ SELECT r.pipeline, COUNT(*)
            SUM(CASE WHEN outcome = ? THEN 1 ELSE 0 END) AS cached,
            SUM(CASE WHEN outcome != '' THEN 1 ELSE 0 END) AS total
       FROM nodes
+     WHERE team = ?
      GROUP BY run_id
   ) x
   JOIN runs r ON r.id = x.run_id
- WHERE x.total > 0 AND CAST(x.cached AS REAL) / x.total >= ?`
-	args := []any{cachedOutcome, fraction}
+ WHERE r.team = ? AND x.total > 0 AND CAST(x.cached AS REAL) / x.total >= ?`
+	args := []any{cachedOutcome, string(t.team), string(t.team), fraction}
 	if pipeline != "" {
 		q += ` AND r.pipeline = ?`
 		args = append(args, pipeline)
 	}
 	q += ` GROUP BY r.pipeline`
-	rows, err := s.query(ctx, q, args...)
+	rows, err := t.s.query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -875,7 +901,11 @@ func profileFromWindow(window []profileSample) PipelineProfile {
 	cores := make([]float64, len(window))
 	sustained := make([]float64, len(window))
 	mems := make([]int64, len(window))
+	clean := 0
 	for i, s := range window {
+		if !s.P {
+			clean++
+		}
 		durations[i] = s.D
 		cores[i] = s.C
 		sustained[i] = s.S
@@ -887,7 +917,7 @@ func profileFromWindow(window []profileSample) PipelineProfile {
 		PeakCores:       percentile(cores, peakPercentile),
 		SustainedCores:  percentile(sustained, peakPercentile),
 		PeakMemoryBytes: percentile(mems, peakPercentile),
-		SampleCount:     len(window),
+		SampleCount:     clean,
 	}
 }
 

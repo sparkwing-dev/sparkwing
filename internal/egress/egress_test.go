@@ -330,23 +330,6 @@ func TestConcurrentRecordsSumExactly(t *testing.T) {
 	}
 }
 
-func TestFormatBytesReadsAsABill(t *testing.T) {
-	for _, tc := range []struct {
-		in   int64
-		want string
-	}{
-		{512, "512 B"},
-		{1024, "1.00 KiB"},
-		{1536, "1.50 KiB"},
-		{1 << 30, "1.00 GiB"},
-		{1 << 40, "1.00 TiB"},
-	} {
-		if got := egress.FormatBytes(tc.in); got != tc.want {
-			t.Errorf("FormatBytes(%d) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestBudgetedReportsWhetherAnyBudgetApplies(t *testing.T) {
 	if (egress.Config{}).Budgeted() {
 		t.Error("a zero Config reports a budget")

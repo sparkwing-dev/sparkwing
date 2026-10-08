@@ -83,7 +83,8 @@ func TestDaemonStatusPipedDefaultIsJSON(t *testing.T) {
 	home := t.TempDir()
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runDaemon([]string{"status", "--home", home})
+		t.Setenv("SPARKWING_HOME", home)
+		runErr = runDaemon([]string{"status"})
 	})
 	if runErr != nil {
 		t.Fatal(runErr)
@@ -110,7 +111,8 @@ func TestDaemonStatusExplicitOutputOverridesPipe(t *testing.T) {
 		t.Run(test.format, func(t *testing.T) {
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = runDaemon([]string{"status", "--home", home, "-o", test.format})
+				t.Setenv("SPARKWING_HOME", home)
+				runErr = runDaemon([]string{"status", "-o", test.format})
 			})
 			if runErr != nil {
 				t.Fatal(runErr)
@@ -126,7 +128,8 @@ func TestDaemonRestartPipedDefaultPreservesStoppedDaemon(t *testing.T) {
 	home := t.TempDir()
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runDaemon([]string{"restart", "--home", home})
+		t.Setenv("SPARKWING_HOME", home)
+		runErr = runDaemon([]string{"restart"})
 	})
 	if runErr != nil {
 		t.Fatal(runErr)
@@ -210,7 +213,8 @@ func TestDaemonRestartForcePreservesStoppedDaemon(t *testing.T) {
 
 func TestDaemonCommandsRejectUnknownOutput(t *testing.T) {
 	for _, subcommand := range []string{"status", "restart"} {
-		err := runDaemon([]string{subcommand, "--home", t.TempDir(), "-o", "yaml"})
+		t.Setenv("SPARKWING_HOME", t.TempDir())
+		err := runDaemon([]string{subcommand, "-o", "yaml"})
 		if err == nil || !strings.Contains(err.Error(), "pretty|json|plain") {
 			t.Fatalf("%s error = %v", subcommand, err)
 		}
@@ -229,7 +233,8 @@ func TestDaemonRecoverStateRequiresConsentAndPreservesUnreadableBytes(t *testing
 		t.Fatal(err)
 	}
 
-	err := runDaemon([]string{"recover-state", "--home", home})
+	t.Setenv("SPARKWING_HOME", home)
+	err := runDaemon([]string{"recover-state"})
 	if err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("recovery without consent error = %v", err)
 	}
@@ -239,7 +244,8 @@ func TestDaemonRecoverStateRequiresConsentAndPreservesUnreadableBytes(t *testing
 
 	var runErr error
 	captureStdout(t, func() {
-		runErr = runDaemon([]string{"recover-state", "--home", home, "--yes"})
+		t.Setenv("SPARKWING_HOME", home)
+		runErr = runDaemon([]string{"recover-state", "--yes"})
 	})
 	if runErr != nil {
 		t.Fatalf("recover unreadable state: %v", runErr)

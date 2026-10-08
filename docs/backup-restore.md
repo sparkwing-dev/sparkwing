@@ -22,9 +22,8 @@ restores a controller that starts and still cannot do its job.
   During a key rotation the same is true of
   `SPARKWING_SECRETS_PREVIOUS_KEY`.
 - **The controller's own start-up configuration**: its flags and the
-  rest of its environment, including `GITHUB_WEBHOOK_SECRET`,
-  `GITHUB_WEBHOOK_BINDINGS`, `GITHUB_TOKEN`, and the announced service
-  URLs. On Kubernetes that is the Helm values file and the Secrets it
+  rest of its environment, including the `SPARKWING_GITHUB_APP_*`
+  settings and the announced service URLs. On Kubernetes that is the Helm values file and the Secrets it
   names; on a single machine it is the unit file and its environment.
 
 What the state database does not hold, and what a restore therefore
@@ -190,8 +189,8 @@ while you are standing in it.
 ### Read what the release changes
 
 ```bash
-sparkwing docs migrations list
-sparkwing docs migrations read --version <vX.Y.Z>
+sparkwing docs migrations
+sparkwing docs migrations --version <vX.Y.Z>
 ```
 
 A guide exists only for a release carrying a breaking change. It names
@@ -244,7 +243,7 @@ write, because its upserts name a unique index that no longer exists.
 Register a profile against the scratch controller and write through it:
 
 ```bash
-sparkwing configure profiles add --name rehearsal --controller http://127.0.0.1:4456 --token-stdin
+sparkwing cloud connect --name rehearsal --controller http://127.0.0.1:4456 --token-stdin
 sparkwing secrets set --profile rehearsal --name ROLLBACK_PROBE --value probe
 sparkwing secrets delete --profile rehearsal --name ROLLBACK_PROBE
 ```
@@ -291,18 +290,18 @@ the upgrade as unfinished and keep the backup where you can reach it.
 Run these after a restore and after an upgrade, against the controller
 you are judging. They are ordered so the first failure is the most
 informative. `--profile` names the profile pointing at that controller;
-register one with `sparkwing configure profiles add` when verifying a
+register one with `sparkwing cloud connect` when verifying a
 scratch controller on a spare port.
 
 ```bash
 # The controller answers, and the token still authenticates.
-sparkwing configure profiles test --profile prod
+sparkwing cloud status --profile prod
 
 # Run history is present, and reaches the most recent run you remember.
 sparkwing runs list --profile prod
 
 # One run still carries its nodes.
-sparkwing runs get --run <id> --profile prod
+sparkwing runs status <id> -o json --exit-zero --profile prod
 
 # Secret rows are present.
 sparkwing secrets list --profile prod

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -118,5 +119,111 @@ func TestPipelineProfile_ListReturnsRollupAndNodeRows(t *testing.T) {
 	}
 	if len(all) != 3 {
 		t.Fatalf("all profiles = %d, want 3", len(all))
+	}
+}
+
+func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	seed := store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 4, SustainedCores: 2, PeakMemoryBytes: 1000}
+	for range 20 {
+		if err := st.RecordProfileObservation(ctx, "partial", "", seed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := st.ProfileSamples(ctx, "partial", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obs := range []store.ProfileObservation{
+		{CPUMeasured: true, Partial: true, Duration: time.Second, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 10},
+		{CPUMeasured: true, Partial: true, Duration: time.Second, PeakCores: 4, SustainedCores: 2, PeakMemoryBytes: 1000},
+	} {
+		if err := st.RecordProfileObservation(ctx, "partial", "", obs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unchanged, err := st.ProfileSamples(ctx, "partial", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, unchanged) {
+		t.Fatalf("partial low evidence changed window: %v -> %v", before, unchanged)
+	}
+	for range 2 {
+		if err := st.RecordProfileObservation(ctx, "partial", "", store.ProfileObservation{CPUMeasured: true, Partial: true, Duration: 2 * time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 2000}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := st.GetPipelineProfile(ctx, "partial", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PeakCores != 4 || p.SustainedCores != 2 || p.PeakMemoryBytes != 2000 || p.SampleCount != 18 || p.P99Duration != 2*time.Minute {
+		t.Fatalf("raise-only profile = %+v", p)
+	}
+}
+
+func TestPartialContendedProfileObservationNeverDecaysFloor(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	for _, obs := range []store.ProfileObservation{
+		{CPUMeasured: true, Contended: true, PlanHash: "old", FloorCores: 4, FloorMemoryBytes: 1000},
+		{CPUMeasured: true, Contended: true, Partial: true, FloorCores: 8, FloorMemoryBytes: 500},
+		{CPUMeasured: true, Contended: true, Partial: true, FloorCores: 1, FloorMemoryBytes: 2000},
+		{CPUMeasured: true, Contended: true, Partial: true, PlanHash: "new", FloorCores: 1, FloorMemoryBytes: 10},
+	} {
+		if err := st.RecordProfileObservation(ctx, "partial", "", obs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := st.GetPipelineProfile(ctx, "partial", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PlanHash != "new" || p.FloorCores != 8 || p.FloorMemoryBytes != 2000 || p.SampleCount != 0 {
+		t.Fatalf("partial contended floor = %+v", p)
+	}
+}
+
+func TestPartialProfilePlanTransitionKeepsResourceBounds(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	for _, obs := range []store.ProfileObservation{
+		{CPUMeasured: true, PlanHash: "old", Duration: time.Minute, PeakCores: 4, SustainedCores: 2, PeakMemoryBytes: 1000},
+		{CPUMeasured: true, Partial: true, PlanHash: "new", Duration: 2 * time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 2000},
+	} {
+		if err := st.RecordProfileObservation(ctx, "partial", "", obs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := st.GetPipelineProfile(ctx, "partial", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PlanHash != "new" || p.PeakCores != 4 || p.SustainedCores != 2 || p.PeakMemoryBytes != 2000 || p.P99Duration != 2*time.Minute {
+		t.Fatalf("partial plan transition profile = %+v", p)
+	}
+}
+
+func TestPartialProfileObservationNeverGraduates(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	clean := store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1000}
+	for range 2 {
+		if err := st.RecordProfileObservation(ctx, "graduation", "", clean); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raising := store.ProfileObservation{CPUMeasured: true, Partial: true, Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 4000}
+	if err := st.RecordProfileObservation(ctx, "graduation", "", raising); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.GetPipelineProfile(ctx, "graduation", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PeakMemoryBytes != 4000 || p.SampleCount != 2 {
+		t.Fatalf("profile = %+v, want the raised memory with only clean samples counted", p)
 	}
 }

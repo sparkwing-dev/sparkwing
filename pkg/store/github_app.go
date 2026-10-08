@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS github_app_connect_states (
 CREATE TABLE IF NOT EXISTS github_app_deliveries (
     digest      TEXT PRIMARY KEY,
     delivery_id TEXT NOT NULL,
-    received_at INTEGER NOT NULL
+    received_at INTEGER NOT NULL,
+    event       TEXT NOT NULL DEFAULT ''
 )
 `
 
@@ -106,7 +107,13 @@ var githubAppTablesPostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(g
 var (
 	githubAppTriggerTagsCols     = map[string]string{"on_tags": "INTEGER NOT NULL DEFAULT 0"}
 	githubAppTriggerPatternsCols = map[string]string{"tag_patterns": "TEXT NOT NULL DEFAULT '[]'"}
+	githubAppDeliveryEventCols   = map[string]string{"event": "TEXT NOT NULL DEFAULT ''"}
 )
+
+// perf: every verified delivery expires old digests and bindings by age, so
+// the delete reads only the expired range.
+const githubAppDeliveriesReceivedIndex = `CREATE INDEX IF NOT EXISTS idx_github_app_deliveries_received
+    ON github_app_deliveries(received_at)`
 
 const (
 	maxGitHubTagPatterns      = 10
@@ -536,9 +543,29 @@ func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, 
 	return s.consumeFlowNonce(ctx, "github_app_connect_states", nonce, expires, now)
 }
 
-// GitHubAppDeliveryRetention is how long a delivery's digest is remembered;
-// a delivery replayed later than this is accepted again.
+// GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
+// The App webhook refuses an event older than this, so a forgotten digest
+// does not readmit a replayed delivery.
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
+
+// BindGitHubAppDeliveryEvent ties digest to the first event it arrived as and
+// reports whether event is that one. The binding is kept apart from the
+// processed record, so binding a delivery does not make it seen.
+func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error) {
+	if err := s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
+		return false, err
+	}
+	key := "event:" + digest
+	if _, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
+		ON CONFLICT (digest) DO NOTHING`, key, delivery, now.Unix(), event); err != nil {
+		return false, err
+	}
+	var bound string
+	if err := s.queryRow(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
+		return false, err
+	}
+	return bound == event, nil
+}
 
 // GitHubAppDeliverySeen reports whether a delivery with digest was processed
 // before, for any team.
@@ -549,14 +576,20 @@ func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool,
 }
 
 // RecordGitHubAppDelivery remembers that a delivery with digest was
-// processed, and forgets digests older than [GitHubAppDeliveryRetention].
+// processed. It and [Store.BindGitHubAppDeliveryEvent] forget digests and
+// event bindings older than [GitHubAppDeliveryRetention].
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
-	if _, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		now.Add(-GitHubAppDeliveryRetention).Unix()); err != nil {
+	if err := s.forgetExpiredGitHubAppDeliveries(ctx, now); err != nil {
 		return err
 	}
 	_, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
 		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
+	return err
+}
+
+func (s *Store) forgetExpiredGitHubAppDeliveries(ctx context.Context, now time.Time) error {
+	_, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
+		now.Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
 
@@ -607,7 +640,7 @@ func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha 
 	}
 	out := make([]*Trigger, 0, len(ids))
 	for _, id := range ids {
-		trig, err := t.s.GetTrigger(ctx, id)
+		trig, err := t.GetTrigger(ctx, id)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}

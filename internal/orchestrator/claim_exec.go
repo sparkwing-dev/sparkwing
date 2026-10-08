@@ -19,6 +19,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -94,9 +95,14 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	cmd := exec.Command(binary.path, args...)
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), authwire.CacheGrantEnv+"="+grant, SpecHashEnv+"="+specHash)
-	cmd.Stderr = os.Stderr
+	values, err := secrets.ShareWithChild(cmd)
+	if err != nil {
+		return fail(err)
+	}
+	defer values.Close()
+	cmd.Stderr = values.Writer(os.Stderr)
 	var plan bytes.Buffer
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = values.Writer(os.Stdout)
 	if nodeID == store.PlanNodeID {
 		cmd.Stdout = &plan
 	}

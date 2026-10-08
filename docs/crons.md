@@ -59,10 +59,37 @@ pipelines:
         catch_up: 6h
 ```
 
-Every field, its accepted values, and its default are in
-[scheduling.md](scheduling.md#schedule-triggers-cron). `tz: local` resolves to
-the zone of whichever host evaluates the schedule, so a repository moved
-between machines follows the machine.
+The fields:
+
+- `where` is **required** and has no default: `local` fires from a host
+  that armed the schedule with `sparkwing crons install`, `controller`
+  from a controller the schedule was installed on. One side per entry,
+  so nothing fires somewhere you did not say it should; declare an entry
+  per side to fire from both.
+- `name` distinguishes the cadences on one pipeline and appears in
+  `sparkwing crons list` as `<repo>/<pipeline>/<name>`. Required once a
+  pipeline declares more than one entry. It matches
+  `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters.
+- `cron` takes lists, ranges, steps, month and day names, and the
+  `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` aliases.
+- `tz` is an IANA zone name. Default `UTC`; `local` means the zone of
+  the host evaluating the schedule, so a repository moved between machines
+  follows the machine.
+- `overlap` decides a fire that comes due while the previous scheduled
+  run is still running: `skip` (default) records it as skipped, `queue`
+  launches it and lets admission order the two.
+- `catch_up` is how long after its due minute a fire may still happen
+  when the host was asleep or the timer ran late. Default `1h`, floor
+  `2m`, ceiling `24h`. A window over the ceiling is lowered to it when
+  the schedule is evaluated, and `sparkwing crons show` marks the
+  effective window clamped. An older due minute is recorded as missed.
+- `args` supplies argument values for this cadence's runs, keyed by CLI
+  flag name exactly like `args:` on the pipeline. They sit above
+  `pipeline.args` and below a host's own override for the schedule, so
+  a `guards: {require: [arg:region=us-east]}` token reads them.
+
+The expression is validated when the config loads, so a malformed cron
+fails the command that reads it rather than the run.
 
 ### Several cadences on one pipeline
 
@@ -111,7 +138,7 @@ days a year that have no single answer:
 
 ```sh
 sparkwing crons install                     # the enclosing repo
-sparkwing crons install --repo /path/to/repo
+sparkwing -C /path/to/repo crons install
 sparkwing crons install --only nightly,sweep/quick
 sparkwing crons install --fleet             # every registered repo
 ```
@@ -144,9 +171,9 @@ holds at the moment it fires, and one that runs `terraform` gets whichever
 version is installed. Pin those the way you would for any other unattended job.
 
 `--follow` arms without a pin, which is what v0.47.0 did: each fire compiles the
-checkout as it stands that minute. `sparkwing crons unlock <name>` moves an
-armed schedule to that behaviour, and `sparkwing crons lock <name>` pins it
-again at the current checkout. `--no-prove` skips the compile, and so pins
+checkout as it stands that minute. `sparkwing crons set <name> --unpin` moves
+an armed schedule to that behaviour, and `sparkwing crons set <name> --pin`
+pins it again at the current checkout. `--no-prove` skips the compile, and so pins
 nothing.
 
 ### What re-arming keeps
@@ -159,13 +186,13 @@ overrides survive, and an override is re-based onto the new declaration.
 
 Only a config sparkwing could read withdraws a schedule. A checkout that has
 moved, been deleted, or sits on a volume that is not mounted is reported in the
-tick's errors and `sparkwing crons status`, and its rows are left armed --
+tick's errors and `sparkwing crons list --timer`, and its rows are left armed --
 being unable to read a repository is not a decision to stop scheduling it.
 
-`sparkwing crons disarm <name>` removes one schedule, its history and its
-pinned binary, leaving every sibling armed. `sparkwing crons uninstall` does
-the same for a whole checkout, and when nothing is left armed anywhere, the OS
-timer goes with it.
+`sparkwing crons uninstall --name <name>` removes one schedule, its history and
+its pinned binary, leaving every sibling armed and the timer in place.
+`sparkwing crons uninstall` does the same for a whole checkout, and when nothing
+is left armed anywhere, the OS timer goes with it.
 
 A build installed beside the released binary (`SPARKWING_INSTALL_NAME=sparkwing-crons
 bash bin/install.sh`) can arm and tick on its own, but a scheduled run still
@@ -184,7 +211,7 @@ overlap policy, the catch-up window and the launch's arguments:
 sparkwing crons set nightly --cron "0 5 * * *"
 sparkwing crons set nightly --tz local
 sparkwing crons set sweep/quick --arg depth=deep --arg dry-run=true
-sparkwing crons reset nightly          # run what the repo declares again
+sparkwing crons set nightly --reset    # run what the repo declares again
 ```
 
 Each `set` keeps what an earlier one said and replaces only the fields it
@@ -201,7 +228,7 @@ override is **stale** once the repo changes the declaration it was set against:
 it still applies, because a cadence someone chose against `0 3 * * *` may mean
 nothing against `*/5 * * * *`. `crons list` adds a `!` after the `*` and prints
 a footnote naming the remedy, `crons show` prints an `override stale` line, and
-`crons status` counts them. Re-running install re-bases every stale override
+`crons list --timer` counts them. Re-running install re-bases every stale override
 and says which ones it moved, which is the host acknowledging the new
 declaration.
 
@@ -301,16 +328,16 @@ launched -- and exits non-zero only when the tick itself could not run.
 ```sh
 sparkwing crons list          # what is armed, what it runs, when it next fires
 sparkwing crons show nightly-rebuild   # declaration, override, effective, lock, fires
-sparkwing crons next          # the next instants across every armed schedule
-sparkwing crons next nightly-rebuild --count 10
-sparkwing crons status        # the timer, the last tick, the counts
+sparkwing crons list --next 5          # the next instants across every armed schedule
+sparkwing crons show nightly-rebuild --next 10
+sparkwing crons list --timer  # the timer, the last tick, the counts
 ```
 
 Every verb takes a schedule id, a `<repo>/<pipeline>[/<name>]` display name, a
 `pipeline/name` pair, or a bare pipeline name unique across this host. An
 ambiguous name lists the candidates instead of guessing.
 
-`crons next` is the cheapest way to check that an expression means what it
+`--next` is the cheapest way to check that an expression means what it
 looks like -- a day-of-week field, a daylight-saving boundary, a zone that is
 not yours. It walks the same evaluator the tick uses.
 
@@ -324,8 +351,8 @@ Piping any of them yields NDJSON, one record per line.
 ## Pausing and running by hand
 
 ```sh
-sparkwing crons pause nightly-rebuild
-sparkwing crons resume nightly-rebuild
+sparkwing crons set nightly-rebuild --pause
+sparkwing crons set nightly-rebuild --resume
 sparkwing crons run nightly-rebuild
 ```
 
@@ -343,9 +370,9 @@ not open the store, could not take the lock, or could not start a consumer
 says so. Everything a tick decided about a schedule is in the store instead,
 readable with `sparkwing crons show`.
 
-## When status says stale
+## When the timer report says stale
 
-`sparkwing crons status` calls the tick stale when no tick has landed in the
+`sparkwing crons list --timer` calls the tick stale when no tick has landed in the
 last few minutes on a host that should be ticking. It exits non-zero whenever
 schedules are armed and the host is not evaluating them, so a check script can
 read the exit code. A recent tick is the evidence either way, so a host
@@ -355,7 +382,7 @@ to do depends on what it reports:
 - **timer not installed**: run `sparkwing crons install` on this host.
 - **installed, not running**: the service manager has the files but is not
   firing them. On Linux, `systemctl --user status sparkwing-crons.timer` (the
-  name `crons status` prints, for a home other than the default) says why; a user without a login session needs `loginctl enable-linger` for its
+  name `crons list --timer` prints, for a home other than the default) says why; a user without a login session needs `loginctl enable-linger` for its
   timers to run while logged out.
 - **ticks another Sparkwing home**: a timer installed by an older sparkwing
   from another `SPARKWING_HOME` replaced this home's. `sparkwing crons install`
@@ -410,12 +437,11 @@ verified push can arm them again.
 For a repository without the App connection, an operator can push entries:
 
 ```bash
-sparkwing crons install --profile prod --repo ~/code/my-app
+sparkwing -C ~/code/my-app crons install --profile prod
 ```
 
 The push reads the repository's controller entries, resolves the checkout's
-git origin, branch and HEAD, seeds the controller's git cache with that
-commit, and sends the whole set. Entries declared `where: local` are reported
+git origin, branch and HEAD, and sends the whole set. Entries declared `where: local` are reported
 as this host's, and the same command with no `--profile` arms them here.
 
 The repository needs a git origin, because the cluster clones the pipeline
@@ -424,16 +450,15 @@ push refuses a HEAD no remote branch carries -- `git branch -r --contains HEAD`
 empty -- since every fire would fail at the clone: push the branch first, or
 use `--follow` to clone the branch tip instead. Uncommitted edits are a warning
 rather than a refusal, because the controller clones the pushed commit and they
-are simply not part of what fires. A seed that fails is a warning too: the
-trigger loop fetches the commit itself when it finds the cache short.
+are simply not part of what fires.
 
 ### Pinned by commit, or following the branch
 
 By default every fire clones the commit the push resolved, so a branch that
 moves afterwards does not change what runs unattended. `--follow` clones the
 tip of the branch at each fire instead. Re-running the push is the explicit
-update, and it moves the pin. `crons lock` and `crons unlock` are host verbs
-and have no controller form: the pin moves with the push.
+update, and it moves the pin. `crons set --pin` and `crons set --unpin` are
+host actions and have no controller form: the pin moves with the push.
 
 A pushed row records the clone URL as its repository, so its display name is
 `<owner>/<name>/<pipeline>[/<entry>]` rather than a directory name. The state
@@ -468,20 +493,20 @@ starting a second.
 
 ### Inspecting
 
-Every verb but `tick`, `lock` and `unlock` takes `--profile NAME` and reads the
+Every verb but `tick`, `set --pin` and `set --unpin` takes `--profile NAME` and reads the
 controller instead of this host. A controller schedule is pinned by the commit
 it was pushed at, so there is no separate lock to take:
 
 ```bash
 sparkwing crons list --profile prod
 sparkwing crons show --profile prod my-org/my-app/nightly
-sparkwing crons status --profile prod
-sparkwing crons pause --profile prod my-org/my-app/nightly
+sparkwing crons list --timer --profile prod
+sparkwing crons set --profile prod my-org/my-app/nightly --pause
 sparkwing crons run --profile prod my-org/my-app/nightly
-sparkwing crons uninstall --profile prod --repo ~/code/my-app
+sparkwing -C ~/code/my-app crons uninstall --profile prod
 ```
 
-`crons status --profile` reports the controller's loop in place of an OS
+`crons list --timer --profile` reports the controller's loop in place of an OS
 timer, along with when it last ticked and what that tick reported. The
 dashboard reads the same routes through its controller proxy, so a browser
 session with `runs.read` sees the controller's schedules beside its runs.

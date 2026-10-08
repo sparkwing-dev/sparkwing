@@ -59,13 +59,14 @@ test("GitHub explanations open by keyboard and touch", async ({ page }) => {
     }
   });
   await page.goto("/team/github");
+  await page.getByText("Advanced: manual subscriptions", { exact: true }).click();
 
   const info = page.getByRole("button", { name: /About GitHub runs/ });
   await info.focus();
   await expect(page.getByRole("tooltip")).toContainText(
     "Pull requests from forks are not run.",
   );
-  await page.getByRole("heading", { name: "Runs from GitHub" }).click();
+  await page.getByRole("heading", { name: "Manual subscriptions" }).click();
   await expect(page.getByRole("tooltip")).toHaveCount(0);
 
   await info.tap();

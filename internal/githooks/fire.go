@@ -131,7 +131,7 @@ func attemptRefusedCommit(res FireResult, repoRoot, hooksDir string) FireResult 
 		return res
 	}
 	staged := filepath.Join(worktree, "sparkwing-gate-selftest.txt")
-	if err := os.WriteFile(staged, []byte("staged by `sparkwing pipeline hooks fire` to see whether the gate refuses it\n"), 0o644); err != nil {
+	if err := os.WriteFile(staged, []byte("staged by `sparkwing pipeline hooks status --prove` to see whether the gate refuses it\n"), 0o644); err != nil {
 		res.Verdict, res.Detail = FireError, err.Error()
 		return res
 	}

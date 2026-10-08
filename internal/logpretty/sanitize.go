@@ -13,10 +13,6 @@ func StripANSI(s string) string { return sanitize(s, false) }
 // web log viewer, and every control character other than tab and newline, from s.
 func SanitizeANSI(s string) string { return sanitize(s, true) }
 
-// SanitizeInline is SanitizeANSI with newlines folded to spaces, for a value rendered inside a
-// line such as a node id, a step name, or a skip reason.
-func SanitizeInline(s string) string { return foldLines(SanitizeANSI(s)) }
-
 // StripInline is StripANSI with newlines folded to spaces, for a value rendered inside a line.
 func StripInline(s string) string { return foldLines(StripANSI(s)) }
 

@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -63,15 +64,16 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 	}
 
 	allowed := map[string]bool{
-		"POST /api/v1/credits/grants":           true,
-		"POST /api/v1/credits/reversals":        true,
-		"POST /api/v1/credits/freezes":          true,
-		"POST /api/v1/credits/checkouts/closed": true,
-		"GET /api/v1/credits/units":             true,
-		"POST /api/v1/credits/cards":            true,
-		"POST /api/v1/credits/card-payments":    true,
-		"POST /api/v1/credits/warnings":         true,
-		"POST /api/v1/credits/card-refunds":     true,
+		"POST /api/v1/credits/grants":              true,
+		"POST /api/v1/credits/reversals":           true,
+		"POST /api/v1/credits/freezes":             true,
+		"POST /api/v1/credits/checkouts/closed":    true,
+		"GET /api/v1/credits/units":                true,
+		"GET /api/v1/credits/payments/{reference}": true,
+		"POST /api/v1/credits/cards":               true,
+		"POST /api/v1/credits/card-payments":       true,
+		"POST /api/v1/credits/warnings":            true,
+		"POST /api/v1/credits/card-refunds":        true,
 		// safety: both answer any authenticated caller, the first with its own
 		// identity and the second with the service URLs.
 		"GET /api/v1/auth/whoami": true,
@@ -96,11 +98,6 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 		path := strings.ReplaceAll(m[2], "{id}", "rx")
 		path = regexp.MustCompile(`\{[^}]+\}`).ReplaceAllString(path, "x")
 		path = strings.TrimSuffix(path, "...")
-		// safety: the pool and artifact routes are registered only on a server
-		// given a pool or an artifact store, which this fixture is not.
-		if strings.HasPrefix(m[2], "/api/v1/pool") || strings.HasPrefix(m[2], "/api/v1/artifacts/") {
-			continue
-		}
 		code := f.call(m[1], path, grant, map[string]any{}, nil)
 		if code != http.StatusForbidden && code != http.StatusUnauthorized {
 			t.Errorf("%s with a credits.grant token = %d, want 401 or 403", route, code)
@@ -109,6 +106,50 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 	}
 	if checked < 50 {
 		t.Fatalf("checked %d routes; the route pattern no longer matches server.go", checked)
+	}
+}
+
+// The payment lookup answers the team a paid grant funded, or 404 with a code
+// that tells a payment no grant carries apart from a route the controller does
+// not serve, and it writes nothing.
+func TestPaidGrantLookupAnswersThePayingTeam(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner := f.user("o", "olga@example.com")
+	grant := f.creditsGrantToken()
+	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
+		"kind": "paid", "amount_micro": 500 * int64(store.MicroCreditsPerCent), "reference": "pi_1", "team": owner.team,
+	}, nil); code != http.StatusCreated {
+		t.Fatalf("grant = %d", code)
+	}
+	var before teamBilling
+	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &before)
+	var found struct {
+		Team string `json:"team"`
+	}
+	if code := f.call("GET", "/api/v1/credits/payments/pi_1", grant, nil, &found); code != http.StatusOK || found.Team != owner.team {
+		t.Fatalf("lookup of a granted payment = %d %+v", code, found)
+	}
+	var missing struct {
+		Code string `json:"code"`
+	}
+	if code := f.call("GET", "/api/v1/credits/payments/pi_unknown", grant, nil, &missing); code != http.StatusNotFound ||
+		missing.Code != controller.UnknownPaymentCode {
+		t.Fatalf("lookup of an unknown payment = %d %+v", code, missing)
+	}
+	if code := f.call("GET", "/api/v1/credits/payments/pi_1", owner.auth, nil, nil); code != http.StatusForbidden {
+		t.Errorf("an owner's lookup = %d, want 403", code)
+	}
+	var unserved struct {
+		Code string `json:"code"`
+	}
+	if code := f.call("GET", "/api/v1/credits/no-such-route/pi_1", grant, nil, &unserved); code != http.StatusNotFound ||
+		unserved.Code == controller.UnknownPaymentCode {
+		t.Errorf("an unserved route = %d %+v, want 404 without the unknown-payment code", code, unserved)
+	}
+	var after teamBilling
+	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &after)
+	if after.BalanceMicro != before.BalanceMicro {
+		t.Errorf("balance moved from %d to %d across lookups", before.BalanceMicro, after.BalanceMicro)
 	}
 }
 
@@ -295,5 +336,22 @@ func TestCheckoutClosedClosesOnlyTheTeamsOpenUnpaidSession(t *testing.T) {
 		if err != nil || len(events) != want {
 			t.Errorf("%s events = %+v, %v; want %d", kind, events, err, want)
 		}
+	}
+}
+
+// A reversal of a payment the ledger does not hold answers one 404 document
+// and logs no reversal.
+func TestAReversalOfAnUnknownPaymentAnswersOnly404(t *testing.T) {
+	raw, pub := multiTeamLicense(t)
+	logs := &lockedBuffer{}
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, logger: slog.New(slog.NewJSONHandler(logs, nil))})
+	var body map[string]any
+	if code := f.call("POST", "/api/v1/credits/reversals", "Bearer "+f.admin, map[string]any{
+		"payment_id": "pi_unknown", "reference": "refund:pi_unknown",
+	}, &body); code != http.StatusNotFound || body["error"] == nil {
+		t.Fatalf("unknown payment = %d %+v, want one 404 error document", code, body)
+	}
+	if strings.Contains(logs.String(), "payment reversed") {
+		t.Fatalf("logs = %s; want no reversal logged", logs.String())
 	}
 }

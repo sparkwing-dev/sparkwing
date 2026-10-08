@@ -71,7 +71,8 @@ func TestRunQueuePriority_HolderSaysOnlyItsLaterNodesMove(t *testing.T) {
 	serveQueueDaemon(t, home)
 	queuePriorityHolder(t, home, "holding-run", 1)
 
-	out, err := queuePriorityOutput(t, "--home", home, "--run", "holding-run", "--set", "7", "-o", "pretty")
+	t.Setenv("SPARKWING_HOME", home)
+	out, err := queuePriorityOutput(t, "--run", "holding-run", "--set", "7", "-o", "pretty")
 	if err != nil {
 		t.Fatalf("queue priority: %v", err)
 	}
@@ -88,7 +89,8 @@ func TestRunQueuePriority_JSONCarriesTheAckFields(t *testing.T) {
 	serveQueueDaemon(t, home)
 	queuePriorityHolder(t, home, "json-run", 1)
 
-	out, err := queuePriorityOutput(t, "--home", home, "--run", "json-run", "--set", "front", "-o", "json")
+	t.Setenv("SPARKWING_HOME", home)
+	out, err := queuePriorityOutput(t, "--run", "json-run", "--set", "front", "-o", "json")
 	if err != nil {
 		t.Fatalf("queue priority: %v", err)
 	}
@@ -109,7 +111,8 @@ func TestRunQueuePriority_PlainIsOneTabSeparatedRecord(t *testing.T) {
 	serveQueueDaemon(t, home)
 	queuePriorityHolder(t, home, "plain-run", 1)
 
-	out, err := queuePriorityOutput(t, "--home", home, "--run", "plain-run", "--set", "2", "-o", "plain")
+	t.Setenv("SPARKWING_HOME", home)
+	out, err := queuePriorityOutput(t, "--run", "plain-run", "--set", "2", "-o", "plain")
 	if err != nil {
 		t.Fatalf("queue priority: %v", err)
 	}
@@ -127,7 +130,8 @@ func TestRunQueuePriority_UnknownRunExitsOneWithTheInvisibleCaveat(t *testing.T)
 	home := queueHome(t)
 	serveQueueDaemon(t, home)
 
-	_, err := queuePriorityOutput(t, "--home", home, "--run", "ghost", "--set", "3", "-o", "pretty")
+	t.Setenv("SPARKWING_HOME", home)
+	_, err := queuePriorityOutput(t, "--run", "ghost", "--set", "3", "-o", "pretty")
 	if err == nil {
 		t.Fatal("queue priority exited 0 for a run local admission does not know")
 	}
@@ -145,7 +149,8 @@ func TestRunQueuePriority_UnknownRunExitsOneWithTheInvisibleCaveat(t *testing.T)
 func TestRunQueuePriority_NoDaemonIsANotFoundRatherThanAnInfrastructureFault(t *testing.T) {
 	home := queueHome(t)
 
-	_, err := queuePriorityOutput(t, "--home", home, "--run", "ghost", "--set", "3", "-o", "pretty")
+	t.Setenv("SPARKWING_HOME", home)
+	_, err := queuePriorityOutput(t, "--run", "ghost", "--set", "3", "-o", "pretty")
 	if err == nil {
 		t.Fatal("queue priority exited 0 with no daemon running")
 	}
@@ -161,7 +166,8 @@ func TestRunQueuePriority_UnreachableDaemonExitsWithTheInfrastructureCode(t *tes
 	home := queueHome(t)
 	blockQueueSocket(t, home)
 
-	_, err := queuePriorityOutput(t, "--home", home, "--run", "any", "--set", "3", "-o", "pretty")
+	t.Setenv("SPARKWING_HOME", home)
+	_, err := queuePriorityOutput(t, "--run", "any", "--set", "3", "-o", "pretty")
 	if err == nil {
 		t.Fatal("queue priority exited 0 against a daemon it could not reach")
 	}
@@ -172,10 +178,12 @@ func TestRunQueuePriority_UnreachableDaemonExitsWithTheInfrastructureCode(t *tes
 
 func TestRunQueuePriority_RejectsMissingFlagsAndPositionals(t *testing.T) {
 	home := queueHome(t)
-	if err := runQueuePriority([]string{"--home", home, "--set", "3"}); err == nil {
+	t.Setenv("SPARKWING_HOME", home)
+	if err := runQueuePriority([]string{"--set", "3"}); err == nil {
 		t.Error("queue priority accepted a missing --run")
 	}
-	if err := runQueuePriority([]string{"--home", home, "--run", "r", "--set", "3", "extra"}); err == nil {
+	t.Setenv("SPARKWING_HOME", home)
+	if err := runQueuePriority([]string{"--run", "r", "--set", "3", "extra"}); err == nil {
 		t.Error("queue priority accepted a positional argument")
 	}
 }

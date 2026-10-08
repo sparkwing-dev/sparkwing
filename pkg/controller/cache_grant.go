@@ -1,23 +1,27 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // CacheGrantResponse is the body of POST /api/v1/runs/{id}/cache-grant.
 type CacheGrantResponse struct {
 	// Grant is the bearer the runner sends to the cache in place of the
-	// cache's operator token. It opens only Team's blob stores, until
-	// ExpiresAt: six hours, or the requesting credential's own expiry if
-	// that comes first.
+	// cache's operator token. It opens only Team's blob stores, within the
+	// run's repository and ref, until ExpiresAt: five minutes for a claim
+	// token, six hours for a runner's live node or trigger claim, or the
+	// requesting credential's own expiry if that comes first.
 	Grant     string    `json:"grant"`
 	Team      string    `json:"team"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -93,6 +97,14 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 		} else if node && trigger {
 			writeError(w, http.StatusConflict, store.ErrLockHeld)
 			return
+		} else if !node && !trigger {
+			// safety: the cache honors a grant on its signature alone, so one minted with no
+			// live claim would outlive a revoked token, a removed member and a finished run.
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "claim_required", Principal: p.label(),
+				Message: "a cache grant needs the run's live node or trigger claim fence",
+			})
+			return
 		}
 		if node {
 			fence, fenceErr := nodeClaimFenceFromRequest(r)
@@ -128,7 +140,12 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			}
 			claim = &authwire.CacheClaim{Kind: "trigger", Generation: generation, Principal: identity.Principal, TokenPrefix: identity.TokenPrefix}
 		}
-		grant, err := authwire.MintClaimCacheGrant(key, string(team), runID, now, ttl, claim)
+		scope, err := s.cacheGrantScope(r.Context(), team, runID)
+		if err != nil {
+			s.writeInternalError(w, r, "read cache grant scope", err)
+			return
+		}
+		grant, err := authwire.MintClaimCacheGrant(key, string(team), runID, now, ttl, claim, scope)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -144,4 +161,129 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			ExpiresAt: expiresAt.UTC(),
 		})
 	})
+}
+
+// safety: the cache scopes every key by the repository and refs a grant
+// carries, so they come from the run's trigger and never from the caller. A
+// run with no trigger writes under a scope no branch's run reads.
+func (s *Server) cacheGrantScope(ctx context.Context, team store.Team, runID string) (*authwire.CacheScope, error) {
+	var trigger *store.Trigger
+	tenant, err := s.tenantForTeam(ctx, team)
+	if err == nil {
+		trigger, err = tenant.GetTrigger(ctx, runID)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return &authwire.CacheScope{Refs: []string{"manual:"}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if trigger.Team != team {
+		return nil, errors.New("the run's trigger belongs to another team")
+	}
+	root, vouched, err := s.vouchedRoot(ctx, trigger)
+	if err != nil {
+		return nil, err
+	}
+	// safety: a vouched retry or child runs its root's ref and commit, so it takes the
+	// root's scope whole, the pull request's ref and base included, which a retry row lacks.
+	source := trigger
+	if vouched {
+		source = root
+	}
+	_, own, refs, err := s.triggerCacheScope(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	repo := cacheRepository(source)
+	// safety: a run whose ref and commit only its submitter vouches for writes beside
+	// that ref's entries and never over them.
+	write := own
+	if !vouched {
+		write = "manual:" + own
+	}
+	if len(refs) == 0 || refs[0] != write {
+		refs = append([]string{write}, refs...)
+	}
+	return &authwire.CacheScope{Repo: repo, Refs: refs}, nil
+}
+
+const maxCacheLineage = 64
+
+// safety: classified as the OIDC subject's trigger is. A retry or child holds its root's
+// ref only when the root's event or follow-the-tip schedule vouches for it and the run
+// names that ref and commit with no uploaded source, so the code it runs is the root's.
+func (s *Server) vouchedRoot(ctx context.Context, trigger *store.Trigger) (*store.Trigger, bool, error) {
+	root := trigger
+	for range maxCacheLineage {
+		parent := root.RetryOf
+		if parent == "" {
+			parent = root.ParentRunID
+		}
+		if parent == "" {
+			break
+		}
+		var next *store.Trigger
+		tenant, err := s.tenantForTeam(ctx, trigger.Team)
+		if err == nil {
+			next, err = tenant.GetTrigger(ctx, parent)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		if next.Team != trigger.Team {
+			return nil, false, nil
+		}
+		root = next
+	}
+	switch kind := oidcTriggerKind(root); {
+	case root.RetryOf != "" || root.ParentRunID != "", kind == oidcTriggerManual:
+		return nil, false, nil
+	case kind == oidcTriggerCron && root.GitSHA != "":
+		return nil, false, nil
+	}
+	if root == trigger {
+		return root, true, nil
+	}
+	// safety: a submitter names the retry_of or parent it likes, so the lineage
+	// vouches only for the repository the root ran.
+	if repo := cacheRepository(trigger); repo == "" || repo != cacheRepository(root) {
+		return nil, false, nil
+	}
+	rootID, err := s.store.TriggerRepoID(ctx, root.Team, root.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	ownID, err := s.store.TriggerRepoID(ctx, trigger.Team, trigger.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if rootID > 0 && ownID > 0 && rootID != ownID {
+		return nil, false, nil
+	}
+	ref := trigger.TriggerEnv["GITHUB_REF"]
+	held := trigger.GitBranch == root.GitBranch && trigger.GitSHA == root.GitSHA &&
+		(ref == "" || ref == root.TriggerEnv["GITHUB_REF"]) &&
+		!strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") &&
+		trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] == ""
+	return root, held, nil
+}
+
+// safety: the one repository the trigger names, with the port and the path's case kept,
+// because either can name another repository; the OIDC subject drops the port, so this
+// cannot reuse that. Names other than the clone URL are GitHub's, which folds case.
+func cacheRepository(trigger *store.Trigger) string {
+	repo, err := sourceurl.TriggerRepository(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
+		trigger.GithubOwner, trigger.GithubRepo)
+	if err != nil || trigger.RepoURL == "" {
+		return repo
+	}
+	repo, err = sourceurl.CaseIdentity(trigger.RepoURL)
+	if err != nil {
+		return ""
+	}
+	return repo
 }

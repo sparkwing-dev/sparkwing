@@ -28,7 +28,7 @@ func TestFinishAtGenerationUsesTheRunsTeam(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	finished, err := s.FinishRunAtGeneration(ctx, "run-b", 0, "success", "")
+	finished, err := teamB.FinishRunAtGeneration(ctx, "run-b", 0, "success", "")
 	if err != nil || !finished {
 		t.Fatalf("finish team B run = %v, %v", finished, err)
 	}

@@ -314,7 +314,7 @@ func TestRepoGatesRemedy_ClearsTheOverrideBeforeInstallingForABorrowedGate(t *te
 		Borrowed: []string{"pre-commit"}, State: githooks.GateBorrowed,
 	}
 	got := r.Remedy()
-	for _, want := range []string{"--unset core.hooksPath", "hooks install --repo /code/sparkwing-platform"} {
+	for _, want := range []string{"--unset core.hooksPath", "sparkwing -C /code/sparkwing-platform pipeline hooks install"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Remedy = %q, want it to say %q", got, want)
 		}
@@ -327,7 +327,7 @@ func TestRepoGatesRemedy_ClearsALocalOverrideBeforeInstallingAShadowedGate(t *te
 		Shadowed: []string{"pre-commit"}, State: githooks.GateShadowed,
 	}
 	got := r.Remedy()
-	for _, want := range []string{"--unset core.hooksPath", "hooks install --repo /code/sparkwing"} {
+	for _, want := range []string{"--unset core.hooksPath", "sparkwing -C /code/sparkwing pipeline hooks install"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Remedy = %q, want it to say %q", got, want)
 		}

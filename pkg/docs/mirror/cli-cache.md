@@ -13,6 +13,9 @@ under $SPARKWING_HOME/cache/pipelines. Automatic pruning after compilation
 keeps recently used entries within the configured byte and entry limits.
 Use these commands to inspect entries or reclaim space.
 
+--docs on info and prune points them at the docs --web fetch cache under
+$XDG_CACHE_HOME/sparkwing/web/ (or ~/.cache/sparkwing/web/) instead.
+
 ### Subcommands
 
 - `info` -- Print cache dir, size, ceilings, and recent entries
@@ -50,7 +53,6 @@ answer to why a rebuild happened.
 
 | Flag | Description |
 |---|---|
-| `--dir PATH` | Pipeline module directory (default: ./.sparkwing) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -72,12 +74,18 @@ ceilings, and the most recently used entries with their sizes and
 last-use times. Entries are ordered by last use, which is what
 pruning evicts on -- not by when they were built.
 
+--docs reports the docs --web fetch cache instead: its directory, total size,
+file counts by doc, migration and index, and the freshness of the cached
+versions.json (24h TTL). The cache mirrors the URL path, so the cached files
+can be read directly when debugging.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--all` | List every entry instead of the ten most recent |
+| `--docs` | Report the docs --web fetch cache instead of pipeline binaries |
 
 ### Examples
 
@@ -90,6 +98,9 @@ sparkwing cache info -o json
 
 # Every entry
 sparkwing cache info --all
+
+# The docs --web fetch cache
+sparkwing cache info --docs
 ```
 
 ## `sparkwing cache prune`
@@ -106,6 +117,10 @@ and busy entries, bounds the number examined, and reports observed
 capacity separately from removed entries. Callers making admission
 decisions remeasure filesystem capacity after pruning.
 
+--docs deletes every file in the docs --web fetch cache instead, so the next
+--web call fetches afresh; it refuses paths that do not resolve inside the
+cache directory, so a stray symlink cannot escape. It takes no ceiling flag.
+
 ### Flags
 
 | Flag | Description |
@@ -113,6 +128,7 @@ decisions remeasure filesystem capacity after pruning.
 | `--max-bytes SIZE` | Byte ceiling (512MiB and similar sizes) |
 | `--max-entries N` | Entry ceiling |
 | `--all` | Remove every entry, ignoring both ceilings |
+| `--docs` | Clear the docs --web fetch cache instead of pipeline binaries |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
@@ -126,4 +142,7 @@ sparkwing cache prune --max-bytes 512MiB
 
 # Reclaim everything
 sparkwing cache prune --all
+
+# Force-refresh the next docs --web call
+sparkwing cache prune --docs
 ```

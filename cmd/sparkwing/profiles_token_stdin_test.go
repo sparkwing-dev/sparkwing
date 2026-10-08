@@ -60,13 +60,13 @@ func TestReadTokenStdinTrimsPipedInput(t *testing.T) {
 	}
 }
 
-func TestProfilesAddReadsTokenFromStdin(t *testing.T) {
+func TestCloudConnectNoProbeReadsTokenFromStdin(t *testing.T) {
 	path := profilesFixturePath(t)
 	withStdin(t, "swu_from_stdin\n")
 	out := captureStdout(t, func() {
-		args := []string{"--name", "prod", "--controller", "https://api.example.dev", "--token-stdin"}
-		if err := runProfilesAdd(args); err != nil {
-			t.Errorf("profiles add: %v", err)
+		args := []string{"--name", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
+		if err := runCloudConnect(args); err != nil {
+			t.Errorf("cloud connect: %v", err)
 		}
 	})
 	if strings.Contains(out, "swu_from_stdin") {
@@ -81,9 +81,9 @@ func TestProfilesSetReadsTokenFromStdin(t *testing.T) {
 	path := profilesFixturePath(t)
 	withStdin(t, "swu_first\n")
 	captureStdout(t, func() {
-		args := []string{"--name", "prod", "--controller", "https://api.example.dev", "--token-stdin"}
-		if err := runProfilesAdd(args); err != nil {
-			t.Fatalf("profiles add: %v", err)
+		args := []string{"--name", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
+		if err := runCloudConnect(args); err != nil {
+			t.Fatalf("cloud connect: %v", err)
 		}
 	})
 	withStdin(t, "swu_rotated\n")
@@ -103,7 +103,6 @@ func TestProfilesTokenFlagsConflict(t *testing.T) {
 		run  func([]string) error
 		args []string
 	}{
-		{"add", runProfilesAdd, []string{"--name", "prod", "--controller", "https://api.example.dev", "--token", "swu_x", "--token-stdin"}},
 		{"set", runProfilesSet, []string{"--name", "prod", "--token", "swu_x", "--token-stdin"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

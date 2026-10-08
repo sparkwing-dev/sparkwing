@@ -1,4 +1,7 @@
 {{- if .Values.cache.enabled -}}
+{{- $token := .Values.cache.tokenSecret -}}
+{{- $grantKey := .Values.cache.grantKeySecret -}}
+{{- $credentials := or (and $token.name $token.key) (and $grantKey.name $grantKey.key) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,9 +58,20 @@ spec:
             {{- if not .Values.cache.dependencyProxy.enabled }}
             - --disable-proxy
             {{- end }}
+            {{- with (include "sparkwing-runner-bundle.cachePublicURL" .) }}
+            - --public-url
+            - {{ . | quote }}
+            {{- end }}
+            {{- if .Values.cache.repos }}
+            - --auto-register-repos
+            - {{ .Values.cache.repos | quote }}
+            {{- end }}
+            {{- if $credentials }}
+            - --credentials-dir
+            - /etc/sparkwing/credentials
+            {{- end }}
             {{- $limits := .Values.cache.limits | default dict }}
             {{- range $limit := list
-                  (dict "flag" "--max-artifact-bytes" "value" $limits.maxArtifactBytes)
                   (dict "flag" "--max-cache-archive-bytes" "value" $limits.maxCacheArchiveBytes)
                   (dict "flag" "--max-store-bytes" "value" $limits.maxStoreBytes)
                   (dict "flag" "--max-store-objects" "value" $limits.maxStoreObjects)
@@ -75,36 +89,15 @@ spec:
           env:
             - name: HOME
               value: /tmp
-            {{- with (include "sparkwing-runner-bundle.cachePublicURL" .) }}
-            - name: SPARKWING_CACHE_PUBLIC_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if .Values.cache.repos }}
-            - name: GITCACHE_REPOS
-              value: {{ .Values.cache.repos | quote }}
-            {{- end }}
-            {{- with .Values.cache.tokenSecret }}
-            {{- if and .name .key }}
-            - name: SPARKWING_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .name | quote }}
-                  key: {{ .key | quote }}
-            {{- end }}
-            {{- end }}
-            {{- with .Values.cache.grantKeySecret }}
-            {{- if and .name .key }}
-            - name: SPARKWING_CACHE_GRANT_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .name | quote }}
-                  key: {{ .key | quote }}
-            {{- end }}
-            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.cache.service.targetPort }}
           volumeMounts:
+            {{- if $credentials }}
+            - name: credentials
+              mountPath: /etc/sparkwing/credentials
+              readOnly: true
+            {{- end }}
             {{- if .Values.cache.sshKeySecret.name }}
             - name: ssh-key
               mountPath: /etc/ssh-key
@@ -129,6 +122,26 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 5
       volumes:
+        {{- if $credentials }}
+        - name: credentials
+          projected:
+            defaultMode: 0400
+            sources:
+              {{- if and $token.name $token.key }}
+              - secret:
+                  name: {{ $token.name | quote }}
+                  items:
+                    - key: {{ $token.key | quote }}
+                      path: cache-token
+              {{- end }}
+              {{- if and $grantKey.name $grantKey.key }}
+              - secret:
+                  name: {{ $grantKey.name | quote }}
+                  items:
+                    - key: {{ $grantKey.key | quote }}
+                      path: cache-grant-key
+              {{- end }}
+        {{- end }}
         {{- if .Values.cache.sshKeySecret.name }}
         - name: ssh-key
           secret:

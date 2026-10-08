@@ -189,3 +189,32 @@ func TestGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 		})
 	}
 }
+
+// A proxy may spell the default port in Host while the browser's Origin omits
+// it, and the other way round; both are the dashboard's own origin.
+func TestRefuseCrossSiteWritesComparesOriginWithHost(t *testing.T) {
+	t.Parallel()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	for _, tc := range []struct {
+		origin, host string
+		want         int
+	}{
+		{"https://dash.example", "dash.example", http.StatusNoContent},
+		{"https://dash.example", "dash.example:443", http.StatusNoContent},
+		{"http://dash.example:80", "DASH.example", http.StatusNoContent},
+		{"http://localhost:8080", "localhost:8080", http.StatusNoContent},
+		{"http://localhost:8081", "localhost:8080", http.StatusForbidden},
+		{"https://dash.example", "dash.example:80", http.StatusForbidden},
+		{"https://dash.example.evil.test", "dash.example", http.StatusForbidden},
+		{"chrome-extension://abc", "dash.example", http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/api/v1/runs/r/cancel", nil)
+		req.Host = tc.host
+		req.Header.Set("Origin", tc.origin)
+		rec := httptest.NewRecorder()
+		RefuseCrossSiteWrites(ok).ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("Origin %s, Host %s: status %d, want %d", tc.origin, tc.host, rec.Code, tc.want)
+		}
+	}
+}

@@ -106,7 +106,7 @@ const StoreCeilingSubject = "the log store"
 // StoreCeilingRemedy is the operator instruction a refused append ends
 // with.
 const StoreCeilingRemedy = "Delete a run with DELETE /api/v1/logs/{runID}, or set --retention " +
-	"(SPARKWING_LOGS_RETENTION) so the sweeper does; both measure the store again, so appends " +
+	"so the sweeper does; both measure the store again, so appends " +
 	"resume as soon as it is back under the ceiling. Raise --max-store-bytes or --max-store-objects " +
 	"to accept more."
 

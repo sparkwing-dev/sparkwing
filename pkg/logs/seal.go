@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -296,6 +297,7 @@ func (c *Client) Seal(ctx context.Context, runID, nodeID string, seal Seal) erro
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	setClaimHeaders(ctx, req)
 	resp, err := c.http.Do(req)
 	if err != nil {

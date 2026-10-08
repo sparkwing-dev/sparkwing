@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// BuildWarmRunnerFactory keeps the legacy worker and combined runner on one atomic fallback handoff.
+// BuildWarmRunnerFactory gives each trigger a fresh warm-pool runner with its own fallback handoff.
 func BuildWarmRunnerFactory(
 	controllerURL, token string,
 	cfg warmpool.Config,

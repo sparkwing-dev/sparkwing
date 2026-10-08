@@ -96,7 +96,7 @@ func (l *Launcher) claimFailed(pacer *client.Pacer, err error) time.Duration {
 	switch {
 	case pace.Dead != nil:
 		l.Logger.Error("launcher: "+pace.Dead.Explain(token,
-			"Restart the launcher with a live claims.launch token (--token or SPARKWING_AGENT_TOKEN)"),
+			"Restart the launcher with a live claims.launch token in agent-token under --credentials-dir"),
 			"token_prefix", client.TokenPrefix(token), "token_state", pace.Dead.State)
 	case pace.Parked:
 		l.Logger.Warn("launcher: token is still refused; staying parked",

@@ -14,16 +14,27 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-func defaultSparkwingDir() string {
+// safety: -C may name a subdirectory, so the nearest project .sparkwing/
+// upward is the module; with none, the caller refuses rather than writing a
+// .sparkwing/ into the working directory or the runtime home.
+func defaultSparkwingDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return ".sparkwing"
+		return "", err
 	}
-	return filepath.Join(cwd, ".sparkwing")
+	dir, ok, err := nearestDotSparkwing(cwd)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return dir, nil
+	}
+	return "", fmt.Errorf("no .sparkwing/ project (sparkwing.yaml or go.mod) in %s or above it; run from a checkout or pass -C DIR", cwd)
 }
 
 func runSparks(args []string) error {
@@ -37,7 +48,7 @@ func runSparks(args []string) error {
 	switch args[0] {
 	case "catalog":
 		return runSparksCatalog(args[1:])
-	case "list", "ls":
+	case "list":
 		return runSparksList(args[1:])
 	case "lint":
 		return runSparksLint(args[1:])
@@ -47,7 +58,7 @@ func runSparks(args []string) error {
 		return runSparksUpdate(args[1:])
 	case "add":
 		return runSparksAdd(args[1:])
-	case "remove", "rm":
+	case "remove":
 		return runSparksRemove(args[1:])
 	case "warmup":
 		return runSparksWarmup(args[1:])
@@ -74,7 +85,6 @@ type sparkListLine struct {
 
 func runSparksList(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksList.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
 	noResolve := fs.Bool("no-resolve", false, "skip module-proxy lookups; only print declared versions")
 	if err := parseAndCheck(cmdSparksList, fs, args); err != nil {
@@ -87,9 +97,9 @@ func runSparksList(args []string) error {
 	if err != nil {
 		return err
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
 	if err != nil {
@@ -97,11 +107,16 @@ func runSparksList(args []string) error {
 	}
 	entries := []sparkListEntry{}
 	if m != nil {
-		ctx := context.Background()
+		ctx := gotoolchain.WithSession(context.Background(), nil, nil)
+		var resolver *sparks.Resolver
+		if !*noResolve {
+			resolver = sparks.NewResolverFromEnv()
+			resolver.Dir = sparkwingDir
+		}
 		for _, lib := range m.Libraries {
 			e := sparkListEntry{Name: lib.Name, Source: lib.Source, Declared: lib.Version}
 			if !*noResolve {
-				resolved, rerr := sparks.Resolve(ctx, &sparks.Manifest{Libraries: []sparks.Library{lib}})
+				resolved, rerr := resolver.Resolve(ctx, &sparks.Manifest{Libraries: []sparks.Library{lib}})
 				if rerr != nil {
 					e.Error = rerr.Error()
 				} else {
@@ -405,7 +420,6 @@ func resolveSparkJSONPath(verb, target string) (libDir, manifestPath string, err
 
 func runSparksResolve(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksResolve.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	quiet := fs.BoolP("quiet", "q", false, "suppress progress output; print only changes")
 	if err := parseAndCheck(cmdSparksResolve, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -413,9 +427,9 @@ func runSparksResolve(args []string) error {
 		}
 		return err
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 	ctx := context.Background()
 	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
@@ -435,7 +449,6 @@ func runSparksResolve(args []string) error {
 
 func runSparksUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksUpdate.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	name := fs.String("name", "", "refused: update re-resolves every declared library")
 	if err := parseAndCheck(cmdSparksUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -446,9 +459,9 @@ func runSparksUpdate(args []string) error {
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("spark update: unexpected positional %q", rest[0])
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 	m, path, err := loadManifestForWrite(sparkwingDir)
 	if err != nil {
@@ -478,7 +491,6 @@ func runSparksUpdate(args []string) error {
 
 func runSparksAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksAdd.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	sourceFlag := fs.String("source", "", "library source path (e.g. github.com/user/lib)")
 	version := fs.String("version", "latest", "declared version ('latest', exact tag, or semver range)")
 	name := fs.String("name", "", "short library name (default: last path segment of --source)")
@@ -499,9 +511,9 @@ func runSparksAdd(args []string) error {
 	if libName == "" {
 		libName = filepath.Base(source)
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 	m, path, err := loadManifestForWrite(sparkwingDir)
 	if err != nil {
@@ -525,7 +537,6 @@ func runSparksAdd(args []string) error {
 
 func runSparksRemove(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksRemove.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	nameFlag := fs.String("name", "", "library name (or source) to remove")
 	if err := parseAndCheck(cmdSparksRemove, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -540,9 +551,9 @@ func runSparksRemove(args []string) error {
 	if target == "" {
 		return errors.New("spark remove: --name is required")
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 	m, path, err := loadManifestForWrite(sparkwingDir)
 	if err != nil {
@@ -569,7 +580,6 @@ func runSparksRemove(args []string) error {
 
 func runSparksWarmup(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksWarmup.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	clearCache := fs.Bool("clear-cache", false, "delete the local pipeline binary cache before compiling")
 	if err := parseAndCheck(cmdSparksWarmup, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -577,12 +587,12 @@ func runSparksWarmup(args []string) error {
 		}
 		return err
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 
-	ctx := context.Background()
+	ctx := gotoolchain.WithSession(context.Background(), nil, nil)
 	if _, err := sparksResolveAndWrite(ctx, sparkwingDir); err != nil {
 		return fmt.Errorf("spark warmup: resolve: %w", err)
 	}
@@ -647,7 +657,6 @@ func resolveVendorModulePath(module string) string {
 
 func runSparksInflate(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksInflate.Path, flag.ContinueOnError)
-	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	moduleFlag := fs.String("module", "", "block module to vendor: a sparks-core name (e.g. templates) or a full module path")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty)")
 	if err := parseAndCheck(cmdSparksInflate, fs, args); err != nil {
@@ -667,9 +676,9 @@ func runSparksInflate(args []string) error {
 	if err != nil {
 		return err
 	}
-	sparkwingDir := *dir
-	if sparkwingDir == "" {
-		sparkwingDir = defaultSparkwingDir()
+	sparkwingDir, err := defaultSparkwingDir()
+	if err != nil {
+		return err
 	}
 	modulePath := resolveVendorModulePath(module)
 
@@ -701,12 +710,12 @@ func runSparksInflate(args []string) error {
 
 func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error) {
 	if sparkwingDir == "" {
-		return nil, "", errors.New("sparkwing-dir must not be empty")
+		return nil, "", errors.New(".sparkwing directory must not be empty")
 	}
 	if info, err := os.Stat(sparkwingDir); err != nil {
-		return nil, "", fmt.Errorf("sparkwing-dir %s: %w", sparkwingDir, err)
+		return nil, "", fmt.Errorf("%s: %w (run from the repository root, or pass -C DIR)", sparkwingDir, err)
 	} else if !info.IsDir() {
-		return nil, "", fmt.Errorf("sparkwing-dir %s is not a directory", sparkwingDir)
+		return nil, "", fmt.Errorf("%s is not a directory", sparkwingDir)
 	}
 	path := filepath.Join(sparkwingDir, projectconfig.Filename)
 	m, err := projectconfig.LoadSparksManifest(sparkwingDir)

@@ -101,7 +101,7 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 		t.Fatalf("trigger loop: %v", err)
 	}
 
-	other, err := authwire.MintCacheGrant(cacheGrantKey, "team-a", "team-a-run", time.Now(), time.Hour)
+	other, err := mintTestCacheGrant("team-a", "team-a-run")
 	if err != nil {
 		t.Fatal(err)
 	}

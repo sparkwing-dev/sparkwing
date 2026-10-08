@@ -1030,7 +1030,7 @@ func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := journal.Read(dir)
+	records, _, err := journal.ReadWithStats(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

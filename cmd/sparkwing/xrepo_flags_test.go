@@ -12,7 +12,7 @@ func TestXrepoReportsFlagErrors(t *testing.T) {
 	}
 	for _, verb := range []string{"list", "add", "remove", "prune"} {
 		t.Run(verb, func(t *testing.T) {
-			cmd := outputContractCommand(t, "configure", "xrepo", verb, "--bogus")
+			cmd := outputContractCommand(t, "repos", verb, "--bogus")
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			out, err := cmd.Output()

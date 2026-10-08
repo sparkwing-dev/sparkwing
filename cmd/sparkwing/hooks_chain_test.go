@@ -174,7 +174,7 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	hooksDir := filepath.Join(f.repo, ".git", "hooks")
 
 	out := captureStdout(t, func() {
-		if err := runHooksInstall([]string{"--repo", f.repo, "--no-prove"}); err != nil {
+		if err := runIn(t, f.repo, runHooksInstall, "--no-prove"); err != nil {
 			t.Fatalf("hooks install: %v", err)
 		}
 	})
@@ -186,7 +186,7 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	}
 
 	out = captureStdout(t, func() {
-		if err := runHooksStatus([]string{"--repo", f.repo, "--output", "pretty"}); err != nil {
+		if err := runIn(t, f.repo, runHooksStatus, "--output", "pretty"); err != nil {
 			t.Fatalf("hooks status: %v", err)
 		}
 	})
@@ -196,7 +196,7 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	}
 
 	out = captureStdout(t, func() {
-		if err := runHooksUninstall([]string{"--repo", f.repo}); err != nil {
+		if err := runIn(t, f.repo, runHooksUninstall); err != nil {
 			t.Fatalf("hooks uninstall: %v", err)
 		}
 	})
@@ -221,7 +221,7 @@ func TestHooksCommands_RejectARepoWithNoSparkwingDirectory(t *testing.T) {
 		"status":    runHooksStatus,
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := run([]string{"--repo", bare})
+			err := runIn(t, bare, run)
 			if err == nil {
 				t.Fatalf("hooks %s accepted a directory that is not a sparkwing project", name)
 			}
@@ -343,7 +343,7 @@ func TestHooksStatus_LocalShadowRemedyReachesFiringHooks(t *testing.T) {
 		}
 	})
 	wantUnset := "git -C " + f.repo + " config --unset core.hooksPath"
-	wantInstall := "sparkwing pipeline hooks install --repo " + f.repo
+	wantInstall := "sparkwing -C " + f.repo + " pipeline hooks install"
 	if !strings.Contains(out, wantUnset) || !strings.Contains(out, wantInstall) {
 		t.Fatalf("status remedy did not name both required steps:\n%s", out)
 	}

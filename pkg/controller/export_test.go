@@ -48,3 +48,24 @@ func VerifyLiveDataGrant(ctx context.Context, s *Server, raw string) (bool, erro
 	}
 	return s.verifyLiveDataGrant(ctx, grant, false)
 }
+
+func (r *githubCheckReporter) idle(ctx context.Context) error {
+	for {
+		r.mu.Lock()
+		empty, changed := len(r.jobs) == 0, r.changed
+		r.mu.Unlock()
+		if empty {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+// ReportGitHubRunState reports runID's state to GitHub as a run finish does.
+func ReportGitHubRunState(ctx context.Context, s *Server, runID, status string) {
+	s.reportGitHubRunState(ctx, runID, status)
+}

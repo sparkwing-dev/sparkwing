@@ -602,3 +602,16 @@ func TestDeferredLegacyDoesNotStarveManagedPressureReclaim(t *testing.T) {
 		t.Fatalf("deferred legacy entry changed: %v", err)
 	}
 }
+
+func (e Entry) Materialize(ctx context.Context, write func(string) error) (published bool, err error) {
+	lease, published, err := e.AcquireOrMaterialize(ctx, write)
+	if lease != nil {
+		err = errors.Join(err, lease.Release())
+	}
+	return published, err
+}
+
+func cacheCandidates(ctx context.Context, root string, limit int) ([]cacheCandidate, error) {
+	candidates, _, err := cacheCandidatesBounded(ctx, root, limit)
+	return candidates, err
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -105,63 +106,6 @@ func printExamplesHint() {
 		{Command: "sparkwing docs search -q <what you are doing>", Purpose: "usually the fastest way in"},
 		{Command: "sparkwing examples --name <name> --body", Purpose: "read one in full"},
 	})
-}
-
-func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
-	tmpl, err := templates.Get(templateName)
-	if err != nil {
-		return fmt.Errorf("new: unknown template %q -- run `sparkwing examples` to list them", templateName)
-	}
-	pm, err := parseTemplateParams(params)
-	if err != nil {
-		return err
-	}
-	if manifestDeclaresParam(tmpl.Manifest, "pipeline-name") {
-		pm["pipeline-name"] = name
-	}
-	rendered, err := templates.Render(templateName, pm)
-	if err != nil {
-		return fmt.Errorf("new: %w", err)
-	}
-
-	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
-	if _, err := os.Stat(file); err == nil {
-		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
-	}
-	if err := os.WriteFile(file, []byte(rendered), 0o644); err != nil {
-		return err
-	}
-	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden, ""); err != nil {
-		return errors.Join(err, os.Remove(file))
-	}
-	if err := finishScaffold(sparkwingDir, file, name, bootstrapped, ""); err != nil {
-		return err
-	}
-	if pre := strings.TrimSpace(tmpl.Manifest.Prerequisite); pre != "" {
-		fmt.Printf("\n%s %s\n", color.Bold("prerequisite:"), pre)
-	}
-	return nil
-}
-
-func parseTemplateParams(params []string) (map[string]string, error) {
-	out := make(map[string]string, len(params))
-	for _, p := range params {
-		k, v, ok := strings.Cut(p, "=")
-		if !ok || k == "" {
-			return nil, fmt.Errorf("examples scaffold: --param %q must be k=v", p)
-		}
-		out[k] = v
-	}
-	return out, nil
-}
-
-func manifestDeclaresParam(m templates.Manifest, name string) bool {
-	for _, p := range m.Parameters {
-		if p.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 func validatePipelineName(name string) error {
@@ -439,7 +383,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			fmt.Printf("    %s\n", color.Dim(hint))
 		}
 	}
-	tidied, err := tidySkeleton(sparkwingDir)
+	tidied, err := tidySkeleton(context.Background(), sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -652,7 +596,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the gate locally", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
 	}
 }
 
@@ -737,7 +681,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the release flow", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
 	}
 }
 
@@ -831,7 +775,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the report now", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline explain --name {{NAME}}"},
+		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
 	}
 }
 

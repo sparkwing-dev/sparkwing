@@ -86,9 +86,6 @@ type dataDownloadRequest struct {
 }
 
 func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingTrigger bool) (bool, error) {
-	if grant.Claim == nil {
-		return false, errors.New("cache grant has no claim")
-	}
 	if c := grant.Claim; c.Kind == authwire.CacheClaimToken {
 		tok, err := s.store.CheckClaimSensitive(ctx, store.ClaimToken{
 			Team: store.Team(grant.Team), RunID: grant.Run,
@@ -148,10 +145,6 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, err)
-			return "", nil, false
-		}
-		if grant.Claim == nil {
-			writeError(w, http.StatusForbidden, errors.New("cache grant has no claim"))
 			return "", nil, false
 		}
 		if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
@@ -273,7 +266,11 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, errors.New("source downloads need a live claim grant"))
 			return
 		}
-		trigger, findErr := s.store.GetTrigger(r.Context(), grant.Run)
+		var trigger *store.Trigger
+		tenant, findErr := s.tenantForTeam(r.Context(), team)
+		if findErr == nil {
+			trigger, findErr = tenant.GetTrigger(r.Context(), grant.Run)
+		}
 		if findErr != nil || trigger.Team != team || !strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") ||
 			req.Key != trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] {
 			writeError(w, http.StatusForbidden, errors.New("source bundle does not belong to this run"))
@@ -344,12 +341,24 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		objectKey, err = bucket.Key(string(team), req.Key)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+		// safety: the cache writes a grant's binaries under its run's scope, so a
+		// grant reads the scopes it would read there, in the same order.
+		scopes := []string{""}
+		if grant != nil {
+			scopes = grant.ScopePrefixes()
 		}
-		object, headErr := bucket.Head(r.Context(), string(team), req.Key)
+		var object teamblob.Object
+		headErr := teamblob.ErrNotFound
+		for _, scope := range scopes {
+			objectKey, err = bucket.Key(string(team), scope+req.Key)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			if object, headErr = bucket.Head(r.Context(), string(team), scope+req.Key); !errors.Is(headErr, teamblob.ErrNotFound) {
+				break
+			}
+		}
 		if errors.Is(headErr, teamblob.ErrNotFound) {
 			http.NotFound(w, r)
 			return

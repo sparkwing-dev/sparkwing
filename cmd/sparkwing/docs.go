@@ -26,24 +26,16 @@ func runDocs(args []string) error {
 		return runDocsList(args[1:])
 	case "read":
 		return runDocsRead(args[1:])
-	case "guides":
-		return runDocsGuides(args[1:])
-	case "all":
-		return runDocsAll(args[1:])
 	case "search":
 		return runDocsSearch(args[1:])
 	case "migrations":
 		return runDocsMigrations(args[1:])
-	case "versions":
-		return runDocsVersions(args[1:])
-	case "cache":
-		return runDocsCache(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdDocs, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdDocs, os.Stderr)
-		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search, migrations, versions, cache)", args[0])
+		return fmt.Errorf("docs: unknown verb %q (valid: list, read, search, migrations)", args[0])
 	}
 }
 
@@ -56,12 +48,41 @@ func runDocsList(args []string) error {
 	fs.IntVar(&paging.limit, "limit", 40, "maximum records; 0 returns every remaining match")
 	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
+	guides := fs.Bool("guides", false, "list the task-sized topic sets instead of topics")
+	versions := fs.Bool("versions", false, "list the doc versions this CLI knows instead of topics")
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("docs list: unexpected positional %q", fs.Arg(0))
+	}
+	if *guides && *versions {
+		return errors.New("docs list: --guides and --versions each pick a different listing; name one")
+	}
+	if *guides || *versions {
+		mode := "--guides"
+		allowed := map[string]bool{"output": true, "guides": true}
+		if *versions {
+			mode = "--versions"
+			allowed = map[string]bool{"output": true, "versions": true, "web": true, "no-cache": true}
+		}
+		var stray []string
+		fs.Visit(func(f *flag.Flag) {
+			if !allowed[f.Name] {
+				stray = append(stray, "--"+f.Name)
+			}
+		})
+		if len(stray) > 0 {
+			return fmt.Errorf("docs list %s: %s does not apply to this listing", mode, strings.Join(stray, ", "))
+		}
+		if *guides {
+			return renderDocsGuides(output)
+		}
+		return renderDocsVersions(wf, output)
 	}
 	if paging.limit < 0 {
 		return fmt.Errorf("--limit must be zero or greater")
@@ -83,16 +104,7 @@ func runDocsList(args []string) error {
 	return renderDocsPage(entries, *query, paging, output)
 }
 
-func runDocsGuides(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsGuides.Path, flag.ContinueOnError)
-	var output string
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	if err := parseAndCheck(cmdDocsGuides, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
+func renderDocsGuides(output string) error {
 	list := docs.Guides()
 	switch strings.ToLower(output) {
 	case "json":
@@ -119,9 +131,10 @@ func runDocsGuides(args []string) error {
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
-	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs guides`)")
+	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, auth)")
+	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs list --guides`)")
 	section := fs.Int("section", 0, "read the embedded section whose start_line was returned by docs search")
+	all := fs.Bool("all", false, "read every embedded document")
 	var wf docsWebFlags
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
@@ -129,6 +142,21 @@ func runDocsRead(args []string) error {
 			return nil
 		}
 		return err
+	}
+	if *all {
+		var stray []string
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name != "all" && f.Name != "output" {
+				stray = append(stray, "--"+f.Name)
+			}
+		})
+		if len(stray) > 0 {
+			return fmt.Errorf("docs read --all: reads the whole embedded corpus, so %s does not apply", strings.Join(stray, ", "))
+		}
+		if fs.NArg() > 0 {
+			return fmt.Errorf("docs read --all: unexpected positional %q", fs.Arg(0))
+		}
+		return readAllDocs(*output)
 	}
 	if fs.Changed("section") && (*section < 1 || *guide != "" || wf.web) {
 		return fmt.Errorf("docs read: --section requires a positive start_line, an embedded --topic, and no --guide or --web")
@@ -196,31 +224,20 @@ func runDocsRead(args []string) error {
 	return writeDocument(os.Stdout, *topic, body, *output)
 }
 
-func runDocsAll(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsAll.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	if err := parseAndCheck(cmdDocsAll, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("docs all: unexpected positional %q", fs.Arg(0))
-	}
-	if *output == "json" {
+func readAllDocs(output string) error {
+	if output == "json" {
 		for _, entry := range docs.List() {
 			body, err := docs.Read(entry.Slug)
 			if err != nil {
 				return err
 			}
-			if err := writeDocument(os.Stdout, entry.Slug, body, *output); err != nil {
+			if err := writeDocument(os.Stdout, entry.Slug, body, output); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	return writeText(os.Stdout, "document", docs.All(), *output)
+	return writeText(os.Stdout, "document", docs.All(), output)
 }
 
 func runDocsSearch(args []string) error {

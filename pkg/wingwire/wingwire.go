@@ -33,7 +33,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 )
 
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
@@ -285,15 +284,6 @@ var messageRegistry = map[MessageType]func() Message{
 	TypeLivenessProbe:    func() Message { return &LivenessProbe{} },
 	TypeLivenessAck:      func() Message { return &LivenessAck{} },
 	TypeUnsupported:      func() Message { return &Unsupported{} },
-}
-
-func registeredTypes() []MessageType {
-	out := make([]MessageType, 0, len(messageRegistry))
-	for t := range messageRegistry {
-		out = append(out, t)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
 }
 
 func emptyMessage(t MessageType) (Message, error) {

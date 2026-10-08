@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"path"
 	"strconv"
@@ -23,6 +24,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const webhookBodyLimit = 1 << 20
+
+var defaultPullRequestActions = map[string]struct{}{
+	"opened":      {},
+	"synchronize": {},
+	"reopened":    {},
+}
+
 type githubAppRepoRef struct {
 	ID            int64  `json:"id"`
 	FullName      string `json:"full_name"`
@@ -32,7 +41,8 @@ type githubAppRepoRef struct {
 type githubAppDelivery struct {
 	Action       string `json:"action"`
 	Installation struct {
-		ID int64 `json:"id"`
+		ID    int64 `json:"id"`
+		AppID int64 `json:"app_id"`
 	} `json:"installation"`
 	Repository githubAppRepoRef `json:"repository"`
 }
@@ -91,6 +101,18 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode delivery: %w", err))
 		return
 	}
+	// safety: GitHub signs the body and not the event header, so a body is
+	// read only as the event it first arrived as.
+	sameEvent, err := s.store.BindGitHubAppDeliveryEvent(r.Context(), githubAppDeliveryDigest(body), event, delivery, time.Now())
+	if err != nil {
+		s.writeInternalError(w, r, "github app delivery event", err)
+		return
+	}
+	if !sameEvent {
+		s.logger.Warn("github app delivery re-sent as another event", "event", event, "delivery", delivery)
+		writeError(w, http.StatusConflict, errors.New("this delivery body arrived before as another event"))
+		return
+	}
 	switch event {
 	case "ping":
 		writeJSON(w, http.StatusOK, map[string]string{"status": "pong"})
@@ -129,6 +151,28 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 	current, err := s.githubApp.client.InstallationRepositories(ctx, env.Installation.ID)
 	if err != nil {
 		if env.Action == "removed" {
+			var removal struct {
+				Removed []githubAppRepoRef `json:"repositories_removed"`
+			}
+			if decodeErr := json.Unmarshal(body, &removal); decodeErr != nil {
+				writeError(w, http.StatusBadRequest, decodeErr)
+				return
+			}
+			for _, removed := range removal.Removed {
+				stillCovered := false
+				for _, repo := range current {
+					if repo.ID == removed.ID {
+						stillCovered = true
+						break
+					}
+				}
+				if !stillCovered {
+					if revokeErr := tenant.WithdrawGitHubAppAutomation(ctx, env.Installation.ID, removed.ID); revokeErr != nil {
+						s.writeInternalError(w, r, "revoke unreadable removed repository automation", revokeErr)
+						return
+					}
+				}
+			}
 			if !s.withdrawUnlistedGitHubRemoval(w, r, tenant, env.Installation.ID, body, current, err) {
 				return
 			}
@@ -139,6 +183,19 @@ func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWri
 	covered := make(map[int64]bool, len(current))
 	for _, repo := range current {
 		covered[repo.ID] = true
+	}
+	grants, err := tenant.GitHubAppAutomations(ctx)
+	if err != nil {
+		s.writeInternalError(w, r, "github app automation grants", err)
+		return
+	}
+	for _, grant := range grants {
+		if grant.InstallationID == env.Installation.ID && !covered[grant.RepositoryID] {
+			if err := tenant.WithdrawGitHubAppAutomation(ctx, env.Installation.ID, grant.RepositoryID); err != nil {
+				s.writeInternalError(w, r, "revoke removed repository automation", err)
+				return
+			}
+		}
 	}
 	rows, err := tenant.ListCronSchedules(ctx)
 	if err != nil {
@@ -197,6 +254,12 @@ func (s *Server) withdrawUnlistedGitHubRemoval(w http.ResponseWriter, r *http.Re
 // needs the connect flow, because GitHub's notice that the App was installed
 // says nothing about which team should hold it.
 func (s *Server) handleGitHubAppInstallationEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery, delivery string) {
+	// safety: only installation events carry the full installation object, so
+	// a body without this App's id is another event's or another App's.
+	if env.Installation.AppID != s.githubApp.client.AppID() {
+		githubAppIgnored(w, "the installation event names another App")
+		return
+	}
 	id := env.Installation.ID
 	op := s.store.AsOperator()
 	var err error
@@ -523,6 +586,14 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		githubAppIgnored(w, "the event carries no time this controller can read")
 		return
 	}
+	// safety: a digest is forgotten one retention after receipt, so an event older than that is a replay
+	// nothing remembers; GitHub redelivers for days, not months, so no real delivery is refused.
+	if time.Since(intake.at) > store.GitHubAppDeliveryRetention-githubAppClockSkew {
+		s.logger.Warn("github app delivery refused: older than the replay window", "team", string(in.Team),
+			"event", event, "repo", repo.Slug(), "event_at", intake.at.UTC(), "delivery", delivery)
+		writeError(w, http.StatusConflict, errors.New("the event is older than the delivery replay window"))
+		return
+	}
 	if intake.at.Add(githubAppClockSkew).Before(in.CreatedAt) {
 		githubAppIgnored(w, "the event predates this team's connection of the installation")
 		return
@@ -542,10 +613,42 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var planned []githubAppPlannedRun
+	manualPipelines := make(map[string]bool, len(subs))
 	for _, sub := range subs {
+		manualPipelines[sub.Pipeline] = true
 		if githubAppSubscribes(sub, event, env.Action, intake.env, intake.branch) {
 			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: intake})
 		}
+	}
+	if grant, err := tenant.GitHubAppAutomation(ctx, in.InstallationID, repo.ID); err == nil && (event == "pull_request" || event == "push" && intake.branch != "") {
+		// safety: a delivery from before consent must not gain permission by being replayed later.
+		if !intake.at.Add(githubAppClockSkew).Before(grant.EnabledAt) {
+			preview, err := s.githubAppAutomationPreview(ctx, tenant, in, repo)
+			if err != nil || (preview.Status != "ready" && preview.Status != "missing") {
+				s.logger.Warn("github app repository automation unavailable", "team", string(in.Team), "repo", repo.Slug(), "status", preview.Status, "error", preview.Error, "err", err)
+				if len(planned) == 0 {
+					if err != nil {
+						s.writeInternalError(w, r, "discover repository automation", err)
+					} else {
+						writeJSON(w, http.StatusUnprocessableEntity, preview)
+					}
+					return
+				}
+			} else if preview.Enabled {
+				automaticIntake := intake
+				automaticIntake.env = maps.Clone(intake.env)
+				automaticIntake.env[EnvDefaultBranch] = preview.DefaultBranch
+				for _, decl := range preview.Pipelines {
+					// safety: an existing subscription owns its pipeline's event policy, including events it excludes.
+					if !manualPipelines[decl.Pipeline] && automationSubscribes(decl, event, env.Action, intake) {
+						planned = append(planned, githubAppPlannedRun{pipeline: decl.Pipeline, intake: automaticIntake, automation: &grant})
+					}
+				}
+			}
+		}
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.writeInternalError(w, r, "read repository automation consent", err)
+		return
 	}
 	if len(planned) == 0 {
 		if cronErr != nil {
@@ -701,6 +804,10 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 		return
 	}
 	if env.Action == "deleted" {
+		if err := tenant.WithdrawGitHubAppAutomation(r.Context(), env.Installation.ID, repo.ID); err != nil {
+			s.writeInternalError(w, r, "revoke deleted repository automation", err)
+			return
+		}
 		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
 			s.writeInternalError(w, r, "withdraw deleted GitHub repository schedule", err)
 			return
@@ -715,6 +822,10 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 	}
 	if !covered || inst.ID != env.Installation.ID || inst.SuspendedAt != nil {
 		if env.Action == "transferred" {
+			if err := tenant.WithdrawGitHubAppAutomation(r.Context(), env.Installation.ID, repo.ID); err != nil {
+				s.writeInternalError(w, r, "revoke transferred repository automation", err)
+				return
+			}
 			if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
 				s.writeInternalError(w, r, "withdraw transferred GitHub repository schedule", err)
 				return
@@ -742,6 +853,10 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 	}
 	if !matched {
 		githubAppIgnored(w, "the installation no longer covers repository id")
+		return
+	}
+	if err := tenant.RenameGitHubAppAutomation(r.Context(), env.Installation.ID, repo.ID, repo.Slug()); err != nil {
+		s.writeInternalError(w, r, "rename repository automation", err)
 		return
 	}
 	if _, err := s.store.AsOperator().WithdrawOtherGitHubCronBindings(r.Context(), tenant.Team(), env.Installation.ID, repo.ID, time.Now()); err != nil {
@@ -806,8 +921,9 @@ func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env m
 }
 
 type githubAppPlannedRun struct {
-	pipeline string
-	intake   githubAppIntake
+	pipeline   string
+	intake     githubAppIntake
+	automation *store.GitHubAppAutomation
 }
 
 // safety: A signed App delivery starts its budgeted run set only once.
@@ -906,6 +1022,9 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			s.logger.Warn("github app delivery not recorded", "delivery", delivery, "err", err)
 		}
 	}
+	if !githubAppStartedAny(resp.Runs) && shed == 0 {
+		resp.Status, resp.Reason = "ignored", "repository automation consent is no longer current"
+	}
 	s.logger.Info("github app delivery accepted", "team", string(in.Team), "event", event,
 		"repo", repo.Slug(), "sha", planned[0].intake.sha, "runs", len(resp.Runs), "shed", shed, "delivery", delivery)
 	writeJSON(w, http.StatusAccepted, resp)
@@ -947,9 +1066,6 @@ func (s *Server) startGitHubAppRun(
 	ctx := r.Context()
 	pipeline, in := plan.pipeline, plan.intake
 	replayKey := githubAppReplayKey(tenant.Team(), pipeline, body)
-	if existing, err := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); err == nil && existing != nil {
-		return githubAppRun{Pipeline: pipeline, RunID: existing.ID, Status: "duplicate"}, nil
-	}
 	runID := newRunID()
 	triggerEnv := map[string]string{"GITHUB_DELIVERY": delivery}
 	for k, v := range in.env {
@@ -957,17 +1073,27 @@ func (s *Server) startGitHubAppRun(
 	}
 	trigger := sparkwing.TriggerInfo{Source: "github", User: in.user, PullRequest: in.prInfo}
 	now := time.Now()
-	err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
+	trig := store.Trigger{
 		ID: runID, Pipeline: pipeline, TriggerSource: trigger.Source, TriggerUser: trigger.User,
 		TriggerEnv: triggerEnv, GitBranch: in.branch, GitSHA: in.sha, Repo: repo.Slug(),
 		GithubOwner: repo.Owner, GithubRepo: repo.Name, GithubRepoID: repo.ID,
 		WebhookDelivery: delivery + "/" + pipeline, WebhookReplayKey: replayKey,
 		CreatedAt: now,
-	}, store.Run{
+	}
+	run := store.Run{
 		ID: runID, Pipeline: pipeline, Status: "pending", TriggerSource: trigger.Source,
 		GitBranch: in.branch, GitSHA: in.sha, DeclaredRepo: repo.Slug(),
 		GithubOwner: repo.Owner, GithubRepo: repo.Name, CreatedAt: now, StartedAt: now,
-	})
+	}
+	var err error
+	if plan.automation != nil {
+		err = tenant.CreateGitHubAutomationTriggerWithRun(ctx, trig, run, *plan.automation)
+	} else {
+		err = tenant.CreateTriggerWithRun(ctx, trig, run)
+	}
+	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
+		return githubAppRun{Pipeline: pipeline, Status: "ignored"}, nil
+	}
 	if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
 		run := githubAppRun{Pipeline: pipeline, Status: "duplicate"}
 		if existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); ferr == nil && existing != nil {
@@ -979,12 +1105,6 @@ func (s *Server) startGitHubAppRun(
 		return githubAppRun{}, fmt.Errorf("persist trigger: %w", err)
 	}
 	s.recordQueueActivity(time.Now())
-	if err := s.dispatcher.Dispatch(ctx, RunRequest{
-		RunID: runID, Pipeline: pipeline, Trigger: trigger,
-		Git: &sparkwing.Git{Branch: in.branch, SHA: in.sha, Repo: repo.Slug()},
-	}); err != nil {
-		return githubAppRun{}, err
-	}
 	s.reportGitHubRunState(context.WithoutCancel(ctx), runID, "pending")
 	return githubAppRun{Pipeline: pipeline, RunID: runID, Status: "dispatched"}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -53,7 +54,7 @@ func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	var grepErr error
 	output := captureStdout(t, func() {
-		grepErr = runJobs([]string{"grep", "--profile", "prod", "--pattern", "fatal", "--status", "failed", "--branch", "release", "--sha", "abc", "-o", "json"})
+		grepErr = runJobs([]string{"logs", "--profile", "prod", "--grep", "fatal", "--status", "failed", "--branch", "release", "--sha", "abc", "-o", "json"})
 	})
 	if grepErr != nil {
 		t.Fatal(grepErr)
@@ -75,16 +76,24 @@ func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
 }
 
 func TestRunsGrepControllerOnlyProfileNeedsLogsAnnouncement(t *testing.T) {
+	// safety: discovery caches by URL and httptest reuses ports, so a stale
+	// entry from an earlier test would answer this one.
+	discovery.ResetCache()
+	t.Cleanup(discovery.ResetCache)
 	controller := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(controller.Close)
 	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod: {controller: {url: %q}}\n", controller.URL))
-	err := runJobs([]string{"grep", "--profile", "prod", "--pattern", "failure"})
+	err := runJobs([]string{"logs", "--profile", "prod", "--grep", "failure"})
 	if err == nil || !strings.Contains(err.Error(), "logs service") {
 		t.Fatalf("missing logs announcement error = %v", err)
 	}
 }
 
 func TestRunsGrepDiscoversLogsWhenProfileURLWasInherited(t *testing.T) {
+	// safety: discovery caches by URL and httptest reuses ports, so a stale
+	// entry from an earlier test would answer this one.
+	discovery.ResetCache()
+	t.Cleanup(discovery.ResetCache)
 	logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/logs/run-inherited/build" {
 			http.NotFound(w, r)
@@ -109,7 +118,7 @@ func TestRunsGrepDiscoversLogsWhenProfileURLWasInherited(t *testing.T) {
 	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller}\n", controller.URL))
 	var grepErr error
 	output := captureStdout(t, func() {
-		grepErr = runJobs([]string{"grep", "--profile", "prod", "--pattern", "fatal", "-q", "-o", "plain"})
+		grepErr = runJobs([]string{"logs", "--profile", "prod", "--grep", "fatal", "-q", "-o", "plain"})
 	})
 	if grepErr != nil || strings.TrimSpace(output) != "run-inherited" {
 		t.Fatalf("grep inherited logs URL = (%q, %v)", output, grepErr)

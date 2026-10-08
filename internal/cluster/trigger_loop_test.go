@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,21 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func init() {
-	if os.Getenv("SPARKWING_TRIGGER_LOOP_HELPER") != "1" {
-		return
-	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		os.Exit(2)
-	}
-	if err := os.WriteFile(os.Getenv("SPARKWING_TRIGGER_LOOP_READY"), []byte("ready"), 0o600); err != nil {
-		os.Exit(2)
-	}
-	_, _ = listener.Accept()
-	os.Exit(0)
-}
 
 func TestTriggerRunnerArgsK8s(t *testing.T) {
 	got := triggerRunnerArgs(TriggerLoopOptions{
@@ -61,6 +44,10 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		},
 		DependencyProxy:    "http://cache:80",
 		K8sImagePullPolicy: "Always",
+		K8sCPUCeiling:      "8",
+		K8sMemoryCeiling:   "16Gi",
+		K8sJobDeadline:     90 * time.Minute,
+		K8sTeamNodes:       true,
 	})
 	want := []string{
 		"--runner", "k8s",
@@ -73,6 +60,10 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		"--kubeconfig", "/tmp/kubeconfig",
 		"--artifact-store", "http://cache:4344",
 		"--image-pull-policy", "Always",
+		"--k8s-cpu-ceiling", "8",
+		"--k8s-memory-ceiling", "16Gi",
+		"--k8s-job-deadline", "1h30m0s",
+		"--runner-team-nodes",
 		"--dependency-proxy", "http://cache:80",
 		"--runner-label", "cluster",
 		"--runner-node-selector", "sparkwing.io/node-pool=runner",
@@ -146,12 +137,8 @@ func TestHandleTriggerArgsPutFlagsBeforeTriggerID(t *testing.T) {
 }
 
 func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
-	oldBaked := BakedBinary
-	BakedBinary = os.Args[0]
-	t.Cleanup(func() { BakedBinary = oldBaked })
-	t.Setenv("SPARKWING_TRIGGER_LOOP_HELPER", "1")
-	ready := filepath.Join(t.TempDir(), "helper-ready")
-	t.Setenv("SPARKWING_TRIGGER_LOOP_READY", ready)
+	firstInFlight := make(chan struct{})
+	var firstOnce sync.Once
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -167,8 +154,9 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 				return
 			}
 			if n == 2 {
-				if err := waitForTriggerHelper(ready, 15*time.Second); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+				select {
+				case <-firstInFlight:
+				case <-r.Context().Done():
 					return
 				}
 			}
@@ -185,6 +173,9 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 			if n == 2 {
 				cancel()
 			}
+		case r.URL.Path == "/api/v1/runs/trigger-1/cache-grant":
+			firstOnce.Do(func() { close(firstInFlight) })
+			<-r.Context().Done()
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-1/heartbeat":
 			_ = json.NewEncoder(w).Encode(map[string]bool{"cancel_requested": false})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-2/heartbeat":
@@ -211,7 +202,7 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	if len(claimTimes) < 2 {
 		t.Fatalf("claims = %d, want at least 2", len(claimTimes))
 	}
-	// safety: the in-flight handler blocks forever, so any bounded return proves the loop did not wait on it
+	// safety: the first handler blocks until the loop cancels, so any bounded return proves the loop did not wait on it
 	if elapsed := time.Since(claimTimes[1]); elapsed >= 5*time.Second {
 		t.Fatalf("trigger loop returned %s after the second claim, want < 5s", elapsed)
 	}
@@ -350,29 +341,6 @@ func TestRunTriggerLoop_ConfirmsRunAfterAmbiguousFinishResponse(t *testing.T) {
 					claimed.Load(), reads.Load(), done.Load(), tc.wantDone)
 			}
 		})
-	}
-}
-
-func waitForTriggerHelper(path string, timeout time.Duration) error {
-	deadlineAt := time.Now().Add(timeout)
-	poll := time.NewTicker(5 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(time.Until(deadlineAt))
-	defer deadline.Stop()
-	for {
-		if !time.Now().Before(deadlineAt) {
-			return fmt.Errorf("trigger helper did not publish readiness within %s", timeout)
-		}
-		if _, err := os.Stat(path); err == nil {
-			return nil
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("read trigger helper readiness: %w", err)
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			return fmt.Errorf("trigger helper did not publish readiness within %s", timeout)
-		}
 	}
 }
 

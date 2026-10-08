@@ -49,8 +49,7 @@ type runFlags struct {
 	noUpdate bool
 	verbose  bool
 
-	secrets   string
-	changeDir string
+	secrets string
 
 	mode string
 
@@ -415,17 +414,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case strings.HasPrefix(argument, "--sw-output="):
 			flags.outputFormat = strings.TrimPrefix(argument, "--sw-output=")
-			argumentIndex++
-		case argument == "-C", argument == "--sw-cd":
-			if argumentIndex+1 < len(args) {
-				flags.changeDir = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-cd="):
-			flags.changeDir = strings.TrimPrefix(argument, "--sw-cd=")
 			argumentIndex++
 		default:
 			if strings.HasPrefix(argument, "--sw-") && flags.unknownRunnerFlag == "" {
