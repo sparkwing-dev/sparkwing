@@ -56,7 +56,7 @@ that secret of its pipeline.
 **The child's environment is rebuilt rather than inherited.** It carries `PATH`,
 `HOME`, `TMPDIR`, the locale and TLS-bundle variables, and similar runtime
 names, plus whatever the operator lists in `SPARKWING_SUBMIT_ENV_ALLOW`. The
-agent token, cache token, artifact store, and claim variables are removed by
+agent token, cache grant, artifact store, and claim variables are removed by
 name, and any variable whose name or value reads as a credential is dropped even
 when the allow-list names it. See `remoteExecutionChildEnvironment` in
 `internal/orchestrator/run_node_remote.go` and `internal/envredact`.

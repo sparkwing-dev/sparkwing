@@ -530,8 +530,8 @@ claim require the current admin-capable runner token. Login-enabled dashboard in
 the controller without a browser session or CSRF token. The process opens no
 listener. A private direct cache URL can replace the controller proxy when the
 machines already share a LAN, VPN, or tailnet. Direct cache binary writes use
-only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never sent to that
-raw cache. Raw Git reads have no cache-level auth, so keep a direct cache on a
+only the run's cache grant (`SPARKWING_CACHE_GRANT`); the agent/controller
+token is never sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct cache on a
 trusted private network. Pack streams have a 30-minute server window, and the
 CLI gives a working-tree upload 15 minutes. Manual retries and same-repository
 `RunAndAwait` children retain the original `pipeline-working-tree@<host>`

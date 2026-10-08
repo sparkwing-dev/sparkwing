@@ -47,11 +47,11 @@ cannot both win. A reservation a crashed writer never settled expires after an
 hour. A commit with a reservation ID counts once for 24 hours; hourly
 storage maintenance prunes older receipts, after which a replay counts
 again. A renewal retry returns the same next reservation while it is
-active. The cache calls these routes with its operator token and makes one
+active. The cache calls these routes with its `storage.count` service token and makes one
 reserve and one commit or release per object. The logs service forwards the
 appending caller's credential, which counts only its own team's logs. A
 forwarded commit must name a reservation and a nonnegative byte count. The
-cache's operator token can commit a negative overwrite delta when an object
+cache's service token can commit a negative overwrite delta when an object
 shrinks. The logs service reserves a 1 MiB block per team and run, or the
 room left when that is smaller. Appends draw from the block without asking
 the controller. When a block runs out, the service commits what the run
@@ -198,7 +198,7 @@ second run over the same data removes nothing more.
 | Run events, node metrics | finished runs past the retention window | controller, hourly storage pass | `event_retention_days`, `node_metric_retention_days`; a multi-team controller writes 30 days where the operator set none |
 | A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
 | Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive; a run the controller answered free when its logs were written keeps its archived logs 30 days at most, recorded with the run so a restart keeps the class | logs service | `--retention` on `sparkwing-logs`; 90 days with `--archive-store` unless set, off otherwise |
-| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
+| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and the operator grant's cache root | controller, hourly storage pass | `--cache-blob-store` |
 | Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
 | Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (2 GiB) |
 | Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |

@@ -116,35 +116,48 @@ older than the claim tokens above reads no secret from this controller.
 
 ## Service credentials
 
-Three static secrets authenticate services to each other. None is a
-principal in the tokens table, and each grants more than its caller needs.
+Three static secrets authenticated services to each other. None was a
+principal in the tokens table, and each granted more than its caller needed.
+The cache operator token is gone (landed, D-CRD-02); the two logs-service
+secrets go with the logs service.
 
 | Secret | Direction | Used for | Grants |
 |---|---|---|---|
 | logs-delete token (`SPARKWING_LOGS_DELETE_TOKEN`) | controller to logs service | deleting a deleted team's logs | a controller token holding only `logs.delete` |
-| cache operator token (`cache-token`; the controller's `SPARKWING_CACHE_TOKEN`) | controller to cache, and cache to controller | the controller's git-cache proxy and team purge on the cache; the cache's storage reserve, commit and release calls on the controller | every cache route, every team's tree, and the storage counters for every team |
+| ~~cache operator token~~ (removed) | was controller to cache, and cache to controller | was the controller's git-cache proxy and team purge, and the cache's storage counter calls | was every cache route, every team's tree, and every team's storage counters |
 | logs service's controller bearer (`controller.tokenSecret` in the runner bundle) | logs service to controller | resolving a caller's credential before serving a log | the scopes of whatever runner token the operator mounted |
 
-Plan:
+What landed for the cache operator token, which split by direction into two
+credentials that each do one thing:
 
-- **Logs-delete token and the logs service's bearer** go with the logs
-  service. With logs stored as objects the controller writes and deletes
-  through its own data plane, team deletion removes a prefix the controller
-  already holds credentials for, and nothing needs to call back.
-- **Cache operator token** splits by direction into two service
-  credentials that each do one thing:
-  - controller to cache: the controller calls the cache with a short-lived
-    signed service grant (the `swcg1.` format the cache already verifies,
-    with an operator scope and no team), minted from the grant key the two
-    already share. The static bearer stops being accepted on cache routes.
-  - cache to controller: the storage counter routes accept a service token
-    of a new `service` row with exactly one scope, `storage.count`, minted by
-    the operator and mounted on the cache like any other token. The
-    constant-time compare against `SPARKWING_CACHE_TOKEN` in
-    `counterCaller` goes.
-  The result is one fewer shared secret, a counter credential that can be
-  revoked and listed, and no credential that both reads every team's cache
-  and moves every team's storage counters.
+- **Controller to cache:** the controller signs a five-minute operator grant
+  for each call of its own (the git-cache proxy, team purges, and the new
+  `POST /api/v1/cache/store-ceiling/measure` and `/thaw` routes that forward
+  to the cache's admin routes). It is the `swcg1.` format the cache already
+  verified, with an operator flag and no team, run, claim or scope, signed with
+  the grant key both already held; a payload that is both an operator grant
+  and a team's grant is refused. The cache accepts grants and nothing else, so
+  it needed no new secret. Asking the controller to verify a service token was
+  the other option; it was not taken because it puts a controller round trip
+  on every cache request and makes the cache's availability depend on the
+  controller's.
+- **Cache to controller:** the storage counter routes accept a `service` row
+  (prefix `sws_`, hashed, listable and revocable like every token) holding the
+  new operator-only `storage.count` scope, which no team token may carry. The
+  operator mints it with
+  `sparkwing cluster tokens create --type service --principal cache --scope storage.count`
+  and mounts it on the cache as the file `controller-token`; the cache refuses
+  to start with `--controller` and no such file. The constant-time compare
+  against `SPARKWING_CACHE_TOKEN` in `counterCaller` is gone, and the routes
+  still take a forwarded `logs.write` credential for its own team's logs.
+- **People:** nobody holds a cache credential. Operators register mirrors and
+  drive the store ceiling through the controller's `admin` routes, which
+  forward under the operator grant. `--allow-unauthenticated` still opens a
+  cache that has no grant key, for a bootstrap or laptop install.
+
+The result is no standing shared secret between the two services, a counter
+credential that can be revoked and listed, and no credential that both reads
+every team's cache and moves every team's storage counters.
 
 ### What is left after the logs service is removed
 
@@ -200,11 +213,11 @@ with this design:
   offer and executor tables, the fleet authority, enrollment bearers and the
   enrollment route are gone; the ordinary claim protocol is the one protocol
   and lost its "legacy" name.
-- **Cache service credential: one service-token kind.** The cache calls the
-  controller with a hashed, scoped, revocable service token; the cache
-  accepts cache grants and that token only, and the static cache operator
-  token goes under both of its names. People act through the operator
-  identity.
+- **Cache service credential: one service-token kind (landed).** The cache
+  calls the controller with a hashed, scoped, revocable `storage.count`
+  service token; the cache accepts cache grants only, the controller's own
+  calls included, and the static cache operator token is gone under both of
+  its names. People act through the operator identity.
 - **One installation-token route.** `POST /api/v1/runs/{id}/source-credential`,
   claim-bound, is the only route that mints a GitHub App installation token;
   a repository a run names by hand qualifies only when the team has

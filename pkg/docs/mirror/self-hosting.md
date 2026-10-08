@@ -310,7 +310,7 @@ either service at an S3-compatible store.
 
 | Service | Flag | Keys |
 |---|---|---|
-| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
+| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator grant's own under `cache/{bins,cache,artifacts}/...` |
 | `sparkwing-logs` | `--archive-store s3://bucket/logs` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
 
 **The cache** moves its binary, dependency-archive and artifact stores to the
@@ -341,10 +341,13 @@ does, in its database, and each service asks it for room before a team's
 write and charges each team's download to its day there
 ([Tenant limits](limits.md)). The store ceiling on each service covers its
 volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller` and its token, the
-file `cache-token` in its `--credentials-dir`, which the controller holds as
-`SPARKWING_CACHE_TOKEN`; a cache with a `cache-grant-key` and `--blob-store`
-refuses to start without them. The logs service reaches the
+bucket. On a multi-team deployment give the cache `--controller` and a
+`service` token holding only the `storage.count` scope, minted with
+`sparkwing cluster tokens create --type service --principal cache --scope storage.count`
+and mounted as the file `controller-token` in its `--credentials-dir`; a cache
+with a `cache-grant-key` and `--blob-store` refuses to start without
+`--controller`, and one with `--controller` refuses to start without the
+token. The logs service reaches the
 same controller through its `--controller` with the appending caller's own
 credential. Give the controller `--cache-blob-store` and
 `--logs-archive-store` (or `SPARKWING_CACHE_BLOB_STORE` and

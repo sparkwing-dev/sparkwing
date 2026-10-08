@@ -26,7 +26,7 @@ and ref, as [Cache service](#cache-service) describes.
 
 **Operators and service credentials have separate authority.** `admin` is
 deployment authority. Service scopes such as `credits.grant`, `claims.launch`,
-and `logs.delete` cross teams for their documented operations. Team membership
+`storage.count` and `logs.delete` cross teams for their documented operations. Team membership
 does not grant them. Operators who control the database, encryption keys or
 cluster remain trusted with tenant data. See [Authentication](auth.md) for
 individual scope and claim contracts.
@@ -676,12 +676,18 @@ the published images are known bad.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token (the file `cache-token` in its
-`--credentials-dir`) on every route that touches repository content: git
-clone and registration, the binary and dependency-archive blob routes, and
-the admin routes. The cache serves no source archives, single
+`sparkwing-cache` requires a cache grant, signed with the grant key in the file
+`cache-grant-key` in its `--credentials-dir`, on every route that touches
+repository content: git clone and registration, the binary and
+dependency-archive blob routes, and the admin routes. A run's grant is
+confined to its team and repository; the operator grant the controller signs
+for its own proxy, team purge and store-ceiling calls lasts five minutes and
+reaches every route. The cache accepts no static token, so no person holds a
+credential for it: an operator reaches it through the controller's
+`admin`-scoped `/api/v1/gitcache/...` and `/api/v1/cache/store-ceiling/...`
+routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
-refuses to start without one unless the operator passes
+refuses to start without a grant key unless the operator passes
 `--allow-unauthenticated`, which
 logs a startup warning. The guard has no network-location exemption: an
 in-cluster caller, a port-forward, and an ingress request are all rejected
@@ -693,6 +699,14 @@ rather than repository content. A cache published outside the cluster starts
 with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
 `--metrics-addr`, which moves `/metrics` to a listener the ingress does not
 route to.
+
+In the other direction the cache counts each team's storage and downloads on
+the controller's `/internal/storage/...`, `/internal/downloads/charge` and
+`/internal/egress/totals` routes with a `service` token holding only the
+`storage.count` scope, the file `controller-token` in its `--credentials-dir`.
+It is an ordinary hashed row in the tokens table: `sparkwing cluster tokens
+list --type service` shows it, and rotating it is minting a new one and
+revoking the old.
 
 Registering a repository name validates it against
 `^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a

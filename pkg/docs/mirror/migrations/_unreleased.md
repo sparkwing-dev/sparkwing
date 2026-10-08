@@ -220,17 +220,17 @@ ran it.
   ignored: a malformed duration or boolean kept the default without a word, and
   a malformed byte count printed a warning and stayed unlimited.
 - **After:** the cache reads settings from flags alone and its secrets from
-  `--credentials-dir`, a directory holding one file per secret: `cache-token`
-  (the operator token) and `cache-grant-key`. An absent file turns that
-  feature off, as an unset variable did. `--api-token` and `--grant-key` are
+  `--credentials-dir`, a directory holding one file per secret:
+  `cache-grant-key` and, with `--controller`, `controller-token`. The static
+  operator token is gone altogether; see
+  [The cache's static operator token is removed](#the-caches-static-operator-token-is-removed). `--api-token` and `--grant-key` are
   gone, because a flag value shows in `/proc/<pid>/cmdline`. A malformed flag
   value now stops the cache at startup with an error naming the flag; so does
   a `--credentials-dir` that names no directory.
 - **Operator steps:** the `sparkwing-runner-bundle` chart projects
-  `cache.tokenSecret` and `cache.grantKeySecret` into
-  `/etc/sparkwing/credentials` and passes the flags; upgrading the chart needs
-  no value changes. In a manifest of your own, mount the two Secret keys as
-  files and move each variable to its flag:
+  `cache.grantKeySecret` into `/etc/sparkwing/credentials` and passes the
+  flags. In a manifest of your own, mount the Secret key as a file and move
+  each variable to its flag:
 
   ```yaml
   args:
@@ -246,16 +246,13 @@ ran it.
         defaultMode: 0400
         sources:
           - secret:
-              name: sparkwing-cache-token
-              items: [{key: token, path: cache-token}]
-          - secret:
               name: sparkwing-cache-grant-key
               items: [{key: key, path: cache-grant-key}]
   ```
 
   | Variable or flag | Use instead |
   |---|---|
-  | `SPARKWING_API_TOKEN`, `--api-token` | the file `cache-token` under `--credentials-dir` |
+  | `SPARKWING_API_TOKEN`, `--api-token` | nothing: the cache accepts only grants (see the section below) |
   | `SPARKWING_CACHE_GRANT_KEY`, `--grant-key` | the file `cache-grant-key` under `--credentials-dir` |
   | `PORT`, `PORT_ADDR` | `--addr` |
   | `DATA_DIR` | `--data-dir` |
@@ -286,10 +283,7 @@ ran it.
   start on the default; with the value moved to its flag it refuses to start,
   so check the value before the upgrade. `--allow-unauthenticated` is a boolean
   flag: pass it bare, because `--allow-unauthenticated=yes` is refused.
-  The controller still reads the same token as `SPARKWING_CACHE_TOKEN` and the
-  grant key as `SPARKWING_CACHE_GRANT_KEY`; when it moves to a credentials
-  directory it reads the same `cache-token` and `cache-grant-key` file names,
-  so one projected Secret volume will serve both. `SPARKWING_S3_ENDPOINT`,
+  The controller still reads the grant key as `SPARKWING_CACHE_GRANT_KEY`. `SPARKWING_S3_ENDPOINT`,
   `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
 
 ## sparkwing-runner reads flags and a credentials directory
@@ -482,7 +476,7 @@ The controller keeps `POST /api/v1/gitcache/git/register` and the clone proxies.
 
 | Removed | Use instead |
 |---|---|
-| `/archive`, `/file`, `/tree-hash`, `/branch-contains` | Clone `/git/<name>` with `SPARKWING_CACHE_TOKEN` and read the checkout. |
+| `/archive`, `/file`, `/tree-hash`, `/branch-contains` | Clone through the controller's `/api/v1/gitcache/git/<name>` with an `admin` bearer, or `/git/<name>` with a run's cache grant, and read the checkout. |
 | `/git/refresh`, `POST /api/v1/gitcache/refresh` | Nothing: a clone refreshes a mirror older than `FETCH_FRESH_WINDOW` before it answers. |
 | `/sync/seed`, `POST /api/v1/gitcache/seed`, `/sync/negotiate`, `/upload`, `/uploads/<id>` | Give the cache a credential for origin and register the repository, or run a runner without `--gitcache` so it fetches from origin itself. `--working-tree` already uploads to the direct data store. |
 | `/artifacts/<job>` | Declare `Outputs` and `Consumes`; the SDK stores artifacts under content-addressed `/bin/artifacts/...` keys or the direct data store. |
@@ -931,11 +925,10 @@ argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
 - **Before:** the pipeline binary kept the runner's `SPARKWING_AGENT_TOKEN` in
   its environment, so every command a step started inherited it, and a step
   that printed it showed the raw value in the run's logs. `.CacheDir` used it
-  as the cache bearer when no `SPARKWING_CACHE_GRANT` or
-  `SPARKWING_CACHE_TOKEN` was set.
+  as the cache bearer when no `SPARKWING_CACHE_GRANT` was set.
 - **After:** the pipeline binary removes the token from its environment when
   it starts and masks it in node output. Commands a step starts do not see it,
-  and `.CacheDir` sends only the cache grant or cache token.
+  and `.CacheDir` sends only the cache grant.
 - **Author steps:** a step that called the controller with
   `$SPARKWING_AGENT_TOKEN` uses the SDK instead (`sparkwing.Secret`,
   `sparkwing.RunAndAwait`), which reaches the controller through the node's own
@@ -1346,3 +1339,80 @@ To upgrade:
 - A node that runs inside its trigger's process, under the in-process node
   runner, reads through the trigger's claim token; its release event names
   the run and no node.
+
+## The cache's static operator token is removed
+
+- **Before:** one static secret had two names. The cache read it as the file
+  `cache-token` under `--credentials-dir` (the runner-bundle chart's
+  `cache.tokenSecret`) and accepted it on every route; the controller read it
+  as `SPARKWING_CACHE_TOKEN`, sent it on its git-cache proxy and team purges,
+  and accepted it on the storage counter routes
+  (`/internal/storage/reserve`, `commit`, `release`,
+  `/internal/downloads/charge` and `/internal/egress/totals`), where the cache
+  sent it back. An operator could also send it to the cache from a shell, and
+  the CLI, git clones, `.CacheDir` and the artifact store fell back to
+  `SPARKWING_CACHE_TOKEN` when no `SPARKWING_CACHE_GRANT` was set.
+- **After:** the cache accepts cache grants only, signed with
+  `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
+  the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
+  controller signs a five-minute operator grant with
+  `SPARKWING_CACHE_GRANT_KEY`. The cache authenticates to the controller's
+  counter routes with a `service` token holding only the new operator-only
+  `storage.count` scope, read from the file `controller-token` under
+  `--credentials-dir`; a cache with `--controller` refuses to start without
+  it. A cache refuses to start without `cache-grant-key` unless
+  `--allow-unauthenticated` is set. The controller ignores
+  `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
+  drops `cache.tokenSecret`, refuses to render while it is set, and requires
+  `cache.grantKeySecret` for a cache-enabled install unless
+  `cache.allowUnauthenticated=true`. A person reaches the cache only through
+  the controller with an `admin` bearer.
+- **Operator steps:**
+  1. If the cache runs with `--controller`, mint its counter token as the
+     operator and store it in a Secret:
+
+     ```bash
+     sparkwing cluster tokens create --type service --principal cache \
+       --scope storage.count --profile prod
+     kubectl -n sparkwing create secret generic sparkwing-cache-controller-token \
+       --from-literal=token=<the sws_ token>
+     ```
+
+     Mount it as the file `controller-token` in the cache's
+     `--credentials-dir`, beside `cache-grant-key`. The charts do not start
+     the cache with `--controller`, so a chart install skips this step.
+  2. Make sure the cache and the controller hold the same grant key:
+     `cache.grantKeySecret` in the runner-bundle chart (the full chart passes
+     it to the controller as `SPARKWING_CACHE_GRANT_KEY`), or
+     `cache-grant-key` and `SPARKWING_CACHE_GRANT_KEY` in your own manifests.
+     An install that had only the cache token creates one:
+
+     ```bash
+     kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
+       --from-literal=key="$(openssl rand -hex 32)"
+     ```
+
+  3. Unset `cache.tokenSecret` (or
+     `sparkwing-runner-bundle.cache.tokenSecret` in the full chart), set
+     `cache.grantKeySecret.name`, and upgrade the cache and controller
+     together, since an older controller sends the cache a token it no longer
+     takes.
+  4. Remove `SPARKWING_CACHE_TOKEN` from the controller's environment and from
+     operators' shells, remove the `cache-token` file from the cache's
+     credentials, and delete the old Secret:
+     `kubectl -n sparkwing delete secret sparkwing-cache-token`.
+  5. Replace any `curl` against the cache with the controller's routes and an
+     `admin` bearer: `POST /api/v1/gitcache/git/register` to register a
+     mirror, and `POST /api/v1/cache/store-ceiling/measure` or `thaw` for the
+     store ceiling.
+- **Edge cases:** rotating the counter token is minting a new one, swapping
+  the Secret and revoking the old prefix with
+  `sparkwing cluster tokens revoke`. A single-team controller without a grant
+  key calls the cache with no bearer, which only a cache started with
+  `--allow-unauthenticated` serves. `sparkwing spark` and a laptop's compile
+  no longer upload binaries to a cache with an operator's token; only a run's
+  grant writes there. Every authenticated cache now has a grant key, so two
+  rules that applied only to a cache with one now apply to all: a cache with
+  `--blob-store` needs `--controller` and its `controller-token`, and the
+  daily egress alarm defaults to 200 GiB unless `--egress-daily-alarm-bytes`
+  is set (the alarm reports in `/health` and the metrics and refuses nothing).

@@ -542,6 +542,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
+| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`, and POST `/internal/egress/totals`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
@@ -909,7 +910,9 @@ never registered again. The controller deletes logs with the token in
 `SPARKWING_LOGS_DELETE_TOKEN`, which must carry exactly the `logs.delete`
 scope; mint one as the operator with `sparkwing cluster tokens create --type service --principal controller-logs --scope logs.delete`. With a logs service
 configured and no such token, or one carrying any other scope, a deletion
-stays pending and records why. The purge deletes the team's logs with one
+stays pending and records why. The controller deletes the team's cache tree
+under an operator grant it signs with `SPARKWING_CACHE_GRANT_KEY`, the key the
+cache verifies grants with. The purge deletes the team's logs with one
 `DELETE /api/v1/teams/{team}/logs`, which removes every run the logs service
 recorded for the team and its archived namespace; a logs service without an
 archive store answers that route 404, and the controller then deletes the

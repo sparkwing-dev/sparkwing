@@ -807,10 +807,12 @@ Neither service waits out the interval to recover. Deleting a run with
 `--retention`, starts a fresh measurement of the log store, so appends
 resume shortly after the delete answers rather than at the end of the
 interval. The cache
-serves no delete of its own, so it carries two bearer-gated admin
-routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
-what turns freeing space on the volume into uploads flowing again, and
-`POST /admin/store-ceiling/thaw` accepts uploads until the next
+serves no delete of its own, so it carries two admin routes, which take
+only the controller's operator grant and which an operator reaches through
+the controller with an `admin` bearer: `POST
+/api/v1/cache/store-ceiling/measure` starts a walk now, which is what turns
+freeing space on the volume into uploads flowing again, and `POST
+/api/v1/cache/store-ceiling/thaw` accepts uploads until the next
 measurement. The measure route answers `202` with the state as it stands
 and walks off the request path, so the caller pays no latency for a
 large store and a disconnect cannot abandon the walk; one runs at a
@@ -874,8 +876,8 @@ download, not the one under way. A signed URL is charged the object's whole
 size when it is minted and expires after 60 seconds. While the
 controller cannot answer the cache, a free team's download is refused with
 `503`, and a team the controller answered funded within five minutes
-proceeds. The operator's own team and the operator token carry no cap,
-because every in-cluster runner shares them.
+proceeds. The operator's own team carries no cap, because every in-cluster
+runner shares it, and neither does the controller's operator grant.
 
 Reading a run's logs, from the dashboard or the CLI, is never charged to
 the team, so a team past its cap can still read why its run failed. The
