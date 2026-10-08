@@ -149,7 +149,7 @@ instead.
 
 After a controller is running, a Linux or macOS workstation can run
 `sparkwing-runner` as a user service. With `sparkwing-runner` on PATH and a
-profile naming the controller, one command does the whole enrollment:
+profile naming the controller, one command does the whole setup:
 
 ```bash
 go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
@@ -200,8 +200,8 @@ replace its own executable; update the service binary through the same installer
 or service manager you used to install it.
 
 The installer asks for the controller URL, logs URL, API token, runner name,
-and maximum concurrent jobs. It writes the existing unenrolled agent format,
-which uses legacy FIFO claims with local admission enabled. Its default CPU
+and maximum concurrent jobs. It writes the agent format `sparkwing cluster
+runners add` writes, which uses FIFO claims with local admission enabled. Its default CPU
 and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
 `~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
 `~/.config/systemd/user/`.
@@ -241,15 +241,14 @@ already exists, because a shell script cannot merge YAML without risking the
 other sections; `sparkwing cluster runners add` merges it instead. The service
 uses that file rather than embedding the token in its
 launchd plist or systemd unit. The contribution caps reported capacity; the
-reserve constrains local admission. Neither enables the reservation-backed
-assisted offer protocol.
+reserve constrains local admission.
 
 The section carries claim-mode keys only. It has no `name` and no
-`coordinators`; a section that still sets either key fails to load and names the
-removed enrolled mode. `allow_repos`, which `runners add --allow-repo` writes,
-makes the agent fetch source directly rather than through the controller's
-gitcache proxy; see [local-execution.md](local-execution.md#an-agent-that-fetches-source-itself). See [local-execution.md](local-execution.md) for the
-controller-side enrolled design.
+`coordinators`; a section that still sets either key fails to load and says
+enrolled mode has been removed. `allow_repos`, which `runners add --allow-repo`
+writes, makes the agent fetch source directly rather than through the
+controller's gitcache proxy; see
+[local-execution.md](local-execution.md#an-agent-that-fetches-source-itself).
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
 --config <path>` command, but neither installer creates a Windows service. On

@@ -147,27 +147,31 @@ tokens table with a single operator-only scope, which is the shape the cache
 moves to. `logs.write` stays a claim-derived capability for the node's own
 log upload.
 
-## Enrollment bearers and the assisted-offer protocol
+## Enrollment bearers and the assisted-offer protocol (landed)
 
-The assisted-offer protocol (`POST /api/v1/nodes/claim/prepare`, the
-executor offer table, the fleet authority and `PUT /api/v1/agents/{name}`
-enrollment) lets a foreground coordinator started with `sparkwing run
---sw-fleet` hand nodes to enrolled helper executors. The coordinator side
-ships; the helper side has no shipped client, so the protocol runs only in
-tests. An enrolled credential is nevertheless forced onto it server-side:
-`rejectEnrolledLegacyClaim` refuses an enrolled token's ordinary claim.
+The assisted-offer protocol let a foreground coordinator started with
+`sparkwing run --sw-fleet` hand nodes to enrolled helper executors. The
+coordinator side shipped; the helper side never had a shipped client, so the
+protocol ran only in tests. An enrolled credential was nevertheless forced
+onto it server-side: `rejectEnrolledLegacyClaim` refused an enrolled token's
+ordinary claim. The protocol carried its own credential path (enrollment bound
+a token prefix to an executor record, and offers were fenced by that binding),
+a second way for a bearer to reach node work alongside the claim path above.
 
-The protocol carries its own credential path (enrollment binds a token
-prefix to an executor record, and offers are fenced by that binding), which
-is a second way for a bearer to reach node work alongside the claim path
-above. The credential model has no place for it.
-
-Plan (decided): remove the prepare route, the offer and
-executor tables, the fleet authority, the enrollment route,
-`rejectEnrolledLegacyClaim`, the `sparkwing fleet` command group and
-`--sw-fleet`, with their docs, as one breaking change with a migration
-note. A future multi-machine foreground run would be built on claim tokens
-from the start.
+It was removed whole as one breaking change. Gone are
+`POST /api/v1/nodes/claim/prepare`, the executor-offer body of
+`POST /api/v1/nodes/claim` (its fields are now refused as unknown),
+`PUT /api/v1/agents/{name}` enrollment, the enrolled executor heartbeat at
+`POST /api/v1/agents/{name}/heartbeat`, offer arbitration by priority,
+`rejectEnrolledLegacyClaim`, the controller authority id, and the foreground
+fleet coordinator. Schema v97 drops the `executors` and `node_claim_offers`
+tables. On the CLI, the `fleet` command group, `run --sw-fleet` and
+`cluster agents enroll` are gone, and a `fleet:` section in `config.yaml`
+fails to parse. The ordinary claim protocol, `POST
+/api/v1/nodes/claim` with a holder id, labels, headroom and capacity, is the
+one claim protocol. Machines that were enrolled helpers run as ordinary
+runners through `sparkwing cluster runners add`. A future multi-machine
+foreground run would be built on claim tokens from the start.
 
 ## GitHub Actions runner credential
 
@@ -183,10 +187,10 @@ row outside the team token families.
 The owner decided these on the recommendations below, and the work lands
 with this design:
 
-- **Assisted-offer protocol: cut whole.** The prepare route, the offer and
-  executor tables, the fleet authority, enrollment bearers and the
-  enrollment route go; the ordinary claim protocol is the one protocol and
-  loses its "legacy" name.
+- **Assisted-offer protocol: cut whole (landed).** The prepare route, the
+  offer and executor tables, the fleet authority, enrollment bearers and the
+  enrollment route are gone; the ordinary claim protocol is the one protocol
+  and lost its "legacy" name.
 - **Cache service credential: one service-token kind.** The cache calls the
   controller with a hashed, scoped, revocable service token; the cache
   accepts cache grants and that token only, and the static cache operator

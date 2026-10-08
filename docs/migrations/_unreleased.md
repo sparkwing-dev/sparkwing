@@ -1085,10 +1085,10 @@ step with the controller's own.
 - **After:** the first two are gone, and the third is a method of `Tenant`.
   Many other `Store` methods now act on the default team only; their `Tenant`
   methods of the same name serve every team.
-- **Upgrade:** code embedding `pkg/store` replaces
-  `st.ActiveExecutorActivity(ctx, now)` with
-  `team.ActiveExecutorActivity(ctx, now)` on the handle from
-  `st.ForTeam(ctx, slug)`, replaces `st.PrincipalHoldsPipelineClaim` with
+- **Upgrade:** code embedding `pkg/store` drops calls to
+  `st.ActiveExecutorActivity`, which went with executor enrollment (see
+  [Assisted offers, enrollment and the foreground fleet are removed](#assisted-offers-enrollment-and-the-foreground-fleet-are-removed)),
+  replaces `st.PrincipalHoldsPipelineClaim` with
   `st.PrincipalHoldsProfileClaim` or `st.PrincipalHoldsRunClaim`, and calls
   `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
   writes runs, nodes or triggers of a team other than the default goes
@@ -1196,6 +1196,66 @@ To upgrade:
 - The 10 live member tokens per member and 100 live machine tokens per team
   count the old CLI and runner tokens too.
 - Operator tokens (`POST /api/v1/tokens`, `sparkwing cluster tokens`), the
-  bootstrap token, GitHub Actions exchange credentials and local-fleet tokens
-  are unchanged. The dashboard's **Team > Machines** page uses the new routes
+  bootstrap token and GitHub Actions exchange credentials are unchanged. The dashboard's **Team > Machines** page uses the new routes
   and works as before.
+
+## Assisted offers, enrollment and the foreground fleet are removed
+
+The assisted-offer claim protocol had no shipped helper client, so nothing
+but tests reached it. Machines that helped a run go back to being ordinary
+runners, which claim nodes the way warm trigger runners always have.
+
+- **Before:** an operator enrolled an executor with
+  `sparkwing cluster agents enroll` (`PUT /api/v1/agents/{name}`), binding a
+  runner token to a name, priority, budget and placement. An enrolled
+  executor kept itself live with `POST /api/v1/agents/{name}/heartbeat`,
+  previewed work with `POST /api/v1/nodes/claim/prepare` and offered for a
+  node by sending `executor_name` and a reservation to
+  `POST /api/v1/nodes/claim`; its token could no longer make an ordinary
+  claim. `sparkwing fleet init` wrote a `fleet` section into `config.yaml`,
+  and `sparkwing run PIPELINE --sw-fleet` ran a foreground coordinator that
+  offered nodes to the helpers that section named.
+- **After:** those routes answer `404`, and `POST /api/v1/nodes/claim`
+  refuses the offer fields as unknown. `sparkwing fleet`, `--sw-fleet` and
+  `sparkwing cluster agents enroll` are gone. Any runner or machine token
+  with `nodes.claim` claims through `POST /api/v1/nodes/claim`, including one
+  that was enrolled. `GET /api/v1/agents` and `sparkwing cluster agents list`
+  show the runners that claimed in the last hour with the labels, slot limit
+  and headroom they advertised; `active_slots`, `base_priority`,
+  `priority_ceiling`, `budget` and the `gateway` type are gone. Schema v97
+  drops the executor and offer tables. An older controller pointed at the
+  upgraded database fails its claim and mark-ready statements rather than
+  running nodes.
+
+To upgrade:
+
+1. Delete the `fleet:` section from `config.yaml`. Until it is gone every
+   command that reads the file stops with
+   `unknown section "fleet"`.
+2. For each machine that was an enrolled helper, run it as an ordinary
+   runner: `sparkwing cluster runners add --profile PROFILE --name MACHINE`
+   on it mints its runner token and starts the service, or deploy the runner
+   bundle in Kubernetes. Give it the capabilities its enrollment listed with
+   `--labels`, and its `max_concurrent` with `--max-concurrent`. Revoke the
+   token the enrollment named once nothing uses it.
+3. Run pipelines without `--sw-fleet` or `--sw-allow-secret-file`; the
+   latter only fed the fleet's source snapshot, and
+   `sparkwing pipeline trigger --working-tree --allow-secret-file` keeps it. A foreground `sparkwing run` executes
+   on the machine you run it on; to spread a run across machines, trigger it
+   on a controller with runners attached.
+4. Code embedding `pkg/controller/client` drops `PrepareExecutorClaim`,
+   `OfferExecutorClaim` and `HeartbeatExecutor`, and calls `ClaimNode` where
+   it called `ClaimNodeAs`. Code embedding `pkg/store` renames
+   `Tenant.ListLegacyAgentClaims` to `ListAgentClaims`, `LegacyAgentClaim` to
+   `AgentClaim`, `FinalizeExecutorClaimRound` to `FinalizeClaimRound` and
+   `ExecutorClaimRoundResult` to `ClaimRoundResult`, and drops the executor,
+   offer and scheduling-summary methods.
+
+**Edge cases:**
+
+- The enrolled executors' priorities, budgets and trusted locations have no
+  runner equivalent. A runner advertises its own labels and capacity, and
+  the controller places work by those.
+- Runs record no `executor_offer_received`, `executor_offer_expired`,
+  `executor_offer_declined`, `executor_offer_awarded` or `executor_selected`
+  events from now on; runs already stored keep theirs.

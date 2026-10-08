@@ -158,7 +158,7 @@ A pipeline may declare `source: origin/main` in its `sparkwing.yaml` entry.
 Foreground runs, detached submissions, and triggers compile that source and
 execute jobs in the submitting checkout. An explicit `--sw-pipeline-ref` must
 resolve to the same commit. Source declarations cannot be combined with
-`--sw-ref` or `--sw-fleet`; source-backed schedules must use `--follow`.
+`--sw-ref`; source-backed schedules must use `--follow`.
 
 `--sw-pipeline-ref <ref>` works in foreground and detached runs. It compiles the pipeline from a separate revision while
 executing it in the submitting checkout. The ref resolves to a commit at submission;
@@ -198,8 +198,7 @@ refused with the reason rather than silently ignored: `--sw-index`
 (the index binding is a live path the launching process holds open),
 `--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
 `--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
-`--sw-local-only`, `--sw-secrets`, `--sw-no-update`, `--sw-fleet`, and
-`--profile`. Run those in the foreground with
+`--sw-local-only`, `--sw-secrets`, `--sw-no-update`, and `--profile`. Run those in the foreground with
 `sparkwing run`. Everything else after the pipeline name is passed to the
 pipeline as its own arguments.
 
@@ -506,26 +505,12 @@ filter uses decides both.
 
 The refusal lists every offending path and says whether it is tracked:
 `git rm --cached PATH` for a tracked file, `.gitignore` for an untracked one,
-or `--allow-secret-file PATH` (`--sw-allow-secret-file PATH` for `sparkwing
-run --sw-fleet`) once per file to send it anyway. The override admits only the
-paths it names and refuses a path that matches nothing in the snapshot, so
+or `--allow-secret-file PATH` once per file to send it anyway. The override
+admits only the paths it names and refuses a path that matches nothing in the snapshot, so
 what travelled stays visible in the command that sent it. Gitignored files
 never enter the manifest and so are never named. Sparkwing judges the first
 64 KiB of a settings or manifest file, searches the whole file for a key or
 certificate block, and never reads a file whose bytes are binary.
-
-The coordinator reads the `fleet` section of `config.yaml` (see
-[Machine settings](machine-config.md)); `SPARKWING_CONFIG` selects a different
-file. The `SPARKWING_FLEET*` names are private parent-to-pipeline handoff, not
-configuration: `SPARKWING_FLEET`, `SPARKWING_FLEET_SOURCE_ROOT`,
-`SPARKWING_FLEET_SOURCE_BUNDLE`, `SPARKWING_FLEET_SOURCE_SHA`,
-`SPARKWING_FLEET_SOURCE_MANIFEST_DIGEST`,
-`SPARKWING_FLEET_SOURCE_REPO_URL`, `SPARKWING_FLEET_SOURCE_FILES`,
-`SPARKWING_FLEET_SOURCE_BYTES`, `SPARKWING_FLEET_SOURCE_BUNDLE_BYTES`,
-`SPARKWING_FLEET_PARENT_GUARD`, and `SPARKWING_FLEET_PARENT_TOKEN`. Sparkwing
-sets and validates them for the lifetime of one foreground run. Do not set or
-forward them; submitted environments and retry snapshots remove the parent
-guard and token.
 
 An off-cluster machine can claim only these triggers and compile them locally:
 
@@ -699,93 +684,40 @@ An agent section without `allow_repos` keeps the proxy, as before.
 
 `sparkwing-runner agent` runs claim mode, the mode that executes work. Its
 agent section carries no `name` and no `coordinators`; a section that still
-sets either key fails to load and names the removed enrolled mode. The rest of this
-section describes the controller-side enrolled design, which no agent
-configuration selects.
+sets either key fails to load and says enrolled mode has been removed.
 
 The configuration uses the outbound FIFO `/api/v1/nodes/claim` loop. Its
 `labels` are self-asserted placement terms, not administrator-trusted
 capabilities. `sparkwing cluster runners add` and the bundled service installer
 both write this format. Existing sections keep their `local_admission` setting,
-including an explicit `false`; when enabled, legacy local admission happens
-after a claim.
+including an explicit `false`; when enabled, local admission happens after a
+claim.
 
-The controller owns the enrolled assisted-offer design. An administrator binds
-an executor to the exact prefix of a live runner or service token:
-
-```bash
-sparkwing cluster agents enroll --profile prod \
-  --name desk --token-prefix swr_01234567 \
-  --kind agent --location local --capability linux-amd64 \
-  --base-priority 10 --priority-ceiling 30 \
-  --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592
-```
-
-The controller-owned enrollment is the trust envelope. Kind identifies an
-`agent` or `gateway` execution boundary; location is controller-owned placement
-policy. `location=local` and `location=cloud` requirements match only this
-field, while `unknown` fails both. The reserved `location=coordinator` selector
-and compatibility alias `local` are ungrantable to helpers. The awarded value
-also becomes immutable attribution and a hard requirement for an agent-loss
-retry. Capabilities, priority range, concurrency ceiling, and
-resource budget come only from enrollment. Worker traffic cannot add or widen
-them, and the agents API never returns the credential prefix or principal.
-
-A foreground coordinator reads its trusted helpers from the `executors` list in
-the `fleet` section of `config.yaml`. Write that list by hand; no command edits
-it. Each entry names an
-executor that this machine's state database already binds to a live runner
-credential carrying `nodes.claim` and `runs.state`, and a run refuses to start
-when one does not, naming the executor. Create the binding against a controller
-that serves this same state database, which `sparkwing-controller` does: mint
-the credential with `sparkwing cluster runners add --profile <p>`, then bind it
-with `sparkwing cluster agents enroll --profile <p> --name <helper>
---token-prefix <prefix> --kind agent --location local`. Network discovery never
-grants trust.
-
-An enrolled executor reports liveness to its coordinator, and a controller that
-hears nothing shows it offline. Idle enrollments remain visible. A compatible
-sealed node returns `body_attestation_required`, so no helper reserves capacity
-or executes a node without an exact compiled-body attestation.
-
-The retained offer records encode a five-second arbitration rule. Priority 100
-and the exact highest eligible effective priority recorded at round open win
-immediately; otherwise the deadline winner is the highest effective priority,
-then the earliest offer, executor name, slot, and holder. `Requires` and
-resource limits filter before ranking. The sealed helper path does not open or
-populate an offer round while compiled-body attestation is absent.
-Run priority and the first matching `Prefers` term add to base priority and are
-then clamped inside each administrator-owned priority range. A preference is a
-small tie-breaking boost, not an absolute override: base priority can still
-outweigh it. Arbitration is scoped to one controller. A retry after a lost
-response recovers the same fenced claim. Legacy direct
-claims remain FIFO and do not use this ranking.
-
-The controller owns retries after an agent or gateway disappears. The source
-node becomes terminal `agent_lost` and is never resumed. Loss before the
-job-body start acknowledgement creates a fresh linked run without spending
-`.Retry(n)`; loss after acknowledgement spends the persisted invocation count.
+The controller owns retries after a runner disappears. When a runner stops
+renewing a node's claim, the source node becomes terminal `agent_lost` and is
+never resumed. Loss before the job-body start acknowledgement creates a fresh
+linked run without spending `.Retry(n)`; loss after acknowledgement spends the persisted invocation count.
 The same total budget covers local retry loops, `RetryAuto` dispatches, and
 fresh runs. A replacement keeps the captured source/plan and the original
 coordinator and location, rehydrates unrelated terminal work, and reruns only
-the lost work and its descendants after durable backoff. Another executor is
+the lost work and its descendants after durable backoff. Another runner is
 preferred briefly, but the original may reclaim when it is the only eligible
 capacity. Coordinator fallback cannot relax the required placement. External
 effects remain at-least-once within the configured budget.
 
 With the Helm values `runner.triggerRunner.kind: warm` and
-`runner.automountServiceAccountToken: true`, a trigger worker offers each node
-to remote agents first. If no agent claims an unlabeled node within the
-internal window, the worker atomically removes the offer and creates a
+`runner.automountServiceAccountToken: true`, a trigger worker opens each node
+to remote runners first. If no runner claims an unlabeled node within the
+five-second claim round, the worker atomically takes it back and creates a
 Kubernetes Job with the chart's existing image, namespace, service account,
 pull policy, and cache settings. The Job runs `sparkwing-runner run-node`, the
-executable the runner image installs. A concurrent agent claim defeats
-revocation, so fallback cannot double-execute the node. Labeled nodes stay
-agent-only by default. `runner.triggerRunner.labels` may name static
+executable the runner image installs. A concurrent runner claim defeats the
+take-back, so fallback cannot double-execute the node. Labeled nodes stay
+runner-only by default. `runner.triggerRunner.labels` may name static
 capabilities every fallback Job can honor; a labeled node then falls back only
 when those labels satisfy all of its requirements. These labels do not inherit
 the outer pool's `runner.labels`, and the Job reports the configured set as its
-runtime runner metadata. Saturated or offline agents therefore spill eligible
+runtime runner metadata. Saturated or offline runners therefore spill eligible
 work to Kubernetes without weakening placement requirements.
 
 The published runner image uses Debian slim, so downloaded Linux Go and Node
@@ -860,25 +792,25 @@ Kubernetes quantity fails at startup rather than at pod creation. The
 namespace-wide backstop is the chart's `limitRange` and `resourceQuota`; see
 the `sparkwing-runner-bundle` README.
 
-Enrolling a workstation or gateway authorizes repository pipeline code to run
-as the agent service's OS user. Complete assisted execution starts every job
-body in a child process. The supervisor keeps the enrollment token and claim
-identity; the child receives a process-lifetime loopback capability limited to
-its awarded run and node. Execution start, finish, and logs also require the
+Running a runner on a workstation authorizes repository pipeline code to run
+as the runner service's OS user. The runner starts every job body in a child
+process. The supervisor keeps the runner token and claim identity; the child
+receives a process-lifetime loopback capability limited to its claimed run
+and node. Execution start, finish, and logs also require the
 acknowledged attempt ordinal. That capability cannot claim or renew work,
-manage the fleet, or call administrative routes. The child inherits only the
+manage runners, or call administrative routes. The child inherits only the
 minimum runtime environment plus non-credential variables explicitly named by
 `SPARKWING_SUBMIT_ENV_ALLOW`, not the agent service's arbitrary cloud, cache,
 or service credentials.
 
 This is credential isolation, not an OS sandbox. Pipeline code can still read
 files, use the network, and start processes with every permission the agent OS
-user has. Run an agent under a dedicated account and enroll it only for
+user has. Run a runner under a dedicated account and let it claim only
 repositories whose code that account may execute. Give each device its own
 short-lived runner token and revoke it when the device leaves the pool.
-Native Windows helpers bind a suspended body to a non-breakaway Job Object
+Native Windows runners bind a suspended body to a non-breakaway Job Object
 before its code can run, then wait for the Job to reach zero active processes
-after exit or cancellation. Linux, macOS, and WSL helpers terminate and empty
+after exit or cancellation. Linux, macOS, and WSL runners terminate and empty
 the body's dedicated process session. Unix code can leave that session with
 `setsid`, so pipeline bodies must not daemonize out of it. Sparkwing treats
 deliberate escape as trusted OS-user code, not as a containment failure.
@@ -889,31 +821,6 @@ and cached source or binary objects do not contain credentials. The compiled
 pipeline binary interprets `warm`; protocol and named-capability negotiation,
 not exact release equality, decides compatibility.
 
-Schema 30 is an internal dependency of the assisted-execution release, not a
-standalone compatibility boundary. Its offer and award records remain for
-migration, but schema 31 never admits an unsealed node to a helper. The
-foreground authority derives and seals policy from its immutable source, run,
-plan, dependency, and artifact records. Prepare then checks the helper's
-supervisor protocol and named host capabilities before local capacity is
-reserved. A missing capability returns `upgrade_required`; a helper whose
-minimum supported protocol is newer than the sealed body returns
-`protocol_incompatible`. Unknown capability or protocol floors carry
-`safe_hold` and no minimum release instead of guessing an update target.
-
-Remote body execution is still disabled. A compatible helper receives only an
-opaque binding and `body_attestation_required`; it cannot offer, reserve, or
-run the node until a later release verifies that exact compiled pipeline binary
-and enforces the sealed body and action authority. Eligible work therefore
-falls back to the coordinator, while helper-only work remains pending. The
-runner build identity recorded by heartbeat is observational and is never
-compared for exact version equality. There is no automatic runner updater yet.
-Do not deploy this boundary as remote execution.
-
-The helper's observed OS, architecture, and environment remain diagnostics,
-not trusted scheduling facts. Use explicit non-reserved administrator-owned
-capabilities and `location=local` or `location=cloud` for admission. Sparkwing
-must persist, evaluate, and render observed platform facts separately before
-selectors such as `os=windows` are truthful.
 The bundled service installer supports Linux and macOS. Native Windows agents
 run under an operator-managed service; WSL can use the Linux installer when
 systemd user services are enabled.

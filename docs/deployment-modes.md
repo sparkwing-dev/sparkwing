@@ -34,11 +34,7 @@ infrastructure. This is the default behavior -- no profile is selected and
 the built-in local sqlite + filesystem defaults apply -- when no
 `--profile` is given and the project sets no `defaults.profile`.
 
-For: a developer working on pipelines on their own laptop, and the other
-machines that developer owns. `sparkwing run <pipeline> --sw-fleet` hands
-nodes of one foreground run to helpers provisioned with
-[`sparkwing fleet`](cli-fleet.md), which keeps the run local to your own
-hardware and needs no controller.
+For: a developer working on pipelines on their own laptop.
 
 Tradeoff: nobody else can see what you ran.
 
@@ -416,8 +412,7 @@ profile by passing `--profile` in the run command (see
 
 A practical decision order:
 
-1. **One person, on the machines they own?** Local, plus `--sw-fleet`
-   when a run should spread across them.
+1. **One person on their own machine?** Local.
 2. **A team that wants one dashboard and one run history?**
    [Sparkwing Cloud](#sparkwing-cloud), or a controller your team runs.
 3. **Multiple people on S3, fine with bucket-dependent coordination?**

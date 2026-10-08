@@ -560,7 +560,7 @@ run in place of the scope, so the claim the runner already took is what opens
 them. Add `runs.read` only to give a token the deployment-wide view.
 
 A warm-pool dispatcher hands nodes to a pool on that same set. It opens and
-closes each offer round while holding the run's trigger claim, so the readiness
+closes each claim round while holding the run's trigger claim, so the readiness
 routes admit it without an `admin` token.
 
 A route can narrow a field below its route scope. The node dispatch reads
@@ -625,7 +625,7 @@ from the run or the source trigger generation. A runner with `runs.state` but
 without the applicable fence gets `403 claim_required`; a stale generation
 gets `409 Conflict`.
 
-An assisted executor acknowledges its claim generation and next monotonic
+A runner acknowledges its claim generation and next monotonic
 attempt ordinal immediately before each job-body invocation. Node log appends
 must carry that started ordinal in addition to the exact claim fence. The logs
 service validates it against the controller and stores it in an immutable
@@ -1512,13 +1512,10 @@ resets the backoff.
   `secrets.read` carved the runner's work out of `admin`. What remains can be
   split further into `cache.write`, `locks.admin`, and similar when a real
   caller needs that narrower trust.
-- **Execution capabilities beyond assisted nodes**: workstation and gateway
-  agents keep their enrollment bearer in the supervisor and give each
-  job-body child a process-lifetime loopback capability for its exact run,
-  node, and acknowledged attempt log/lifecycle. Schema 30 is the internal
-  current-node dependency; schema 31 adds the current-attempt mutation fence and
-  durable grants for `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`,
-  cross-pipeline references, and dynamic `SpawnNode` before this path can ship.
-  Other execution modes retain their documented credential boundary. A future
+- **Execution capabilities beyond runner job bodies**: a runner keeps its
+  token in the supervisor and gives each job-body child a process-lifetime
+  loopback capability for its exact run, node, and acknowledged attempt
+  log/lifecycle. Other execution modes retain their documented credential
+  boundary. A future
   capability service could make the same split portable across container and
   process boundaries that do not share one supervisor.

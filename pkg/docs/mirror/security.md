@@ -40,14 +40,14 @@ dedicated OS user that holds nothing else, or in a container or VM, and list
 only repositories whose every committer may act as that user.
 
 **Pipeline authors run code on runners.** A pipeline is Go that the runner
-compiles and executes. Enrolling a workstation or gateway authorizes that
-code to execute as the agent service's OS user. Assisted execution keeps the
-enrollment bearer and claim identity in the supervisor; the job-body child
-gets a process-lifetime loopback capability limited to its exact run and node,
+compiles and executes. Running a runner on a workstation authorizes that
+code to execute as the runner service's OS user. The runner keeps its token
+and claim identity in the supervisor; the job-body child gets a
+process-lifetime loopback capability limited to its exact run and node,
 including reserving and committing its own typed output upload,
 with execution start, finish, and logs additionally bound to its acknowledged
 attempt ordinal. The child does not inherit arbitrary agent service credentials,
-and its capability cannot claim or renew work, manage the fleet, or call
+and its capability cannot claim or renew work, manage runners, or call
 administrative routes. A claimed trigger's pipeline binary, which plans the
 run, gets the same kind of loopback capability, limited to its own run and
 the child runs it spawns, from a runner using the in-process node runner.
@@ -93,7 +93,7 @@ still hold objects an earlier release seeded. Assess those separately from
 controller API permissions. This guide makes no tenant-isolation guarantee
 for those shared mirrors.
 
-Assisted execution on a self-hosted machine keeps the agent OS user's file,
+Execution on a self-hosted machine keeps the agent OS user's file,
 network, and process permissions. It can read the agent's
 `config.yaml`, which holds the runner token, and every other credential in
 that user's home, such as ssh keys and cloud profiles. GitHub gives the same
@@ -103,27 +103,19 @@ whose every committer may act as that user. Sparkwing does not
 join a tailnet or configure host networking.
 [threat-model.md](threat-model.md) states what that boundary isolates, what it
 does not, and what an operator does about the rest when a teammate's branch
-runs on an enrolled desktop.
+runs on a teammate's desktop runner.
 
-Native Windows helpers start the body suspended, assign it to a kill-on-close
+Native Windows runners start the body suspended, assign it to a kill-on-close
 Job Object, and then resume it, so nothing the body spawns exists outside the
 job. The supervisor waits for the Job to report zero active processes after
-the body exits or is cancelled. Linux, macOS, and WSL helpers instead create a
+the body exits or is cancelled. Linux, macOS, and WSL runners instead create a
 dedicated process session, send TERM and then KILL to its remaining members,
 and wait for that session to empty. Unix code can call `setsid` to leave that
 accounting boundary. Pipeline bodies must not daemonize out of their session;
 Sparkwing does not try to contain intentional evasion by code already trusted
 to run as the agent OS user.
 
-Schema 30 supplies authenticated foreground enrollment, offer, award, source
-handoff, and coordinator fallback as an internal release dependency. It does
-not expose remote helper body completion. The containment boundary above must
-ship with schema 31, which adds the current-attempt fence and durable grants
-required by `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline
-references, and dynamic `SpawnNode`. Schema 30 is not a complete assisted-node
-compatibility boundary on its own.
-
-**A warm pool shares one OS account across repositories.** Assisted job bodies
+**A warm pool shares one OS account across repositories.** Job bodies
 run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
@@ -388,14 +380,13 @@ an active run.
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
 path names -- and falls back to the `X-Sparkwing-Runner` header only on
-`POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
-`POST /api/v1/triggers/claim`, which name nothing. A runner sends one
-identity for the life of its process (a pool runner its holder prefix and
-process id, an enrolled agent its name), not one per poll: a value that
+`POST /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`, which name
+nothing. A runner sends one identity for the life of its process (a pool
+runner its holder prefix and process id), not one per poll: a value that
 changed per request would buy a fresh budget on every claim and grow the
 controller's bucket table at the fleet's poll rate.
 
-On those three claim routes the identity is the runner's own word, so a
+On those two claim routes the identity is the runner's own word, so a
 holder of a valid token that varies it gets a fresh budget each time.
 `--runners-per-token` (default 64) caps how many such names one caller --
 its team for a signed-up team, its token in the operator's team -- may hold
@@ -418,10 +409,8 @@ the rollout finishes.
 carries one setting rather than one per guard. It is described under
 [Limits profiles](#limits-profiles) below.
 
-The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`,
-is never shed. Run and trigger heartbeats and node touch requests are
-unbudgeted when the caller owns the claim. Losing those updates can
-tear down an active run or executor.
+Run and trigger heartbeats and node touch requests are unbudgeted when the
+caller owns the claim. Losing those updates can tear down an active run.
 
 Past a budget the route answers `429` with a `Retry-After` naming the
 real refill delay, and `sparkwing_principal_throttled_total{route_class}`
@@ -436,8 +425,8 @@ because their callers are unauthenticated and would share one bucket.
 keyed by signed-up team or by token prefix in the operator's team. It binds
 a caller varying the runner it says it is: on the two claim routes the runner name
 is the caller's own word, so the per-runner budgets above bound a runaway
-loop rather than a holder of a valid token who means harm. The agent
-liveness routes above are spared here too. Past the budget a request answers
+loop rather than a holder of a valid token who means harm. The claim-owned
+heartbeats and node touch requests above are spared here too. Past the budget a request answers
 `429` with a `Retry-After`, counted under
 `sparkwing_principal_throttled_total{route_class="token"}`.
 
@@ -465,9 +454,7 @@ daemon, enforces nothing.
 
 The gate guards the two routes that carry the suggestion, `POST
 /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`. A route that
-names the trigger or the node it wants is no idle poll, and the
-preparation half of an offer round would charge the round twice. It is
-keyed the way the per-runner budgets are, on the token prefix together
+names the trigger or the node it wants is no idle poll. It is keyed the way the per-runner budgets are, on the token prefix together
 with the runner, and the runner a pool names itself carries its process
 id, so two runner processes on one host are two runners rather than one
 polling twice.

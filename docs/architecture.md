@@ -124,7 +124,7 @@ port; `sparkwing serve` serves the same bundle locally. Log panes read
 through the controller, which forwards each read to the logs service with
 the viewer's own credential.
 
-The Fleet page shows team-scoped executors and queue activity. Operators can
+The Fleet page shows the team's runners and queue activity. Operators can
 check controller and logs health through their own service endpoints.
 
 ### DinD (Docker-in-Docker)
@@ -207,7 +207,7 @@ These are set on every runner pod:
 | `SPARKWING_RUN_ID` | The run this node belongs to |
 | `SPARKWING_NODE_ID` | The node being executed |
 | `SPARKWING_HOME` | State / cache / logs root |
-| `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller + logs calls; assisted job-body children receive a scoped loopback capability instead |
+| `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller + logs calls; job-body children receive a scoped loopback capability instead |
 
 ### Environment variables set on a local node process
 

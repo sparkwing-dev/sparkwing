@@ -1,6 +1,6 @@
 # Threat model: another person's branch on your machine
 
-Enrolling a workstation as a runner authorizes pipeline code from the
+Adding a workstation as a runner authorizes pipeline code from the
 repositories that controller schedules to compile and execute on it. This page
 states what Sparkwing isolates in that case, what it does not, and what an
 operator does about the rest. [security.md](security.md) covers transport,
@@ -15,14 +15,10 @@ node to your runner, your machine fetches that commit, compiles its Go pipeline
 code, and runs it. You do not read the branch first, and the award carries no
 per-repository consent step.
 
-The same applies to a foreground fleet run (`sparkwing run <pipeline>
---sw-fleet`), where the difference is that your working tree, not a pushed
-commit, is what travels.
-
 ## What is isolated
 
 **The job body runs in a child process with its own credential.** Every node a
-runner claims executes this way. The supervisor keeps the enrollment token, and
+runner claims executes this way. The supervisor keeps the runner token, and
 the child never sees it: the supervisor starts a broker on `127.0.0.1`, mints a
 32-byte random capability that lives as long as that one node, and hands it to
 the child on stdin rather than through the environment or argv, where any
@@ -37,7 +33,7 @@ cancellation, and release
 for that node's holder. The controller resolves concurrency keys in the
 runner token's team, so the same key in another team remains separate. The
 broker answers everything else with `403`, so the child cannot claim work, renew a
-claim, register an executor, or call an administrative route. It also strips
+claim, or call an administrative route. It also strips
 the claim headers the child sends and stamps the supervisor's own, so the child
 cannot execute against a claim it was not given. The allow-list is
 `allowController` in `internal/orchestrator/remote_execution_broker.go`, and it
@@ -93,13 +89,14 @@ reaches the admission daemon's socket, which every process running as that
 account may use to queue, inspect, cancel, and drain that account's runs; the
 socket's own check is the peer uid (`internal/wingd`).
 
-**The files in a working tree.** A fleet run transmits an immutable snapshot of
-every tracked file and every non-ignored untracked file to the helper that wins
-a node, so an untracked `.env` beside your code is part of what travels. The
-capture rejects submodules, unsafe symlinks, and non-regular files, and it
-reports a digest, a file count, and byte totals rather than names
-(`cmd/sparkwing/worktree_snapshot.go`); it judges nothing about contents. In the
-other direction, the sender's working tree lands on your disk under the runner's
+**The files in a working tree.** A `sparkwing pipeline trigger --working-tree`
+run transmits an immutable snapshot of every tracked file and every non-ignored
+untracked file to the runner that claims it, so an untracked `.env` beside your
+code is part of what travels unless the secret-shaped file check refuses it
+(see [remote execution](local-execution.md#remote-execution)). The capture
+rejects submodules, unsafe symlinks, and non-regular files, and it reports a
+digest, a file count, and byte totals rather than names
+(`cmd/sparkwing/worktree_snapshot.go`). In the other direction, the sender's working tree lands on your disk under the runner's
 account.
 
 **A trigger consumer's child.** A pool started with `--also-claim-triggers`
@@ -112,7 +109,7 @@ environment at start and masks it in node output
 (`internal/orchestrator/agent_token.go`), so commands the team's code starts do
 not inherit it, but the team's code runs in the process that holds it, and
 `/proc/<pid>/environ` still shows the value the process started with. `sparkwing cluster runners add` never sets that flag, so a
-desktop enrolled by the installer does not take that path.
+desktop added by the installer does not take that path.
 
 **The contribution cap.** A runner's `--contribution` value caps the headroom it
 advertises when it claims (`internal/cluster/headroom.go`), so it bounds how
@@ -127,25 +124,22 @@ no labels matches any runner, and a runner advertises its own set on every
 claim (`labelsSatisfied` and the claim scan in `pkg/store/store.go`), so label
 terms cannot hold a box to one repository's work. No repository or pipeline
 allow-list exists on the claim path. The boundary is which controller you
-enroll with: one controller is one trust domain, so every repository on it
-reaches every runner whose labels satisfy any unsealed node.
+add the runner to: one controller is one trust domain, so every repository on
+it reaches every runner whose labels satisfy any unsealed node.
 
 A sealed node is the narrower case. The claim scan skips nodes that are sealed
-or pinned to a coordinator or executor location, and a fleet run's nodes are
-sealed: they reach one enrolled executor, and only when the claimant's token
-prefix and principal match the executor the run named
-(`PrepareExecutorClaimForRun` in `pkg/store/executor_claim_offer.go`). A pool
-runner never sees that work.
+or pinned to a coordinator or executor location (`pkg/store/store.go`), so a
+pool runner never sees that work.
 
 ## What to do about it
 
 **Give the runner its own OS account.** This is the control that matters most,
 because it is the one that moves the OS user boundary. Create an account for the
 runner, install the service under it, and keep your keys, cloud credentials, and
-source checkouts out of its reach. Enroll from that account with `sparkwing
-cluster runners add`.
+source checkouts out of its reach. Add the runner from that account with
+`sparkwing cluster runners add`.
 
-**Enroll only against a controller whose repositories you accept.** Every
+**Add runners only to a controller whose repositories you accept.** Every
 repository that controller schedules may run on your box. A repository you would
 not execute unreviewed needs its own controller, not another token.
 
@@ -154,11 +148,11 @@ repository is readable by any run that repository starts, on any runner that
 claims one of its nodes. A shared secret is readable by every repository on the
 controller.
 
-**Keep secret-shaped files out of a working tree you start fleet runs from.**
-A credential belongs in the controller's secret store, in an ignored path, or
-outside the repository. An untracked file that no ignore rule names is in the
-snapshot whether or not you meant to commit it, so read `git status` before a
-fleet run.
+**Keep secret-shaped files out of a working tree you send with
+`--working-tree`.** A credential belongs in the controller's secret store, in
+an ignored path, or outside the repository. An untracked file that no ignore
+rule names is in the snapshot whether or not you meant to commit it, so read
+`git status` before such a run.
 
 **Bound the machine.** Set a machine budget so a pipeline cannot take the box,
 and use its `enforce` term on Linux when you want the ceiling to hold at the OS

@@ -311,7 +311,7 @@ sparkwing secrets list --profile prod
 sparkwing secrets get --profile prod --name <name>
 
 # Runner and user credentials survived, so runners reconnect without
-# being re-enrolled.
+# being added again.
 sparkwing cluster tokens list --profile prod
 
 # Runners have reconnected.

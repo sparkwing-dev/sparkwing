@@ -109,7 +109,7 @@ Every request the credential makes passes a fence that lists the routes it may u
 
 | Route | Rule |
 | --- | --- |
-| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs from signed GitHub push deliveries for the repository at the job's branch and commit; executor offers are refused |
+| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs from signed GitHub push deliveries for the repository at the job's branch and commit |
 | `POST /api/v1/triggers/claim` | the same repository, branch and commit filter, restricted to signed GitHub push deliveries with no retry or parent run |
 | `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, carry the job's branch and commit, and come from a signed GitHub push delivery; the cache grant route answers 403 |
 | `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |

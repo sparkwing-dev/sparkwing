@@ -4,17 +4,16 @@
 
 **Local** is the product. Sparkwing is a program on your machine: it
 compiles `.sparkwing/` and runs each job as a host subprocess, keeps state
-in SQLite under `~/.sparkwing/`, and serves its own dashboard. No account,
-no cloud, and the machines you own join a run with `--sw-fleet`. After one
-successful run, a pipeline whose sparks are pinned to exact tags runs with
-the network unplugged; see
+in SQLite under `~/.sparkwing/`, and serves its own dashboard. No account
+and no cloud. After one successful run, a pipeline whose sparks are
+pinned to exact tags runs with the network unplugged; see
 [offline after the first build](#offline-after-the-first-build) for what
 still needs it.
 
 **Sparkwing Cloud** is the hosted controller. A controller gives a team
 one dashboard, one run history, and one queue: a triggered run waits there
-until an enrolled machine claims it, and fails with `queue_timeout` at the
-queue deadline when none does (see [scheduling.md](scheduling.md)). The
+until a runner claims it, and fails with `queue_timeout` at the queue
+deadline when none does (see [scheduling.md](scheduling.md)). The
 same command reaches any controller you can reach, including one your team
 runs:
 
@@ -393,7 +392,7 @@ revoke the credential is not allowed to make leaves the token live and names
 the prefix and the command that finishes the job. `--keep-token` removes the
 profile and touches no credential.
 
-To run work on this machine for that controller, enroll it as a runner with
+To run work on this machine for that controller, add it as a runner with
 `sparkwing cluster runners add --profile prod --name this-laptop`.
 
 ### Start a run
