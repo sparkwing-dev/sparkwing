@@ -280,8 +280,6 @@ export interface NodeModifiers {
 
 export interface NodeWork {
   steps?: NodeWorkStep[];
-  spawns?: NodeWorkSpawn[];
-  spawn_each?: NodeWorkSpawnEach[];
   result_step?: string;
   step_groups?: NodeStepGroup[];
 }
@@ -302,22 +300,6 @@ export interface NodeWorkStep {
   duration_ms?: number;
   annotations?: string[];
   summary?: string;
-}
-
-export interface NodeWorkSpawn {
-  id: string;
-  needs?: string[];
-  target_job?: string;
-  target_work?: NodeWork;
-  has_skip_if?: boolean;
-}
-
-export interface NodeWorkSpawnEach {
-  id: string;
-  needs?: string[];
-  target_job?: string;
-  item_template_work?: NodeWork;
-  note?: string;
 }
 
 export interface RunDetail {
@@ -341,6 +323,20 @@ export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
   const url = `${API_URL}/api/v1/runs${params.toString() ? `?${params}` : ""}`;
   const res = await authFetch(url, { cache: "no-store" });
   if (!res.ok) return [];
+  const body = await res.json();
+  return body.runs || [];
+}
+
+// listRuns sends a query runListQuery built and fails loud, because an empty page read
+// as "no runs" would hide a controller error behind a blank history.
+export async function listRuns(params: URLSearchParams): Promise<Run[]> {
+  const res = await authFetch(`${API_URL}/api/v1/runs?${params}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Listing runs failed (${res.status})${detail ? `: ${detail.trim()}` : ""}`);
+  }
   const body = await res.json();
   return body.runs || [];
 }
@@ -459,6 +455,7 @@ export interface RunsGrepResponse {
   total: number;
   runs_scanned: number;
   runs_matching: number;
+  next_cursor?: { after_id: string; after_started_at: string };
 }
 
 export interface RunsGrepOpts {
@@ -474,6 +471,7 @@ export interface RunsGrepOpts {
   since?: string;
   limit?: number;
   maxMatches?: number;
+  after?: { after_id: string; after_started_at: string };
 }
 
 export async function searchRunsGrep(
@@ -494,6 +492,10 @@ export async function searchRunsGrep(
   if (opts.limit) params.set("limit", String(opts.limit));
   if (opts.maxMatches !== undefined)
     params.set("max_matches", String(opts.maxMatches));
+  if (opts.after) {
+    params.set("after_id", opts.after.after_id);
+    params.set("after_started_at", opts.after.after_started_at);
+  }
   const res = await authFetch(`${API_URL}/api/v1/runs/grep?${params}`, {
     cache: "no-store",
   });

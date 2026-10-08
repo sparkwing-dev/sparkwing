@@ -152,48 +152,16 @@ func adminBrokeredNode(t *testing.T, nodeID string, wrap ...func(http.Handler) h
 	return st, broker, client.NewWithToken(broker.URL(), nil, broker.capability)
 }
 
-func TestBrokeredNodeSpawnsAChild(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	st, _, child := adminBrokeredNode(t, "parent")
-	backends := RemoteBackends(child, localLogs{paths: PathsAt(home)}, nil, nil, time.Minute)
-	h := newNodeSpawnHandler(NewNodeExecutor(backends), backends, sparkwing.NewPlan(), "run-1", "demo", "parent", nil, nil)
+func TestBrokeredNodeCreatesNoNodes(t *testing.T) {
+	_, _, child := adminBrokeredNode(t, "parent")
 	ctx := context.Background()
-	out, err := h.Spawn(ctx, "parent", "scan", nodeSpawnOKChild{})
-	if err != nil {
-		t.Fatalf("spawn through the broker: %v", err)
-	}
-	if raw, _ := out.([]byte); string(raw) != `{"findings":3}` {
-		t.Fatalf("spawn output = %#v", out)
-	}
-	row, err := st.GetNode(ctx, "run-1", "parent/scan")
-	if err != nil || row.Outcome != string(sparkwing.Success) {
-		t.Fatalf("spawned row = %+v, %v", row, err)
-	}
-
-	for _, n := range []store.Node{
-		{NodeID: "parent", Status: "pending"},
-		{NodeID: "sibling", Status: "pending"},
-		{NodeID: "parentx/scan", Status: "pending"},
-		{NodeID: "parent/../sibling", Status: "pending"},
-	} {
-		if err := child.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: n.NodeID, Status: n.Status}); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
-			t.Errorf("create %q = %v, want the broker's refusal", n.NodeID, err)
+	for _, id := range []string{"parent/scan", "sibling"} {
+		if err := child.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: id, Status: "pending"}); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
+			t.Errorf("create %q = %v, want the broker's refusal", id, err)
 		}
 	}
-	if err := child.StartNode(ctx, "run-1", "sibling"); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
-		t.Errorf("start a sibling = %v, want the broker's refusal", err)
-	}
-}
-
-func TestBrokeredRunnerSpawnMeetsTheControllersOwnAnswer(t *testing.T) {
-	f := newBrokeredRunnerNode(t, nil)
-	ctx := context.Background()
-	direct := client.NewWithToken(f.url, nil, f.token)
-	directErr := direct.CreateNode(store.WithNodeClaimFence(ctx, f.fence), store.Node{RunID: "run-1", NodeID: "parent/direct", Status: "pending"})
-	brokeredErr := f.child.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "parent/brokered", Status: "pending"})
-	if (directErr == nil) != (brokeredErr == nil) || (brokeredErr != nil && strings.Contains(brokeredErr.Error(), brokerRefusal)) {
-		t.Fatalf("direct = %v, brokered = %v; the broker must forward a spawn for the controller to judge", directErr, brokeredErr)
+	if err := child.StartNode(ctx, "run-1", "parent/scan"); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
+		t.Errorf("start a node under this one = %v, want the broker's refusal", err)
 	}
 }
 
@@ -267,6 +235,7 @@ func TestBrokeredNodeAwaitsAChildRun(t *testing.T) {
 		{Pipeline: "child"},
 		{Pipeline: "child", ParentRunID: "run-2", ParentNodeID: "parent"},
 		{Pipeline: "child", ParentRunID: "run-1", ParentNodeID: "sibling"},
+		{Pipeline: "child", ParentRunID: "run-1", ParentNodeID: "parent/child"},
 	} {
 		if _, err := child.CreateTrigger(ctx, req); err == nil || !strings.Contains(err.Error(), brokerRefusal) {
 			t.Errorf("trigger %+v = %v, want the broker's refusal", req, err)

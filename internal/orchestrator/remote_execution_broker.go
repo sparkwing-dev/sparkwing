@@ -285,10 +285,9 @@ func (b *remoteExecutionBroker) putArtifact(r *http.Request, key string) error {
 	return b.artifact.Put(r.Context(), key, tmp)
 }
 
-// safety: {run} is this broker's run, {node} its node or one it spawned (node%2Fchild), {other} any
-// one-part node of the run, {spawned} any node id, {name} one segment, {name...} the rest. {other}
-// stays one part because an upstream decoding %2F would read a/metrics as another node's route;
-// a decoded {node} path stays inside the node's own subtree.
+// safety: {run} and {node} are this broker's run and node, {anyrun} any run, {other} any one-part
+// node of the run, {spawned} any node id, {name} one segment, {name...} the rest. {other} stays
+// one part because an upstream decoding %2F would read a/metrics as another node's route.
 type brokerRoute struct {
 	method, pattern string
 	check           func(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool
@@ -315,7 +314,6 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/heartbeat", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/oidc-token", nil},
-	{http.MethodPost, "/api/v1/runs/{run}/nodes", spawnedByThisNode},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/start", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/finish", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/deps", nil},
@@ -391,8 +389,7 @@ func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[s
 				return nil, false
 			}
 		case w == "{node}":
-			node, err := url.PathUnescape(got)
-			if err != nil || !b.ownNode(node) {
+			if got != url.PathEscape(b.nodeID) {
 				return nil, false
 			}
 		case w == "{anyrun}":
@@ -433,19 +430,6 @@ func runNodeID(id string) bool {
 	return true
 }
 
-// safety: a node spawned at run time is a row under the spawning node's id, so the node may
-// create and report it, and nothing outside its own subtree.
-func (b *remoteExecutionBroker) ownNode(id string) bool {
-	return id == b.nodeID || (strings.HasPrefix(id, b.nodeID+"/") && runNodeID(id))
-}
-
-func spawnedByThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
-	var node struct {
-		ID string `json:"id"`
-	}
-	return readBrokeredBody(r, &node) && node.ID != b.nodeID && b.ownNode(node.ID)
-}
-
 // safety: another run's record is readable for RunAndAwait and pipeline references, but its
 // unredacted secret arguments belong to that run's own nodes.
 func secretsOfThisRunOnly(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
@@ -460,13 +444,13 @@ func triggeredByThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string
 		ParentRunID  string `json:"parent_run_id"`
 		ParentNodeID string `json:"parent_node_id"`
 	}
-	return readBrokeredBody(r, &trigger) && trigger.ParentRunID == b.runID && b.ownNode(trigger.ParentNodeID)
+	return readBrokeredBody(r, &trigger) && trigger.ParentRunID == b.runID && trigger.ParentNodeID == b.nodeID
 }
 
 // safety: a retried node looks up the child its earlier attempt started, whose parent run is the
 // run this one retries, so only the parent node is bound.
 func spawnedChildOfThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
-	return b.ownNode(r.URL.Query().Get("parent_node_id"))
+	return r.URL.Query().Get("parent_node_id") == b.nodeID
 }
 
 func oneSegmentKey(_ *remoteExecutionBroker, _ *http.Request, segments map[string]string) bool {
@@ -483,16 +467,13 @@ func concurrencyForThisNode(b *remoteExecutionBroker, r *http.Request, segments 
 	if err != nil || key == "" || strings.Contains(key, "/") {
 		return false
 	}
-	ownHolder := func(holder string) bool {
-		node, ok := strings.CutPrefix(holder, b.runID+"/")
-		return ok && b.ownNode(node)
-	}
+	holder := b.runID + "/" + b.nodeID
 	action := r.URL.EscapedPath()[strings.LastIndex(r.URL.EscapedPath(), "/")+1:]
 	switch action {
 	case "holder":
-		return ownHolder(r.URL.Query().Get("holder_id"))
+		return r.URL.Query().Get("holder_id") == holder
 	case "resolve":
-		return r.URL.Query().Get("run_id") == b.runID && b.ownNode(r.URL.Query().Get("node_id"))
+		return r.URL.Query().Get("run_id") == b.runID && r.URL.Query().Get("node_id") == b.nodeID
 	}
 	var slot struct {
 		HolderID          string `json:"holder_id"`
@@ -504,13 +485,13 @@ func concurrencyForThisNode(b *remoteExecutionBroker, r *http.Request, segments 
 		return false
 	}
 	if action == "cancel-waiter" {
-		return slot.RunID == b.runID && b.ownNode(slot.NodeID)
+		return slot.RunID == b.runID && slot.NodeID == b.nodeID
 	}
-	if !ownHolder(slot.HolderID) {
+	if slot.HolderID != holder {
 		return false
 	}
 	if action == "acquire" {
-		return slot.RunID == b.runID && slot.HolderID == b.runID+"/"+slot.NodeID &&
+		return slot.RunID == b.runID && slot.NodeID == b.nodeID &&
 			slot.InheritedHolderID == ""
 	}
 	return true

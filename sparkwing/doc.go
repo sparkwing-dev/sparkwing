@@ -22,8 +22,8 @@
 // # Building Plans and Work
 //
 // Use [Job] to attach a job to a Plan. Use [JobApproval] for human
-// gates and [JobSpawn] / [JobSpawnEach] for dynamic expansion at
-// dispatch time. Inside a multi-step job, use [Step] on the supplied
+// gates and [JobFanOutDynamic] for children decided by an upstream
+// job's output at dispatch time. Inside a multi-step job, use [Step] on the supplied
 // [Work] and order with [WorkStep.Needs] or [GroupSteps]. Cross-step
 // data flow is via typed [Ref] values returned by [RefTo].
 //

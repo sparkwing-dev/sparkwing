@@ -983,6 +983,122 @@ argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
 - **Author steps:** settle a node with `FinalizeNodeCredits`; generate a release
   seed as described above under `cmd/sign-manifest is removed`.
 
+## JobSpawn and JobSpawnEach are removed
+
+**Before:** a step graph inserted Plan nodes while it ran. `JobSpawn`
+added one child named `parent/id`, and `JobSpawnEach` one per item; the
+parent's runner stayed suspended until every child finished.
+
+```go
+func (j *Scan) Work(w *sw.Work) (*sw.WorkStep, error) {
+    list := sw.Step(w, "list", j.listTargets)
+    sw.JobSpawnEach(w, j.targets, func(t string) (string, any) {
+        return "scan-" + t, &ScanTarget{Target: t}
+    }).Needs(list)
+    return nil, nil
+}
+```
+
+**After:** Jobs are added on the Plan. A Job produces the item list, and
+`JobFanOutDynamic` creates one child per item once it succeeds; the
+source's runner exits first.
+
+```go
+type ListTargets struct {
+    sw.Base
+    sw.Produces[[]string]
+}
+
+func (j *ListTargets) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "list", j.list), nil // func(ctx) ([]string, error)
+}
+
+func (Scan) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    list := sw.Job(plan, "list", &ListTargets{})
+    sw.JobFanOutDynamic(plan, "scan", list, func(t string) (string, any) {
+        return "scan-" + t, &ScanTarget{Target: t}
+    })
+    return nil
+}
+```
+
+**Author steps:**
+
+- A single `JobSpawn(w, id, job)` becomes `sw.Job(plan, id, job)` with
+  `.Needs(...)` on the Job that ran the steps before it. Steps after the
+  spawn move into a Job that `Needs` the new one, and read its output
+  with `sw.RefTo[T](node)`.
+- A `JobSpawnEach` becomes the Plan shape above.
+- `SkipIf` on a spawn becomes `SkipIf` on the new Job.
+- Child node ids lose the `parent/` prefix; update anything that reads
+  runs by node id, such as `--sw-only` globs and dashboards.
+
+Tools that read plan snapshots, `pipeline plan --json` or the run API's
+`work` object stop seeing `spawns`, `spawn_each`, `cardinality` and
+`cardinality_source`, and the `spawn_dispatched` event is no longer
+written.
+
+## The job-args schema builder is removed
+
+**Before:** a job embedding `sparkwing.WithArgs[T]` turned every exported
+field of `T` into a kebab-cased flag, and declared constraints in Go
+through a `Schema()` method built with `sparkwing.NewSchema[T]()`.
+`sparkwing.Arg[T]` and `ArgOrDefault` read any job's arg by flag name.
+
+```go
+type DeployArgs struct {
+    Replicas int
+    Image    string
+    Strategy string
+}
+
+func (DeployJob) Schema() (*sparkwing.Schema, error) {
+    s := sparkwing.NewSchema[DeployArgs]()
+    s.Field("Replicas").Default(3)
+    s.Field("Image").Required()
+    s.Field("Strategy").Default("rolling").OneOf("rolling", "recreate")
+    return s.Build()
+}
+```
+
+**After:** `T` uses the pipeline Inputs tags, and only `flag:`-tagged
+fields are flags. Required, default and enum checks run before any step,
+as they do for Inputs.
+
+```go
+type DeployArgs struct {
+    Replicas int    `flag:"replicas" default:"3"`
+    Image    string `flag:"image" required:"true"`
+    Strategy string `flag:"strategy" default:"rolling" enum:"rolling,recreate"`
+}
+```
+
+**Author steps:**
+
+1. Add a `flag:"name"` tag to every `T` field that should stay a flag,
+   using the kebab-cased name the field had (`MainSourceRoot` was
+   `--main-source-root`). An untagged field now fails as an unknown flag
+   when passed.
+2. Move constraints into tags and delete the `Schema()` method:
+
+| Removed | Use instead |
+|---|---|
+| `.Required()` | `required:"true"` |
+| `.Default(v)` | `default:"v"` |
+| `.OneOf(a, b)` | `enum:"a,b"` (string fields; needs `default` or `required`) |
+| `.Min`, `.Max`, `.Range`, `.Positive`, `.Custom` | check the value at the top of the step and return an error |
+| `.Computed(fn)`, `.DependsOn` | compute the value inside the step from `j.Args(ctx)` |
+| `.RequiredWhen(p)`, `Group(...)`, predicates | validate the combination inside the step and return an error |
+| `.Bind("target")` | a `flag:"target"` tag; `Bind` only checked its argument |
+| `sparkwing.Arg[T](ctx, flag)`, `ArgOrDefault` | `j.Args(ctx)` on the job that declares the flag, or a pipeline Inputs field read in `Plan` |
+
+Move a `secret:"true"` arg to the pipeline's Inputs: the run masks only
+pipeline secrets, so a job secret panics at registration.
+
+Tools that read `Plan.TransitiveArgsSurface` or `JobArgSchemas` use
+`Plan.JobArgs`, which returns `DescribeArg` records stamped with the
+owning job id.
+
 ## Six unused SDK names are removed
 
 **Before:** the `sparkwing` package exported `Cache`, `Logs` and `State` (type

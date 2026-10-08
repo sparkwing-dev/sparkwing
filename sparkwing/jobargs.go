@@ -1,55 +1,19 @@
 package sparkwing
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
 
-// SchemaProvider is the optional interface a job implements to declare
-// its typed args' constraints. Jobs that only need plain optional
-// flags (zero constraints, just types) can skip it -- the framework
-// synthesizes a zero-constraint schema from the embedded WithArgs[T]'s
-// type via reflection.
-//
-//	func (DeployJob) Schema() (*sparkwing.Schema, error) {
-//	    s := sparkwing.NewSchema[DeployArgs]()
-//	    s.Field("Replicas").Required().Range(1, 100)
-//	    return s.Build()
-//	}
-//
-// Return (nil, nil) to opt out -- treated identically to not
-// implementing the interface at all.
-type SchemaProvider interface {
-	Schema() (*Schema, error)
-}
-
-// JobArgSchemas returns every job-args schema registered against this
-// plan, keyed by node id. The CLI flag registrar walks this map to
-// build the union of all args a pipeline exposes; integration callers
-// in internal/orchestrator consume the same map during dispatch.
-//
-// Nodes whose job doesn't embed WithArgs[T] are absent from the map
-// rather than mapping to nil -- the absence carries the meaning.
-func (p *Plan) JobArgSchemas() map[string]*Schema {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.jobArgs) == 0 {
-		return nil
-	}
-	out := make(map[string]*Schema, len(p.jobArgs))
-	for id, s := range p.jobArgs {
-		out[id] = s
-	}
-	return out
-}
-
-// JobArgSchema returns the args schema for the named job, or nil
-// when that job doesn't declare typed args.
-func (p *Plan) JobArgSchema(id string) *Schema {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.jobArgs[id]
+type jobArgsDecl struct {
+	jobID  string
+	schema InputSchema
+	goType reflect.Type
+	holder argsHolder
 }
 
 func registerJobArgs(p *Plan, id string, jobValue any) {
@@ -57,108 +21,88 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 	if holder == nil || argsType == nil {
 		return
 	}
-	var (
-		schema *Schema
-		err    error
-	)
-	if sp, ok := jobValue.(SchemaProvider); ok {
-		schema, err = sp.Schema()
-		if err != nil {
-			panic(fmt.Sprintf("sparkwing: Job(%q): Schema() returned error: %v", id, err))
+	schema, err := parseInputsSchema(argsType)
+	if err != nil {
+		panic(fmt.Sprintf("sparkwing: Job(%q): invalid WithArgs[%s]: %v", id, argsType, err))
+	}
+	for _, f := range schema.Fields {
+		if f.isExtraBag {
+			panic(fmt.Sprintf("sparkwing: Job(%q): WithArgs[%s] field %s: flag:\",extra\" is only supported on pipeline Inputs", id, argsType, f.GoName))
 		}
-		if schema != nil && schema.goType != argsType {
-			panic(fmt.Sprintf(
-				"sparkwing: Job(%q): Schema() returned schema for %s but WithArgs is parameterized on %s",
-				id, schema.goType, argsType,
-			))
+		// safety: secret masking reads the pipeline Inputs schema before the
+		// plan exists, so a job-level secret would reach the logs unmasked.
+		if f.Secret {
+			panic(fmt.Sprintf("sparkwing: Job(%q): WithArgs[%s] field %s: secret:\"true\" is only supported on pipeline Inputs", id, argsType, f.GoName))
 		}
-	}
-	if schema == nil {
-		schema, err = NewSchemaFromType(argsType)
-		if err != nil {
-			panic(fmt.Sprintf("sparkwing: Job(%q): synthesize schema for %s: %v", id, argsType, err))
-		}
-	}
-
-	if err := assertNoFlagCollisions(p, id, schema); err != nil {
-		panic(fmt.Sprintf("sparkwing: Job(%q): %v", id, err))
-	}
-
-	if p.jobArgs == nil {
-		p.jobArgs = make(map[string]*Schema)
-	}
-	p.jobArgs[id] = schema
-}
-
-func assertNoFlagCollisions(p *Plan, newID string, newSchema *Schema) error {
-	if newSchema == nil {
-		return nil
-	}
-	owned := make(map[string]string, 16)
-	for priorID, priorSchema := range p.jobArgs {
-		for _, m := range priorSchema.fields {
-			if m.Flag != "" {
-				owned[m.Flag] = priorID
+		for _, prior := range p.jobArgs {
+			for _, pf := range prior.schema.Fields {
+				if pf.Name == f.Name {
+					panic(fmt.Sprintf(
+						"sparkwing: Job(%q): flag --%s declared by both job %q and job %q; "+
+							"rename one with a `flag:\"...\"` tag",
+						id, f.Name, prior.jobID, id,
+					))
+				}
+				if f.Short != "" && pf.Short == f.Short {
+					panic(fmt.Sprintf("sparkwing: Job(%q): short -%s declared by both job %q and job %q", id, f.Short, prior.jobID, id))
+				}
 			}
 		}
 	}
-	for _, m := range newSchema.fields {
-		if m.Flag == "" {
-			continue
-		}
-		if priorID, dup := owned[m.Flag]; dup {
-			return fmt.Errorf(
-				"flag --%s declared by both job %q and job %q; "+
-					"rename one field or add a `flag:\"...\"` tag to disambiguate",
-				m.Flag, priorID, newID,
-			)
-		}
-	}
-	return nil
+	p.jobArgs = append(p.jobArgs, jobArgsDecl{jobID: id, schema: schema, goType: argsType, holder: holder})
 }
 
-// TransitiveArgsSurface returns the deduplicated map of every flag
-// the plan exposes (across all its jobs that declare args), keyed by
-// flag name with the owning job id. Used by the CLI flag registrar
-// (task #31) and `pipeline describe --args` (a Tier 2 feature). A
-// pipeline that contains zero arg-declaring jobs returns nil.
-//
-// The map is stable across calls for the same Plan -- registration
-// is plan-time and we don't allow late additions to JobArgs.
-func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg {
+// JobArgs returns the flags that jobs embedding [WithArgs] add to the
+// pipeline, in registration order, each stamped with its owning job id.
+// The describe cache, --help renderer and completion read this so job
+// flags share the envelope of pipeline-level Inputs fields.
+func (p *Plan) JobArgs() []DescribeArg {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.jobArgs) == 0 {
-		return nil
-	}
-	out := make(map[string]TransitiveArg, 16)
-	for jobID, s := range p.jobArgs {
-		for _, m := range s.fields {
-			if m.Flag == "" {
-				continue
-			}
-			out[m.Flag] = TransitiveArg{
-				Flag:      m.Flag,
-				JobID:     jobID,
-				FieldName: m.Name,
-				Desc:      m.Desc,
-				Schema:    s,
-			}
+	var out []DescribeArg
+	for _, d := range p.jobArgs {
+		for _, f := range d.schema.Fields {
+			out = append(out, DescribeArg{
+				Name:     f.Name,
+				GoName:   f.GoName,
+				Short:    f.Short,
+				Type:     f.Type,
+				Required: f.Required,
+				Desc:     f.Description,
+				Default:  f.Default,
+				Enum:     f.Enum,
+				JobID:    d.jobID,
+			})
 		}
 	}
 	return out
 }
 
-// TransitiveArg is one entry in [Plan.TransitiveArgsSurface]: the
-// flag, the job that owns it, the underlying Go field, and the
-// schema for resolving its value. Carries enough to render the
-// CLI --help and the describe-tree view.
-type TransitiveArg struct {
-	Flag      string
-	JobID     string
-	FieldName string
-	Desc      string
-	Schema    *Schema
+// safety: the CLI maps every flag and alias of the pipeline and its jobs
+// into one table, so a shared name would silently route a value to one owner.
+func assertJobArgsDisjoint(p *Plan, pipe InputSchema) error {
+	names := map[string]bool{}
+	shorts := map[string]string{}
+	for _, f := range pipe.Fields {
+		if f.isExtraBag {
+			continue
+		}
+		names[f.Name] = true
+		if f.Short != "" {
+			shorts[f.Short] = f.Name
+		}
+	}
+	for _, d := range p.jobArgs {
+		for _, f := range d.schema.Fields {
+			if names[f.Name] {
+				return fmt.Errorf("job %q declares --%s, which the pipeline Inputs already declare", d.jobID, f.Name)
+			}
+			if prior, dup := shorts[f.Short]; f.Short != "" && dup {
+				return fmt.Errorf("job %q declares -%s for --%s, which the pipeline Inputs already use for --%s", d.jobID, f.Short, f.Name, prior)
+			}
+		}
+	}
+	return nil
 }
 
 func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
@@ -166,22 +110,16 @@ func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
 		return nil
 	}
 	known := map[string]bool{}
-	for _, s := range p.jobArgs {
-		if s == nil {
-			continue
-		}
-		for _, m := range s.fields {
-			if m.Flag != "" {
-				known[m.Flag] = true
-			}
+	for _, d := range p.jobArgs {
+		for _, f := range d.schema.Fields {
+			known[f.Name] = true
 		}
 	}
 	var unknown []string
 	for k := range extra {
-		if known[k] {
-			continue
+		if !known[k] {
+			unknown = append(unknown, k)
 		}
-		unknown = append(unknown, k)
 	}
 	if len(unknown) == 0 {
 		return nil
@@ -193,25 +131,47 @@ func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
 	return fmt.Errorf("unknown flags: --%s", strings.Join(unknown, ", --"))
 }
 
-func (p *Plan) setResolvedArgs(m map[string]any) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.resolvedArgs = m
-}
-
-// ResolvedArgs returns the merged map of every job's typed-args
-// resolution result, keyed by CLI flag name. Nil before
-// [resolveAndBindJobArgs] runs; otherwise a shallow copy callers
-// can read freely without locking.
-func (p *Plan) ResolvedArgs() map[string]any {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.resolvedArgs) == 0 {
+func resolveAndBindJobArgs(p *Plan, args map[string]string) error {
+	if p == nil {
 		return nil
 	}
-	out := make(map[string]any, len(p.resolvedArgs))
-	for k, v := range p.resolvedArgs {
-		out[k] = v
+	var problems []error
+	for _, d := range p.jobArgs {
+		own := make(map[string]string, len(d.schema.Fields))
+		for _, f := range d.schema.Fields {
+			if v, ok := args[f.Name]; ok {
+				own[f.Name] = v
+			}
+		}
+		val := reflect.New(d.goType).Elem()
+		if err := populateInputs(d.schema, val, own); err != nil {
+			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
+			continue
+		}
+		if err := d.holder.BindFromAny(val.Interface()); err != nil {
+			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
+		}
 	}
-	return out
+	return errors.Join(problems...)
+}
+
+type keySkipArgResolveType struct{}
+
+var keySkipArgResolve = keySkipArgResolveType{}
+
+// SkipArgResolve marks ctx so a registration's Invoke builds the plan
+// without resolving and binding [WithArgs] values. Describe-time
+// callers use it to walk the plan graph without failing on missing
+// required job args; run paths never set it, so a missing required
+// arg fails before any step runs.
+func SkipArgResolve(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keySkipArgResolve, true)
+}
+
+func skipArgResolveFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(keySkipArgResolve).(bool)
+	return v
 }

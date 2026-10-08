@@ -28,7 +28,7 @@ func testExecutionPolicy() NodeExecutionPolicy {
 			Source: NodeBodySourceAuthority{Kind: "git", Identity: strings.Repeat("b", 40), ManifestDigest: digest, PlanDigest: digest},
 		},
 		Actions: []NodeExecutionGrant{
-			{GrantID: "spawn-release", Kind: NodeExecutionActionSpawn, Spawn: &NodeSpawnGrant{SpawnID: "notify", TargetWorkIdentity: digest, MaxChildren: 1}},
+			{GrantID: "ref-release", Kind: NodeExecutionActionRef, Ref: &NodeRefGrant{Pipeline: "release", NodeID: "notify", MaxBytes: 1 << 10}},
 			{GrantID: "tool-docker", Kind: NodeExecutionActionToolSlot, ToolSlot: &NodeToolSlotGrant{Group: "docker", Scope: "box", Capacity: 100, OnLimit: "queue", MaxCost: 1}},
 		},
 	}

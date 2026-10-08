@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"runtime"
 	"testing"
@@ -55,74 +54,6 @@ func TestProcessNodeAccountingRequiresExactOwnership(t *testing.T) {
 				if (sample.Kind == store.MetricInterval) != measured {
 					t.Fatalf("owned=%t produced sample %+v", tc.owned, sample)
 				}
-			}
-		})
-	}
-}
-
-func TestSpawnAccountingFailureAllowsChildAndMarksParent(t *testing.T) {
-	for _, failure := range []error{errors.New("parent marker rejected"), store.ErrNodeMetricLimit} {
-		t.Run(failure.Error(), func(t *testing.T) {
-			st, handler := nodeSpawnFixture(t, "spawn-metric-failure", nil)
-			metrics := &rejectParentMarker{localState: localState{st: st}, failure: failure}
-			handler.backends.State = metrics
-			backends := handler.backends
-			bodies := 0
-			node := sparkwing.Job(sparkwing.NewPlan(), "parent", func(ctx context.Context) error {
-				bodies++
-				for range 100 {
-					if _, err := sparkwing.Exec(ctx, "true").Run(); err != nil { //nolint:contextcheck // safety: Exec stores ctx; Run takes no context argument.
-						return err
-					}
-				}
-				_, err := handler.Spawn(ctx, "parent", "child", nodeSpawnOKChild{})
-				return err
-			}).Retry(1, sparkwing.RetryAuto())
-			ctx := t.Context()
-			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
-			result := NewNodeExecutor(backends).RunNode(ctx, runner.Request{RunID: "spawn-metric-failure", NodeID: "parent", Node: node})
-			if result.Err != nil || !result.Outcome.OK() || bodies != 1 {
-				t.Fatalf("parent=%+v bodies=%d", result, bodies)
-			}
-			child, err := st.GetNode(ctx, "spawn-metric-failure", "parent/child")
-			if err != nil || child.Outcome != "success" {
-				t.Fatalf("child=%+v err=%v", child, err)
-			}
-			samples, err := st.ListNodeMetrics(ctx, "spawn-metric-failure", "parent")
-			if err != nil {
-				t.Fatal(err)
-			}
-			unknown := false
-			for _, sample := range samples {
-				unknown = unknown || sample.Kind == store.MetricUnknown
-			}
-			if metrics.markers != 3 {
-				t.Fatalf("parent marker attempts=%d; want initial, spawn, and finish", metrics.markers)
-			}
-			if !unknown {
-				t.Fatalf("parent samples=%+v; want unknown", samples)
-			}
-
-			events, err := st.ListEventsAfter(ctx, "spawn-metric-failure", 0, 1000)
-			if err != nil {
-				t.Fatal(err)
-			}
-			losses := 0
-			for _, event := range events {
-				if event.Kind != "resource_samples_incomplete" && event.Kind != "metrics_partial" {
-					continue
-				}
-				losses++
-				var payload struct{ Lost, Attempted int64 }
-				if err := json.Unmarshal(event.Payload, &payload); err != nil {
-					t.Fatal(err)
-				}
-				if payload.Lost != 0 || payload.Attempted != 100 {
-					t.Fatalf("marker changed delivery counts: %s", event.Payload)
-				}
-			}
-			if losses != 1 {
-				t.Fatalf("marker loss events=%d; want 1", losses)
 			}
 		})
 	}
@@ -197,20 +128,4 @@ func metricExecutionFixture(t *testing.T) (*store.Store, Backends) {
 		t.Fatal(err)
 	}
 	return st, LocalBackends(paths, st, nil)
-}
-
-type rejectParentMarker struct {
-	localState
-	markers int
-	failure error
-}
-
-func (s *rejectParentMarker) AddNodeMetricSample(ctx context.Context, run, node string, sample store.MetricSample) error {
-	if node == "parent" && sample.Kind == store.MetricUnknown {
-		s.markers++
-		if s.markers <= 2 {
-			return s.failure
-		}
-	}
-	return s.localState.AddNodeMetricSample(ctx, run, node, sample)
 }
