@@ -222,11 +222,14 @@ func TestWalkRunPagesFindsAMatchBehindFullPagesOfMisses(t *testing.T) {
 		runs, err := st.ListRuns(context.Background(), f)
 		return orchestrator.TagShared(runs), len(runs) < f.Limit, err
 	}
-	var got []string
 	keep := func(r *store.Run) bool { return r.ID == "run-0" || r.ID == "run-1" }
-	err = walkRunPages(store.RunFilter{Limit: 2}, 5, fetch, keep, func(r orchestrator.TaggedRun) { got = append(got, r.ID) })
+	kept, err := walkRunPages(store.RunFilter{Limit: 2}, 5, fetch, keep)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range kept {
+		got = append(got, r.ID)
 	}
 	if strings.Join(got, ",") != "run-1,run-0" {
 		t.Fatalf("walk kept %v, want the two oldest runs found behind pages of misses", got)
@@ -254,5 +257,34 @@ func TestRemoteFailuresStopOnAShortPageWithoutACursor(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].ID != "run-old" {
 		t.Fatalf("rows = %+v, want the one failed run", rows)
+	}
+}
+
+func TestWalkRunPagesKeepsOneRowPerRunPreferringTheSharedCopy(t *testing.T) {
+	now := time.Now()
+	row := func(id, label string, at time.Time) orchestrator.TaggedRun {
+		return orchestrator.TaggedRun{Run: &store.Run{ID: id, StartedAt: at}, Store: label}
+	}
+	for name, pages := range map[string][][]orchestrator.TaggedRun{
+		"shared copy first": {{row("run-x", orchestrator.SharedStoreLabel, now)}, {row("run-x", "standalone/a", now.Add(-time.Minute))}},
+		"shared copy later": {{row("run-x", "standalone/a", now)}, {row("run-x", orchestrator.SharedStoreLabel, now.Add(-time.Minute))}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			call := 0
+			fetch := func(store.RunFilter) ([]orchestrator.TaggedRun, bool, error) {
+				if call >= len(pages) {
+					return nil, true, nil
+				}
+				call++
+				return pages[call-1], false, nil
+			}
+			kept, err := walkRunPages(store.RunFilter{Limit: 1}, 10, fetch, func(*store.Run) bool { return true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(kept) != 1 || kept[0].Store != orchestrator.SharedStoreLabel {
+				t.Fatalf("kept %+v, want the run once, from the shared store", kept)
+			}
+		})
 	}
 }

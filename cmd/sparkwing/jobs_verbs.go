@@ -72,12 +72,13 @@ func collectLocalFailures(
 		exhausted := f.Limit > 0 && len(runs) < f.Limit && len(others) < f.Limit
 		return orchestrator.MergeTaggedRuns(append(orchestrator.TagShared(runs), others...)), exhausted, nil
 	}
-	var rows []failureRow
-	err = walkRunPages(filter, limit, fetch, keep, func(r orchestrator.TaggedRun) {
-		rows = append(rows, failureRowFor(ctx, standalone, st, r))
-	})
+	kept, err := walkRunPages(filter, limit, fetch, keep)
 	if err != nil {
 		return nil, nil, err
+	}
+	rows := make([]failureRow, 0, len(kept))
+	for _, r := range kept {
+		rows = append(rows, failureRowFor(ctx, standalone, st, r))
 	}
 	return rows, standalone.Notes(), nil
 }
@@ -91,32 +92,41 @@ func walkRunPages(
 	limit int,
 	fetch func(store.RunFilter) (page []orchestrator.TaggedRun, exhausted bool, err error),
 	keep func(*store.Run) bool,
-	emit func(orchestrator.TaggedRun),
-) error {
-	kept := 0
+) ([]orchestrator.TaggedRun, error) {
+	var kept []orchestrator.TaggedRun
+	// safety: a run held in the shared and a standalone store under different
+	// start times lands on two pages; the walk keeps one row per id, the
+	// shared copy when both appear, as one merged page would.
+	at := map[string]int{}
 	for {
 		page, exhausted, err := fetch(filter)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if filter.Limit > 0 && len(page) > filter.Limit {
 			page = page[:filter.Limit]
 		}
 		if len(page) == 0 {
-			return nil
+			return kept, nil
 		}
 		for _, r := range page {
 			if !keep(r.Run) {
 				continue
 			}
-			emit(r)
-			kept++
-			if limit > 0 && kept == limit {
-				return nil
+			if i, seen := at[r.ID]; seen {
+				if kept[i].Store != orchestrator.SharedStoreLabel && r.Store == orchestrator.SharedStoreLabel {
+					kept[i] = r
+				}
+				continue
+			}
+			at[r.ID] = len(kept)
+			kept = append(kept, r)
+			if limit > 0 && len(kept) == limit {
+				return kept, nil
 			}
 		}
 		if exhausted {
-			return nil
+			return kept, nil
 		}
 		last := page[len(page)-1]
 		filter.AfterID = last.ID
@@ -168,8 +178,12 @@ func collectRemoteFailures(ctx context.Context, controllerURL, token string, fil
 		}
 		return orchestrator.TagShared(runs), f.Limit > 0 && len(runs) < f.Limit, nil
 	}
-	var rows []failureRow
-	err := walkRunPages(filter, limit, fetch, keep, func(tagged orchestrator.TaggedRun) {
+	kept, err := walkRunPages(filter, limit, fetch, keep)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]failureRow, 0, len(kept))
+	for _, tagged := range kept {
 		r := tagged.Run
 		row := failureRow{
 			ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status,
@@ -189,9 +203,6 @@ func collectRemoteFailures(ctx context.Context, controllerURL, token string, fil
 			row.Message = truncateOneLine(r.Error, 160)
 		}
 		rows = append(rows, row)
-	})
-	if err != nil {
-		return nil, err
 	}
 	return rows, nil
 }
