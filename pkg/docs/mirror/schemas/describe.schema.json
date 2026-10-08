@@ -149,10 +149,24 @@
         "dynamic": { "type": "boolean" },
         "approval": { "$ref": "#/$defs/approval" },
         "on_failure_of": { "type": "string" },
-        "modifiers": { "$ref": "#/$defs/modifiers" },
+        "dirCache": {
+      "type": "object",
+      "description": "One CacheDir declaration as the Go SDK serializes it today.",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "resolver": { "type": "string", "enum": ["gomod", "npm"] },
+        "key_scope": { "type": "string" },
+        "key_files": { "type": ["array", "null"], "items": { "type": "string" } }
+      },
+      "required": ["name", "key_files"],
+      "additionalProperties": false
+    },
+    "modifiers": { "$ref": "#/$defs/modifiers" },
         "work": { "$ref": "#/$defs/work" },
         "spec_hash": { "type": "string" },
         "pipeline_refs": { "type": "array", "items": { "$ref": "#/$defs/pipelineRef" } },
+        "dir_caches": { "type": "array", "items": { "$ref": "#/$defs/dirCache" }, "description": "Today: dependency-cache directories declared with CacheDir; the engine's node executor restores them before the node starts and saves them after it succeeds." },
         "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Target: dependency-cache directories the host restores before the node starts and saves after it succeeds." },
         "memo_key": { "$ref": "#/$defs/memoKey", "description": "Target: declarative memo key inputs the host hashes." },
         "closures": { "$ref": "#/$defs/closures", "description": "Target: ids of the closures the host asks the SDK to evaluate." },
