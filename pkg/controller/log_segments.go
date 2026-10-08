@@ -184,6 +184,9 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	attempt, generation, err := s.store.CurrentNodeAttempt(r.Context(), team, runID, nodeID)
+	if fence, ok := store.TriggerClaimFenceFromContext(r.Context()); ok && errors.Is(err, store.ErrNotFound) && nodeID == store.CompileLogNode {
+		attempt, generation, err = 1, fence.ClaimGeneration, nil
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -196,10 +199,15 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, errors.New("the claim no longer holds this node"))
 		return
 	}
-	if req.Attempt != 0 && (req.Attempt != attempt || req.Generation != generation) {
-		writeError(w, http.StatusConflict, fmt.Errorf("attempt %d generation %d is superseded by attempt %d generation %d",
-			req.Attempt, req.Generation, attempt, generation))
-		return
+	// safety: a writer keeps the attempt its first grant named, so an execution that retries in its own
+	// process goes on writing one log; a claim of another generation has fenced it out.
+	if req.Attempt != 0 {
+		if req.Generation != generation || req.Attempt > attempt {
+			writeError(w, http.StatusConflict, fmt.Errorf("attempt %d generation %d is superseded by attempt %d generation %d",
+				req.Attempt, req.Generation, attempt, generation))
+			return
+		}
+		attempt = req.Attempt
 	}
 	prefix, err := logseg.AttemptPrefix(s.logClass(r.Context(), team), string(team), runID, nodeID, attempt, generation)
 	if err != nil {

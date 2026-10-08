@@ -113,6 +113,47 @@ func (l *liveLogs) Append(runID, nodeID string, data []byte) {
 	l.broadcastLocked(r)
 }
 
+// AppendAt adds data that begins at byte offset off of the node's log.
+// A writer that numbers its bytes this way lets a reader join the ring
+// to the log's durable segments by offset: bytes the ring already holds
+// are skipped, and an offset past the ring's end starts the ring over
+// there, which a reader sees as a gap.
+func (l *liveLogs) AppendAt(runID, nodeID string, off int64, data []byte) {
+	if len(data) == 0 || off < 0 {
+		return
+	}
+	key := liveKey{runID, nodeID}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.clock()
+	l.sweepLocked(now)
+	r := l.nodes[key]
+	if r == nil {
+		l.makeRoomLocked()
+		r = &liveRing{start: off, updated: make(chan struct{})}
+		l.nodes[key] = r
+	}
+	end := r.start + int64(len(r.buf))
+	switch {
+	case off > end:
+		l.total -= int64(len(r.buf))
+		r.buf, r.start = r.buf[:0], off
+	case off < end:
+		skip := end - off
+		if skip >= int64(len(data)) {
+			r.touched = now
+			return
+		}
+		data = data[skip:]
+	}
+	r.buf = append(r.buf, data...)
+	l.total += int64(len(data))
+	r.touched = now
+	l.trimNodeLocked(r)
+	l.trimTotalLocked()
+	l.broadcastLocked(r)
+}
+
 // Finish marks a node's ring complete. Readers still draining it see
 // the end of the stream, and the sweep releases it shortly after.
 func (l *liveLogs) Finish(runID, nodeID string) {

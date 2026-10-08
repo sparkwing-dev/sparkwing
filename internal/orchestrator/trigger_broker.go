@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -36,6 +37,7 @@ type TriggerBroker struct {
 	pipeline      string
 	controller    *httputil.ReverseProxy
 	logs          *httputil.ReverseProxy
+	sinks         *nodeLogSinks
 	logger        *slog.Logger
 
 	mu       sync.Mutex
@@ -66,6 +68,7 @@ func StartTriggerBroker(controllerURL, logsURL, upstreamToken string, trigger *s
 		listener: listener, capability: base64.RawURLEncoding.EncodeToString(raw),
 		upstreamToken: upstreamToken, runID: trigger.ID, retryOf: trigger.RetryOf, pipeline: trigger.Pipeline,
 		controller: brokerProxy(controllerTarget, logger), logger: logger,
+		sinks:    newNodeLogSinks(client.NewWithToken(controllerURL, nil, upstreamToken), trigger.ID, logger),
 		children: map[string]bool{}, refRuns: map[string]bool{},
 	}
 	b.logs = b.controller
@@ -102,13 +105,22 @@ func (b *TriggerBroker) URL() string { return "http://" + b.listener.Addr().Stri
 // Capability is the bearer the child presents to the broker.
 func (b *TriggerBroker) Capability() string { return b.capability }
 
-// Close stops the broker; the capability dies with it.
+// SealLogs seals every node log the child wrote as segments; stopped
+// reports a child that did not exit on its own, whose unsealed logs read
+// as cut off. Call it once the child has exited.
+func (b *TriggerBroker) SealLogs(ctx context.Context, stopped bool) {
+	b.sinks.closeAll(ctx, stopped)
+}
+
+// Close stops the broker; the capability dies with it. Logs SealLogs did
+// not seal are sealed as stopped.
 func (b *TriggerBroker) Close(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	if err := b.server.Shutdown(ctx); err != nil {
+	if err := b.server.Shutdown(shutdownCtx); err != nil {
 		b.logger.Warn("trigger broker shutdown incomplete", "run_id", b.runID, "err", err)
 	}
+	b.sinks.closeAll(ctx, true)
 }
 
 func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -135,11 +147,16 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "trigger capability does not allow this route", http.StatusForbidden)
 		return
 	}
-	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
 	if logs {
+		if sink := b.sinks.forRequest(r.Context(), r); sink != nil {
+			sink.ServeHTTP(w, r)
+			return
+		}
+		r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
 		b.logs.ServeHTTP(w, r)
 		return
 	}
+	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
 	b.controller.ServeHTTP(w, r)
 }
 

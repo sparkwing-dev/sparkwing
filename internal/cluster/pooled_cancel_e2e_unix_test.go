@@ -47,22 +47,22 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ctrlHTTP := httptest.NewServer(controller.New(st, nil).Handler())
+	started := make(chan struct{})
+	var once sync.Once
+	ctrlHandler := controller.New(st, nil).Handler()
+	ctrlHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctrlHandler.ServeHTTP(w, r)
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/r1/nodes/n1/logs" {
+			once.Do(func() { close(started) })
+		}
+	}))
 	t.Cleanup(ctrlHTTP.Close)
 	ctrl := client.New(ctrlHTTP.URL, nil)
 	logSrv, err := logs.New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := make(chan struct{})
-	var once sync.Once
-	logHandler := logSrv.Handler()
-	logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logHandler.ServeHTTP(w, r)
-		if r.Method == http.MethodPost {
-			once.Do(func() { close(started) })
-		}
-	}))
+	logsHTTP := httptest.NewServer(logSrv.Handler())
 	t.Cleanup(logsHTTP.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

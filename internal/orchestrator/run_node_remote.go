@@ -223,11 +223,11 @@ func runNodeChild(
 	}
 	defer broker.Close()
 	childLogsURL := ""
-	if logsURL != "" {
-		childLogsURL = broker.URL()
-	} else if sink := openNodeLogSink(ctx, client.NewWithToken(controllerURL, nil, token), runID, nodeID, logger); sink != nil {
+	if sink := openNodeLogSink(ctx, client.NewWithToken(controllerURL, nil, token), runID, nodeID, logger); sink != nil {
 		defer sink.close(ctx, true)
 		broker.logSink = sink
+		childLogsURL = broker.URL()
+	} else if logsURL != "" {
 		childLogsURL = broker.URL()
 	}
 	childBaseEnv, err := remoteExecutionChildEnvironment(os.Environ())

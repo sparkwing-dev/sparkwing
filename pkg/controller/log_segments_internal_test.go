@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -192,5 +193,132 @@ func TestControllerSealsAnAttemptItsRunnerAbandoned(t *testing.T) {
 	}
 	if left, _ := f.srv.logObjects().List(ctx, rec.Prefix); len(left) != 0 {
 		t.Fatalf("deleting the run left its log objects: %v", left)
+	}
+}
+
+// A viewer of a running segment node sees the segments uploaded so far
+// and then the live ring from the byte where they end, each line once,
+// until the manifest ends the stream.
+func TestSegmentStreamJoinsTheLiveRingByOffset(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	up := client.NewWithToken(f.url, nil, tok).NewLogSegmentUploader(ctx, "run-d", "a")
+	if err := up.Open(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stored := make(chan int, 64)
+	s, err := logseg.NewSink(ctx, signalUploader{LogSegmentUploader: up, stored: stored}, logseg.Options{
+		Run: "run-d", Node: "a", SpoolDir: t.TempDir(), SegmentBytes: 16,
+		Live: func(off int64, data []byte) { f.srv.liveLogs.AppendAt("run-d", "a", off, data) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for i := 1; i <= 5; i++ {
+		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, strings.TrimSuffix(logLine(i), "\n"))
+	}
+	for n := range stored {
+		if n >= 2 {
+			break
+		}
+	}
+	body, err := f.srv.dashboardLogs(store.DefaultTeam).Stream(ctx, "run-d", "a")
+	if err != nil || body == nil {
+		t.Fatalf("stream = %v, %v", body, err)
+	}
+	defer func() { _ = body.Close() }()
+	lines := bufio.NewScanner(body)
+	var got []string
+	next := func() (string, bool) {
+		for lines.Scan() {
+			if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+				return data, true
+			}
+		}
+		return "", false
+	}
+	for len(got) < len(want) {
+		line, ok := next()
+		if !ok {
+			t.Fatalf("stream ended after %q", got)
+		}
+		got = append(got, line)
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		line, ok := next()
+		if !ok {
+			break
+		}
+		if line != "{}" {
+			got = append(got, line)
+		}
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("stream sent %q, want each of %q once", got, want)
+	}
+}
+
+func TestNodeLogReadsThroughTheControllerRoutes(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	for _, line := range []string{"alpha\n", "needle one\n", "beta\n", "needle two\n"} {
+		if err := s.Append([]byte(line), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	logs := client.NewWithToken(f.url, nil, f.admin(t)).NodeLogs()
+	if got, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{Tail: 1}); err != nil || string(got) != "needle two\n" {
+		t.Fatalf("tail read = %q, %v", got, err)
+	}
+	matches, err := logs.Grep(ctx, "run-d", "a", "needle", 0)
+	if err != nil || len(matches) != 2 || matches[0].LineNo != 2 || matches[1].LineNo != 4 {
+		t.Fatalf("grep = %+v, %v", matches, err)
+	}
+	if one, err := logs.Grep(ctx, "run-d", "a", "needle", 1); err != nil || len(one) != 1 {
+		t.Fatalf("grep capped at one = %+v, %v", one, err)
+	}
+}
+
+func TestCompileLogTakesSegmentsUnderTheTriggerClaim(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	admin := f.admin(t)
+	post := func(header bool) (int, []byte) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-d/nodes/_compile/log-segments", strings.NewReader(`{"next":1,"count":1}`))
+		req.Header.Set("Authorization", "Bearer "+admin)
+		req.Header.Set("Content-Type", "application/json")
+		if header {
+			req.Header.Set(store.TriggerGenerationHeader, "3")
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.Bytes()
+	}
+	if code, body := post(false); code != http.StatusNotFound {
+		t.Fatalf("compile log without a trigger claim: %d %s", code, body)
+	}
+	code, body := post(true)
+	if code != http.StatusOK || !strings.Contains(string(body), "/runs/run-d/_5fcompile/a1-g3/") {
+		t.Fatalf("compile log under the trigger claim: %d %s", code, body)
+	}
+}
+
+func TestCapabilitiesAdvertiseLogSegments(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	keeps, err := client.NewWithToken(f.url, nil, "").KeepsLogSegments(t.Context())
+	if err != nil || !keeps {
+		t.Fatalf("KeepsLogSegments = %v, %v", keeps, err)
 	}
 }

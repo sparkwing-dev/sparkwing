@@ -165,3 +165,32 @@ func TestNodeLogStaysLocalOnAControllerWithoutSegments(t *testing.T) {
 		t.Fatal("a controller without the route was handed the node's log")
 	}
 }
+
+// A trigger's in-process nodes post their logs to the trigger broker,
+// which keeps one sink per node across every stream that writes it and
+// seals them all when the trigger's child exits.
+func TestTriggerBrokerKeepsEachNodeLogAsSegments(t *testing.T) {
+	ctrl, tok := newSegmentController(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broker, err := StartTriggerBroker(ctrl.url, "", tok, &store.Trigger{ID: "run-s", Pipeline: "demo"}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close(t.Context())
+	for _, stream := range []string{"waiting", "running"} {
+		nodeLog, err := NewHTTPLogsWithToken(broker.URL(), nil, broker.Capability(), logger).OpenNodeLog(context.Background(), "run-s", "a", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodeLog.Log("info", stream)
+		if err := nodeLog.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	broker.SealLogs(t.Context(), false)
+
+	l := ctrl.log(t)
+	if l.Manifest == nil || l.Manifest.Status != logseg.StatusComplete || l.Manifest.Lines != 2 {
+		t.Fatalf("manifest = %+v", l.Manifest)
+	}
+}

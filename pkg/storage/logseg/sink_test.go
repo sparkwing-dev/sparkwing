@@ -362,3 +362,28 @@ func TestUnsealedLogStreamsUntilTheGraceEnds(t *testing.T) {
 		t.Fatalf("abandoned = %+v", c)
 	}
 }
+
+func TestSinkHandsTheLiveViewEachAppendAtItsOffset(t *testing.T) {
+	objs := newMemObjects()
+	var pushed []string
+	var offsets []int64
+	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{
+		MaxBytes: 2 * int64(len(line(0))),
+		Live: func(off int64, data []byte) {
+			offsets = append(offsets, off)
+			pushed = append(pushed, string(data))
+		},
+	})
+	for i := 1; i <= 3; i++ {
+		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	n := int64(len(line(0)))
+	if len(offsets) != 3 || offsets[0] != 0 || offsets[1] != n || offsets[2] != 2*n || pushed[2] != logseg.TruncationMarker {
+		t.Fatalf("live view got %q at %v", pushed, offsets)
+	}
+}

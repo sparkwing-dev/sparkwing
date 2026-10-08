@@ -96,7 +96,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), authwire.CacheGrantEnv+"="+grant, SpecHashEnv+"="+specHash)
 	var logSink *nodeLogSink
-	if nodeID != store.PlanNodeID && os.Getenv("SPARKWING_LOGS_URL") == "" {
+	if nodeID != store.PlanNodeID {
 		logSink = openNodeLogSink(ctx, c, runID, nodeID, logger)
 	}
 	if logSink != nil {

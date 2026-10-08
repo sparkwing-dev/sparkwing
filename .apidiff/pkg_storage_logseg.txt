@@ -36,6 +36,7 @@ type Log struct {
 }
 func (l *Log) Completeness(node NodeProgress, now time.Time) Completeness
 func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]byte, error)
+func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
 const LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
 const LogSeqHeader = "X-Sparkwing-Log-Seq"
 const LogStreamHeader = "X-Sparkwing-Log-Stream"
@@ -63,7 +64,7 @@ const ManifestName = "manifest.json"
 const ManifestVersion = 1
 const MaxAppendBytes = 4 << 20
 const MaxNodeBytes int64 = 64 << 20
-func NewSink(up Uploader, opts Options) (*Sink, error)
+func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
 const NoTeam = "_"
 type NodeProgress struct {
 	Started    bool
@@ -84,7 +85,7 @@ type Options struct {
 	SegmentBytes int64
 	MaxBytes     int64
 
-	Live func(data []byte)
+	Live func(offset int64, data []byte)
 
 	AfterFunc func(d time.Duration, f func()) (stop func() bool)
 

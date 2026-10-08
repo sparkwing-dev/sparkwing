@@ -98,7 +98,7 @@ func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]
 	}
 	var out bytes.Buffer
 	for _, seg := range segs {
-		body, err := l.segment(ctx, objs, seg)
+		body, err := l.Segment(ctx, objs, seg)
 		if errors.Is(err, errBadSegment) || errors.Is(err, storage.ErrNotFound) {
 			l.Broken = seg.N
 			break
@@ -117,7 +117,10 @@ func tailOnly(opts storage.ReadOpts) (int, bool) {
 
 var errBadSegment = errors.New("logseg: segment does not match its manifest")
 
-func (l *Log) segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error) {
+// Segment returns one segment's log bytes, checked against its digest
+// when the manifest names one. A missing segment's error wraps
+// storage.ErrNotFound.
+func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error) {
 	stored, err := readObject(ctx, objs, SegmentKey(l.Prefix, seg.N), maxSegmentStored)
 	if err != nil {
 		return nil, err

@@ -305,6 +305,7 @@ type ClaimedRun struct {
 	Pipeline string
 }
 const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
+const CompileLogNode = "_compile"
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -1282,6 +1283,7 @@ type LegacyOutput struct {
 }
 func (o LegacyOutput) Moved() bool
 func (o LegacyOutput) Ref() OutputRef
+const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
 type LogSegmentURL struct {
 	N       int
 	URL     string

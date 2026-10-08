@@ -98,7 +98,12 @@ type capabilitiesResp struct {
 	Billing   capabilitiesBilling          `json:"billing"`
 	Auth      capabilitiesAuth             `json:"auth"`
 	Claims    capabilitiesClaims           `json:"claims"`
+	Logs      capabilitiesLogs             `json:"logs"`
 	GitHubApp *capabilitiesGitHubApp       `json:"github_app,omitempty"`
+}
+
+type capabilitiesLogs struct {
+	Segments bool `json:"segments"`
 }
 
 type capabilitiesBilling struct {
@@ -128,6 +133,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp.Auth.Providers = s.signInProviders()
 	resp.Claims.AllowRepos = true
 	resp.Claims.Profile = true
+	resp.Logs.Segments = s.logObjects() != nil
 	if s.githubApp != nil {
 		resp.GitHubApp = &capabilitiesGitHubApp{Slug: s.githubApp.client.Slug(), SourceTokens: true}
 	}

@@ -56,9 +56,10 @@ type Options struct {
 	Interval     time.Duration
 	SegmentBytes int64
 	MaxBytes     int64
-	// Live, when set, receives every stored append in order, for the
-	// controller's live view. It must not block.
-	Live func(data []byte)
+	// Live, when set, receives every stored append in order with the
+	// byte offset in the log it begins at, for the controller's live
+	// view. It must not block.
+	Live func(offset int64, data []byte)
 	// AfterFunc schedules the interval cut; time.AfterFunc when nil.
 	AfterFunc func(d time.Duration, f func()) (stop func() bool)
 	// Retries is how many times a failed upload is tried before the
@@ -208,11 +209,11 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 		return fmt.Errorf("logseg: write spool: %w", err)
 	}
 	s.advance(ws, last)
+	if s.opts.Live != nil {
+		s.opts.Live(s.written, data)
+	}
 	s.written += int64(len(data))
 	s.lines += n
-	if s.opts.Live != nil {
-		s.opts.Live(data)
-	}
 	if s.written-s.cutOff >= s.opts.SegmentBytes {
 		s.cutLocked()
 	} else if s.stopTimer == nil {

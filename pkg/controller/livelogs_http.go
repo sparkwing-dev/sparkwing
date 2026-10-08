@@ -65,7 +65,16 @@ func (s *Server) handleAppendNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusRequestEntityTooLarge, fmt.Errorf("live log batch exceeds %d bytes", liveLogAppendLimit))
 		return
 	}
-	s.liveLogs.Append(runID, nodeID, data)
+	if raw := r.Header.Get(store.LiveLogOffsetHeader); raw != "" {
+		off, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || off < 0 {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("%s must be a non-negative byte offset", store.LiveLogOffsetHeader))
+			return
+		}
+		s.liveLogs.AppendAt(runID, nodeID, off, data)
+	} else {
+		s.liveLogs.Append(runID, nodeID, data)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

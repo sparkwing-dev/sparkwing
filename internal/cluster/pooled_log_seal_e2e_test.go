@@ -22,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -86,8 +85,9 @@ func runPipelineChildForTest(runID, nodeID string) int {
 
 // A node an agent claims from its pool runs in a child pipeline binary built
 // against the team's pinned SDK, which may predate log seals. The agent's
-// own supervisor carries every log line the child writes, so it numbers and
-// seals them, and a finished node reads complete whatever SDK wrote it.
+// own supervisor keeps every line the child writes as segments through the
+// controller and seals them, so a finished node reads complete whatever SDK
+// wrote it, and a killed child's log reads cut off.
 func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns pipeline child processes")
@@ -116,11 +116,11 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var seals []string
+			var forwarded []string
 			logHandler := logSrv.Handler()
 			logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/seal") {
-					seals = append(seals, r.URL.Path)
+				if r.Method == http.MethodPost {
+					forwarded = append(forwarded, r.URL.Path)
 				}
 				logHandler.ServeHTTP(w, r)
 			}))
@@ -151,7 +151,7 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 				time.Now().Add(-time.Hour).UnixNano(), time.Now().Add(-2*logs.SealGrace).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
-			b := backend.NewClientBackend(ctrl, sparkwinglogs.New(logsHTTP.URL, nil, ""))
+			b := backend.NewClientBackend(ctrl, ctrl.NodeLogs())
 			node, err := st.GetNode(ctx, "r1", "n1")
 			if err != nil {
 				t.Fatal(err)
@@ -163,8 +163,8 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 			if got.State != tc.want || got.Lines != 5 {
 				t.Fatalf("verdict = %+v, want %s over 5 lines", got, tc.want)
 			}
-			if tc.mode == "sealing" && len(seals) != 1 {
-				t.Fatalf("a child that seals itself was sealed %d times: %v", len(seals), seals)
+			if len(forwarded) != 0 {
+				t.Fatalf("the agent forwarded the child's log to the logs service: %v", forwarded)
 			}
 		})
 	}

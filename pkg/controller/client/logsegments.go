@@ -20,6 +20,35 @@ import (
 // segments: it predates the route, or it has no store to keep them in.
 var ErrLogSegmentsUnavailable = errors.New("controller/client: the controller keeps no log segments")
 
+// KeepsLogSegments reports whether the controller advertises that it
+// keeps node logs as segments. A controller that predates segments
+// answers false.
+func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, capabilitiesReadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/capabilities", nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false, readHTTPError(resp)
+	}
+	var caps struct {
+		Logs struct {
+			Segments bool `json:"segments"`
+		} `json:"logs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
+		return false, fmt.Errorf("decode capabilities: %w", err)
+	}
+	return caps.Logs.Segments, nil
+}
+
 // LogSegments asks the controller for upload URLs for a node attempt's
 // log segments. A controller that keeps no segments answers
 // [ErrLogSegmentsUnavailable].
@@ -62,6 +91,9 @@ const (
 	logSegmentLowWater     = 4
 	logSegmentRefreshAhead = 2 * time.Minute
 	logSegmentPutTimeout   = time.Minute
+	// safety: half the controller's 60 s seal grace, so one lost touch
+	// never lets it seal a live writer's attempt.
+	logSegmentTouch = 30 * time.Second
 )
 
 // LogSegmentUploader is the [logseg.Uploader] a node's log sink writes
@@ -153,12 +185,13 @@ func (u *LogSegmentUploader) urlLocked(ctx context.Context, n int) (store.LogSeg
 	return s, nil
 }
 
-// KeepFresh renews the URL batch before it expires until ctx ends, so a
-// node silent for longer than a batch lives still holds a usable
-// manifest URL when it finishes. onError hears each renewal that
-// failed; the next tick tries again.
+// KeepFresh tells the controller the writer is alive every
+// logSegmentTouch, so it does not seal the attempt as abandoned while a
+// node sits silent, and renews the URL batch before it expires, so the
+// writer still holds a usable manifest URL when the node finishes.
+// onError hears each request that failed; the next tick tries again.
 func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error)) {
-	t := time.NewTicker(logSegmentRefreshAhead / 2)
+	t := time.NewTicker(logSegmentTouch)
 	defer t.Stop()
 	for {
 		select {
@@ -167,13 +200,28 @@ func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
 		case <-t.C:
 		}
 		u.mu.Lock()
-		if u.received && time.Until(u.grant.ExpiresAt) <= logSegmentRefreshAhead {
-			if err := u.refreshLocked(ctx, u.through+1); err != nil && ctx.Err() == nil {
-				onError(err)
-			}
+		var err error
+		if !u.received || time.Until(u.grant.ExpiresAt) <= logSegmentRefreshAhead {
+			err = u.refreshLocked(ctx, u.through+1)
+		} else {
+			err = u.touchLocked(ctx)
 		}
 		u.mu.Unlock()
+		if err != nil && ctx.Err() == nil {
+			onError(err)
+		}
 	}
+}
+
+// safety: the caller holds mu.
+func (u *LogSegmentUploader) touchLocked(ctx context.Context) error {
+	rc, cancel := u.requestCtx(ctx)
+	defer cancel()
+	_, err := u.c.LogSegments(rc, u.runID, u.nodeID, store.LogSegmentsRequest{
+		Attempt: u.grant.Attempt, Generation: u.grant.Generation,
+		Next: u.through + 1, UploadedThrough: u.through, StoredBytes: u.stored,
+	})
+	return err
 }
 
 // PutSegment uploads one segment.

@@ -5,16 +5,18 @@ import (
 	"crypto/subtle"
 	"errors"
 	"log/slog"
-	"math"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the sink runs in the engine-side process, so a pipeline binary built against any SDK keeps posting
@@ -23,7 +25,7 @@ type nodeLogSink struct {
 	runID, nodeID string
 	sink          *logseg.Sink
 	handler       http.Handler
-	live          *logbatch.Store
+	live          *livePusher
 	stopFresh     context.CancelFunc
 	freshDone     chan struct{}
 	logger        *slog.Logger
@@ -34,6 +36,13 @@ type nodeLogSink struct {
 // safety: nil keeps the node's log on local disk as before, for a controller that keeps no segments or cannot be
 // asked; ctx carries the claim fence every upload request repeats.
 func openNodeLogSink(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) *nodeLogSink {
+	n, _ := openNodeLogSinkLive(ctx, ctrl, runID, nodeID, true, logger)
+	return n
+}
+
+// safety: unavailable reports a controller that keeps no segments at all, which no retry changes, as against a
+// request that failed; a pseudo node with no node row takes no live view, which the controller would refuse.
+func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID string, live bool, logger *slog.Logger) (n *nodeLogSink, unavailable bool) {
 	up := ctrl.NewLogSegmentUploader(ctx, runID, nodeID)
 	openCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -44,38 +53,21 @@ func openNodeLogSink(ctx context.Context, ctrl *client.Client, runID, nodeID str
 		}
 		logger.Log(ctx, level, "node log stays on this runner's disk: the controller issued no segment URLs",
 			"run_id", runID, "node_id", nodeID, "err", err)
-		return nil
+		return nil, errors.Is(err, client.ErrLogSegmentsUnavailable)
 	}
 	nodeCtx := context.WithoutCancel(ctx)
-	n := &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger, freshDone: make(chan struct{})}
-	n.live = logbatch.New(
-		&liveLogStore{sink: ctrl, ctx: nodeCtx},
-		logbatch.WithFlushInterval(liveLogFlushInterval),
-		logbatch.WithBufferThreshold(liveLogFlushBytes),
-		logbatch.WithMaxObjects(math.MaxInt32),
-		logbatch.WithMaxBytes(math.MaxInt64),
-	)
-	var liveFailed sync.Once
-	sink, err := logseg.NewSink(nodeCtx, up, logseg.Options{
-		Run: runID, Node: nodeID, Logger: logger,
-		Live: func(data []byte) {
-			// safety: the live view is a convenience; the segments are the log.
-			if err := n.live.Append(nodeCtx, runID, nodeID, data); err != nil {
-				liveFailed.Do(func() {
-					logger.Warn("live log mirror unavailable; the segments are unaffected",
-						"run_id", runID, "node_id", nodeID, "err", err)
-				})
-			}
-		},
-	})
+	n = &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger, freshDone: make(chan struct{})}
+	opts := logseg.Options{Run: runID, Node: nodeID, Logger: logger}
+	if live {
+		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, logger)
+		opts.Live = n.live.push
+	}
+	sink, err := logseg.NewSink(nodeCtx, up, opts)
 	if err != nil {
 		logger.Warn("node log stays on this runner's disk: the log spool could not be opened",
 			"run_id", runID, "node_id", nodeID, "err", err)
-		//nolint:contextcheck // logbatch.Close takes no context; it flushes what the mirror holds.
-		if cerr := n.live.Close(); cerr != nil {
-			logger.Warn("close the live log mirror", "run_id", runID, "node_id", nodeID, "err", cerr)
-		}
-		return nil
+		n.live.close()
+		return nil, false
 	}
 	n.sink = sink
 	n.handler = logseg.AppendHandler(sink, runID, nodeID)
@@ -87,21 +79,17 @@ func openNodeLogSink(ctx context.Context, ctrl *client.Client, runID, nodeID str
 			logger.Warn("renew the node's log segment URLs", "run_id", runID, "node_id", nodeID, "err", err)
 		})
 	}()
-	return n
+	return n, false
 }
 
 func (n *nodeLogSink) ServeHTTP(w http.ResponseWriter, r *http.Request) { n.handler.ServeHTTP(w, r) }
 
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 	n.closeOnce.Do(func() {
-		//nolint:contextcheck // logbatch.Close takes no context; it flushes what the mirror holds.
-		if err := n.live.Close(); err != nil {
-			n.logger.Warn("live log mirror did not flush its last batch; the segments are unaffected",
-				"run_id", n.runID, "node_id", n.nodeID, "err", err)
-		}
 		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), childLogSealBudget)
 		defer cancel()
 		m, err := n.sink.Close(sealCtx, logseg.End{Stopped: stopped})
+		n.live.close()
 		n.stopFresh()
 		<-n.freshDone
 		switch {
@@ -150,4 +138,248 @@ func serveLoopbackLogs(sink *nodeLogSink, bearer string, logger *slog.Logger) (s
 		}
 	}
 	return "http://" + listener.Addr().String(), stop, nil
+}
+
+// perf: pushes go out every livePushEvery, or sooner at livePushBytes; past livePushHold the oldest bytes drop,
+// which a reader sees as a gap the segments fill.
+const (
+	livePushEvery = 250 * time.Millisecond
+	livePushBytes = 32 << 10
+	livePushHold  = 1 << 20
+)
+
+// safety: the live view is a convenience and the segments are the log, so a
+// slow or failing controller costs live lines, never a blocked writer.
+type livePusher struct {
+	ctrl          *client.Client
+	runID, nodeID string
+	logger        *slog.Logger
+
+	mu     sync.Mutex
+	buf    []byte
+	off    int64
+	kick   chan struct{}
+	done   chan struct{}
+	failed bool
+	closed bool
+}
+
+func startLivePusher(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) *livePusher {
+	p := &livePusher{
+		ctrl: ctrl, runID: runID, nodeID: nodeID, logger: logger,
+		kick: make(chan struct{}, 1), done: make(chan struct{}),
+	}
+	go p.loop(ctx)
+	return p
+}
+
+func (p *livePusher) push(off int64, data []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	if len(p.buf) == 0 || p.off+int64(len(p.buf)) != off {
+		p.buf, p.off = p.buf[:0], off
+	}
+	p.buf = append(p.buf, data...)
+	if over := len(p.buf) - livePushHold; over > 0 {
+		p.buf, p.off = p.buf[over:], p.off+int64(over)
+	}
+	if len(p.buf) >= livePushBytes {
+		select {
+		case p.kick <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (p *livePusher) loop(ctx context.Context) {
+	defer close(p.done)
+	t := time.NewTicker(livePushEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			p.flush(ctx)
+			return
+		case _, open := <-p.kick:
+			p.flush(ctx)
+			if !open {
+				return
+			}
+		case <-t.C:
+			p.flush(ctx)
+		}
+	}
+}
+
+func (p *livePusher) flush(ctx context.Context) {
+	p.mu.Lock()
+	data, off := p.buf, p.off
+	p.buf, p.off = nil, off+int64(len(data))
+	p.mu.Unlock()
+	if len(data) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), liveLogPostTimeout)
+	defer cancel()
+	err := p.ctrl.AppendNodeLiveLogAt(ctx, p.runID, p.nodeID, off, data)
+	p.mu.Lock()
+	first := err != nil && !p.failed
+	p.failed = p.failed || err != nil
+	p.mu.Unlock()
+	if first {
+		p.logger.Warn("live log mirror unavailable; the segments are unaffected",
+			"run_id", p.runID, "node_id", p.nodeID, "err", err)
+	}
+}
+
+func (p *livePusher) close() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	if !p.closed {
+		p.closed = true
+		close(p.kick)
+	}
+	p.mu.Unlock()
+	<-p.done
+}
+
+// safety: a node keeps one sink across every stream that writes it until the broker closes them all, because a
+// node writes several streams in turn and a second sink would number its segments over the first's.
+type nodeLogSinks struct {
+	ctrl   *client.Client
+	runID  string
+	logger *slog.Logger
+
+	mu          sync.Mutex
+	nodes       map[string]*nodeLogSink
+	unavailable bool
+}
+
+func newNodeLogSinks(ctrl *client.Client, runID string, logger *slog.Logger) *nodeLogSinks {
+	return &nodeLogSinks{ctrl: ctrl, runID: runID, logger: logger, nodes: map[string]*nodeLogSink{}}
+}
+
+func (s *nodeLogSinks) forRequest(ctx context.Context, r *http.Request) *nodeLogSink {
+	nodeID, ok := appendNode(r, s.runID)
+	if !ok {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unavailable || s.nodes == nil {
+		return nil
+	}
+	if n := s.nodes[nodeID]; n != nil {
+		return n
+	}
+	n, unavailable := openNodeLogSinkLive(requestFence(ctx, r), s.ctrl, s.runID, nodeID, true, s.logger)
+	s.unavailable = unavailable
+	if n != nil {
+		s.nodes[nodeID] = n
+	}
+	return n
+}
+
+func (s *nodeLogSinks) closeAll(ctx context.Context, stopped bool) {
+	s.mu.Lock()
+	nodes := s.nodes
+	s.nodes = nil
+	s.mu.Unlock()
+	for _, n := range nodes {
+		n.close(ctx, stopped)
+	}
+}
+
+func appendNode(r *http.Request, runID string) (string, bool) {
+	if r.Method != http.MethodPost {
+		return "", false
+	}
+	rest, ok := strings.CutPrefix(r.URL.EscapedPath(), "/api/v1/logs/"+url.PathEscape(runID)+"/")
+	if !ok {
+		return "", false
+	}
+	rest = strings.TrimSuffix(rest, "/seal")
+	nodeID, err := url.PathUnescape(rest)
+	if err != nil || nodeID == "" || strings.Contains(rest, "/") {
+		return "", false
+	}
+	return nodeID, true
+}
+
+// safety: the sink's uploads repeat the fence the writer's own append
+// carried, so the controller refuses them once that claim is gone.
+func requestFence(ctx context.Context, r *http.Request) context.Context {
+	ctx = context.WithoutCancel(ctx)
+	if gen, err := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64); err == nil && gen > 0 {
+		ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: gen})
+	}
+	if gen, err := strconv.ParseInt(r.Header.Get(store.ClaimGenerationHeader), 10, 64); err == nil && gen > 0 {
+		ctx = store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+			HolderID: r.Header.Get(store.ClaimHolderHeader), MembershipID: r.Header.Get(store.ClaimMembershipHeader),
+			ReservationID: r.Header.Get(store.ClaimReservationHeader), ClaimGeneration: gen,
+		})
+	}
+	return ctx
+}
+
+// EngineNodeLog writes the engine's own lines into one node of a run,
+// such as a trigger's compile output: as segments when the controller
+// keeps them, else to the logs service at logsURL, else nowhere. Close
+// seals it.
+type EngineNodeLog struct {
+	controllerURL, logsURL, token, runID, nodeID string
+	logger                                       *slog.Logger
+
+	mu     sync.Mutex
+	opened bool
+	sink   *nodeLogSink
+}
+
+// NewEngineNodeLog returns a log for nodeID of runID that opens on the
+// first Append, under the claim fence that Append's context carries.
+func NewEngineNodeLog(controllerURL, logsURL, token, runID, nodeID string, logger *slog.Logger) *EngineNodeLog {
+	return &EngineNodeLog{
+		controllerURL: controllerURL, logsURL: logsURL, token: token,
+		runID: runID, nodeID: nodeID, logger: logger,
+	}
+}
+
+// Append writes data, one or more lines, to the node's log. It outlives
+// ctx's cancellation, so a line about a failure still lands.
+func (l *EngineNodeLog) Append(ctx context.Context, data []byte) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.opened {
+		l.opened = true
+		if l.controllerURL != "" {
+			l.sink, _ = openNodeLogSinkLive(ctx, client.NewWithToken(l.controllerURL, nil, l.token),
+				l.runID, l.nodeID, false, l.logger)
+		}
+	}
+	if l.sink != nil {
+		return l.sink.sink.Append(data, "", 0, 0)
+	}
+	if l.logsURL == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return logs.NewClientWithToken(l.logsURL, nil, l.token).
+		WithRunnerIdentity(logs.ProcessIdentity("trigger-loop")).
+		Append(ctx, l.runID, l.nodeID, data)
+}
+
+// Close seals the log when it went to segments.
+func (l *EngineNodeLog) Close(ctx context.Context) {
+	l.mu.Lock()
+	sink := l.sink
+	l.mu.Unlock()
+	if sink != nil {
+		sink.close(ctx, false)
+	}
 }

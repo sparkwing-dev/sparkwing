@@ -21,6 +21,11 @@ import (
 // submitted node may take the ID.
 const PlanNodeID = "plan"
 
+// CompileLogNode is the pseudo node a trigger runner writes its build
+// output and source warnings to. It has no node row; its log belongs to
+// the run's trigger claim.
+const CompileLogNode = "_compile"
+
 // Plan limits. A submitted plan above a cap is refused, and a resource or
 // retry request above its ceiling is clamped to it.
 const (

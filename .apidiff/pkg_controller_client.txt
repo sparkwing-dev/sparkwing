@@ -58,6 +58,7 @@ func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (c *Client) AppendNodeLiveLog(ctx context.Context, runID, nodeID string, data []byte) error
+func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID string, off int64, data []byte) error
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
@@ -150,6 +151,7 @@ func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom He
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
+func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error)
 func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error)
 func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error)
 func (c *Client) ListCrons(ctx context.Context) (*api.OverviewView, error)
@@ -170,6 +172,7 @@ func (c *Client) LogSegments(ctx context.Context, runID, nodeID string, req stor
 func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader
+func (c *Client) NodeLogs() NodeLogs
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
 func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
@@ -304,6 +307,10 @@ type GitMeta struct {
 	GithubOwner string
 	GithubRepo  string
 }
+type GrepLine struct {
+	LineNo int
+	Line   string
+}
 type Headroom struct {
 	Cores       float64
 	MemoryBytes int64
@@ -329,7 +336,7 @@ type LiveLogChunk struct {
 func LoadSignal(err error) (time.Duration, bool)
 type LogSegmentUploader struct {
 }
-func (u *LogSegmentUploader) KeepFresh(ctx context.Context)
+func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
 func (u *LogSegmentUploader) Open(ctx context.Context) error
 func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error
 func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error
@@ -340,6 +347,14 @@ func New(baseURL string, httpClient *http.Client) *Client
 func NewPacer(floor time.Duration) *Pacer
 func NewShedLog(every time.Duration) *ShedLog
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
+type NodeLogs struct{}
+func (NodeLogs) Append(context.Context, string, string, []byte) error
+func (NodeLogs) DeleteRun(context.Context, string) error
+func (l NodeLogs) Grep(ctx context.Context, runID, nodeID, pattern string, maxMatches int) ([]GrepLine, error)
+func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, _ logseg.NodeProgress, _ time.Time) (logseg.Completeness, bool, error)
+func (l NodeLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
+func (l NodeLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)
+func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 type OIDCToken struct {
 	Token     string
 	ExpiresAt time.Time

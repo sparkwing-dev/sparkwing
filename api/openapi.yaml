@@ -3737,8 +3737,14 @@ paths:
       tags: [nodes]
       summary: Add one batch of a running node's log lines to the live ring.
       description: >
-        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the logs surface's job; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write.
+        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the logs surface's job; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write. A runner that keeps the node's log as segments sends `X-Sparkwing-Log-Offset`, the byte offset in the whole log the batch begins at, so a reader can join the ring to the segments; bytes the ring already holds are skipped and an offset past its end starts the ring over there.
 
+      parameters:
+        - in: header
+          name: X-Sparkwing-Log-Offset
+          required: false
+          schema: {type: integer, format: int64}
+          description: Byte offset in the node's whole log at which the batch begins.
       requestBody:
         required: true
         content:
@@ -4728,7 +4734,7 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.capabilitiesResp
                 type: object
-                required: [teams, billing, auth, claims]
+                required: [teams, billing, auth, claims, logs]
                 properties:
                   mode: {type: string, description: "The dashboard's mode, such as cluster or local. Absent from a controller serving no dashboard."}
                   storage:
@@ -4768,6 +4774,12 @@ paths:
                     properties:
                       allow_repos: {type: boolean, description: Trigger and node claims read allow_repos; a runner sends the list only when this is true.}
                       profile: {type: boolean, description: Trigger and node claims read platform and resources; a runner sends them only when this is true.}
+                  logs:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesLogs
+                    type: object
+                    required: [segments]
+                    properties:
+                      segments: {type: boolean, description: "The controller keeps node logs as segments: POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments issues upload URLs."}
                   github_app:
                     x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
                     type: object
@@ -7380,7 +7392,14 @@ paths:
       tags: [dashboard]
       summary: Read one node's log.
       description: >-
-        Renders by the `format` query value or the Accept header, as the whole-run read does.
+        Renders by the `format` query value or the Accept header, as the whole-run read does. Reads a node whose runner kept its log as segments from those segments, verifying each against the manifest, and any other node from the logs service. `tail`, `head`, `lines` and `grep` narrow the read on the controller. `line_numbers=1` with `grep` and no other filter answers NDJSON objects `{"line_no", "line"}` for the matching lines, at most `max_matches` of them.
+      parameters:
+        - {in: query, name: tail, required: false, schema: {type: integer}, description: The last N lines.}
+        - {in: query, name: head, required: false, schema: {type: integer}, description: The first N lines.}
+        - {in: query, name: lines, required: false, schema: {type: string}, description: "An inclusive 1-based range, A:B."}
+        - {in: query, name: grep, required: false, schema: {type: string}, description: Lines containing this text.}
+        - {in: query, name: line_numbers, required: false, schema: {type: string, enum: ["1"]}, description: Number the grep matches.}
+        - {in: query, name: max_matches, required: false, schema: {type: integer}, description: Stop a numbered grep after this many matches.}
       responses:
         default: {description: Undescribed.}
 
@@ -7465,10 +7484,14 @@ paths:
         Returns up to 16 presigned PUT URLs for the node attempt's log
         segments, starting at `next`, and a manifest URL, all valid for
         15 minutes. The first request records where the attempt's log
-        lives. `attempt` and `generation` echo the previous grant; a writer
-        whose attempt was superseded is refused with 409. A claim token
-        asks only for its own node. A controller with no object store and
-        no output directory answers 503.
+        lives. `attempt` and `generation` echo the previous grant, so an
+        execution that retries in its own process keeps writing one log; a
+        writer of another claim generation is refused with 409. `count` 0
+        issues only the manifest URL and tells the controller the writer is
+        alive, which keeps it from sealing a silent node's attempt as
+        abandoned. A claim token asks only for its own node. A trigger claim
+        may write the `_compile` node, which has no node row. A controller
+        with no object store and no output directory answers 503.
       requestBody:
         required: true
         content:

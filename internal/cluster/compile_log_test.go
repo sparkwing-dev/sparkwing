@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
@@ -36,12 +38,12 @@ func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
 	defer ts.Close()
 
 	buildErr := &bincache.CompileError{Output: []byte(want), Err: errors.New("exit status 1")}
-	opts := TriggerLoopOptions{LogsURL: ts.URL, Token: "ignored"}
-	shipCompileOutput(context.Background(), opts, runID, buildErr, slog.Default())
+	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", ts.URL, "ignored", runID, store.CompileLogNode, slog.Default()),
+		runID, buildErr, slog.Default())
 
 	mu.Lock()
 	defer mu.Unlock()
-	wantPath := "/api/v1/logs/" + runID + "/" + CompileLogNode
+	wantPath := "/api/v1/logs/" + runID + "/" + store.CompileLogNode
 	if gotPath != wantPath {
 		t.Errorf("path: got %q, want %q", gotPath, wantPath)
 	}
@@ -52,7 +54,8 @@ func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
 
 func TestShipCompileOutput_NoLogsURLNoOp(t *testing.T) {
 	buildErr := &bincache.CompileError{Output: []byte("oops"), Err: errors.New("x")}
-	shipCompileOutput(context.Background(), TriggerLoopOptions{}, "run-x", buildErr, slog.Default())
+	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", "", "", "run-x", store.CompileLogNode, slog.Default()),
+		"run-x", buildErr, slog.Default())
 }
 
 func TestShipCompileOutput_NonCompileErrorIgnored(t *testing.T) {
@@ -63,8 +66,8 @@ func TestShipCompileOutput_NonCompileErrorIgnored(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	opts := TriggerLoopOptions{LogsURL: ts.URL}
-	shipCompileOutput(context.Background(), opts, "run-y", errors.New("hash failed"), slog.Default())
+	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", ts.URL, "", "run-y", store.CompileLogNode, slog.Default()),
+		"run-y", errors.New("hash failed"), slog.Default())
 	if posted {
 		t.Errorf("expected no POST for non-CompileError; server saw a request")
 	}
@@ -84,7 +87,8 @@ func TestShipCompileOutput_PostsEvenWhenCtxCancelled(t *testing.T) {
 	cancel()
 
 	buildErr := &bincache.CompileError{Output: []byte("late but informative"), Err: errors.New("x")}
-	shipCompileOutput(ctx, TriggerLoopOptions{LogsURL: ts.URL}, "run-z", buildErr, slog.Default())
+	shipCompileOutput(ctx, orchestrator.NewEngineNodeLog("", ts.URL, "", "run-z", store.CompileLogNode, slog.Default()),
+		"run-z", buildErr, slog.Default())
 
 	done := make(chan struct{})
 	go func() { posted.Wait(); close(done) }()

@@ -230,7 +230,16 @@ func serveLogs(b backend.Backend, w http.ResponseWriter, r *http.Request, runID,
 	format := negotiateLogFormat(r)
 	w.Header().Set("Content-Type", contentTypeFor(format))
 	if nodeID != "" {
-		content, err := b.ReadNodeLog(r.Context(), runID, nodeID, backend.ReadOpts{})
+		filter, numbered, maxMatches, err := parseNodeLogFilter(r)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if numbered {
+			serveNumberedGrep(b, w, r, runID, nodeID, filter.Grep, maxMatches)
+			return
+		}
+		content, err := b.ReadNodeLog(r.Context(), runID, nodeID, filter)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
@@ -266,6 +275,64 @@ func serveLogs(b backend.Backend, w http.ResponseWriter, r *http.Request, runID,
 			continue
 		}
 		renderJSONL(content, w, format)
+	}
+}
+
+func parseNodeLogFilter(r *http.Request) (backend.ReadOpts, bool, int, error) {
+	q := r.URL.Query()
+	f := backend.ReadOpts{Lines: q.Get("lines"), Grep: q.Get("grep")}
+	for name, into := range map[string]*int{"tail": &f.Tail, "head": &f.Head} {
+		if raw := q.Get(name); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				return f, false, 0, fmt.Errorf("invalid %s: %q", name, raw)
+			}
+			*into = n
+		}
+	}
+	numbered := q.Get("line_numbers") != ""
+	if numbered && (q.Get("line_numbers") != "1" || f.Grep == "" || f.Lines != "" || f.Tail != 0 || f.Head != 0) {
+		return f, false, 0, errors.New("line_numbers requires grep without other line filters")
+	}
+	maxMatches := 0
+	if raw := q.Get("max_matches"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || !numbered {
+			return f, false, 0, fmt.Errorf("invalid max_matches: %q", raw)
+		}
+		maxMatches = n
+	}
+	return f, numbered, maxMatches, nil
+}
+
+// NumberedLogLine is one line a numbered grep matched, with its 1-based
+// position in the node's whole log.
+type NumberedLogLine struct {
+	LineNo int    `json:"line_no"`
+	Line   string `json:"line"`
+}
+
+func serveNumberedGrep(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID, pattern string, maxMatches int) {
+	content, err := b.ReadNodeLog(r.Context(), runID, nodeID, backend.ReadOpts{})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", mediaTypeNDJSON+"; charset=utf-8")
+	enc := json.NewEncoder(w)
+	sc := bufio.NewScanner(bytes.NewReader(content))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	found := 0
+	for lineNo := 1; sc.Scan(); lineNo++ {
+		if !strings.Contains(sc.Text(), pattern) {
+			continue
+		}
+		if enc.Encode(NumberedLogLine{LineNo: lineNo, Line: sc.Text()}) != nil {
+			return
+		}
+		if found++; maxMatches > 0 && found >= maxMatches {
+			return
+		}
 	}
 }
 

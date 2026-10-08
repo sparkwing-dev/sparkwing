@@ -87,14 +87,104 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) 
 	return out.Bytes(), nil
 }
 
-// Stream has no live read of its own; a reader falls back to the
-// controller's live ring.
+// Stream serves a segment node's log as server-sent events: the
+// segments uploaded so far, then the live ring from where they end,
+// until the manifest lands. A node without segments streams through
+// fallback, or (nil, nil) so the reader uses the live ring alone.
 func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {
-	_, ok, err := l.record(ctx, runID, nodeID)
-	if err != nil || ok || l.fallback == nil {
+	rec, ok, err := l.record(ctx, runID, nodeID)
+	if err != nil {
 		return nil, err
 	}
-	return l.fallback.Stream(ctx, runID, nodeID)
+	if !ok {
+		if l.fallback == nil {
+			return nil, nil
+		}
+		return l.fallback.Stream(ctx, runID, nodeID)
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		pw.CloseWithError(streamSegments(ctx, l.objs, l.s.liveLogs, rec, pw))
+	}()
+	return pr, nil
+}
+
+// perf: segments land every 10 s, so the stream lists the prefix about
+// this often while the live ring serves the lines in between.
+const segmentStreamPoll = 5 * time.Second
+
+// safety: offsets count bytes of the whole log, off how far the reader was sent and segEnd how far the segments
+// reach; the ring is joined only at off, so no line is sent twice or skipped.
+func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, rec store.NodeLog, out io.Writer) error {
+	if _, err := io.WriteString(out, ": open\n\n"); err != nil {
+		return err
+	}
+	var off, segEnd int64
+	read := 0
+	for {
+		log, err := logseg.Open(ctx, objs, rec.Prefix)
+		if err != nil {
+			return err
+		}
+		for _, seg := range log.Segments[min(read, len(log.Segments)):] {
+			body, err := log.Segment(ctx, objs, seg)
+			if err != nil {
+				return err
+			}
+			if skip := off - segEnd; skip < int64(len(body)) {
+				if err := writeSSELines(out, body[max(skip, 0):]); err != nil {
+					return err
+				}
+			}
+			segEnd += int64(len(body))
+			off = max(off, segEnd)
+			read++
+		}
+		if log.Manifest != nil {
+			_, err := io.WriteString(out, "event: stream_end\ndata: {}\n\n")
+			return err
+		}
+		if err := tailLiveRing(ctx, live, rec, &off, out); err != nil {
+			return err
+		}
+	}
+}
+
+// perf: when the ring cannot continue from off it waits out the poll rather than listing segments in a loop.
+func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *int64, out io.Writer) error {
+	deadline := time.Now().Add(segmentStreamPoll)
+	for {
+		waitCtx, cancel := context.WithDeadline(ctx, deadline)
+		chunk, ok := live.Wait(waitCtx, rec.RunID, rec.NodeID, *off)
+		cancel()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		switch {
+		case !time.Now().Before(deadline):
+			return nil
+		case ok && chunk.Start <= *off && chunk.Next > *off:
+			if err := writeSSELines(out, chunk.Data); err != nil {
+				return err
+			}
+			*off = chunk.Next
+		default:
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Until(deadline)):
+			}
+			return nil
+		}
+	}
+}
+
+func writeSSELines(out io.Writer, data []byte) error {
+	for line := range bytes.SplitSeq(bytes.TrimSuffix(data, []byte("\n")), []byte("\n")) {
+		if _, err := fmt.Fprintf(out, "data: %s\n\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error {

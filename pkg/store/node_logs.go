@@ -120,16 +120,16 @@ func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []N
 }
 
 // AbandonedNodeLogs lists unsealed attempts no writer will seal: the
-// node finished or moved to another attempt, nothing has been heard
-// from the attempt since before cutoff, and a finished node finished
-// before cutoff too. A deleted run's records are not listed; deleting
-// the run deletes its logs.
+// node finished or another claim generation holds it, nothing has been
+// heard from the attempt since before cutoff, and a finished node
+// finished before cutoff too. A deleted run's records are not listed;
+// deleting the run deletes its logs.
 func (s *Store) AbandonedNodeLogs(ctx context.Context, cutoff time.Time, limit int) (_ []NodeLog, err error) {
 	rows, err := s.query(ctx, `SELECT `+nodeLogColumnsOf("l")+` FROM node_logs l
   JOIN nodes n ON n.team = l.team AND n.run_id = l.run_id AND n.node_id = l.node_id
  WHERE l.sealed_at IS NULL AND l.updated_at < ?
    AND ((n.status = ? AND COALESCE(n.finished_at, 0) < ?)
-        OR (n.status != ? AND (l.attempt != n.attempts_consumed + 1 OR l.generation != n.claim_generation)))
+        OR (n.status != ? AND l.generation != n.claim_generation))
  ORDER BY l.updated_at LIMIT ?`,
 		cutoff.UnixNano(), nodeStatusDone, cutoff.UnixNano(), nodeStatusDone, limit)
 	if err != nil {
@@ -185,6 +185,11 @@ func collectNodeLogs(rows *sql.Rows) (out []NodeLog, err error) {
 	}
 	return out, rows.Err()
 }
+
+// LiveLogOffsetHeader names the byte offset in a node's whole log at
+// which a live log append begins. A writer that keeps its log as
+// segments sends it, so a reader can join the live view to the segments.
+const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
 
 // LogSegmentsRequest asks the controller for upload URLs for a node
 // attempt's log segments. Attempt and Generation echo the previous

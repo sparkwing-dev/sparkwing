@@ -2242,7 +2242,7 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		}
 		fence := store.TriggerClaimFence{Claimant: claimIdentity(r), ClaimGeneration: generation}
 		rawOrdinal := r.Header.Get(store.AttemptOrdinalHeader)
-		if rawOrdinal == "" && r.PathValue("nodeID") == "_compile" {
+		if rawOrdinal == "" && r.PathValue("nodeID") == store.CompileLogNode {
 			held, err = s.store.TriggerClaimFenceIsLive(r.Context(), r.PathValue("id"), claimIdentity(r), generation, time.Now())
 		} else {
 			ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
