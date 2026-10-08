@@ -443,11 +443,11 @@ func runNodeCLI(args []string) error {
 	if *coordinated {
 		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
 		runOpts = append(runOpts, Coordinated())
-		var abandon context.CancelFunc
-		ctx, abandon = context.WithCancel(ctx)
-		defer abandon()
-		defer WatchParentLiveness(abandon)()
 	}
+	var abandon context.CancelFunc
+	ctx, abandon = context.WithCancel(ctx)
+	defer abandon()
+	defer WatchParentLiveness(abandon)()
 	if brokeredChild {
 		for name := range remoteExecutionPrivateEnv {
 			_ = os.Unsetenv(name)

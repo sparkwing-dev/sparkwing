@@ -34,7 +34,7 @@ sequenceDiagram
 
 ## Environment contract
 
-The host sets these variables in the SDK process's environment. Values are strings. A descriptor named by a `_FD` variable is inherited from the host, and the SDK closes it when it is done with it.
+The host sets these variables in the SDK process's environment. Values are strings. A descriptor named by a `_FD` variable is inherited from the host. The SDK removes the variable from its environment and keeps the descriptor from the processes it starts (the Go SDK marks it close-on-exec), and closes it when it is done with it.
 
 | Variable | Meaning | Value | Set by, today |
 |---|---|---|---|
