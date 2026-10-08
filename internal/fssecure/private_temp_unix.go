@@ -2,7 +2,10 @@
 
 package fssecure
 
-import "os"
+import (
+	"errors"
+	"os"
+)
 
 func mkdirPrivateTemp(parent, prefix string) (string, error) {
 	directory, err := os.MkdirTemp(parent, prefix+"*")
@@ -10,8 +13,7 @@ func mkdirPrivateTemp(parent, prefix string) (string, error) {
 		return "", err
 	}
 	if err := SecurePrivateDir(directory); err != nil {
-		_ = os.Remove(directory)
-		return "", err
+		return "", errors.Join(err, os.Remove(directory))
 	}
 	return directory, nil
 }

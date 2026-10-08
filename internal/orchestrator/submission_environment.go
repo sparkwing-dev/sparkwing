@@ -53,7 +53,7 @@ type submissionEnvironmentSnapshot struct {
 	Environment []string `json:"environment"`
 }
 
-func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog.Logger) error {
+func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog.Logger) (err error) {
 	layout, err := ConsumerLayoutFor(home)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog
 	if err != nil {
 		return fmt.Errorf("create private submission environment directory: %w", err)
 	}
-	defer func() { _ = os.Remove(privateDir) }()
+	defer func() { err = errors.Join(err, os.Remove(privateDir)) }()
 	tmp, err := os.CreateTemp(privateDir, "snapshot-*")
 	if err != nil {
 		return fmt.Errorf("create submission environment: %w", err)

@@ -269,9 +269,9 @@ func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		if runtime.GOOS == "windows" {
-			_, err = sparkwing.Exec(ctx, os.Args[0], "-test.run=^TestExec_WindowsCancellationHelper$").Env("SPARKWING_EXEC_READY", marker).Run()
+			_, err = sparkwing.Exec(ctx, os.Args[0], "-test.run=^TestExec_WindowsCancellationHelper$").Env("SPARKWING_EXEC_READY", marker).Run() //nolint:contextcheck // safety: Exec stores ctx; Run takes no context argument.
 		} else {
-			_, err = sparkwing.Bash(ctx, fmt.Sprintf("printf ready > %q; sleep 30", marker)).Run()
+			_, err = sparkwing.Bash(ctx, fmt.Sprintf("printf ready > %q; sleep 30", marker)).Run() //nolint:contextcheck // safety: Bash stores ctx; Run takes no context argument.
 		}
 		close(done)
 	}()
