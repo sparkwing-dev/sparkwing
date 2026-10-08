@@ -183,8 +183,8 @@ func TestBuildJob_FetchesSourceInAFixedInitContainer(t *testing.T) {
 	if ie["SPARKWING_SOURCE_DIR"] != "/tmp/src" || ne["SPARKWING_SOURCE_DIR"] != "/tmp/src" || ne["GOFLAGS"] != "-mod=mod" {
 		t.Fatalf("init env %v node env %v", ie, ne)
 	}
-	if ne["SPARKWING_LOG_FORMAT"] != "json" {
-		t.Fatalf("node env %v lacks SPARKWING_LOG_FORMAT=json", ne)
+	if ne["SPARKWING_LOG_FORMAT"] != "json" || ne["SPARKWING_RUNNER_TYPE"] != "kubernetes" || ne["SPARKWING_RUNNER_NAME"] == "" {
+		t.Fatalf("node env %v lacks the log format or the runner identity", ne)
 	}
 	if _, ok := ie["GOFLAGS"]; ok {
 		t.Fatal("the init container inherits the node's module mode")
