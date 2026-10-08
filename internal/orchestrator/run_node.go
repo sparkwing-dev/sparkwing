@@ -348,6 +348,7 @@ func runContextFor(run *store.Run) sparkwing.RunContext {
 }
 
 func runNodeCLI(args []string) error {
+	defer secrets.StopSharingRegistered()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
 		"controller base URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")

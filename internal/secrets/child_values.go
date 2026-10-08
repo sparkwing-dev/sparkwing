@@ -56,6 +56,19 @@ func ShareRegisteredFromEnv() {
 	shareMu.Unlock()
 }
 
+// StopSharingRegistered closes the descriptor [ShareRegisteredFromEnv] opened, once this
+// process registers nothing further, so the process that started it sees the channel end
+// while it still reads this process's output. Registering afterwards masks in this process
+// only.
+func StopSharingRegistered() {
+	shareMu.Lock()
+	defer shareMu.Unlock()
+	if closer, ok := shareTo.(io.Closer); ok {
+		_ = closer.Close()
+	}
+	shareTo = nil
+}
+
 func shareRegistered(value string) {
 	shareMu.Lock()
 	defer shareMu.Unlock()
