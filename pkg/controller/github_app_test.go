@@ -929,106 +929,9 @@ func TestGitHubAppUninstallUnbinds(t *testing.T) {
 }
 
 type claimedNode struct {
-	RunID  string `json:"run_id"`
-	NodeID string `json:"node_id"`
-}
-
-func (f *appFixture) appWork(owner signedIn, runID, slug string) string {
-	f.t.Helper()
-	ctx := context.Background()
-	tn, err := f.store.ForTeam(ctx, store.Team(owner.team))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	repo, _ := store.ParseGitHubRepo(slug)
-	now := time.Now()
-	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", RepoURL: "https://github.com/" + slug + ".git",
-		GithubOwner: repo.Owner, GithubRepo: repo.Name, CreatedAt: now, GitBranch: "main", GitSHA: headSHA,
-	}, store.Run{
-		ID: runID, Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now,
-		RepoURL: "https://github.com/" + slug + ".git", GithubOwner: repo.Owner, GithubRepo: repo.Name,
-	}); err != nil {
-		f.t.Fatal(err)
-	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
-		f.t.Fatal(err)
-	}
-	if err := f.store.MarkNodeReady(ctx, runID, "compile"); err != nil {
-		f.t.Fatal(err)
-	}
-	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
-		map[string]any{"scopes": machineScopes, "name": "r-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
-		f.t.Fatalf("mint runner = %d", code)
-	}
-	auth := "Bearer " + m.Token
-	var n claimedNode
-	if code := f.call("POST", "/api/v1/runs/"+runID+"/nodes/compile/claim", auth,
-		map[string]any{"holder_id": "pod-" + runID}, &n); code != http.StatusOK || n.RunID != runID {
-		f.t.Fatalf("claim %s = %d %+v", runID, code, n)
-	}
-	return auth
-}
-
-func (f *appFixture) sourceToken(auth, runID string) (gitCredentialAnswer, int) {
-	f.t.Helper()
-	return f.gitCredential(auth, runID)
-}
-
-// The source-token route is gone; a runner from before v0.66 that asks it
-// gets the mux's 404.
-func TestGitHubAppSourceTokenRouteIsGone(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	runner := f.appWork(olga, "run-widgets", "acme/widgets")
-	before := len(f.app.Minted())
-	if code := f.call("POST", "/api/v1/runs/run-widgets/source-token", runner, nil, nil); code != http.StatusNotFound {
-		t.Fatalf("source-token = %d, want 404", code)
-	}
-	if n := len(f.app.Minted()) - before; n != 0 {
-		t.Fatalf("the removed route minted %d tokens", n)
-	}
-}
-
-func TestGitHubAppSourceTokenReadsOnlyTheRunsRepository(t *testing.T) {
-	f := newAppFixture(t)
-	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
-	f.connect(olga, 501, 7, acmeAdmin)
-
-	runner := f.appWork(olga, "run-widgets", "acme/widgets")
-	tok, code := f.sourceToken(runner, "run-widgets")
-	if code != http.StatusOK || tok.Repository != "acme/widgets" {
-		t.Fatalf("source token = %d %+v", code, tok)
-	}
-	if !f.app.TokenCovers(tok.Token, "acme/widgets") {
-		t.Fatal("the token does not read the run's repository")
-	}
-	if f.app.TokenCovers(tok.Token, "acme/plans") {
-		t.Fatal("the token reads acme/plans, another repository of the same installation")
-	}
-	minted := f.app.Minted()
-	last := minted[len(minted)-1]
-	if len(last.Repositories) != 1 || last.Repositories[0] != "widgets" || len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
-		t.Fatalf("token request = %+v, want widgets with contents:read only", last)
-	}
-
-	other := f.appWork(olga, "run-plans", "acme/plans")
-	if _, code := f.sourceToken(other, "run-widgets"); code != http.StatusForbidden {
-		t.Fatalf("source token for a run the caller does not hold = %d, want 403", code)
-	}
-	unowned := f.appWork(olga, "run-elsewhere", "someone/else")
-	if _, code := f.sourceToken(unowned, "run-elsewhere"); code != http.StatusNotFound {
-		t.Fatalf("source token for an uncovered repository = %d, want 404", code)
-	}
-	bobs := f.appWork(bob, "run-bobs-widgets", "acme/widgets")
-	if _, code := f.sourceToken(bobs, "run-bobs-widgets"); code != http.StatusNotFound {
-		t.Fatalf("source token for another team's run of the repository = %d, want 404", code)
-	}
-	if _, code := f.sourceToken(runner, "run-bobs-widgets"); code != http.StatusNotFound && code != http.StatusForbidden {
-		t.Fatalf("source token across teams = %d, want 404 or 403", code)
-	}
+	RunID      string `json:"run_id"`
+	NodeID     string `json:"node_id"`
+	ClaimToken string `json:"claim_token"`
 }
 
 func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
@@ -1434,37 +1337,6 @@ func TestGitHubAppRunNeedsTheRepositoryStillCovered(t *testing.T) {
 	}
 	if n := len(f.triggers(olga.team)); n != 0 {
 		t.Fatalf("an uncovered repository started %d runs", n)
-	}
-}
-
-// A runner that asks for its run's source token in a loop gets the one live
-// token back, and a claim that keeps asking is refused.
-func TestGitHubAppSourceTokenIsMintedOncePerClaim(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	runner := f.appWork(olga, "run-widgets", "acme/widgets")
-	before := len(f.app.Minted())
-	first, code := f.sourceToken(runner, "run-widgets")
-	if code != http.StatusOK {
-		t.Fatalf("source token = %d", code)
-	}
-	for i := 0; i < 5; i++ {
-		again, code := f.sourceToken(runner, "run-widgets")
-		if code != http.StatusOK || again.Token != first.Token {
-			t.Fatalf("ask %d = %d %q, want the first token again", i, code, again.Token)
-		}
-	}
-	if n := len(f.app.Minted()) - before; n != 1 {
-		t.Fatalf("six asks minted %d tokens, want 1", n)
-	}
-	refused := false
-	for i := 0; i < 10 && !refused; i++ {
-		_, code := f.sourceToken(runner, "run-widgets")
-		refused = code == http.StatusTooManyRequests
-	}
-	if !refused {
-		t.Fatal("a claim asking in a loop was never refused")
 	}
 }
 

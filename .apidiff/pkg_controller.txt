@@ -143,20 +143,6 @@ type GitCredentialReleaseJSON struct {
 	TokenPrefix string
 	ReleasedAt  int64
 }
-type GitCredentialResponse struct {
-	Kind string
-
-	Host      string
-	Token     string
-	ExpiresAt int64
-
-	Repository        string
-	ExtraRepositories []string
-
-	Username   string
-	Secret     string
-	KnownHosts string
-}
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
@@ -364,13 +350,6 @@ type ServicesResponse struct {
 	MultiTeam bool
 
 	DirectData bool
-}
-type SourceTokenResponse struct {
-	Token      string
-	ExpiresAt  int64
-	Repository string
-
-	ExtraRepositories []string
 }
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"

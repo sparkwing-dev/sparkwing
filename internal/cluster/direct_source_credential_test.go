@@ -96,9 +96,9 @@ func TestCloudRunnerFetchesWithTheTeamsDeployKey(t *testing.T) {
 	if err := tn.SetGitCredentialMachine(ctx, tok.Prefix, true, "owner", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := tn.CreateTrigger(ctx, store.Trigger{
+	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: "cloud-run", Pipeline: "deploy", RepoURL: repoURL, GitBranch: "main", GitSHA: sha,
-	}); err != nil {
+	}, store.Run{ID: "cloud-run", Pipeline: "deploy", Status: "pending", RepoURL: repoURL, CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 

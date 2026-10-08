@@ -545,9 +545,10 @@ The git cache and its controller proxy belong to the operator, so a runner that
 holds a team's runner token starts without `--gitcache`. Such a runner fetches
 each claimed run's source directly: it fetches the commit the trigger recorded
 from the remote the trigger recorded. It asks the controller for the run's
-credential first: the team's GitHub App token when an installation covers the
-repository, else the git credential the team stored for the host and opted
-this machine into (see [Team git credentials](git-credentials.md)). When the
+credential first, with its claim's token: the team's GitHub App token when an
+installation covers the repository and the repository qualifies, else the git
+credential the team stored for the host and opted this machine into (see
+[Team git credentials](git-credentials.md)). When the
 controller releases none, a runner given `--allow-repo` fetches with the
 machine's own git config and credentials. The dashboard's machines page asks
 which repositories the machine may build and prints this command:

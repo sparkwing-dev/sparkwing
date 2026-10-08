@@ -17,7 +17,7 @@ import (
 // RunSource is one run's source as a direct runner fetches it.
 type RunSource struct {
 	ControllerURL string
-	RunnerToken   string
+	ClaimToken    string
 	RunID         string
 	RepoURL       string
 	Branch        string
@@ -61,7 +61,7 @@ func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	cred, err := RequestDirectCredential(ctx, src.ControllerURL, src.RunnerToken, src.RunID)
+	cred, err := RequestDirectCredential(ctx, src.ControllerURL, src.ClaimToken, src.RunID)
 	if err != nil {
 		// safety: a runner its owner did not fence has no credentials of its
 		// own to offer, so it fails rather than fetch as whoever runs it.

@@ -62,7 +62,6 @@ const (
 	defaultHTTPSUsername  = "x-access-token"
 	hostKeyScanTimeout    = 10 * time.Second
 	gitCredentialScope    = "git-credential"
-	gitCredentialsPerMin  = 10
 	gitCredentialListSize = 200
 )
 

@@ -662,9 +662,9 @@ claim:
   `GET /api/v1/services`. Anything else answers `403 claim_mismatch`.
 - It reads any node of its run but writes only to its own node. Of the
   run-level writes it makes only a node's own: events, the run heartbeat, the
-  cache grant, the source credential and token routes and the run's Git
-  proxy. Run create and finish, plan, node create and the readiness routes
-  answer `403 claim_mismatch`.
+  cache grant, the run's source credential and the run's Git proxy. Run
+  create and finish, plan, node create and the readiness routes answer
+  `403 claim_mismatch`.
 - Every request carries the claim's own holder, membership, reservation and
   generation, whatever fence headers it sent, and never a trigger generation,
   so it never acts as the run's dispatcher.
@@ -676,8 +676,11 @@ claim:
   request after that answers `403 claim_ended`, or `401` for a dead runner
   token.
 
-A trigger claim token answers `GET /api/v1/secrets/{name}` alone, for the
-trigger's own run, and stops with the trigger claim. A trigger child that runs
+A trigger claim token answers `GET /api/v1/secrets/{name}` and
+`POST /api/v1/runs/{id}/source-credential` alone, for the trigger's own run,
+and stops with the trigger claim. The source credential route answers a node
+or trigger claim token and no bearer, so the runner's token fetches no
+source credential (see [Git credentials](git-credentials.md)). A trigger child that runs
 a node in its own process does so under the trigger claim, which is why the
 trigger claim reads secrets. Every other route a trigger child calls goes
 through the runner's loopback trigger broker, which admits only its run's

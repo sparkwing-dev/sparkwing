@@ -1016,8 +1016,6 @@ type GitCredentialRelease struct {
 	Runner       string
 	TokenPrefix  string
 	ReleasedAt   time.Time
-
-	Claimant ClaimIdentity
 }
 const GitCredentialSSH = "ssh"
 type GitHubAppAutomation struct {
@@ -1910,13 +1908,19 @@ type SkewError struct {
 }
 func (e *SkewError) Error() string
 type SourceCredential struct {
-	Token        string
-	ExpiresAt    int64
-	RepoURL      string
-	SHA          string
-	Branch       string
+	Kind      string
+	Host      string
+	Token     string
+	ExpiresAt int64
+	RepoURL   string
+	SHA       string
+	Branch    string
+
 	Repositories []string
 	Source       SourceSpec
+	Username     string
+	Secret       string
+	KnownHosts   string
 }
 func SourceKeyDigest(key string) (string, bool)
 type SourceSpec struct {
@@ -1926,8 +1930,7 @@ type SourceSpec struct {
 	LFS        bool
 }
 type SourceSpend struct {
-	Spec   SourceSpec
-	RepoID int64
+	Spec SourceSpec
 }
 type SpawnedChild struct {
 	ParentNodeID string
@@ -2646,6 +2649,7 @@ func (t *Tenant) GitHubAppExtraRepoRefs(ctx context.Context, repository string) 
 func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repository string) (_ []string, err error)
 func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInstallation, err error)
+func (t *Tenant) GitHubAppSubscribedRepository(ctx context.Context, repository string) (_ int64, err error)
 func (t *Tenant) GitHubAppTriggers(ctx context.Context) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, repositoryID int64) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error)
@@ -2717,7 +2721,7 @@ func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq in
 func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name string, now time.Time) (_ *Secret, err error)
 func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitCredentialRelease, now time.Time) (_ GitCredential, err error)
+func (t *Tenant) ReleaseGitCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ GitCredential, _ SourceSpend, err error)
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
@@ -2762,7 +2766,8 @@ func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error
 func (t *Tenant) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (t *Tenant) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpend, err error)
+func (t *Tenant) SourceClaimant(ctx context.Context, tok ClaimToken) (ClaimIdentity, error)
+func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ SourceSpend, err error)
 func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error)
 func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error

@@ -139,9 +139,16 @@ not a defect. A team editor can read masked secret values: it can mint a
 runner token, start a run, claim it and read, through the claim's token, the
 secrets the run's plan declares, because it already chooses the code that run
 executes. A runner's own token reads no secret, and every node read is
-recorded as a `secret_released` event. The operator's launcher token
+recorded as a `secret_released` event. The same editor reaches the source of
+the repositories it can already trigger, and no more: a run's GitHub App token
+reads the repository the App's webhook recorded, or a repository the run names
+by hand only when one of the team's App trigger subscriptions names it, so
+typing a private repository of the installation into a run yields no token for
+it. Only a claim token of the run receives a source credential, through
+`POST /api/v1/runs/{id}/source-credential`, and each issue is recorded with
+the team's git credential releases. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
-every team's run secrets, source tokens and cache grants; keep it
+every team's run secrets, source credentials and cache grants; keep it
 operator-only. Which secrets a run may read through a claim token is declared
 by that run's own plan, so the boundary is the secret's pipeline or shared
 scope, not the declaration. The masker covers step output that goes through

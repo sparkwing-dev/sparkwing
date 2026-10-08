@@ -105,9 +105,6 @@ type GitCredentialRelease struct {
 	Runner       string
 	TokenPrefix  string
 	ReleasedAt   time.Time
-	// Claimant is the claim the release is made against; the release
-	// re-checks it inside its own transaction. Not stored.
-	Claimant ClaimIdentity
 }
 
 // ErrClaimNotLive refuses a release whose claimant no longer holds a live
@@ -268,73 +265,37 @@ func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error {
 	return nil
 }
 
-// ReleaseGitCredential reads the team's confirmed credential for host and
-// records its release to the runner rel names, in one transaction, so a
-// credential is never handed out without its audit row and a deleted one is
-// never released. The same transaction re-checks, and on Postgres locks,
-// rel.Claimant's live claim on rel.RunID in the team, so a claim that lapses
-// or moves after the caller's own check releases nothing. ErrNotFound when
-// the team holds no confirmed credential for host; ErrClaimNotLive when the
-// claim is gone.
-func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitCredentialRelease, now time.Time) (_ GitCredential, err error) {
+// ReleaseGitCredential reads the team's confirmed credential for rel.Host and
+// records its release to rel.Runner, in one transaction, so a credential is
+// never handed out without its audit row and a deleted one is never
+// released. The same transaction admits the release under tok's claim as
+// [Tenant.SpendSourceCredential] does, so a claim that lapses or moves after
+// the caller's own check releases nothing. ErrNotFound when the team holds no
+// confirmed credential for the host.
+func (t *Tenant) ReleaseGitCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ GitCredential, _ SourceSpend, err error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
-		return GitCredential{}, err
+		return GitCredential{}, SourceSpend{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := t.lockLiveRunClaimTx(ctx, tx, rel.RunID, rel.Claimant, now); err != nil {
-		return GitCredential{}, err
+	spend, err := t.spendSourceClaimTx(ctx, tx, tok, now)
+	if err != nil {
+		return GitCredential{}, SourceSpend{}, err
 	}
 	c, err := scanGitCredential(tx.QueryRowContext(ctx, `
 		SELECT `+gitCredentialCols+` FROM git_credentials
-		WHERE team = ? AND host = ? AND confirmed_at IS NOT NULL`, string(t.team), host))
+		WHERE team = ? AND host = ? AND confirmed_at IS NOT NULL`, string(t.team), rel.Host))
 	if errors.Is(err, sql.ErrNoRows) {
-		return GitCredential{}, notFound("git credential", host)
+		return GitCredential{}, SourceSpend{}, notFound("git credential", rel.Host)
 	}
 	if err != nil {
-		return GitCredential{}, err
+		return GitCredential{}, SourceSpend{}, err
 	}
-	id, err := newIdentityID()
-	if err != nil {
-		return GitCredential{}, err
+	rel.CredentialID, rel.Host = c.ID, c.Host
+	if err := t.insertSourceReleaseTx(ctx, tx, tok, rel, now); err != nil {
+		return GitCredential{}, SourceSpend{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO git_credential_releases (id, team, credential_id, host, run_id, runner, token_prefix, released_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, string(t.team), c.ID, c.Host, rel.RunID, rel.Runner, rel.TokenPrefix, now.UTC().Unix()); err != nil {
-		return GitCredential{}, err
-	}
-	return c, tx.Commit()
-}
-
-// safety: the claim row stays locked until tx ends, so the claim cannot be renewed away or
-// reassigned under the release.
-func (t *Tenant) lockLiveRunClaimTx(ctx context.Context, tx *storeTx, runID string, claimant ClaimIdentity, now time.Time) error {
-	if !claimant.bound() || runID == "" {
-		return ErrClaimNotLive
-	}
-	at := now.UnixNano()
-	var one int
-	err := tx.QueryRowContext(ctx, `
-		SELECT 1 FROM nodes
-		WHERE team = ? AND run_id = ? AND claim_principal = ? AND claim_token_prefix = ?
-		  AND `+nodeClaimLiveSQL("")+` LIMIT 1`+tx.forUpdate(),
-		string(t.team), runID, claimant.Principal, claimant.TokenPrefix, at).Scan(&one)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	err = tx.QueryRowContext(ctx, `
-		SELECT 1 FROM triggers
-		WHERE team = ? AND id = ? AND claim_principal = ? AND claim_token_prefix = ?
-		  AND `+triggerClaimLiveSQL("")+tx.forUpdate(),
-		string(t.team), runID, claimant.Principal, claimant.TokenPrefix, at).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrClaimNotLive
-	}
-	return err
+	return c, spend, tx.Commit()
 }
 
 // GitCredentialReleases lists the team's most recent releases, newest

@@ -1438,3 +1438,47 @@ To upgrade:
    kept current already runs v0.66 or later.
 2. Drop `github_app.source_tokens` from code that reads
    `GET /api/v1/capabilities`; `github_app` still names the App's `slug`.
+
+## Source credentials go to claim tokens only
+
+- **Before:** a runner without the git cache asked
+  `POST /api/v1/runs/{id}/git-credential` with its own token while it held a
+  claim on the run. The controller minted a GitHub App token for whatever
+  github.com repository the run named, if an installation of the team covered
+  it, kept it for reuse, and otherwise released the team's stored git
+  credential for the host. The answer carried `repository` and
+  `extra_repositories`.
+- **After:** `POST /api/v1/runs/{id}/source-credential` is the only route,
+  and it answers only a claim token of the run: a node claim's or trigger
+  claim's, which every runner claim returns, or a Cloud Job's. A bearer gets
+  `403 claim_token_required` and `git-credential` answers 404. The App token
+  reads the repository the App's webhook recorded on the run's trigger, or a
+  repository the run names by hand only when one of the team's App trigger
+  subscriptions names it. The team's stored host credential is unchanged in
+  who receives it. A node's claim gets at most three credentials and none
+  once its attempt starts; every App token issued appears in
+  `GET /api/v1/team/git-credentials/releases`. The answer names the run's
+  repository and the owner's extra repositories in `repositories`, the run's
+  first.
+
+To upgrade:
+
+1. Upgrade every runner together with the controller. A runner older than
+   this release asks the removed route and fails to fetch source straight
+   from the controller; a runner using the operator's git cache is
+   unaffected.
+2. For a repository your team starts runs of by hand (`sparkwing run` against
+   the controller, the API or the dashboard) rather than through the GitHub
+   App, subscribe it under **Team > GitHub**, or store a git credential for
+   github.com under **Team > Git credentials**. Until then those runs fail at
+   the fetch with `no_source_credential` and a message naming the
+   subscription. A public repository needs the same, since a runner presents
+   no credential of its own.
+3. If an owner listed extra repositories before their GitHub IDs were
+   recorded, save the list again; such a list now answers 409 rather than
+   minting by name.
+4. Code that calls `store.Tenant.SpendSourceCredential` or
+   `ReleaseGitCredential` passes the claim token and a
+   `store.GitCredentialRelease`; code that decoded
+   `controller.GitCredentialResponse` or `controller.SourceTokenResponse`
+   decodes `store.SourceCredential`.

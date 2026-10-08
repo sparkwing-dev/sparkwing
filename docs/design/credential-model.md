@@ -83,7 +83,8 @@ a claim and are never mintable from a bearer alone. There are four kinds:
 - **`trigger`**: a runner's trigger claim, returned as `claim_token` by both
   trigger claim routes and stored in `trigger_claim_tokens` (schema v98),
   because the run row does not exist when the trigger is claimed. It answers
-  the secret route alone and stops with the trigger claim.
+  the secret route and the source credential route alone and stops with the
+  trigger claim.
 
 The machine bearer stays in the runner process. A pooled node's supervisor
 and the brokered child behind it run on the node's claim token. A Kubernetes
@@ -113,6 +114,51 @@ included, answers `403 claim_required`, even while it holds the run's claim.
 exchange); a token minted with it keeps authenticating, and the scope
 releases nothing. `ClaimedRunsFor` went with the bearer path, and a runner
 older than the claim tokens above reads no secret from this controller.
+
+### One source credential route (landed)
+
+Three routes used to mint a `contents: read` App installation token for a
+run's source, each with its own caching, scoping and validation:
+`source-credential` for a Cloud Job's claim token, and `source-token` and
+`git-credential` for a runner's bearer. The two bearer routes minted for
+whatever repository a run named, so an editor who typed a private repository
+of the installation into a run got a token for it.
+
+`POST /api/v1/runs/{id}/source-credential` is now the only one. It answers
+the claim token of a live plan, work, node or trigger claim on the run and
+nothing else; a bearer, a runner's included, gets `403 claim_token_required`.
+A runner's claim must still trace to a machine credential that authenticates.
+The App token is minted by GitHub repository ID for:
+
+- the repository the App's webhook recorded on the trigger
+  (`github_repo_id`), which a retry and a child run of the same repository
+  inherit; or
+- a repository the run names by hand, only when one of the team's App
+  trigger subscriptions (`github_app_triggers`) names it, under the ID that
+  subscription recorded. Two IDs under one name, a rename GitHub has not
+  reported yet, qualify neither.
+
+The owner's extra repositories are added by their recorded IDs, as before.
+The team's stored host credential, the documented feature for hosts other
+than github.com and for repositories the App does not reach, is served from
+the same route rather than a route of its own, because it answers the same
+question (what does this claim fetch the run's source with) under the same
+claim checks, and a second route would be a second policy to audit. It keeps
+its opt-in (a metered runner, or a machine an owner opted in), its host-key
+confirmation, its audit row and its per-minute limit, and it reaches only a
+runner's node or trigger claim; a Cloud Job's claim never receives it.
+
+One policy applies to every claim: at most ten asks a minute, an audit row in
+`git_credential_releases` for every token issued and every credential
+released, and, for a claim with a node of its own, at most three credentials
+and none once its attempt has started, since the node's own process holds the
+same token. The in-memory token reuse the bearer routes kept is gone. A
+runner's trigger claim has no node, so it gets the per-minute limit alone; its
+token never leaves the runner process. The trigger loop fetches with the
+trigger's claim token, and a pooled node's supervisor and a Kubernetes Job
+with the node's claim token. `source-token` (D-CRD-04) and `git-credential`
+are removed and answer 404, and a runner older than this release fetches no
+source straight from a controller of it.
 
 ## Service credentials
 
@@ -218,10 +264,14 @@ with this design:
   service token; the cache accepts cache grants only, the controller's own
   calls included, and the static cache operator token is gone under both of
   its names. People act through the operator identity.
-- **One installation-token route.** `POST /api/v1/runs/{id}/source-credential`,
-  claim-bound, is the only route that mints a GitHub App installation token;
-  a repository a run names by hand qualifies only when the team has
-  subscribed it. `source-token` and `git-credential` go.
+- **One installation-token route (landed).** `POST /api/v1/runs/{id}/source-credential`,
+  claim-bound, is the only route that mints a GitHub App installation token
+  and the one that releases a team's stored host credential; a repository a
+  run names by hand qualifies only when the team has subscribed it.
+  `source-token` and `git-credential` are gone.
+- **`source-token` removed now (landed).** The compatibility window for
+  runners and controllers older than v0.66 ends on 2026-10-15, and the
+  release carrying the removal ships after it.
 - **Bearer secret release: removed (landed).** A node reads secrets with its
   claim token, under the plan declaration and with an audit event; a team
   token keeps no `secrets.read`, and management reads by name stay with the

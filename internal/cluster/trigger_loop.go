@@ -272,7 +272,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 			trigger.ID, trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], sha, repoURL, workDir)
 	case direct:
 		sparkwingDir, fetchErr = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
-			ControllerURL: opts.ControllerURL, RunnerToken: opts.Token, RunID: trigger.ID,
+			ControllerURL: opts.ControllerURL, ClaimToken: trigger.ClaimToken, RunID: trigger.ID,
 			RepoURL: repoURL, Branch: branch, SHA: sha, WorkDir: workDir,
 			OwnerCredentials: !opts.AllowRepos.Empty(),
 		}, logger)

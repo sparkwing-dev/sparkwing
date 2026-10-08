@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type credFixture struct {
@@ -74,7 +76,7 @@ func (f *credFixture) put(who signedIn, body map[string]any) (controller.GitCred
 
 func (f *credFixture) cloudRun(owner signedIn, runID, repoURL string) string {
 	f.t.Helper()
-	auth, prefix := f.runWork(owner, runID, repoURL)
+	auth, prefix := f.nodeClaim(owner, runID, repoURL, 0)
 	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
 		f.t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func TestTeamGitCredentialSSHIsUnusableUntilConfirmed(t *testing.T) {
 	}
 
 	runner := f.cloudRun(f.olga, "run-gl", "git@gitlab.example.com:acme/tools.git")
-	got, code := f.gitCredential(runner, "run-gl")
+	got, code := f.sourceCredential(runner, "run-gl")
 	if code != http.StatusConflict || got.Error != "git_credential_unconfirmed" || got.Secret != "" {
 		t.Fatalf("release before confirmation = %d %+v; want 409 git_credential_unconfirmed", code, got)
 	}
@@ -128,7 +130,7 @@ func TestTeamGitCredentialSSHIsUnusableUntilConfirmed(t *testing.T) {
 		map[string]string{"fingerprint": want}, nil); code != http.StatusOK {
 		t.Fatalf("confirm = %d", code)
 	}
-	got, code = f.gitCredential(runner, "run-gl")
+	got, code = f.sourceCredential(runner, "run-gl")
 	if code != http.StatusOK || got.Kind != "ssh" || got.Host != "gitlab.example.com" || got.Secret != key ||
 		!strings.Contains(got.KnownHosts, "gitlab.example.com ssh-ed25519 ") {
 		t.Fatalf("release = %d %+v; want the key and its pinned host key", code, got)
@@ -149,16 +151,16 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 		t.Fatalf("put = %d", code)
 	}
 	olgas := f.cloudRun(f.olga, "run-olga", "https://gitlab.example.com/acme/tools.git")
-	if got, code := f.gitCredential(olgas, "run-olga"); code != http.StatusOK || got.Secret != "glpat-olga" ||
+	if got, code := f.sourceCredential(olgas, "run-olga"); code != http.StatusOK || got.Secret != "glpat-olga" ||
 		got.Username != "x-access-token" || got.Kind != "https" {
 		t.Fatalf("control: the team's cloud runner = %d %+v", code, got)
 	}
 
 	bobs := f.cloudRun(bob, "run-bob", "https://gitlab.example.com/bob/tools.git")
-	if got, code := f.gitCredential(bobs, "run-bob"); code != http.StatusNotFound || got.Secret != "" || got.Error != "no_source_credential" {
+	if got, code := f.sourceCredential(bobs, "run-bob"); code != http.StatusNotFound || got.Secret != "" || got.Error != "no_source_credential" {
 		t.Fatalf("another team's runner on its own run of the host = %d %+v; want no credential", code, got)
 	}
-	if got, code := f.gitCredential(bobs, "run-olga"); code == http.StatusOK || got.Secret != "" {
+	if got, code := f.sourceCredential(bobs, "run-olga"); code == http.StatusOK || got.Secret != "" {
 		t.Fatalf("another team's runner on the team's run = %d %+v; want a refusal", code, got)
 	}
 
@@ -166,12 +168,12 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
 		t.Fatal(err)
 	}
-	if got, code := f.gitCredential(idle, "run-olga"); code != http.StatusForbidden || got.Secret != "" {
-		t.Fatalf("a cloud runner of the team without a claim = %d %+v; want 403", code, got)
+	if got, code := f.sourceCredential(idle, "run-olga"); code != http.StatusForbidden || got.Secret != "" || got.Error != "claim_token_required" {
+		t.Fatalf("a cloud runner of the team without a claim = %d %+v; want 403 claim_token_required", code, got)
 	}
 
 	elsewhere := f.cloudRun(f.olga, "run-elsewhere", "https://gitlab.other.com/acme/tools.git")
-	if got, code := f.gitCredential(elsewhere, "run-elsewhere"); code != http.StatusNotFound || got.Secret != "" ||
+	if got, code := f.sourceCredential(elsewhere, "run-elsewhere"); code != http.StatusNotFound || got.Secret != "" ||
 		!strings.Contains(got.Message, "gitlab.other.com") {
 		t.Fatalf("a run on another host = %d %+v; want no credential and a remedy naming its host", code, got)
 	}
@@ -187,8 +189,8 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 	if _, code := f.put(f.olga, map[string]any{"host": "gitlab.example.com", "kind": "https", "token": "glpat-olga"}); code != http.StatusOK {
 		t.Fatalf("put = %d", code)
 	}
-	laptop, prefix := f.runWork(f.olga, "run-laptop", "https://gitlab.example.com/acme/tools.git")
-	got, code := f.gitCredential(laptop, "run-laptop")
+	laptop, prefix := f.nodeClaim(f.olga, "run-laptop", "https://gitlab.example.com/acme/tools.git", 0)
+	got, code := f.sourceCredential(laptop, "run-laptop")
 	if code != http.StatusForbidden || got.Error != "git_credential_not_released" || got.Secret != "" {
 		t.Fatalf("a machine not opted in = %d %+v; want 403 git_credential_not_released", code, got)
 	}
@@ -208,14 +210,50 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 	if !listed {
 		t.Fatalf("runner tokens = %+v; want %s shown as opted in", tokens, prefix)
 	}
-	if got, code := f.gitCredential(laptop, "run-laptop"); code != http.StatusOK || got.Secret != "glpat-olga" {
+	if got, code := f.sourceCredential(laptop, "run-laptop"); code != http.StatusOK || got.Secret != "glpat-olga" {
 		t.Fatalf("an opted-in machine = %d %+v", code, got)
 	}
 	if code := f.call("PUT", path, f.olga.auth, map[string]bool{"enabled": false}, nil); code != http.StatusOK {
 		t.Fatalf("opt out = %d", code)
 	}
-	if _, code := f.gitCredential(laptop, "run-laptop"); code != http.StatusForbidden {
+	if _, code := f.sourceCredential(laptop, "run-laptop"); code != http.StatusForbidden {
 		t.Fatalf("after opting out = %d, want 403", code)
+	}
+}
+
+// The stored credential reaches a runner's claim, its node's or its
+// trigger's, and never a Cloud launcher's claim or a bearer.
+func TestTeamGitCredentialReachesOnlyARunnersClaim(t *testing.T) {
+	f := newCredFixture(t)
+	for host, tok := range map[string]string{"gitlab.example.com": "glpat-olga", "github.com": "github_pat_x"} {
+		if _, code := f.put(f.olga, map[string]any{"host": host, "kind": "https", "token": tok}); code != http.StatusOK {
+			t.Fatalf("put %s = %d", host, code)
+		}
+	}
+	launcher := f.launchedRun(f.olga, "run-cloud", "someone", "else")
+	if got, code := f.sourceCredential("Bearer "+launcher, "run-cloud"); code != http.StatusNotFound ||
+		got.Secret != "" || !strings.Contains(got.Message, "Sparkwing Cloud") {
+		t.Fatalf("a launcher's claim = %d %+v; want no credential and the Cloud remedy", code, got)
+	}
+
+	f.createRun(f.olga, "run-hook", "https://gitlab.example.com/acme/tools.git", 0)
+	machine, prefix := f.teamRunner(f.olga, "trigger-machine")
+	if code := f.call("PUT", "/api/v1/team/tokens/"+prefix+"/git-credentials", f.olga.auth, map[string]bool{"enabled": true}, nil); code != http.StatusOK {
+		t.Fatalf("opt in = %d", code)
+	}
+	if got, code := f.sourceCredential(machine, "run-hook"); code != http.StatusForbidden || got.Secret != "" {
+		t.Fatalf("the opted-in machine's bearer = %d %+v; want 403", code, got)
+	}
+	trig, err := client.NewWithToken(f.url, nil, strings.TrimPrefix(machine, "Bearer ")).ClaimSpecificTrigger(context.Background(), "run-hook", time.Minute)
+	if err != nil || trig == nil {
+		t.Fatalf("claim trigger = %+v, %v", trig, err)
+	}
+	if got, code := f.sourceCredential("Bearer "+trig.ClaimToken, "run-hook"); code != http.StatusOK || got.Secret != "glpat-olga" {
+		t.Fatalf("the opted-in machine's trigger claim = %d %+v", code, got)
+	}
+	rels := f.releases(f.olga)
+	if len(rels) != 1 || rels[0].RunID != "run-hook" || rels[0].TokenPrefix != prefix || !strings.Contains(rels[0].Runner, "trigger-machine") {
+		t.Fatalf("audit = %+v; want one row naming the machine", rels)
 	}
 }
 
@@ -228,38 +266,41 @@ func TestTeamGitCredentialRotationAndRevocation(t *testing.T) {
 		if _, code := f.put(f.olga, map[string]any{"host": "gitlab.example.com", "kind": "https", "token": tok}); code != http.StatusOK {
 			t.Fatalf("put %s = %d", tok, code)
 		}
-		if got, code := f.gitCredential(runner, "run-gl"); code != http.StatusOK || got.Secret != tok {
+		if got, code := f.sourceCredential(runner, "run-gl"); code != http.StatusOK || got.Secret != tok {
 			t.Fatalf("release after storing %s = %d %+v", tok, code, got)
 		}
 	}
 	if code := f.call("DELETE", "/api/v1/team/git-credentials/gitlab.example.com", f.olga.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("delete = %d", code)
 	}
-	if got, code := f.gitCredential(runner, "run-gl"); code != http.StatusNotFound || got.Secret != "" || got.Error != "no_source_credential" {
+	if got, code := f.sourceCredential(runner, "run-gl"); code != http.StatusNotFound || got.Secret != "" || got.Error != "no_source_credential" {
 		t.Fatalf("release after delete = %d %+v; want no credential", code, got)
 	}
 }
 
-// With an App installation covering the repository, the App token wins even
-// when the team also stored a credential for github.com, and that credential
-// is neither released nor audited. A repository the App does not cover gets
-// the stored credential.
+// With an App installation covering the run's verified repository, the App
+// token wins even when the team also stored a credential for github.com, and
+// only the App token's issue is audited. A repository the App does not cover
+// gets the stored credential.
 func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 	f := newCredFixture(t)
 	f.connect(f.olga, 501, 7, acmeAdmin)
 	if _, code := f.put(f.olga, map[string]any{"host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
 		t.Fatalf("put = %d", code)
 	}
-	covered := f.cloudRun(f.olga, "run-widgets", "https://github.com/acme/widgets.git")
-	got, code := f.gitCredential(covered, "run-widgets")
+	covered, prefix := f.nodeClaim(f.olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
+	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+		t.Fatal(err)
+	}
+	got, code := f.sourceCredential(covered, "run-widgets")
 	if code != http.StatusOK || got.Kind != "github_app" || got.Secret != "" || !f.app.TokenCovers(got.Token, "acme/widgets") {
 		t.Fatalf("covered repository = %d %+v; want the App token", code, got)
 	}
-	if rels := f.releases(f.olga); len(rels) != 0 {
-		t.Fatalf("audit = %+v; the stored credential was released beside the App token", rels)
+	if rels := f.releases(f.olga); len(rels) != 1 || rels[0].RunID != "run-widgets" {
+		t.Fatalf("audit = %+v; want the App token's row alone", rels)
 	}
 	uncovered := f.cloudRun(f.olga, "run-else", "https://github.com/someone/else.git")
-	got, code = f.gitCredential(uncovered, "run-else")
+	got, code = f.sourceCredential(uncovered, "run-else")
 	if code != http.StatusOK || got.Kind != "https" || got.Secret != "github_pat_x" {
 		t.Fatalf("uncovered repository = %d %+v; want the stored credential", code, got)
 	}

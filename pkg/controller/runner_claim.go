@@ -93,7 +93,6 @@ func bindRunnerClaimFence(r *http.Request, fence store.NodeClaimFence) {
 // under the run is a dispatcher's, which a node claim never acts as.
 var runnerClaimRunWrites = map[string]bool{
 	"/events": true, "/heartbeat": true, "/cache-grant": true,
-	"/git-credential": true, "/source-credential": true,
 }
 
 func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {

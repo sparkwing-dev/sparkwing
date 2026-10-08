@@ -117,7 +117,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/git-credential` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |

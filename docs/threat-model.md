@@ -53,6 +53,18 @@ row by name. See `handleClaimSecret` in `pkg/controller/claim_run.go` and
 the grant is what that code declares: a branch that adds a declaration reads
 that secret of its pipeline.
 
+**A source credential resolves through the claim, before the child starts.**
+The supervisor asks `POST /api/v1/runs/{id}/source-credential` with the node's
+claim token and fetches the run's source before it starts the child, and the
+broker does not proxy that route. The controller answers only a claim token of
+the run, a few times per claim and never once the attempt has started, and the
+GitHub App token it mints reads the repository the App's webhook recorded on
+the trigger, or a repository the run names by hand only when the team
+subscribed it. A run that names another private repository of the
+installation by hand therefore gets no token for it. A team's stored git credential
+for the host goes only to a machine its owner opted in. See
+`handleRunSourceCredential` in `pkg/controller/claim_source.go`.
+
 **The child's environment is rebuilt rather than inherited.** It carries `PATH`,
 `HOME`, `TMPDIR`, the locale and TLS-bundle variables, and similar runtime
 names, plus whatever the operator lists in `SPARKWING_SUBMIT_ENV_ALLOW`. The
