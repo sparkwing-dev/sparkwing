@@ -212,7 +212,7 @@ the controller reads. Empty when no credential is configured.
 {{- $items = append $items (dict "ref" (index $bundle "cache" "tokenSecret" | default dict) "path" "cache-token") -}}
 {{- $items = append $items (dict "ref" (index $bundle "cache" "grantKeySecret" | default dict) "path" "cache-grant-key") -}}
 {{- end -}}
-{{- with $c.credentialsSecret.name }}
+{{- with include "sparkwing-full.controller.credentialsBundle" . }}
 - secret:
     name: {{ . | quote }}
 {{- end }}
@@ -228,23 +228,30 @@ the controller reads. Empty when no credential is configured.
 {{- end }}
 
 {{/*
-"true" when the controller receives a bootstrap admin token, either through
-bootstrapAdminToken or as a key of credentialsSecret; empty otherwise.
+The controller.credentialsSecret name, or empty. A release installed before
+the value existed has no credentialsSecret map under --reuse-values.
+*/}}
+{{- define "sparkwing-full.controller.credentialsBundle" -}}
+{{- get (.Values.controller.credentialsSecret | default dict) "name" -}}
+{{- end -}}
+
+{{/*
+"true" when the controller may receive a bootstrap admin token: through
+bootstrapAdminToken, or possibly through credentialsSecret, whose keys the
+chart cannot see. Empty otherwise.
 */}}
 {{- define "sparkwing-full.controller.hasBootstrapAdminToken" -}}
-{{- $c := .Values.controller -}}
-{{- if or $c.bootstrapAdminToken.name (and $c.credentialsSecret.name (eq $c.credentialsSecret.holdsBootstrapAdminToken true)) -}}
+{{- if or .Values.controller.bootstrapAdminToken.name (include "sparkwing-full.controller.credentialsBundle" .) -}}
 true
 {{- end -}}
 {{- end -}}
 
 {{/*
-"true" when the controller receives a current secrets key, either through
-secretsKey or as a key of credentialsSecret; empty otherwise.
+"true" when the controller may receive a current secrets key: through
+secretsKey, or possibly through credentialsSecret. Empty otherwise.
 */}}
 {{- define "sparkwing-full.controller.hasSecretsKey" -}}
-{{- $c := .Values.controller -}}
-{{- if or $c.secretsKey.name (and $c.credentialsSecret.name (eq $c.credentialsSecret.holdsSecretsKey true)) -}}
+{{- if or .Values.controller.secretsKey.name (include "sparkwing-full.controller.credentialsBundle" .) -}}
 true
 {{- end -}}
 {{- end -}}

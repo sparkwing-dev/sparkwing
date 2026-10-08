@@ -57,8 +57,16 @@ Reach the dashboard:
 Controller in-cluster URL (for runners / external clients in the same cluster):
   {{ include "sparkwing-full.controller.serviceURL" . }}
 
-{{- if not (include "sparkwing-full.controller.hasSecretsKey" .) }}
-{{- if .Values.controller.databaseSecret.name }}
+{{- if not .Values.controller.secretsKey.name }}
+{{- if include "sparkwing-full.controller.credentialsBundle" . }}
+
+NOTE: controller.credentialsSecret is set and the chart cannot see its keys.
+If it carries secrets-key, that is the live key every stored secret is sealed
+under: keep an owner-only backup of it, and never replace it except by moving
+it to controller.secretsPreviousKey, setting the new key, and running
+`sparkwing secrets rotate`. If it carries none, the controller says at startup
+what it does without a key.
+{{- else if .Values.controller.databaseSecret.name }}
 
 NOTE: controller.secretsKey.name is empty, so this PostgreSQL controller
 refuses to store secrets until it has a key. It has stored none yet, so a new

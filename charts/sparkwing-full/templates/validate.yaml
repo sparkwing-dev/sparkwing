@@ -22,14 +22,8 @@
 {{- if and .Values.controller.secretsPreviousKey.name (not .Values.controller.secretsPreviousKey.key) -}}
 {{- fail "sparkwing-full: controller.secretsPreviousKey.key is required when controller.secretsPreviousKey.name is set" -}}
 {{- end -}}
-{{- if not (kindIs "bool" .Values.controller.credentialsSecret.holdsSecretsKey) -}}
-{{- fail "sparkwing-full: controller.credentialsSecret.holdsSecretsKey must be a bool" -}}
-{{- end -}}
-{{- if and .Values.controller.credentialsSecret.holdsSecretsKey (not .Values.controller.credentialsSecret.name) -}}
-{{- fail "sparkwing-full: controller.credentialsSecret.holdsSecretsKey=true needs controller.credentialsSecret.name, the Secret holding the secrets-key key" -}}
-{{- end -}}
 {{- if and .Values.controller.secretsPreviousKey.name (not (include "sparkwing-full.controller.hasSecretsKey" .)) -}}
-{{- fail "sparkwing-full: controller.secretsPreviousKey.name without a current key gives the controller a key to read old values with and none to write new ones under, which it refuses to start on. Set controller.secretsKey.name to the key values are sealed under now, or put it in controller.credentialsSecret as secrets-key and set controller.credentialsSecret.holdsSecretsKey=true" -}}
+{{- fail "sparkwing-full: controller.secretsPreviousKey.name without a current key gives the controller a key to read old values with and none to write new ones under, which it refuses to start on. Set controller.secretsKey.name to the key values are sealed under now, or put it in controller.credentialsSecret as secrets-key" -}}
 {{- end -}}
 {{- if and .Values.controller.bootstrapAdminToken.name (not .Values.controller.bootstrapAdminToken.key) -}}
 {{- fail "sparkwing-full: controller.bootstrapAdminToken.key is required when controller.bootstrapAdminToken.name is set" -}}
@@ -37,15 +31,9 @@
 {{- if not (kindIs "bool" .Values.controller.allowOpenBootstrap) -}}
 {{- fail "sparkwing-full: controller.allowOpenBootstrap must be a bool. A quoted value such as 'false' reads as true to the template, which would silently open the controller's bootstrap window" -}}
 {{- end -}}
-{{- if not (kindIs "bool" .Values.controller.credentialsSecret.holdsBootstrapAdminToken) -}}
-{{- fail "sparkwing-full: controller.credentialsSecret.holdsBootstrapAdminToken must be a bool" -}}
-{{- end -}}
-{{- if and .Values.controller.credentialsSecret.holdsBootstrapAdminToken (not .Values.controller.credentialsSecret.name) -}}
-{{- fail "sparkwing-full: controller.credentialsSecret.holdsBootstrapAdminToken=true needs controller.credentialsSecret.name, the Secret holding the bootstrap-admin-token key" -}}
-{{- end -}}
 {{- $hasBootstrap := include "sparkwing-full.controller.hasBootstrapAdminToken" . -}}
 {{- if and .Values.controller.requireAuth (not $hasBootstrap) (ne .Values.controller.allowOpenBootstrap true) -}}
-{{- fail "sparkwing-full: controller.requireAuth=true without controller.bootstrapAdminToken.name leaves a fresh controller no way to mint its first token. Set controller.bootstrapAdminToken.name to a Secret holding the first admin token, or put it in controller.credentialsSecret as bootstrap-admin-token and set controller.credentialsSecret.holdsBootstrapAdminToken=true, or set controller.allowOpenBootstrap=true to start without one: an empty tokens table then serves every route, token minting included, unauthenticated to anything that reaches the Service until a token exists and the controller restarts" -}}
+{{- fail "sparkwing-full: controller.requireAuth=true without controller.bootstrapAdminToken.name leaves a fresh controller no way to mint its first token. Set controller.bootstrapAdminToken.name to a Secret holding the first admin token, or put it in controller.credentialsSecret as bootstrap-admin-token, or set controller.allowOpenBootstrap=true to start without one: an empty tokens table then serves every route, token minting included, unauthenticated to anything that reaches the Service until a token exists and the controller restarts" -}}
 {{- end -}}
 {{- if not (kindIs "bool" .Values.ingress.allowInsecure) -}}
 {{- fail "sparkwing-full: ingress.allowInsecure must be a bool. A quoted value such as 'false' reads as true to the template, which would silently drop the published-controller guard" -}}

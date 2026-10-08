@@ -1113,41 +1113,30 @@ func TestControllerNumbersFromAValuesFileRenderWhole(t *testing.T) {
 	}
 }
 
-func TestControllerBootstrapTokenInTheCredentialsBundleSatisfiesRequireAuth(t *testing.T) {
+// safety: helm cannot see a Secret's keys, so a credentials bundle stands in
+// for a bootstrap token and a current secrets key, and the controller's own
+// startup checks decide.
+func TestControllerCredentialsBundleSkipsTheChartsKeyChecks(t *testing.T) {
 	args := renderController(t,
 		"controller.allowOpenBootstrap=false",
 		"controller.credentialsSecret.name=sparkwing-credentials",
-		"controller.credentialsSecret.holdsBootstrapAdminToken=true").Args
+		"controller.secretsPreviousKey.name=sparkwing-old-key").Args
 	if !containsArg(args, "--require-auth") || !containsArg(args, "--credentials-dir=/etc/sparkwing/credentials") {
 		t.Fatalf("controller args = %v, want --require-auth and the credentials directory", args)
 	}
-	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
-		"controller.allowOpenBootstrap=false",
-		"controller.credentialsSecret.name=sparkwing-credentials")
-	if !strings.Contains(out, "holdsBootstrapAdminToken") {
-		t.Fatalf("render without the bundle flag = %s, want a refusal naming controller.credentialsSecret.holdsBootstrapAdminToken", out)
-	}
-	out = helmRenderError(t, "./sparkwing-full", "sparkwing",
-		"controller.credentialsSecret.holdsBootstrapAdminToken=true")
-	if !strings.Contains(out, "needs controller.credentialsSecret.name") {
-		t.Fatalf("render with the flag and no Secret = %s, want a refusal", out)
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.secretsPreviousKey.name=sparkwing-old-key")
+	if !strings.Contains(out, "without a current key") {
+		t.Fatalf("previous key with no current key and no bundle = %s, want a refusal", out)
 	}
 }
 
-func TestControllerPreviousKeyAcceptsABundledCurrentKey(t *testing.T) {
-	renderController(t,
-		"controller.credentialsSecret.name=sparkwing-credentials",
-		"controller.credentialsSecret.holdsSecretsKey=true",
-		"controller.secretsPreviousKey.name=sparkwing-old-key")
-	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
-		"controller.credentialsSecret.name=sparkwing-credentials",
-		"controller.secretsPreviousKey.name=sparkwing-old-key")
-	if !strings.Contains(out, "holdsSecretsKey") {
-		t.Fatalf("previous key without a current one = %s, want a refusal naming holdsSecretsKey", out)
-	}
-	out = helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.credentialsSecret.holdsSecretsKey=true")
-	if !strings.Contains(out, "needs controller.credentialsSecret.name") {
-		t.Fatalf("holdsSecretsKey without a Secret = %s, want a refusal", out)
+// safety: --reuse-values carries an older release's values, which have no
+// credentialsSecret map at all.
+func TestControllerRendersValuesFromBeforeTheCredentialsBundle(t *testing.T) {
+	renderController(t, "controller.credentialsSecret=null", "controller.allowOpenBootstrap=false",
+		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin")
+	if notes := renderNotes(t, "controller.credentialsSecret=null"); !strings.Contains(notes, "/data/secrets.key") {
+		t.Errorf("notes for values without credentialsSecret:\n%s", notes)
 	}
 }
 
@@ -1190,8 +1179,12 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	if notes := renderNotes(t, "controller.secretsKey.name=sparkwing-secrets-key"); strings.Contains(notes, "secretsKey.name is empty") {
 		t.Errorf("notes with a key still warn about a missing one:\n%s", notes)
 	}
-	if notes := renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.credentialsSecret.holdsSecretsKey=true"); strings.Contains(notes, "secretsKey.name is empty") {
-		t.Errorf("notes with a bundled key still warn about a missing one:\n%s", notes)
+	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials")
+	if !strings.Contains(notes, "that is the live key") || !strings.Contains(notes, "secretsPreviousKey") {
+		t.Errorf("notes with a credentials bundle lack the live-key warning:\n%s", notes)
+	}
+	if strings.Contains(notes, "openssl rand") || strings.Contains(notes, "secretsKey.name is empty") {
+		t.Errorf("notes with a credentials bundle claim a key state the chart cannot see:\n%s", notes)
 	}
 }
 
