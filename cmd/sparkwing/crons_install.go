@@ -449,7 +449,7 @@ func cronsTargetRoots(fleet bool) ([]string, error) {
 			return nil, err
 		}
 		if len(roots) == 0 {
-			return nil, errors.New("no repos registered; run `sparkwing configure xrepo add <dir>` first")
+			return nil, errors.New("no repos registered; run `sparkwing repos add <dir>` first")
 		}
 		return roots, nil
 	}

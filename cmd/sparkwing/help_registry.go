@@ -343,92 +343,16 @@ var cmdConfigure = Command{
 	Synopsis: "Configure laptop-local settings",
 	Description: `Configure this machine. 'init' prepares the configuration directory and
 reports its contents. 'profiles' lists and edits controller connections;
-'sparkwing cloud' adds, checks and removes them.
-'xrepo' registers local repositories.
+'sparkwing cloud' adds, checks and removes them. 'sparkwing repos'
+registers local repositories.
 
 Manage controller users and tokens with 'sparkwing cluster'.
 Manage secrets with 'sparkwing secrets'.`,
-	SubcommandOrder: []string{"init", "profiles", "xrepo"},
+	SubcommandOrder: []string{"init", "profiles"},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
 		{"Status of laptop config", "sparkwing configure init -o json"},
 		{"List profiles", "sparkwing configure profiles list"},
-		{"Register the current repo with the cross-repo registry", "sparkwing configure xrepo add"},
-	},
-}
-
-var cmdConfigureXrepo = Command{
-	Path:     "sparkwing configure xrepo",
-	Synopsis: "Manage the laptop-local repo registry",
-	Description: `The registry maps pipeline names to local checkouts so
-cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
-annotations. Auto-populated when you run 'sparkwing run <pipeline>'
-in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
-
-The registry is the repos section of config.yaml: $SPARKWING_CONFIG
-(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
-~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
-is the state, cache and logs root, and a registered checkout is a
-machine-wide fact that outlives any one home. A write from a command
-running under a home of its own is refused rather than sent to the
-machine's registry: set SPARKWING_CONFIG to a path inside that home
-to keep it there.`,
-	SubcommandOrder: []string{"list", "add", "remove", "prune"},
-	Examples: []Example{
-		{"Register the current checkout", "sparkwing configure xrepo add"},
-		{"Show the fleet the registry reaches", "sparkwing configure xrepo list"},
-		{"Drop entries whose checkout is gone", "sparkwing configure xrepo prune"},
-	},
-}
-
-var cmdConfigureXrepoList = Command{
-	Path:        "sparkwing configure xrepo list",
-	Synopsis:    "List registered checkouts and their pipelines",
-	Description: "Shows each registered checkout, its status, and the pipelines it provides.",
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json | table", Group: "Output"},
-		{Name: "pipelines", Desc: "Include pipeline names", Default: "true", Group: "Output"},
-	},
-	GroupOrder: []string{"Output", "Other"},
-	Examples: []Example{
-		{"List registered checkouts", "sparkwing configure xrepo list"},
-		{"Emit one JSON record per checkout", "sparkwing configure xrepo list -o json"},
-		{"Skip pipeline discovery", "sparkwing configure xrepo list --pipelines=false"},
-	},
-}
-
-var cmdConfigureXrepoAdd = Command{
-	Path:        "sparkwing configure xrepo add",
-	Synopsis:    "Register a checkout",
-	Description: "Registers a checkout explicitly. The path defaults to the current directory.",
-	PosArgs: []PosArg{
-		{Name: "[path]", Desc: "Checkout path; defaults to the current directory"},
-	},
-	Examples: []Example{
-		{"Register the current checkout", "sparkwing configure xrepo add"},
-		{"Register another checkout", "sparkwing configure xrepo add ../service"},
-	},
-}
-
-var cmdConfigureXrepoRemove = Command{
-	Path:        "sparkwing configure xrepo remove",
-	Synopsis:    "Remove a registered checkout",
-	Description: "Removes every registry entry matching a path or basename.",
-	PosArgs: []PosArg{
-		{Name: "<path-or-basename>", Desc: "Registered path or basename to remove", Required: true},
-	},
-	Examples: []Example{
-		{"Remove a checkout by basename", "sparkwing configure xrepo remove service"},
-	},
-}
-
-var cmdConfigureXrepoPrune = Command{
-	Path:        "sparkwing configure xrepo prune",
-	Synopsis:    "Remove checkouts whose pipeline directory is gone",
-	Description: "Removes registered checkouts that no longer contain a .sparkwing directory.",
-	Examples: []Example{
-		{"Remove stale registry entries", "sparkwing configure xrepo prune"},
 	},
 }
 
@@ -498,7 +422,7 @@ latest) for shell pipelines.`,
 		{"Local-only (no network)", "sparkwing version --offline"},
 		{"Changelog for the installed release", "sparkwing version --changelog"},
 		{"Update the CLI binary", "sparkwing update --cli"},
-		{"Bump the SDK pin in this project", "sparkwing update --sdk"},
+		{"Bump the SDK pin in this project", "sparkwing repos update --in-place"},
 	},
 }
 
@@ -544,24 +468,19 @@ machine's hold: set SPARKWING_VERSION_HOLD to hold that shell alone.`,
 
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
-	Synopsis: "Update the CLI binary or this project's SDK pin",
-	Description: `CLI is the default target; --cli selects it explicitly. --sdk selects
-this project's .sparkwing/go.mod pin. Targets are mutually exclusive.
-Both resolve the latest published GitHub release unless --version names a
-specific release tag.
+	Synopsis: "Update the CLI binary",
+	Description: `Updates the CLI binary; --cli names that target explicitly. It resolves the
+latest published GitHub release unless --version names a specific release
+tag. Bump this project's .sparkwing/go.mod SDK pin with
+'sparkwing repos update --in-place'.
 
 CLI updates verify Ed25519 signatures, the release digest and the version the
 staged binary reports before atomic replacement. Verification failure is
 terminal. --force permits a downgrade;
---override-hold crosses an operator CLI hold. Both flags are CLI-only.
-
-SDK updates run native go get for the resolved release, then go mod tidy.
-Go retains its toolchain selection, module verification and dependency rules.
-The CLI binary and operator CLI hold are unchanged.
+--override-hold crosses an operator CLI hold.
 
 --check reads installed identity and release metadata without installing,
-running Go, changing module files or writing caches. It honors the selected
-target and --version. Exit 0 means current or ahead, 1 means an update is
+running Go, changing module files or writing caches. It honors --version. Exit 0 means current or ahead, 1 means an update is
 available, and 2 means unknown, diverged or a check failure. Local SDK
 replacements and unverified CLI provenance are reported as unknown.
 A check does not verify downloadable assets or promise installation will work.
@@ -571,11 +490,10 @@ update_check record; successful updates emit one update receipt. Progress
 and failures go to stderr. Plain checks print the status word; plain updates
 print the resulting version.`,
 	Flags: []FlagSpec{
-		{Name: "cli", Desc: "Update the CLI binary (default target)", Group: "Target", ConflictsWith: []string{"sdk"}},
-		{Name: "sdk", Desc: "Update this project's .sparkwing/go.mod SDK pin", Group: "Target", ConflictsWith: []string{"cli"}},
+		{Name: "cli", Desc: "Update the CLI binary (the only target; optional)", Group: "Target"},
 		{Name: "check", Desc: "Compare the selected target without changing it", Group: "Behavior"},
-		{Name: "force", Desc: "Allow CLI downgrade (--cli only)", Group: "Behavior"},
-		{Name: "override-hold", Desc: "Cross an operator CLI version hold (--cli only)", Group: "Behavior"},
+		{Name: "force", Desc: "Allow a CLI downgrade", Group: "Behavior"},
+		{Name: "override-hold", Desc: "Cross an operator CLI version hold", Group: "Behavior"},
 		{Name: "version", Argument: "TAG", Desc: "Canonical release tag; omit for latest published release", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "pretty | json | plain", Group: "Output"},
 	},
@@ -583,8 +501,6 @@ print the resulting version.`,
 	Examples: []Example{
 		{"Check for a newer CLI release", "sparkwing update --check"},
 		{"Update the CLI", "sparkwing update --cli"},
-		{"Check this project's SDK pin", "sparkwing update --sdk --check"},
-		{"Update the SDK pin", "sparkwing update --sdk"},
 		{"Check a specific CLI release", "sparkwing update --cli --check --version v9.8.7"},
 		{"Downgrade the CLI", "sparkwing update --cli --version v9.7.6 --force"},
 	},
@@ -1219,7 +1135,7 @@ support -o json so an agent can parse output directly rather
 than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
-'sparkwing update --sdk'. To see the current pin, run
+'sparkwing repos update --in-place'. To see the current pin, run
 'sparkwing version' (composite card).`,
 	SubcommandOrder: []string{"list", "describe", "new", "lint", "plan", "trigger", "hooks", "sparks"},
 	Examples: []Example{
@@ -3636,23 +3552,29 @@ preserved as the dashboard renders them.`,
 var cmdRepos = Command{
 	Path:     "sparkwing repos",
 	Synopsis: "The machine's fleet of sparkwing repos and their SDK pins",
-	Description: `Lists registered repositories and repositories with recorded pipeline runs.
-Each row shows the SDK version, last run, and intervening migration guides.
-Linked worktrees appear under their primary checkout, with differing SDK
-versions reported separately.
+	Description: `'list' shows registered repositories and repositories with recorded pipeline
+runs, with their SDK pins; 'info' inspects one; 'update' validates or applies
+SDK upgrades. 'add', 'remove' and 'prune' edit the registry of checkouts.
 
-'sparkwing repos' and 'sparkwing repos list' print the same listing.
-Use 'sparkwing repos info' to inspect one repository and 'sparkwing repos
-update' to validate SDK upgrades for selected repositories.`,
-	SubcommandOrder:    []string{"list", "info", "update"},
-	SubcommandOptional: true,
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-	},
-	GroupOrder: []string{"Output", "Other"},
+The registry maps pipeline names to local checkouts so
+cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
+annotations. Auto-populated when you run 'sparkwing run <pipeline>'
+in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
+disable).
+
+The registry is the repos section of config.yaml: $SPARKWING_CONFIG
+(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
+~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
+is the state, cache and logs root, and a registered checkout is a
+machine-wide fact that outlives any one home. A write from a command
+running under a home of its own is refused rather than sent to the
+machine's registry: set SPARKWING_CONFIG to a path inside that home
+to keep it there.`,
+	SubcommandOrder: []string{"list", "info", "update", "add", "remove", "prune"},
 	Examples: []Example{
-		{"List the fleet", "sparkwing repos"},
-		{"Agent-readable record", "sparkwing repos -o json"},
+		{"List the fleet", "sparkwing repos list"},
+		{"Register the current checkout", "sparkwing repos add"},
+		{"Drop entries whose checkout is gone", "sparkwing repos prune"},
 	},
 }
 
@@ -3661,14 +3583,57 @@ var cmdReposList = Command{
 	Synopsis: "List the machine's fleet of sparkwing repos",
 	Description: `Lists registered repositories and repositories with recorded pipeline runs.
 Each row shows the SDK version, last run, and intervening migration guides.
-This is the same output as 'sparkwing repos'.`,
+Linked worktrees appear under their primary checkout, with differing SDK
+versions reported separately.
+
+--checkouts lists the registry itself instead: each registered checkout, its
+status, and the pipelines it provides (--pipelines=false skips the per-repo
+describe call).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "checkouts", Desc: "List registered checkouts and their pipelines instead of SDK pins", Group: "Output"},
+		{Name: "pipelines", Desc: "With --checkouts, include pipeline names", Default: "true", RequiresFlags: []string{"checkouts"}, Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"List the fleet", "sparkwing repos list"},
 		{"Agent-readable record", "sparkwing repos list -o json"},
+		{"Registered checkouts and their pipelines", "sparkwing repos list --checkouts"},
+		{"Skip pipeline discovery", "sparkwing repos list --checkouts --pipelines=false"},
+	},
+}
+
+var cmdReposAdd = Command{
+	Path:        "sparkwing repos add",
+	Synopsis:    "Register a checkout",
+	Description: "Registers a checkout explicitly. The path defaults to the current directory.",
+	PosArgs: []PosArg{
+		{Name: "[path]", Desc: "Checkout path; defaults to the current directory"},
+	},
+	Examples: []Example{
+		{"Register the current checkout", "sparkwing repos add"},
+		{"Register another checkout", "sparkwing repos add ../service"},
+	},
+}
+
+var cmdReposRemove = Command{
+	Path:        "sparkwing repos remove",
+	Synopsis:    "Remove a registered checkout",
+	Description: "Removes every registry entry matching a path or basename.",
+	PosArgs: []PosArg{
+		{Name: "<path-or-basename>", Desc: "Registered path or basename to remove", Required: true},
+	},
+	Examples: []Example{
+		{"Remove a checkout by basename", "sparkwing repos remove service"},
+	},
+}
+
+var cmdReposPrune = Command{
+	Path:        "sparkwing repos prune",
+	Synopsis:    "Remove checkouts whose pipeline directory is gone",
+	Description: "Removes registered checkouts that no longer contain a .sparkwing directory.",
+	Examples: []Example{
+		{"Remove stale registry entries", "sparkwing repos prune"},
 	},
 }
 
@@ -3711,6 +3676,15 @@ are skipped and named.
 --apply writes and commits updates per repository. --verify also runs each
 repository's pre-commit gate. --repo selects one repository.
 
+--in-place updates the checkout you stand in (or the one -C names) instead:
+native go get for the resolved release, then go mod tidy, with no plan
+comparison and no commit. Go keeps its toolchain selection, module
+verification and dependency rules. --in-place --check reads the pin and the
+release metadata without changing anything: exit 0 means current or ahead, 1
+means an update is available, and 2 means unknown, diverged or a check
+failure; a local SDK replacement reports unknown. Output is one update_check
+record for a check and one update receipt for an update.
+
 Progress goes to stderr. The first interrupt allows the active repository to
 restore module files and prints completed results. A second interrupt exits
 immediately. The report also identifies divergent SDK pins that may conflict
@@ -3720,6 +3694,8 @@ with the shared store schema.`,
 		{Name: "apply", Desc: "Write the bumps and commit per repo (default is a dry run)", Group: "Behavior"},
 		{Name: "verify", Desc: "Run each repo's pre-commit gate after the bump", Group: "Behavior"},
 		{Name: "repo", Argument: "NAME_OR_PATH", Desc: "Scope to a single repo by name or checkout path", Group: "Filter"},
+		{Name: "in-place", Desc: "Bump this checkout's pin with go get and go mod tidy; no plan comparison, no commit", ConflictsWith: []string{"apply", "verify", "repo"}, Group: "Behavior"},
+		{Name: "check", Desc: "With --in-place, compare the pin with the release without changing it", RequiresFlags: []string{"in-place"}, Group: "Behavior"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Behavior", "Filter", "Output", "Other"},
@@ -3728,6 +3704,8 @@ with the shared store schema.`,
 		{"Preview a bump to a specific release", "sparkwing repos update --version v0.16.0"},
 		{"Apply the bump and commit per repo", "sparkwing repos update --version v0.16.0 --apply"},
 		{"Scope to one repo and run its gate", "sparkwing repos update --repo fictional-app --verify"},
+		{"Bump this checkout's SDK pin", "sparkwing repos update --in-place"},
+		{"Check this checkout's SDK pin", "sparkwing repos update --in-place --check"},
 	},
 }
 

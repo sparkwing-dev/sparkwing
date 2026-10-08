@@ -23,7 +23,7 @@ support -o json so an agent can parse output directly rather
 than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
-'sparkwing update --sdk'. To see the current pin, run
+'sparkwing repos update --in-place'. To see the current pin, run
 'sparkwing version' (composite card).
 
 ### Subcommands

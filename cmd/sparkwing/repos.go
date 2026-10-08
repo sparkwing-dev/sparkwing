@@ -30,17 +30,27 @@ func runRepos(args []string) error {
 	if handleParentHelp(cmdRepos, args) {
 		return nil
 	}
-	if len(args) > 0 {
-		switch args[0] {
-		case "update":
-			return runReposUpdate(args[1:])
-		case "list":
-			return runReposList(args[1:])
-		case "info":
-			return runReposInfo(args[1:])
-		}
+	if len(args) == 0 {
+		PrintHelp(cmdRepos, os.Stderr)
+		return errors.New("repos: subcommand required (list|info|update|add|remove|prune)")
 	}
-	return runReposList(args)
+	switch args[0] {
+	case "update":
+		return runReposUpdate(args[1:])
+	case "list":
+		return runReposList(args[1:])
+	case "info":
+		return runReposInfo(args[1:])
+	case "add":
+		return runXrepoAdd(args[1:])
+	case "remove":
+		return runXrepoRemove(args[1:])
+	case "prune":
+		return runXrepoPrune(args[1:])
+	default:
+		PrintHelp(cmdRepos, os.Stderr)
+		return fmt.Errorf("repos: unknown subcommand %q", args[0])
+	}
 }
 
 func fleetGit(dir string, args ...string) (string, error) {
@@ -111,17 +121,25 @@ func observeRuns() []repos.RunObservation {
 }
 
 func runReposList(args []string) error {
-	fs := flag.NewFlagSet(cmdRepos.Path, flag.ContinueOnError)
+	fs := flag.NewFlagSet(cmdReposList.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	if err := parseAndCheck(cmdRepos, fs, args); err != nil {
+	checkouts := fs.Bool("checkouts", false, "list registered checkouts, their status and pipelines instead of SDK pins")
+	pipelines := fs.Bool("pipelines", true, "with --checkouts, include pipeline names (--pipelines=false skips the per-repo describe call)")
+	if err := parseAndCheck(cmdReposList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("repos: unexpected positional %q", fs.Arg(0))
+		return fmt.Errorf("repos list: unexpected positional %q", fs.Arg(0))
+	}
+	if *checkouts {
+		return listCheckouts(output, *pipelines)
+	}
+	if fs.Changed("pipelines") {
+		return errors.New("repos list: --pipelines applies to --checkouts")
 	}
 
 	latest, _ := fetchLatestRelease()
@@ -188,7 +206,7 @@ func fleetJSON(fleet []repos.Repo, latest string) []fleetRepoJSON {
 
 func printFleet(fleet []repos.Repo, latest string) {
 	if len(fleet) == 0 {
-		fmt.Println(color.Dim("no sparkwing repos found (run a pipeline or add one with `sparkwing configure xrepo add`)"))
+		fmt.Println(color.Dim("no sparkwing repos found (run a pipeline or add one with `sparkwing repos add`)"))
 		return
 	}
 	fmt.Printf("Fleet: %d repo(s)", len(fleet))
@@ -235,6 +253,8 @@ func runReposUpdate(args []string) error {
 	fs.StringVar(&repo, "repo", "", "scope to one repo by name or checkout path")
 	fs.BoolVar(&apply, "apply", false, "write the bumps and commit per repo")
 	fs.BoolVar(&verify, "verify", false, "run each repo's pre-commit gate after the bump")
+	inPlace := fs.Bool("in-place", false, "update this checkout's .sparkwing/go.mod pin with go get and go mod tidy; no plan comparison, no commit")
+	check := fs.Bool("check", false, "with --in-place, compare the pin with the release without changing it")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
 	if err := parseAndCheck(cmdReposUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -244,6 +264,12 @@ func runReposUpdate(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("repos update: unexpected positional %q", fs.Arg(0))
+	}
+	if *inPlace {
+		return updatePinInPlace(fs, version, *check, output)
+	}
+	if *check {
+		return errors.New("repos update: --check needs --in-place; without --apply the fleet preview already changes nothing")
 	}
 
 	target := strings.TrimSpace(version)
@@ -615,4 +641,27 @@ func parsePlanDoc(pipeline string, raw []byte) (repos.Plan, error) {
 		plan.Nodes = append(plan.Nodes, pn)
 	}
 	return plan, nil
+}
+
+func updatePinInPlace(fs *flag.FlagSet, version string, check bool, output string) error {
+	for _, name := range []string{"apply", "verify", "repo"} {
+		if fs.Changed(name) {
+			return fmt.Errorf("repos update --in-place: --%s works on the tracked fleet; drop it or drop --in-place", name)
+		}
+	}
+	if fs.Changed("version") && !validUpdateVersion(version) {
+		return errors.New("repos update --in-place: --version must be a canonical release tag such as v0.48.1; omit it for latest")
+	}
+	mode, err := resolveOutputFormat(output, "repos update")
+	if err != nil {
+		return err
+	}
+	if check {
+		return runUpdateCheck("sdk", version, false, false, mode)
+	}
+	result, err := updateSDK(version)
+	if err != nil {
+		return err
+	}
+	return writeUpdateReceipt(os.Stdout, result, mode)
 }

@@ -87,7 +87,7 @@ func installFleet(opts installOptions) error {
 		return fmt.Errorf("hooks install: %w", err)
 	}
 	if len(roots) == 0 {
-		fmt.Fprintln(os.Stdout, "hooks install: no repos registered; run `sparkwing configure xrepo add <dir>` first")
+		fmt.Fprintln(os.Stdout, "hooks install: no repos registered; run `sparkwing repos add <dir>` first")
 		return nil
 	}
 	armed, noGate := 0, 0
@@ -930,7 +930,7 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 		return nil
 	}
 	if len(rows) == 0 {
-		fmt.Fprintln(w, "no repos registered; run `sparkwing configure xrepo add <dir>` first")
+		fmt.Fprintln(w, "no repos registered; run `sparkwing repos add <dir>` first")
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

@@ -523,8 +523,6 @@ func runConfigure(args []string) error {
 		return runConfigureInit(args[1:])
 	case "profiles":
 		return runProfiles(args[1:])
-	case "xrepo":
-		return runXrepo(args[1:])
 	default:
 		PrintHelp(cmdConfigure, os.Stderr)
 		return fmt.Errorf("configure: unknown subcommand %q", args[0])

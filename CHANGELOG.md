@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Move `configure xrepo` and `update --sdk` under `repos`, and drop the bare `repos` listing
+  `configure xrepo add|remove|prune` are `repos add|remove|prune`; `configure xrepo list [--pipelines=false]` is `repos list --checkouts [--pipelines=false]`; `update --sdk [--check] [--version V]` is `repos update --in-place [--check] [--version V]`, which keeps the same go get and go mod tidy, update receipt, check record and exit codes. Bare `sparkwing repos` printed the same table as `repos list` and now prints the group's help. `update` keeps `--cli` as an optional name for its only target. See [migration guide](docs/migrations/_unreleased.md#repository-verbs-gather-under-repos).
+
 - **cli (Breaking):** Fold the connection verbs into `cloud`: `configure profiles add`, `remove` and `test`, `cluster status`, the top-level `profile`, and `cluster tokens lookup`; remove `configure profiles duplicate`
   `configure profiles add` is `cloud connect --token-stdin` (`--no-probe` writes the profile without contacting the controller, as `add` did); `configure profiles remove` is `cloud disconnect --keep-token`; `configure profiles test` is `cloud status`, which now also reports a profile with no controller; `cluster status` is `cloud status --cluster`; `sparkwing profile [--profile P]` is `configure profiles show [--profile P]`; `cluster tokens lookup --prefix P` is `cluster tokens list --prefix P`. `configure profiles duplicate` had no replacement worth keeping; copy the entry in config.yaml. See [migration guide](docs/migrations/_unreleased.md#connection-verbs-fold-into-cloud).
 

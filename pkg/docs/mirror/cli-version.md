@@ -57,7 +57,7 @@ sparkwing version --changelog
 sparkwing update --cli
 
 # Bump the SDK pin in this project
-sparkwing update --sdk
+sparkwing repos update --in-place
 ```
 
 ## `sparkwing version hold`

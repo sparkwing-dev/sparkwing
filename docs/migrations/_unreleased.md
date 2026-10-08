@@ -468,7 +468,7 @@ Every verb the CLI dispatches is now a registered command, so `--help`,
 | `sparkwing configure profiles dup ...` | none; see [Connection verbs fold into cloud](#connection-verbs-fold-into-cloud) |
 | `sparkwing secrets rm ...`, `sparkwing secrets remove ...` | `sparkwing secrets delete ...` |
 | `sparkwing pipeline sparks ls`, `... rm ...` | `sparkwing pipeline sparks list`, `... remove ...` |
-| `sparkwing configure xrepo ls`, `... rm ...` | `sparkwing configure xrepo list`, `... remove ...` |
+| `sparkwing configure xrepo ls`, `... rm ...` | `sparkwing repos list --checkouts`, `sparkwing repos remove ...` |
 | `sparkwing runs consumer kill` | `sparkwing runs consumer stop` |
 | `sparkwing run <pipeline> config [-o json]` | `sparkwing pipeline describe --name <pipeline> --secrets [-o json]` |
 | `sparkwing pipeline publish` | none; a runner compiles the pipeline on first use and shares the binary through the cache |
@@ -683,3 +683,25 @@ instead of naming its replacement.
 - **`configure profiles show`** keeps `--name NAME [--show-token]` for one
   config.yaml entry; without `--name` it prints the resolution report
   `sparkwing profile` printed.
+
+## Repository verbs gather under repos
+
+| Before | After |
+|---|---|
+| `sparkwing configure xrepo add [path]` | `sparkwing repos add [path]` |
+| `sparkwing configure xrepo remove <path-or-basename>` | `sparkwing repos remove <path-or-basename>` |
+| `sparkwing configure xrepo prune` | `sparkwing repos prune` |
+| `sparkwing configure xrepo list [--pipelines=false] [-o json]` | `sparkwing repos list --checkouts [--pipelines=false] [-o json]` |
+| `sparkwing repos [-o json]` | `sparkwing repos list [-o json]` |
+| `sparkwing update --sdk [--version V]` | `sparkwing repos update --in-place [--version V]` |
+| `sparkwing update --sdk --check` | `sparkwing repos update --in-place --check` |
+
+- `repos update --in-place` runs the old `update --sdk` path unchanged: native
+  `go get` for the resolved release, then `go mod tidy`, in the checkout you
+  stand in or the one `sparkwing -C DIR` names. It neither compares plans nor
+  commits, and it refuses `--apply`, `--verify` and `--repo`, which act on the
+  tracked fleet.
+- `--in-place --check` keeps the exit codes: 0 current or ahead, 1 an update
+  is available, 2 unknown, diverged or a failed check.
+- `sparkwing update` updates the CLI only. `--cli` still names that target;
+  `--force` and `--override-hold` are unchanged.

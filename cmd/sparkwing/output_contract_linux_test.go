@@ -34,9 +34,9 @@ func TestOutputContractTerminal(t *testing.T) {
 		{"serve-plain", "plain", []string{"serve", "stop"}, 0},
 		{"consumer-default", "", []string{"runs", "consumer", "stop"}, 0},
 		{"consumer-json", "json", []string{"runs", "consumer", "stop"}, 0},
-		{"update-default", "", []string{"update", "--sdk", "--check"}, 2},
-		{"update-json", "json", []string{"update", "--sdk", "--check"}, 2},
-		{"update-plain", "plain", []string{"update", "--sdk", "--check"}, 2},
+		{"update-default", "", []string{"repos", "update", "--in-place", "--check"}, 2},
+		{"update-json", "json", []string{"repos", "update", "--in-place", "--check"}, 2},
+		{"update-plain", "plain", []string{"repos", "update", "--in-place", "--check"}, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mode := tc.mode

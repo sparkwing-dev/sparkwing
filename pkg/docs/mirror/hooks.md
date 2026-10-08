@@ -374,7 +374,7 @@ than among them, because a sweep that reports it as armed reports a gated
 fleet while every commit in that repository still goes unchecked.
 
 The list is the machine's repo registry -- the `repos` section of
-`~/.config/sparkwing/config.yaml`, which `sparkwing configure xrepo add <dir>`
+`~/.config/sparkwing/config.yaml`, which `sparkwing repos add <dir>`
 writes to and which can name
 `fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
 extent of the survey: a checkout the registry does not reach is not surveyed,

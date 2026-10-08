@@ -88,7 +88,7 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`sparkwing pipeline add\b`),
-		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`",
+		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing repos add <path>`",
 	},
 	{
 		regexp.MustCompile(`pipeline templates\b`),

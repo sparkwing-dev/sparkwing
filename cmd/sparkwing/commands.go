@@ -16,7 +16,7 @@ import (
 
 var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdDaemonExplain, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun,
-	&cmdConfigure, &cmdConfigureInit, &cmdConfigureXrepo, &cmdConfigureXrepoList, &cmdConfigureXrepoAdd, &cmdConfigureXrepoRemove, &cmdConfigureXrepoPrune,
+	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsSearch, &cmdDocsMigrations,
 	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
@@ -47,7 +47,7 @@ var allCommands = []*Command{
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup, &cmdSparksInflate,
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
 	&cmdAnnotations, &cmdAnnotationsList, &cmdAnnotationsAdd,
-	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate,
+	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate, &cmdReposAdd, &cmdReposRemove, &cmdReposPrune,
 	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsList,
 	&cmdCronsShow, &cmdCronsSet, &cmdCronsRun, &cmdCronsTick,
 	&cmdWingd, &cmdWingdRun, &cmdWingdSupervise, &cmdDashboardSupervise, &cmdRunsConsume,

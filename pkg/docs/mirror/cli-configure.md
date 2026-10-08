@@ -10,8 +10,8 @@ Configure laptop-local settings
 
 Configure this machine. 'init' prepares the configuration directory and
 reports its contents. 'profiles' lists and edits controller connections;
-'sparkwing cloud' adds, checks and removes them.
-'xrepo' registers local repositories.
+'sparkwing cloud' adds, checks and removes them. 'sparkwing repos'
+registers local repositories.
 
 Manage controller users and tokens with 'sparkwing cluster'.
 Manage secrets with 'sparkwing secrets'.
@@ -20,7 +20,6 @@ Manage secrets with 'sparkwing secrets'.
 
 - `init` -- Set up ~/.config/sparkwing/ and report laptop-level config status
 - `profiles` -- Manage connection profiles for remote controllers
-- `xrepo` -- Manage the laptop-local repo registry
 
 ### Examples
 
@@ -33,9 +32,6 @@ sparkwing configure init -o json
 
 # List profiles
 sparkwing configure profiles list
-
-# Register the current repo with the cross-repo registry
-sparkwing configure xrepo add
 ```
 
 ## `sparkwing configure init`
@@ -204,119 +200,4 @@ sparkwing configure profiles show --name prod
 
 # Show a named profile with the raw token
 sparkwing configure profiles show --name prod --show-token
-```
-
-## `sparkwing configure xrepo`
-
-Manage the laptop-local repo registry
-
-The registry maps pipeline names to local checkouts so
-cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
-annotations. Auto-populated when you run 'sparkwing run <pipeline>'
-in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
-
-The registry is the repos section of config.yaml: $SPARKWING_CONFIG
-(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
-~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
-is the state, cache and logs root, and a registered checkout is a
-machine-wide fact that outlives any one home. A write from a command
-running under a home of its own is refused rather than sent to the
-machine's registry: set SPARKWING_CONFIG to a path inside that home
-to keep it there.
-
-### Subcommands
-
-- `list` -- List registered checkouts and their pipelines
-- `add` -- Register a checkout
-- `remove` -- Remove a registered checkout
-- `prune` -- Remove checkouts whose pipeline directory is gone
-
-### Examples
-
-```sh
-# Register the current checkout
-sparkwing configure xrepo add
-
-# Show the fleet the registry reaches
-sparkwing configure xrepo list
-
-# Drop entries whose checkout is gone
-sparkwing configure xrepo prune
-```
-
-## `sparkwing configure xrepo add`
-
-Register a checkout
-
-Registers a checkout explicitly. The path defaults to the current directory.
-
-### Arguments
-
-- `[path]` (optional) -- Checkout path; defaults to the current directory
-
-### Examples
-
-```sh
-# Register the current checkout
-sparkwing configure xrepo add
-
-# Register another checkout
-sparkwing configure xrepo add ../service
-```
-
-## `sparkwing configure xrepo list`
-
-List registered checkouts and their pipelines
-
-Shows each registered checkout, its status, and the pipelines it provides.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: json \| table |
-| `--pipelines` | Include pipeline names (default: true) |
-
-### Examples
-
-```sh
-# List registered checkouts
-sparkwing configure xrepo list
-
-# Emit one JSON record per checkout
-sparkwing configure xrepo list -o json
-
-# Skip pipeline discovery
-sparkwing configure xrepo list --pipelines=false
-```
-
-## `sparkwing configure xrepo prune`
-
-Remove checkouts whose pipeline directory is gone
-
-Removes registered checkouts that no longer contain a .sparkwing directory.
-
-### Examples
-
-```sh
-# Remove stale registry entries
-sparkwing configure xrepo prune
-```
-
-## `sparkwing configure xrepo remove`
-
-Remove a registered checkout
-
-Removes every registry entry matching a path or basename.
-
-### Arguments
-
-- `<path-or-basename>` (required) -- Registered path or basename to remove
-
-### Examples
-
-```sh
-# Remove a checkout by basename
-sparkwing configure xrepo remove service
 ```

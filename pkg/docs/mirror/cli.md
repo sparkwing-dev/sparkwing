@@ -87,17 +87,17 @@ indexed in [cli-reference.md](cli-reference.md):
 | `pipeline` | This repo's pipelines: list / describe / new / lint / plan / trigger / hooks / sparks |
 | `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
 | `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / bounce / prune, plus `approvals` and `annotations` |
-| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update |
+| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
 | `queue` | Local admission: holders, connections, waiters, capacity |
 | `daemon` | The local admission daemon: status / restart |
-| `version` | Composite CLI + SDK + sparks version card; `update --sdk` bumps the pinned SDK |
+| `version` | Composite CLI + SDK + sparks version card; `repos update --in-place` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
 | `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |
 | `cloud` | Connect this machine to a controller: connect / status / disconnect |
 | `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
 | `secrets` | Secrets in the local store, or controller-stored with `--profile`: set / get / list / delete / rotate |
-| `configure` | Laptop-local config: init / profiles / xrepo |
+| `configure` | Laptop-local config: init / profiles |
 | `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |
 | `docs` | The embedded copy of this doc tree: list / read / all / search |
 | `examples` | The worked-pipeline registry; `--name <example> --body` prints the source |

@@ -578,7 +578,7 @@ func resolveSubmitRepo(ctx context.Context, pipeline, pipelineRef string) (strin
 		return "", nil, fmt.Errorf(
 			"run --sw-detached: no project here or in the repo registry declares a pipeline named %q.\n"+
 				"Run it from the checkout that defines it, pass -C <path> to point at that checkout, "+
-				"or register it with `sparkwing configure xrepo add <path>`.\n"+
+				"or register it with `sparkwing repos add <path>`.\n"+
 				"A registered checkout whose pipeline binary has never been built is not searched; "+
 				"run `sparkwing pipeline list` there once first", pipeline)
 	}
