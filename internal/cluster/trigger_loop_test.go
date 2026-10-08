@@ -44,6 +44,10 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		},
 		DependencyProxy:    "http://cache:80",
 		K8sImagePullPolicy: "Always",
+		K8sCPUCeiling:      "8",
+		K8sMemoryCeiling:   "16Gi",
+		K8sJobDeadline:     90 * time.Minute,
+		K8sTeamNodes:       true,
 	})
 	want := []string{
 		"--runner", "k8s",
@@ -56,6 +60,10 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		"--kubeconfig", "/tmp/kubeconfig",
 		"--artifact-store", "http://cache:4344",
 		"--image-pull-policy", "Always",
+		"--k8s-cpu-ceiling", "8",
+		"--k8s-memory-ceiling", "16Gi",
+		"--k8s-job-deadline", "1h30m0s",
+		"--runner-team-nodes",
 		"--dependency-proxy", "http://cache:80",
 		"--runner-label", "cluster",
 		"--runner-node-selector", "sparkwing.io/node-pool=runner",

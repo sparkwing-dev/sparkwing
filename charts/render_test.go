@@ -263,6 +263,46 @@ type renderedVolume struct {
 	PersistentVolumeClaim *struct {
 		ClaimName string `yaml:"claimName"`
 	} `yaml:"persistentVolumeClaim"`
+	Projected *struct {
+		Sources []struct {
+			Secret *struct {
+				Name  string `yaml:"name"`
+				Items []struct {
+					Key  string `yaml:"key"`
+					Path string `yaml:"path"`
+				} `yaml:"items"`
+			} `yaml:"secret"`
+		} `yaml:"sources"`
+	} `yaml:"projected"`
+}
+
+func credentialRef(t *testing.T, rendered, file string) *renderedSecretKeyRef {
+	t.Helper()
+	for _, volume := range deploymentDocument(t, rendered).Spec.Template.Spec.Volumes {
+		if volume.Name != "credentials" || volume.Projected == nil {
+			continue
+		}
+		for _, source := range volume.Projected.Sources {
+			if source.Secret == nil {
+				continue
+			}
+			for _, item := range source.Secret.Items {
+				if item.Path == file {
+					return &renderedSecretKeyRef{Name: source.Secret.Name, Key: item.Key}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func flagValue(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }
 
 type renderedClaim struct {
@@ -1091,8 +1131,8 @@ func TestCachePublicURLMatchesTheProxyURLRunnersDial(t *testing.T) {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
 	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got := runnerEnv(t, renderCache(t))["SPARKWING_CACHE_PUBLIC_URL"]; got != want {
-		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want %q", got, want)
+	if got, _ := flagValue(runnerContainer(t, renderCache(t)).Args, "--public-url"); got != want {
+		t.Errorf("--public-url = %q, want %q", got, want)
 	}
 	if got := runnerEnv(t, renderRunner(t))["npm_config_registry"]; got != want+"/proxy/npm" {
 		t.Errorf("npm_config_registry = %q, want the same base the cache rewrites against", got)
@@ -1103,9 +1143,9 @@ func TestCachePublicURLOverrideWins(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	env := runnerEnv(t, renderCache(t, "cache.publicUrl=https://cache.example.com"))
-	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "https://cache.example.com" {
-		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+	args := runnerContainer(t, renderCache(t, "cache.publicUrl=https://cache.example.com")).Args
+	if got, _ := flagValue(args, "--public-url"); got != "https://cache.example.com" {
+		t.Errorf("--public-url = %q, want the explicit override", got)
 	}
 }
 
@@ -1114,17 +1154,17 @@ func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
 		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
 	}
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false"))
-		if got, ok := env["SPARKWING_CACHE_PUBLIC_URL"]; ok {
-			t.Errorf("%s Service set SPARKWING_CACHE_PUBLIC_URL = %q, want it unset so the proxy rewrites per request", serviceType, got)
+		args := runnerContainer(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false")).Args
+		if got, ok := flagValue(args, "--public-url"); ok {
+			t.Errorf("%s Service set --public-url %q, want it unset so the proxy rewrites per request", serviceType, got)
 		}
 	}
 
-	env := runnerEnv(t, renderCache(t,
+	args := runnerContainer(t, renderCache(t,
 		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false",
-		"cache.publicUrl=http://cache.example.com"))
-	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "http://cache.example.com" {
-		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+		"cache.publicUrl=http://cache.example.com")).Args
+	if got, _ := flagValue(args, "--public-url"); got != "http://cache.example.com" {
+		t.Errorf("--public-url = %q, want the explicit override", got)
 	}
 }
 
@@ -1200,12 +1240,12 @@ func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	rendered := renderRunner(t,
-		"cache.enabled=false",
-		"runner.extraEnv[0].name=SPARKWING_GITCACHE_URL",
-		"runner.extraEnv[0].value=https://gitcache.example.com")
+	rendered := renderRunner(t, "cache.enabled=false", "runner.gitcacheUrl=https://gitcache.example.com")
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--gitcache=https://gitcache.example.com") {
+		t.Errorf("runner args = %v, want --gitcache naming the external gitcache", args)
+	}
 	if got := runnerEnv(t, rendered)["SPARKWING_GITCACHE_URL"]; got != "https://gitcache.example.com" {
-		t.Errorf("SPARKWING_GITCACHE_URL = %q, want external gitcache URL", got)
+		t.Errorf("SPARKWING_GITCACHE_URL = %q, want the same gitcache for the nodes' SDK helpers", got)
 	}
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--also-claim-triggers") {
 		t.Errorf("runner args = %v, want trigger claiming preserved", args)
@@ -2550,10 +2590,10 @@ func TestRunnerCarriesNoJobCeilingByDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	env := runnerEnv(t, renderRunner(t))
-	for _, name := range []string{"SPARKWING_K8S_CPU_CEILING", "SPARKWING_K8S_MEMORY_CEILING"} {
-		if _, ok := env[name]; ok {
-			t.Errorf("default install sets %s; the ceiling is opt-in", name)
+	args := runnerContainer(t, renderRunner(t)).Args
+	for _, name := range []string{"--cpu-ceiling=", "--memory-ceiling="} {
+		if arg, ok := hasFlag(args, name); ok {
+			t.Errorf("default install passes %s; the ceiling is opt-in", arg)
 		}
 	}
 }
@@ -2562,9 +2602,26 @@ func TestRunnerCarriesTheConfiguredJobCeiling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	env := runnerEnv(t, renderRunner(t, "runner.jobCeiling.cpu=8", "runner.jobCeiling.memory=16Gi"))
-	if env["SPARKWING_K8S_CPU_CEILING"] != "8" || env["SPARKWING_K8S_MEMORY_CEILING"] != "16Gi" {
-		t.Errorf("runner env = %v, want the configured job ceiling", env)
+	args := runnerContainer(t, renderRunner(t, "runner.jobCeiling.cpu=8", "runner.jobCeiling.memory=16Gi")).Args
+	if !containsArg(args, "--cpu-ceiling=8") || !containsArg(args, "--memory-ceiling=16Gi") {
+		t.Errorf("runner args = %v, want the configured job ceiling", args)
+	}
+}
+
+func TestRunnerCarriesTheConfiguredJobDeadlineAndTeamNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	args := runnerContainer(t, renderRunner(t)).Args
+	if arg, ok := hasFlag(args, "--deadline"); ok {
+		t.Errorf("default install passes %s; the 6h default needs no flag", arg)
+	}
+	if containsArg(args, "--team-nodes") {
+		t.Error("default install passes --team-nodes; team nodes are opt-in")
+	}
+	args = runnerContainer(t, renderRunner(t, "runner.jobDeadline=90m", "runner.teamNodes=true")).Args
+	if !containsArg(args, "--deadline=90m") || !containsArg(args, "--team-nodes") {
+		t.Errorf("runner args = %v, want --deadline=90m and --team-nodes", args)
 	}
 }
 
@@ -2575,8 +2632,8 @@ func TestFullChartCarriesTheJobCeiling(t *testing.T) {
 	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
 		"sparkwing-runner-bundle.controller.tokenSecret.name=tok",
 		"sparkwing-runner-bundle.runner.jobCeiling.cpu=8")
-	if !strings.Contains(rendered, "SPARKWING_K8S_CPU_CEILING") {
-		t.Error("flagship chart carries no job ceiling env; the vendored sub-chart may be stale")
+	if !strings.Contains(rendered, "--cpu-ceiling=8") {
+		t.Error("flagship chart carries no job ceiling flag; the vendored sub-chart may be stale")
 	}
 }
 

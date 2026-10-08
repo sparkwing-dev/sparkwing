@@ -216,7 +216,7 @@ registries:
 
 **URL rewriting:** npm packuments and PyPI simple pages carry absolute
 upstream URLs, so the proxy rewrites them onto itself. It rewrites against
-`SPARKWING_CACHE_PUBLIC_URL` when that is set, and caches the rewritten body.
+`--public-url` when that is set, and caches the rewritten body.
 Unset, the cached copy stays exactly as upstream sent it and each response is
 rewritten from its own request's `Host` header, so a caller who sends a forged
 `Host` only ever changes its own response. A per-request response carries
@@ -235,8 +235,8 @@ pool that does share one address can set `cache.publicUrl` itself.
 
 Changing the public URL (setting it, clearing it, or pointing it elsewhere)
 leaves already-cached mutable entries written against the old value. They keep
-being served that way until their TTL expires -- `PROXY_CACHE_TTL`, 10 minutes
-by default -- so plan for that window, or wipe `PROXY_CACHE_DIR` to end it at
+being served that way until their TTL expires -- `--proxy-cache-ttl`, 10 minutes
+by default -- so plan for that window, or wipe `--proxy-cache-dir` to end it at
 once. Immutable entries carry no upstream URLs and are unaffected.
 
 **Cache policy:**
@@ -258,22 +258,22 @@ failure returns HTTP 502 and leaves no partial cache entry.
 - `GET /stats` -- cache size per registry
 - `GET /health` -- liveness/readiness
 
-**Configuration (env vars):**
+**Configuration (flags):**
 
-- `PROXY_CACHE_DIR` -- cache directory (default: `/data/proxy`)
-- `PROXY_CACHE_TTL` -- metadata TTL (default: `10m`)
-- `PROXY_MAX_AGE` -- cleanup threshold for immutable entries (default: `168h`)
-- `SPARKWING_CACHE_PUBLIC_URL` (`--public-url`) -- base URL clients use to reach
+- `--proxy-cache-dir` -- cache directory (default: `/data/proxy`)
+- `--proxy-cache-ttl` -- metadata TTL (default: `10m`)
+- `--proxy-max-age` -- cleanup threshold for immutable entries (default: `168h`)
+- `--public-url` -- base URL clients use to reach
   the proxy, e.g. `http://sparkwing-cache.sparkwing.svc.cluster.local`. A scheme
   and host, optionally with a `/proxy` path; any other path, a query, or a
   fragment fails startup with the offending value named. Empty rewrites per
   request from the `Host` header (default)
-- `SPARKWING_CACHE_TRUST_FORWARDED_HOST` (`--trust-forwarded-host`) -- honor
+- `--trust-forwarded-host` -- honor
   `X-Forwarded-Host` and `X-Forwarded-Proto` when rewriting per request. Only
   set it when a reverse proxy is the only route to the port (default: off).
   Proxies append, so the right-most element wins and it has to parse as a
   host with an optional port; anything else is refused with a 400. The flag is
-  inert when `SPARKWING_CACHE_PUBLIC_URL` is set, because that base ignores the
+  inert when `--public-url` is set, because that base ignores the
   request entirely
 
 

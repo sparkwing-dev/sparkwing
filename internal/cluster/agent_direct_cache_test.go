@@ -219,7 +219,15 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 		}
 		executePooledNode(ctx, ctrl, ctrlSrv.URL, "", ctrlSrv.URL+"/api/v1/gitcache", allow, token,
 			claimed, claimed.ClaimedBy, time.Minute, time.Hour, "pool runner", discardLogger(), nil, nil)
-		node, err := st.GetNode(ctx, runID, "build")
+		owner, err := st.AsOperator().RunTeam(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tenant, err := st.ForTeam(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, err := tenant.GetNode(ctx, runID, "build")
 		if err != nil {
 			t.Fatal(err)
 		}

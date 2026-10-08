@@ -149,7 +149,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
 | `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. A metered token's pool needs `k8s` or `warm`; the controller refuses its `inprocess` trigger claims. | `inprocess` |
 | `runner.triggerRunner.labels` | Static capabilities every trigger-spawned Kubernetes Job advertises. | `[]` |
-| `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
+| `runner.extraEnv` | Extra runner environment. | `[]` |
+| `runner.gitcacheUrl` | External gitcache passed as `--gitcache` when `cache.enabled=false`. | `""` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at startup. Empty warms the SDK at the runner image's version. | `[]` |
 | `runner.goCache.persistence.enabled` | Mount a PVC over `GOCACHE` and `GOMODCACHE` so the caches outlive the pod. | `false` |
@@ -159,7 +160,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy; `false` also stops the cache serving it. Must be `false` when `cache.service.type` is not `ClusterIP`, because the proxy takes no credential. | `true` |
 | `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
-| `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
+| `cache.repos` | `--auto-register-repos` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
@@ -172,6 +173,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
 | `runner.jobCeiling.cpu` | Hard CPU ceiling the runner clamps every pipeline pin and measured charge to before it creates a Job pod. Empty means no ceiling. | `""` |
 | `runner.jobCeiling.memory` | Hard memory ceiling for the same. | `""` |
+| `runner.jobDeadline` | Wall-clock bound on one Job pod, as a Go duration of at least a minute, passed as `--deadline`. Empty keeps 6h. | `""` |
+| `runner.teamNodes` | Keep each band node to the team whose Job booted it, passed as `--team-nodes`. | `false` |
 | `limitRange.enabled` | Bound what one container in the namespace may request, including the Job pods the runner creates. | `false` |
 | `limitRange.max` | Per-container ceiling when the LimitRange is on. | `cpu: "16"`, `memory: 64Gi` |
 | `limitRange.min` | Per-container floor, which rejects a pod asking for a sliver no quota counts. | `cpu: 10m`, `memory: 16Mi` |
@@ -206,7 +209,8 @@ release before enabling it.
 
 ## Auth
 
-The runner reads its bearer token from `controller.tokenSecret` and uses it
+The runner reads its bearer token from `controller.tokenSecret`, which the
+chart projects as the file `agent-token` under `--credentials-dir`, and uses it
 for controller claims and writes to the logs service. Mint it with
 `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
 `logs.write`: enough to claim triggers and nodes, drive the runs it claimed
@@ -219,9 +223,10 @@ incoming Authorization header to the resolved controller's
 receive a second service bearer. Once a Secret name is configured, its key
 and the Secret itself are required.
 
-The cache reads its operator token from `cache.tokenSecret` as
-`SPARKWING_API_TOKEN`, and the key it verifies cache grants with from
-`cache.grantKeySecret` as `SPARKWING_CACHE_GRANT_KEY`. The runner holds
+The chart projects `cache.tokenSecret` and `cache.grantKeySecret` into one
+volume at `/etc/sparkwing/credentials` and passes it as `--credentials-dir`:
+the cache reads its operator token from the file `cache-token` and the key it
+verifies cache grants with from `cache-grant-key`. The runner holds
 neither: for each claimed run it asks the controller for a cache grant, which
 the controller signs with the grant key, and it hands the run only that grant.
 Pipeline code can read the runner's token, so the chart refuses to render when
@@ -243,8 +248,7 @@ open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
 Service read, forge, and delete every run's logs, which is again a bootstrap
 setting to turn back off with the token upgrade.
 
-With `cache.enabled=false` and no `SPARKWING_GITCACHE_URL` in
-`runner.extraEnv`, runners fetch each run's source straight from its host.
+With `cache.enabled=false` and no `runner.gitcacheUrl`, runners fetch each run's source straight from its host.
 The controller releases the credential for each run: the team's GitHub App
 token when an installation covers the repository, else the git credential
 the team stored for the host. A run with neither fails with a message naming
@@ -387,8 +391,8 @@ Runner pods rolling-update one at a time; in-flight claims on the
 rolled pod time out and re-queue. Cache + logs use `Recreate`
 because of their RWO PVCs -- expect ~30s of downtime per upgrade.
 For zero-downtime cache, run a separate cache deployment with
-`cache.enabled=false` here and point runners at it via your own
-`SPARKWING_GITCACHE_URL` env override.
+`cache.enabled=false` here and point runners at it with
+`runner.gitcacheUrl`.
 
 ## Uninstall
 

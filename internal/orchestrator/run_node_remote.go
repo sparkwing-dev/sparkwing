@@ -337,9 +337,6 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_NODE_CLAIM_GENERATION":    true,
 	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
 	"SPARKWING_NODE_CLAIM_RESERVATION":   true,
-	"SPARKWING_TRIGGER_CLAIM_GENERATION": true,
-	"SPARKWING_TRIGGER_GENERATION":       true,
-	"SPARKWING_ATTEMPT_ORDINAL":          true,
 }
 
 // ErrRepoNotAllowed marks a run whose repository this machine's owner did not

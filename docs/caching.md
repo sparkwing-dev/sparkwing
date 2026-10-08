@@ -162,8 +162,7 @@ Restores require an exact key match.
 
 Both use tar.gz archives.
 The cache service bounds one archive at
-`sparkwing-cache --max-cache-archive-bytes`
-(`SPARKWING_CACHE_MAX_ARCHIVE_BYTES`), 500 MB by default and unbounded
+`sparkwing-cache --max-cache-archive-bytes`, 500 MB by default and unbounded
 at `0`. A larger archive is refused with `413` naming the cap, and the
 node logs a warning and proceeds without the dependency cache. The cap
 is applied before the first byte reaches the volume, so one pipeline
@@ -172,16 +171,13 @@ The SDK skips an upload over 500 MB client-side before it asks; that constant is
 client's own, and the service's cap is what actually holds.
 
 `--max-store-bytes` and `--max-store-objects`
-(`SPARKWING_CACHE_MAX_STORE_BYTES`, `SPARKWING_CACHE_MAX_STORE_OBJECTS`)
 bound the dependency-archive, team and git mirror trees
 together rather than one object. At or above either one the service refuses every upload
 with `507` naming the ceiling, while reads and deletes keep working, and
 a later measurement that finds the store back under the ceiling thaws
-it. `--warn-store-bytes` and `--warn-store-objects`
-(`SPARKWING_CACHE_WARN_STORE_BYTES`,
-`SPARKWING_CACHE_WARN_STORE_OBJECTS`) mark the store as warning without
+it. `--warn-store-bytes` and `--warn-store-objects` mark the store as warning without
 refusing anything, and `--store-reconcile`
-(`SPARKWING_CACHE_STORE_RECONCILE`, hourly by default, `0` measures once
+(hourly by default, `0` measures once
 at startup) is how often the service walks its trees and replaces its
 running count with the measurement. All of
 them are off until set, and the chart carries them as `cache.limits.*`.

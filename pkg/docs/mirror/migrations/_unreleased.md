@@ -155,18 +155,215 @@ ran it.
       --trigger-runner-sa=SA --trigger-runner-image-pull-secret=SECRET
   ```
 
-  `--trigger-sources`, `--token`, `--metrics-addr` and `--dependency-proxy`
-  carry over; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
+  `--trigger-sources`, `--metrics-addr` and `--dependency-proxy` carry over,
+  and `--token` becomes the file `agent-token` under `--credentials-dir`; `--image-pull-policy`, `--kubeconfig`, `--runner-controller-url`
   and `--runner-logs-url` gain the `--trigger-runner-` prefix, and
   `--artifact-store` becomes `--trigger-artifact-store`. Drop
   `--claim-nodes=false` to let the same pod also run nodes. The worker's
   `--log-store` has no runner equivalent: the runner streams logs to `--logs`.
   `--k8s-cpu-ceiling`, `--k8s-memory-ceiling` and `--k8s-job-deadline` become
-  `SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING` and
-  `SPARKWING_K8S_JOB_DEADLINE` in the runner pod's environment, which each
-  trigger's child inherits.
+  `--cpu-ceiling`, `--memory-ceiling` and `--deadline`.
 - **Edge cases:** `sparkwing cluster worker`, the CLI's in-process claim loop
   for a profile, is unchanged.
+
+## sparkwing-logs reads flags only
+
+- **Before:** every `sparkwing-logs` flag took its default from an
+  environment variable of the same meaning: `SPARKWING_CONTROLLER_URL`,
+  `SPARKWING_REQUIRE_AUTH`, `SPARKWING_LOGS_ARCHIVE_STORE`,
+  `SPARKWING_LOGS_ARCHIVE_IDLE`, the `SPARKWING_LOGS_*` limits, and
+  `SPARKWING_LOGS_EGRESS_*`.
+- **After:** the service reads none of them. A variable left in the pod's
+  environment is ignored, so the setting it carried falls back to the flag's
+  default. A malformed flag value stops the service at startup with an error
+  naming the flag.
+- **Operator steps:** the `sparkwing-runner-bundle` chart already passes flags
+  and needs nothing. In a manifest of your own, move each variable to its flag:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_REQUIRE_AUTH` | `--require-auth` |
+  | `SPARKWING_LOGS_ARCHIVE_STORE` | `--archive-store` |
+  | `SPARKWING_LOGS_ARCHIVE_IDLE` | `--archive-idle` |
+  | `SPARKWING_LOGS_MAX_NODE_BYTES` | `--max-node-bytes` |
+  | `SPARKWING_LOGS_MAX_RUN_BYTES` | `--max-run-bytes` |
+  | `SPARKWING_LOGS_MAX_INFLIGHT_BYTES` | `--max-inflight-bytes` |
+  | `SPARKWING_LOGS_MIN_FREE_BYTES` | `--min-free-bytes` |
+  | `SPARKWING_LOGS_RETENTION` | `--retention` |
+  | `SPARKWING_LOGS_SWEEP_INTERVAL` | `--sweep-interval` |
+  | `SPARKWING_LOGS_SEARCH_MAX_BYTES` | `--search-max-bytes` |
+  | `SPARKWING_LOGS_SEARCH_TIMEOUT` | `--search-timeout` |
+  | `SPARKWING_LOGS_MAX_LINE_BYTES` | `--max-line-bytes` |
+  | `SPARKWING_LOGS_BINARY_RATIO` | `--binary-ratio` |
+  | `SPARKWING_LOGS_MAX_STORE_BYTES` | `--max-store-bytes` |
+  | `SPARKWING_LOGS_MAX_STORE_OBJECTS` | `--max-store-objects` |
+  | `SPARKWING_LOGS_WARN_STORE_BYTES` | `--warn-store-bytes` |
+  | `SPARKWING_LOGS_WARN_STORE_OBJECTS` | `--warn-store-objects` |
+  | `SPARKWING_LOGS_STORE_RECONCILE` | `--store-reconcile` |
+  | `SPARKWING_LOGS_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+  | `SPARKWING_LOGS_EGRESS_MAX_DOWNLOADS` | `--egress-max-downloads` |
+  | `SPARKWING_LOGS_EGRESS_MAX_LOG_STREAMS` | `--egress-max-log-streams` |
+
+- **Edge cases:** `SPARKWING_REQUIRE_AUTH` also accepted `yes` and `on`;
+  `--require-auth` is a boolean flag, so pass it bare. A retention set through
+  `SPARKWING_LOGS_RETENTION` used to count as named and kept an archived
+  service off its 90-day default; only `--retention` counts now.
+  `SPARKWING_S3_ENDPOINT` is still read, because it has no flag yet.
+
+## sparkwing-cache reads flags and a credentials directory
+
+- **Before:** `sparkwing-cache` took each flag's default from an environment
+  variable, including eleven without the `SPARKWING_` prefix, and its two
+  secrets from `SPARKWING_API_TOKEN` and `SPARKWING_CACHE_GRANT_KEY` or the
+  `--api-token` and `--grant-key` flags. A value it could not parse was
+  ignored: a malformed duration or boolean kept the default without a word, and
+  a malformed byte count printed a warning and stayed unlimited.
+- **After:** the cache reads settings from flags alone and its secrets from
+  `--credentials-dir`, a directory holding one file per secret: `cache-token`
+  (the operator token) and `cache-grant-key`. An absent file turns that
+  feature off, as an unset variable did. `--api-token` and `--grant-key` are
+  gone, because a flag value shows in `/proc/<pid>/cmdline`. A malformed flag
+  value now stops the cache at startup with an error naming the flag; so does
+  a `--credentials-dir` that names no directory.
+- **Operator steps:** the `sparkwing-runner-bundle` chart projects
+  `cache.tokenSecret` and `cache.grantKeySecret` into
+  `/etc/sparkwing/credentials` and passes the flags; upgrading the chart needs
+  no value changes. In a manifest of your own, mount the two Secret keys as
+  files and move each variable to its flag:
+
+  ```yaml
+  args:
+    - --credentials-dir
+    - /etc/sparkwing/credentials
+  volumeMounts:
+    - name: credentials
+      mountPath: /etc/sparkwing/credentials
+      readOnly: true
+  volumes:
+    - name: credentials
+      projected:
+        defaultMode: 0400
+        sources:
+          - secret:
+              name: sparkwing-cache-token
+              items: [{key: token, path: cache-token}]
+          - secret:
+              name: sparkwing-cache-grant-key
+              items: [{key: key, path: cache-grant-key}]
+  ```
+
+  | Variable or flag | Use instead |
+  |---|---|
+  | `SPARKWING_API_TOKEN`, `--api-token` | the file `cache-token` under `--credentials-dir` |
+  | `SPARKWING_CACHE_GRANT_KEY`, `--grant-key` | the file `cache-grant-key` under `--credentials-dir` |
+  | `PORT`, `PORT_ADDR` | `--addr` |
+  | `DATA_DIR` | `--data-dir` |
+  | `PROXY_CACHE_DIR` | `--proxy-cache-dir` |
+  | `PROXY_CACHE_TTL` | `--proxy-cache-ttl` |
+  | `PROXY_MAX_AGE` | `--proxy-max-age` |
+  | `FETCH_INTERVAL` | `--fetch-interval` |
+  | `FETCH_FRESH_WINDOW` | `--fetch-fresh-window` |
+  | `RECLONE_COOLDOWN` | `--reclone-cooldown` |
+  | `GITCACHE_REPOS` | `--auto-register-repos` |
+  | `SSH_KEY_DIR` | `--ssh-key-dir` |
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_METRICS_ADDR` | `--metrics-addr` |
+  | `SPARKWING_CACHE_PUBLIC_URL` | `--public-url` |
+  | `SPARKWING_CACHE_TRUST_FORWARDED_HOST` | `--trust-forwarded-host` |
+  | `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | `--allow-unauthenticated` |
+  | `SPARKWING_CACHE_BLOB_STORE` | `--blob-store` |
+  | `SPARKWING_CACHE_MAX_ARCHIVE_BYTES` | `--max-cache-archive-bytes` |
+  | `SPARKWING_CACHE_MAX_STORE_BYTES` | `--max-store-bytes` |
+  | `SPARKWING_CACHE_MAX_STORE_OBJECTS` | `--max-store-objects` |
+  | `SPARKWING_CACHE_WARN_STORE_BYTES` | `--warn-store-bytes` |
+  | `SPARKWING_CACHE_WARN_STORE_OBJECTS` | `--warn-store-objects` |
+  | `SPARKWING_CACHE_STORE_RECONCILE` | `--store-reconcile` |
+  | `SPARKWING_CACHE_PROXY_MAX_BYTES` | `--proxy-max-bytes` |
+  | `SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+
+- **Edge cases:** a cache whose environment carried a malformed value used to
+  start on the default; with the value moved to its flag it refuses to start,
+  so check the value before the upgrade. `--allow-unauthenticated` is a boolean
+  flag: pass it bare, because `--allow-unauthenticated=yes` is refused.
+  The controller still reads the same token as `SPARKWING_CACHE_TOKEN` and the
+  grant key as `SPARKWING_CACHE_GRANT_KEY`; when it moves to a credentials
+  directory it reads the same `cache-token` and `cache-grant-key` file names,
+  so one projected Secret volume will serve both. `SPARKWING_S3_ENDPOINT`,
+  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
+
+## sparkwing-runner reads flags and a credentials directory
+
+- **Before:** `sparkwing-runner runner` and `sparkwing-runner launch` took
+  their bearer from `SPARKWING_AGENT_TOKEN` or `--token`, and `runner` seeded
+  most flags from `SPARKWING_*` variables. The Kubernetes Job ceilings,
+  deadline and team-node switch existed only as `SPARKWING_K8S_CPU_CEILING`,
+  `SPARKWING_K8S_MEMORY_CEILING`, `SPARKWING_K8S_JOB_DEADLINE` and
+  `SPARKWING_RUNNER_TEAM_NODES` on the runner pod, which each trigger's
+  `handle-trigger` child inherited and read.
+- **After:** both commands read their bearer from the file `agent-token` under
+  `--credentials-dir`; `--token` is gone, because a flag value shows in
+  `/proc/<pid>/cmdline`. The runner takes `--cpu-ceiling`, `--memory-ceiling`,
+  `--deadline` and `--team-nodes`, the launcher's names, validates them at
+  startup, and hands them to each trigger as `handle-trigger` flags.
+  `handle-trigger` no longer reads those four variables, nor
+  `SPARKWING_RUNNER_SA`, `SPARKWING_IMAGE_PULL_POLICY` and
+  `SPARKWING_DEPENDENCY_PROXY_URL`, which the runner already passed as flags.
+  `POD_NAME`, `POD_NAMESPACE`, `KUBECONFIG` and the GitHub Actions variables
+  are still read, because other tools define them. The token a Job or a
+  trigger child receives from Sparkwing still crosses in
+  `SPARKWING_AGENT_TOKEN`; that is Sparkwing's own protocol, not a setting.
+- **Operator steps:** the `sparkwing-runner-bundle` chart projects
+  `controller.tokenSecret` as `agent-token` and passes
+  `runner.jobCeiling` as flags; upgrading needs no value changes. A Helm
+  user who set `SPARKWING_K8S_JOB_DEADLINE` or `SPARKWING_RUNNER_TEAM_NODES`
+  through `runner.extraEnv` moves them to the new values `runner.jobDeadline`
+  and `runner.teamNodes`. An external
+  gitcache moves from a `SPARKWING_GITCACHE_URL` entry in `runner.extraEnv` to
+  `runner.gitcacheUrl`. In a manifest of your own, mount the token Secret as a
+  file and move each variable to its flag:
+
+  | Variable or flag | Use instead |
+  |---|---|
+  | `SPARKWING_AGENT_TOKEN`, `--token` | the file `agent-token` under `--credentials-dir` |
+  | `SPARKWING_K8S_CPU_CEILING` | `sparkwing-runner runner --cpu-ceiling` |
+  | `SPARKWING_K8S_MEMORY_CEILING` | `--memory-ceiling` |
+  | `SPARKWING_K8S_JOB_DEADLINE` | `--deadline` |
+  | `SPARKWING_RUNNER_TEAM_NODES` | `--team-nodes` |
+  | `SPARKWING_CONTROLLER_URL` | `--controller` |
+  | `SPARKWING_LOGS_URL` | `--logs` |
+  | `SPARKWING_GITCACHE_URL` | `--gitcache` |
+  | `SPARKWING_RUNNER_SA` | `--trigger-runner-sa` |
+  | `SPARKWING_CACHE_URL` | `--trigger-artifact-store` |
+  | `SPARKWING_DEPENDENCY_PROXY_URL` | `--dependency-proxy` |
+  | `SPARKWING_IMAGE_PULL_POLICY` | `--trigger-runner-image-pull-policy` |
+  | `SPARKWING_WARM_MODULES` | `--warm-modules` |
+  | `SPARKWING_LOCAL_RESERVE` | `--local-reserve` |
+  | `SPARKWING_TEAM` | `--team` |
+
+  A machine connected from the dashboard runs the new command the machines
+  page prints, which writes the token to
+  `$HOME/.config/sparkwing/runner-credentials/agent-token` with mode `0600`
+  before it starts the runner.
+- **Edge cases:** `--team-nodes` reaches a trigger as
+  `handle-trigger --runner-team-nodes`, which a pipeline built from an SDK
+  older than v0.66.0 rejects; the runner passes it only when set. A pipeline
+  built from an SDK older than this release still reads the four Job
+  variables if they remain in the runner pod's environment, so delete them
+  rather than leaving them beside the flags. `sparkwing-runner agent`, which
+  reads `config.yaml`, is unchanged.
+
+## Leftover variable names are removed
+
+- **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper
+  ahead of `SPARKWING_GITCACHE_URL`.
+- **After:** the clone helper reads `SPARKWING_GITCACHE_URL` alone.
+- **Author or operator steps:** rename `SPARKWING_GITCACHE` to
+  `SPARKWING_GITCACHE_URL`.
+- **Edge cases:** `SPARKWING_TOKEN`, `SPARKWING_TRIGGER_CLAIM_GENERATION`,
+  `SPARKWING_TRIGGER_GENERATION` and `SPARKWING_ATTEMPT_ORDINAL` were stripped
+  from child environments although nothing set or read them; they no longer
+  appear in the code.
 
 ## Flag-mirror environment variables are no longer read
 

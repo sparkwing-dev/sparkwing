@@ -350,10 +350,10 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    Kubernetes holds those pods until the configured Secret is present.
    `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
    service's signal to resolve callers against the controller.
-   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as
-   `SPARKWING_API_TOKEN` and the controller as `SPARKWING_CACHE_TOKEN`, and
-   `sparkwing-runner-bundle.cache.grantKeySecret` what both read as
-   `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
+   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as the
+   credential file `cache-token` and the controller as `SPARKWING_CACHE_TOKEN`,
+   and `sparkwing-runner-bundle.cache.grantKeySecret` what the cache reads as
+   `cache-grant-key` and the controller as `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
    token fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
    logs-enabled one without the runner token unless

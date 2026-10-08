@@ -127,6 +127,22 @@ runner:
     cpu: ""
     memory: ""
 
+  # Wall-clock bound on one Job pod this runner creates, as a Go duration
+  # of at least a minute (6h, 90m), passed as --deadline. Kubernetes kills
+  # a pod that outlives it, and a node's own .Timeout() outranks it.
+  # Empty keeps the 6h default.
+  jobDeadline: ""
+
+  # Keep each band node to the team whose Job booted it, passed as
+  # --team-nodes. Turn it on only for a band pool whose nodes carry the
+  # sparkwing.dev/team-node label.
+  teamNodes: false
+
+  # An external gitcache the runners fetch source through, passed as
+  # --gitcache, when cache.enabled is false. Empty fetches each run's
+  # source straight from its host.
+  gitcacheUrl: ""
+
   # Go build and module caches. The runner compiles a repository's
   # pipeline on the first claim of each source hash and publishes the
   # binary to the cache service, so every source change pays one compile:
@@ -172,10 +188,7 @@ runner:
 
   # Extra env passed to the runner container. Useful for forwarding
   # AWS_REGION, GOPRIVATE, DOCKER_HOST, etc. An entry here also
-  # overrides a cache.dependencyProxy default of the same name, and
-  # SPARKWING_IMAGE_PULL_POLICY sets the imagePullPolicy of the pods
-  # the runner spawns (Always | IfNotPresent | Never; default
-  # IfNotPresent).
+  # overrides a cache.dependencyProxy default of the same name.
   extraEnv: []
   # - name: GOPRIVATE
   #   value: github.com/your-org
@@ -191,7 +204,7 @@ runner:
 # -----------------------------------------------------------------------
 cache:
   # Set to false to run without the cache. With no gitcache (this one,
-  # or SPARKWING_GITCACHE_URL in runner.extraEnv for an external one),
+  # or runner.gitcacheUrl for an external one),
   # runners fetch each run's source straight from its host with the
   # credential the controller releases for the run: the team's GitHub
   # App token, else the git credential the team stored for the host.
@@ -208,7 +221,8 @@ cache:
   # team's tree. The cache requires it and the controller holds it for
   # its own hop; runners never do. It must name a different Secret key
   # from controller.tokenSecret, because pipeline code can read the
-  # runner's token, and the chart refuses to render otherwise.
+  # runner's token, and the chart refuses to render otherwise. The
+  # cache reads it as the file cache-token under --credentials-dir.
   #   kubectl create secret generic sparkwing-cache-token \
   #     --from-literal=token=<token>
   tokenSecret:
@@ -220,7 +234,8 @@ cache:
   # run, so this key is held by the controller and the cache only, and
   # must name a different Secret key from both tokens above. Leave name
   # empty to mint no grants: runs then go without the binary and
-  # dependency caches.
+  # dependency caches. The cache reads it as the file cache-grant-key
+  # under --credentials-dir.
   #   kubectl create secret generic sparkwing-cache-grant-key \
   #     --from-literal=key=<random 32 bytes>
   grantKeySecret:
@@ -304,8 +319,8 @@ cache:
     # own mirror without turning the rest off.
     enabled: true
 
-  # Repos the cache should pre-warm / proxy. Format matches the
-  # GITCACHE_REPOS env: comma-separated `<alias>=<git-url>` pairs.
+  # Repos the cache should pre-warm / proxy, passed as
+  # --auto-register-repos: comma-separated `<alias>=<git-url>` pairs.
   # Empty = cache acts as a transparent proxy with no preloaded
   # repos.
   repos: ""

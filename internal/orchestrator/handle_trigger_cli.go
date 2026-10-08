@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
@@ -26,22 +25,22 @@ func runHandleTriggerCLI(args []string) error {
 	runnerKind := fs.String("runner", "inprocess", "node runner: inprocess | k8s | warm")
 	k8sNamespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace for runner Jobs (k8s)")
 	k8sImage := fs.String("image", "", "runner image (k8s)")
-	k8sSA := fs.String("runner-sa", os.Getenv("SPARKWING_RUNNER_SA"), "service account name for runner pods (k8s)")
+	k8sSA := fs.String("runner-sa", "", "service account name for runner pods (k8s)")
 	k8sPullSecret := fs.String("image-pull-secret", "", "imagePullSecret for runner pods (k8s)")
 	k8sCtrlURL := fs.String("runner-controller-url", "", "controller URL the runner pod should talk to (defaults to --controller)")
 	k8sLogsURL := fs.String("runner-logs-url", "", "logs-service URL the runner pod should talk to (defaults to --logs)")
 	artifactStoreURL := fs.String("artifact-store", os.Getenv("SPARKWING_CACHE_URL"), "artifact/cache store URL passed to runner pods (k8s)")
-	dependencyProxy := fs.String("dependency-proxy", os.Getenv("SPARKWING_DEPENDENCY_PROXY_URL"),
+	dependencyProxy := fs.String("dependency-proxy", "",
 		"base URL of the in-cluster pull-through package proxy stamped on runner pods as GOPROXY / npm_config_registry / PIP_INDEX_URL; "+
-			"empty derives it from SPARKWING_GITCACHE_URL, \"off\" disables (env: SPARKWING_DEPENDENCY_PROXY_URL)")
-	imagePullPolicy := fs.String("image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
-		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
-	k8sCPUCeiling := fs.String("k8s-cpu-ceiling", os.Getenv("SPARKWING_K8S_CPU_CEILING"),
-		"hard CPU ceiling for runner pods as a Kubernetes quantity (8, 500m); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_CPU_CEILING)")
-	k8sMemoryCeiling := fs.String("k8s-memory-ceiling", os.Getenv("SPARKWING_K8S_MEMORY_CEILING"),
-		"hard memory ceiling for runner pods as a Kubernetes quantity (8Gi); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_MEMORY_CEILING)")
-	k8sJobDeadline := fs.String("k8s-job-deadline", os.Getenv("SPARKWING_K8S_JOB_DEADLINE"),
-		"wall-clock bound on one runner Job as a Go duration (6h, 90m); Kubernetes kills a pod that outlives it, and a node's own .Timeout() outranks it (empty = 6h; env: SPARKWING_K8S_JOB_DEADLINE)")
+			"empty derives it from SPARKWING_GITCACHE_URL, \"off\" disables")
+	imagePullPolicy := fs.String("image-pull-policy", "",
+		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent)")
+	k8sCPUCeiling := fs.String("k8s-cpu-ceiling", "",
+		"hard CPU ceiling for runner pods as a Kubernetes quantity (8, 500m); a pipeline pin or measured charge above it is clamped (empty = no ceiling)")
+	k8sMemoryCeiling := fs.String("k8s-memory-ceiling", "",
+		"hard memory ceiling for runner pods as a Kubernetes quantity (8Gi); a pipeline pin or measured charge above it is clamped (empty = no ceiling)")
+	k8sJobDeadline := fs.String("k8s-job-deadline", "",
+		"wall-clock bound on one runner Job as a Go duration (6h, 90m); Kubernetes kills a pod that outlives it, and a node's own .Timeout() outranks it (empty = 6h)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	var k8sLabels stringSliceFlag
 	fs.Var(&k8sLabels, "runner-label", "static capability every runner Job advertises (repeatable)")
@@ -49,20 +48,9 @@ func runHandleTriggerCLI(args []string) error {
 	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable)")
 	var k8sTolerations stringSliceFlag
 	fs.Var(&k8sTolerations, "runner-toleration", "toleration for runner pods, key[=value]:Effect (repeatable)")
-	teamNodesDefault := false
-	if raw := os.Getenv("SPARKWING_RUNNER_TEAM_NODES"); raw != "" {
-		v, err := strconv.ParseBool(raw)
-		if err != nil {
-			return fmt.Errorf("SPARKWING_RUNNER_TEAM_NODES: %w", err)
-		}
-		teamNodesDefault = v
-	}
-	// safety: the cloud sets this through the environment, which reaches a
-	// customer's compiled binary whatever SDK it pins; a flag it predates would
-	// fail the trigger.
-	k8sTeamNodes := fs.Bool("runner-team-nodes", teamNodesDefault,
+	k8sTeamNodes := fs.Bool("runner-team-nodes", false,
 		"keep each band node to the team whose Job booted it by selecting sparkwing.dev/team-node; "+
-			"the band pool must stamp that label on its nodes (env: SPARKWING_RUNNER_TEAM_NODES)")
+			"the band pool must stamp that label on its nodes")
 	local := fs.Bool("local", false,
 		"run against the laptop SQLite store; no controller required")
 	profileName := fs.String("profile", "",

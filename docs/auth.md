@@ -1466,8 +1466,8 @@ To recover, give the machine a live token:
   seconds of the rewrite, without a restart.
 - **`sparkwing cluster worker`**: point the profile at a live token. The worker
   watches the profile file and reloads it within seconds.
-- **A token passed with `--token` or `SPARKWING_AGENT_TOKEN`**: restart the
-  process with a live token.
+- **A token in a `--credentials-dir`**: replace the `agent-token` file with a
+  live token and restart the process.
 
 Failures that are not a dead token back off rather than parking. A network
 error, a `5xx` or another `401` waits about a second, doubling on each
