@@ -1094,24 +1094,31 @@ step with the controller's own.
   writes runs, nodes or triggers of a team other than the default goes
   through that team's handle.
 
-## Node logs without a logs URL reach the controller
+## Node logs reach the controller as segments
 
-- **Before:** a Kubernetes Job, warm runner, self-hosted agent or launcher
-  Job started without a logs URL wrote its node logs to the pod's or
-  machine's own disk, which nobody could read and which went away with the
-  pod.
-- **After:** the runner uploads each node's log as gzip segments plus a
-  sealing manifest through URLs the controller issues, into the
-  controller's cache bucket (`--cache-blob-store`) or, without one, its
-  output directory. The dashboard and `sparkwing runs logs` read them, and
-  deleting a run or a team deletes them. Runners and controllers with a
-  logs URL behave as before.
-- **Operator steps:** none are required. On an S3 cache bucket, add a
-  lifecycle rule that expires `<cache prefix>/logs/r90/` after 90 days;
-  until later releases manage retention, nothing else expires these
-  objects. A controller that keeps them on its own disk keeps them until
-  their run is deleted. Segment bytes do not yet count against a team's
-  storage share.
-- **Mixed versions:** a runner that predates segments keeps its local
-  file, as before. A runner of this release against an older controller
-  finds no `log-segments` route and does the same.
+- **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub
+  Actions runner, launcher Job or the trigger runner's in-process nodes
+  appended node logs to the logs service at their logs URL, and without one
+  wrote them to a disk nobody could read and that went away with the pod.
+  `sparkwing runs logs --profile` and `runs logs --grep --profile` read the
+  logs service the profile or the controller named.
+- **After:** against a controller that keeps segments, every one of those
+  runners uploads each node's log as gzip segments plus a sealing manifest
+  through URLs the controller issues, into the controller's cache bucket
+  (`--cache-blob-store`) or, without one, its output directory, whether or
+  not it has a logs URL. The dashboard and the CLI read every node through
+  the controller, which serves segments first and the logs service for a
+  node that wrote none, so logs the service already holds stay readable.
+  Deleting a run or a team deletes its segments.
+- **Operator steps:** none are required; keep the logs service running so
+  its existing logs stay readable. On an S3 cache bucket, add a lifecycle
+  rule that expires `<cache prefix>/logs/r90/` after 90 days; until later
+  releases manage retention, nothing else expires these objects. A
+  controller that keeps them on its own disk keeps them until their run is
+  deleted. Segment bytes do not yet count against a team's storage share.
+- **Mixed versions:** upgrade the controller first. A runner that predates
+  segments keeps writing to its logs URL, which the controller still reads
+  through. A runner of this release against an older controller finds no
+  segments advertised and writes to its logs URL, or locally without one,
+  as before. Rolling the runners back returns their new logs to the logs
+  service.

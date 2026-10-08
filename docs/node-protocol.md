@@ -64,7 +64,7 @@ Run options are not environment variables in this contract; [Run options](#run-o
 The Go in-process path reads more variables than the contract names. They exist because the orchestrator runs inside the customer's binary, and an SDK in another language never reads them:
 
 - `SPARKWING_API_SOCKET`: a unix socket the local Go child uses in place of URL plus bearer.
-- `SPARKWING_LOGS_URL`: the logs service for direct appends; the hosted model reads log records from stdout.
+- `SPARKWING_LOGS_URL`: where the node appends its log records. On a cluster runner it is a loopback address in the runner process, which keeps the log as segments; it names the logs service only when the controller keeps no segments. The hosted model reads log records from stdout.
 - `SPARKWING_HOME`, `HOME`, `GOCACHE`, `GOMODCACHE`, `GOFLAGS`: Go toolchain and state locations.
 - `SPARKWING_NODE_CLAIM_HOLDER`, `SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`, `SPARKWING_NODE_CLAIM_RESERVATION`, `SPARKWING_NODE_CLAIM_LEASE_SECONDS`, `SPARKWING_NODE_SPEC_HASH`: the claim fence, which the engine-side executor holds.
 - `SPARKWING_EXECUTION_CAPABILITY_STDIN`, `SPARKWING_BROKERED_ARTIFACTS`, `SPARKWING_BROKERED_NODE_CLAIM`: broker-mode switches.
@@ -77,7 +77,7 @@ The Go in-process path reads more variables than the contract names. They exist 
 **Today.** A node reaches the routes below at `SPARKWING_CONTROLLER_URL` with `Authorization: Bearer <token>`. Three hosts answer them:
 
 - the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`;
-- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller or the logs service;
+- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller; it keeps the node's log appends as segments itself, or forwards them to the logs service on a controller that keeps none;
 - the **controller** itself, for a Kubernetes or launcher Job that holds a claim token.
 
 The Go child on a local run may use the unix socket in `SPARKWING_API_SOCKET` instead of URL plus bearer. The socket stays as a Go-only optimization; it is not part of the contract.

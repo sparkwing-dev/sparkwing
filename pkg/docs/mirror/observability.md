@@ -123,7 +123,7 @@ code as top-level fields:
 ```
 
 Logs are not part of this payload; fetch them separately with
-`sparkwing runs logs --run <id>` or from the logs service.
+`sparkwing runs logs --run <id>`.
 
 ## Log completeness
 
@@ -170,22 +170,25 @@ before the restart.
 
 A node's lines are written by the pipeline binary, which is built against
 the SDK version the pipeline's `go.mod` pins, not by the runner that
-claimed the node. When a pooled agent or a Kubernetes Job runs the node, the
-runner carries every line the pipeline binary writes, so it numbers the
-lines of a binary that does not and seals them once the binary exits on its
-own; a binary killed by a signal or cancelled is left unsealed and reads
-`cut_off`. A line the binary gives up on after the logs service refused it
-counts as dropped. A pipeline binary that runs its nodes itself, the
-in-process trigger runner, writes straight to the logs service, so on an
-SDK without seals those nodes read `unconfirmed` until the pin moves.
+claimed the node. When the controller keeps node logs as segments (below),
+the runner keeps every line the binary writes and seals the log itself, so
+a binary built against any SDK reads complete when it exits on its own. On
+a controller that keeps no segments, a pooled agent or Kubernetes Job
+numbers the lines of a binary that does not and seals them for it in the
+logs service; a binary killed by a signal or cancelled is left unsealed and
+reads `cut_off`, and a line the binary gives up on after the logs service
+refused it counts as dropped.
 
-### Runners without a logs service
+### Node logs kept as segments
 
-A Kubernetes Job, warm runner, self-hosted agent or launcher Job started
-without a logs URL keeps its node's log as segments the controller
-stores, instead of on a disk that dies with the pod. The runner process
-that supervises the pipeline binary serves the binary's log appends on
-127.0.0.1, so a binary built against any SDK logs unchanged. It appends
+Every cluster runner keeps its nodes' logs as segments the controller
+stores when the controller advertises them (`logs.segments` in
+`GET /api/v1/capabilities`), whether or not it has a logs URL: a
+Kubernetes Job, warm runner, self-hosted agent, GitHub Actions runner,
+launcher Job, and the trigger runner's in-process nodes and compile
+output. The runner process that supervises the pipeline binary serves the
+binary's log appends on 127.0.0.1, so a binary built against any SDK logs
+unchanged. It appends
 every line to a spool file and uploads a gzip-compressed segment every
 10 seconds or 1 MiB, whichever comes first; an idle node uploads
 nothing. When the binary exits, the runner uploads the last segment and
@@ -196,10 +199,18 @@ its cache bucket when it has `--cache-blob-store`, otherwise signed
 against its own output directory. Segments live under
 `logs/r90/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`.
 A runner whose controller predates segments, or has nowhere to keep
-them, keeps the log on local disk as before.
+them, writes to its logs URL, or keeps the log on local disk without one,
+as before. While a node runs, its runner also posts each line to the
+controller's live ring with the line's byte offset in the log, about
+every 250 ms.
 
-The dashboard and `sparkwing runs logs` read such a node from its
-segments and verify each one against the manifest's digest. A runner
+The dashboard and `sparkwing runs logs`, `--follow` and `--grep` read
+through the controller, which serves a node from its segments and verifies
+each one against the manifest's digest, and serves a node that wrote none
+from the logs service. A follow of a running node sends the segments
+uploaded so far, then the live ring from the byte where they end, so no
+line is sent twice; when the ring has already dropped bytes, it waits for
+the segment that covers them. A runner
 lost mid-node loses at most the segment it was filling: once the node
 has been finished for 60 seconds with no manifest, the controller writes
 one listing the segments that landed, and the log reads incomplete:
@@ -213,7 +224,7 @@ one listing the segments that landed, and the log reads incomplete:
 
 Deleting a run deletes its segments, and so does deleting a team. Nothing
 expires segments on its own yet; see the
-[migration guide](migrations/_unreleased.md#node-logs-without-a-logs-url-reach-the-controller)
+[migration guide](migrations/_unreleased.md#node-logs-reach-the-controller-as-segments)
 for the lifecycle rule to add.
 
 ## Failure excerpts

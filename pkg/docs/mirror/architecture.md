@@ -121,8 +121,9 @@ See [Cache](gitcache.md) for endpoints and configuration.
 Next.js web app showing pipeline runs, logs, node status, and
 documentation. The controller embeds the bundle and serves it on its API
 port; `sparkwing serve` serves the same bundle locally. Log panes read
-through the controller, which forwards each read to the logs service with
-the viewer's own credential.
+through the controller, which serves a node from the log segments its
+runner uploaded, and a node that wrote none from the logs service with the
+viewer's own credential.
 
 The Fleet page shows team-scoped executors and queue activity. Operators can
 check controller and logs health through their own service endpoints.
