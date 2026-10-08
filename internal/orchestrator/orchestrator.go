@@ -1006,13 +1006,18 @@ func mergeInvokeArgs(opts Options) map[string]string {
 	return merged
 }
 
-func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
+func loadCheckoutProjectConfig() (*projectconfig.Config, string, error) {
 	root := sparkwing.CurrentRuntime().WorkDir
 	if root == "" {
-		return nil
+		return nil, "", nil
 	}
 	path := filepath.Join(root, ".sparkwing", projectconfig.Filename)
 	cfg, err := projectconfig.Load(path)
+	return cfg, path, err
+}
+
+func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
+	cfg, path, err := loadCheckoutProjectConfig()
 	if err != nil {
 		if logger == nil {
 			logger = slog.Default()
