@@ -112,7 +112,7 @@ func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.T
 	if err != nil {
 		out.Status = "unavailable"
 		out.Error = "GitHub could not read the repository configuration; retry discovery"
-		return out, nil
+		return out, nil //nolint:nilerr // Discovery failure is a valid preview status, not a failed preview request.
 	}
 	if snapshot.RepositoryID != repo.ID {
 		return out, errors.New("GitHub repository identity changed while reading configuration")
@@ -127,7 +127,7 @@ func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.T
 	out.Status = status
 	if err != nil {
 		out.Error = err.Error()
-		return out, nil
+		return out, nil //nolint:nilerr // Invalid or unsupported declarations are valid preview results.
 	}
 	manual, err := tenant.GitHubAppTriggersFor(ctx, in.InstallationID, repo.ID)
 	if err != nil {
