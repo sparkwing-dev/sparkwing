@@ -3,8 +3,6 @@ package controller_test
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 var (
@@ -498,42 +495,5 @@ func TestLegacyCLIAndRunnerTokensStayListedAndRevocable(t *testing.T) {
 	}
 	if cliAuthenticates(f, cliRaw) || runnerAuthenticates(f, legacyRunner) {
 		t.Error("a revoked legacy token still authenticates")
-	}
-}
-
-// An executor enrollment binds a machine credential; a machine team token is
-// one and a member team token is not, whatever scopes it carries.
-func TestEnrollmentAcceptsAMachineTeamTokenOnly(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	now := time.Now().UTC()
-	adminRaw, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, machine, err := st.CreateToken("agent:desk", store.TokenKindTeam, []string{controller.ScopeNodesClaim}, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, member, err := st.CreateToken("eddie@example.com", store.TokenKindTeam, []string{controller.ScopeNodesClaim}, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-	defer srv.Close()
-	enroll := func(name, prefix string) int {
-		status, _ := agentRequest(t, http.MethodPut, srv.URL+"/api/v1/agents/"+name, adminRaw, map[string]any{
-			"token_prefix": prefix, "kind": "agent", "location": "local", "max_concurrent": 1,
-		})
-		return status
-	}
-	if status := enroll("desk", machine.Prefix); status != http.StatusNoContent {
-		t.Errorf("enrolling a machine team token = %d, want 204", status)
-	}
-	if status := enroll("laptop", member.Prefix); status != http.StatusBadRequest {
-		t.Errorf("enrolling a member team token = %d, want 400", status)
 	}
 }

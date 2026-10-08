@@ -65,21 +65,6 @@ func TestRunnerIdentity_EveryClaimMethodNamesItsRunner(t *testing.T) {
 			},
 		},
 		{
-			name: "PrepareExecutorClaim", route: "/api/v1/nodes/claim/prepare|POST",
-			call: func() error {
-				_, err := c.PrepareExecutorClaim(ctx, "agent-1")
-				return err
-			},
-		},
-		{
-			name: "OfferExecutorClaim", route: "/api/v1/nodes/claim|POST",
-			call: func() error {
-				_, err := c.OfferExecutorClaim(ctx,
-					client.ExecutorClaim{ExecutorName: "agent-1", HolderID: "holder-1"}, "run-1", "node-1")
-				return err
-			},
-		},
-		{
 			name: "HeartbeatNodeClaim", route: "/api/v1/runs/run-1/nodes/node-1/heartbeat|POST",
 			call: func() error {
 				return c.HeartbeatNodeClaim(ctx, "run-1", "node-1", "holder-1", time.Minute, nil)

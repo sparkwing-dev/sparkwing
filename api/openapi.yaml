@@ -1772,11 +1772,7 @@ paths:
         the lease is unexpired; another runner token gets `403` with
         `"error": "claim_required"`, even one carrying the same principal
         name. `lease_secs` is clamped to the server cap of 10 minutes.
-        A request carrying `executor_name` is a sealed assisted offer:
-        it validates the private binding and returns `409
-        body_attestation_required` before reservation or award. The `200`
-        response remains active only for the ordinary legacy claim shape that
-        omits `executor_name`; sealed nodes are excluded from that path.
+        A node sealed under an execution policy is never claimed here.
       requestBody:
         required: true
         content:
@@ -1787,15 +1783,7 @@ paths:
               required: [holder_id]
               properties:
                 holder_id: {type: string}
-                run_id: {type: string}
-                node_id: {type: string}
-                executor_name: {type: string}
-                reservation_id: {type: string}
-                resource_digest: {type: string}
-                slot: {type: integer}
                 lease_secs: {type: integer}
-                execution_binding:
-                  $ref: "#/components/schemas/ExecutionClaimBinding"
                 labels:
                   type: array
                   items: {type: string}
@@ -1841,12 +1829,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditsRefused"}
-        "409":
-          description: >-
-            Assisted offer refusal. The controller does not reserve, record, or award the offer.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
 
   /api/v1/tokens:
     post:
@@ -2977,156 +2959,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/agents/{name}:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: {type: string}
-    put:
-      x-sparkwing-scope: admin
-      tags: [agents]
-      summary: Enroll an executor under an exact runner credential.
-      description: |
-        Creates or updates the named executor. `token_prefix` must resolve to
-        a live runner or service credential authorized to claim nodes; the raw bearer is
-        never accepted here. Location is a trusted operator declaration, while
-        capabilities describe placement features and cannot impersonate a
-        location. Rebinding a name to another credential clears its liveness.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.enrollAgentReq
-              type: object
-              required: [token_prefix, kind, max_concurrent]
-              properties:
-                token_prefix: {type: string, description: Non-secret prefix of the credential bound to this enrollment.}
-                kind: {type: string, enum: [agent, gateway]}
-                location: {type: string, enum: [local, cloud, unknown], default: unknown}
-                capabilities:
-                  type: array
-                  items: {type: string}
-                base_priority: {type: integer, minimum: 0, maximum: 100}
-                priority_ceiling: {type: integer, minimum: 0, maximum: 100}
-                max_concurrent: {type: integer, minimum: 1}
-                budget:
-                  x-sparkwing-go-type: pkg/controller.AgentResources
-                  type: object
-                  required: [cores, memory_bytes]
-                  properties:
-                    cores: {type: number, minimum: 0}
-                    memory_bytes: {type: integer, format: int64, minimum: 0}
-                accept_repos:
-                  type: array
-                  items: {type: string}
-                  description: Repositories the executor takes, as host/path patterns. Absent takes every repository; an empty list takes none.
-      responses:
-        "204": {description: Executor enrolled. Empty body.}
-        "400": {description: Invalid enrollment or credential prefix.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {description: Enrollment limit or name/credential conflict.}
-
-  /api/v1/agents/{name}/heartbeat:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [agents]
-      summary: Report an enrolled executor's available capacity.
-      description: |
-        The exact credential bound by enrollment must authenticate this call.
-        The controller timestamps the observation itself; the runner cannot
-        supply a clock value. Negative or non-finite capacity is rejected.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.agentHeartbeatReq
-              type: object
-              required: [headroom]
-              properties:
-                headroom:
-                  x-sparkwing-go-type: pkg/controller.claimHeadroom
-                  type: object
-                  required: [cores, memory_bytes, queue_depth]
-                  properties:
-                    cores: {type: number, minimum: 0}
-                    memory_bytes: {type: integer, format: int64, minimum: 0}
-                    queue_depth: {type: integer, minimum: 0}
-                runtime:
-                  x-sparkwing-go-type: pkg/controller.agentRuntimeReportReq
-                  type: object
-                  description: >-
-                    Supervisor host capabilities and observational build identity. This report does not attest any compiled workload.
-                  required: [body_protocol_minimum, body_protocol_maximum, build_identity]
-                  properties:
-                    body_protocol_minimum: {type: integer, minimum: 0}
-                    body_protocol_maximum: {type: integer, minimum: 0}
-                    supervisor_requirements:
-                      type: array
-                      items: {type: string}
-                    body_host_requirements:
-                      type: array
-                      items: {type: string}
-                    build_identity:
-                      x-sparkwing-go-type: internal/buildinfo.Identity
-                      type: object
-                      description: Observational runner identity; never compared for exact admission equality.
-                      properties:
-                        binary: {type: string}
-                        version: {type: string}
-                        commit: {type: string}
-                        revision_time: {type: string}
-                        modified: {type: boolean}
-                        goos: {type: string}
-                        goarch: {type: string}
-      responses:
-        "204": {description: Heartbeat recorded. Empty body.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {description: Credential does not match this enrollment.}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/nodes/claim/prepare:
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Preview the next node eligible for an enrolled executor.
-      description: |
-        Evaluates the controller-owned resource digest and current membership
-        snapshot without claiming the node or reserving capacity. A foreground
-        Fleet authority restricts this lookup to its own run. A sealed
-        compatible candidate returns `409 body_attestation_required` with its
-        protected binding. No capacity is reserved.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-partial: pkg/controller.claimNodeReq
-              type: object
-              required: [executor_name]
-              properties:
-                executor_name: {type: string}
-      responses:
-        "204": {description: No eligible node. Empty body.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Credential does not match this enrollment.}
-        "409":
-          description: >-
-            Typed upgrade, protocol-incompatibility, or compiled-body-attestation refusal. No capacity has been reserved.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset:
     parameters:
       - in: path
@@ -3356,12 +3188,11 @@ paths:
     post:
       x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Resolve an executor offer round or release coordinator fallback.
+      summary: Close a claim round and release the node to the dispatcher's fallback.
       description: |
-        After the five-second offer window, atomically awards the best still
-        eligible offer. If no live offer remains and placement permits the
-        coordinator, clears readiness so the coordinator can execute locally.
-        A still-open round or hard placement requirement reports `pending`.
+        After the five-second claim window, clears the readiness of a node no
+        runner claimed so the dispatcher can execute it itself. A still-open
+        round or hard placement requirement reports `pending`.
       responses:
         "200":
           description: Resolution state.
@@ -8334,12 +8165,12 @@ components:
       x-sparkwing-go-type: pkg/controller.Agent
       type: object
       description: >-
-        One runner known to the controller through enrollment, heartbeats, or recent node claims.
+        One runner known to the controller through its recent node claims.
       properties:
         name: {type: string}
         type:
           type: string
-          enum: [agent, gateway, pool, local]
+          enum: [agent, pool, local]
         location:
           type: string
           enum: [local, cloud, unknown]
@@ -8360,19 +8191,6 @@ components:
         max_concurrent:
           type: integer
           description: Configured concurrent-node ceiling.
-        active_slots:
-          type: integer
-          nullable: true
-          description: Slots occupied now; absent when the controller cannot calculate it.
-        base_priority: {type: integer}
-        priority_ceiling: {type: integer}
-        budget:
-          x-sparkwing-go-type: pkg/controller.AgentResources
-          type: object
-          required: [cores, memory_bytes]
-          properties:
-            cores: {type: number}
-            memory_bytes: {type: integer, format: int64}
         headroom:
           allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
           nullable: true
@@ -8394,55 +8212,6 @@ components:
       properties:
         max_concurrent: {type: integer}
         active_claims: {type: integer}
-    ExecutionClaimBinding:
-      x-sparkwing-go-type: none
-      type: object
-      description: >-
-        Protected prepare-to-offer binding for one exact immutable policy tuple. It is never present in public run or node projections.
-      required:
-        - run_id
-        - node_id
-        - policy_hash
-        - policy_version
-        - body_protocol
-        - supervisor_requirements_hash
-        - body_requirements_hash
-      properties:
-        run_id: {type: string}
-        node_id: {type: string}
-        policy_hash: {type: string}
-        policy_version: {type: integer, minimum: 1}
-        body_protocol: {type: integer, minimum: 1}
-        supervisor_requirements_hash: {type: string}
-        body_requirements_hash: {type: string}
-    ExecutionAdmissionError:
-      x-sparkwing-go-type: none
-      type: object
-      description: Stable assisted-admission refusal returned before reservation or award.
-      required: [error, code]
-      properties:
-        error: {type: string}
-        code:
-          type: string
-          enum: [upgrade_required, protocol_incompatible, body_attestation_required]
-        run_id: {type: string}
-        node_id: {type: string}
-        scope:
-          type: string
-          enum: [supervisor, body_host]
-        missing:
-          type: array
-          items: {type: string}
-        minimum_release: {type: string}
-        safe_hold:
-          type: boolean
-          description: >-
-            True when no trusted stable release floor resolves every missing capability; automated updating must not guess a target.
-        policy_protocol: {type: integer}
-        helper_minimum: {type: integer}
-        helper_maximum: {type: integer}
-        execution_binding:
-          $ref: "#/components/schemas/ExecutionClaimBinding"
     ClaimPlatform:
       x-sparkwing-go-type: pkg/controller.claimPlatform
       type: object

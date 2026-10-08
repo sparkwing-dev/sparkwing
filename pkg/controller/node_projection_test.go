@@ -4,23 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func requireExactJSONKeys(t *testing.T, got map[string]any, want ...string) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("JSON keys = %v, want exactly %v", got, want)
-	}
-	for _, key := range want {
-		if _, ok := got[key]; !ok {
-			t.Fatalf("JSON keys = %v, missing %q", got, key)
-		}
-	}
-}
 
 func TestNodeForClaimResponseRestoresOnlyRunnerFence(t *testing.T) {
 	raw := &store.Node{
@@ -88,51 +74,5 @@ func TestNodeForClaimResponseRestoresOnlyRunnerFence(t *testing.T) {
 		if _, ok := attemptObject[key]; ok {
 			t.Fatalf("claim response attempt exposed %q: %s", key, encoded)
 		}
-	}
-}
-
-func TestExecutorClaimPreparationForResponseContainsOnlyReservationInputs(t *testing.T) {
-	deadline := time.Now().Add(time.Minute)
-	raw := &store.ExecutorClaimPreparation{
-		Summary: store.ExecutorSchedulingSummary{
-			RunID: "run", NodeID: "node", ResourceDigest: "sha256:digest", Slots: 1,
-			Resources:             store.ExecutorResource{Cores: 2, MemoryBytes: 1024},
-			HardCapabilities:      []string{"private-hard-capability"},
-			PreferredCapabilities: []string{"private-preferred-capability"}, RunPriority: 91,
-			RequiredCoordinatorID: "private-coordinator",
-			RequiredLocation:      "private-location",
-		},
-		Membership: store.ExecutorMembershipSnapshot{
-			MembershipID: "membership", WorkerID: "helper", Eligible: true, MaxConcurrent: 3,
-			Kind: "private-kind", RegisteredBasePriority: 11, EffectivePriority: 22,
-			HighestEligiblePriority: 33, ActiveSlots: 2,
-		},
-		OfferDeadline: &deadline,
-	}
-
-	got := executorClaimPreparationForResponse(raw, executionpolicy.ClaimBinding{})
-	if got.Summary.RunID != "run" || got.Summary.NodeID != "node" || got.Summary.ResourceDigest != "sha256:digest" ||
-		got.Membership.MembershipID != "membership" || got.Membership.WorkerID != "helper" || got.Membership.EffectivePriority != 22 {
-		t.Fatalf("preparation lost executor admission contract: %+v", got)
-	}
-	encoded, err := json.Marshal(got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "private-") {
-		t.Fatalf("preparation leaked an unused sentinel: %s", encoded)
-	}
-	var object map[string]any
-	if err := json.Unmarshal(encoded, &object); err != nil {
-		t.Fatal(err)
-	}
-	requireExactJSONKeys(t, object, "summary", "membership", "offer_deadline")
-	summary := object["summary"].(map[string]any)
-	requireExactJSONKeys(t, summary, "run_id", "node_id", "resources", "resource_digest", "slots")
-	requireExactJSONKeys(t, summary["resources"].(map[string]any), "cores", "memory_bytes")
-	membership := object["membership"].(map[string]any)
-	requireExactJSONKeys(t, membership, "membership_id", "worker_id", "eligible", "effective_priority", "max_concurrent")
-	if raw.Summary.RequiredCoordinatorID != "private-coordinator" {
-		t.Fatal("projection mutated source preparation")
 	}
 }

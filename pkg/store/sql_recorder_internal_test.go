@@ -6,68 +6,16 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	modernsqlite "modernc.org/sqlite"
 )
 
-func TestExecutorClaimOfferQueryCountDoesNotGrowWithFleet(t *testing.T) {
-	one := pendingExecutorOfferStatements(t, 1)
-	full := pendingExecutorOfferStatements(t, MaxEnrolledExecutors)
-	if len(full) != len(one) {
-		t.Fatalf("offer statements at fleet limit = %d, want one-executor count %d", len(full), len(one))
-	}
-	for _, statement := range full {
-		normalized := strings.Join(strings.Fields(strings.ToLower(statement)), " ")
-		if strings.Contains(normalized, "from executors order by kind, name") ||
-			strings.Contains(normalized, "select claim_executor, claim_slot, claim_reservation") {
-			t.Fatalf("ordinary pending offer scanned fleet state: %s", normalized)
-		}
-	}
-}
-
-func pendingExecutorOfferStatements(t *testing.T, fleetSize int) []string {
-	t.Helper()
-	st, recorder := newRecordingExecutorStore(t)
-	seedExecutorRegistrations(t, st, fleetSize)
-	ctx := context.Background()
-	if err := st.CreateRun(ctx, Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, Node{RunID: "run", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "run", "work"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET offer_priority_target = 100 WHERE run_id = 'run' AND node_id = 'work'`); err != nil {
-		t.Fatal(err)
-	}
-	summary, err := st.SchedulingSummary(ctx, "run", "work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder.reset()
-	result, err := st.TestOnlyOfferExecutorClaim(ctx, ClaimIdentity{Principal: "principal-seed-0", TokenPrefix: "swr_seed-0"}, ExecutorClaimOffer{
-		ExecutorName: "seed-0", HolderID: "holder", RunID: "run", NodeID: "work",
-		ReservationID: "reservation", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Pending || result.Node != nil {
-		t.Fatalf("offer result = %+v, want pending", result)
-	}
-	return recorder.snapshot()
-}
-
 var recordingSQLiteDriverSequence atomic.Uint64
 
-func newRecordingExecutorStore(t *testing.T) (*Store, *sqlStatementRecorder) {
+func newRecordingStore(t *testing.T) (*Store, *sqlStatementRecorder) {
 	t.Helper()
 	recorder := &sqlStatementRecorder{}
 	driverName := fmt.Sprintf("sparkwing_recording_sqlite_%d", recordingSQLiteDriverSequence.Add(1))

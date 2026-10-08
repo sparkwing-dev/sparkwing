@@ -115,9 +115,6 @@ type Server struct {
 	runnerHeartbeats *runnerHeartbeatRegistry
 	placement        placementPolicy
 
-	assistedRunID string
-	draining      atomic.Bool
-
 	// safety: names this process in the cron tick lease and on each recorded
 	// tick, so an operator can tell which controller evaluated.
 	cronHolder string
@@ -165,67 +162,6 @@ func (s *Server) WithLocalExecution() *Server {
 	s.requestBudget = newPrincipalBudget(RequestBudget{})
 	s.tokenBudget = nil
 	return s
-}
-
-// WithAssistedRunScope restricts executor preparation and offers to one
-// foreground coordinator run.
-func (s *Server) WithAssistedRunScope(runID string) *Server {
-	s.assistedRunID = runID
-	return s
-}
-
-// StopAssistedClaims makes a foreground coordinator refuse new preparations
-// and offers while already-claimed nodes wind down.
-func (s *Server) StopAssistedClaims() { s.draining.Store(true) }
-
-// AssistedRunHandler exposes only the authenticated surfaces an enrolled
-// executor needs for one foreground run.
-func (s *Server) AssistedRunHandler() http.Handler {
-	full := s.Handler()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.assistedPathAllowed(r.Method, r.URL.Path) {
-			http.NotFound(w, r)
-			return
-		}
-		if s.draining.Load() && r.Method == http.MethodPost &&
-			(r.URL.Path == "/api/v1/nodes/claim" || r.URL.Path == "/api/v1/nodes/claim/prepare") {
-			http.Error(w, "foreground coordinator is stopping", http.StatusServiceUnavailable)
-			return
-		}
-		full.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) assistedPathAllowed(method, path string) bool {
-	if method == http.MethodGet && (path == "/api/v1/health" || path == "/api/v1/auth/whoami" || path == "/api/v1/services") {
-		return true
-	}
-	if method == http.MethodPost && (path == "/api/v1/nodes/claim" || path == "/api/v1/nodes/claim/prepare") {
-		return true
-	}
-	if strings.HasPrefix(path, "/api/v1/agents/") && strings.HasSuffix(path, "/heartbeat") {
-		return method == http.MethodPost
-	}
-	if method == http.MethodGet && path == "/api/v1/triggers/"+s.assistedRunID {
-		return true
-	}
-	prefix := "/api/v1/runs/" + s.assistedRunID
-	if method == http.MethodGet && path == prefix {
-		return true
-	}
-	if strings.HasPrefix(path, prefix+"/gitcache/git/") {
-		return method == http.MethodGet || method == http.MethodPost
-	}
-	if strings.HasPrefix(path, prefix+"/nodes/") {
-		suffix := strings.TrimPrefix(path, prefix+"/nodes/")
-		if method == http.MethodGet && !strings.Contains(suffix, "/") {
-			return true
-		}
-		if method == http.MethodGet && strings.HasSuffix(suffix, "/output") {
-			return true
-		}
-	}
-	return false
 }
 
 // New constructs a Server bound to the given store. A trigger it accepts is
@@ -956,10 +892,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
-	mux.Handle("PUT /api/v1/agents/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEnrollAgent)))
-	// safety: an agent treats a lost liveness heartbeat as fatal, so shedding
-	// one would take the agent and every node it runs down with it.
-	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatAgent)))
 
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
@@ -1019,7 +951,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
 
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimNode))))
-	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handlePrepareNodeClaim))))
 	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
 	// to the live claim on the run's trigger rather than to the scope alone. A node claim
 	// never satisfies them, which keeps a runner from skipping its node's dependencies.

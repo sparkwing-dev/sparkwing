@@ -1,19 +1,15 @@
 # pkg/controller
 
 type Agent struct {
-	Name            string
-	Type            string
-	Location        string
-	Labels          map[string]string
-	Capabilities    []string
-	LastSeen        string
-	Status          string
-	ActiveJobs      []string
-	ActiveSlots     *int
-	MaxConcurrent   int
-	BasePriority    int
-	PriorityCeiling int
-	Budget          AgentResources
+	Name          string
+	Type          string
+	Location      string
+	Labels        map[string]string
+	Capabilities  []string
+	LastSeen      string
+	Status        string
+	ActiveJobs    []string
+	MaxConcurrent int
 
 	Headroom *AgentHeadroom
 }
@@ -23,10 +19,6 @@ type AgentHeadroom struct {
 	QueueDepth  int
 
 	ObservedAt string
-}
-type AgentResources struct {
-	Cores       float64
-	MemoryBytes int64
 }
 type Authenticator struct {
 }
@@ -299,7 +291,6 @@ func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string)
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
-func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
 func (s *Server) DaemonHandler() http.Handler
@@ -315,9 +306,7 @@ func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCou
 func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
-func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
-func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server

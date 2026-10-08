@@ -107,23 +107,6 @@ func TestRequestBudget_BudgetsRunnersSharingATokenApart(t *testing.T) {
 	}
 }
 
-func TestRequestBudget_NeverShedsTheAgentLivenessHeartbeat(t *testing.T) {
-	base := newBudgetServer(t, controller.RequestBudget{HeartbeatsPerMinute: 1})
-
-	for i := range 8 {
-		resp, err := http.Post(base+"/api/v1/agents/agent-1/heartbeat", "application/json",
-			bytes.NewReader([]byte(`{}`)))
-		if err != nil {
-			t.Fatalf("heartbeat %d: %v", i, err)
-		}
-		status := resp.StatusCode
-		_ = resp.Body.Close()
-		if status == http.StatusTooManyRequests {
-			t.Fatalf("agent liveness heartbeat %d was shed; losing it kills the agent and its nodes", i)
-		}
-	}
-}
-
 func TestRequestBudget_ShedsNodeHeartbeatsPastTheRunnerBudget(t *testing.T) {
 	base := newBudgetServer(t, controller.RequestBudget{HeartbeatsPerMinute: 1})
 	url := base + "/api/v1/runs/run-1/nodes/node-1/heartbeat"
@@ -221,16 +204,6 @@ func TestRequestBudget_SharedTokenFleetStaysAliveUnderTheRecommendedBudget(t *te
 				t.Fatalf("%s claim %d status=%d; fifty runners sharing a token must not shed each other",
 					name, i, status)
 			}
-		}
-		beat, err := http.Post(base+"/api/v1/agents/"+name+"/heartbeat", "application/json",
-			bytes.NewReader([]byte(`{}`)))
-		if err != nil {
-			t.Fatalf("%s heartbeat: %v", name, err)
-		}
-		status := beat.StatusCode
-		_ = beat.Body.Close()
-		if status == http.StatusTooManyRequests {
-			t.Fatalf("%s liveness heartbeat was shed under fleet load", name)
 		}
 	}
 }

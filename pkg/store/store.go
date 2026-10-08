@@ -29,7 +29,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -112,17 +111,15 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db              *sql.DB
-	dialect         Dialect
-	cleanup         func() error
-	csrfKeyMu       sync.Mutex
-	csrfKey         []byte
-	prepareCursorMu sync.Mutex
-	prepareCursors  map[string]executorPrepareCursor
-	launchResumeMu  sync.Mutex
-	launchResume    *launchCursor
-	backupDir       string
-	outputDir       string
+	db             *sql.DB
+	dialect        Dialect
+	cleanup        func() error
+	csrfKeyMu      sync.Mutex
+	csrfKey        []byte
+	launchResumeMu sync.Mutex
+	launchResume   *launchCursor
+	backupDir      string
+	outputDir      string
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -729,65 +726,6 @@ CREATE INDEX IF NOT EXISTS idx_nodes_assisted_claimable
     ON nodes(execution_policy_version, ready_at, run_id, node_id)
     WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND outcome = '' AND finished_at IS NULL AND execution_policy_hash != '';
 
-CREATE TABLE IF NOT EXISTS node_claim_offers (
-    claim_token_prefix TEXT NOT NULL DEFAULT '',
-    claim_principal    TEXT NOT NULL DEFAULT '',
-    holder_id          TEXT NOT NULL,
-    run_id             TEXT NOT NULL,
-    node_id            TEXT NOT NULL,
-    executor_name      TEXT NOT NULL DEFAULT '',
-    membership_id      TEXT NOT NULL DEFAULT '',
-    worker_id          TEXT NOT NULL,
-    executor_kind      TEXT NOT NULL DEFAULT '',
-    reservation_id     TEXT NOT NULL,
-    resource_digest    TEXT NOT NULL DEFAULT '',
-    slot                INTEGER NOT NULL DEFAULT -1,
-    base_priority      INTEGER NOT NULL,
-    effective_priority INTEGER NOT NULL,
-    offered_at         INTEGER NOT NULL,
-    last_seen_at       INTEGER NOT NULL,
-    lease_ns           INTEGER NOT NULL,
-    execution_policy_hash TEXT NOT NULL DEFAULT '',
-    execution_policy_version INTEGER NOT NULL DEFAULT 0,
-    execution_body_protocol INTEGER NOT NULL DEFAULT 0,
-    execution_supervisor_requirements_hash TEXT NOT NULL DEFAULT '',
-    execution_body_requirements_hash TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (claim_token_prefix, claim_principal, holder_id),
-    FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_node_claim_offers_award
-    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, executor_name, slot, holder_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_reservation
-    ON node_claim_offers(reservation_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
-    ON node_claim_offers(executor_name, slot);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
-    ON node_claim_offers(executor_name, run_id, node_id);
-CREATE TABLE IF NOT EXISTS executors (
-    executor_id           TEXT NOT NULL,
-    name                  TEXT PRIMARY KEY,
-    token_prefix          TEXT NOT NULL UNIQUE,
-    kind                  TEXT NOT NULL,
-    location              TEXT NOT NULL,
-    capabilities_json     BLOB,
-    base_priority         INTEGER NOT NULL DEFAULT 0,
-    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
-    max_concurrent        INTEGER NOT NULL,
-    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
-    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
-    principal             TEXT NOT NULL,
-    last_seen             INTEGER NOT NULL,
-    headroom_reported     INTEGER NOT NULL DEFAULT 0,
-    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
-    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
-    queue_depth           INTEGER NOT NULL DEFAULT 0,
-    supported_body_protocol_min INTEGER NOT NULL DEFAULT 0,
-    supported_body_protocol_max INTEGER NOT NULL DEFAULT 0,
-    supervisor_requirements_json BLOB,
-    body_runtime_requirements_json BLOB,
-    runner_build_identity_json BLOB
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id);
 
 CREATE TABLE IF NOT EXISTS agent_loss_retry_node_sources (
     retry_run_id       TEXT NOT NULL,
@@ -1139,7 +1077,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 96
+const expectedSchemaVersion = 97
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -1162,38 +1100,6 @@ var nodeExecutionPolicyColsPostgres = map[string]string{
 	"execution_supervisor_requirements_json": "BYTEA",
 	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
 	"execution_body_requirements_json":       "BYTEA",
-	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
-}
-
-var executorExecutionProtocolCols = map[string]string{
-	"supported_body_protocol_min":    "INTEGER NOT NULL DEFAULT 0",
-	"supported_body_protocol_max":    "INTEGER NOT NULL DEFAULT 0",
-	"supervisor_requirements_json":   "BLOB",
-	"body_runtime_requirements_json": "BLOB",
-	"runner_build_identity_json":     "BLOB",
-}
-
-var executorExecutionProtocolColsPostgres = map[string]string{
-	"supported_body_protocol_min":    "BIGINT NOT NULL DEFAULT 0",
-	"supported_body_protocol_max":    "BIGINT NOT NULL DEFAULT 0",
-	"supervisor_requirements_json":   "BYTEA",
-	"body_runtime_requirements_json": "BYTEA",
-	"runner_build_identity_json":     "BYTEA",
-}
-
-var claimOfferExecutionPolicyCols = map[string]string{
-	"execution_policy_hash":                  "TEXT NOT NULL DEFAULT ''",
-	"execution_policy_version":               "INTEGER NOT NULL DEFAULT 0",
-	"execution_body_protocol":                "INTEGER NOT NULL DEFAULT 0",
-	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
-	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
-}
-
-var claimOfferExecutionPolicyColsPostgres = map[string]string{
-	"execution_policy_hash":                  "TEXT NOT NULL DEFAULT ''",
-	"execution_policy_version":               "BIGINT NOT NULL DEFAULT 0",
-	"execution_body_protocol":                "BIGINT NOT NULL DEFAULT 0",
-	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
 	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
 }
 
@@ -1328,30 +1234,6 @@ const nodeExecutionUnsealed = `COALESCE(execution_policy_hash, '') = ''
    AND COALESCE(LENGTH(execution_body_requirements_json), 0) = 0
    AND COALESCE(execution_body_requirements_hash, '') = ''`
 
-const executorsTableSQLite = `CREATE TABLE IF NOT EXISTS executors (
-    name                  TEXT PRIMARY KEY,
-    token_prefix          TEXT NOT NULL UNIQUE,
-    kind                  TEXT NOT NULL,
-    location              TEXT NOT NULL,
-    capabilities_json     BLOB,
-    base_priority         INTEGER NOT NULL DEFAULT 0,
-    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
-    max_concurrent        INTEGER NOT NULL,
-    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
-    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
-    principal             TEXT NOT NULL,
-    last_seen             INTEGER NOT NULL,
-    headroom_reported     INTEGER NOT NULL DEFAULT 0,
-    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
-    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
-    queue_depth           INTEGER NOT NULL DEFAULT 0
-);`
-
-var executorsTablePostgres = strings.NewReplacer(
-	"INTEGER", "BIGINT",
-	"BLOB", "BYTEA",
-).Replace(executorsTableSQLite)
-
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
@@ -1479,40 +1361,6 @@ CREATE INDEX IF NOT EXISTS idx_node_bounces_pending
 var nodeBouncesTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 ).Replace(nodeBouncesTableSQLite)
-
-const nodeClaimOffersTableSQLite = `CREATE TABLE IF NOT EXISTS node_claim_offers (
-    claim_token_prefix TEXT NOT NULL DEFAULT '',
-    claim_principal    TEXT NOT NULL DEFAULT '',
-    holder_id          TEXT NOT NULL,
-    run_id             TEXT NOT NULL,
-    node_id            TEXT NOT NULL,
-    executor_name      TEXT NOT NULL DEFAULT '',
-    membership_id      TEXT NOT NULL DEFAULT '',
-    worker_id          TEXT NOT NULL,
-    executor_kind      TEXT NOT NULL DEFAULT '',
-    reservation_id     TEXT NOT NULL,
-    resource_digest    TEXT NOT NULL DEFAULT '',
-    slot                INTEGER NOT NULL DEFAULT -1,
-    base_priority      INTEGER NOT NULL,
-    effective_priority INTEGER NOT NULL,
-    offered_at         INTEGER NOT NULL,
-    last_seen_at       INTEGER NOT NULL,
-    lease_ns           INTEGER NOT NULL,
-    PRIMARY KEY (claim_token_prefix, claim_principal, holder_id),
-    FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_node_claim_offers_award
-    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, executor_name, slot, holder_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_reservation
-    ON node_claim_offers(reservation_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
-    ON node_claim_offers(executor_name, slot);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
-    ON node_claim_offers(executor_name, run_id, node_id);`
-
-var nodeClaimOffersTablePostgres = strings.NewReplacer(
-	"INTEGER", "BIGINT",
-).Replace(nodeClaimOffersTableSQLite)
 
 // safety: a named index rather than an inline UNIQUE, so widening the key can
 // drop it by name on both dialects; SQLite's inline form mints an internal
@@ -1695,8 +1543,7 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return err
 	}
-	_, err = s.ensureControllerAuthority(ctx)
-	return err
+	return nil
 }
 
 func retryOnBusy(fn func() error) error {
@@ -1941,6 +1788,22 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 const dropGitHubWebhookBindings = `DROP TABLE IF EXISTS github_webhook_bindings`
 
 var sessionTokenCols = map[string]string{"token_prefix": "TEXT NOT NULL DEFAULT ''"}
+
+// safety: the ordinary claim is the one claim protocol, so the executor enrollments, the offers they
+// made and the controller authority that named their memberships go; an older binary then fails the
+// claim and readiness statements that name those tables rather than writing anything wrong.
+func dropAssistedOffers(ctx context.Context, tx *storeTx) error {
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS node_claim_offers`,
+		`DROP TABLE IF EXISTS executors`,
+		`DELETE FROM sparkwing_meta WHERE key = 'controller_authority_id'`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // safety: sign-in is an identity provider or an operator token, so the password table goes with every
 // session a password opened; the bootstrap latch only serialized the first password user's insert.
@@ -2251,7 +2114,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 80:
 		return ensureColumnsSQLite(ctx, tx, "teams", billingTrustCols)
 	case 81:
-		return ensureColumnsSQLite(ctx, tx, "executors", executorAcceptCols)
+		// safety: v81 widened the executors table that v97 drops, so a database that never held it
+		// skips straight past it.
+		return nil
 	case 82:
 		return applyAgentNameIndexMigration(ctx, tx, time.Now())
 	case 83:
@@ -2295,6 +2160,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return dropPasswordUsers(ctx, tx)
 	case 96:
 		return widenAgentNameIndex(ctx, tx, time.Now())
+	case 97:
+		return dropAssistedOffers(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2406,12 +2273,6 @@ func applyExecutionPolicyMigrationSQLite(ctx context.Context, tx *storeTx) error
 	if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeExecutionPolicyCols); err != nil {
 		return err
 	}
-	if err := ensureColumnsSQLite(ctx, tx, "executors", executorExecutionProtocolCols); err != nil {
-		return err
-	}
-	if err := ensureColumnsSQLite(ctx, tx, "node_claim_offers", claimOfferExecutionPolicyCols); err != nil {
-		return err
-	}
 	if _, err := tx.ExecContext(ctx, agentLossRetryNodeSourcesTableSQLite); err != nil {
 		return err
 	}
@@ -2432,26 +2293,11 @@ func applyFleetMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeExecutorClaimCols); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, executorsTableSQLite); err != nil {
-		return err
-	}
 	if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOfferCols); err != nil {
-		return err
-	}
-	if err := ensureColumnsSQLite(ctx, tx, "executors", executorIdentityCols); err != nil {
-		return err
-	}
-	if err := backfillExecutorIDsTx(ctx, tx); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id)`); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
  WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, nodeClaimOffersTableSQLite); err != nil {
 		return err
 	}
 	if err := ensureColumnsSQLite(ctx, tx, "runs", runAgentRetryCols); err != nil {
@@ -2739,7 +2585,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 80:
 		return addColumnsTx(ctx, tx, "teams", billingTrustColsPostgres)
 	case 81:
-		return addColumnsTx(ctx, tx, "executors", executorAcceptCols)
+		// safety: v81 widened the executors table that v97 drops, so a database that never held it
+		// skips straight past it.
+		return nil
 	case 82:
 		return applyAgentNameIndexMigration(ctx, tx, time.Now())
 	case 83:
@@ -2783,6 +2631,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return dropPasswordUsers(ctx, tx)
 	case 96:
 		return widenAgentNameIndex(ctx, tx, time.Now())
+	case 97:
+		return dropAssistedOffers(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2790,12 +2640,6 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 
 func applyExecutionPolicyMigrationPostgres(ctx context.Context, tx *storeTx) error {
 	if err := addColumnsTx(ctx, tx, "nodes", nodeExecutionPolicyColsPostgres); err != nil {
-		return err
-	}
-	if err := addColumnsTx(ctx, tx, "executors", executorExecutionProtocolColsPostgres); err != nil {
-		return err
-	}
-	if err := addColumnsTx(ctx, tx, "node_claim_offers", claimOfferExecutionPolicyColsPostgres); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, agentLossRetryNodeSourcesTablePostgres); err != nil {
@@ -2818,26 +2662,11 @@ func applyFleetMigrationPostgres(ctx context.Context, tx *storeTx) error {
 	if err := addColumnsTx(ctx, tx, "nodes", nodeExecutorClaimColsPostgres); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, executorsTablePostgres); err != nil {
-		return err
-	}
 	if err := addColumnsTx(ctx, tx, "nodes", nodesOfferColsPostgres); err != nil {
-		return err
-	}
-	if err := addColumnsTx(ctx, tx, "executors", executorIdentityCols); err != nil {
-		return err
-	}
-	if err := backfillExecutorIDsTx(ctx, tx); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id)`); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
  WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, nodeClaimOffersTablePostgres); err != nil {
 		return err
 	}
 	if err := addColumnsTx(ctx, tx, "runs", runAgentRetryColsPostgres); err != nil {
@@ -3076,10 +2905,6 @@ const pipelineProfilesSustainedBackfill = `UPDATE pipeline_profiles
    SET sustained_cores = peak_cores, prev_sustained_cores = prev_peak_cores
  WHERE sustained_cores = 0`
 
-var executorIdentityCols = map[string]string{
-	"executor_id": "TEXT NOT NULL DEFAULT ''",
-}
-
 var nodesUsageCols = map[string]string{
 	"cpu_nanos":          "INTEGER NOT NULL DEFAULT 0",
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
@@ -3215,12 +3040,6 @@ var triggerRepoInheritedCols = map[string]string{
 var triggerSubmissionCols = map[string]string{
 	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
-}
-
-// safety: NULL accepts every repository, so a row an older binary writes keeps
-// the behavior it had.
-var executorAcceptCols = map[string]string{
-	"accept_repos_json": "BLOB",
 }
 
 // #nosec G101 -- column names, not credentials
@@ -3968,9 +3787,6 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	// safety: lock order across this store is executor eligibility first, then
 	// a guard or ledger advisory lock; taking them the other way around here
 	// deadlocks against a claim that holds the executor lock.
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	if err := enforceRunsPerHourTx(ctx, tx, team, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
 		return err
 	}
@@ -4156,9 +3972,6 @@ func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string,
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
@@ -4494,9 +4307,6 @@ func (t *Tenant) DeleteRun(ctx context.Context, runID string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	var owned int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE team = ? AND id = ?
 UNION ALL SELECT 1 FROM triggers WHERE team = ? AND id = ? LIMIT 1`,
@@ -4767,8 +4577,6 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if err := s.assertRunMutationFenceTx(ctx, tx, team, n.RunID); err != nil {
 		return err
 	}
-	// safety: this transaction takes the compute-guard key alone; a later edit
-	// that adds the executor eligibility lock here must take it first.
 	if err := enforceNodesPerRunTx(ctx, tx, team, n.RunID, n.NodeID); err != nil {
 		return err
 	}
@@ -4912,28 +4720,17 @@ func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
-	var executorName, currentStatus string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
-		string(t.team), runID, nodeID).Scan(&executorName, &currentStatus)
+	var found int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
+		string(t.team), runID, nodeID).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
-	}
-	if executorName != "" {
-		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
-			return err
-		}
-		if currentStatus == nodeStatusDone && status != nodeStatusDone {
-			return ErrLockHeld
-		}
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
 		status, string(t.team), runID, nodeID)
@@ -5014,15 +4811,12 @@ func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 		return err
 	}
-	var executorName, team string
+	var team string
 	var generation, consumed int64
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
+	err = tx.QueryRowContext(ctx, `SELECT team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&team, &generation, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", runID+"/"+nodeID)
 	}
@@ -5036,11 +4830,6 @@ func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg 
 	}
 	if copied != nil {
 		if output, err = sourceOutputRefTx(ctx, tx, Team(team), copied.run, copied.node); err != nil {
-			return err
-		}
-	}
-	if executorName != "" {
-		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
 			return err
 		}
 	}
@@ -5761,9 +5550,6 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, true); err != nil {
-		return err
-	}
 	node := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
@@ -5783,27 +5569,6 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 	if isAgentLossRetry && !agentLossRetrySourceMatchesMaterialized(retrySource, node) {
 		return fmt.Errorf("%w: retry node no longer matches durable source", errExecutionPolicyInvalid)
 	}
-	if policy == nil && executionpolicy.AssistedReadyFromContext(ctx) {
-		if nodeHasExecutionPolicy(node) {
-			existing, present, policyErr := policyForNodeExecution(node)
-			if policyErr != nil {
-				return policyErr
-			}
-			if !present {
-				return errExecutionPolicyInvalid
-			}
-			policy = &existing
-		} else {
-			built, eligible, policyErr := t.s.buildNodeExecutionPolicyTx(ctx, tx, node, pipeline)
-			if policyErr != nil {
-				return policyErr
-			}
-			if eligible {
-				policy = &built
-			}
-		}
-	}
-
 	if policy == nil {
 		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
 			return err
@@ -5862,38 +5627,20 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 			}
 		}
 	}
-	var summary ExecutorSchedulingSummary
-	target := 0
-	executorEligible := false
-	var now time.Time
+	var summary claimRoundSummary
 	if !opened {
-		if err := lockExecutorRegistryTx(ctx, tx, false); err != nil {
-			return err
-		}
-		if err := lockAllExecutorRowsCanonicalTx(ctx, tx); err != nil {
-			return err
-		}
-		now = time.Now()
-		summary, err = t.s.schedulingSummaryTx(ctx, tx, runID, nodeID)
-		if err != nil {
-			return err
-		}
-		target, executorEligible, err = t.s.highestActiveExecutorPriorityTx(
-			ctx, tx, summary, now.Add(-ExecutorRegistrationActiveWindow), now,
-		)
+		summary, err = claimRoundSummaryTx(ctx, tx, runID, nodeID)
 		if err != nil {
 			return err
 		}
 	}
-	if now.IsZero() {
-		now = time.Now()
-	}
+	now := time.Now()
 	class, err := readyCPUClassTx(ctx, tx, summary.Resources)
 	if err != nil {
 		return err
 	}
 	offerStart := now
-	if !opened && !executorEligible {
+	if !opened {
 		idle, err := t.s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
 		if err != nil {
 			return err
@@ -5907,10 +5654,9 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
 		                  placement_hold_from = COALESCE(placement_hold_from, ?),
 		                  offer_started_at = COALESCE(offer_started_at, ?),
-		                  credit_cpu_class = ?,
-		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
+		                  credit_cpu_class = ?
 		  WHERE team = ? AND run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, target, string(t.team), runID, nodeID,
+		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, string(t.team), runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -5925,7 +5671,6 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 	if !opened {
 		if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "executor_offer_round_opened", map[string]any{
 			"deadline":               offerStart.Add(nodeClaimOfferWindow),
-			"priority_target":        target,
 			"hard_capabilities":      summary.HardCapabilities,
 			"preferred_capabilities": summary.PreferredCapabilities,
 			"resources":              summary.Resources,
@@ -5949,9 +5694,6 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
 	}
@@ -5960,29 +5702,21 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 			return err
 		}
 	}
-	var status, outcome, failureReason, executorName string
+	var status, outcome, failureReason string
 	var claimedBy sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by, claim_executor
+	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by
   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(), string(t.team), runID, nodeID).Scan(
-		&status, &outcome, &failureReason, &claimedBy, &executorName); err != nil {
+		&status, &outcome, &failureReason, &claimedBy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("node", runID+"/"+nodeID)
 		}
 		return err
-	}
-	if executorName != "" {
-		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
-			return err
-		}
 	}
 	if status == nodeStatusPending && outcome == "" && !claimedBy.Valid {
 		return tx.Commit()
 	}
 	if status != nodeStatusDone || outcome != "failed" || failureReason == FailureAgentLost {
 		return ErrLockHeld
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
-		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
 		return err
@@ -6055,10 +5789,6 @@ func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 		}
 		return false, nil
 	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
-		return false, err
-	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -6089,11 +5819,6 @@ func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 // team's queue at all. A metered credential is no exception, because
 // metering decides who pays and not whose work the claimant may see.
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
-	return s.ClaimNextReadyNodeAs(ctx, claimant, holderID, lease, runnerLabels, ExecutorIdentity{})
-}
-
-func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string, executor ExecutorIdentity) (*Node, error) {
-	_ = executor
 	lease = clampNodeLease(lease)
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
@@ -6478,9 +6203,6 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 	if err != nil {
 		return nil, err
 	}
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return nil, err
-	}
 	// safety: reservation claims lock their node before its run; sharing that order avoids a cycle.
 	var lockedNode string
 	err = tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE run_id = ? AND node_id = ?`+teamClause+tx.forUpdate(),
@@ -6596,10 +6318,9 @@ func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID
 	}
 	var charge CreditChargeResult
 	var metered bool
-	err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
-		var executorName string
+	err := s.inTx(ctx, func(tx *storeTx) error {
 		var currentLease int64
-		err := tx.QueryRowContext(ctx, `SELECT claim_executor, COALESCE(lease_expires_at, 0) FROM nodes
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(lease_expires_at, 0) FROM nodes
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
 		    AND COALESCE(claim_principal, '') = ?
 		    AND COALESCE(claim_token_prefix, '') = ?
@@ -6607,17 +6328,12 @@ func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID
 		    AND COALESCE(reservation_id, '') = ?
 		    AND claim_generation = ? AND cancel_requested_at IS NULL AND `+nodeRunActiveSQL("")+nodeRunNotCancelled+tx.forUpdate(),
 			runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
-			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration).Scan(&executorName, &currentLease)
+			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration).Scan(&currentLease)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrLockHeld
 		}
 		if err != nil {
 			return err
-		}
-		if executorName != "" {
-			if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
-				return err
-			}
 		}
 		now := time.Now()
 		if currentLease < now.UnixNano() {
@@ -6807,9 +6523,6 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return nil, err
-	}
 	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
@@ -6886,9 +6599,6 @@ func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return nil, err
-	}
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT node_id FROM nodes WHERE run_id = ? AND `+nodeNotDone, runID)
@@ -7372,12 +7082,6 @@ type ClaimIdentity struct {
 }
 
 func (c ClaimIdentity) bound() bool { return c.TokenPrefix != "" }
-
-type ExecutorIdentity struct {
-	Kind          string `json:"kind,omitempty"`
-	ID            string `json:"id,omitempty"`
-	ReservationID string `json:"reservation_id,omitempty"`
-}
 
 const metaKeyCoordinatorID = "coordinator_id"
 
@@ -8524,7 +8228,7 @@ UPDATE runs SET status = ?, error = ?, finished_at = ?
 }
 
 func (s *Store) cascadeOrphanedNodes(ctx context.Context, runID, errMsg string, nowNS int64) error {
-	return s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
+	return s.inTx(ctx, func(tx *storeTx) error {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET `+nodeFailSet+`,
@@ -8603,7 +8307,7 @@ func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.D
 	}
 	orphanIDs = append(orphanIDs, pendingIDs...)
 
-	if err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
+	if err := s.inTx(ctx, func(tx *storeTx) error {
 		_, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET status         = ?,
@@ -9253,25 +8957,8 @@ func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, a.RunID); err != nil {
 		return err
-	}
-	var executorName, currentStatus string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
-		string(t.team), a.RunID, a.NodeID).Scan(&executorName, &currentStatus)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil && executorName != "" {
-		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
-			return err
-		}
-		if currentStatus == nodeStatusDone {
-			return ErrLockHeld
-		}
 	}
 	res, err := tx.ExecContext(ctx, `
 INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)

@@ -157,9 +157,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v79 adds one nullable checkout column an older binary never
 	// names, so an older binary keeps writing the migrated database.
 	79: {creditCheckoutCloseCols},
-	// safety: v81 adds one nullable executor column an older binary never
-	// names, so an older binary keeps writing the migrated database.
-	81: {executorAcceptCols},
+	// safety: v81 widened the executors table v97 drops, and now adds nothing.
+	81: nil,
 	// safety: v82 adds a unique index and no column. An older binary still
 	// reads and writes the store; its agent-token rotation, which inserts the
 	// successor before revoking the predecessor, fails on the index instead.
@@ -196,6 +195,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v96 rebuilds a unique index and adds no column; an older binary
 	// never mints a team token, so the wider index refuses nothing it writes.
 	96: nil,
+	// safety: v97 drops the executor and offer tables and adds nothing; an older
+	// binary fails its claim and readiness statements that name them, loudly.
+	97: nil,
 }
 
 func columnSpecMaps() []map[string]string {

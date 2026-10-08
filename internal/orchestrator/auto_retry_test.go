@@ -95,23 +95,6 @@ func claimedRetryContext(t *testing.T, st *store.Store, runID, pipeline string) 
 	})
 }
 
-func enrollMixedExecutor(t *testing.T, st *store.Store) store.ClaimIdentity {
-	t.Helper()
-	identity := store.ClaimIdentity{Principal: "mixed-agent", TokenPrefix: "swr_mixed_agent"}
-	if err := st.EnrollExecutor(context.Background(), identity.TokenPrefix, store.Executor{
-		Name: "mixed-agent", Kind: "agent", Location: "local", Principal: identity.Principal,
-		BasePriority: 100, PriorityCeiling: 100, MaxConcurrent: 1,
-		Budget: store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.HeartbeatExecutor(context.Background(), identity, "mixed-agent",
-		store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30}, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	return identity
-}
-
 func awaitLegacyMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID string, identity store.ClaimIdentity) *store.Node {
 	return awaitLegacyMixedClaimAfterAttempts(t, ctx, st, runID, 0, identity)
 }
@@ -285,7 +268,7 @@ func TestAutoRetry_FallbackThenLegacyLossUsesOnlyTwoGlobalAttempts(t *testing.T)
 	warm := warmpool.New(ctrl, orchestrator.NewNodeExecutor(backends), warmpool.Config{
 		PollInterval: time.Millisecond, ClaimWaitTimeout: 10 * time.Millisecond,
 	}, nil)
-	agent := enrollMixedExecutor(t, st)
+	agent := store.ClaimIdentity{Principal: "mixed-agent", TokenPrefix: "swr_mixed_agent"}
 	ctx, cancel := context.WithTimeout(claimedRetryContext(t, st, "mixed-fallback-agent", "auto-retry-one-failure"), 5*time.Second)
 	defer cancel()
 	type runResult struct {

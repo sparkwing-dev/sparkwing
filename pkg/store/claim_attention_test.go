@@ -146,7 +146,7 @@ func TestRegisteredAgentsCarryTheirLastLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].Name != "pi" || agents[0].Enrolled ||
+	if err != nil || len(agents) != 1 || agents[0].Name != "pi" ||
 		!slices.Equal(agents[0].Profile.Labels, []string{"tool:git", "arch=arm64"}) {
 		t.Fatalf("agents = %+v, %v; want pi with its labels less the forged name", agents, err)
 	}

@@ -12,6 +12,17 @@ import (
 	"unicode"
 )
 
+const (
+	executorLocationLocal = "local"
+	executorLocationCloud = "cloud"
+)
+
+// ExecutorKindLocal is the executor kind of a node its dispatcher runs in
+// its own process. The process that built the plan runs the node body, so
+// the execution attempt is attributed to the host it ran on rather than to
+// a claimed runner.
+const ExecutorKindLocal = "local"
+
 const maxExecutionExecutorNameLen = 128
 
 var executorNameEscape = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)`)

@@ -24,9 +24,6 @@ func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now tim
 		return "", err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return "", err
-	}
 	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
 		return "", err
 	}
@@ -64,9 +61,6 @@ func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.D
 		return ClaimBeat{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return ClaimBeat{}, err
-	}
 	var prefix string
 	var anchor int64
 	err = tx.QueryRowContext(ctx, `SELECT claim_token_prefix, credit_charged_through FROM nodes
@@ -151,9 +145,6 @@ func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name st
 		return nil, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return nil, err
-	}
 	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
 		return nil, err
 	}

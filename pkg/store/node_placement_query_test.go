@@ -9,7 +9,7 @@ import (
 )
 
 func TestClaimPlacement_HeldPollReadsByBatchWithoutWrites(t *testing.T) {
-	s, recorder := newRecordingExecutorStore(t)
+	s, recorder := newRecordingStore(t)
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{
 		Hold: time.Hour,
 		Live: []RunnerPresence{{Name: "laptop", Labels: []string{"location=local"}, FreeSlots: 2}},

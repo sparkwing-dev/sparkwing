@@ -65,7 +65,6 @@ func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, []byte, error)
 func (c *Client) ClaimLaunch(ctx context.Context, holderID string, lease, deadline time.Duration) (*store.LaunchClaim, error)
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
-func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 func (c *Client) ClaimNodeByID(
 	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, sizesToClass bool, labels []string,
 ) (*store.Node, error)
@@ -117,7 +116,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error)
-func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error)
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ClaimRoundResult, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error
@@ -144,7 +143,6 @@ func (c *Client) GetSecretForPipeline(ctx context.Context, name, pipeline string
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
 func (c *Client) HeartbeatClaim(ctx context.Context, runID, nodeID string, lease time.Duration) (cancel bool, err error)
-func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
@@ -168,11 +166,9 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
 func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
-func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
 func (c *Client) PauseCron(ctx context.Context, name string) (*api.ScheduleView, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) PollAdvice() time.Duration
-func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
 func (c *Client) PutCronRepo(ctx context.Context, req CronRepoRequest) (*CronReposResponse, error)
 func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (*LiveLogChunk, error)
 func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
@@ -276,18 +272,6 @@ var ErrControllerFailed = errors.New("the controller failed to answer")
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
 var ErrNoLiveLog = errors.New("controller holds no live log for this node")
-type ExecutorClaim struct {
-	ExecutorName   string
-	HolderID       string
-	ReservationID  string
-	ResourceDigest string
-	Slot           int
-	Lease          time.Duration
-}
-type ExecutorClaimOfferResult struct {
-	Node    *store.Node
-	Pending bool
-}
 const FailureBackoffBase = time.Second
 const FailureBackoffCap = 5 * time.Minute
 type GitMeta struct {

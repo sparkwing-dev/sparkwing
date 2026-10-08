@@ -582,11 +582,7 @@ export interface Agent {
   last_seen: string;
   status: string;
   active_jobs?: string[];
-  active_slots?: number;
   max_concurrent: number;
-  base_priority?: number;
-  priority_ceiling?: number;
-  budget?: { cores: number; memory_bytes: number };
   headroom?: {
     cores: number;
     memory_bytes: number;

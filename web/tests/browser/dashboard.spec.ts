@@ -1711,7 +1711,7 @@ test("shows retry lineage from privacy-safe execution attempts", async ({
       ...node,
       run_id: finishedRun.id,
       claimed: true,
-      executor_kind: "gateway",
+      executor_kind: "agent",
       executor_name: "cloud-helper",
       executor_location: "cloud",
       execution_attempts: [
@@ -1733,7 +1733,7 @@ test("shows retry lineage from privacy-safe execution attempts", async ({
           run_id: finishedRun.id,
           node_id: node.id,
           attempt: 2,
-          executor_kind: "gateway",
+          executor_kind: "agent",
           executor_name: "cloud-helper",
           location: "cloud",
           started_at: "2026-08-27T18:00:00Z",
@@ -1811,7 +1811,7 @@ test("keeps run tabs fixed when selecting a node with execution history", async 
   expect((await attempt.boundingBox())!.height).toBeLessThanOrEqual(30);
 });
 
-test("separates fleet policy, observations, and current activity", async ({
+test("separates fleet executors, observations, and current activity", async ({
   page,
 }) => {
   await installMockAPI(page, {
@@ -1825,11 +1825,7 @@ test("separates fleet policy, observations, and current activity", async ({
         last_seen: new Date().toISOString(),
         status: "busy",
         active_jobs: [finishedRun.id],
-        active_slots: 2,
         max_concurrent: 4,
-        base_priority: 20,
-        priority_ceiling: 80,
-        budget: { cores: 6, memory_bytes: 12 * 1024 ** 3 },
         headroom: {
           cores: 3,
           memory_bytes: 6 * 1024 ** 3,
@@ -1856,28 +1852,26 @@ test("separates fleet policy, observations, and current activity", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: /design-mac/ }).click();
-  const configured = page.getByRole("region", { name: "Configured policy" });
+  const executor = page.getByRole("region", { name: "Executor" });
   const observed = page.getByRole("region", { name: "Observed liveness" });
   const activity = page.getByRole("region", { name: "Current activity" });
-  await expect(configured.getByText("local", { exact: true })).toBeVisible();
-  await expect(configured.getByText("20 (ceiling 80)")).toBeVisible();
+  await expect(executor.getByText("local", { exact: true })).toBeVisible();
+  await expect(executor.getByText("os=darwin", { exact: true })).toBeVisible();
   await expect(observed.getByText("3 cores / 6.0 GiB")).toBeVisible();
   await expect(observed.getByText("headroom observed", { exact: true })).toBeVisible();
-  await expect(observed.getByText("last heartbeat", { exact: true })).toBeVisible();
+  await expect(observed.getByText("last observed", { exact: true })).toBeVisible();
   await expect(observed.getByText(/controller accepted this headroom/)).toBeVisible();
-  await expect(activity.getByText("2", { exact: true })).toBeVisible();
+  await expect(activity.getByText("4", { exact: true })).toBeVisible();
   await expect(
     activity.getByRole("link", { name: finishedRun.id, exact: true }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: /old-pool/ }).click();
-  const legacyObserved = page.getByRole("button", { name: /old-pool/ }).locator("..").getByRole("region", { name: "Observed liveness" });
-  await expect(legacyObserved.getByText("last observed", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(
-      "Configuration unavailable. This executor was inferred from recent activity.",
-    ),
-  ).toBeVisible();
+  const poolExecutor = page
+    .getByRole("button", { name: /old-pool/ })
+    .locator("..")
+    .getByRole("region", { name: "Executor" });
+  await expect(poolExecutor.getByText("None advertised")).toBeVisible();
   await expect(page.getByText("not reported", { exact: true })).toBeVisible();
 });
 

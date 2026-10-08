@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -1016,142 +1015,6 @@ type ClaimCapacity struct {
 	ActiveClaims  int `json:"active_claims"`
 }
 
-// ExecutorClaim describes an attested local reservation. Prepare does not
-// create one when compiled-body attestation is absent.
-type ExecutorClaim struct {
-	ExecutorName   string
-	HolderID       string
-	ReservationID  string
-	ResourceDigest string
-	Slot           int
-	Lease          time.Duration
-}
-
-// ExecutorClaimOfferResult describes an attested offer outcome. Unattested
-// offers return body_attestation_required before a local slot is reserved.
-type ExecutorClaimOfferResult struct {
-	Node    *store.Node
-	Pending bool
-}
-
-// PrepareExecutorClaim finds a sealed compatible node, owns its private binding,
-// then returns body_attestation_required without reserving capacity.
-func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error) {
-	body := map[string]any{"executor_name": executorName}
-	buf, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/api/v1/nodes/claim/prepare", bytes.NewReader(buf))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.setRunnerIdentity(req)
-	setNodeClaimFenceHeaders(req, ctx)
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var wire struct {
-			Summary       store.ExecutorSchedulingSummary  `json:"summary"`
-			Membership    store.ExecutorMembershipSnapshot `json:"membership"`
-			OfferDeadline *time.Time                       `json:"offer_deadline,omitempty"`
-			Binding       json.RawMessage                  `json:"execution_binding,omitempty"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
-			return nil, err
-		}
-		binding, err := executionpolicy.DecodeClaimBinding(wire.Binding)
-		if err != nil {
-			return nil, err
-		}
-		if err := executionpolicy.StorePreparation(ctx, binding); err != nil {
-			return nil, err
-		}
-		preparation := store.ExecutorClaimPreparation{
-			Summary: wire.Summary, Membership: wire.Membership, OfferDeadline: wire.OfferDeadline,
-		}
-		return &preparation, nil
-	case http.StatusNoContent:
-		return nil, nil
-	default:
-		raw, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, readErr
-		}
-		var admission executionAdmissionErrorWire
-		if resp.StatusCode == http.StatusConflict && json.Unmarshal(raw, &admission) == nil &&
-			admission.Code == "body_attestation_required" {
-			binding, decodeErr := executionpolicy.DecodeClaimBinding(admission.Binding)
-			if decodeErr != nil {
-				return nil, decodeErr
-			}
-			if err := executionpolicy.StorePreparation(ctx, binding); err != nil {
-				return nil, err
-			}
-		}
-		resp.Body = io.NopCloser(bytes.NewReader(raw))
-		return nil, readHTTPError(resp)
-	}
-}
-
-// OfferExecutorClaim submits a bound offer. It refuses an unattested body before
-// the offer can reserve or award capacity.
-func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error) {
-	body := executorClaimBody(executor)
-	body["run_id"] = runID
-	body["node_id"] = nodeID
-	if binding, ok := executionpolicy.OfferBindingFromContext(ctx); ok {
-		encoded, err := executionpolicy.EncodeClaimBinding(binding)
-		if err != nil {
-			return ExecutorClaimOfferResult{}, err
-		}
-		body["execution_binding"] = json.RawMessage(encoded)
-	}
-	buf, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/api/v1/nodes/claim", bytes.NewReader(buf))
-	if err != nil {
-		return ExecutorClaimOfferResult{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.setRunnerIdentity(req)
-	resp, err := c.do(req)
-	if err != nil {
-		return ExecutorClaimOfferResult{}, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var n store.Node
-		if err := json.NewDecoder(resp.Body).Decode(&n); err != nil {
-			return ExecutorClaimOfferResult{}, err
-		}
-		return ExecutorClaimOfferResult{Node: &n}, nil
-	case http.StatusNoContent:
-		return ExecutorClaimOfferResult{Pending: resp.Header.Get("X-Sparkwing-Claim-Offer-State") == "pending"}, nil
-	default:
-		return ExecutorClaimOfferResult{}, readHTTPError(resp)
-	}
-}
-
-func executorClaimBody(executor ExecutorClaim) map[string]any {
-	body := map[string]any{
-		"executor_name":   executor.ExecutorName,
-		"holder_id":       executor.HolderID,
-		"reservation_id":  executor.ReservationID,
-		"resource_digest": executor.ResourceDigest,
-		"slot":            executor.Slot,
-	}
-	if executor.Lease > 0 {
-		secs := max(int(executor.Lease.Seconds()), 1)
-		body["lease_secs"] = secs
-	}
-	return body
-}
-
 // ClaimNode atomically claims the oldest ready, unclaimed node for
 // holderID. Returns (nil, nil) when the queue is empty. A non-nil
 // headroom advertises the box's live free capacity to the controller.
@@ -1159,10 +1022,6 @@ func executorClaimBody(executor ExecutorClaim) map[string]any {
 // The controller filters candidates so a returned node's needs_labels
 // is a subset of labels (AND semantics).
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error) {
-	return c.ClaimNodeAs(ctx, holderID, labels, lease, headroom, store.ExecutorIdentity{})
-}
-
-func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error) {
 	return c.ClaimNodeWithCapacity(ctx, holderID, labels, lease, headroom, nil)
 }
 
@@ -1334,23 +1193,6 @@ func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID s
 	return readHTTPError(resp)
 }
 
-// HeartbeatExecutor reports live capacity for an administrator-enrolled
-// executor. The controller authenticates the exact enrollment credential.
-func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error {
-	path := fmt.Sprintf("/api/v1/agents/%s/heartbeat", url.PathEscape(name))
-	body := map[string]any{"headroom": headroom}
-	if report, ok := executionpolicy.RuntimeReportFromContext(ctx); ok {
-		body["runtime"] = map[string]any{
-			"body_protocol_minimum":   report.BodyProtocolMinimum,
-			"body_protocol_maximum":   report.BodyProtocolMaximum,
-			"supervisor_requirements": report.Supervisor,
-			"body_host_requirements":  report.BodyHost,
-			"build_identity":          report.Build,
-		}
-	}
-	return c.post(ctx, path, body, http.StatusNoContent, nil)
-}
-
 // MarkNodeReady sets ready_at on a node so pool runners can claim it.
 // Idempotent; first call wins (stable FIFO ordering).
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
@@ -1380,14 +1222,14 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 	return resp.Revoked, nil
 }
 
-// FinalizeNodeReady atomically awards the best pending offer or transfers an
-// unclaimed node to the coordinator's local or cloud fallback.
-func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
+// FinalizeNodeReady takes an unclaimed node back from the queue once its claim
+// round has run out, so the dispatcher's own fallback may run it.
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ClaimRoundResult, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finalize-ready",
 		url.PathEscape(runID), url.PathEscape(nodeID))
-	var resp store.ExecutorClaimRoundResult
+	var resp store.ClaimRoundResult
 	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
-		return store.ExecutorClaimRoundResult{}, err
+		return store.ClaimRoundResult{}, err
 	}
 	return resp, nil
 }
@@ -1871,23 +1713,6 @@ func readHTTPError(resp *http.Response) error {
 
 func classifyHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
-	var executionError executionAdmissionErrorWire
-	if resp.StatusCode == http.StatusConflict && json.Unmarshal(body, &executionError) == nil {
-		switch executionError.Code {
-		case "upgrade_required":
-			return &executionpolicy.UpgradeRequiredError{
-				Scope: executionError.Scope, Missing: executionError.Missing,
-				MinimumRelease: executionError.MinimumRelease, SafeHold: executionError.SafeHold,
-			}
-		case "protocol_incompatible":
-			return &executionpolicy.ProtocolIncompatibleError{
-				PolicyProtocol: executionError.PolicyProtocol,
-				HelperMinimum:  executionError.HelperMinimum, HelperMaximum: executionError.HelperMaximum,
-			}
-		case "body_attestation_required":
-			return &executionpolicy.BodyAttestationRequiredError{RunID: executionError.RunID, NodeID: executionError.NodeID}
-		}
-	}
 	if resp.StatusCode == http.StatusConflict {
 		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
 	}
@@ -1954,18 +1779,4 @@ type computeLimitRefusalWire struct {
 	Cap      int64  `json:"cap"`
 	Observed int64  `json:"observed"`
 	Scope    string `json:"scope"`
-}
-
-type executionAdmissionErrorWire struct {
-	Code           string          `json:"code"`
-	RunID          string          `json:"run_id"`
-	NodeID         string          `json:"node_id"`
-	Scope          string          `json:"scope"`
-	Missing        []string        `json:"missing"`
-	MinimumRelease string          `json:"minimum_release"`
-	SafeHold       bool            `json:"safe_hold"`
-	PolicyProtocol int             `json:"policy_protocol"`
-	HelperMinimum  int             `json:"helper_minimum"`
-	HelperMaximum  int             `json:"helper_maximum"`
-	Binding        json.RawMessage `json:"execution_binding"`
 }

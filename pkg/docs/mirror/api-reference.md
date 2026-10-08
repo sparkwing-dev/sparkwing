@@ -12,8 +12,6 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/accounts/{account}` | `admin` |
 | `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
-| `PUT` | `/api/v1/agents/{name}` | `admin` |
-| `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
@@ -75,7 +73,6 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
-| `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
 | `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
 | `GET` | `/api/v1/operator/teams` | `operator` |

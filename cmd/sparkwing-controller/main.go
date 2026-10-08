@@ -178,16 +178,13 @@ func run(args []string) error {
 			controller.CompliantClaimPollsPerMinute()*8))
 	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
-			"rolling minute, charged whatever the answer. The agent liveness "+
-			"heartbeat is never budgeted. Zero is unlimited; %d suits the "+
+			"rolling minute, charged whatever the answer. Zero is unlimited; %d suits the "+
 			"cadence the shipped runners heartbeat at.",
 			controller.RecommendedHeartbeatsPerMinute))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
 		"request budget on every route one token can reach, per rolling minute, "+
 			"keyed on the token prefix. It bounds a caller that varies the runner "+
-			"it says it is, which the per-runner budgets above cannot. A liveness "+
-			"heartbeat for the agent this token enrolled is never the request "+
-			"that is shed; one naming any other agent is budgeted like the rest. "+
+			"it says it is, which the per-runner budgets above cannot. "+
 			"Past the budget a request is answered 429 with a Retry-After naming "+
 			"the refill delay. Zero is unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,

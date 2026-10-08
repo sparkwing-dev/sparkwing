@@ -138,52 +138,6 @@ func TestClaimAttentionCountsSparkwingCloud(t *testing.T) {
 	}
 }
 
-// An enrolled executor counts as online by its heartbeat, since its assisted
-// offers record no presence, and is judged on its enrolled profile.
-func TestClaimAttentionReadsAnEnrolledExecutorsHeartbeat(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
-	srv := New(st, nil)
-	_, desk, err := st.CreateToken("agent:desk", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.EnrollExecutor(ctx, desk.Prefix, store.Executor{
-		Name: "desk", Kind: "agent", Location: "local", Principal: "agent:desk",
-		Capabilities: []string{"tool:terraform"}, MaxConcurrent: 1,
-		Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	node := store.WaitingNode{NodeID: "apply", Team: store.DefaultTeam, Selector: []string{"tool:terraform"}}
-	heartbeat := func(at time.Time) string {
-		t.Helper()
-		if _, err := st.DB().ExecContext(ctx, `UPDATE executors SET last_seen = ?`, at.UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-		registered, err := st.ListRegisteredAgents(ctx, store.DefaultTeam)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return claimAttention(node, sightAgents(registered, srv.runnerPresence.byToken(time.Now(), agentOnlineWithin), time.Now()), false)
-	}
-	if got := heartbeat(time.Now()); got != "" {
-		t.Fatalf("a heartbeating enrolled executor with the tool leaves %q", got)
-	}
-	seen := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
-	if got, want := heartbeat(seen), "node apply needs tool:terraform; eligible agent desk is offline (last seen 2026-09-28T10:00:00Z)"; got != want {
-		t.Fatalf("reason = %q, want %q", got, want)
-	}
-	node.Request = match.Resources{Cores: 16}
-	if got := heartbeat(time.Now()); got != "node apply needs tool:terraform; every agent in team default that matches refuses it: desk (shape)" {
-		t.Fatalf("a node larger than the enrolled budget = %q", got)
-	}
-}
-
 // A new platform with the same labels is still worth storing.
 func TestPresenceReportsAPlatformChange(t *testing.T) {
 	reg := newRunnerPresenceRegistry()

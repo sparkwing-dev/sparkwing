@@ -236,16 +236,8 @@ func TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes(t *testing.T) {
 	f.bind(owner, widgetsJob)
 	f.work(owner.team, "run-widgets", "acme/widgets")
 	runner := f.credential(widgetsJob, owner.team)
-	offer := map[string]any{
-		"holder_id": "gh-1", "executor_name": "x", "run_id": "run-widgets", "node_id": "compile",
-		"reservation_id": "r", "resource_digest": "d", "slot": 0,
-	}
-	if code := f.call("POST", "/api/v1/nodes/claim", runner, offer, nil); code != http.StatusForbidden {
-		t.Fatalf("executor offer = %d, want 403", code)
-	}
 	for _, route := range [][2]string{
 		{"GET", "/api/v1/runs"},
-		{"POST", "/api/v1/nodes/claim/prepare"},
 		{"GET", "/api/v1/team/github-runners"},
 		{"POST", "/api/v1/team/tokens"},
 		{"GET", "/api/v1/tokens"},
