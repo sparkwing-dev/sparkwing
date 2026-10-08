@@ -19,6 +19,14 @@ type Config struct {
 	Repos []*Entry `yaml:"repos,omitempty"`
 
 	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
+
+	// AutoRegister false stops `sparkwing run` registering the checkout it
+	// runs in; unset means true.
+	AutoRegister *bool `yaml:"auto_register,omitempty"`
+
+	// IncludeWorktrees lets automatic registration take a linked git
+	// worktree, which it otherwise skips.
+	IncludeWorktrees bool `yaml:"include_worktrees,omitempty"`
 }
 
 // DefaultPath reports the config.yaml the repo registry is read from and
@@ -60,7 +68,15 @@ func update(change func(cfg *Config) (bool, error)) error {
 }
 
 func AutoRegister(absPath string) error {
-	if os.Getenv("SPARKWING_NO_AUTO_REGISTER") == "1" {
+	path, err := DefaultPath()
+	if err != nil {
+		return err
+	}
+	settings, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if settings.AutoRegister != nil && !*settings.AutoRegister {
 		return nil
 	}
 	if absPath == "" {
@@ -77,7 +93,7 @@ func AutoRegister(absPath string) error {
 	if err != nil {
 		return err
 	}
-	if kind == repoKindWorktree && os.Getenv("SPARKWING_AUTO_REGISTER_WORKTREES") != "1" {
+	if kind == repoKindWorktree && !settings.IncludeWorktrees {
 		return nil
 	}
 

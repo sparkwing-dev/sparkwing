@@ -40,8 +40,9 @@ func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
 		"SPARKWING_NODE_CLAIM_MEMBERSHIP=membership-secret",
 		"SPARKWING_NODE_CLAIM_RESERVATION=reservation-secret",
 	}
+	writeMachineSettings(t, "run:\n  submit_env_allow: [AWS_REGION]\n")
 	got, err := remoteExecutionChildEnvironment(append(private,
-		"PATH=/safe/bin", "AWS_REGION=us-west-2", submissionEnvironmentAllowKey+"=AWS_REGION"))
+		"PATH=/safe/bin", "AWS_REGION=us-west-2"))
 	if err != nil {
 		t.Fatal(err)
 	}

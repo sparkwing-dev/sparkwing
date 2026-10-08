@@ -1024,11 +1024,11 @@ two scopes (or two qualifiers) can never fold onto one key:
 
 `<len>` is the byte length of the qualifier that follows.
 
-`hostID` for `ScopeBox` is `os.Hostname()`, overridable via
-`SPARKWING_BOX_ID`. Inside a container the hostname is per-container, so
-two containers on one physical host would each get their own box budget;
-set `SPARKWING_BOX_ID` to the physical host identity when you want
-per-machine budgeting across containers.
+`hostID` for `ScopeBox` is `os.Hostname()`, overridable by `machine.box_id`
+in [config.yaml](machine-config.md). Inside a container the hostname is
+per-container, so two containers on one physical host would each get their
+own box budget; set `machine.box_id` to the physical host identity when you
+want per-machine budgeting across containers.
 
 ### Capacity skew: most-restrictive wins
 

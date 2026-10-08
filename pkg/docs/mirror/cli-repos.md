@@ -15,8 +15,9 @@ SDK upgrades. 'add', 'remove' and 'prune' edit the registry of checkouts.
 The registry maps pipeline names to local checkouts so
 cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
 annotations. Auto-populated when you run 'sparkwing run <pipeline>'
-in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
+in a .sparkwing/-bearing repo; set repos.auto_register: false in
+config.yaml to disable it, and repos.include_worktrees: true to let it
+register linked git worktrees, which it otherwise skips.
 
 The registry is the repos section of config.yaml: $SPARKWING_CONFIG
 (if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else

@@ -337,8 +337,7 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 
 func TestAcquireOrMaterializeAutomaticallyPrunesAfterNonCLIWrite(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(MaxCacheBytesEnv, "0")
-	t.Setenv(MaxCacheEntriesEnv, "1")
+	writeCacheConfig(t, "cache:\n  max_bytes: 0\n  max_entries: 1\n")
 
 	root := filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
 	old := testEntry(t, root, "11111111-11111111")

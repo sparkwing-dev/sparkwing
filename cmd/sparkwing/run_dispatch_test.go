@@ -230,7 +230,6 @@ func TestDispatchRun_ConsumesSeparatorBeforeExecutingPipeline(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SPARKWING_NO_BINCACHE", "1")
-	t.Setenv("SPARKWING_NO_AUTO_REGISTER", "1")
 	t.Setenv("GOWORK", "off")
 	repository := t.TempDir()
 	pipelineDirectory := filepath.Join(repository, ".sparkwing")
@@ -287,7 +286,6 @@ func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SPARKWING_NO_BINCACHE", "1")
-	t.Setenv("SPARKWING_NO_AUTO_REGISTER", "1")
 	t.Setenv("GOWORK", "off")
 	// safety: an inherited cap would satisfy the assertion without the flag reaching
 	// the child, so the ambient value is set to one the test never expects to see.

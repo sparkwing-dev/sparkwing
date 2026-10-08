@@ -251,10 +251,13 @@ pipeline from a temporary build with debug symbols when you need those.
 After each new entry, Sparkwing reclaims inactive entries to fit a byte
 ceiling and an entry count.
 
-| Variable | Default | Meaning |
+| [config.yaml](machine-config.md) key | Default | Meaning |
 | --- | --- | --- |
-| `SPARKWING_CACHE_MAX_BYTES` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
-| `SPARKWING_CACHE_MAX_ENTRIES` | `20` | Entry count ceiling. `0` disables. |
+| `cache.max_bytes` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
+| `cache.max_entries` | `20` | Entry count ceiling. `0` disables. |
+
+`sparkwing cache prune --max-bytes` and `--max-entries` override them for
+one prune.
 
 Pruning advances through a bounded second-chance queue. An entry used
 since it entered the queue moves behind the other candidates, so use

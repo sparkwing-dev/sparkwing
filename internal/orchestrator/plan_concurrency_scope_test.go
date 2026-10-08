@@ -64,7 +64,7 @@ func runPlanScopePipe(t *testing.T, ctx context.Context, name string, group *spa
 }
 
 func TestPlanConcurrency_KeyCarriesScope(t *testing.T) {
-	t.Setenv("SPARKWING_BOX_ID", "testbox")
+	orchestrator.SetTestBoxID(t, "testbox")
 	global := sparkwing.NewConcurrencyGroup("deploy-scope-x", sparkwing.ConcurrencyLimit{Capacity: 1})
 	boxed := sparkwing.NewConcurrencyGroup("deploy-scope-x", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeBox})
 	concGlobal := &planAcquireCapture{kind: store.AcquireGranted}

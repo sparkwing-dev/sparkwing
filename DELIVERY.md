@@ -367,8 +367,7 @@ file. Other syntax and workflow checks remain active.
   `config.yaml`, `SPARKWING_SECRETS_KEY_FILE` for the local secrets key. The
   local secrets themselves live in the home's own `state.db`, and the home
   does not import the machine's `secrets.env` or `config.env`. No variable
-  moves `version-hold`; `SPARKWING_VERSION_HOLD` holds one shell without
-  writing it.
+  moves `version-hold`.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is

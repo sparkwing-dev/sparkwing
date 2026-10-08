@@ -756,8 +756,8 @@ const (
 	// flag.
 	BudgetSourceFlag BudgetSource = "flag"
 	// BudgetSourceEnv means the budget came from SPARKWING_BUDGET in the
-	// environment of whatever process spawned the daemon, and dies with
-	// that daemon.
+	// environment of whatever process spawned the daemon. Only a daemon
+	// older than the move to config.yaml reports it.
 	BudgetSourceEnv BudgetSource = "env"
 	// BudgetSourceConfig means the budget came from the on-disk config
 	// file, the one source that survives a daemon respawn.

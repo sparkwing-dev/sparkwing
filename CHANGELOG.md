@@ -146,6 +146,9 @@ unlock.
 
 ### Removed
 
+- **cli + orchestrator (Breaking):** Machine settings read config.yaml, not the environment
+  `SPARKWING_BUDGET`, `SPARKWING_CACHE_MAX_BYTES`, `SPARKWING_CACHE_MAX_ENTRIES`, `SPARKWING_VERSION_HOLD`, `SPARKWING_NO_AUTO_REGISTER`, `SPARKWING_AUTO_REGISTER_WORKTREES`, `SPARKWING_BOX_ID`, `SPARKWING_LOGS_DROP_POLICY`, `SPARKWING_PAUSE_TIMEOUT`, `SPARKWING_SUBMIT_ENV_ALLOW` and `SPARKWING_RERUN_IMAGE` are no longer read. config.yaml gains the `cache`, `machine`, `logs`, `debug` and `run` sections, `repos.auto_register` and `repos.include_worktrees`, and a profile's `rerun_image`; the cache ceilings and the submit allow-list refuse a value they cannot parse. See [migration guide](docs/migrations/_unreleased.md#machine-settings-move-from-the-environment-to-configyaml).
+
 - **services (Breaking):** Every service takes `--log-format` and `--log-level`; the cache stops reading `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL`
   The controller, cache, logs service, runner and launcher write their own log to stderr as `text` or `json` at the level the flags name, and refuse an unknown value. The cache wrote to stdout before. See [migration guide](docs/migrations/_unreleased.md#services-take---log-format-and---log-level).
 

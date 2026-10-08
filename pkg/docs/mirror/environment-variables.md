@@ -49,9 +49,6 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_ADMISSION_CLASS` | [admission](admission.md) |
 | `SPARKWING_ALLOW_UNADMITTED` | [cli](cli.md), [local-execution](local-execution.md) |
 | `SPARKWING_ARTIFACT_DIGEST_BACKFILL` | [caching](caching.md) |
-| `SPARKWING_BUDGET` | [local-execution](local-execution.md) |
-| `SPARKWING_CACHE_MAX_BYTES` | [caching](caching.md), [cli-cache](cli-cache.md) |
-| `SPARKWING_CACHE_MAX_ENTRIES` | [caching](caching.md), [cli-cache](cli-cache.md) |
 | `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [cli-configure](cli-configure.md), [cli-fleet](cli-fleet.md) |
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
@@ -60,24 +57,17 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_HASH_ALL_FILES` | [caching](caching.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-fleet](cli-fleet.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
-| `SPARKWING_LOGS_DROP_POLICY` | [observability](observability.md) |
-| `SPARKWING_NO_AUTO_REGISTER` | [cli-configure](cli-configure.md) |
 | `SPARKWING_NO_BINCACHE` | [caching](caching.md) |
 | `SPARKWING_NO_SPARKS_RESOLVE` | [ci-embedded](ci-embedded.md) |
-| `SPARKWING_PAUSE_TIMEOUT` | [cli-debug](cli-debug.md) |
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
-| `SPARKWING_RERUN_IMAGE` | [cli-debug](cli-debug.md) |
 | `SPARKWING_SECRETS` | [machine-config](machine-config.md) |
 | `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_KEY_FILE` | [machine-config](machine-config.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
-| `SPARKWING_VERSION_HOLD` | [cli-version](cli-version.md) |
 | `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |
-| `SPARKWING_BOX_ID` | [sdk](sdk.md) |
 | `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_SUBMIT_ENV_ALLOW` | [cli-run](cli-run.md) |
 | `TYPESAFE_API_KEY` | [admission](admission.md) |
 
 ## Configuration: release tooling
@@ -216,6 +206,5 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_STORE_WEDGE_BUDGET` | Bounds how long a wedged store call may block; only tests set it. |
 | `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` | SQLite busy timeout; only tests set it. |
 | `SPARKWING_NAMESPACE` | Kubernetes namespace for `sparkwing debug attach`; only tests set it. |
-| `SPARKWING_AUTO_REGISTER_WORKTREES` | `1` lets automatic repo registration include git worktrees, which it otherwise skips; nothing sets it. |
 | `SPARKWING_DOCS_BASE_URL` | Base URL that `sparkwing docs` links point at; tests set it, and an earlier changelog entry offers it. |
 | `SPARKS_GO_BIN` | The `go` binary the sparks resolver runs when it writes a pipeline's module overlay; nothing sets it. |

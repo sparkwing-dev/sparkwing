@@ -79,11 +79,9 @@ type Hold struct {
 	Source string `json:"source"`
 }
 
-// ResolveHold gives an explicit environment setting precedence over the config file.
-func ResolveHold(environment Hold, configPath string) (Hold, error) {
-	if value := strings.TrimSpace(environment.Value); value != "" {
-		return Hold{Value: value, Source: environment.Source}, nil
-	}
+// ResolveHold reads the hold file at configPath; an absent or empty file is
+// no hold.
+func ResolveHold(configPath string) (Hold, error) {
 	body, err := readHoldFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return Hold{}, nil
@@ -100,8 +98,8 @@ func ResolveHold(environment Hold, configPath string) (Hold, error) {
 
 // ResolveHoldStrict distinguishes an invalid configured ceiling from the
 // absence of one so unattended updaters can fail closed.
-func ResolveHoldStrict(environment Hold, configPath string) (Hold, error) {
-	hold, err := ResolveHold(environment, configPath)
+func ResolveHoldStrict(configPath string) (Hold, error) {
+	hold, err := ResolveHold(configPath)
 	if err != nil {
 		return hold, err
 	}

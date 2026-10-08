@@ -25,7 +25,7 @@ func TestScopeKey_QualifierWithSeparatorDoesNotCollide(t *testing.T) {
 }
 
 func TestScopeKey_LabelRecoversQualifierWithSeparators(t *testing.T) {
-	t.Setenv("SPARKWING_BOX_ID", "host:with@seps")
+	SetTestBoxID(t, "host:with@seps")
 	box := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{Scope: sparkwing.ScopeBox})
 	if got := ScopeLabelFromKey(scopedGroupKey(box, "run-1")); got != "box (host:with@seps)" {
 		t.Fatalf("box label = %q, want box (host:with@seps)", got)

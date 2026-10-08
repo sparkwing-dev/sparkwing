@@ -38,7 +38,6 @@ func isolateUpdateTests(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("SPARKWING_HOME", filepath.Join(home, "state"))
-	t.Setenv(versionHoldEnv, "")
 	updateFetchLatest = func(context.Context) (string, error) { return "v0.49.0", nil }
 	updateLookupRelease = lookupUpdateRelease
 	updateLookupRevision = lookupUpdateRevision
@@ -176,13 +175,13 @@ func TestUnifiedUpdateCheckPreservesHoldAndOutputModes(t *testing.T) {
 	updateReadInstalled = func() updateIdentity {
 		return updateIdentity{Version: "v0.48.0", Revision: revision, Dirty: &clean, Path: filepath.Join(os.Getenv("HOME"), "installed")}
 	}
-	t.Setenv(versionHoldEnv, "v0.48")
+	writeVersionHold(t, "v0.48")
 	report, code := checkUpdate(t, "--check", "--cli")
 	if code != 1 || report.BlockedReason == "" {
 		t.Fatalf("hold not reported: %+v %d", report, code)
 	}
-	if os.Getenv(versionHoldEnv) != "v0.48" {
-		t.Fatal("check changed hold")
+	if hold := resolveVersionHold(); hold.Value != "v0.48" {
+		t.Fatalf("check changed hold: %+v", hold)
 	}
 	for _, mode := range []string{"plain", "pretty"} {
 		var err error
@@ -206,7 +205,7 @@ func TestUnifiedSameLabelLocalBuildStillReportsOperatorHold(t *testing.T) {
 	updateReadInstalled = func() updateIdentity {
 		return updateIdentity{Version: "v0.49.0", Revision: strings.Repeat("b", 40), Dirty: &clean, Path: filepath.Join(os.Getenv("HOME"), "installed")}
 	}
-	t.Setenv(versionHoldEnv, "v0.48")
+	writeVersionHold(t, "v0.48")
 	report, code := checkUpdate(t, "--check", "--version", "v0.49.0")
 	if code != 2 || report.Status != "unknown" || !strings.Contains(report.BlockedReason, "operator CLI version hold") {
 		t.Fatalf("same-label local build hid hold: %+v %d", report, code)
@@ -239,12 +238,6 @@ func TestUnifiedUpdateRefusesUnreadableHoldEvenForCurrentVersion(t *testing.T) {
 	}
 	if hold := gatherVersionReport(true).Hold; hold == nil || hold.Error == "" {
 		t.Fatal("version card hid hold read error")
-	}
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv(versionHoldEnv, "v0.48")
-	if hold := resolveVersionHold(); hold.Error != "" || hold.Value != "v0.48" || hold.Source != versionHoldEnv {
-		t.Fatalf("environment hold required a home path: %+v", hold)
 	}
 }
 
@@ -655,7 +648,7 @@ func TestUnifiedSDKUpdateUsesResolvedReleaseAndNativeGoSequence(t *testing.T) {
 	}
 	t.Setenv("PATH", bin)
 	t.Setenv("GOTOOLCHAIN", "go1.26.6+auto")
-	t.Setenv(versionHoldEnv, "v0.10")
+	writeVersionHold(t, "v0.10")
 	var commandError error
 	out := captureStdout(t, func() { commandError = runReposUpdate([]string{"--in-place"}) })
 	if commandError != nil {

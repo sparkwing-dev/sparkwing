@@ -292,14 +292,14 @@ func runNodeChild(
 }
 
 func remoteExecutionChildEnvironment(env []string) ([]string, error) {
-	names, prefixes, err := submissionEnvironmentAllowList(env)
+	names, prefixes, err := submissionEnvironmentAllowList()
 	if err != nil {
 		return nil, fmt.Errorf("remote execution environment allowlist: %w", err)
 	}
 	out := make([]string, 0, len(env))
 	for _, item := range env {
 		name, value, ok := strings.Cut(item, "=")
-		if !ok || remoteExecutionPrivateEnv[name] || name == submissionEnvironmentAllowKey {
+		if !ok || remoteExecutionPrivateEnv[name] {
 			continue
 		}
 		if !remoteExecutionRuntimeEnv[name] && !submissionEnvironmentAllowed(name, names, prefixes) {

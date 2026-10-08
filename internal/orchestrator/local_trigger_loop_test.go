@@ -705,8 +705,8 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 			const id = "local-setup-failure"
 			// safety: a local submission carries its captured environment, and the
 			// child fixture reads its switches from it.
-			if err := CaptureSubmissionEnvironment(home, id, append(os.Environ(),
-				"SPARKWING_SUBMIT_ENV_ALLOW=SPARKWING_LOCAL_SETUP_TEST_*"), quietLogger()); err != nil {
+			writeMachineSettings(t, "run:\n  submit_env_allow: [SPARKWING_LOCAL_SETUP_TEST_*]\n")
+			if err := CaptureSubmissionEnvironment(home, id, os.Environ(), quietLogger()); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateTrigger(ctx, store.Trigger{

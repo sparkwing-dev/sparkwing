@@ -2,6 +2,8 @@ package orchestrator_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -124,8 +126,12 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	t.Setenv("SPARKWING_PAUSE_TIMEOUT", "200ms")
 	h := newPauseHarness(t)
+	settings := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(settings, []byte("debug:\n  pause_timeout: 200ms\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", settings)
 	opts := orchestrator.Options{
 		Pipeline: "orch-pause-ok",
 		Debug: orchestrator.DebugDirectives{

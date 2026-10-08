@@ -435,16 +435,14 @@ The ceiling shape controls its reach:
 
 With no flags, prints the current hold and where it is set. The hold
 persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
-version-hold); the SPARKWING_VERSION_HOLD environment variable
-overrides the file for a shell or a whole fleet. Releases beyond the
-hold still show in 'sparkwing version' so the operator sees what is
+version-hold). Releases beyond the hold still show in 'sparkwing version' so the operator sees what is
 being deferred.
 
 SPARKWING_HOME does not move this file; it is the state, cache and
 logs root, and the hold is machine-wide even though the toolchains it
 governs live under that root. A --set or --clear from a command
 running under a home of its own is refused rather than applied to the
-machine's hold: set SPARKWING_VERSION_HOLD to hold that shell alone.`,
+machine's hold.`,
 	Flags: []FlagSpec{
 		{Name: "set", Argument: "VERSION", Desc: "Set the ceiling (vMAJOR.MINOR or vMAJOR.MINOR.PATCH)", Group: "Action"},
 		{Name: "clear", Desc: "Remove the hold so upgrades are unrestricted", Group: "Action"},
@@ -880,8 +878,8 @@ var cmdCachePrune = Command{
 	Synopsis: "Evict least recently used binaries down to the ceilings",
 	Description: `Removes the least recently used cached binaries until the cache
 fits both the byte ceiling and the entry ceiling. Defaults come
-from $SPARKWING_CACHE_MAX_BYTES and $SPARKWING_CACHE_MAX_ENTRIES;
-either accepts 0 to disable that dimension.
+from cache.max_bytes and cache.max_entries in config.yaml; either
+accepts 0 to disable that dimension.
 
 An execution lease protects each running binary. Prune skips active
 and busy entries, bounds the number examined, and reports observed
@@ -959,8 +957,8 @@ pipeline binary; they never land in tracked code.
   error. Skipped / cancelled / OnFailure-recovered nodes do not
   pause -- only Run errors.
 
-Paused nodes hold for 30 minutes by default; set
-SPARKWING_PAUSE_TIMEOUT=<duration> to change. An expired pause
+Paused nodes hold for 30 minutes by default; set debug.pause_timeout
+in config.yaml (a duration such as 10m) to change it. An expired pause
 is released with reason 'timeout-released' and surfaces in the
 run record.
 
@@ -1021,7 +1019,8 @@ var cmdDebugRerun = Command{
 	Description: `Opens an interactive shell using a node's recorded environment and working
 directory. Local execution writes upstream reference outputs beneath the
 run's rerun directory. Cluster execution creates a temporary pod using
---image or SPARKWING_RERUN_IMAGE, attaches to it, and deletes it on exit.
+--image, else the profile's rerun_image in config.yaml, attaches to it,
+and deletes it on exit.
 
 Snapshots omit credential names and values and remove URL credentials.
 Controller access to the captured environment requires an admin token.
@@ -1509,8 +1508,8 @@ one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
 GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
-every credential-shaped name -- widened by naming variables in
-SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+every credential-shaped name -- widened by the names and NAME_*
+prefixes listed in run.submit_env_allow in config.yaml. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.`,
 	PosArgs: []PosArg{
@@ -3491,8 +3490,9 @@ SDK upgrades. 'add', 'remove' and 'prune' edit the registry of checkouts.
 The registry maps pipeline names to local checkouts so
 cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
 annotations. Auto-populated when you run 'sparkwing run <pipeline>'
-in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
+in a .sparkwing/-bearing repo; set repos.auto_register: false in
+config.yaml to disable it, and repos.include_worktrees: true to let it
+register linked git worktrees, which it otherwise skips.
 
 The registry is the repos section of config.yaml: $SPARKWING_CONFIG
 (if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else

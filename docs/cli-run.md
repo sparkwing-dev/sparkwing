@@ -93,8 +93,8 @@ one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
 GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
-every credential-shaped name -- widened by naming variables in
-SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+every credential-shaped name -- widened by the names and NAME_*
+prefixes listed in run.submit_env_allow in config.yaml. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.
 

@@ -116,3 +116,15 @@ func TestAutoRegister_StillRecordsACheckoutOutsideTempDir(t *testing.T) {
 		t.Errorf("AutoRegister(%q) failed with %v, want an error naming the path: the temp filter swallowed it", outside, err)
 	}
 }
+
+func TestAutoRegister_OffInConfigStopsBeforeThePath(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", registry)
+	if err := os.WriteFile(registry, []byte("repos:\n  auto_register: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(string(filepath.Separator), "Users", "dev", "code", "app")
+	if err := AutoRegister(outside); err != nil {
+		t.Fatalf("AutoRegister with repos.auto_register false = %v, want it to stop before inspecting the path", err)
+	}
+}

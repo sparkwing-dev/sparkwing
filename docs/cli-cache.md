@@ -109,8 +109,8 @@ Evict least recently used binaries down to the ceilings
 
 Removes the least recently used cached binaries until the cache
 fits both the byte ceiling and the entry ceiling. Defaults come
-from $SPARKWING_CACHE_MAX_BYTES and $SPARKWING_CACHE_MAX_ENTRIES;
-either accepts 0 to disable that dimension.
+from cache.max_bytes and cache.max_entries in config.yaml; either
+accepts 0 to disable that dimension.
 
 An execution lease protects each running binary. Prune skips active
 and busy entries, bounds the number examined, and reports observed

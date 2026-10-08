@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,16 +90,6 @@ const (
 	scopeKeyBoxPrefix    = "b:"
 	scopeKeyLenSep       = ":"
 )
-
-func boxHostID() string {
-	if v := strings.TrimSpace(os.Getenv("SPARKWING_BOX_ID")); v != "" {
-		return v
-	}
-	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
-		return h
-	}
-	return "localhost"
-}
 
 func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
 	name := g.Name()

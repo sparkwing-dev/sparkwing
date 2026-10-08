@@ -89,7 +89,7 @@ const (
 	// work may well have succeeded, but its record of that work is
 	// incomplete, so the same rule as FailureLogsAuth applies: a run
 	// nobody can read is not a run anybody should trust. Adopters who
-	// prefer the lossy behavior set SPARKWING_LOGS_DROP_POLICY=warn.
+	// prefer the lossy behavior set logs.drop_policy: warn in config.yaml.
 	FailureLogsDropped = "logs_dropped"
 	// FailureSourceUnavailable: a launcher Job's init container was refused
 	// the run's source credential, which answers the same on every attempt,

@@ -21,6 +21,10 @@ type Profile struct {
 	Logs    *backends.Spec `yaml:"logs,omitempty"`
 
 	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
+
+	// RerunImage is the runner image `sparkwing debug rerun` starts its
+	// debug pod from on this profile's cluster.
+	RerunImage string `yaml:"rerun_image,omitempty"`
 }
 
 type ControllerSpec struct {

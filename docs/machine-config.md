@@ -16,11 +16,16 @@ Each top-level key is a section with one owner:
 
 | Section | Holds | Written by |
 |---|---|---|
-| `profiles` | named connections to controllers and storage backends, keyed by profile name | `sparkwing cloud connect`, `sparkwing configure profiles` |
-| `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths` | `sparkwing run` (auto-registration), `sparkwing repos add` |
+| `profiles` | named connections to controllers and storage backends, keyed by profile name; `rerun_image` names the image `sparkwing debug rerun` uses on that profile's cluster | `sparkwing cloud connect`, `sparkwing configure profiles` |
+| `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths`; `auto_register` (default `true`) and `include_worktrees` (default `false`) govern automatic registration | `sparkwing run` (auto-registration), `sparkwing repos add` |
 | `admission` | the admission policy (`mode`, `custom`, `jev`) and the machine `budget` | you |
 | `agent` | what `sparkwing-runner agent` runs: controller, token, capacity | `sparkwing cluster runners add` |
 | `fleet` | the foreground fleet coordinator's listener and trusted `executors` | `sparkwing fleet init` |
+| `cache` | the pipeline binary cache ceilings `max_bytes` (default `2GiB`) and `max_entries` (default `20`); `0` disables one | you |
+| `machine` | `box_id`, the host identity a box-scoped concurrency group keys on (default: the hostname) | you |
+| `logs` | `drop_policy`: `warn` keeps a run green when log lines are lost; anything else fails the node | you |
+| `debug` | `pause_timeout`, how long a `sparkwing debug` pause holds (default `30m`) | you |
+| `run` | `submit_env_allow`, the extra names and `NAME_*` prefixes a detached run's environment snapshot carries | you |
 
 Any other top-level key, and any key a section does not define, fails the read
 with the file, line and key named.
@@ -37,6 +42,7 @@ repos:
     - path: /srv/code/app
   fallback_paths:
     - ~/code
+  include_worktrees: true
 admission:
   mode: auto
   # host sensor over-reads external load on this box
@@ -51,14 +57,23 @@ agent:
 fleet:
   listen: 127.0.0.1:4346
   public_url: https://desk.tailnet.example
+cache:
+  max_bytes: 4GiB
+machine:
+  box_id: rack-3-host-7
+run:
+  submit_env_allow: [AWS_PROFILE, AWS_REGION, DOCKER_*]
 ```
 
 The sections are documented where their behavior is:
 [Backends](backends.md) for profiles, [Hooks](hooks.md) for the registry,
 [Local admission policy](admission.md) and
 [Local execution](local-execution.md#where-to-set-it) for admission and the
-budget, [Self-hosting](self-hosting.md) for the agent, and
-[Local execution](local-execution.md) for the fleet.
+budget, [Self-hosting](self-hosting.md) for the agent,
+[Local execution](local-execution.md) for the fleet and `run`,
+[Caching](caching.md) for `cache`, [SDK](sdk.md) for `machine`,
+[Observability](observability.md) for `logs`, and
+[`sparkwing debug`](cli-debug.md) for `debug`.
 
 ## Permissions and writes
 

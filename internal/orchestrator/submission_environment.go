@@ -22,8 +22,6 @@ import (
 
 const SubmissionEnvironmentCapturedKey = "_SPARKWING_SUBMISSION_ENV_CAPTURED"
 
-const submissionEnvironmentAllowKey = "SPARKWING_SUBMIT_ENV_ALLOW"
-
 const (
 	submissionEnvironmentDir          = "submission-environments"
 	abandonedSubmissionEnvironmentAge = 10 * time.Minute
@@ -146,7 +144,7 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 }
 
 func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, error) {
-	names, prefixes, err := submissionEnvironmentAllowList(env)
+	names, prefixes, err := submissionEnvironmentAllowList()
 	if err != nil {
 		return nil, err
 	}
@@ -168,32 +166,30 @@ func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, e
 	}
 	if len(dropped) > 0 && logger != nil {
 		logger.Warn("submission environment: credential filter dropped allow-listed names",
-			"names", strings.Join(dropped, ","), "allow_key", submissionEnvironmentAllowKey)
+			"names", strings.Join(dropped, ","), "allow_key", submitEnvAllowKey)
 	}
 	return out, nil
 }
 
-func submissionEnvironmentAllowList(env []string) (map[string]bool, []string, error) {
+func submissionEnvironmentAllowList() (map[string]bool, []string, error) {
+	items, path, err := submitEnvAllowSetting()
+	if err != nil {
+		return nil, nil, err
+	}
 	names := map[string]bool{}
 	var prefixes []string
-	for _, entry := range env {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || key != submissionEnvironmentAllowKey {
-			continue
-		}
-		for _, item := range strings.Split(value, ",") {
-			item = strings.TrimSpace(item)
-			switch {
-			case item == "":
-			case item == "*":
-				return nil, nil, fmt.Errorf(
-					"%s: %q is not a wildcard; name each variable or give a prefix such as AWS_*",
-					submissionEnvironmentAllowKey, item)
-			case strings.HasSuffix(item, "*"):
-				prefixes = append(prefixes, strings.TrimSuffix(item, "*"))
-			default:
-				names[item] = true
-			}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		switch {
+		case item == "":
+		case item == "*":
+			return nil, nil, fmt.Errorf(
+				"%s %s: %q is not a wildcard; name each variable or give a prefix such as AWS_*",
+				path, submitEnvAllowKey, item)
+		case strings.HasSuffix(item, "*"):
+			prefixes = append(prefixes, strings.TrimSuffix(item, "*"))
+		default:
+			names[item] = true
 		}
 	}
 	return names, prefixes, nil

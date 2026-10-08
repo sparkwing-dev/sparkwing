@@ -99,6 +99,10 @@ func runCacheInfo(args []string) error {
 	if err != nil {
 		return fmt.Errorf("cache info: %w", err)
 	}
+	limits, err := bincache.ConfiguredLimits()
+	if err != nil {
+		return fmt.Errorf("cache info: %w", err)
+	}
 
 	report := cacheInfoReport{
 		Dir:           bincache.CacheRoot(),
@@ -108,8 +112,8 @@ func runCacheInfo(args []string) error {
 		LegacyEntries: status.LegacyEntries,
 		LegacyBytes:   status.LegacyBytes,
 		TotalBytes:    status.ObservedBytes + status.LegacyBytes,
-		MaxBytes:      bincache.ConfiguredMaxBytes(),
-		MaxEntries:    bincache.ConfiguredMaxEntries(),
+		MaxBytes:      limits.MaxBytes,
+		MaxEntries:    limits.MaxEntries,
 	}
 	for _, e := range entries {
 		if len(e.Owners) > 1 {
@@ -206,7 +210,11 @@ func runCachePrune(args []string) error {
 	if *docsCache {
 		return docsCacheClear(output)
 	}
-	maxBytes := bincache.ConfiguredMaxBytes()
+	limits, err := bincache.ConfiguredLimits()
+	if err != nil {
+		return fmt.Errorf("cache prune: %w", err)
+	}
+	maxBytes := limits.MaxBytes
 	if maxBytesRaw != "" {
 		parsed, err := bincache.ParseBytes(maxBytesRaw)
 		if err != nil {
@@ -214,7 +222,7 @@ func runCachePrune(args []string) error {
 		}
 		maxBytes = parsed
 	}
-	entryLimit := bincache.ConfiguredMaxEntries()
+	entryLimit := limits.MaxEntries
 	if maxEntries >= 0 {
 		entryLimit = maxEntries
 	}

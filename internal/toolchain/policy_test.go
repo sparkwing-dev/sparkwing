@@ -43,38 +43,34 @@ func TestParseMode(t *testing.T) {
 	}
 }
 
-func TestResolveHoldPrefersEnvironment(t *testing.T) {
+func TestResolveHoldReadsTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "version-hold")
 	if err := os.WriteFile(path, []byte("v0.15\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ResolveHold(Hold{Source: "SPARKWING_TEST_VERSION_HOLD"}, path); err != nil || got.Value != "v0.15" || got.Source != path {
+	if got, err := ResolveHold(path); err != nil || got.Value != "v0.15" || got.Source != path {
 		t.Fatalf("file hold = %+v, %v", got, err)
-	}
-	if got, err := ResolveHold(Hold{Value: "v0.10", Source: "SPARKWING_TEST_VERSION_HOLD"}, path); err != nil || got.Value != "v0.10" || got.Source != "SPARKWING_TEST_VERSION_HOLD" {
-		t.Fatalf("environment hold = %+v, %v", got, err)
 	}
 }
 
 func TestResolveHoldStrictDistinguishesInvalidFromAbsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "version-hold")
-	environment := Hold{Source: "SPARKWING_TEST_VERSION_HOLD"}
-	if hold, err := ResolveHoldStrict(environment, path); err != nil || hold.Value != "" {
+	if hold, err := ResolveHoldStrict(path); err != nil || hold.Value != "" {
 		t.Fatalf("absent hold = %+v, %v", hold, err)
 	}
-	if err := os.WriteFile(path, []byte("latest\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if hold, err := ResolveHoldStrict(environment, path); err == nil || hold.Source != path {
-		t.Fatalf("invalid file hold = %+v, %v", hold, err)
-	}
-	environment.Value = "v0.15-rc.1"
-	if hold, err := ResolveHoldStrict(environment, path); err == nil || hold.Source != "SPARKWING_TEST_VERSION_HOLD" {
-		t.Fatalf("invalid environment hold = %+v, %v", hold, err)
+	for _, value := range []string{"latest", "v0.15-rc.1"} {
+		if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if hold, err := ResolveHoldStrict(path); err == nil || hold.Source != path {
+			t.Fatalf("invalid file hold %q = %+v, %v", value, hold, err)
+		}
 	}
 	for _, value := range []string{"v0.15", "v0.15.4"} {
-		environment.Value = value
-		if hold, err := ResolveHoldStrict(environment, path); err != nil || hold.Value != value {
+		if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if hold, err := ResolveHoldStrict(path); err != nil || hold.Value != value {
 			t.Errorf("valid hold %q = %+v, %v", value, hold, err)
 		}
 	}

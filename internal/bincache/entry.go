@@ -214,7 +214,11 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 		return nil, false, err
 	}
 	writerOpen = false
-	if _, pruneErr := pruneToLimitsAtRoot(ctx, e.root, ConfiguredMaxBytes(), ConfiguredMaxEntries(), false); pruneErr != nil {
+	limits, pruneErr := ConfiguredLimits()
+	if pruneErr == nil {
+		_, pruneErr = pruneToLimitsAtRoot(ctx, e.root, limits.MaxBytes, limits.MaxEntries, false)
+	}
+	if pruneErr != nil {
 		return nil, true, fmt.Errorf("enforce pipeline cache ceilings after publication: %w", pruneErr)
 	}
 	leaseReturned = true

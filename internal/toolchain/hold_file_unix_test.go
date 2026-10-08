@@ -15,7 +15,7 @@ import (
 
 func TestResolveHoldRejectsFIFO(t *testing.T) {
 	if path := os.Getenv("SPARKWING_HOLD_FIFO_FIXTURE"); path != "" {
-		if _, err := ResolveHold(Hold{}, path); err == nil {
+		if _, err := ResolveHold(path); err == nil {
 			t.Fatal("FIFO hold appeared absent")
 		}
 		return

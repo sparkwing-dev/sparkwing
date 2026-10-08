@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,25 +89,45 @@ func TestParseBytes(t *testing.T) {
 	}
 }
 
-func TestConfiguredLimits_FallBackOnGarbage(t *testing.T) {
-	t.Setenv(MaxCacheBytesEnv, "not-a-size")
-	t.Setenv(MaxCacheEntriesEnv, "not-a-number")
-	if got := ConfiguredMaxBytes(); got != DefaultMaxCacheBytes {
-		t.Fatalf("unparseable byte ceiling should fall back, got %d", got)
+func writeCacheConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got := ConfiguredMaxEntries(); got != DefaultMaxCacheEntries {
-		t.Fatalf("unparseable entry ceiling should fall back, got %d", got)
+	t.Setenv("SPARKWING_CONFIG", path)
+	return path
+}
+
+func TestConfiguredLimits_DefaultWithoutTheSection(t *testing.T) {
+	writeCacheConfig(t, "repos: {}\n")
+	t.Setenv("SPARKWING_CACHE_MAX_BYTES", "1")
+	got, err := ConfiguredLimits()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != (Limits{MaxBytes: DefaultMaxCacheBytes, MaxEntries: DefaultMaxCacheEntries}) {
+		t.Fatalf("limits = %+v, want the defaults; the environment is no longer read", got)
 	}
 }
 
-func TestConfiguredLimits_HonorEnvironment(t *testing.T) {
-	t.Setenv(MaxCacheBytesEnv, "512MiB")
-	t.Setenv(MaxCacheEntriesEnv, "5")
-	if got := ConfiguredMaxBytes(); got != 512<<20 {
-		t.Fatalf("ConfiguredMaxBytes = %d, want %d", got, 512<<20)
+func TestConfiguredLimits_ReadTheCacheSection(t *testing.T) {
+	writeCacheConfig(t, "cache:\n  max_bytes: 512MiB\n  max_entries: 0\n")
+	got, err := ConfiguredLimits()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := ConfiguredMaxEntries(); got != 5 {
-		t.Fatalf("ConfiguredMaxEntries = %d, want 5", got)
+	if got != (Limits{MaxBytes: 512 << 20, MaxEntries: 0}) {
+		t.Fatalf("limits = %+v, want 512MiB and a disabled entry ceiling", got)
+	}
+}
+
+func TestConfiguredLimits_RefuseGarbage(t *testing.T) {
+	for _, body := range []string{"cache:\n  max_bytes: lots\n", "cache:\n  max_entries: -1\n"} {
+		path := writeCacheConfig(t, body)
+		if _, err := ConfiguredLimits(); err == nil || !strings.Contains(err.Error(), path) {
+			t.Fatalf("%q: error = %v, want one naming %s", body, err, path)
+		}
 	}
 }
 

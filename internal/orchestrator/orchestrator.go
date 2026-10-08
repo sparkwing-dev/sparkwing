@@ -2458,15 +2458,6 @@ func (s *dispatchState) claimedParent(nodeID string) (string, bool) {
 
 var defaultPauseTimeout = 30 * time.Minute
 
-func pauseTimeout() time.Duration {
-	if v := os.Getenv("SPARKWING_PAUSE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
-	}
-	return defaultPauseTimeout
-}
-
 const debugPausePollInterval = 500 * time.Millisecond
 
 func (s *dispatchState) doPause(ctx context.Context, nodeID, reason string) bool {

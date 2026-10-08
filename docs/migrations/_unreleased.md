@@ -522,6 +522,54 @@ ran it.
   `SPARKWING_LOG_LEVEL` on a cache Deployment with the flags. A log shipper
   that read the cache's stdout reads its stderr instead.
 
+## Machine settings move from the environment to config.yaml
+
+- **Before:** the `sparkwing` CLI, the admission daemon and the pipeline
+  binary read these machine settings from the environment:
+
+  | Variable | config.yaml key |
+  |---|---|
+  | `SPARKWING_BUDGET` | `admission.budget` (already read; the variable no longer overrides it) |
+  | `SPARKWING_CACHE_MAX_BYTES` | `cache.max_bytes` |
+  | `SPARKWING_CACHE_MAX_ENTRIES` | `cache.max_entries` |
+  | `SPARKWING_NO_AUTO_REGISTER=1` | `repos.auto_register: false` |
+  | `SPARKWING_AUTO_REGISTER_WORKTREES=1` | `repos.include_worktrees: true` |
+  | `SPARKWING_BOX_ID` | `machine.box_id` |
+  | `SPARKWING_LOGS_DROP_POLICY=warn` | `logs.drop_policy: warn` |
+  | `SPARKWING_PAUSE_TIMEOUT` | `debug.pause_timeout` |
+  | `SPARKWING_SUBMIT_ENV_ALLOW` (comma-separated) | `run.submit_env_allow` (a YAML list) |
+  | `SPARKWING_RERUN_IMAGE` | `rerun_image` on the profile `debug rerun --profile` names |
+
+  `SPARKWING_VERSION_HOLD` overrode the version-hold file for one shell.
+- **After:** none of those variables is read. Each setting lives in
+  [config.yaml](../machine-config.md) and holds for every process on the
+  machine. The version hold is the file `sparkwing version hold --set`
+  writes, alone. `sparkwing cache prune --max-bytes` and `--max-entries`
+  still override the cache ceilings for one prune, and `debug rerun --image`
+  still overrides the profile's image.
+- **Operator steps:** move each exported value into the matching key, for
+  example:
+
+  ```yaml
+  cache:
+    max_bytes: 4GiB
+  machine:
+    box_id: rack-3-host-7
+  run:
+    submit_env_allow: [AWS_PROFILE, AWS_REGION, DOCKER_*]
+  ```
+
+  A shell that exported `SPARKWING_VERSION_HOLD` runs
+  `sparkwing version hold --set <version>` instead.
+- **Edge cases:** `cache.max_bytes`, `cache.max_entries` and
+  `run.submit_env_allow` refuse a value they cannot parse, naming the file
+  and key; the variables fell back to the default silently. A misspelled key
+  in any section fails the read. A container that set `SPARKWING_BOX_ID`
+  points `SPARKWING_CONFIG` at a file carrying `machine.box_id`. The detached
+  run snapshot no longer carries `SPARKWING_SUBMIT_ENV_ALLOW` itself.
+  `SPARKWING_ADMISSION_CLASS` stays: a hook sets it for the run it starts,
+  and it goes with `AdmissionClass`.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,7 +87,7 @@ func TestLogsDropped_FailsRunAndRecordsCount(t *testing.T) {
 		if n.FailureReason != store.FailureLogsDropped {
 			t.Errorf("FailureReason: got %q, want %q", n.FailureReason, store.FailureLogsDropped)
 		}
-		for _, want := range []string{"log line(s) lost", "check:", "SPARKWING_LOGS_DROP_POLICY=warn", "cause:"} {
+		for _, want := range []string{"log line(s) lost", "check:", "logs.drop_policy: warn", "cause:"} {
 			if !strings.Contains(n.Error, want) {
 				t.Errorf("Node.Error should contain %q, got: %q", want, n.Error)
 			}
@@ -122,7 +123,7 @@ func TestLogsDropped_WarnPolicyKeepsRunGreen(t *testing.T) {
 	register("dropwarn-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
 	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)
 	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 0)
-	t.Setenv(orchestrator.LogsDropPolicyEnvVar, "warn")
+	writeDropPolicy(t, "warn")
 
 	backends, _ := dropFailBackends(t, alwaysFailingLogsServer(t))
 	res, err := orchestrator.Run(context.Background(), backends,
@@ -131,7 +132,7 @@ func TestLogsDropped_WarnPolicyKeepsRunGreen(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if res.Status != "success" {
-		t.Errorf("Status: got %q, want success under %s=warn", res.Status, orchestrator.LogsDropPolicyEnvVar)
+		t.Errorf("Status: got %q, want success under logs.drop_policy: warn", res.Status)
 	}
 }
 
@@ -139,7 +140,7 @@ func TestLogsDropped_MisspelledPolicyStillFails(t *testing.T) {
 	register("droptypo-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
 	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)
 	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 0)
-	t.Setenv(orchestrator.LogsDropPolicyEnvVar, "warning")
+	writeDropPolicy(t, "warning")
 
 	backends, _ := dropFailBackends(t, alwaysFailingLogsServer(t))
 	res, _ := orchestrator.Run(context.Background(), backends,
@@ -177,4 +178,13 @@ func TestLogsDropped_404NamesTheMissingService(t *testing.T) {
 			t.Errorf("a 404 should name the missing logs service, got: %q", n.Error)
 		}
 	}
+}
+
+func writeDropPolicy(t *testing.T, policy string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("logs:\n  drop_policy: "+policy+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", path)
 }

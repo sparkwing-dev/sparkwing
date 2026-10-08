@@ -797,7 +797,10 @@ func (e *submitTestEnv) useBlockingFixture(t *testing.T) <-chan struct{} {
 		server.CloseClientConnections()
 		server.Close()
 	})
-	e.extraEnv = append(e.extraEnv, "ADV_HOLD_URL="+server.URL, "SPARKWING_SUBMIT_ENV_ALLOW=ADV_HOLD_URL")
+	e.extraEnv = append(e.extraEnv, "ADV_HOLD_URL="+server.URL)
+	if err := os.WriteFile(filepath.Join(e.home, "config.yaml"), []byte("run:\n  submit_env_allow: [ADV_HOLD_URL]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return started
 }
 

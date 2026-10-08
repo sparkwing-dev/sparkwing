@@ -12,7 +12,6 @@ func budgetEnvSandbox(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("SPARKWING_CONFIG", "")
-	t.Setenv(BudgetEnv, "")
 	return filepath.Join(dir, "sparkwing", "config.yaml")
 }
 
@@ -29,14 +28,12 @@ func writeBudgetConfig(t *testing.T, path, body string) {
 func TestResolveBudget_Precedence(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	writeBudgetConfig(t, path, "admission:\n  budget: \"2\"\n")
-	t.Setenv(BudgetEnv, "4")
-
 	got, err := ResolveBudget("6")
 	if err != nil {
-		t.Fatalf("resolve with all three set: %v", err)
+		t.Fatalf("resolve with flag and config set: %v", err)
 	}
 	if got.Budget.Cores != 6 {
-		t.Errorf("cores = %v, want 6: the flag must beat the environment and the config file", got.Budget.Cores)
+		t.Errorf("cores = %v, want 6: the flag must beat the config file", got.Budget.Cores)
 	}
 	if got.Source != BudgetSourceFlag {
 		t.Errorf("source = %q, want %q", got.Source, BudgetSourceFlag)
@@ -45,27 +42,13 @@ func TestResolveBudget_Precedence(t *testing.T) {
 		t.Errorf("origin = %q, want --budget", got.Origin)
 	}
 
+	t.Setenv("SPARKWING_BUDGET", "4")
 	got, err = ResolveBudget("")
 	if err != nil {
-		t.Fatalf("resolve with env and config set: %v", err)
-	}
-	if got.Budget.Cores != 4 {
-		t.Errorf("cores = %v, want 4: the environment must beat the config file", got.Budget.Cores)
-	}
-	if got.Source != BudgetSourceEnv {
-		t.Errorf("source = %q, want %q", got.Source, BudgetSourceEnv)
-	}
-	if got.Origin != BudgetEnv {
-		t.Errorf("origin = %q, want %q", got.Origin, BudgetEnv)
-	}
-
-	t.Setenv(BudgetEnv, "")
-	got, err = ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve with only the config file set: %v", err)
+		t.Fatalf("resolve with the config file and the retired variable set: %v", err)
 	}
 	if got.Budget.Cores != 2 {
-		t.Errorf("cores = %v, want 2: the config file must apply when nothing else is set", got.Budget.Cores)
+		t.Errorf("cores = %v, want 2: SPARKWING_BUDGET is no longer read", got.Budget.Cores)
 	}
 	if got.Source != BudgetSourceConfig {
 		t.Errorf("source = %q, want %q", got.Source, BudgetSourceConfig)
@@ -75,9 +58,8 @@ func TestResolveBudget_Precedence(t *testing.T) {
 	}
 }
 
-func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
+func TestResolveBudget_ConfigAlone(t *testing.T) {
 	path := budgetEnvSandbox(t)
-	os.Unsetenv(BudgetEnv)
 	writeBudgetConfig(t, path, "admission:\n  budget: 50%,ignore-external\n")
 
 	got, err := ResolveBudget("")
@@ -85,7 +67,7 @@ func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
 		t.Fatalf("resolve from config: %v", err)
 	}
 	if !got.IsSet() {
-		t.Fatal("budget is not set: the config file did not survive an environment that never exported the variable")
+		t.Fatal("budget is not set: the config file was not read")
 	}
 	if got.Budget.CoresFraction != 0.5 {
 		t.Errorf("cores fraction = %v, want 0.5", got.Budget.CoresFraction)
@@ -100,7 +82,6 @@ func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
 
 func TestResolveBudget_UnsetSaysSo(t *testing.T) {
 	budgetEnvSandbox(t)
-	os.Unsetenv(BudgetEnv)
 
 	got, err := ResolveBudget("")
 	if err != nil {
@@ -122,7 +103,6 @@ func TestResolveBudget_UnsetSaysSo(t *testing.T) {
 
 func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 	path := budgetEnvSandbox(t)
-	os.Unsetenv(BudgetEnv)
 	writeBudgetConfig(t, path, "admission:\n  # host sensor over-reads external load\n\n  budget: \"  ignore-external  \"\n")
 
 	got, err := ResolveBudget("")
@@ -139,7 +119,6 @@ func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 
 func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
 	path := budgetEnvSandbox(t)
-	os.Unsetenv(BudgetEnv)
 	writeBudgetConfig(t, path, "admission:\n  # nothing set yet\n  mode: classic\n")
 
 	got, err := ResolveBudget("")
@@ -153,7 +132,6 @@ func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
 
 func TestResolveBudget_MalformedConfigFails(t *testing.T) {
 	path := budgetEnvSandbox(t)
-	os.Unsetenv(BudgetEnv)
 	writeBudgetConfig(t, path, "admission:\n  budget: half of it\n")
 
 	if _, err := ResolveBudget(""); err == nil || !strings.Contains(err.Error(), path+" admission.budget") {
