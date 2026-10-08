@@ -70,7 +70,7 @@ The Go in-process path reads more variables than the contract names. They exist 
 - `SPARKWING_EXECUTION_CAPABILITY_STDIN`, `SPARKWING_BROKERED_ARTIFACTS`, `SPARKWING_BROKERED_NODE_CLAIM`: broker-mode switches.
 - `SPARKWING_LEASE_TOKEN`, `SPARKWING_CHILD_LEASE_TOKEN`: admission leases for nested runs.
 - `SPARKWING_SOURCE_DIR`, `SPARKWING_GATE_INDEX`: checkout and hook staging paths.
-- `SPARKWING_START_AT`, `SPARKWING_STOP_AT`, `SPARKWING_DRY_RUN`, `SPARKWING_ONLY`, `SPARKWING_NO_CACHE`, `SPARKWING_PROFILE`, `SPARKWING_MODE`, `SPARKWING_WORKERS`, `SPARKWING_DEBUG_PAUSE_BEFORE`, `SPARKWING_DEBUG_PAUSE_AFTER`, `SPARKWING_DEBUG_PAUSE_ON_FAILURE`: run options and debug pauses, which [Run options](#run-options) replaces.
+- `SPARKWING_START_AT`, `SPARKWING_STOP_AT`, `SPARKWING_DRY_RUN`, `SPARKWING_ONLY`, `SPARKWING_NO_CACHE`, `SPARKWING_MODE`, `SPARKWING_WORKERS`, `SPARKWING_DEBUG_PAUSE_BEFORE`, `SPARKWING_DEBUG_PAUSE_AFTER`, `SPARKWING_DEBUG_PAUSE_ON_FAILURE`: run options and debug pauses, which [Run options](#run-options) replaces.
 
 ## Transport
 
@@ -197,7 +197,7 @@ When a plan lists steps, the host sends one `run_step` per step in an order the 
 
 ## Run options
 
-**Today.** `sparkwing run` hands the Go binary its run options as `SPARKWING_START_AT`, `SPARKWING_STOP_AT`, `SPARKWING_DRY_RUN`, `SPARKWING_ONLY`, `SPARKWING_NO_CACHE`, `SPARKWING_PROFILE`, `SPARKWING_MODE` and `SPARKWING_WORKERS`. The binary has no flags for them.
+**Today.** `sparkwing run` hands the Go binary its run options as `SPARKWING_START_AT`, `SPARKWING_STOP_AT`, `SPARKWING_DRY_RUN`, `SPARKWING_ONLY`, `SPARKWING_NO_CACHE`, `SPARKWING_MODE` and `SPARKWING_WORKERS`. The binary has no flags for them.
 
 **Target.** Run options travel as one JSON object:
 

@@ -5,7 +5,7 @@ Pipelines fire from several sources:
 1. **GitHub App** -- a GitHub event runs the pipelines a team subscribed
    to the repository through the [GitHub App](github-app.md).
 2. **Manual / API invocation** -- `sparkwing run <pipeline>` for local
-   execution, `sparkwing pipeline trigger <pipeline> --profile prof` for
+   execution, `sparkwing pipeline trigger --profile prof <pipeline>` for
    remote dispatch.
 3. **Git hooks** (optional) -- `sparkwing pipeline hooks install` writes
    pre-commit / pre-push / post-commit hook files into `.git/hooks/` that
@@ -128,14 +128,13 @@ public dashboard base URL to make each check run link to `/runs?run=<run-id>`.
 
 ```bash
 sparkwing run build-deploy                                  # local execution
-sparkwing run build-deploy --profile prod                   # local, state via prod
-sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
+sparkwing pipeline trigger --profile prod build-deploy      # remote dispatch
 ```
 
 `sparkwing cluster triggers list --profile prod` surfaces pending / claimed /
 done triggers on the controller; `sparkwing cluster triggers get --id ...`
 inspects one. To fire a fresh trigger (the sparkwing equivalent of
-`gh workflow run`), use `sparkwing pipeline trigger <pipeline> --profile PROF`.
+`gh workflow run`), use `sparkwing pipeline trigger --profile PROF <pipeline>`.
 
 ## Git hooks
 
@@ -167,10 +166,8 @@ names. `--output pretty` keeps the readable report and repair instructions.
 If configuration loading fails, status still lists installed hooks, reports
 the error on stderr, and exits nonzero. It emits no JSON summary in that case.
 
-
-Hooks installed without `--profile` prove and run their pipelines with
-`--sw-local-only`, even when the project selects a default profile. Pass
-`--profile NAME` to install a hook that uses shared storage.
+Every hook proves and runs its pipelines on this machine with
+`--sw-local-only`.
 
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.

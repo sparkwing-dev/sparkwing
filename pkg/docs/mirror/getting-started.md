@@ -218,10 +218,9 @@ What still wants the network is visible in advance:
   overlay already on disk, or pin exact tags and pay nothing. Without the
   flag an unreachable proxy fails the run and the error names it. The
   resolution rules are in [sparks.md](sparks.md).
-- **A profile with a `controller:` block.** Sparkwing Cloud and any other
-  hosted controller own state, cache, and secrets over HTTPS, so a run
-  under that profile needs the controller. `--sw-local-only` pins one run
-  back to the local surfaces.
+- **A controller profile.** `sparkwing pipeline trigger --profile NAME`
+  and read verbs that name a controller profile need that controller over
+  HTTPS. `sparkwing run` reads and writes only local surfaces.
 - **What the pipeline itself does.** A step that pulls an image, fetches a
   ref, or deploys needs whatever that step needs. Sparkwing does not
   change it.
@@ -331,18 +330,19 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 
 ## Run Targets
 
-`sparkwing run` executes locally; `sparkwing pipeline trigger` hands
-execution to a profile's controller. Both take `--profile` to pick where
-state lives and which controller to talk to. `sparkwing run` also takes
+`sparkwing run` executes on this machine against its local store, logs,
+cache, and secrets. `sparkwing pipeline trigger --profile NAME` hands
+execution to that profile's controller. `sparkwing run` also takes
 `--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
-tree (trigger runs the source registered with the controller):
+tree (trigger runs the source registered with the controller, or the
+checkout's uncommitted changes with `--working-tree`):
 
 ```bash
-sparkwing run build                              # run locally with local code
-sparkwing run build --profile dev               # local code, state via "dev"
-sparkwing run build --sw-ref main               # build the main ref locally
-sparkwing pipeline trigger build --profile dev  # run on the "dev" cluster
-sparkwing pipeline trigger build --profile prod # run on the "prod" cluster
+sparkwing run build                                    # run locally with local code
+sparkwing run build --sw-ref main                      # build the main ref locally
+sparkwing pipeline trigger --profile dev build         # run on the "dev" cluster
+sparkwing pipeline trigger --profile dev --working-tree build  # uncommitted changes on "dev"
+sparkwing pipeline trigger --profile prod build        # run on the "prod" cluster
 ```
 
 Cluster names are profiles. `sparkwing cloud connect` writes one; see
@@ -438,32 +438,20 @@ Runs started by a push come with the Sparkwing GitHub App.
 ## Advanced deployments
 
 Everything below is optional. A team on the two paths above never has to
-read it; reach for one of these when you host the state, cache, or
-controller yourself. Each is one profile away, and pipeline code does not
-change between them.
-
-**Shared object storage.** Runners write run state, cache blobs, and logs
-to one bucket, and coordinate over object-store compare-and-swap with no
-database and no controller. See
-[shared object storage](deployment-modes.md#shared-object-storage-mode-2).
-
-**Postgres and object storage.** Run state moves to a shared Postgres so
-cache reservation, triggers, approvals, and debug pauses rest on a row
-lock rather than the bucket's CAS support. Every runner then holds a
-database credential. See
-[Postgres and object storage](deployment-modes.md#postgres-and-object-storage-mode-3).
+read it; reach for one of these when you host the controller yourself.
+Each is one profile away, and pipeline code does not change between them.
 
 **Self-hosted controller.** The `sparkwing-full` Helm chart deploys the
 controller, dashboard, cache, logs service, and Kubernetes runner into a
 cluster you operate. See [Self-hosting](self-hosting.md) and
-[hosted controller](deployment-modes.md#hosted-controller-mode-4).
+[hosted controller](deployment-modes.md#hosted-controller).
 
 **One of your own machines as the controller.** A single-instance
 controller on one box, backed by SQLite and local disk, lets a laptop
-point its profile at a desktop you own. See
+trigger pipelines on a desktop you own. See
 [one of your own machines as the controller](deployment-modes.md#one-of-your-own-machines-as-the-controller).
 
-**Profile surface YAML.** The `state` / `cache` / `logs` triple every
-advanced shape selects is documented in
+**Profile surface YAML.** The `controller:` block and the `state` /
+`cache` / `logs` triple read verbs select are documented in
 [Storage backends](backends.md), and the full field list in
 [config-reference.md](config-reference.md).

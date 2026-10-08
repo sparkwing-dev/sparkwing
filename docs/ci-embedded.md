@@ -2,9 +2,12 @@
 
 Run sparkwing pipelines **inside** an existing CI job (GitHub Actions,
 Buildkite, GitLab CI, CircleCI, ...) without standing up a sparkwing
-cluster. State, logs, and artifacts go to S3-compatible storage so a
-remote dashboard can follow the run live and replay it after the CI VM
-exits.
+cluster. The run executes on the CI runner against that runner's local
+SQLite store, logs, and cache, as `sparkwing run` does on a laptop, and
+those records go away with the CI VM. A CI job that wants run history and
+a dashboard in a shared place triggers the pipeline on a controller
+instead; see
+[sharing results through a controller](#sharing-results-through-a-controller).
 
 ## When to use
 
@@ -15,7 +18,7 @@ exits.
 | Self-hosted cluster with runners, fan-out | `distributed` |
 
 ci-embedded is the migration wedge: keep your CI vendor's job orchestration,
-let sparkwing handle the pipeline DSL + caching + dashboard.
+let sparkwing handle the pipeline DSL and caching.
 
 ## Quick start (GitHub Actions)
 
@@ -35,17 +38,10 @@ jobs:
       - run: curl -fsSL https://sparkwing.dev/install.sh | bash
 
       - name: Run sparkwing release pipeline
-        env:
-          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION:            us-west-2
         run: sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
 ```
 
-State, cache, and logs destinations come from the resolved profile in
-`~/.config/sparkwing/config.yaml`. Select one with `--profile NAME`;
-neither the environment nor a project default selects one. See
-[storage backends](backends.md) for the configuration shape.
+State, cache, and logs stay on the CI runner's disk under `~/.sparkwing`.
 
 A pipeline node that fails fails the GHA job (exit code propagates).
 
@@ -53,18 +49,10 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 
 1. `--sw-mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
    via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
-2. The orchestrator resolves state, cache, and logs from the active
-   profile (selected by `--profile` or the pipeline's `profile:`) -- e.g. an
-   S3-backed profile.
-3. Run and node state goes to the profile's `state:` surface. A sqlite
-   state surface keeps records locally and uploads one
-   `runs/<runID>/state.ndjson` dump to the cache surface when the
-   pipeline exits; an S3 state surface writes that same NDJSON
-   continuously over the life of the run.
-4. Per-node log lines route to the resolved `Logs` backend instead
-   of `~/.sparkwing/runs/<id>/`.
-5. A dashboard configured with the matching backends reads
-   everything back.
+2. The orchestrator records run and node state in the runner's local
+   SQLite store, per-node logs under `~/.sparkwing/runs/<id>/`, and cache
+   entries on local disk.
+3. The run records `mode` among its invocation flags.
 
 ## Flags
 
@@ -72,10 +60,6 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | ---- | ------- | ----------- |
 | `--sw-mode=ci-embedded` | (off) | Enables this mode. |
 | `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. A hosted runner has far fewer cores than a workstation, so a value picked for local use over-subscribes it -- pick deliberately. |
-| `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/config.yaml` (override the path with `SPARKWING_CONFIG`). Absent, the pipeline's own `profile:` field applies. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
-
-State, cache, and logs come from the resolved profile; see
-[storage backends](backends.md) for the configuration shape.
 
 ### Recommended: `SPARKWING_NO_SPARKS_RESOLVE=1` in CI
 
@@ -101,87 +85,19 @@ CI never re-resolves; the publish step on your laptop (or in a
 publish-on-merge workflow) is the deliberate "go fresh" surface.
 Repos without a `sparks:` block ignore this var -- it's a no-op.
 
-## Profile-based config (laptop)
+## Sharing results through a controller
 
-`~/.config/sparkwing/config.yaml`:
-
-```yaml
-profiles:
-  ci-team:
-    state: { type: s3, bucket: my-team-sparkwing, prefix: state }
-    cache: { type: s3, bucket: my-team-sparkwing, prefix: cache }
-    logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs }
-```
-
-Then:
+A CI job whose runs belong in a shared run history triggers the pipeline
+on a controller (Sparkwing Cloud or one you host) rather than running it
+on the CI VM:
 
 ```sh
-sparkwing run release-prod --sw-mode=ci-embedded --profile ci-team
+sparkwing pipeline trigger --profile ci-team release-prod
 ```
 
-## Watching from a laptop dashboard
-
-After (or during) a ci-embedded run, point your local dashboard at
-the same bucket:
-
-```sh
-sparkwing serve start \
-    --profile ci-team \
-    --read-only
-```
-
-The dashboard reads `state.ndjson` for run metadata, the LogStore
-for per-node lines, and the ArtifactStore for any blobs the pipeline
-saved. A profile whose `state:` surface is S3 streams run and node
-records to `runs/<runID>/state.ndjson` continuously (flushed on a
-sub-second interval, or earlier once enough envelopes buffer), so a
-dashboard pointed at the same bucket follows the run live. A sqlite
-`state:` surface has no live view: its NDJSON dump is written to the
-cache surface when the pipeline exits.
-
-### Fresh laptop, no SQLite (`--no-local-store`)
-
-The default invocation above still opens `~/.sparkwing/state.db` so
-locally-triggered runs can coexist with the remote ones. On a clean
-machine that has *only* the bucket -- new hire, ephemeral
-container, etc. -- pass `--no-local-store` to skip SQLite entirely
-and have the dashboard list runs directly from
-`<artifact-store>/runs/*/state.ndjson`:
-
-```sh
-sparkwing serve start \
-    --profile ci-team \
-    --no-local-store \
-    --read-only
-```
-
-This mode is read-only by construction: the orchestrator's write
-endpoints (cancel, retry, approvals) are not mounted, since there's
-no local SQLite to persist to. Passing `--no-local-store` without
-both `--log-store` and `--artifact-store` (directly or via `--profile`)
-errors out -- the dashboard would have nowhere to read from.
-
-## S3 layout
-
-```
-<bucket>/<prefix>/
-    cache/                                  # ArtifactStore
-        runs/<runID>/state.ndjson           # final run + node dump
-        <user-keys...>                      # pipeline-saved blobs
-    logs/                                   # LogStore
-        <runID>/<nodeID>/<seq>.ndjson       # one object per flush
-```
-
-S3 has no native append, so every write is its own object. The logs
-surface buffers each node's lines and writes one object per flush,
-which keeps a chatty node at a handful of requests rather than one per
-line. A flush lands when the buffer reaches `batch_bytes`, when
-`batch_interval` elapses, when a reader asks for the node's log, and
-when the node finishes. `max_log_objects` and `max_log_bytes` bound
-what one node can write; past either the surface drops further lines
-and ends the node's log with one marker line counting them. See
-[storage backends](backends.md#object-store-log-batching) for the keys
-and their defaults. Reads list+concat by prefix.
+The controller dispatches the run to its own runners. The CI step follows
+the run until it finishes and exits non-zero when the run fails. See
+[deployment modes](deployment-modes.md) for the controller shapes.
 
 ## Exit codes
 
@@ -197,7 +113,9 @@ node fails the CI step.
   GitHub Actions / Buildkite handle the trigger.
 - **Caching across runs** depends on stable `bincache.PipelineCacheKey`
   output (sha256 over source + go toolchain). Same source tree on the
-  same Go version = warm cache.
+  same Go version = warm cache. The cache lives on the runner's disk, so
+  a fresh VM starts cold unless the CI job persists the sparkwing home
+  between runs.
 - **Worker count vs CPU**. GHA hosted runners default to 2 CPUs.
   `--sw-workers=NumCPU` (the default) usually fits fine; larger numbers
   trade memory pressure for less queueing.
@@ -209,25 +127,6 @@ steps:
   - label: "release"
     command: |
       sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
-    plugins:
-      - aws-credentials#v1.0:
-          role: arn:aws:iam::1234:role/buildkite-sparkwing
-```
-
-State, cache, and logs come from the resolved profile. Declare a
-profile for the run and pass it with `--profile`:
-
-```yaml
-# ~/.config/sparkwing/config.yaml
-profiles:
-  buildkite:
-    state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
-    cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
-    logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
-```
-
-```sh
-sparkwing run release-prod --sw-mode=ci-embedded --profile buildkite
 ```
 
 ## GitLab CI
@@ -241,12 +140,3 @@ release:
   script:
     - sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
 ```
-
-Declare a `gitlab` profile in `~/.config/sparkwing/config.yaml` and
-select it with `--profile gitlab` (same shape as the Buildkite example
-above).
-
-## Related
-
-- The storage interface + filesystem / S3 backends.
-- The dashboard's storage-aware reads.
