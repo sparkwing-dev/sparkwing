@@ -197,6 +197,9 @@ email or a token) and `team`. These also get an `audit` record:
 - reads of secrets, tokens and operator routes (`/api/v1/secrets`,
   `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
   `/api/v1/operator/...`);
+- the dashboard's own sign-in and logout routes, and the redirect that finishes
+  a browser flow: a completed OAuth sign-in, identity link or GitHub App
+  connection, recorded with the account it signed in or acted for;
 - every `401` and `403`, whatever the method. A refused bearer shaped like a
   Sparkwing token adds `attempted_prefix`, the prefix that names the token
   without granting it.
@@ -257,7 +260,7 @@ message and the detail goes to the controller log.
 
 Login throttling keys on the TCP peer. Only a request accepted on the
 controller's `--trusted-proxy-addr` listener counts against the budget of its
-`X-Real-IP`, so keep that port reachable by the ingress and the dashboard alone.
+`X-Real-IP`, so keep that port reachable by the ingress alone.
 Without it every browser shares the proxy's budget, which stays safe and turns
 coarse. [auth.md](auth.md) covers the setup.
 
@@ -718,10 +721,7 @@ Off-cluster runners read Git through
 live claim on the named run, and the repository recorded on its trigger. The
 unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
 drops the caller's bearer and presents its own cache credential upstream, and
-permits only registration and upload-pack reads. A login-enabled dashboard
-exposes those paths to machine bearers without accepting browser sessions:
-the mount rejects a request carrying no bearer before it extends the half-hour
-stream deadline or proxies anything, and caps concurrent Git streams. A
+permits only registration and upload-pack reads. A
 direct cache receives the run's cache grant instead, which opens only that
 team's blob trees. Every grant names the live claim that asked for it and the
 run's repository and refs; the cache refuses one that names neither, so no
@@ -758,7 +758,7 @@ records, not by the cache.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's
-runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+runner and controller pods plus the Job pods the Kubernetes runner
 backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
 render a non-`ClusterIP` cache Service unless a token Secret is configured. A
 controller or runner pool outside the cluster reaches the cache through

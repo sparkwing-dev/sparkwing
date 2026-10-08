@@ -15,7 +15,6 @@ const (
 	SparkwingController Binary = "sparkwing-controller"
 	SparkwingLogs       Binary = "sparkwing-logs"
 	SparkwingRunner     Binary = "sparkwing-runner"
-	SparkwingWeb        Binary = "sparkwing-web"
 )
 
 var supportedPlatforms = map[Binary]map[string]map[string]bool{
@@ -24,7 +23,6 @@ var supportedPlatforms = map[Binary]map[string]map[string]bool{
 	SparkwingController: releasePlatforms(false),
 	SparkwingLogs:       releasePlatforms(false),
 	SparkwingRunner:     releasePlatforms(true),
-	SparkwingWeb:        releasePlatforms(false),
 }
 
 func releasePlatforms(windows bool) map[string]map[string]bool {

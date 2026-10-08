@@ -422,11 +422,6 @@ controller:
     type: pvc
     pvc:
       keepOnUninstall: true
-web:
-  image:
-    repository: ${image_prefix}sparkwing-web
-    tag: $image_tag
-    pullPolicy: $image_pull_policy
 sparkwing-runner-bundle:
   runner:
     replicas: 1

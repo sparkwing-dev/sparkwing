@@ -22,6 +22,11 @@ unlock.
 
 ### Added
 
+- **controller:** The controller serves the dashboard, browser sign-in and the dashboard's log, event and capacity reads on its own listener
+  `Server.WithDashboard` attaches the surface; `sparkwing-controller` always attaches it. A `__Host-sw_session` cookie authenticates a request that carries no `Authorization` header, and a cookie-authenticated write must pass the same-origin check and send the session's CSRF token in `X-CSRF-Token`, matching the `__Host-sw_csrf` cookie. Bearer, claim-token and `Session` requests are unchanged, and a browser write from another site is refused. Pages need a signed-in browser whenever the controller authenticates its API. New routes: `GET /api/v1/runs/{id}/logs`, `/logs/search`, `/logs/{node}`, `/logs/{node}/stream`, `/logs/{node}/completeness`, `GET /api/v1/runs/grep`, `GET /api/v1/runs/{id}/events/stream` and `GET /api/v1/capacity/profiles` and `/explain`; log reads go through the logs service named by `--logs-url` with the caller's own credential. New flags `--hsts` and `--insecure-cookies`. `GET /api/v1/capabilities` adds `mode`, `storage`, `features` and `read_only` when a dashboard is attached. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
+- **sdk + runner:** The node protocol between the engine and a pipeline process is a versioned contract, `docs/node-protocol.md`
+  It names the environment a node process reads, every node-facing route with its request and response, the describe and plan documents (`docs/schemas/describe.schema.json`) and the log record (`docs/schemas/log-record.schema.json`), and marks which parts the engine-hosted model still needs. Node requests carry `Sparkwing-Node-Protocol: 1`; the local loopback controller and the execution broker log one warning per listener for a request that names another version or none, and serve it. The broker's allowlist is now one route table, and it refuses paths outside that table that it forwarded before, which no upstream route served. An empty plan's `plan --json` and `--explain` document writes `"nodes": []` rather than `null`.
+
 - **cli:** `sparkwing doctor` reports the project's Go toolchain floor, running Go, and the source of its `GOTOOLCHAIN` setting
   It identifies the toolchain sparkwing will select for builds or explains how to unblock `GOTOOLCHAIN=local`.
 
@@ -32,6 +37,12 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
+
+- **helm chart (Breaking):** `sparkwing-full` routes its Ingress to the controller Service and drops the `web` values, Deployment and Service
+  A values file that sets `web` fails to render; `web.logs.url` moves to `controller.logs.url`. `ingress.tls` passes `--hsts` and `ingress.allowInsecure=true` without TLS passes `--insecure-cookies` to the controller. Because the Ingress now publishes the whole controller API, the render refuses an Ingress in front of a controller that would start open (`controller.requireAuth=false`, or `controller.allowOpenBootstrap=true` without `controller.bootstrapAdminToken.name`) unless `ingress.allowInsecure=true`. `sparkwing-runner-bundle` 0.1.10 drops `networkPolicy.webPodSelector`. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
+- **sdk + orchestrator:** The engine restores and saves `CacheDir` directories instead of hidden node hooks
+  The node host restores each declared directory before the node's `BeforeRun` hooks and saves it after its `AfterRun` hooks; before, the restore and save ran as hooks in declaration order among the author's own. Keys, archive format and backends are unchanged. The plan snapshot lists each node's caches under `dir_caches`, and a node whose only hooks came from `CacheDir` no longer reports `has_before_run` or `has_after_run`.
+
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
   service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own
@@ -57,6 +68,11 @@ unlock.
 - **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
 - **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
 - **Child runs:** A controller-dispatched node's child run checks its ancestry in the claim's team, and the run profile fold reads node samples in the run's team, rather than in the default team.
+
+- **controller:** Server-sent event streams outlive the listener's 30-second write timeout
+  The request log's response writer now exposes the connection to `http.ResponseController`, so a live log stream extends its own write deadline instead of ending 30 seconds after it opened.
+- **runner:** Lost resource samples no longer fail or retry successful work or block spawned children
+  Capacity learning tolerates losses up to 1%; larger losses produce one warning and can only raise the resource profile. Exact exit accounting remains usable.
 
 - **cli:** Build the pipeline module with the Go version its `go.mod` requires when a fixed `GOTOOLCHAIN` pins an older version
   Resolution and compilation select the required toolchain; pipeline steps retain the original pin. `GOTOOLCHAIN=local` errors name the running version, required floor, setting source, and fix, including when a dependency raises the requirement. These errors no longer suggest `--sw-no-update`.
@@ -105,6 +121,14 @@ unlock.
 ### Removed
 - **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
   Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
+
+- **web + helm chart (Breaking):** `sparkwing-web` and its image are gone; the controller serves the dashboard
+  The controller serves the dashboard pages, browser sign-in, session cookies and the log, event and capacity reads on its own listener. Point the console host at the controller Service and delete the web Deployment. The web flags map as follows: `--require-login` follows the controller's own authentication, `--hsts` and `--trusted-proxy-addr` are controller flags, `SPARKWING_WEB_INSECURE_COOKIES` and `--allow-insecure-cookies-remote` become the controller's `--insecure-cookies`, and `--controller`, `--logs`, `--token`, `--allow-unauthenticated-remote`, `--allow-origin` and the `--*-spec` and `--profile` flags have no replacement. See [migration guide](docs/migrations/_unreleased.md#the-controller-serves-the-dashboard).
+
+- **controller (Breaking):** The JSON halves of the browser sign-in and connect flows are gone; the controller's browser surface runs those flows itself
+  `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`, `POST /api/v1/me/identities/{provider}/link` and `/link/complete`, `POST /api/v1/team/github-app/connect`, `/connect/available`, `/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and `GET /api/v1/auth/bootstrap-needed` answer 404. The dashboard's `/login`, `/auth/{provider}/...` and `/github/app/...` pages on the controller replace them. `POST /api/v1/auth/login`, `GET /api/v1/auth/session` and `POST /api/v1/auth/logout` remain for API clients.
+- **sdk (Breaking):** Remove six exported SDK names nothing called and no guide documented
+  `sparkwing.Cache`, `sparkwing.Logs` and `sparkwing.State` (aliases for `pkg/storage.ArtifactStore`, `LogStore` and `StateStore`), `sparkwing.TypeName`, `sparkwing.FailureFromContext` and `(*SpawnSpec).ResolvedID` are gone. Import `pkg/storage` for the store interfaces, and read the `Failure` an `OnFailure` handler receives as its second argument. `ResolvedID` always returned an empty string because the engine never set it. See [migration guide](docs/migrations/_unreleased.md#six-unused-sdk-names-are-removed).
 
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).

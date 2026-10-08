@@ -41,33 +41,29 @@ dependencies before running the local gate; hosted CI runs `pnpm install
 
 `next build` static-exports the dashboard to `web/out/`. `bash
 bin/build-web.sh` copies that into `internal/web/next-out/`, which
-`cmd/sparkwing` (`sparkwing serve start`) and `cmd/sparkwing-web` (the
-cluster dashboard pod) embed with `//go:embed all:next-out`.
+`cmd/sparkwing` (`sparkwing serve start`) and `cmd/sparkwing-controller`
+(the cluster controller) embed with `//go:embed all:next-out`.
 `bin/install.sh` and the release workflow both run that script, so every
-install and released artifact ships the current dashboard. Static export has
-no request lifecycle, so runtime config (API token, controller URL) is
-injected by the Go server via HTML templating. Set `SKIP_WEB_BUILD=1` on
-`bin/install.sh` to reuse the existing bundle when iterating on Go code only.
+install and released artifact ships the current dashboard. A controller built
+without that step still starts, and its dashboard pages answer 503 naming the
+build step. Static export has no request lifecycle, so the page reads its
+runtime config (version and login mode) from `/sparkwing-runtime.js`. Set
+`SKIP_WEB_BUILD=1` on `bin/install.sh` to reuse the existing bundle when
+iterating on Go code only.
 
-When controller-backed login is active, browser requests stay same-origin and
+When the controller requires sign-in, browser requests stay same-origin and
 authenticate with the session cookie, and the shared navigation shows `Log out`
-at its right edge. The service bearer stays server-side; only the dashboard
-proxy adds it to controller requests. Sessionless local dashboards retain their
-existing runtime-token behavior. Login, bootstrap, and logout forms require a
-same-origin CSRF token. Unsafe `/api/v1/*` requests also send the session CSRF
-token in `X-CSRF-Token`; the Go proxy strips browser cookies and that header
-before adding its service bearer upstream. HTML, data, and API requests
-revalidate the controller session, so logout or controller-side revocation
-takes effect on the next protected data request. Immutable `/_next/static/`
+at its right edge. `sparkwing serve` dashboards sign in with the serve token
+instead. Login, bootstrap, and logout forms require a same-origin CSRF token.
+Unsafe `/api/v1/*` requests also send the session CSRF token in
+`X-CSRF-Token`, which the controller checks against the cookie and the live
+session. Page and API requests revalidate the session, so logout or
+controller-side revocation takes effect on the next request. Immutable build
 assets do not resolve a session.
 
-`sparkwing-web --require-login` refuses to start without `--controller URL` or
-a selected profile that declares `controller.url`. A state-only backend does
-not provide browser sessions by itself. Login cookies are `Secure`; use HTTPS,
-or set `SPARKWING_WEB_INSECURE_COOKIES=1` for a loopback-only local development
-process. On a non-loopback bind that variable also needs
-`--allow-insecure-cookies-remote`, which says the operator accepts session
-cookies travelling without TLS.
+Session cookies are `Secure`; reach the controller over HTTPS, or pass the
+controller `--insecure-cookies` for a dashboard published over plain HTTP,
+which accepts session cookies travelling without TLS.
 
 ## Learn more
 

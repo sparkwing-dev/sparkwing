@@ -59,7 +59,7 @@ func TestCapacityProfiles_ChargesMeasuredSustainedCores(t *testing.T) {
 	measure(t, st, "demo", 10)
 
 	body := getJSON[capacityProfilesPayload](t,
-		capacityProfilesHandler(b), "/api/v1/capacity/profiles", http.StatusOK)
+		CapacityProfilesHandler(profilesOf(b)), "/api/v1/capacity/profiles", http.StatusOK)
 
 	if len(body.Profiles) != 1 {
 		t.Fatalf("profiles = %d, want 1: %+v", len(body.Profiles), body.Profiles)
@@ -96,7 +96,7 @@ func TestCapacityProfiles_ColdStartBeforeEnoughSamples(t *testing.T) {
 	measure(t, st, "fresh", 1)
 
 	body := getJSON[capacityProfilesPayload](t,
-		capacityProfilesHandler(b), "/api/v1/capacity/profiles", http.StatusOK)
+		CapacityProfilesHandler(profilesOf(b)), "/api/v1/capacity/profiles", http.StatusOK)
 
 	p := body.Profiles[0]
 	if p.Charge.Source != string(store.CostSourceDefault) {
@@ -115,7 +115,7 @@ func TestCapacityProfiles_PinWinsAndDriftIsReported(t *testing.T) {
 	}
 
 	body := getJSON[capacityProfilesPayload](t,
-		capacityProfilesHandler(b), "/api/v1/capacity/profiles", http.StatusOK)
+		CapacityProfilesHandler(profilesOf(b)), "/api/v1/capacity/profiles", http.StatusOK)
 
 	p := body.Profiles[0]
 	if p.Charge.Source != string(store.CostSourcePin) || p.Charge.Cores != 16 {
@@ -128,7 +128,7 @@ func TestCapacityProfiles_PinWinsAndDriftIsReported(t *testing.T) {
 
 func TestCapacityProfiles_UnsupportedBackend(t *testing.T) {
 	rec := httptest.NewRecorder()
-	capacityProfilesHandler(&fakeBackend{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil))
+	CapacityProfilesHandler(profilesOf(&fakeBackend{}))(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil))
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501; body = %s", rec.Code, rec.Body.String())
 	}
@@ -138,7 +138,7 @@ func TestCapacityExplain_MarksTheSampleThePriceCameFrom(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "demo", 10)
 
-	body := getJSON[capacityExplainPayload](t, capacityExplainHandler(b),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
 		"/api/v1/capacity/profiles/explain?pipeline=demo", http.StatusOK)
 
 	if len(body.Samples) != 10 {
@@ -173,7 +173,7 @@ func TestCapacityExplain_ChainMarksExactlyOneResolvedStep(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "demo", 10)
 
-	body := getJSON[capacityExplainPayload](t, capacityExplainHandler(b),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
 		"/api/v1/capacity/profiles/explain?pipeline=demo", http.StatusOK)
 
 	applied := []string{}
@@ -209,7 +209,7 @@ func TestCapacityExplain_NodeRowsAccompanyTheRollup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := getJSON[capacityExplainPayload](t, capacityExplainHandler(b),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
 		"/api/v1/capacity/profiles/explain?pipeline=demo", http.StatusOK)
 
 	if len(body.Nodes) != 1 || body.Nodes[0].NodeID != "build" {
@@ -234,7 +234,7 @@ func TestCapacityExplain_RejectsMissingAndUnknownPipelines(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			capacityExplainHandler(b)(rec, httptest.NewRequest(http.MethodGet, tc.target, nil))
+			CapacityExplainHandler(profilesOf(b))(rec, httptest.NewRequest(http.MethodGet, tc.target, nil))
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tc.want, rec.Body.String())
 			}
@@ -246,10 +246,17 @@ func TestCapacityExplain_AcceptsRepoScopedKeys(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "myrepo/ci", 4)
 
-	body := getJSON[capacityExplainPayload](t, capacityExplainHandler(b),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
 		"/api/v1/capacity/profiles/explain?pipeline=myrepo%2Fci", http.StatusOK)
 
 	if body.Profile.Pipeline != "myrepo/ci" {
 		t.Fatalf("pipeline = %q, want the repo-scoped key", body.Profile.Pipeline)
 	}
+}
+
+func profilesOf(b backend.Backend) ProfileReader {
+	if sb, ok := b.(*backend.StoreBackend); ok {
+		return sb.Store()
+	}
+	return nil
 }

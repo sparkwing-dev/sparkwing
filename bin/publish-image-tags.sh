@@ -23,7 +23,6 @@ binaries=(
   sparkwing-runner
   sparkwing-cache
   sparkwing-logs
-  sparkwing-web
 )
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/publish-image-tags.XXXXXX")"

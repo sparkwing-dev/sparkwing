@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
@@ -25,22 +26,27 @@ func TestGitHubSignInCreatesAnAccountAndItsPersonalSpace(t *testing.T) {
 
 func TestGitHubStartAsksOnlyForProfileAndEmails(t *testing.T) {
 	f := newIdentityFixture(t)
-	var start struct {
-		AuthorizeURL string `json:"authorize_url"`
-		State        string `json:"state"`
+	start := f.browserGet("/auth/github/start")
+	u, err := url.Parse(start.Header.Get("Location"))
+	if start.StatusCode != http.StatusSeeOther || err != nil {
+		t.Fatalf("github start = %d %q", start.StatusCode, start.Header.Get("Location"))
 	}
-	f.call("POST", "/api/v1/auth/oauth/github/start", "", map[string]string{"redirect_uri": dashRedirect}, &start)
-	u, err := url.Parse(start.AuthorizeURL)
+	q := u.Query()
+	if q.Get("scope") != "read:user user:email" || q.Get("state") == "" || q.Get("redirect_uri") != githubRedirect {
+		t.Fatalf("authorize query = %v", q)
+	}
+	req, err := http.NewRequest(http.MethodGet, f.url+"/auth/github/start", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := u.Query()
-	if q.Get("scope") != "read:user user:email" || q.Get("state") != start.State || q.Get("redirect_uri") != dashRedirect {
-		t.Fatalf("authorize query = %v", q)
+	req.Host = "evil.example"
+	resp, err := noRedirects.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code := f.call("POST", "/api/v1/auth/oauth/github/start", "",
-		map[string]string{"redirect_uri": "https://evil.example/cb"}, nil); code != http.StatusBadRequest {
-		t.Fatalf("github start with an unlisted redirect = %d, want 400", code)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("github start from an unlisted host = %d, want 400", resp.StatusCode)
 	}
 }
 
@@ -95,16 +101,13 @@ func TestGitHubIdentityIsKeyedOnTheNumericID(t *testing.T) {
 func TestGitHubOnAGoogleUsersAddressIsRefusedUntilLinked(t *testing.T) {
 	f := newIdentityFixture(t)
 	g := f.signIn(person("g-d", "dual@example.com", "Dual"))
-	var refused struct {
-		Error string `json:"error"`
+	const instructions = "An account with this email already exists. Sign in the way you did before, then link this provider from account settings."
+	if code := f.githubExchange(ghPerson(401, "dual", "dual@example.com"), nil); code != http.StatusConflict ||
+		!strings.Contains(f.lastPage, instructions) {
+		t.Fatalf("github sign-in on the google user's address = %d, want 409 with the link instructions: %s", code, f.lastPage)
 	}
-	if code := f.githubExchange(ghPerson(401, "dual", "dual@example.com"), &refused); code != http.StatusConflict ||
-		refused.Error != "An account with this email already exists. Sign in the way you did before, then link this provider from account settings." {
-		t.Fatalf("github exchange on the google user's address = %d %q, want 409 with the link instructions", code, refused.Error)
-	}
-	var linked identityBody
-	if code := f.linkGitHub(sessionAuth(g.SessionID), ghPerson(401, "dual", "dual@example.com"), &linked); code != http.StatusCreated {
-		t.Fatalf("link = %d %+v", code, linked)
+	if outcome := f.linkGitHub(sessionAuth(g.SessionID), ghPerson(401, "dual", "dual@example.com")); outcome != linked {
+		t.Fatalf("link = %s", outcome)
 	}
 	gh := f.signInGitHub(ghPerson(401, "dual", "dual@example.com"))
 	if gh.User.ID != g.User.ID || gh.ActiveTeam.Slug != g.ActiveTeam.Slug {

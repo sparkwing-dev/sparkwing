@@ -95,6 +95,8 @@ type auditRecord struct {
 	id, route string
 	principal *Principal
 	targets   []any
+	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
+	write bool
 }
 
 type auditCtxKey struct{}
@@ -107,6 +109,14 @@ func withAuditRecord(ctx context.Context, id, route string) (context.Context, *a
 func noteAuditPrincipal(ctx context.Context, p *Principal) {
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
 		rec.principal = p
+	}
+}
+
+// safety: a browser flow finishes on a GET the provider redirects to, so the step that signs an account in or
+// binds an identity or installation marks its request for the audit record a write gets.
+func noteAuditWrite(ctx context.Context) {
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
+		rec.write = true
 	}
 }
 
@@ -199,7 +209,7 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	answer http.Header, status int, elapsed time.Duration, clientIP string,
 ) {
 	denied := status == http.StatusUnauthorized || status == http.StatusForbidden
-	if readOnlyMethod(r.Method) && !denied && !auditedRead(rec.route) {
+	if readOnlyMethod(r.Method) && !denied && !rec.write && !auditedRead(rec.route) {
 		logger.InfoContext(ctx, "http", "request_id", rec.id, "method", r.Method, "route", rec.route,
 			"status", status, "dur_ms", elapsed.Milliseconds())
 		return

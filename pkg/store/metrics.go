@@ -11,6 +11,11 @@ import (
 // sampler's two-second tick, about five and a half hours of a node.
 const MaxNodeMetricSamples = 10_000
 
+// MaxNodeMetricMarkers is how many marker samples a node may hold past
+// [MaxNodeMetricSamples], so a measurement that filled the cap can still be
+// labeled partial or excluded.
+const MaxNodeMetricMarkers = 8
+
 // ErrNodeMetricLimit refuses a sample past [MaxNodeMetricSamples].
 var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
 
@@ -25,6 +30,7 @@ const (
 	MetricUnknown  MetricKind = ""
 	MetricInterval MetricKind = "interval"
 	MetricCommand  MetricKind = "command"
+	MetricPartial  MetricKind = "partial"
 )
 
 // MetricSample is one resource point.
@@ -40,12 +46,18 @@ type MetricSample struct {
 }
 
 // OneShot reports whether this reading covers a completed command.
-func (m MetricSample) OneShot() bool { return m.Kind == MetricCommand }
+func (sample MetricSample) OneShot() bool { return sample.Kind == MetricCommand }
+
+// Marker reports whether the sample only labels its node's measurement,
+// carrying no resource reading.
+func (sample MetricSample) Marker() bool {
+	return (sample.Kind == MetricUnknown || sample.Kind == MetricPartial) && sample.CPUMillicores == 0 && sample.MemoryBytes == 0 && sample.CPUTime == 0
+}
 
 // ValidateResourceValues rejects invalid kinds, negative resource values,
 // and command CPU time in an interval.
 func (sample MetricSample) ValidateResourceValues() error {
-	if sample.Kind != MetricUnknown && sample.Kind != MetricInterval && sample.Kind != MetricCommand {
+	if sample.Kind != MetricUnknown && sample.Kind != MetricInterval && sample.Kind != MetricCommand && sample.Kind != MetricPartial {
 		return errors.New("invalid node metric kind")
 	}
 	if sample.Kind == MetricInterval && sample.CPUTime != 0 {
@@ -84,7 +96,7 @@ func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 		string(t.team), runID, nodeID).Scan(&held); err != nil {
 		return err
 	}
-	if held >= MaxNodeMetricSamples {
+	if held >= MaxNodeMetricSamples && (!sample.Marker() || held >= MaxNodeMetricSamples+MaxNodeMetricMarkers) {
 		return ErrNodeMetricLimit
 	}
 	// safety: the guard never passes, so a retry inserts nothing and is told from a first write by
