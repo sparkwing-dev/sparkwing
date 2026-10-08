@@ -72,6 +72,7 @@ func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 		CPUMeasured:      obs.CPUMeasured,
 		PlanHash:         obs.PlanHash,
 		Contended:        obs.Contended,
+		Partial:          obs.Partial,
 		FloorCores:       obs.FloorCores,
 		FloorMemoryBytes: obs.FloorMemoryBytes,
 	})
@@ -85,6 +86,7 @@ type profileObservationBody struct {
 	CPUMeasured      bool    `json:"cpu_measured,omitempty"`
 	PlanHash         string  `json:"plan_hash,omitempty"`
 	Contended        bool    `json:"contended,omitempty"`
+	Partial          bool    `json:"partial,omitempty"`
 	FloorCores       float64 `json:"floor_cores,omitempty"`
 	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
 }

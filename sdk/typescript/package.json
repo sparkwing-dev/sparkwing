@@ -1,0 +1,22 @@
+{
+  "name": "@sparkwing/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prototype TypeScript SDK for Sparkwing engine-hosted execution",
+  "license": "Elastic-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}

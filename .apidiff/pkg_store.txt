@@ -1312,6 +1312,7 @@ const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
 const MaxNodeIDBytes = 200
+const MaxNodeMetricMarkers = 8
 const MaxNodeMetricSamples = 10_000
 const MaxNodeRetries = 10
 const MaxOpenInvitations = 50
@@ -1346,6 +1347,7 @@ const MeteringUnknown NodeMetering = iota
 const MetricCommand MetricKind = "command"
 const MetricInterval MetricKind = "interval"
 type MetricKind string
+const MetricPartial MetricKind = "partial"
 type MetricSample struct {
 	Kind          MetricKind
 	TS            time.Time
@@ -1354,7 +1356,8 @@ type MetricSample struct {
 
 	CPUTime time.Duration
 }
-func (m MetricSample) OneShot() bool
+func (sample MetricSample) Marker() bool
+func (sample MetricSample) OneShot() bool
 func (sample MetricSample) ValidateResourceValues() error
 const MetricUnknown MetricKind = ""
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
@@ -1660,6 +1663,7 @@ type PlanPipelineRef struct {
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
+	Partial         bool
 	Duration        time.Duration
 	PeakCores       float64
 	PeakMemoryBytes int64

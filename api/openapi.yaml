@@ -2954,6 +2954,7 @@ paths:
         this pipeline are charged. An empty `node` targets the pipeline
         rollup. A `contended` observation feeds the demand floor only, and
         carries `floor_cores` and `floor_memory_bytes` rather than peaks.
+        A `partial` observation may only raise resource dimensions or the floor.
       parameters:
         - in: query
           name: node
@@ -2973,6 +2974,7 @@ paths:
                 cpu_measured: {type: boolean}
                 plan_hash: {type: string}
                 contended: {type: boolean}
+                partial: {type: boolean}
                 floor_cores: {type: number}
                 floor_memory_bytes: {type: integer, format: int64}
       responses:
@@ -7874,8 +7876,9 @@ components:
       description: |
         One resource reading for a node. Kind identifies an interval reading or
         a completed command. An empty kind means the source is unknown.
+        A partial marker makes capacity learning raise-only.
       properties:
-        kind: {type: string, enum: ["", interval, command]}
+        kind: {type: string, enum: ["", interval, command, partial]}
         ts: {type: string, format: date-time}
         cpu_millicores: {type: integer, format: int64}
         memory_bytes: {type: integer, format: int64}

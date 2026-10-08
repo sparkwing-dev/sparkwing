@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -42,6 +43,7 @@ func (c *Client) UploadNodeOutput(ctx context.Context, runID, nodeID string, dat
 		}
 	}
 	req.ContentLength = ref.Size
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := c.blobClient(grant.URL).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upload output: %w", err)
@@ -95,6 +97,7 @@ func (c *Client) fetchOutput(ctx context.Context, grant store.OutputReadGrant) (
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := c.blobClient(grant.URL).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download output: %w", err)
