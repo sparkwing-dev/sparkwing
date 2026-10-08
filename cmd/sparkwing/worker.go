@@ -123,15 +123,7 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 }
 
 func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, logsURL, token string, heartbeat time.Duration) {
-	args := []string{
-		"handle-trigger",
-		triggerID,
-		"--controller", controllerURL,
-		"--heartbeat", heartbeat.String(),
-	}
-	if logsURL != "" {
-		args = append(args, "--logs", logsURL)
-	}
+	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(triggerID, controllerURL, logsURL, heartbeat)...)
 	cmd := exec.CommandContext(ctx, self, args...)
 	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
 	cmd.Env = os.Environ()

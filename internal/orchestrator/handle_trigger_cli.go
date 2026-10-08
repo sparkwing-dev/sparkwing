@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
 )
@@ -68,12 +69,12 @@ func runHandleTriggerCLI(args []string) error {
 		"profile to resolve backends from (local mode only). Forwarded by "+
 			"the parent's local trigger dispatcher so the child opens the "+
 			"same state backend the parent enqueued the trigger in.")
-	_ = fs.Parse(args)
+	positional := parseInterspersed(fs, args)
 
-	if fs.NArg() < 1 {
+	if len(positional) < 1 {
 		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local [--profile NAME]]")
 	}
-	triggerID := fs.Arg(0)
+	triggerID := positional[0]
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -186,4 +187,31 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// HandleTriggerArgs is the handle-trigger argv a parent that claimed
+// triggerID passes after the verb, flags first. A non-zero heartbeat makes
+// the child renew the claim itself.
+func HandleTriggerArgs(triggerID, controllerURL, logsURL string, heartbeat time.Duration) []string {
+	args := []string{"--controller", controllerURL, "--heartbeat", heartbeat.String()}
+	if logsURL != "" {
+		args = append(args, "--logs", logsURL)
+	}
+	return append(args, triggerID)
+}
+
+// safety: an older sparkwing cluster worker put the trigger ID before its
+// flags, and the stdlib parser stops at the first positional, which dropped
+// --heartbeat and left the claim to expire.
+func parseInterspersed(fs *flag.FlagSet, args []string) []string {
+	var positional []string
+	for {
+		_ = fs.Parse(args)
+		args = fs.Args()
+		if len(args) == 0 {
+			return positional
+		}
+		positional = append(positional, args[0])
+		args = args[1:]
+	}
 }
