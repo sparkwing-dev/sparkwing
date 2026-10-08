@@ -57,7 +57,6 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-local-only", Desc: "Force local secrets, state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
-	{Name: "sw-allow-secret-file", Argument: "PATH", Desc: "Send this secret-shaped working-tree file with the source snapshot anyway; PATH is repository-relative (repeatable)", Group: "System"},
 	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
 	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
 	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop)", Group: "System", Hot: true},

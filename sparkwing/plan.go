@@ -848,8 +848,8 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 // fails it with queue_timeout. Direct runs and inline jobs have no runner claim
 // step, so Requires does not select or reject their runner. For conditional
 // execution based on the active runner, use WhenRunner. The reserved "local"
-// term is a compatibility alias for "location=coordinator" and cannot be
-// claimed by a fleet helper. For soft enrolled-executor ordering, use Prefers.
+// term is a compatibility alias for "location=coordinator", which no runner
+// can claim. For a soft preference, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
 	n.requires = normalizeLabels(labels)
 	return n
@@ -861,10 +861,11 @@ func (n *JobNode) RequiresLabels() []string {
 	return copyLabels(append(slices.Clone(n.requires), n.tools...))
 }
 
-// Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.
-// The first matched preference determines the boost.
-// Each argument uses the comma-OR and AND semantics of Requires.
-// Name-less runner claims ignore preferences. No arguments clears the preferences.
+// Prefers holds the node back, for the controller's placement hold, from a
+// claim-mode runner that does not advertise the labels while a live runner
+// that does advertise them has a free slot. After the hold any eligible runner
+// takes the node. Each argument uses the comma-OR and AND semantics of
+// Requires. No arguments clears the preferences.
 func (n *JobNode) Prefers(labels ...string) *JobNode {
 	n.prefers = normalizeLabels(labels)
 	return n

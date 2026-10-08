@@ -8,9 +8,8 @@ controller hands each job to a runner whose labels satisfy it.**
 
 Each job declares the labels it needs, per node through the Go SDK
 (`.Requires(...)`) or for the whole pipeline through `requires:` in
-`sparkwing.yaml`. Legacy runners self-report labels when they poll. Enrolled
-executors use only administrator-owned capabilities; agent traffic cannot add
-them. The controller filters incompatible runners before claim ordering. A node
+`sparkwing.yaml`. Runners self-report labels when they poll. The controller
+filters incompatible runners before claim ordering. A node
 with no eligible runner waits, and its run reports why in `needs_attention`,
 until its claim wait runs out (24 hours unless the plan sets
 `ClaimWait`); it then fails as unclaimable with `queue_timeout`.
@@ -84,8 +83,7 @@ sw.Job(plan, "apply", &Apply{}).NeedsTools("terraform")
 ```
 
 `JobGroup.NeedsTools` applies to every member, including those a
-`JobFanOutDynamic` group generates after its source finishes. An enrolled executor has the tools its enrollment grants as
-`tool:<name>` capabilities.
+`JobFanOutDynamic` group generates after its source finishes.
 
 ## Waiting nodes and `needs_attention`
 
@@ -93,9 +91,8 @@ A node no agent can claim does not fail fast. Once it has waited 30 seconds
 since it first became ready, the controller checks every agent registered to
 the node's team, online or offline, plus Sparkwing Cloud on a metered
 controller. Agents are judged as their claims are, on the selector, the run's
-repository and the node's resource request: an enrolled executor on its
-enrolled profile and online while it heartbeats, any other agent on what its
-latest claim sent and online while it polls. When no online agent and no Cloud
+repository and the node's resource request: each agent on what its latest
+claim sent, and online while it polls. When no online agent and no Cloud
 runner could run the node, the run's `needs_attention` field (on the run and
 in the run list) says why:
 
@@ -137,7 +134,7 @@ sw.Job(plan, "train", &Train{}).Requires("gpu")
 sw.Job(plan, "package", &Package{}).Requires("arch=arm64", "trusted")
 sw.Job(plan, "build", &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
 
-// Enrolled executors use this to adjust priority within their operator ceiling.
+// Holds the node for a runner advertising cloud-linux, for a short window.
 sw.Job(plan, "integration", &Integration{}).
     Requires("os=linux").
     Prefers("cloud-linux")
@@ -153,15 +150,9 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
   naming the missing labels and the node waits; the controller's sweep
   fails it with `queue_timeout` at its claim wait (default 24h).
 - **`Prefers`** -- runner-label preferences recorded in plan-snapshot
-  metadata. They raise an eligible enrolled-executor offer's effective
-  priority within its administrator-owned priority ceiling during one
-  controller's offer round.
-  The first matching term adds `len(Prefers) - index`, so preferences break
-  nearby scores rather than overriding administrator-owned base priority. For
-  example, a base-50 generic executor still outranks a base-0 executor that
-  matches one preference. On the legacy claim path a preference holds the node
-  back from a runner that does not advertise it, for the controller's hold
-  window; see Local-first placement in claim mode below.
+  metadata. A preference holds the node back from a runner that does not
+  advertise it, for the controller's hold window; see
+  [Local-first placement in claim mode](#local-first-placement-in-claim-mode).
 - **`WhenRunner`** -- conditional execution. A runner that advertises
   labels evaluates the terms up front and skips the node when they are
   not satisfied (downstream `Needs` treats a skip as satisfied); a runner
@@ -183,9 +174,10 @@ pipelines:
 
 `requires` is a flat list of label terms. When set it wholesale replaces
 the project `defaults.requires`. The reserved label **`local`** is the
-compatibility spelling of `location=coordinator`: enrolled and legacy fleet
-helpers cannot claim that node. `--sw-local-only` is different; it selects
-local secrets, state, cache, and log backends, not fleet placement.
+compatibility spelling of `location=coordinator`: no runner can claim that
+node, because a runner cannot advertise either term for itself.
+`--sw-local-only` is different; it selects local secrets, state, cache, and
+log backends, not placement.
 
 ```yaml
 pipelines:
@@ -218,7 +210,7 @@ a child process that compiles and runs the pipeline. It works at the
 trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
 which claims nodes.
 
-While external executors work on nodes, the warm runner reads their
+While runners work on its nodes, the warm runner reads their
 statuses with one `GET /api/v1/runs/{id}/nodes` per run. An unchanged run
 backs off from 500 ms to 12 seconds with jitter; a status change resets the
 interval. A `429` response with `Retry-After` or
@@ -276,107 +268,32 @@ sparkwing-runner runner --label location=local
 
 ## Agent-first execution with Kubernetes overflow
 
-The `warm` trigger runner still sends nodes through the legacy name-less
-`sparkwing-runner agent` FIFO claim loop. That process opens no listener and
-polls the controller over outbound HTTP(S). A LAN, VPN, or tailnet may provide
-a direct cache path, but discovery grants no execution trust. Legacy `labels`
-are self-asserted placement terms, so they order the claim queue and never
-satisfy a hard requirement. Local admission may happen after a claim.
+The `warm` trigger runner sends nodes through the `sparkwing-runner agent`
+FIFO claim loop. That process opens no listener and polls the controller over
+outbound HTTP(S). A LAN, VPN, or tailnet may provide a direct cache path, but
+discovery grants no execution trust. Runner `labels` are self-asserted
+placement terms, so they order the claim queue and never satisfy a hard
+requirement. Local admission may happen after a claim.
 
-Schema 30 adds administrator-owned executor enrollment for the assisted
-scheduler. Enrollment binds an exact runner or service token prefix
-to trusted capabilities, a priority range, concurrency and resource ceilings,
-and a trusted placement location. `location=local` and `location=cloud` hard
-requirements match only that enrollment field. `unknown` fails either selector,
-while `location=coordinator` and its compatibility alias `local` cannot be
-granted to any helper. Authenticated worker heartbeats can update only
-liveness and finite nonnegative headroom. Idle enrollments remain visible;
-stale ones appear offline. Each enrollment also reports the exact number of
-live node claims as `active_slots`; legacy inferred rows omit that field because
-their slot count is unknown, and carry the labels and `max_concurrent` their
-runner asserted on its last claim. Rotating an enrollment to a different credential
-marks it offline until that exact credential sends a heartbeat. The scheduling
-summary and membership check apply hard capability, slot, headroom, and
-resource filters before bounded priority. Each controller accepts at most 256
-enrolled executors. The fixed safety bound keeps one scheduling snapshot and
-offer round finite; adding the 257th returns
-`executor enrollment limit reached: maximum 256 per controller`.
-At schema 31 heartbeat persists the supervisor's body-protocol range, named
-supervisor and body-host capability sets, and observational runner build
-identity. Those fields gate protocol hosting; they do not attest a particular
-compiled pipeline binary, and Sparkwing never requires exact runner-version
-equality. Observed OS, architecture, and environment are not trusted placement
-facts. Use explicit non-reserved trusted capabilities for admission tests
-rather than treating an `os=`, `arch=`, or `environment=` selector as automatic
-helper placement.
-Once an executor wins a node, its coordinator and location become hard
-requirements for any agent-loss retry.
+When a node is ready, the dispatcher opens a claim round of at most five
+seconds in which any eligible runner may claim it with
+`POST /api/v1/nodes/claim`. Requirements and resource limits filter which
+runner may claim; among eligible runners the queue is first-in-first-out,
+subject to [local-first placement](#local-first-placement-in-claim-mode).
 
-Schema 31 admits only nodes carrying an immutable controller-derived execution
-policy. Migrated schema-30 and other unsealed nodes stay coordinator-only.
-Prepare checks the indexed policy and placement metadata, then requires the
-helper's supervisor protocol and capability sets before decoding the bounded
-policy document or reserving capacity. Missing host capabilities return
-`upgrade_required`; a helper whose minimum protocol is newer than the sealed
-body returns `protocol_incompatible`. A compatible helper currently stops at
-`body_attestation_required`: exact compiled-body attestation and policy
-enforcement are not implemented yet, so it cannot reserve, offer, or execute.
-The upgrade response names the highest stable release that introduced every
-known missing floor. An unknown capability or protocol reports `safe_hold`
-with no minimum release, so a future updater cannot guess a download target.
-Eligible nodes fall back once to the coordinator; helper-only nodes remain
-pending. Automatic runner update is not implemented.
-
-Schema 30 added the durable offer records and arbitration rules retained by
-assisted scheduling. Schema 31 keeps that data model, but public helpers cannot
-submit an offer while compiled-body attestation is absent. The reservation
-contract binds one exact resource digest and physical slot through wingd. One
-shared local slot ledger covers every configured coordinator, so two
-controllers cannot award the same physical capacity. wingd also enforces
-machine-wide and per-membership CPU and memory contribution ceilings. A
-gateway must make an equivalent downstream admission reservation before
-offering. Schema 30 also persists separate random internal identities for the
-controller and each enrollment. Membership IDs derive from those two values,
-so credential rotation does not split execution history and the same display
-name on another controller cannot merge it. A membership ID is a non-secret
-journal identity, not proof that a network endpoint is trusted.
-
-The round lasts at most five seconds. On PostgreSQL, opening the round takes an
-exclusive eligibility fence while ordinary allocation, release, expiry,
-claim-heartbeat, and plan mutations take a shared fence. Its recorded highest
-eligible effective priority therefore describes one exact eligibility instant,
-while a deadline award cannot stall an unrelated claim heartbeat. Target and
-award paths load active executor occupancy once; award locks candidate executor
-rows in one canonical batch. A late heartbeat cannot revive an expired claim
-after its capacity is reusable. An offer at priority 100 or at that priority wins
-immediately.
-Otherwise the deadline winner is the highest effective priority, then the
-earliest offer, executor name, physical slot, and holder. Effective priority
-starts at the enrolled base. Run priority and the first matching `Prefers` term
-are added, then clamped to zero and the administrator-owned ceiling.
-Requirements and resource limits always filter before ranking. The winner
-consumes the same reservation; losers release theirs. Repeating an offer after
-a lost response recovers the same fenced claim.
-
-Each controller owns its own offer rounds. Multiple configured controller
-memberships share the machine's physical slot ledger, but the offer protocol does not compare
-their run priorities before one membership reserves a free slot. Simultaneous
-work from different controllers is therefore selected by which membership
-prepares and reserves first, not by a global cross-controller priority order.
-
-If the winning agent or gateway stops heartbeating, that node ends as
+If the runner holding a node stops renewing its claim, that node ends as
 `agent_lost`; the controller never reuses its row. When `.Retry(n)` still has
 budget, the controller creates a fresh linked run for the lost node and its
 descendants, reusing successful unrelated nodes and artifacts. Loss before the
 job-body acknowledgement is free. Each acknowledged body invocation spends one
 of the `n + 1` total invocations, including in-process and `RetryAuto` attempts.
 The replacement keeps the original coordinator and location, waits on durable
-bounded backoff, and briefly prefers another eligible executor. Coordinator
+bounded backoff, and briefly prefers another eligible runner. Coordinator
 fallback cannot relax that placement. This is bounded at-least-once execution,
 not exactly-once external effects.
 
-After the offer window, an unclaimed unlabeled node is
-atomically removed from the agent queue and sent to the configured Kubernetes
+After the claim round, an unclaimed unlabeled node is
+atomically removed from the runner queue and sent to the configured Kubernetes
 runner. A claim that wins that handoff owns the node, so the Kubernetes
 fallback cannot execute it a second time. Labeled nodes never use this
 fallback by default because Kubernetes Jobs advertise no capabilities. Set
@@ -401,7 +318,7 @@ no claim step, so label matching against remote runners does not apply
 (`.Requires()` is not enforced here -- there is no claim step to filter
 on -- while `WhenRunner` evaluates against the local runner, which
 advertises `local` unless the caller overrides its label set). Use
-`requires: [local]` keeps a fleet helper from claiming a dispatched node.
+`requires: [local]` keeps any runner from claiming a dispatched node.
 `--sw-local-only` selects local backends but does not add a placement rule.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` hands the run to a
@@ -430,9 +347,10 @@ sw.Job(plan, "deploy", &Deploy{}).Requires("warm-runner")
 sw.Job(plan, "build-image", &BuildImage{}).Prefers("arch=arm64")
 ```
 
-Any runner whose labels satisfy the job's `Requires` can claim it. An enrolled
-executor applies the preference inside its trusted priority range; a legacy
-runner ignores it.
+Any runner whose labels satisfy the job's `Requires` can claim it. The
+controller holds the node for a runner advertising `arch=arm64` while one is
+worth waiting for, up to the placement hold; see
+[Local-first placement in claim mode](#local-first-placement-in-claim-mode).
 
 ### A local-only preflight before a remote build
 
