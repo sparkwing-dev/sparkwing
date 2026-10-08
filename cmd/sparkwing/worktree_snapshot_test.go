@@ -362,7 +362,7 @@ func TestMaterializeSnapshotRejectsEscapingTemplateAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(template, "info", "attributes")); err != nil {
-		t.Fatal(err)
+		t.Skipf("this filesystem refuses symlinks: %v", err)
 	}
 	if runtime.GOOS == "windows" {
 		// bug: Git for Windows refuses template symlinks before checkout preparation; copy the actual link natively.
