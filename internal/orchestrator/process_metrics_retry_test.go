@@ -62,6 +62,9 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reject := tc.reject
+			if reject && runtime.GOOS == "windows" {
+				t.Skip("Windows commands report no per-command resource sample, so no command sample can be lost")
+			}
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 			paths := PathsAt(t.TempDir())
 			if err := paths.EnsureRoot(); err != nil {
@@ -103,10 +106,6 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 			}
 			// safety: without a process sampler, the opening and closing readings are unknown samples.
 			unmeasured := runtime.GOOS == "windows"
-			wantAttempted := tc.attempted
-			if unmeasured {
-				wantAttempted++
-			}
 			if unknown != unmeasured || partialMeasurement != tc.incomplete {
 				t.Fatalf("unknown=%v partial=%v samples=%+v", unknown, partialMeasurement, samples)
 			}
@@ -121,7 +120,7 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 					if err := json.Unmarshal(event.Payload, &payload); err != nil {
 						t.Fatal(err)
 					}
-					if payload.Lost != 1 || payload.Attempted != wantAttempted {
+					if payload.Lost != 1 || payload.Attempted != tc.attempted {
 						t.Fatalf("loss event=%s", event.Payload)
 					}
 				}
@@ -166,6 +165,9 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 func TestPartialCommandMeasurementsOnlyRaiseProfiles(t *testing.T) {
 	for _, raise := range []bool{false, true} {
 		t.Run(map[bool]string{false: "lower usage", true: "higher memory"}[raise], func(t *testing.T) {
+			if raise && runtime.GOOS == "windows" {
+				t.Skip("Windows commands report no per-command resource sample, so no command sample can be lost")
+			}
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 			paths := PathsAt(t.TempDir())
 			if err := paths.EnsureRoot(); err != nil {
@@ -371,6 +373,9 @@ func TestLostExclusionMarkersAreRetriedAsUnknown(t *testing.T) {
 		}, true, "the backend refused the partial marker"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.owned && runtime.GOOS == "windows" {
+				t.Skip("Windows commands report no per-command resource sample, so no command sample can be lost")
+			}
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 			paths := PathsAt(t.TempDir())
 			if err := paths.EnsureRoot(); err != nil {
