@@ -204,3 +204,45 @@ func TestParseRunFilterValidated_ReadsTheDisplayFilters(t *testing.T) {
 		}
 	}
 }
+
+func matchBothWays(t *testing.T, tn *store.Tenant, runs []store.Run, f store.RunFilter, want []string) {
+	t.Helper()
+	got, err := tn.ListRuns(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := runIDs(got); !slices.Equal(ids, want) {
+		t.Errorf("ListRuns(%+v) = %v, want %v", f, ids, want)
+	}
+	all := make([]*store.Run, len(runs))
+	for i := range runs {
+		all[i] = &runs[i]
+	}
+	mem, err := store.FilterRuns(all, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := runIDs(mem); !slices.Equal(ids, want) {
+		t.Errorf("FilterRuns(%+v) = %v, want %v", f, ids, want)
+	}
+}
+
+func TestListRuns_RepoNamesMatchCaseSensitively(t *testing.T) {
+	st := storetest.New(t).Open(t)
+	alpha := tenantFor(t, st, "alpha")
+	base := time.Unix(1700000000, 0)
+	runs := []store.Run{
+		{ID: "lower", Pipeline: "build", Status: "success", DeclaredRepo: "owner/web", StartedAt: base},
+		{ID: "upper", Pipeline: "build", Status: "success", DeclaredRepo: "owner/Web", StartedAt: base.Add(time.Second)},
+		{ID: "bare", Pipeline: "build", Status: "success", DeclaredRepo: "Web", StartedAt: base.Add(2 * time.Second)},
+	}
+	for _, r := range runs {
+		if err := alpha.CreateRun(context.Background(), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"Web"}}, []string{"bare", "upper"})
+	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"web"}}, []string{"lower"})
+	matchBothWays(t, alpha, runs, store.RunFilter{ExcludeRepoNames: []string{"Web"}}, []string{"lower"})
+	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"owner/web"}}, []string{"lower"})
+}

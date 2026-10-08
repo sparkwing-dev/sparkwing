@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type sqlClause struct {
@@ -54,11 +55,6 @@ func likeContains(term string) string {
 	return "%" + r.Replace(strings.ToLower(term)) + "%"
 }
 
-func likeSuffix(suffix string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(suffix)
-}
-
 // safety: each clause filters the whole store, because a filter over one fetched page hides matches on the others.
 func runDisplayFilterClauses(f RunFilter) []sqlClause {
 	var out []sqlClause
@@ -87,8 +83,13 @@ func runDisplayFilterClauses(f RunFilter) []sqlClause {
 		parts := make([]string, len(names))
 		var args []any
 		for i, name := range names {
-			parts[i] = "(" + runRepoNameSQL + " = ? OR " + runRepoNameSQL + ` LIKE ? ESCAPE '\')`
-			args = append(args, name, likeSuffix("/"+name))
+			// safety: = on a computed suffix, because SQLite's LIKE ignores ASCII case and would
+			// select owner/Web for web where PostgreSQL and FilterRuns do not.
+			suffix := "/" + name
+			n := utf8.RuneCountInString(suffix)
+			parts[i] = "(" + runRepoNameSQL + " = ? OR (LENGTH(" + runRepoNameSQL + ") >= ? AND SUBSTR(" + runRepoNameSQL +
+				", LENGTH(" + runRepoNameSQL + ") - ? + 1) = ?))"
+			args = append(args, name, n, n, suffix)
 		}
 		out = append(out, sqlClause{negate + "(" + strings.Join(parts, " OR ") + ")", args})
 	}
