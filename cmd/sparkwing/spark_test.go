@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -248,6 +249,9 @@ func TestSparksAddNeverAdoptsTheRuntimeHome(t *testing.T) {
 }
 
 func TestDiscoveryStopsAtAnUnreadableNestedProject(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny directory reads on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a mode-000 directory")
 	}
