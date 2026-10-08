@@ -347,3 +347,45 @@ func TestBrokeredNodeForceReleasesSupersededHolders(t *testing.T) {
 		t.Fatal("force-release of a multi-segment key was forwarded")
 	}
 }
+
+func TestBrokeredNodeMovesOutputsThroughTheLoopbackShim(t *testing.T) {
+	home := t.TempDir()
+	paths := PathsAt(home)
+	st, err := teststore.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"produce", "consume"} {
+		if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: id, Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backends := LocalBackends(paths, st, nil)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	shim, err := startLoopbackShim(backends.State, backends.Concurrency, "run-1", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(shim.Close)
+	brokered := func(node string) *client.Client {
+		b, err := startRemoteExecutionBroker(shim.url, "", shim.token, "run-1", node, store.NodeClaimFence{}, nil, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(b.Close)
+		return client.NewWithToken(b.URL(), nil, b.capability)
+	}
+	data := []byte(`{"digest":"sha256:abc"}`)
+	if err := brokered("produce").FinishNode(ctx, "run-1", "produce", "success", "", data); err != nil {
+		t.Fatalf("finish with an output through the broker: %v", err)
+	}
+	got, err := brokered("consume").GetNodeOutput(ctx, "run-1", "produce")
+	if err != nil || string(got) != string(data) {
+		t.Fatalf("read the output through the broker = %s, %v", got, err)
+	}
+}

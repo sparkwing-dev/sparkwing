@@ -135,6 +135,11 @@ func (b *remoteExecutionBroker) Close() {
 
 func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	route, segments := b.route(r)
+	if route != nil && route.signed() {
+		b.forwardSigned(w, r)
+		return
+	}
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if len(got) != len(b.capability) || subtle.ConstantTimeCompare([]byte(got), []byte(b.capability)) != 1 {
 		http.Error(w, "execution capability required", http.StatusUnauthorized)
@@ -142,7 +147,8 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	b.protocol.observe(r)
 	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
-	if !b.allow(r) || (logsRequest && b.logs == nil) {
+	allowed := route != nil && (route.check == nil || route.check(b, r, segments))
+	if !allowed || (logsRequest && b.logs == nil) {
 		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
 		return
 	}
@@ -162,6 +168,22 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 		b.logs.ServeHTTP(w, r)
 		return
+	}
+	r.Host = b.controllerHost
+	b.controller.ServeHTTP(w, r)
+}
+
+func (b *remoteExecutionBroker) forwardSigned(w http.ResponseWriter, r *http.Request) {
+	b.protocol.observe(r)
+	r.Header["X-Forwarded-For"] = nil
+	r.Header.Del("X-Forwarded-Host")
+	r.Header.Del("X-Forwarded-Proto")
+	r.Header.Del("Authorization")
+	for _, header := range []string{
+		store.ClaimHolderHeader, store.ClaimMembershipHeader, store.ClaimReservationHeader,
+		store.ClaimGenerationHeader, store.TriggerGenerationHeader,
+	} {
+		r.Header.Del(header)
 	}
 	r.Host = b.controllerHost
 	b.controller.ServeHTTP(w, r)
@@ -272,6 +294,10 @@ type brokerRoute struct {
 	check           func(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool
 }
 
+// safety: an output grant's URL is signed for one object and carries no bearer, so the
+// broker forwards it without the capability and without the runner's credential or fence.
+func (r brokerRoute) signed() bool { return strings.HasPrefix(r.pattern, "/api/v1/outputs/") }
+
 // safety: this is everything a brokered node reaches; docs/node-protocol.md lists the
 // same set, and a test holds the two equal.
 var brokerRoutes = []brokerRoute{
@@ -324,24 +350,24 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodGet, "/api/v1/logs/{run}/{node}/seal", nil},
 	{http.MethodPost, "/api/v1/logs/{run}/{node}/seal", nil},
 	{http.MethodGet, "/api/v1/logs/{run}/{node}/stream", nil},
+	{http.MethodPut, "/api/v1/outputs/uploads/{upload}", nil},
+	{http.MethodGet, "/api/v1/outputs/objects/{key...}", nil},
 	{http.MethodGet, "/bin/{key...}", nil},
 	{http.MethodHead, "/bin/{key...}", nil},
 	{http.MethodPut, "/bin/{key...}", nil},
 }
 
-func (b *remoteExecutionBroker) allow(r *http.Request) bool {
+func (b *remoteExecutionBroker) route(r *http.Request) (*brokerRoute, map[string]string) {
 	path := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
-	for _, route := range brokerRoutes {
-		if route.method != r.Method {
+	for i := range brokerRoutes {
+		if brokerRoutes[i].method != r.Method {
 			continue
 		}
-		segments, ok := b.matchRoute(route.pattern, path)
-		if !ok {
-			continue
+		if segments, ok := b.matchRoute(brokerRoutes[i].pattern, path); ok {
+			return &brokerRoutes[i], segments
 		}
-		return route.check == nil || route.check(b, r, segments)
 	}
-	return false
+	return nil, nil
 }
 
 func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[string]string, bool) {
