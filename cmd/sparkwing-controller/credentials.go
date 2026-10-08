@@ -83,6 +83,13 @@ func readCredentials(path string) (controllerCredentials, error) {
 			*dst = []byte(raw)
 		}
 	}
+	// safety: an empty pg-url would select SQLite and serve a different
+	// database from the one the operator meant, so a present file must hold a URL.
+	if raw, err := dir.ReadBytes(credPGURL); err != nil {
+		return c, err
+	} else if raw != nil && c.PGURL == "" {
+		return c, fmt.Errorf("credential %s in %s is empty; remove the file to use SQLite or write the PostgreSQL URL", credPGURL, path)
+	}
 	if c.SecretsKey, err = readSecretsKey(dir, credSecretsKey); err != nil {
 		return c, err
 	}

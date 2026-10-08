@@ -406,7 +406,8 @@ ran it.
   | `SPARKWING_CACHE_GRANT_KEY` | `cache-grant-key` |
 
 - **Edge cases:** a `--credentials-dir` that names no directory stops the
-  controller. The `sparkwing` CLI still reads `SPARKWING_SECRETS_KEY`,
+  controller, and so does a `pg-url` file that is empty, which would
+  otherwise select SQLite. The `sparkwing` CLI still reads `SPARKWING_SECRETS_KEY`,
   `SPARKWING_SECRETS_PREVIOUS_KEY` and `SPARKWING_CACHE_TOKEN` on a laptop;
   only the controller stopped. `sparkwing-controller migrate-outputs` takes
   `--credentials-dir` too, for its `pg-url`.

@@ -53,6 +53,15 @@ func TestReadCredentialsTrimsTokensAndLeavesAbsentFilesOff(t *testing.T) {
 	}
 }
 
+func TestReadCredentialsRefusesAnEmptyPGURL(t *testing.T) {
+	for _, body := range []string{"", " \n\t"} {
+		_, err := readCredentials(credentialsDir(t, map[string]string{credPGURL: body}))
+		if err == nil || !strings.Contains(err.Error(), credPGURL) {
+			t.Fatalf("pg-url %q: error = %v, want a refusal naming %s rather than a fall back to SQLite", body, err, credPGURL)
+		}
+	}
+}
+
 func TestSecretsKeyCredentials(t *testing.T) {
 	key, err := secrets.GenerateKey()
 	if err != nil {
