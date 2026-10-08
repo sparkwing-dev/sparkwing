@@ -5,6 +5,7 @@ package wingd
 import (
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,13 +56,31 @@ func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 	}
 }
 
+const socketBaseChildEnv = "SPARKWING_TEST_SOCKET_BASE_OUT"
+
 func TestWindowsSocketBaseDirIgnoresTheEnvironment(t *testing.T) {
-	base := testSocketBase(t)
-	for _, name := range []string{"TEMP", "TMP", "USERPROFILE"} {
-		t.Setenv(name, t.TempDir())
-		if got := testSocketBase(t); got != base {
-			t.Fatalf("socketBaseDir() = %q with %s moved, want the fixed base %q", got, name, base)
+	if out := os.Getenv(socketBaseChildEnv); out != "" {
+		if err := os.WriteFile(out, []byte(testSocketBase(t)), 0o600); err != nil {
+			t.Fatal(err)
 		}
+		return
+	}
+	base := testSocketBase(t)
+	// hack: shell32 caches known folders per process, so only a fresh process
+	// resolves the base under a moved environment.
+	out := filepath.Join(t.TempDir(), "base")
+	child := exec.Command(os.Args[0], "-test.run=^TestWindowsSocketBaseDirIgnoresTheEnvironment$")
+	child.Env = append(os.Environ(), socketBaseChildEnv+"="+out,
+		"TEMP="+t.TempDir(), "TMP="+t.TempDir(), "USERPROFILE="+t.TempDir())
+	if output, err := child.CombinedOutput(); err != nil {
+		t.Fatalf("socket base child with TEMP, TMP and USERPROFILE moved: %v\n%s", err, output)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != base {
+		t.Fatalf("socketBaseDir() = %q with TEMP, TMP and USERPROFILE moved, want the fixed base %q", got, base)
 	}
 	home := t.TempDir()
 	sock, err := SocketPath(home)

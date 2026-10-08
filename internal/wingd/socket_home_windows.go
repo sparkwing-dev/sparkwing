@@ -29,13 +29,15 @@ func socketHomeIdentity(home string) (path, key string, err error) {
 func socketBaseDir() (string, error) {
 	// safety: the socket path must be a pure function of the home so every
 	// caller agrees on it whatever the environment. os.TempDir reads TMP, TEMP
-	// and USERPROFILE, so two processes sharing one election lock could bind
-	// different sockets; the token's LocalAppData folder reads no variables.
-	local, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, 0)
+	// and USERPROFILE, and the LocalAppData known folder expands USERPROFILE
+	// even when given the token, so two processes sharing one election lock
+	// could bind different sockets. The token's profile directory comes from
+	// the account's profile record and reads no variables.
+	profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory()
 	if err != nil {
-		return "", fmt.Errorf("wingd: resolve the LocalAppData known folder: %w", err)
+		return "", fmt.Errorf("wingd: resolve the user profile directory: %w", err)
 	}
-	base := filepath.Join(local, "Temp")
+	base := filepath.Join(profile, "AppData", "Local", "Temp")
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		return "", fmt.Errorf("wingd: prepare socket base directory %s: %w", base, err)
 	}
