@@ -787,8 +787,7 @@ func (c *Config) Names() []string {
 }
 
 // EntrypointsByName returns a map of pipeline name -> entrypoint type
-// name. Convenient for matching against sparkwing.TypeName of
-// registered instances.
+// name.
 func (c *Config) EntrypointsByName() map[string]string {
 	out := make(map[string]string, len(c.Pipelines))
 	for _, p := range c.Pipelines {

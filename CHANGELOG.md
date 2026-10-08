@@ -35,6 +35,9 @@ unlock.
   `POST /api/v1/credits/cards` accepts `completed_at` (Unix seconds) and answers 409 `stale_card_setup` to a setup completed before a card on file saved with `completed_at` (a card saved without it, including every earlier save, never refuses a later one), so a delayed Stripe delivery of an older setup cannot change which card is charged. The units route names `card-setup-order-v1`. `store.Card.AddedAt` given to `SaveCard` carries that time.
 
 ### Changed
+- **sdk + orchestrator:** The engine restores and saves `CacheDir` directories instead of hidden node hooks
+  The node host restores each declared directory before the node's `BeforeRun` hooks and saves it after its `AfterRun` hooks; before, the restore and save ran as hooks in declaration order among the author's own. Keys, archive format and backends are unchanged. The plan snapshot lists each node's caches under `dir_caches`, and a node whose only hooks came from `CacheDir` no longer reports `has_before_run` or `has_after_run`.
+
 - **cache + controller (Breaking):** Scope cache grants to the run's repository and git ref
   A cache grant now carries the repository and refs the controller read from the run's trigger, and the cache
   service writes `/cache` and `/bin` entries only under the run's own ref. It reads the run's own
@@ -106,6 +109,9 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+
+- **sdk (Breaking):** Remove six exported SDK names nothing called and no guide documented
+  `sparkwing.Cache`, `sparkwing.Logs` and `sparkwing.State` (aliases for `pkg/storage.ArtifactStore`, `LogStore` and `StateStore`), `sparkwing.TypeName`, `sparkwing.FailureFromContext` and `(*SpawnSpec).ResolvedID` are gone. Import `pkg/storage` for the store interfaces, and read the `Failure` an `OnFailure` handler receives as its second argument. `ResolvedID` always returned an empty string because the engine never set it. See [migration guide](docs/migrations/_unreleased.md#six-unused-sdk-names-are-removed).
 
 - **runner (Breaking):** `sparkwing-runner worker`, the legacy trigger-only claim loop, is gone
   `sparkwing-runner runner --also-claim-triggers` claims triggers, and `--trigger-runner k8s|warm` with the `--trigger-runner-*` flags replaces the worker's `--runner`, `--image`, `--runner-sa` and related flags. Neither chart ran the worker. See [migration guide](docs/migrations/_unreleased.md#sparkwing-runner-worker-is-removed).

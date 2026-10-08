@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, error) {
@@ -20,7 +20,7 @@ func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, er
 		c := client.NewWithToken(strings.TrimRight(spec.URL, "/"), http.DefaultClient, spec.ResolvedToken())
 		return controllerSecretSource(ctx, c, opts.RunID), nil
 	}
-	resolver, err := sparkwing.NewSecretResolverFromSpec(ctx, *spec)
+	resolver, err := secretsource.FromSpec(*spec)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func effectiveSecretsSpec(opts Options) *backends.Spec {
 	return opts.Profile.Surfaces().Secrets
 }
 
-func resolverAsSource(ctx context.Context, r sparkwing.SecretResolver) secrets.Source {
+func resolverAsSource(ctx context.Context, r secretsource.Resolver) secrets.Source {
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
 		return r.Resolve(ctx, name)
 	})

@@ -348,13 +348,14 @@ func TestLostExclusionMarkersAreRetriedAsUnknown(t *testing.T) {
 		name    string
 		backend func(localState) *rejectMetricKind
 		owned   bool
+		warning string
 	}{
 		{"unowned marker", func(l localState) *rejectMetricKind {
 			return &rejectMetricKind{localState: l, kind: store.MetricUnknown, once: true}
-		}, false},
+		}, false, "the exclusion was recorded at finish"},
 		{"partial kind refused", func(l localState) *rejectMetricKind {
 			return &rejectMetricKind{localState: l, kind: store.MetricPartial}
-		}, true},
+		}, true, "the backend refused the partial marker"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
@@ -392,6 +393,13 @@ func TestLostExclusionMarkersAreRetriedAsUnknown(t *testing.T) {
 			}
 			if !unknown || metrics.rejected.Load() == 0 {
 				t.Fatalf("exclusion not recorded: rejected=%d samples=%+v", metrics.rejected.Load(), samples)
+			}
+			logBytes, err := os.ReadFile(paths.NodeLog(result.RunID, "build"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(logBytes), tc.warning) != 1 {
+				t.Fatalf("node log lacks %q:\n%s", tc.warning, logBytes)
 			}
 			profiles, err := st.ListPipelineProfiles(ctx, "")
 			if err != nil {

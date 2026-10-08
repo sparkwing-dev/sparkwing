@@ -67,15 +67,13 @@ func (e *VerifyError) Unwrap() error { return e.Err }
 type failureCtxKey struct{}
 
 // WithFailure returns a context carrying f, read back by a failure-aware
-// recovery callback via [FailureFromContext]. The orchestrator installs
+// recovery callback. The orchestrator installs
 // it on the context handed to an OnFailure recovery node.
 func WithFailure(ctx context.Context, f Failure) context.Context {
 	return context.WithValue(ctx, failureCtxKey{}, f)
 }
 
-// FailureFromContext returns the [Failure] installed by [WithFailure], or
-// the zero Failure (StageAction, nil Err) when none is present.
-func FailureFromContext(ctx context.Context) Failure {
+func failureFromContext(ctx context.Context) Failure {
 	if f, ok := ctx.Value(failureCtxKey{}).(Failure); ok {
 		return f
 	}
@@ -88,7 +86,7 @@ type recoveryFn struct {
 
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error) {
 	Step(w, "run", func(ctx context.Context) error {
-		return c.fn(ctx, FailureFromContext(ctx))
+		return c.fn(ctx, failureFromContext(ctx))
 	})
 	return nil, nil
 }

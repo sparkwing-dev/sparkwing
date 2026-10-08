@@ -1,4 +1,6 @@
-package sparkwing
+// Package tarsafe extracts tar archives into a directory without letting an
+// entry, a symlink or a decompression bomb reach outside it.
+package tarsafe
 
 import (
 	"archive/tar"
@@ -13,14 +15,22 @@ import (
 // safety: bounds one extraction, so a gzip bomb cannot fill the disk.
 var maxExtractBytes = int64(20 << 30)
 
-type tarExtractPolicy struct {
-	allowSymlinks bool
-	minDirPerm    fs.FileMode
-	minFilePerm   fs.FileMode
-	rename        func(name string) (string, bool)
+// Policy tunes one extraction.
+type Policy struct {
+	// AllowSymlinks keeps symlink entries whose targets stay inside the
+	// directory; without it every symlink entry is skipped.
+	AllowSymlinks bool
+	// MinDirPerm and MinFilePerm are OR-ed into every extracted mode.
+	MinDirPerm  fs.FileMode
+	MinFilePerm fs.FileMode
+	// Rename maps an entry name to its extracted name; returning false
+	// skips the entry.
+	Rename func(name string) (string, bool)
 }
 
-func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error {
+// ExtractInRoot writes every entry of tr under dir, refusing entries that
+// escape it and stopping once the archive has produced 20 GiB.
+func ExtractInRoot(tr *tar.Reader, dir string, policy Policy) error {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
@@ -44,9 +54,9 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 		}
 
 		name := hdr.Name
-		if policy.rename != nil {
+		if policy.Rename != nil {
 			kept := false
-			if name, kept = policy.rename(name); !kept {
+			if name, kept = policy.Rename(name); !kept {
 				continue
 			}
 		}
@@ -67,7 +77,7 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			}
 			// safety: chmod ignores the umask, so clamp the archive's mode
 			// instead of letting it leave a world-writable directory.
-			mode := hdr.FileInfo().Mode().Perm()&maxDirPerm | policy.minDirPerm
+			mode := hdr.FileInfo().Mode().Perm()&maxDirPerm | policy.MinDirPerm
 			deferredDirModes = append(deferredDirModes, dirMode{rel, mode})
 
 		case tar.TypeReg:
@@ -77,7 +87,7 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			// safety: overwriting a read-only file from a previous
 			// partial restore needs the remove first.
 			_ = root.Remove(rel)
-			f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, hdr.FileInfo().Mode().Perm()|policy.minFilePerm)
+			f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, hdr.FileInfo().Mode().Perm()|policy.MinFilePerm)
 			if err != nil {
 				return err
 			}
@@ -89,14 +99,14 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			}
 			if written > maxExtractBytes {
 				f.Close()
-				return fmt.Errorf("archive exceeds the %s extraction limit; refusing to fill the disk", humanBytes(maxExtractBytes))
+				return fmt.Errorf("archive exceeds the %s extraction limit; refusing to fill the disk", HumanBytes(maxExtractBytes))
 			}
 			if err := f.Close(); err != nil {
 				return err
 			}
 
 		case tar.TypeSymlink:
-			if !policy.allowSymlinks {
+			if !policy.AllowSymlinks {
 				continue
 			}
 			if err := mkdirParent(root, rel); err != nil {
@@ -185,10 +195,11 @@ func refuseSymlinkedAncestors(root *os.Root, rel string) error {
 	return nil
 }
 
-// safety: extract beside the target and swap it in with a rename, so a
-// concurrent reader sees the previous cache or the new one, never a partial
-// one, and a rejected entry leaves the previous cache in place.
-func extractIntoDirStaged(dir, stagePattern string, extract func(stage string) error) error {
+// ExtractIntoDirStaged runs extract into a fresh directory beside dir and
+// renames it over dir, so a concurrent reader sees the previous contents or
+// the new ones, never a partial tree, and a failed extraction leaves the
+// previous contents in place.
+func ExtractIntoDirStaged(dir, stagePattern string, extract func(stage string) error) error {
 	parent := filepath.Dir(dir)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
@@ -222,4 +233,18 @@ func extractIntoDirStaged(dir, stagePattern string, extract func(stage string) e
 		_ = os.RemoveAll(retired)
 	}
 	return nil
+}
+
+// HumanBytes renders n in decimal units, such as "1.5 MB".
+func HumanBytes(n int64) string {
+	const unit = 1000
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTP"[exp])
 }
