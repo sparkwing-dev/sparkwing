@@ -58,16 +58,44 @@ Controller in-cluster URL (for runners / external clients in the same cluster):
   {{ include "sparkwing-full.controller.serviceURL" . }}
 
 {{- if not .Values.controller.secretsKey.name }}
+{{- if .Values.controller.databaseSecret.name }}
 
-NOTE: controller.secretsKey.name is empty -- secrets stored via the
-controller will be plaintext at rest in the state DB. Generate and
-attach a key for production installs:
+NOTE: controller.secretsKey.name is empty, so this PostgreSQL controller
+refuses to store secrets until it has a key (unless controller.credentialsSecret
+holds a secrets-key). It has stored none yet, so a new key is safe:
 
-  openssl rand -base64 32 > /tmp/sparkwing-key
+  (umask 077 && openssl rand -base64 32 > /tmp/sparkwing-key)
   kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
   helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
     --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
+{{- else }}
+
+NOTE: controller.secretsKey.name is empty, so on its first secret write this
+SQLite controller generates its own key at /data/secrets.key (unless
+controller.credentialsSecret holds a secrets-key). Every stored secret is
+sealed under that key; a different key cannot open them and the controller
+refuses to start. Back it up once a secret exists:
+
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
+    cat /data/secrets.key > sparkwing-secrets.key
+{{- if eq .Values.controller.storage.type "emptyDir" }}
+
+  controller.storage.type is emptyDir, so the key and the state DB both go
+  with the pod; supply a key before storing anything you need to keep.
+{{- end }}
+
+To manage the key as a Secret, create it from that same file, never from a
+new key:
+
+  kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
+    --from-file=key=sparkwing-secrets.key
+  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
+    --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
+
+To change keys later, set the old key as controller.secretsPreviousKey and the
+new one as controller.secretsKey, then run `sparkwing secrets rotate`.
+{{- end }}
 {{- end }}
 
 Inspect controller logs:

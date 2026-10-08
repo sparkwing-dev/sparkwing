@@ -1134,6 +1134,47 @@ func TestControllerBootstrapTokenInTheCredentialsBundleSatisfiesRequireAuth(t *t
 	}
 }
 
+func renderNotes(t *testing.T, sets ...string) string {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	args := helmArgs("./sparkwing-full", "sparkwing", sets)
+	args[0] = "install"
+	out, err := exec.Command(helm, append(args, "--dry-run=client")...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm install --dry-run: %v\n%s", err, out)
+	}
+	_, notes, ok := strings.Cut(string(out), "NOTES:")
+	if !ok {
+		t.Fatalf("helm install --dry-run printed no NOTES:\n%s", out)
+	}
+	return notes
+}
+
+// safety: the notes are the first instructions an operator follows, and an
+// SQLite controller's generated key cannot be replaced by a new one once a
+// secret is sealed under it.
+func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
+	notes := renderNotes(t)
+	for _, want := range []string{"/data/secrets.key", "never from a\nnew key", "secretsPreviousKey"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("SQLite notes lack %q:\n%s", want, notes)
+		}
+	}
+	if strings.Contains(notes, "plaintext") || strings.Contains(notes, "openssl rand") {
+		t.Errorf("SQLite notes still describe plaintext storage or a fresh key:\n%s", notes)
+	}
+	notes = renderNotes(t, "controller.databaseSecret.name=sparkwing-db", "controller.storage.type=emptyDir")
+	if !strings.Contains(notes, "refuses to store secrets until it has a key") || strings.Contains(notes, "/data/secrets.key") {
+		t.Errorf("PostgreSQL notes:\n%s", notes)
+	}
+	if notes := renderNotes(t, "controller.secretsKey.name=sparkwing-secrets-key"); strings.Contains(notes, "secretsKey.name is empty") {
+		t.Errorf("notes with a key still warn about a missing one:\n%s", notes)
+	}
+}
+
 func TestControllerDashboardURLFlag(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
