@@ -88,11 +88,7 @@ func Open(ctx context.Context, raw string) (client *awss3.Client, bucket, prefix
 	if err != nil {
 		return nil, "", "", err
 	}
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		return nil, "", "", fmt.Errorf("object-store request budget: %w", err)
-	}
-	client, err = NewClient(ctx, objectguard.WithBudget(limiter))
+	client, err = NewClient(ctx, objectguard.WithBudget(objectguard.Shared()))
 	if err != nil {
 		return nil, "", "", err
 	}

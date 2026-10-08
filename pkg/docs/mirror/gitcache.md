@@ -83,8 +83,7 @@ credential the controller releases for the run.
 ## Cloud cache paths
 
 Cloud keeps `--cache-url` pointed at its in-cluster cache Service. It does not
-expose the cache through a public Ingress or set `CACHE_POD_URL` or
-`--cache-pod-url`. `GET /api/v1/services` therefore has no `cache_pod` URL,
+expose the cache through a public Ingress or set `--cache-pod-url`. `GET /api/v1/services` therefore has no `cache_pod` URL,
 and `sparkwing cloud status` omits that optional probe. Do not open a public
 cache host to make a health check pass.
 

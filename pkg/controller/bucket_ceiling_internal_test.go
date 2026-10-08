@@ -102,10 +102,7 @@ func TestTheBucketIsMeasuredWithNoCeilingSet(t *testing.T) {
 // A measurement that fails says so in the ceiling's state and in health,
 // rather than leaving the last totals to read as current.
 func TestAFailedBucketMeasurementReachesHealth(t *testing.T) {
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		t.Fatal(err)
-	}
+	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
 	saved := ceiling.State()
 	t.Cleanup(func() {

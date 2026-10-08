@@ -3072,12 +3072,9 @@ state appears on 'sparkwing cloud status' and on the controller's
 Prometheus metrics as sparkwing_object_store_requests_total,
 sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
 
-Budgets come from SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE and
-SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
-SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
-clears when its day window rolls (day, the default) or waits for an
-operator (manual). A local process that must finish past a tripped
-budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
+Budgets come from the controller's --object-store-budget, as
+class:window=count entries such as put:minute=600. A class tripped by its
+day budget clears when the day window rolls.
 
 The same breaker carries the bucket ceiling. A controller started with
 --max-bucket-bytes or --max-bucket-objects measures the bucket on an

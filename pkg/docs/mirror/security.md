@@ -939,8 +939,7 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   serves every endpoint unauthenticated. It logs a warning at startup,
   reports `"auth": "disabled"` on `GET /api/v1/health`, and `sparkwing
   cloud status --cluster` flags the controller probe as a warning -- fine for a
-  laptop, not for a shared deployment. Set `SPARKWING_REQUIRE_AUTH=1`
-  (or `--require-auth`) so the pod refuses to start with an empty tokens
+  laptop, not for a shared deployment. Pass `--require-auth` so the pod refuses to start with an empty tokens
   table. A controller with a multi-team license never serves
   unauthenticated, whatever the tokens table holds. See [auth.md](auth.md).
 - **Provision the first admin token.** Hand the controller the first

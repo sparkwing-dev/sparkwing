@@ -428,8 +428,7 @@ Always active on every service; scrape it with your Prometheus.
 On its API listener the controller serves `/metrics` only to an `admin`
 bearer when authentication is on, because the run counters name every
 team's pipelines; with authentication off it serves it to anyone.
-`sparkwing-controller --metrics-addr 127.0.0.1:9090`
-(`$SPARKWING_METRICS_ADDR`) moves the endpoint onto its own listener,
+`sparkwing-controller --metrics-addr 127.0.0.1:9090` moves the endpoint onto its own listener,
 which serves it without a bearer, so bind it to a pod-local or
 cluster-internal address and leave it out of the ingress. The API
 listener then answers `401` for `/metrics` when authentication is on,
@@ -604,32 +603,29 @@ load and far below a loop with no sleep:
 | `list` | 600 | 100000 |
 | `delete` | 600 | 100000 |
 
-Override any of them with `SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE`
-and `SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY`, where `<CLASS>` is `PUT`,
-`GET`, `LIST` or `DELETE`. A value of `0` removes that budget.
+Override any of them on the controller with `--object-store-budget`, a
+comma-separated list of `class:window=count` entries such as
+`put:minute=600,get:day=0`, where the class is `put`, `get`, `list` or
+`delete` and the window is `minute` or `day`. A count of `0` removes that
+budget. Every other process runs on the built-in budgets.
 A class tripped by its per-minute rate clears when that minute rolls, so
 one burst costs a minute of refusals rather than a day of them; the day
-budget still bounds the total. A class tripped by its per-day budget is
-the one `SPARKWING_OBJECT_STORE_TRIP_RESET` governs: `day` (the default)
-clears it when the day window rolls, `manual` keeps it until a reset.
-`SPARKWING_OBJECT_STORE_BREAKER=off` counts requests without refusing
-any, which is the escape hatch for a process that must finish past a
-tripped budget.
+budget still bounds the total. A class tripped by its per-day budget
+clears when the day window rolls, or earlier with a reset.
 
 ### One budget per process
 
 The budget belongs to a process, not to a cluster or a bucket. A
 controller, each `sparkwing run`, each worker and each runner agent
-builds its own from the same environment, and they do not aggregate: N
+builds its own, and they do not aggregate: N
 processes on the same bucket can spend N budgets. Size the numbers for
 what one process should ever need, and read the AWS-side budget action
 and CloudWatch alarm as the layer that sees the whole account.
 
 The same split decides the remedies. `sparkwing cluster object-store
 reset-breaker` reaches the controller process and nothing else, so a
-refusal inside a local `sparkwing run` clears with
-`SPARKWING_OBJECT_STORE_BREAKER=off` or a raised limit on that process.
-The refusal message names both.
+refusal inside a local `sparkwing run` clears when its window rolls or
+the process restarts. The refusal message names the controller's remedies.
 
 The controller reports its own budget on `GET /api/v1/health` under
 `object_store`, names every tripped class in `problems`, and exports the
@@ -685,15 +681,15 @@ ceilings bound the volumes they write.
 Every ceiling is unlimited by default, so an install that sets nothing
 sees no change. Set the controller's with:
 
-| Flag | Environment | Meaning |
-|--------|------|-------------|
-| `--max-bucket-bytes` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | Stored bytes at or above which object writes freeze |
-| `--max-bucket-objects` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | Objects at or above which object writes freeze |
-| `--warn-bucket-bytes` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | Stored bytes at which health reports a warning |
-| `--warn-bucket-objects` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | Objects at which health reports a warning |
-| `--bucket-reconcile` | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | Gap between bucket measurements, hourly by default |
-| `--bucket-store` | `SPARKWING_OBJECT_STORE_URL` | Store URL the measurement reads, such as `s3://bucket/prefix` |
-| `--bucket-measure-pages` | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | Listings one measurement may spend, 1000 by default |
+| Flag | Meaning |
+|--------|-------------|
+| `--max-bucket-bytes` | Stored bytes at or above which object writes freeze |
+| `--max-bucket-objects` | Objects at or above which object writes freeze |
+| `--warn-bucket-bytes` | Stored bytes at which health reports a warning |
+| `--warn-bucket-objects` | Objects at which health reports a warning |
+| `--bucket-reconcile` | Gap between bucket measurements, hourly by default |
+| `--bucket-store` | Store URL the measurement reads, such as `s3://bucket/prefix` |
+| `--bucket-measure-pages` | Listings one measurement may spend, 1000 by default |
 
 Counting costs nothing per request. Every write the process sends adds
 its own bytes to a running total, and the controller replaces that total
@@ -715,11 +711,7 @@ itself, keeps the running count. The running count starts at zero on
 restart, so a controller with no measurement source sees only what it
 has written since it started.
 
-Every Sparkwing process reads the same environment, so a runner handed
-`SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` refuses its own writes above
-the ceiling too. It counts only what it has written since it started,
-because the measurement belongs to the controller; treat that as a
-backstop on one process rather than a second view of the bucket.
+The ceiling is the controller's alone; no other process takes one.
 
 Three properties keep the measurement from becoming the cost it bounds.
 One replica measures per window: the controllers claim a store-wide
@@ -853,10 +845,7 @@ each guard; see [security.md](security.md#limits-profiles). A cache that
 verifies grants starts with a 200 GiB alarm unless the operator names
 another.
 
-The controller also reads its budgets from environment variables:
-`SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
-`SPARKWING_CONTROLLER_EGRESS_<BUDGET>`. `sparkwing-logs` and
-`sparkwing-cache` read the flags alone.
+Every service reads these budgets from its flags alone.
 
 ### A team's daily download cap
 

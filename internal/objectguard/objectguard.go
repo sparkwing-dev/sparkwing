@@ -70,11 +70,11 @@ type BudgetError struct {
 func (e *BudgetError) Error() string {
 	return fmt.Sprintf(
 		"object-store %s budget exceeded: the per-%s limit of %d %s requests is spent, so the breaker tripped at %s and refuses further %s requests. "+
-			"The budget belongs to this process alone: let it through with SPARKWING_OBJECT_STORE_BREAKER=off, or raise SPARKWING_OBJECT_STORE_%s_PER_%s. "+
-			"On a controller, `sparkwing cluster object-store reset-breaker --profile NAME` clears that process without restarting it",
+			"The budget belongs to this process alone. On a controller, raise it with "+BudgetFlag+" %s:%s=<count>, "+
+			"or clear it without restarting with `sparkwing cluster object-store reset-breaker --profile NAME`",
 		e.Class, e.Window, e.Limit, e.Class,
 		e.Tripped.UTC().Format(time.RFC3339), e.Class,
-		upper(string(e.Class)), upper(string(e.Window)),
+		e.Class, e.Window,
 	)
 }
 
@@ -84,16 +84,6 @@ func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
 // before re-sending, and a budget that is spent is not going to be
 // unspent by another attempt.
 func (e *BudgetError) RetryableError() bool { return false }
-
-func upper(s string) string {
-	out := []byte(s)
-	for i, b := range out {
-		if b >= 'a' && b <= 'z' {
-			out[i] = b - ('a' - 'A')
-		}
-	}
-	return string(out)
-}
 
 // Limit is one class's pair of budgets. A zero or negative value means
 // that budget does not apply.

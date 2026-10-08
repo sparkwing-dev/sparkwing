@@ -1047,26 +1047,16 @@ func TestControllerLimitsProfileAndRequestBudgetsReachTheArgs(t *testing.T) {
 	}
 }
 
-func TestControllerDashboardURLEnvironment(t *testing.T) {
+func TestControllerDashboardURLFlag(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	defaultController := renderController(t)
-	for _, env := range defaultController.Env {
-		if env.Name == "SPARKWING_DASHBOARD_URL" {
-			t.Errorf("default controller unexpectedly sets %s", env.Name)
-		}
+	if arg, ok := hasFlag(renderController(t).Args, "--dashboard-url="); ok {
+		t.Errorf("default controller unexpectedly passes %s", arg)
 	}
-
-	configured := renderController(t, "controller.dashboardURL=https://sparkwing.example.com/team")
-	dashboardURL := ""
-	for i := range configured.Env {
-		if configured.Env[i].Name == "SPARKWING_DASHBOARD_URL" {
-			dashboardURL = configured.Env[i].Value
-		}
-	}
-	if dashboardURL != "https://sparkwing.example.com/team" {
-		t.Errorf("SPARKWING_DASHBOARD_URL = %q", dashboardURL)
+	args := renderController(t, "controller.dashboardURL=https://sparkwing.example.com/team").Args
+	if !containsArg(args, "--dashboard-url=https://sparkwing.example.com/team") {
+		t.Errorf("controller args = %v, want --dashboard-url", args)
 	}
 }
 
@@ -2151,14 +2141,10 @@ func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	rendered := renderControllerYAML(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	env := map[string]string{}
-	for _, e := range runnerContainer(t, rendered).Env {
-		env[e.Name] = e.Value
-	}
 	tokenRef := credentialRef(t, rendered, "cache-token")
-	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got := env["SPARKWING_CACHE_URL"]; got != want {
-		t.Errorf("SPARKWING_CACHE_URL = %q, want %q", got, want)
+	const want = "--cache-url=http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, want) {
+		t.Errorf("controller args = %v, want %s", args, want)
 	}
 	if tokenRef == nil {
 		t.Error("controller projects no cache-token credential")
@@ -2171,10 +2157,8 @@ func TestControllerCacheURLOverrideWins(t *testing.T) {
 	}
 	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
 		"controller.cache.url=http://cache.elsewhere:8090")
-	for _, e := range controller.Env {
-		if e.Name == "SPARKWING_CACHE_URL" && e.Value != "http://cache.elsewhere:8090" {
-			t.Errorf("SPARKWING_CACHE_URL = %q, want the explicit override", e.Value)
-		}
+	if !containsArg(controller.Args, "--cache-url=http://cache.elsewhere:8090") {
+		t.Errorf("controller args = %v, want the explicit --cache-url override", controller.Args)
 	}
 }
 
@@ -2183,10 +2167,8 @@ func TestControllerHasNoCacheURLWhenNoCacheIsDeployed(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	controller := renderController(t, "sparkwing-runner-bundle.enabled=false")
-	for _, e := range controller.Env {
-		if e.Name == "SPARKWING_CACHE_URL" {
-			t.Errorf("rendered SPARKWING_CACHE_URL=%q with no cache deployed", e.Value)
-		}
+	if arg, ok := hasFlag(controller.Args, "--cache-url="); ok {
+		t.Errorf("rendered %s with no cache deployed", arg)
 	}
 }
 

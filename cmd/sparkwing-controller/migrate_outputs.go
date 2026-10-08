@@ -34,7 +34,7 @@ cannot resume afterward.`
 func runMigrateOutputs(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("migrate-outputs", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, migrateOutputsUsage) }
-	cacheBlobStore := fs.String("cache-blob-store", os.Getenv("SPARKWING_CACHE_BLOB_STORE"),
+	cacheBlobStore := fs.String("cache-blob-store", "",
 		"the cache bucket the controller serves outputs from (s3://bucket/prefix); empty moves them to the output directory")
 	batch := fs.Int("batch", 500, "outputs read per batch")
 	credentialsDir := fs.String(credentials.FlagName, "",

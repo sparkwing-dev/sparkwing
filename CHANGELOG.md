@@ -146,6 +146,9 @@ unlock.
 
 ### Removed
 
+- **controller (Breaking):** `sparkwing-controller` reads settings from flags only
+  None of the 41 configuration variables it read is read any more; each has a flag or is gone. `--cloudfront-domain`, `--cloudfront-key-pair-id` and `--object-store-budget` (`class:window=count` entries) are new, replacing the variables that had no flag. `SPARKWING_OBJECT_STORE_BREAKER` and `SPARKWING_OBJECT_STORE_TRIP_RESET` are gone without replacement, and no process reads the object-store budget variables any more. `sparkwing-full` passes `--dashboard-url` and `--cache-url`. See [migration guide](docs/migrations/_unreleased.md#sparkwing-controller-reads-settings-from-flags-only).
+
 - **controller (Breaking):** The controller never stores a secret as plaintext
   Without the `secrets-key` credential a single-team SQLite controller creates its key on the first secret write and keeps it in `secrets.key` beside `state.db`, and a single-team PostgreSQL controller starts but refuses secret writes with `409`. A multi-team controller still refuses to start without a key. Plaintext rows an older controller wrote are sealed at startup; a PostgreSQL controller without a key refuses to start while any remain. A `pkg/controller` server with no cipher refuses secret reads and writes. See [migration guide](docs/migrations/_unreleased.md#the-controller-never-stores-a-secret-as-plaintext).
 

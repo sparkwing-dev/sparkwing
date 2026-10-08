@@ -432,6 +432,67 @@ ran it.
   and says how many. A SQLite store that holds sealed values but has lost
   its `secrets.key` refuses to start rather than create a second key.
 
+## sparkwing-controller reads settings from flags only
+
+- **Before:** most controller flags took their default from an environment
+  variable, and a few settings existed only as variables: the CloudFront
+  domain and key pair id, the object-store request budgets, the breaker
+  switch and its trip reset.
+- **After:** the controller reads no configuration variable. Every setting
+  is a flag; a malformed value stops it at startup naming the flag. Two
+  settings gained a flag, `--cloudfront-domain` and `--cloudfront-key-pair-id`,
+  and the eight budget variables became one flag, `--object-store-budget`.
+  `SPARKWING_OBJECT_STORE_BREAKER` and `SPARKWING_OBJECT_STORE_TRIP_RESET`
+  are gone without a replacement: nothing set them, the breaker stays on, a
+  day trip clears when its day rolls, and `sparkwing cluster object-store
+  reset-breaker` clears one sooner. The budget variables are no longer read
+  by any process: a local `sparkwing run`, the cache and the logs service
+  run on the built-in budgets.
+- **Operator steps:** the `sparkwing-full` chart now passes `--dashboard-url`
+  and `--cache-url` as flags and needs no value changes. A manifest of your
+  own moves each variable to its flag:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_METRICS_ADDR` | `--metrics-addr` |
+  | `CACHE_POD_URL` | `--cache-pod-url` |
+  | `SPARKWING_LOGS_URL` | `--logs-url` |
+  | `SPARKWING_DASHBOARD_URL` | `--dashboard-url` |
+  | `SPARKWING_BILLING_URL` | `--billing-url` |
+  | `SPARKWING_OPERATOR_ACCOUNTS` | `--operator-accounts` |
+  | `SPARKWING_CACHE_URL` | `--cache-url` |
+  | `SPARKWING_EXTERNAL_URL` | `--external-url` |
+  | `SPARKWING_DEFAULT_PREFER_LABELS` | `--default-prefer-labels` |
+  | `SPARKWING_OBJECT_STORE_URL` | `--bucket-store` |
+  | `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | `--max-bucket-bytes` |
+  | `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | `--max-bucket-objects` |
+  | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | `--warn-bucket-bytes` |
+  | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | `--warn-bucket-objects` |
+  | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | `--bucket-reconcile` |
+  | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | `--bucket-measure-pages` |
+  | `SPARKWING_OBJECT_STORE_<CLASS>_PER_<WINDOW>` | `--object-store-budget class:window=count,...` |
+  | `SPARKWING_CACHE_BLOB_STORE` | `--cache-blob-store` (also on `migrate-outputs`) |
+  | `SPARKWING_LOGS_ARCHIVE_STORE` | `--logs-archive-store` |
+  | `SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+  | `SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS` | `--egress-max-downloads` |
+  | `SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS` | `--egress-max-log-streams` |
+  | `SPARKWING_GOOGLE_CLIENT_ID` | `--google-client-id` |
+  | `SPARKWING_GITHUB_CLIENT_ID` | `--github-client-id` |
+  | `SPARKWING_GITHUB_APP_ID` | `--github-app-id` |
+  | `SPARKWING_GITHUB_APP_SLUG` | `--github-app-slug` |
+  | `SPARKWING_OAUTH_REDIRECT_URIS` | `--oauth-redirect-uris` |
+  | `SPARKWING_EMAIL_SENDER` | `--email-sender` |
+  | `SPARKWING_EMAIL_CONFIGURATION_SET` | `--email-configuration-set` |
+  | `SPARKWING_REQUIRE_AUTH` | `--require-auth` (chart: `controller.requireAuth`) |
+  | `SPARKWING_CLOUDFRONT_DOMAIN` | `--cloudfront-domain` |
+  | `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | `--cloudfront-key-pair-id` |
+
+- **Edge cases:** `SPARKWING_REQUIRE_AUTH` accepted `yes` and `on`;
+  `--require-auth` is a boolean flag, so pass it bare. A
+  `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` the controller could not read
+  used to print a warning and keep the default; `--bucket-measure-pages`
+  refuses it. In `internal/egress`, `Bind` takes no environment.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper

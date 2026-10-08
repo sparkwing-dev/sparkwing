@@ -594,10 +594,7 @@ func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		return
-	}
+	limiter := objectguard.Shared()
 	state := limiter.State()
 	collectCeiling(ch, state.Ceiling)
 	for _, c := range state.Classes {

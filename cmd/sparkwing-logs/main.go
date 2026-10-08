@@ -42,7 +42,7 @@ func run(args []string) error {
 			"deletes every run's logs for anyone who can reach it. Leave unset "+
 			"for laptop-local use.")
 
-	readEgress := egress.Bind(fs, nil, egress.ServiceLogs, egress.LogsSurfaces)
+	readEgress := egress.Bind(fs, egress.LogsSurfaces)
 
 	defaults := logs.DefaultLimits()
 	maxNodeBytes := fs.Int64("max-node-bytes", defaults.MaxNodeBytes,

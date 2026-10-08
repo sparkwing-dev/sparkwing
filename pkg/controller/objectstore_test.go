@@ -163,10 +163,7 @@ func TestMetrics_ObjectStoreBudgetIsExported(t *testing.T) {
 
 func freezeBucket(t *testing.T, limit objectguard.CeilingLimit, bytes, objects int64) *objectguard.Ceiling {
 	t.Helper()
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		t.Fatalf("shared limiter: %v", err)
-	}
+	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
 	t.Cleanup(func() { ceiling.Configure(objectguard.CeilingConfig{}) })
 	ceiling.Configure(objectguard.CeilingConfig{Limit: limit, Reconcile: time.Hour})
@@ -265,10 +262,7 @@ func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		t.Fatalf("shared limiter: %v", err)
-	}
+	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
 	t.Cleanup(func() { ceiling.Configure(objectguard.CeilingConfig{}) })
 	ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 1000}})

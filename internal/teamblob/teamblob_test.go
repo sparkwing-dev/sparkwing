@@ -423,7 +423,6 @@ func TestFailingBucketCostsBoundedAttempts(t *testing.T) {
 	t.Setenv("AWS_CONFIG_FILE", "/dev/null")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
 	t.Setenv("SPARKWING_S3_ENDPOINT", srv.URL)
-	t.Setenv("SPARKWING_OBJECT_STORE_BREAKER", "off")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	client, b, prefix, err := s3store.Open(ctx, "s3://"+bucket+"/svc")

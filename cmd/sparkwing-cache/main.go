@@ -116,7 +116,7 @@ func run(args []string) error {
 			"which costs one upstream fetch each. 0 leaves the proxy unbounded.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		cfg.GitForkLimit, "max concurrent git subprocesses.")
-	readEgress := egress.Bind(fs, nil, egress.ServiceCache, egress.CacheSurfaces)
+	readEgress := egress.Bind(fs, egress.CacheSurfaces)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil

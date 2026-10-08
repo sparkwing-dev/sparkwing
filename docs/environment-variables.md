@@ -23,51 +23,10 @@ Kinds:
 - **undecided**: an operator knob without a page yet; each one waits on a
   decision to document it or remove it.
 
+The services (`sparkwing-controller`, `sparkwing-cache`, `sparkwing-logs`,
+`sparkwing-runner`) read their settings from flags and their secrets from
+the files in `--credentials-dir`, so no service configuration appears here.
 
-## Configuration: `sparkwing-controller`
-
-| Variable | Described in |
-|---|---|
-| `SPARKWING_BILLING_URL` | [auth](auth.md) |
-| `SPARKWING_CACHE_BLOB_STORE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_CLOUDFRONT_DOMAIN` | [self-hosting](self-hosting.md) |
-| `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | [self-hosting](self-hosting.md) |
-| `SPARKWING_DASHBOARD_URL` | [hooks](hooks.md) |
-| `SPARKWING_DEFAULT_PREFER_LABELS` | [scheduling](scheduling.md) |
-| `SPARKWING_EMAIL_CONFIGURATION_SET` | [auth](auth.md) |
-| `SPARKWING_EMAIL_SENDER` | [auth](auth.md) |
-| `SPARKWING_EXTERNAL_URL` | [hooks](hooks.md) |
-| `SPARKWING_GITHUB_APP_ID` | [github-app](github-app.md) |
-| `SPARKWING_GITHUB_APP_SLUG` | [github-app](github-app.md) |
-| `SPARKWING_GITHUB_CLIENT_ID` | [auth](auth.md) |
-| `SPARKWING_GOOGLE_CLIENT_ID` | [auth](auth.md) |
-| `SPARKWING_LOGS_ARCHIVE_STORE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_METRICS_ADDR` | [observability](observability.md) |
-| `SPARKWING_OAUTH_REDIRECT_URIS` | [auth](auth.md) |
-| `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_URL` | [observability](observability.md) |
-| `SPARKWING_OPERATOR_ACCOUNTS` | [auth](auth.md) |
-| `SPARKWING_REQUIRE_AUTH` | [security](security.md) |
-| `CACHE_POD_URL` | [gitcache](gitcache.md) |
-| `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
-| `SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` | [observability](observability.md) |
-| `SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS` | [observability](observability.md) |
-| `SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_PUT_PER_MINUTE` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_PUT_PER_DAY` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_GET_PER_MINUTE` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_GET_PER_DAY` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_LIST_PER_MINUTE` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_LIST_PER_DAY` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_DELETE_PER_MINUTE` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_DELETE_PER_DAY` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_BREAKER` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_TRIP_RESET` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | [observability](observability.md) |
-| `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | [observability](observability.md) |
 
 ## Runtime: the Jobs and children a runner starts
 
@@ -80,6 +39,7 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_LOGS_URL` | [architecture](architecture.md) |
+| `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 | `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs

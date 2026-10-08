@@ -75,9 +75,8 @@ func providerConfigured(label, flag, id, secret string) (bool, error) {
 		return false, nil
 	}
 	if id == "" || secret == "" {
-		upper := strings.ToUpper(flag)
-		return false, fmt.Errorf("%s sign-in needs both --%s-client-id (SPARKWING_%s_CLIENT_ID) and SPARKWING_%s_CLIENT_SECRET",
-			label, flag, upper, upper)
+		return false, fmt.Errorf("%s sign-in needs both --%s-client-id and the %s-client-secret credential",
+			label, flag, flag)
 	}
 	return true, nil
 }
@@ -85,7 +84,7 @@ func providerConfigured(label, flag, id, secret string) (bool, error) {
 func redirectAllowlist(raw string) ([]string, error) {
 	uris := splitCSV(raw)
 	if len(uris) == 0 {
-		return nil, fmt.Errorf("sign-in needs --oauth-redirect-uris (SPARKWING_OAUTH_REDIRECT_URIS), " +
+		return nil, fmt.Errorf("sign-in needs --oauth-redirect-uris, " +
 			"the dashboard callback URLs a provider may send a browser back to")
 	}
 	for _, u := range uris {

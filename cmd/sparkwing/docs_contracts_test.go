@@ -90,19 +90,6 @@ var userNamedEnvReads = map[string]string{
 // safety: a computed read hides the names it produces, so each one is listed
 // here and the page check covers them like any other read.
 var constructedEnvReads = map[string][]string{
-	"internal/objectguard/config.go: classEnv(c, WindowMinute)": {
-		"SPARKWING_OBJECT_STORE_PUT_PER_MINUTE", "SPARKWING_OBJECT_STORE_GET_PER_MINUTE",
-		"SPARKWING_OBJECT_STORE_LIST_PER_MINUTE", "SPARKWING_OBJECT_STORE_DELETE_PER_MINUTE",
-	},
-	"internal/objectguard/config.go: classEnv(c, WindowDay)": {
-		"SPARKWING_OBJECT_STORE_PUT_PER_DAY", "SPARKWING_OBJECT_STORE_GET_PER_DAY",
-		"SPARKWING_OBJECT_STORE_LIST_PER_DAY", "SPARKWING_OBJECT_STORE_DELETE_PER_DAY",
-	},
-	// safety: only sparkwing-controller hands egress.Bind an environment.
-	"internal/egress/flags.go: name": {
-		"SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES", "SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS",
-		"SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS",
-	},
 	"internal/executorinfo/platform.go: key": {"WSL_INTEROP", "WSL_DISTRO_NAME"},
 }
 

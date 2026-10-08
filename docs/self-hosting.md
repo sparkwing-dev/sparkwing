@@ -78,8 +78,8 @@ Point `--cache-blob-store` at the cache service's S3 bucket and prefix; the
 controller announces `data_download_url` to in-cluster callers when that store
 is configured, and to public-ingress callers when CloudFront signing is also
 configured.
-Set `SPARKWING_CLOUDFRONT_DOMAIN` and
-`SPARKWING_CLOUDFRONT_KEY_PAIR_ID`, then put the signing key in the `cloudfront-key`
+Pass `--cloudfront-domain` and `--cloudfront-key-pair-id`, then put the
+signing key in the `cloudfront-key`
 [credential](#controller-credentials). Keep it out of Helm values, command
 arguments, and logs. The distribution must serve the private data bucket through its origin
 access control configuration.
@@ -374,8 +374,7 @@ file `cache-token` in its `--credentials-dir`, which the controller holds as
 refuses to start without them. The logs service reaches the
 same controller through its `--controller` with the appending caller's own
 credential. Give the controller `--cache-blob-store` and
-`--logs-archive-store` (or `SPARKWING_CACHE_BLOB_STORE` and
-`SPARKWING_LOGS_ARCHIVE_STORE`), the same URLs the services use, and its hourly
+`--logs-archive-store`, the same URLs the services use, and its hourly
 storage pass lists both to reconcile the counts and expires a team's cache
 objects 30 days after their last write. The controller's role then needs
 `s3:ListBucket` and `s3:DeleteObject` on the cache's prefix and

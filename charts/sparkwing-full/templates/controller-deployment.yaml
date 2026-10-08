@@ -82,6 +82,12 @@ spec:
             {{- if $logsURL }}
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
+            {{- with .Values.controller.dashboardURL }}
+            - {{ printf "--dashboard-url=%s" . | quote }}
+            {{- end }}
+            {{- with (include "sparkwing-full.controller.cacheURL" .) }}
+            - {{ printf "--cache-url=%s" . | quote }}
+            {{- end }}
             {{- with .Values.controller.argon2MemoryBudgetMB }}
             - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
             {{- end }}
@@ -160,14 +166,6 @@ spec:
           env:
             - name: SPARKWING_HOME
               value: /data
-            {{- if .Values.controller.dashboardURL }}
-            - name: SPARKWING_DASHBOARD_URL
-              value: {{ .Values.controller.dashboardURL | quote }}
-            {{- end }}
-            {{- with (include "sparkwing-full.controller.cacheURL" .) }}
-            - name: SPARKWING_CACHE_URL
-              value: {{ . | quote }}
-            {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-controller"
             {{- with .Values.controller.extraEnv }}

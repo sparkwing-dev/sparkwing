@@ -59,7 +59,7 @@ const DefaultCeilingSubject = "the bucket"
 
 func defaultRemedy(r CeilingReason) string {
 	return "Delete objects until the next measurement puts the store under the ceiling, raise " +
-		ceilingEnv(r) + ", or clear the freeze with `sparkwing cluster object-store reset-breaker --profile NAME`"
+		ceilingFlag(r) + ", or clear the freeze with `sparkwing cluster object-store reset-breaker --profile NAME`"
 }
 
 func (e *CeilingError) Unwrap() error { return ErrCeilingFrozen }
@@ -93,13 +93,12 @@ type CeilingConfig struct {
 	// Empty uses DefaultCeilingSubject.
 	Subject string
 	// Remedy is the operator instruction a refusal ends with. Empty
-	// names the controller's environment variables and reset verb.
+	// names the controller's flags and reset verb.
 	Remedy string
 	// Reconcile is the gap between measured bucket totals. A value at or
 	// below zero measures once at startup and then leaves the
-	// incremental counters as the only measurement. [ConfigFromEnv]
-	// fills in DefaultCeilingReconcile when the environment names no
-	// interval.
+	// incremental counters as the only measurement; the controller's
+	// --bucket-reconcile defaults to DefaultCeilingReconcile.
 	Reconcile time.Duration
 }
 
@@ -454,9 +453,9 @@ func (c *Ceiling) markIncomplete(err error) {
 	c.mu.Unlock()
 }
 
-func ceilingEnv(r CeilingReason) string {
+func ceilingFlag(r CeilingReason) string {
 	if r == CeilingObjects {
-		return EnvMaxBucketObjects
+		return "--max-bucket-objects"
 	}
-	return EnvMaxBucketBytes
+	return "--max-bucket-bytes"
 }

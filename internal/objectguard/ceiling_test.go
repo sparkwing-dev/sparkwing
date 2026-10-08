@@ -47,7 +47,7 @@ func TestCeilingFreezesWritesOnBytesAndNamesTheLimit(t *testing.T) {
 	if ce.Reason != objectguard.CeilingBytes || ce.Limit != 1000 || ce.Observed != 1200 {
 		t.Errorf("refusal reports %s %d/%d, want bytes 1000 measured at 1200", ce.Reason, ce.Observed, ce.Limit)
 	}
-	for _, want := range []string{"1000", "1200", "SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES", "reset-breaker"} {
+	for _, want := range []string{"1000", "1200", "--max-bucket-bytes", "reset-breaker"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal message %q does not name %q", err, want)
 		}
@@ -280,66 +280,9 @@ func TestReconcileWithReportsAFailedMeasurement(t *testing.T) {
 	}
 }
 
-func TestCeilingConfigFromEnv(t *testing.T) {
-	cfg, err := objectguard.ConfigFromEnv(envFrom(map[string]string{
-		"SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES":   "4096",
-		"SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES":  "2048",
-		"SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS": "9",
-		"SPARKWING_OBJECT_STORE_BUCKET_RECONCILE":   "15m",
-	}))
-	if err != nil {
-		t.Fatalf("ConfigFromEnv: %v", err)
-	}
-	want := objectguard.CeilingLimit{MaxBytes: 4096, MaxObjects: 9, WarnBytes: 2048}
-	if cfg.Ceiling.Limit != want {
-		t.Errorf("ceiling limit = %+v, want %+v", cfg.Ceiling.Limit, want)
-	}
-	if cfg.Ceiling.Reconcile != 15*time.Minute {
-		t.Errorf("reconcile interval = %s, want 15m", cfg.Ceiling.Reconcile)
-	}
-}
-
-func TestCeilingReconcileEnvZeroMeansMeasureOnce(t *testing.T) {
-	cfg, err := objectguard.ConfigFromEnv(envFrom(map[string]string{
-		"SPARKWING_OBJECT_STORE_BUCKET_RECONCILE": "0",
-	}))
-	if err != nil {
-		t.Fatalf("ConfigFromEnv: %v", err)
-	}
-	if cfg.Ceiling.Reconcile != 0 {
-		t.Errorf("reconcile interval = %s for an environment asking for one measurement, want 0", cfg.Ceiling.Reconcile)
-	}
-	if got := objectguard.NewCeiling(cfg.Ceiling).Reconcile(); got != 0 {
+func TestCeilingReconcileZeroMeansMeasureOnce(t *testing.T) {
+	if got := objectguard.NewCeiling(objectguard.CeilingConfig{Reconcile: 0}).Reconcile(); got != 0 {
 		t.Errorf("the ceiling reports %s, want the 0 it was configured with", got)
-	}
-}
-
-func TestCeilingConfigFromEnvDefaultsToUnlimitedAndHourly(t *testing.T) {
-	cfg, err := objectguard.ConfigFromEnv(envFrom(nil))
-	if err != nil {
-		t.Fatalf("ConfigFromEnv: %v", err)
-	}
-	if cfg.Ceiling.Limit.Enforced() {
-		t.Errorf("an unconfigured bucket carries a ceiling: %+v", cfg.Ceiling.Limit)
-	}
-	if got := objectguard.NewCeiling(cfg.Ceiling).Reconcile(); got != time.Hour {
-		t.Errorf("default reconcile interval = %s, want 1h", got)
-	}
-}
-
-func TestCeilingConfigFromEnvRejectsAMalformedCeiling(t *testing.T) {
-	for name, value := range map[string]string{
-		"SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES": "10GB",
-		"SPARKWING_OBJECT_STORE_BUCKET_RECONCILE": "hourly",
-	} {
-		_, err := objectguard.ConfigFromEnv(envFrom(map[string]string{name: value}))
-		if err == nil {
-			t.Errorf("%s=%q was accepted", name, value)
-			continue
-		}
-		if !strings.Contains(err.Error(), name) {
-			t.Errorf("error %q does not name %s", err, name)
-		}
 	}
 }
 

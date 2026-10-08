@@ -175,7 +175,7 @@ so no caller chooses the team a payment funds. The dashboard posts only the
 amount to `POST /api/v1/team/billing/checkout`, which needs an owner of the
 active team. The controller takes the team from that session, refuses an
 amount outside the range, and asks the hosted checkout service at
-`--billing-url` (`SPARKWING_BILLING_URL`), authenticated with the
+`--billing-url`, authenticated with the
 `billing-token` credential, to open a session for that team. The browser is
 sent to the page it returns. When Stripe confirms the payment, the checkout
 service verifies the webhook and grants the credits to the team the session
@@ -295,7 +295,7 @@ and the effect.
 
 Only the operator's own signed-in account reaches it. The controller lists
 operator accounts by account id with `--operator-accounts`
-(`SPARKWING_OPERATOR_ACCOUNTS`, comma-separated), and every route under
+(comma-separated), and every route under
 `/api/v1/operator/` answers `403` to any other caller: a team owner, a
 password session and every bearer token, an admin token included. A console
 action therefore needs the operator's sign-in, not a credential that
@@ -763,10 +763,9 @@ auth on even while the tokens table is empty, and such a request gets 401. With
 no token yet, only Google or GitHub sign-in sessions are accepted; supply the first admin
 token as the `bootstrap-admin-token` credential.
 
-With the license and a Google OAuth client (`--google-client-id` or
-`SPARKWING_GOOGLE_CLIENT_ID`, the `google-client-secret` credential, and the
-dashboard callbacks in `--oauth-redirect-uris` or
-`SPARKWING_OAUTH_REDIRECT_URIS`), the sign-in page offers Google sign-in. The
+With the license and a Google OAuth client (`--google-client-id`, the
+`google-client-secret` credential, and the dashboard callbacks in
+`--oauth-redirect-uris`), the sign-in page offers Google sign-in. The
 controller runs the whole PKCE flow on its own origin: `GET /auth/google/start`
 creates a state and verifier for a redirect URI on the allowlist, keeps them in
 a `__Host-` cookie, and sends the browser to Google. `GET /auth/google/callback`
@@ -776,8 +775,7 @@ browser finished the flow, then redeems the code, verifies the ID token
 `email_verified`) and opens a session.
 
 GitHub sign-in works the same way through `GET /auth/github/start` and
-`/auth/github/callback`, configured with `--github-client-id` (or
-`SPARKWING_GITHUB_CLIENT_ID`) and the `github-client-secret` credential under the same license and redirect allowlist.
+`/auth/github/callback`, configured with `--github-client-id` and the `github-client-secret` credential under the same license and redirect allowlist.
 It asks for `read:user user:email` only, keys the identity on GitHub's numeric
 account id so a renamed login keeps its account, and trusts only the primary
 email GitHub has verified, never the profile's public email. When the client id
@@ -842,10 +840,9 @@ it with their runner tokens; an owner demoted to `editor` keeps it, since it
 already carried only the editor's scopes. The member lists and revokes their
 own CLI tokens and no one else's, and holds at most 10 live ones in a team.
 
-With `--email-sender` (env `SPARKWING_EMAIL_SENDER`) set, the controller
+With `--email-sender` set, the controller
 emails each invitation through Amazon SES, taking credentials and region from
-the AWS default chain; `--email-configuration-set`
-(`SPARKWING_EMAIL_CONFIGURATION_SET`) names the SES configuration set every
+the AWS default chain; `--email-configuration-set` names the SES configuration set every
 message carries. The email names the inviter by display name, the team, the
 role and the accept link, and says the invitation expires in seven days; it
 strips control and bidirectional-formatting characters from names and caps

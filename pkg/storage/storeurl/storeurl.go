@@ -153,11 +153,7 @@ func newS3Client(ctx context.Context, budgeted bool) (*awss3.Client, error) {
 	if !budgeted {
 		return s3store.NewClient(ctx)
 	}
-	limiter, err := sharedLimiter()
-	if err != nil {
-		return nil, fmt.Errorf("object-store request budget: %w", err)
-	}
-	return s3store.NewClient(ctx, objectguard.WithBudget(limiter))
+	return s3store.NewClient(ctx, objectguard.WithBudget(sharedLimiter()))
 }
 
 // hack: an indirection so a test can hand newS3Client a budget of its own
