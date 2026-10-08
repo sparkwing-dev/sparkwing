@@ -13,9 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -216,19 +214,12 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	return writeRunDetailJSON(ctx, st, runID, label, out)
 }
 
-func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
+func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	ctrl := client.NewWithToken(controllerURL, nil, token)
 	if opts.EventsOnly {
 		return writeEventsViaBackend(ctx, backend.NewClientBackend(ctrl, nil), runID, opts, out)
 	}
-	if logsURL == "" {
-		var err error
-		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
-			return err
-		}
-	}
-	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token).
-		WithRunnerIdentity(logs.ProcessIdentity("cli"))
+	var logc storage.LogStore = ctrl.NodeLogs()
 
 	b := backend.NewClientBackend(ctrl, logc)
 	if !opts.Follow {

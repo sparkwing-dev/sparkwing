@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -89,22 +88,15 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 	return emitGrepMatches(matches, opts, out)
 }
 
-func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, opts GrepOpts, out io.Writer) error {
+func RunGrepRemote(ctx context.Context, controllerURL, token string, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
 		return errors.New("runs logs --grep: PATTERN is required")
 	}
 	if controllerURL == "" {
 		return errors.New("runs logs --grep: profile must carry a controller URL")
 	}
-	if logsURL == "" {
-		var err error
-		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
-			return fmt.Errorf("runs logs --grep: %w", err)
-		}
-	}
 	c := client.NewWithToken(controllerURL, nil, token)
-	logc := logs.NewClientWithToken(logsURL, nil, token).
-		WithRunnerIdentity(logs.ProcessIdentity("cli"))
+	logc := c.NodeLogs()
 	runs, err := c.ListRuns(ctx, store.RunFilter{
 		Limit:          grepFetchLimit(opts),
 		Pipelines:      opts.Pipelines,
@@ -165,7 +157,7 @@ func scanLocalRuns(ctx context.Context, st *store.Store, paths Paths, runs []*st
 	return out, nil
 }
 
-func scanRemoteRuns(ctx context.Context, c *client.Client, logc *logs.Client, runs []*store.Run, opts GrepOpts) ([]GrepMatch, error) {
+func scanRemoteRuns(ctx context.Context, c *client.Client, logc client.NodeLogs, runs []*store.Run, opts GrepOpts) ([]GrepMatch, error) {
 	var out []GrepMatch
 	for _, r := range runs {
 		if ctx.Err() != nil {

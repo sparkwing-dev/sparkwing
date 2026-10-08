@@ -32,7 +32,7 @@ func TestJobLogsRemoteReadsEventsWithoutALogsService(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := orchestrator.JobLogsRemoteWithTokens(ctx, srv.URL, "", "", "run-events",
+	if err := orchestrator.JobLogsRemoteWithTokens(ctx, srv.URL, "", "run-events",
 		orchestrator.LogsOpts{EventsOnly: true, JSON: true}, &out); err != nil {
 		t.Fatalf("events-only read against a controller with no logs service: %v", err)
 	}
@@ -40,8 +40,7 @@ func TestJobLogsRemoteReadsEventsWithoutALogsService(t *testing.T) {
 		t.Fatalf("events-only output = %q, want the run's event", out.String())
 	}
 
-	err = orchestrator.JobLogsRemoteWithTokens(ctx, srv.URL, "", "", "run-events", orchestrator.LogsOpts{}, &out)
-	if err == nil || !strings.Contains(err.Error(), "announces no logs service") {
-		t.Fatalf("node-log read err = %v, want the missing logs service named", err)
+	if err := orchestrator.JobLogsRemoteWithTokens(ctx, srv.URL, "", "run-events", orchestrator.LogsOpts{}, &out); err != nil {
+		t.Fatalf("node-log read against a controller with no logs service: %v", err)
 	}
 }

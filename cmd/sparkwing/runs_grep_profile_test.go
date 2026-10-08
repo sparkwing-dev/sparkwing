@@ -1,36 +1,20 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
-	logServer, err := logs.New(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	logsHTTP := httptest.NewServer(logServer.Handler())
-	t.Cleanup(logsHTTP.Close)
-	if err := logs.NewClient(logsHTTP.URL, nil).Append(context.Background(), "run-match", "build", []byte("start\nunrelated\nfatal error\n")); err != nil {
-		t.Fatal(err)
-	}
+func TestRunsGrepReadsThroughTheControllerWithLineNumbers(t *testing.T) {
 	var runQuery string
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/services":
-			http.NotFound(w, r)
 		case "/api/v1/runs":
 			runQuery = r.URL.RawQuery
 			w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
@@ -39,19 +23,19 @@ func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
 			}}})
 		case "/api/v1/runs/run-match/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: "run-match", NodeID: "build"}}})
+		case "/api/v1/runs/run-match/logs/build":
+			if q := r.URL.Query(); q.Get("grep") != "fatal" || q.Get("line_numbers") != "1" {
+				http.Error(w, "unnumbered grep", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 3, "line": "fatal error"})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(controller.Close)
-	home := t.TempDir()
-	profiles := filepath.Join(home, "config.yaml")
-	body := fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller, url: %q}\n", controller.URL, logsHTTP.URL)
-	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SPARKWING_CONFIG", profiles)
-	t.Setenv("SPARKWING_HOME", home)
+	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller, url: %q}\n",
+		controller.URL, "http://logs.invalid"))
 	var grepErr error
 	output := captureStdout(t, func() {
 		grepErr = runJobs([]string{"logs", "--profile", "prod", "--grep", "fatal", "--status", "failed", "--branch", "release", "--sha", "abc", "-o", "json"})
@@ -75,52 +59,26 @@ func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
 	}
 }
 
-func TestRunsGrepControllerOnlyProfileNeedsLogsAnnouncement(t *testing.T) {
-	// safety: discovery caches by URL and httptest reuses ports, so a stale
-	// entry from an earlier test would answer this one.
-	discovery.ResetCache()
-	t.Cleanup(discovery.ResetCache)
-	controller := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(controller.Close)
-	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod: {controller: {url: %q}}\n", controller.URL))
-	err := runJobs([]string{"logs", "--profile", "prod", "--grep", "failure"})
-	if err == nil || !strings.Contains(err.Error(), "logs service") {
-		t.Fatalf("missing logs announcement error = %v", err)
-	}
-}
-
-func TestRunsGrepDiscoversLogsWhenProfileURLWasInherited(t *testing.T) {
-	// safety: discovery caches by URL and httptest reuses ports, so a stale
-	// entry from an earlier test would answer this one.
-	discovery.ResetCache()
-	t.Cleanup(discovery.ResetCache)
-	logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/logs/run-inherited/build" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 2, "line": "fatal error"})
-	}))
-	t.Cleanup(logsHTTP.Close)
+func TestRunsGrepControllerOnlyProfileReadsThroughTheController(t *testing.T) {
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/services":
-			_ = json.NewEncoder(w).Encode(map[string]string{"logs": logsHTTP.URL})
 		case "/api/v1/runs":
-			_ = json.NewEncoder(w).Encode(map[string]any{"runs": []*store.Run{{ID: "run-inherited", Status: "failed"}}})
-		case "/api/v1/runs/run-inherited/nodes":
-			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: "run-inherited", NodeID: "build"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"runs": []*store.Run{{ID: "run-only", Status: "failed"}}})
+		case "/api/v1/runs/run-only/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: "run-only", NodeID: "build"}}})
+		case "/api/v1/runs/run-only/logs/build":
+			_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 2, "line": "fatal error"})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(controller.Close)
-	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller}\n", controller.URL))
+	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod: {controller: {url: %q}}\n", controller.URL))
 	var grepErr error
 	output := captureStdout(t, func() {
 		grepErr = runJobs([]string{"logs", "--profile", "prod", "--grep", "fatal", "-q", "-o", "plain"})
 	})
-	if grepErr != nil || strings.TrimSpace(output) != "run-inherited" {
-		t.Fatalf("grep inherited logs URL = (%q, %v)", output, grepErr)
+	if grepErr != nil || strings.TrimSpace(output) != "run-only" {
+		t.Fatalf("grep through a controller-only profile = (%q, %v)", output, grepErr)
 	}
 }

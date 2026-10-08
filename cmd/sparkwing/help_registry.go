@@ -2234,10 +2234,11 @@ var cmdJobsLogs = Command{
 	Path:     "sparkwing runs logs",
 	Synopsis: "Print a run's logs",
 	Description: `Without --profile, reads logs from the local run directory. Pass --profile
-NAME to read from a remote controller's logs service (profile must
-carry both controller + logs URLs). Line-selection filters
-(--tail/--head/--lines/--grep) apply server-side in cluster mode so
-the CLI never tails giant logs over the wire.
+NAME to read through that profile's controller, which serves each node's
+log from its segments, or from the logs service for a node that wrote
+none. Line-selection filters (--tail/--head/--lines/--grep) apply
+server-side in cluster mode so the CLI never tails giant logs over the
+wire.
 
 --since D drops nodes whose StartedAt is older than now-D; useful for
 runs that have been retried several times where only the newest
@@ -2257,10 +2258,10 @@ to --limit runs the run filters (--pipeline, --status, --branch, --sha,
 --since, --started-after, --started-before) select and printing up to
 --max-matches lines per node; -q prints only the matching run ids.
 
-When a node's logs live in a logs service, a line framed by em dashes
-follows its log when the log is not known to be whole: lines missing
-after the runner sealed it, a stream that ended without the runner's
-seal, or a runner that does not seal. The line is the reader's, never
+When the controller can judge a node's log, a line framed by em dashes
+follows it when the log is not known to be whole: lines missing, a
+segment that failed to upload or verify, a runner lost before it sealed
+the log, or a writer stopped or capped before it finished. The line is the reader's, never
 part of the stored log, and JSON output omits it.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", RequiredWhen: "unless --grep searches across runs", Group: "Input"},

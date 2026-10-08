@@ -101,5 +101,5 @@ func searchRunLogs(ctx context.Context, paths orchestrator.Paths, fs *flag.FlagS
 	if prof.ControllerURL() == "" {
 		return errors.New("runs logs --grep: profile must carry a controller URL")
 	}
-	return orchestrator.RunGrepRemote(ctx, prof.ControllerURL(), prof.ExplicitLogsURL(), prof.ControllerToken(), opts, os.Stdout)
+	return orchestrator.RunGrepRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), opts, os.Stdout)
 }
