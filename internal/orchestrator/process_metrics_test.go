@@ -61,6 +61,9 @@ func TestProcessNodeAccountingRequiresExactOwnership(t *testing.T) {
 }
 
 func TestSpawnAccountingFailureAllowsChildAndMarksParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, failure := range []error{errors.New("parent marker rejected"), store.ErrNodeMetricLimit} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			st, handler := nodeSpawnFixture(t, "spawn-metric-failure", nil)
@@ -129,6 +132,9 @@ func TestSpawnAccountingFailureAllowsChildAndMarksParent(t *testing.T) {
 }
 
 func TestCommandSampleLossMarksNodeWithoutRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	st, backends := metricExecutionFixture(t)
 	backends.State = &rejectCommandMetric{localState: localState{st: st}, reject: true}
 	ctx := withProcessNode(t.Context(), "run", "build")

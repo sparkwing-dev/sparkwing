@@ -18,6 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const windowsLacksCommandSampler = "Windows has no per-command resource sampler and no true command"
+
 type accountingRetryPipeline struct {
 	sparkwing.Base
 	failFirst bool
@@ -50,6 +52,9 @@ func init() {
 }
 
 func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, tc := range []struct {
 		name, pipeline     string
 		reject, incomplete bool
@@ -62,9 +67,6 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reject := tc.reject
-			if reject && runtime.GOOS == "windows" {
-				t.Skip("Windows commands report no per-command resource sample, so no command sample can be lost")
-			}
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 			paths := PathsAt(t.TempDir())
 			if err := paths.EnsureRoot(); err != nil {
@@ -104,9 +106,7 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 				unknown = unknown || sample.Kind == store.MetricUnknown
 				partialMeasurement = partialMeasurement || sample.Kind == store.MetricPartial
 			}
-			// safety: without a process sampler, the opening and closing readings are unknown samples.
-			unmeasured := runtime.GOOS == "windows"
-			if unknown != unmeasured || partialMeasurement != tc.incomplete {
+			if unknown || partialMeasurement != tc.incomplete {
 				t.Fatalf("unknown=%v partial=%v samples=%+v", unknown, partialMeasurement, samples)
 			}
 			events, err := st.ListEventsAfter(ctx, result.RunID, 0, 100)
@@ -146,10 +146,7 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if unmeasured && len(profiles) != 0 {
-				t.Fatalf("unmeasured native execution learned profiles: %+v", profiles)
-			}
-			if !unmeasured && len(profiles) != 2 {
+			if len(profiles) != 2 {
 				t.Fatalf("complete execution profile count=%d, want node and run", len(profiles))
 			}
 			wantCount := map[bool]int{false: 1, true: 0}[tc.incomplete]
@@ -163,11 +160,11 @@ func TestMetricDeliveryFailureDoesNotRetry(t *testing.T) {
 }
 
 func TestPartialCommandMeasurementsOnlyRaiseProfiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, raise := range []bool{false, true} {
 		t.Run(map[bool]string{false: "lower usage", true: "higher memory"}[raise], func(t *testing.T) {
-			if raise && runtime.GOOS == "windows" {
-				t.Skip("Windows commands report no per-command resource sample, so no command sample can be lost")
-			}
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 			paths := PathsAt(t.TempDir())
 			if err := paths.EnsureRoot(); err != nil {
@@ -244,6 +241,9 @@ func (s *rejectFirstExecutionStart) AcknowledgeNodeExecutionStart(ctx context.Co
 }
 
 func TestExecutionAcknowledgementFailureExcludesUnrecordedRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, reject := range []bool{false, true} {
 		t.Run(map[bool]string{false: "complete", true: "retry"}[reject], func(t *testing.T) {
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
@@ -288,10 +288,7 @@ func TestExecutionAcknowledgementFailureExcludesUnrecordedRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if runtime.GOOS == "windows" && len(profiles) != 0 {
-				t.Fatalf("unmeasured native execution learned profiles: %+v", profiles)
-			}
-			if runtime.GOOS != "windows" && !reject && len(profiles) != 2 {
+			if !reject && len(profiles) != 2 {
 				t.Fatalf("profiles=%d, want node and run", len(profiles))
 			}
 			for _, profile := range profiles {
@@ -359,6 +356,9 @@ func (s *rejectMetricKind) AddNodeMetricSample(ctx context.Context, run, node st
 }
 
 func TestLostExclusionMarkersAreRetriedAsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	for _, tc := range []struct {
 		name    string
 		backend func(localState) *rejectMetricKind
@@ -373,9 +373,6 @@ func TestLostExclusionMarkersAreRetriedAsUnknown(t *testing.T) {
 		}, true, "the backend refused the partial marker"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.owned && runtime.GOOS == "windows" {
-				t.Skip("Windows commands report no per-command resource sample, so no command sample can be lost")
-			}
 			t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 			paths := PathsAt(t.TempDir())
 			if err := paths.EnsureRoot(); err != nil {
