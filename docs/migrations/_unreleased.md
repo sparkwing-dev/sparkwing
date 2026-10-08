@@ -1098,12 +1098,14 @@ step with the controller's own.
 
 - **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub
   Actions runner, launcher Job or the trigger runner's in-process nodes
-  appended node logs to the logs service at their logs URL, and without one
+  appended node logs to the logs service at their logs URL, as did a laptop
+  run against a remote profile, and without one
   wrote them to a disk nobody could read and that went away with the pod.
   `sparkwing runs logs --profile` and `runs logs --grep --profile` read the
   logs service the profile or the controller named.
 - **After:** against a controller that keeps segments, every one of those
-  runners uploads each node's log as gzip segments plus a sealing manifest
+  runners, and `sparkwing run` on a laptop whose profile keeps the run's
+  state on that controller, uploads each node's log as gzip segments plus a sealing manifest
   through URLs the controller issues, into the controller's cache bucket
   (`--cache-blob-store`) or, without one, its output directory, whether or
   not it has a logs URL. The dashboard and the CLI read every node through

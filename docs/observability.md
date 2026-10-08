@@ -186,7 +186,10 @@ stores when the controller advertises them (`logs.segments` in
 `GET /api/v1/capabilities`), whether or not it has a logs URL: a
 Kubernetes Job, warm runner, self-hosted agent, GitHub Actions runner,
 launcher Job, and the trigger runner's in-process nodes and compile
-output. The runner process that supervises the pipeline binary serves the
+output. A run started on a laptop whose state lives on that controller
+(a remote profile) uploads its nodes' segments from the laptop the same
+way, and turns its live view on from its run heartbeat; a laptop run
+whose state stays local keeps the logs service its profile names. The runner process that supervises the pipeline binary serves the
 binary's log appends on 127.0.0.1, so a binary built against any SDK logs
 unchanged. It appends
 every line to a spool file and uploads a gzip-compressed segment every

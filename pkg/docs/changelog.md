@@ -95,6 +95,9 @@ unlock.
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
 
+- **cli:** A run against a remote profile keeps each node's log as segments the controller stores
+  When the profile's state lives on a controller that advertises `logs.segments`, `sparkwing run` and the `run-node --coordinated` children it starts upload each node's log as segments from the laptop and read it back through the controller, instead of appending to the logs service the controller announces, and push live lines only while a viewer watches the node instead of mirroring every line to the live ring. A profile whose state stays local keeps its logs surface as before. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
+
 - **runner + controller:** A node's lines reach the live ring only while a viewer watches it
   The dashboard's log stream and `runs logs --follow` hold a 30-second watch on the node. The controller reports it in the launched pod's claim heartbeat reply (`watched`), in a runner's node claim heartbeat and run heartbeat replies when the request sends `X-Sparkwing-Log-Watch: 1` (answered `200` with `watched` or `watched_nodes` instead of `204`), and in each `log-segments` reply. A runner that keeps the node's log as segments pushes everything after its last uploaded segment when a watch starts and stops when it lapses, so an unwatched node sends nothing live. `Client.WithWatchObserver` hands a process the reports its heartbeats carry.
 
