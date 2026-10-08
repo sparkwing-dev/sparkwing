@@ -734,3 +734,31 @@ func TestHooksUninstallStopsAtAnUninspectableDirectory(t *testing.T) {
 		t.Fatalf("cleanup discovery under an uninspectable directory = %v, want the inspection error", err)
 	}
 }
+
+func TestDiscoveryRefusesTheDefaultStateDirWhenTheHomeIsRedirected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	stateDir := filepath.Join(home, ".sparkwing")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "sparkwing.yaml"), []byte("sparks: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(home, "code", "app")
+	if out, err := exec.Command("git", "init", "-q", checkout).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if _, ok, err := nearestDotSparkwing(checkout); ok || err != nil {
+		t.Fatalf("project discovery adopted the default state dir: ok=%v err=%v", ok, err)
+	}
+	t.Chdir(checkout)
+	root, err := resolveCleanupRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := filepath.EvalSymlinks(checkout); root != want && root != checkout {
+		t.Fatalf("cleanup discovery = %s, want the checkout %s, not the home holding the default state dir", root, checkout)
+	}
+}

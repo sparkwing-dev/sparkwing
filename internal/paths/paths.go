@@ -47,6 +47,20 @@ func DefaultPaths() (Paths, error) {
 	return PathsAt(filepath.Join(home, ".sparkwing")), nil
 }
 
+// StateDirs lists every directory that may hold runtime state: the home in
+// use and the default ~/.sparkwing, which keeps an earlier home's state after
+// SPARKWING_HOME or the test sandbox moves the home elsewhere.
+func StateDirs() []string {
+	var dirs []string
+	if p, err := DefaultPaths(); err == nil {
+		dirs = append(dirs, filepath.Clean(p.Root))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".sparkwing"))
+	}
+	return dirs
+}
+
 // safety: bound before any test can redirect HOME, so a suite that fakes a home
 // directory cannot move the home this refuses.
 var operatorHome = resolveOperatorHome()

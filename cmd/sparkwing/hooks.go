@@ -1027,13 +1027,10 @@ func resolveCleanupRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	runtimeHome := ""
-	if p, err := paths.DefaultPaths(); err == nil {
-		runtimeHome = filepath.Clean(p.Root)
-	}
+	homes := paths.StateDirs()
 	for dir := filepath.Clean(cwd); ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, ".sparkwing")
-		if candidate == runtimeHome {
+		if slices.Contains(homes, candidate) {
 			break
 		}
 		info, err := os.Stat(candidate)
@@ -1059,13 +1056,10 @@ func resolveCleanupRoot() (string, error) {
 // marker; otherwise a checkout with no .sparkwing/ of its own would write its
 // project files into the runs store's directory.
 func nearestDotSparkwing(start string) (string, bool, error) {
-	runtimeHome := ""
-	if p, err := paths.DefaultPaths(); err == nil {
-		runtimeHome = filepath.Clean(p.Root)
-	}
+	homes := paths.StateDirs()
 	for dir := filepath.Clean(start); ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, ".sparkwing")
-		if candidate == runtimeHome {
+		if slices.Contains(homes, candidate) {
 			return "", false, nil
 		}
 		ok, err := isProjectDotSparkwing(candidate)
