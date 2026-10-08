@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the flow cookie is what proves the browser finishing a sign-in is the one that started it; without it a
@@ -116,6 +118,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		s.refuseOAuth(w, r, refused.status, refused.message)
 		return
 	}
+	noteAuditPrincipal(r.Context(), &Principal{Kind: store.TokenKindUser, AccountID: sess.AccountID, Team: sess.Team})
 	s.endPriorSession(r, raw)
 	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
 	renderPage(w, http.StatusOK, signedInTmpl, safeNext(flow.Next))

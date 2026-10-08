@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -25,6 +26,7 @@ type browserFixture struct {
 	token  string
 	sessID string
 	csrf   string
+	logs   *syncBuffer
 }
 
 func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
@@ -46,12 +48,13 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore()
+	logs := &syncBuffer{}
+	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).EnableAuthFromStore()
 	if d != nil {
 		srv.WithDashboard(*d)
 	}
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: token, sessID: sessID, csrf: csrf}
+	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: token, sessID: sessID, csrf: csrf, logs: logs}
 }
 
 func (f *browserFixture) serve(req *http.Request) *httptest.ResponseRecorder {

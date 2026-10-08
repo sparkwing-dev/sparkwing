@@ -201,6 +201,7 @@ func (s *Server) resolveBrowserSession(ctx context.Context, raw string) (*browse
 	if err != nil {
 		return nil, err
 	}
+	noteAuditPrincipal(ctx, p)
 	return &browserSession{principal: p, csrfToken: sess.CSRFToken}, nil
 }
 

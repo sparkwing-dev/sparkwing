@@ -156,7 +156,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	next := safeNext(r.PostForm.Get("next"))
-	raw, sess, _, err := s.passwordLogin(r, r.PostForm.Get("username"), r.PostForm.Get("password"))
+	raw, sess, u, err := s.passwordLogin(r, r.PostForm.Get("username"), r.PostForm.Get("password"))
 	if err != nil {
 		data := s.withSignInProviders(loginPageData{Next: next})
 		status := http.StatusUnauthorized
@@ -173,6 +173,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginPage(w, r, data, status)
 		return
 	}
+	noteAuditPrincipal(r.Context(), &Principal{Name: u.Name, Kind: store.TokenKindUser, Team: sess.Team})
 	s.endPriorSession(r, raw)
 	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
 	http.Redirect(w, r, next, http.StatusSeeOther)

@@ -9,7 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -68,15 +70,26 @@ func (s *Server) WithDashboard(d Dashboard) *Server {
 func (s *Server) browserHandler(api http.Handler) http.Handler {
 	d := s.dashboard
 	pages := web.Pages(d.Bundle)
-	mux := http.NewServeMux()
+	browser := http.NewServeMux()
 	// safety: the page reaches the API on its own origin with its session cookie or the local serve token, so no
 	// credential rides this script.
-	mux.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
+	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
+	top := http.NewServeMux()
 	if d.Local {
-		mux.Handle("/api/", api)
-		mux.Handle("/", s.pageOrAPI(api, pages))
-		return web.SecurityHeaders(d.HSTS, mux)
+		browser.Handle("/", pages)
+		top.Handle("/api/", api)
+	} else {
+		s.signInRoutes(browser)
+		browser.Handle("/", s.pageGate(pages))
+		// safety: a page on another site can make a visitor's browser send a write that needs no credential, which an
+		// open controller would take as its operator's; no browser on another site has a reason to write here.
+		top.Handle("/api/", originguard.RefuseCrossSiteWrites(s.cookieSessions(api)))
 	}
+	top.Handle("/", s.pageOrAPI(api, s.logged(browser)))
+	return web.SecurityHeaders(d.HSTS, top)
+}
+
+func (s *Server) signInRoutes(mux *http.ServeMux) {
 	signIn := func(h http.Handler) http.Handler { return s.loginLimit.middleware(h) }
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.Handle("POST /login", signIn(s.formCSRF(s.handleLoginSubmit)))
@@ -93,11 +106,13 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	mux.HandleFunc("GET "+githubAppCompletePath, s.handleGitHubAppComplete)
 	mux.HandleFunc("GET "+githubAppAvailablePath, s.handleGitHubAppAvailable)
 	mux.Handle("POST /github/app/select", s.formCSRF(s.handleGitHubAppSelect))
-	// safety: a page on another site can make a visitor's browser send a write that needs no credential, which an
-	// open controller would take as its operator's; no browser on another site has a reason to write here.
-	mux.Handle("/api/", originguard.RefuseCrossSiteWrites(s.cookieSessions(api)))
-	mux.Handle("/", s.pageOrAPI(api, s.pageGate(pages)))
-	return web.SecurityHeaders(d.HSTS, mux)
+}
+
+// safety: the browser's own routes write the same request log, audit record and X-Request-Id the API does, so a
+// refused sign-in or a logout leaves the trail docs/security.md promises; the API chain logs itself.
+func (s *Server) logged(mux *http.ServeMux) http.Handler {
+	return otelutil.WrapHandler("sparkwing-controller",
+		withRequestLog(mux, s.logger, muxRouteLabeler(mux), ratelimit.ClientIP))
 }
 
 // safety: the API owns every route it registers outside /api/ (webhooks, metrics, OIDC discovery and the internal

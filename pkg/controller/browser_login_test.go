@@ -263,3 +263,36 @@ func TestBrowserRuntimeConfigCannotBreakOutOfItsScript(t *testing.T) {
 		t.Fatal("runtime config carries a credential")
 	}
 }
+
+// safety: a refused sign-in is the record an operator looks for after a password-guessing run, so the browser's
+// sign-in routes write the same audit line and request id the API does.
+func TestBrowserSignInRoutesAreAudited(t *testing.T) {
+	f := newBrowserFixture(t, &controller.Dashboard{})
+	csrf, _ := f.loginPage("/")
+	rec := f.postForm("/login", url.Values{
+		"username": {"alice"}, "password": {"wrong"}, "csrf_token": {csrf},
+	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
+	id := rec.Header().Get("X-Request-Id")
+	if rec.Code != http.StatusUnauthorized || id == "" {
+		t.Fatalf("wrong password = %d with request id %q, want 401 and an id", rec.Code, id)
+	}
+	if line := auditLine(f.logs.String(), id); !strings.Contains(line, "route=/login") || !strings.Contains(line, "status=401") {
+		t.Fatalf("no audit record for the refused sign-in %s: %s", id, f.logs.String())
+	}
+
+	logout := f.postForm("/logout", url.Values{"csrf_token": {f.csrf}},
+		&http.Cookie{Name: "__Host-sw_session", Value: f.sessID}, &http.Cookie{Name: "__Host-sw_csrf", Value: f.csrf})
+	line := auditLine(f.logs.String(), logout.Header().Get("X-Request-Id"))
+	if !strings.Contains(line, "route=/logout") || !strings.Contains(line, "principal_id=alice") {
+		t.Fatalf("logout audit record does not name the signed-out principal: %q", line)
+	}
+}
+
+func auditLine(logs, requestID string) string {
+	for _, line := range strings.Split(logs, "\n") {
+		if requestID != "" && strings.Contains(line, "msg=audit") && strings.Contains(line, "request_id="+requestID) {
+			return line
+		}
+	}
+	return ""
+}
