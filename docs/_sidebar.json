@@ -84,7 +84,6 @@
         "cli-fleet",
         "cli-info",
         "cli-pipeline",
-        "cli-profile",
         "cli-queue",
         "cli-repos",
         "cli-run",

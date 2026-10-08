@@ -31,7 +31,7 @@ Without --profile, verbs that read runs fall back to SPARKWING_PROFILE, then
 the project's defaults.profile. Verbs that change state elsewhere (secrets,
 crons, runs cancel, cluster, and similar) act locally unless --profile names
 the controller.`,
-	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "serve", "doctor", "cloud", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
+	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "version", "update", "serve", "doctor", "cloud", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
@@ -209,9 +209,9 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "triggers", "users", "tokens", "limits", "image", "concurrency", "object-store"},
+	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "users", "tokens", "limits", "image", "concurrency", "object-store"},
 	Examples: []Example{
-		{"Cluster health summary", "sparkwing cluster status --profile prod"},
+		{"Cluster health summary", "sparkwing cloud status --profile prod --cluster"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
 	},
 }
@@ -257,7 +257,11 @@ no flag. The name resolves against the project's own profiles: block first and
 config.yaml second, so the token stays out of the checkout.
 
 The command closes with the dashboard URL the controller announces and the
-probes 'sparkwing configure profiles test' runs.`,
+probes 'sparkwing cloud status' runs.
+
+--no-probe writes the profile without contacting the controller: no
+reachability check, no mint, no probes. Use it to register a controller that
+is not up yet, or one that serves unauthenticated (omit both token flags).`,
 	Flags: []FlagSpec{
 		{Name: "controller", Argument: "URL", Desc: "Controller base URL", Required: true, Group: "Identity"},
 		{Name: "name", Argument: "NAME", Desc: "Profile name (default: derived from the controller host)", Group: "Identity"},
@@ -266,12 +270,14 @@ probes 'sparkwing configure profiles test' runs.`,
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes for the minted token", Default: "runs.read,runs.write,runs.control,triggers.read,logs.read,approvals.write", Group: "Credential"},
 		{Name: "set-default", Desc: "Set defaults.profile in this project's .sparkwing/sparkwing.yaml", Group: "Project"},
 		{Name: "force", Desc: "Replace an existing profile of that name", Group: "Project"},
+		{Name: "no-probe", Desc: "Write the profile without contacting the controller", ConflictsWith: []string{"admin-token-stdin"}, Group: "Project"},
 	},
 	GroupOrder: []string{"Identity", "Credential", "Project", "Other"},
 	Examples: []Example{
 		{"Connect with a one-time admin token", "sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin"},
 		{"Connect and make it this repository's default", "sparkwing cloud connect --controller https://api.sparkwing.example --name prod --admin-token-stdin --set-default"},
 		{"Store a token someone minted for you", "sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin"},
+		{"Register an unauthenticated local controller offline", "sparkwing cloud connect --controller http://127.0.0.1:4344 --name local --no-probe"},
 	},
 }
 
@@ -280,16 +286,31 @@ var cmdCloudStatus = Command{
 	Synopsis: "Report the connection, its principal, and the probes",
 	Description: `Prints the selected profile, its controller, the principal
 and scopes the controller reports for its token, the announced dashboard URL,
-and the controller, auth, logs and gitcache probes. Exits non-zero when a probe
-fails.`,
+and the controller, auth, logs and gitcache probes. A profile with no
+controller reports its storage probes alone. Exits non-zero when a probe
+fails; a missing optional logs service warns without failing, and a controller
+that announces no cache pod URL omits the gitcache probe.
+
+--cluster answers "is this cluster alive?" for an operator. It adds the probes
+that read /api/v1/agents, /api/v1/triggers (status=claimed) and
+/api/v1/runs?since=24h, in three sections:
+
+  CONNECTIVITY  controller / auth / logs / gitcache
+  FLEET         agents (connected vs stale)
+  QUEUE         stuck triggers + recent-run success rate
+
+It exits 1 only when a probe fails; warnings such as a low success rate or
+stale agents leave the exit code at 0.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile naming the connection to report", Group: "Input"},
+		{Name: "cluster", Desc: "Add the fleet and queue probes an operator reads", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json|table", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
 		{"Report the connection", "sparkwing cloud status --profile prod"},
 		{"Machine-readable status", "sparkwing cloud status --profile prod -o json"},
+		{"Connectivity, fleet and queue health of a cluster", "sparkwing cloud status --profile prod --cluster"},
 	},
 }
 
@@ -321,7 +342,8 @@ var cmdConfigure = Command{
 	Path:     "sparkwing configure",
 	Synopsis: "Configure laptop-local settings",
 	Description: `Configure this machine. 'init' prepares the configuration directory and
-reports its contents. 'profiles' manages controller connections.
+reports its contents. 'profiles' lists and edits controller connections;
+'sparkwing cloud' adds, checks and removes them.
 'xrepo' registers local repositories.
 
 Manage controller users and tokens with 'sparkwing cluster'.
@@ -331,7 +353,6 @@ Manage secrets with 'sparkwing secrets'.`,
 		{"First-time laptop setup", "sparkwing configure init"},
 		{"Status of laptop config", "sparkwing configure init -o json"},
 		{"List profiles", "sparkwing configure profiles list"},
-		{"Add a new profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
 		{"Register the current repo with the cross-repo registry", "sparkwing configure xrepo add"},
 	},
 }
@@ -1604,30 +1625,6 @@ is running and exits after five idle minutes; see
 	},
 }
 
-var cmdProfile = Command{
-	Path:     "sparkwing profile",
-	Synopsis: "Show the selected profile and how it was chosen",
-	Description: `Reports the profile a sparkwing command would resolve to and
-the chain that picked it (flag > project hint > detect > default
-> builtin laptop), using the same resolver 'sparkwing run' and
-'sparkwing pipeline trigger' use -- so the answer matches what
-they would actually do.
-
-With no flag it shows the active no-flag resolution. With
---profile NAME it shows the hypothetical: what adding that flag
-to your next command would select. Tokens are never printed.`,
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Show the hypothetical resolution for `--profile NAME`", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json", Default: "pretty on TTY, json when piped", Group: "Output"},
-	},
-	GroupOrder: []string{"Input", "Output", "Other"},
-	Examples: []Example{
-		{"Active profile with no flag", "sparkwing profile"},
-		{"What would --profile prod pick", "sparkwing profile --profile prod"},
-		{"Machine-readable", "sparkwing profile -o json"},
-	},
-}
-
 var cmdDashboard = Command{
 	Path:     "sparkwing serve",
 	Synopsis: "Manage the local dashboard + API server",
@@ -1867,33 +1864,13 @@ refused rather than sent to the machine's profiles: set
 SPARKWING_CONFIG to a path inside that home to keep it there.
 
 Every human-driven client command (tokens, users, runs
-retry/cancel/prune/logs, gc) reads connection info from the
+retry/cancel/prune/logs) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
-exist on other commands; profiles are the only config surface.`,
-	SubcommandOrder: []string{"add", "list", "show", "remove", "duplicate", "set", "test"},
-}
+exist on other commands; profiles are the only config surface.
 
-var cmdProfilesAdd = Command{
-	Path:     "sparkwing configure profiles add",
-	Synopsis: "Register a new connection profile",
-	Description: `Creates a new entry in the profiles section of config.yaml. --name and --controller
-are required; the token is optional. --token-stdin reads the
-token from stdin and prompts without echo when stdin is a
-terminal; prefer it over --token, which is visible to other
-processes in the process list and recorded in shell history.
-Configure storage and service backends by editing config.yaml.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name (unique in config.yaml)", Required: true, Group: "Input"},
-		{Name: "controller", Argument: "URL", Desc: "Controller base URL", Required: true, Group: "Connection"},
-		{Name: "token", Argument: "TOKEN", Desc: "Bearer token, visible to other processes and shell history (omit for local/unauthed stacks)", ConflictsWith: []string{"token-stdin"}, Group: "Connection"},
-		{Name: "token-stdin", Desc: "Read the bearer token from stdin, prompting without echo on a terminal", ConflictsWith: []string{"token"}, Group: "Connection"},
-	},
-	GroupOrder: []string{"Input", "Connection", "Other"},
-	Examples: []Example{
-		{"Add a prod profile, prompting for the token", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin"},
-		{"Add a prod profile from a piped token", "printf %s \"$TOKEN\" | sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin"},
-		{"Add a local profile without auth", "sparkwing configure profiles add --name local --controller http://127.0.0.1:4344"},
-	},
+Add a profile with 'sparkwing cloud connect', check it with
+'sparkwing cloud status', and remove it with 'sparkwing cloud disconnect'.`,
+	SubcommandOrder: []string{"list", "show", "set"},
 }
 
 var cmdProfilesList = Command{
@@ -1914,43 +1891,28 @@ every mode.`,
 
 var cmdProfilesShow = Command{
 	Path:     "sparkwing configure profiles show",
-	Synopsis: "Print one profile's full config",
-	Description: `Prints all fields of the profile named by --name. Token is
-redacted unless --show-token is passed.`,
+	Synopsis: "Print one profile's config, or the profile a command would select",
+	Description: `With --name, prints all fields of that config.yaml entry. The token is
+redacted unless --show-token is passed.
+
+Without --name, reports the profile a sparkwing command would resolve to and
+the chain that picked it: --profile, then SPARKWING_PROFILE, then the
+project's defaults.profile -- the resolver 'sparkwing run' and 'sparkwing
+pipeline trigger' use, so the answer matches what they would do. --profile
+NAME shows what adding that flag to your next command would select. That
+report never prints tokens.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name", Required: true, Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Profile name in config.yaml", Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Without --name: the resolution --profile NAME would make", ConflictsWith: []string{"name"}, Group: "Input"},
 		{Name: "show-token", Desc: "Print the raw token (redacted by default)", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format for the resolution report: pretty|json", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
+		{"The profile a command would use, and why", "sparkwing configure profiles show"},
+		{"What --profile prod would pick", "sparkwing configure profiles show --profile prod -o json"},
 		{"Show a named profile", "sparkwing configure profiles show --name prod"},
 		{"Show a named profile with the raw token", "sparkwing configure profiles show --name prod --show-token"},
-	},
-}
-
-var cmdProfilesRemove = Command{
-	Path:        "sparkwing configure profiles remove",
-	Synopsis:    "Delete a profile",
-	Description: `Removes the named entry from the profiles section of config.yaml.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name to remove", Required: true, Group: "Input"},
-	},
-	Examples: []Example{
-		{"Remove a stale profile", "sparkwing configure profiles remove --name old-stage"},
-	},
-}
-
-var cmdProfilesDuplicate = Command{
-	Path:     "sparkwing configure profiles duplicate",
-	Synopsis: "Copy one profile's config into another",
-	Description: `Copies the source profile into a new destination profile. The destination
-name must be unused.`,
-	Flags: []FlagSpec{
-		{Name: "src", Argument: "NAME", Desc: "Source profile name", Required: true, Group: "Input"},
-		{Name: "dst", Argument: "NAME", Desc: "Destination profile name (must not exist yet)", Required: true, Group: "Input"},
-	},
-	Examples: []Example{
-		{"Branch prod into a staging-prod profile", "sparkwing configure profiles duplicate --src prod --dst staging-prod"},
 	},
 }
 
@@ -1985,7 +1947,7 @@ var cmdTokens = Command{
 profile named by --profile.
 Token creation prints the raw value to stdout once --
 save it before leaving this command.`,
-	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
+	SubcommandOrder: []string{"create", "list", "revoke", "rotate"},
 }
 
 var cmdTokensCreate = Command{
@@ -2079,8 +2041,11 @@ superset render as "*" since admin short-circuits every other
 scope check. An empty scope set renders as "-".
 
 Use -o json to get a structured array with explicit
-scope arrays, suitable for piping into jq.`,
+scope arrays, suitable for piping into jq.
+
+--prefix PREFIX prints the full record of one token as indented JSON.`,
 	Flags: []FlagSpec{
+		{Name: "prefix", Argument: "PREFIX", Desc: "Print the full record of the token with this non-secret prefix", Group: "Filter"},
 		{Name: "type", Argument: "KIND", Desc: "Filter by token type", Group: "Filter"},
 		{Name: "include-revoked", Desc: "Include revoked tokens in the output", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -2088,6 +2053,7 @@ scope arrays, suitable for piping into jq.`,
 	},
 	Examples: []Example{
 		{"List all active tokens", "sparkwing cluster tokens list --profile prod"},
+		{"One token's full record", "sparkwing cluster tokens list --prefix swu_abc123 --profile prod"},
 		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked --profile prod"},
 		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq 'select(.principal==\"agent:fictional-runner\") | .scopes'"},
 	},
@@ -2104,20 +2070,6 @@ and irreversible.`,
 	},
 	Examples: []Example{
 		{"Revoke a leaked token", "sparkwing cluster tokens revoke --prefix a1b2c3d4 --profile prod"},
-	},
-}
-
-var cmdTokensLookup = Command{
-	Path:     "sparkwing cluster tokens lookup",
-	Synopsis: "Print metadata for a single token",
-	Description: `Prints the JSON metadata for a token given its non-secret prefix. Useful for
-confirming principal + scopes before revoking or rotating.`,
-	Flags: []FlagSpec{
-		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Inspect a token before revoking", "sparkwing cluster tokens lookup --prefix a1b2c3d4 --profile prod"},
 	},
 }
 
@@ -3029,59 +2981,6 @@ image to the registry before calling rollout.`,
 	},
 }
 
-var cmdProfilesTest = Command{
-	Path:     "sparkwing configure profiles test",
-	Synopsis: "Probe controller/auth/logs/gitcache for one profile",
-	Description: `Sequentially checks the profile's controller (/api/v1/health),
-auth (/api/v1/runs?limit=1 + /api/v1/auth/whoami), logs
-service (if configured), and gitcache (if configured). Each
-probe prints ok / warn / fail along with latency and any
-error detail.
-
-Exit code is non-zero when any probe fails. Missing optional logs
-can warn without failing. A controller that announces no cache pod URL
-omits the gitcache probe; direct-data Cloud needs no public cache pod.`,
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-	},
-	GroupOrder: []string{"Output", "System", "Other"},
-	Examples: []Example{
-		{"Probe a named profile", "sparkwing configure profiles test --profile prod"},
-		{"JSON for scripting", "sparkwing configure profiles test --profile prod -o json"},
-	},
-}
-
-var cmdHealth = Command{
-	Path:     "sparkwing cluster status",
-	Synopsis: "Connectivity + fleet + queue health check against a remote cluster",
-	Description: `Answers "is this cluster alive?" in one command. Runs the
-connectivity / auth probes from 'profiles test' plus cluster-
-state probes that hit /api/v1/agents, /api/v1/triggers
-(status=claimed), and /api/v1/runs?since=24h.
-
-Sections:
-
-  CONNECTIVITY  controller / auth / logs / gitcache
-  FLEET         agents (connected vs stale)
-  QUEUE         stuck triggers + recent-run success rate
-
-Exit 0 when every probe is ok or warn; exit 1 when any probe
-fails (auth reject, controller down, HTTP 5xx). Warnings are
-informational -- low success rate, stale agents -- and don't
-change the exit code so scripts can still condition
-on "is the cluster reachable at all?".`,
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
-	},
-	GroupOrder: []string{"Output", "System", "Other"},
-	Examples: []Example{
-		{"Quick-check prod", "sparkwing cluster status --profile prod"},
-		{"Structured output for a status dashboard", "sparkwing cluster status --profile prod -o json"},
-	},
-}
-
 var cmdAgents = Command{
 	Path:     "sparkwing cluster agents",
 	Synopsis: "Inspect the controller's fleet view",
@@ -3318,7 +3217,7 @@ var cmdClusterObjectStore = Command{
 (put, get, list, delete), against a per-minute rate and a per-day
 budget. A class that spends either budget trips: writes of that class
 fail closed and reads keep serving until their own budget trips. The
-state appears on 'sparkwing cluster status' and on the controller's
+state appears on 'sparkwing cloud status' and on the controller's
 Prometheus metrics as sparkwing_object_store_requests_total,
 sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
 

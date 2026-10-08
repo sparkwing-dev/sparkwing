@@ -70,30 +70,6 @@ func TestProfilesRegistryMatchesDispatcher(t *testing.T) {
 	}
 }
 
-func TestProfilesShowHelpRequiresName(t *testing.T) {
-	for _, spec := range cmdProfilesShow.Flags {
-		if spec.Name == "name" {
-			if !spec.Required {
-				t.Fatal("profiles show --name is optional in help but required by the handler")
-			}
-			return
-		}
-	}
-	t.Fatal("profiles show help does not declare --name")
-}
-
-func TestProfilesTestHelpRequiresProfile(t *testing.T) {
-	for _, spec := range cmdProfilesTest.Flags {
-		if spec.Name == "profile" {
-			if !spec.Required {
-				t.Fatal("profiles test --profile is optional in help but required by the handler")
-			}
-			return
-		}
-	}
-	t.Fatal("profiles test help does not declare --profile")
-}
-
 func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
 	fset := token.NewFileSet()
 	for _, filename := range []string{"profiles.go", "profiles_test_cmd.go"} {

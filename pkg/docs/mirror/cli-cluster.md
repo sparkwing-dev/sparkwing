@@ -18,7 +18,6 @@ local dashboard with 'sparkwing serve'.
 
 ### Subcommands
 
-- `status` -- Connectivity + fleet + queue health check against a remote cluster
 - `agents` -- Inspect the controller's fleet view
 - `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
@@ -34,7 +33,7 @@ local dashboard with 'sparkwing serve'.
 
 ```sh
 # Cluster health summary
-sparkwing cluster status --profile prod
+sparkwing cloud status --profile prod --cluster
 
 # List fleet agents
 sparkwing cluster agents list --profile prod
@@ -336,7 +335,7 @@ The controller counts every object-store request it makes, by class
 (put, get, list, delete), against a per-minute rate and a per-day
 budget. A class that spends either budget trips: writes of that class
 fail closed and reads keep serving until their own budget trips. The
-state appears on 'sparkwing cluster status' and on the controller's
+state appears on 'sparkwing cloud status' and on the controller's
 Prometheus metrics as sparkwing_object_store_requests_total,
 sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
 
@@ -541,44 +540,6 @@ replaces it.
 sparkwing cluster runners remove --profile prod
 ```
 
-## `sparkwing cluster status`
-
-Connectivity + fleet + queue health check against a remote cluster
-
-Answers "is this cluster alive?" in one command. Runs the
-connectivity / auth probes from 'profiles test' plus cluster-
-state probes that hit /api/v1/agents, /api/v1/triggers
-(status=claimed), and /api/v1/runs?since=24h.
-
-Sections:
-
-  CONNECTIVITY  controller / auth / logs / gitcache
-  FLEET         agents (connected vs stale)
-  QUEUE         stuck triggers + recent-run success rate
-
-Exit 0 when every probe is ok or warn; exit 1 when any probe
-fails (auth reject, controller down, HTTP 5xx). Warnings are
-informational -- low success rate, stale agents -- and don't
-change the exit code so scripts can still condition
-on "is the cluster reachable at all?".
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--profile NAME` | Profile name (required) |
-| `-o, --output FMT` | Output format: pretty\|json |
-
-### Examples
-
-```sh
-# Quick-check prod
-sparkwing cluster status --profile prod
-
-# Structured output for a status dashboard
-sparkwing cluster status --profile prod -o json
-```
-
 ## `sparkwing cluster tokens`
 
 Manage controller API tokens
@@ -593,7 +554,6 @@ save it before leaving this command.
 - `create` -- Mint a new API token
 - `list` -- List token prefixes + metadata
 - `revoke` -- Mark a token revoked
-- `lookup` -- Print metadata for a single token
 - `rotate` -- Mint a replacement token with a grace window
 
 ## `sparkwing cluster tokens create`
@@ -641,10 +601,13 @@ scope check. An empty scope set renders as "-".
 Use -o json to get a structured array with explicit
 scope arrays, suitable for piping into jq.
 
+--prefix PREFIX prints the full record of one token as indented JSON.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--prefix PREFIX` | Print the full record of the token with this non-secret prefix |
 | `--type KIND` | Filter by token type |
 | `--include-revoked` | Include revoked tokens in the output |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
@@ -656,32 +619,14 @@ scope arrays, suitable for piping into jq.
 # List all active tokens
 sparkwing cluster tokens list --profile prod
 
+# One token's full record
+sparkwing cluster tokens list --prefix swu_abc123 --profile prod
+
 # Audit every revoked service token
 sparkwing cluster tokens list --type service --include-revoked --profile prod
 
 # Inspect the warm-runner pool token's scopes as JSON
 sparkwing cluster tokens list --profile prod -o json | jq 'select(.principal=="agent:fictional-runner") | .scopes'
-```
-
-## `sparkwing cluster tokens lookup`
-
-Print metadata for a single token
-
-Prints the JSON metadata for a token given its non-secret prefix. Useful for
-confirming principal + scopes before revoking or rotating.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--prefix PREFIX` | Non-secret token prefix (required) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Inspect a token before revoking
-sparkwing cluster tokens lookup --prefix a1b2c3d4 --profile prod
 ```
 
 ## `sparkwing cluster tokens revoke`

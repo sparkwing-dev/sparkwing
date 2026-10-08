@@ -936,7 +936,7 @@ scanner failure on `main` is what holds a release back, before the tag exists.
 - **Set the auth tokens.** With an empty tokens table the controller
   serves every endpoint unauthenticated. It logs a warning at startup,
   reports `"auth": "disabled"` on `GET /api/v1/health`, and `sparkwing
-  cluster status` flags the controller probe as a warning -- fine for a
+  cloud status --cluster` flags the controller probe as a warning -- fine for a
   laptop, not for a shared deployment. Set `SPARKWING_REQUIRE_AUTH=1`
   (or `--require-auth`) so the pod refuses to start with an empty tokens
   table. A controller with a multi-team license never serves
@@ -973,14 +973,14 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
   anything that reaches its Service can read, forge, and delete every
   run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
-  and `sparkwing cluster status` flags the logs probe as a warning. Set
+  and `sparkwing cloud status --cluster` flags the logs probe as a warning. Set
   `SPARKWING_REQUIRE_AUTH=1` (or `--require-auth`) so the pod refuses to
   start without an absolute `http(s)` controller URL, which keeps a
   typo from advertising `"auth": "enabled"` on a service whose every
   token lookup fails. The runner-bundle chart wires the controller URL
   from `controller.tokenSecret`, and a logs-enabled install without that
   Secret fails at render time unless you set
-  `logs.allowUnauthenticated=true`. `cluster status` warns rather than
+  `logs.allowUnauthenticated=true`. `cloud status --cluster` warns rather than
   passing whenever it cannot read the logs service's auth state: no
   announced logs URL, a health body with no `auth` field (an image
   older than the report), or a degraded service.

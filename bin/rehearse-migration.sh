@@ -201,12 +201,17 @@ cli_verify() {
   install -d -m 700 "$home"
   # safety: the builds under test predate and postdate config.yaml, so clear both files a profile can live in
   rm -f -- "$home/.config/sparkwing/profiles.yaml" "$home/.config/sparkwing/config.yaml"
-  controller_env "$home" "$cli" configure profiles add --name rehearsal --controller "$url" --token-stdin \
-    < "$creds/canary-token" > "$home/add.log" 2>&1 || { fail "$label: profiles add: $(tail -1 "$home/add.log")"; return; }
+  # hack: the two builds under test spell profile registration differently, so try
+  # the current verb and fall back to the one it replaced.
+  controller_env "$home" "$cli" cloud connect --name rehearsal --controller "$url" --token-stdin --no-probe \
+    < "$creds/canary-token" > "$home/add.log" 2>&1 ||
+    controller_env "$home" "$cli" configure profiles add --name rehearsal --controller "$url" --token-stdin \
+      < "$creds/canary-token" >> "$home/add.log" 2>&1 ||
+    { fail "$label: register profile: $(tail -1 "$home/add.log")"; return; }
   local -a checks=(
-    "configure profiles test --profile rehearsal"
+    "cloud status --profile rehearsal"
     "runs list --profile rehearsal"
-    "runs get --run $run --profile rehearsal"
+    "runs status $run -o json --exit-zero --profile rehearsal"
     "secrets list --profile rehearsal"
     "secrets get --profile rehearsal --name REHEARSAL_V1"
     "cluster tokens list --profile rehearsal"

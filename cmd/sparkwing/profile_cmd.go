@@ -2,36 +2,20 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-func runProfileCmd(args []string) error {
-	fs := flag.NewFlagSet(cmdProfile.Path, flag.ContinueOnError)
-	profileName := fs.String("profile", "", "hypothetical: which profile would `--profile NAME` pick (default: the active no-flag resolution)")
-	output := fs.StringP("output", "o", "pretty", "output format: pretty | json")
-	if err := parseAndCheck(cmdProfile, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		PrintHelp(cmdProfile, os.Stderr)
-		return fmt.Errorf("profile: unexpected positional %q (this verb takes no arguments; use --profile NAME for the hypothetical case)", fs.Arg(0))
-	}
-	format, err := resolveOutputFormat(*output, cmdProfile.Path)
+func showSelectedProfile(profileName, output string) error {
+	format, err := resolveOutputFormat(output, cmdProfilesShow.Path)
 	if err != nil {
 		return err
 	}
 
-	p, chain, cfgPath, err := resolveProfileChain(*profileName)
+	p, chain, cfgPath, err := resolveProfileChain(profileName)
 	if err != nil {
 		return err
 	}

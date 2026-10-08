@@ -81,7 +81,7 @@ func TestOutputContractPipeRoutes(t *testing.T) {
 		{"info", "--for-agent"},
 		{"info", "--first-time"},
 		{"--output=json", "version", "--offline"},
-		{"profile"},
+		{"configure", "profiles", "show"},
 		{"docs", "list"},
 		{"docs", "list", "--guides"},
 		{"docs", "list", "--versions"},

@@ -90,7 +90,6 @@ indexed in [cli-reference.md](cli-reference.md):
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update |
 | `queue` | Local admission: holders, connections, waiters, capacity |
 | `daemon` | The local admission daemon: status / restart |
-| `profile` | Show which profile would resolve for this invocation, and why (read-only; never prints tokens) |
 | `version` | Composite CLI + SDK + sparks version card; `update --sdk` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |

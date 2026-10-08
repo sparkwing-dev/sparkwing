@@ -397,8 +397,6 @@ func runSparkwing(args []string) error {
 		return runCache(args[1:])
 	case "daemon":
 		return runDaemon(args[1:])
-	case "profile":
-		return runProfileCmd(args[1:])
 
 	case "serve":
 		return runDashboard(args[1:])
@@ -486,8 +484,6 @@ func runCluster(args []string) error {
 		return nil
 	}
 	switch args[0] {
-	case "status":
-		return runHealth(args[1:])
 	case "agents":
 		return runAgents(args[1:])
 	case "runners":

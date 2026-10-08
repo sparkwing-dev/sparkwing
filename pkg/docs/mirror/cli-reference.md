@@ -21,7 +21,6 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing fleet`](cli-fleet.md) -- Configure foreground assisted execution
 - [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
-- [`sparkwing profile`](cli-profile.md) -- Show the selected profile and how it was chosen
 - [`sparkwing queue`](cli-queue.md) -- Inspect local admission holders, connections, and waiters
 - [`sparkwing repos`](cli-repos.md) -- The machine's fleet of sparkwing repos and their SDK pins
 - [`sparkwing run`](cli-run.md) -- Invoke a pipeline

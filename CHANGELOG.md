@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Fold the connection verbs into `cloud`: `configure profiles add`, `remove` and `test`, `cluster status`, the top-level `profile`, and `cluster tokens lookup`; remove `configure profiles duplicate`
+  `configure profiles add` is `cloud connect --token-stdin` (`--no-probe` writes the profile without contacting the controller, as `add` did); `configure profiles remove` is `cloud disconnect --keep-token`; `configure profiles test` is `cloud status`, which now also reports a profile with no controller; `cluster status` is `cloud status --cluster`; `sparkwing profile [--profile P]` is `configure profiles show [--profile P]`; `cluster tokens lookup --prefix P` is `cluster tokens list --prefix P`. `configure profiles duplicate` had no replacement worth keeping; copy the entry in config.yaml. See [migration guide](docs/migrations/_unreleased.md#connection-verbs-fold-into-cloud).
+
 - **cli (Breaking):** Fold seven `docs` verbs into `docs list`, `docs read`, `docs migrations` and the `cache` group
   `docs guides` is `docs list --guides`; `docs versions` is `docs list --versions` (with `--web` and `--no-cache`); `docs all` is `docs read --all`; `docs migrations list`, `read` and `between` become one leaf, `docs migrations` (the list), `docs migrations --version V` (one guide) and `docs migrations --from A --to B` (a range; bare `between` is `--from v0.0.0`); `docs cache info` is `cache info --docs` and `docs cache clear` is `cache prune --docs`. See [migration guide](docs/migrations/_unreleased.md#docs-verbs-fold-into-list-read-and-migrations).
 

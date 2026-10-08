@@ -243,7 +243,7 @@ write, because its upserts name a unique index that no longer exists.
 Register a profile against the scratch controller and write through it:
 
 ```bash
-sparkwing configure profiles add --name rehearsal --controller http://127.0.0.1:4456 --token-stdin
+sparkwing cloud connect --name rehearsal --controller http://127.0.0.1:4456 --token-stdin
 sparkwing secrets set --profile rehearsal --name ROLLBACK_PROBE --value probe
 sparkwing secrets delete --profile rehearsal --name ROLLBACK_PROBE
 ```
@@ -290,12 +290,12 @@ the upgrade as unfinished and keep the backup where you can reach it.
 Run these after a restore and after an upgrade, against the controller
 you are judging. They are ordered so the first failure is the most
 informative. `--profile` names the profile pointing at that controller;
-register one with `sparkwing configure profiles add` when verifying a
+register one with `sparkwing cloud connect` when verifying a
 scratch controller on a spare port.
 
 ```bash
 # The controller answers, and the token still authenticates.
-sparkwing configure profiles test --profile prod
+sparkwing cloud status --profile prod
 
 # Run history is present, and reaches the most recent run you remember.
 sparkwing runs list --profile prod

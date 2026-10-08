@@ -464,8 +464,8 @@ Every verb the CLI dispatches is now a registered command, so `--help`,
 | Before | After |
 |---|---|
 | `sparkwing configure profiles ls` | `sparkwing configure profiles list` |
-| `sparkwing configure profiles rm NAME`, `... delete NAME` | `sparkwing configure profiles remove NAME` |
-| `sparkwing configure profiles dup ...` | `sparkwing configure profiles duplicate ...` |
+| `sparkwing configure profiles rm NAME`, `... delete NAME` | `sparkwing cloud disconnect --name NAME --keep-token` |
+| `sparkwing configure profiles dup ...` | none; see [Connection verbs fold into cloud](#connection-verbs-fold-into-cloud) |
 | `sparkwing secrets rm ...`, `sparkwing secrets remove ...` | `sparkwing secrets delete ...` |
 | `sparkwing pipeline sparks ls`, `... rm ...` | `sparkwing pipeline sparks list`, `... remove ...` |
 | `sparkwing configure xrepo ls`, `... rm ...` | `sparkwing configure xrepo list`, `... remove ...` |
@@ -655,3 +655,31 @@ instead of naming its replacement.
   and `--from`/`--to` on `docs migrations` cannot be combined. `--docs` on
   `cache info` and `cache prune` refuses `--all`, `--max-bytes` and
   `--max-entries`. `docs list` now refuses a stray positional.
+
+## Connection verbs fold into cloud
+
+| Before | After |
+|---|---|
+| `sparkwing configure profiles add --name N --controller URL --token-stdin` | `sparkwing cloud connect --name N --controller URL --token-stdin` |
+| `sparkwing configure profiles add --name N --controller URL` (controller not up, or unauthenticated) | `sparkwing cloud connect --name N --controller URL --no-probe` |
+| `sparkwing configure profiles add ... --token T` | `printf %s "$T" \| sparkwing cloud connect ... --token-stdin` |
+| `sparkwing configure profiles remove --name N` | `sparkwing cloud disconnect --name N --keep-token` |
+| `sparkwing configure profiles test --profile P [-o json]` | `sparkwing cloud status --profile P [-o json]` |
+| `sparkwing cluster status --profile P [-o json]` | `sparkwing cloud status --profile P --cluster [-o json]` |
+| `sparkwing profile [--profile P] [-o json]` | `sparkwing configure profiles show [--profile P] [-o json]` |
+| `sparkwing cluster tokens lookup --prefix X --profile P` | `sparkwing cluster tokens list --prefix X --profile P` |
+| `sparkwing configure profiles duplicate --src A --dst B` | copy the `A:` entry under `profiles:` in config.yaml to `B:` |
+
+- **`cloud connect` probes by default:** it checks the controller answers
+  unless `--no-probe` is given, and refuses an existing profile name unless
+  `--force` is given, as `configure profiles add` refused one.
+  `--token` on the command line is gone; pipe the token to `--token-stdin`.
+- **`cloud status` output:** a superset of `configure profiles test`: the same
+  probe table and exit code, plus the principal, scopes and dashboard when the
+  profile names a controller. JSON adds `controller`, `principal`, `scopes`,
+  `token_prefix` and `dashboard` beside `profile`, `probes` and `ok`.
+- **`cloud status --cluster`** prints the old `cluster status` report in the
+  same shape, with the same exit codes.
+- **`configure profiles show`** keeps `--name NAME [--show-token]` for one
+  config.yaml entry; without `--name` it prints the resolution report
+  `sparkwing profile` printed.

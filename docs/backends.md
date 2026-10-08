@@ -37,7 +37,7 @@ profiles:
 Select a profile with `--profile NAME`; it applies wholesale. Without
 `--profile`, the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`
 applies, falling back to the built-in local (sqlite + filesystem)
-defaults. `sparkwing profile` prints which profile resolved and why.
+defaults. `sparkwing configure profiles show` prints which profile resolved and why.
 
 ## Backend types
 

@@ -24,7 +24,7 @@ func runTokens(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdTokens, os.Stderr)
-		return fmt.Errorf("tokens: subcommand required (create|list|revoke|lookup|rotate)")
+		return fmt.Errorf("tokens: subcommand required (create|list|revoke|rotate)")
 	}
 	switch args[0] {
 	case "create":
@@ -33,8 +33,6 @@ func runTokens(args []string) error {
 		return runTokensList(args[1:])
 	case "revoke":
 		return runTokensRevoke(args[1:])
-	case "lookup":
-		return runTokensLookup(args[1:])
 	case "rotate":
 		return runTokensRotate(args[1:])
 	default:
@@ -107,6 +105,7 @@ func runTokensList(args []string) error {
 	on := addProfileFlag(fs)
 	kind := fs.String("type", "", "filter by type (user|runner|service)")
 	includeRevoked := fs.Bool("include-revoked", false, "include revoked tokens")
+	prefix := fs.String("prefix", "", "print the full record of the one token with this non-secret prefix")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdTokensList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -121,6 +120,9 @@ func runTokensList(args []string) error {
 	}
 	if err := requireController(prof, "tokens list"); err != nil {
 		return err
+	}
+	if *prefix != "" {
+		return printTokenRecord(prof.ControllerURL(), prof.ControllerToken(), *prefix)
 	}
 	q := url("")
 	if *kind != "" {
@@ -209,24 +211,8 @@ func runTokensRevoke(args []string) error {
 	return nil
 }
 
-func runTokensLookup(args []string) error {
-	fs := flag.NewFlagSet(cmdTokensLookup.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	prefix := fs.String("prefix", "", "non-secret token prefix")
-	if err := parseAndCheck(cmdTokensLookup, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "tokens lookup"); err != nil {
-		return err
-	}
-	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix)
+func printTokenRecord(controllerURL, token, prefix string) error {
+	resp, err := tokensGet(controllerURL, token, "/api/v1/tokens/"+prefix)
 	if err != nil {
 		return err
 	}
