@@ -63,10 +63,24 @@ type FilterValues = Omit<RunFilterState, `set${string}`>;
 
 // A full RFC 3339 time passes through untouched, because Date keeps milliseconds and an
 // inclusive bound copied from a run's nanosecond start would exclude that run.
-const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+const RFC3339 =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+// The controller parses with Go's RFC 3339 rules, which refuse an out-of-range field such
+// as hour 24 that Date would roll into the next day, so only an in-range time passes raw.
+function validRFC3339(s: string): boolean {
+  const m = RFC3339.exec(s);
+  if (!m) return false;
+  const [y, mo, d, h, mi, sec, oh, om] = m.slice(1).map((v) => (v === undefined ? 0 : Number(v)));
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return (
+    mo >= 1 && mo <= 12 && d >= 1 && d <= daysInMonth &&
+    h <= 23 && mi <= 59 && sec <= 59 && oh <= 23 && om <= 59
+  );
+}
 
 function isoBound(raw: string): string | null {
-  if (RFC3339.test(raw.trim())) return raw.trim();
+  if (validRFC3339(raw.trim())) return raw.trim();
   const ms = parseLooseDate(raw);
   return ms === null ? null : new Date(ms).toISOString();
 }

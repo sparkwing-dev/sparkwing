@@ -165,6 +165,24 @@ describe("runListQuery", () => {
     assert.equal(q?.get("finished_before"), new Date("2026-10-08T00:00").toISOString());
   });
 
+  it("lets Date normalize an RFC 3339 time with an out-of-range field", () => {
+    for (const [raw, want] of [
+      ["2026-10-08T24:00:00Z", "2026-10-09T00:00:00.000Z"],
+      ["2026-02-30T00:00:00Z", "2026-03-02T00:00:00.000Z"],
+    ]) {
+      const q = runListQuery(filters({ startedBefore: raw }), {}, { kind: "latest" });
+      assert.equal(q?.get("started_before"), want, raw);
+    }
+    for (const raw of ["2024-02-29T23:59:59.999999999Z", "2026-12-31T00:00:00+23:59"]) {
+      const q = runListQuery(filters({ startedBefore: raw }), {}, { kind: "latest" });
+      assert.equal(q?.get("started_before"), raw);
+    }
+    for (const raw of ["2026-13-01T00:00:00Z", "2026-10-08T12:60:00Z"]) {
+      const q = runListQuery(filters({ startedBefore: raw }), {}, { kind: "latest" });
+      assert.equal(q?.get("started_before"), null, raw);
+    }
+  });
+
   it("turns tags into the pipelines that carry them", () => {
     const meta = {
       build: { tags: ["ci"] },
