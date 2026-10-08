@@ -9,7 +9,6 @@ import (
 type runtimePlumbingKeys struct {
 	DryRun           any
 	Runner           any
-	SpawnHandler     any
 	StepRange        any
 	JSONRefResolver  any
 	PipelineResolver any
@@ -24,12 +23,10 @@ type runtimePlumbingKeys struct {
 }
 
 type runtimePlumbingFns struct {
-	PlanInsertChild    func(p *Plan, child *JobNode) error
 	PlanInsertExpanded func(p *Plan, source *JobNode, children []*JobNode) error
 	JobGroupFinalize   func(g *JobGroup, members []*JobNode, err error)
 	WorkStepFn         func(s *WorkStep) func(ctx context.Context) (any, error)
 	WorkStepMarkDone   func(s *WorkStep, out any)
-	SpawnSpecMarkDone  func(s *SpawnSpec, out any)
 	NodeDirCaches      func(n *JobNode) []depcache.Spec
 }
 
@@ -41,7 +38,7 @@ type runtimePlumbingFns struct {
 //
 // Pipeline authors should NOT reach for it. The supported surface is
 // the typed accessors: IsDryRun, Runner, Admitted, Ref[T].Get, and
-// the SpawnHandler / WorkStep methods.
+// the WorkStep methods.
 var RuntimePlumbing = struct {
 	Keys runtimePlumbingKeys
 	Fns  runtimePlumbingFns
@@ -49,7 +46,6 @@ var RuntimePlumbing = struct {
 	Keys: runtimePlumbingKeys{
 		DryRun:           dryRunKey{},
 		Runner:           runnerCtxKey{},
-		SpawnHandler:     keySpawnHandler,
 		StepRange:        stepRangeKey{},
 		JSONRefResolver:  keyJSONRefResolver,
 		PipelineResolver: keyPipelineResolver,
@@ -63,12 +59,10 @@ var RuntimePlumbing = struct {
 		OIDCTokenSource:  oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
-		PlanInsertChild:    (*Plan).insertChild,
 		PlanInsertExpanded: (*Plan).insertExpanded,
 		JobGroupFinalize:   (*JobGroup).finalize,
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
-		SpawnSpecMarkDone:  (*SpawnSpec).markDone,
 		NodeDirCaches:      dirCacheSpecs,
 	},
 }

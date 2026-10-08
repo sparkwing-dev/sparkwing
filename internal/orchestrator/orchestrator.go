@@ -2307,8 +2307,7 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 	}
 
 	s.markStarted(node.ID())
-	runnerCtx := sparkwingruntime.WithSpawnHandler(ctx, s.newSpawnHandler(node.ID()))
-	runnerCtx = sparkwingruntime.WithRunner(runnerCtx, runnerInfoFor(activeRunner))
+	runnerCtx := sparkwingruntime.WithRunner(ctx, runnerInfoFor(activeRunner))
 	runnerCtx = withAdmissionWaitParticipant(runnerCtx, node.ID())
 
 	retryCfg := node.RetryConfig()
@@ -3133,8 +3132,6 @@ type snapshotModifiers struct {
 
 type snapshotWork struct {
 	Steps         []snapshotStep      `json:"steps,omitempty"`
-	Spawns        []snapshotSpawn     `json:"spawns,omitempty"`
-	SpawnEach     []snapshotSpawnEach `json:"spawn_each,omitempty"`
 	StepGroups    []snapshotStepGroup `json:"step_groups,omitempty"`
 	ResultStep    string              `json:"result_step,omitempty"`
 	FailurePolicy string              `json:"failure_policy,omitempty"`
@@ -3153,22 +3150,6 @@ type snapshotStep struct {
 	Finally   bool     `json:"finally,omitempty"`
 
 	Risks []string `json:"risks,omitempty"`
-}
-
-type snapshotSpawn struct {
-	ID         string        `json:"id"`
-	Needs      []string      `json:"needs,omitempty"`
-	TargetJob  string        `json:"target_job,omitempty"`
-	TargetWork *snapshotWork `json:"target_work,omitempty"`
-	HasSkipIf  bool          `json:"has_skip_if,omitempty"`
-}
-
-type snapshotSpawnEach struct {
-	ID               string        `json:"id"`
-	Needs            []string      `json:"needs,omitempty"`
-	TargetJob        string        `json:"target_job,omitempty"`
-	ItemTemplateWork *snapshotWork `json:"item_template_work,omitempty"`
-	Note             string        `json:"note,omitempty"`
 }
 
 type planSnapshotMeta struct {
@@ -3215,7 +3196,6 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			MemoryBytes: rh.MemoryBytes,
 		}
 	}
-	walker := newWorkWalker()
 	seen := make(map[string]bool)
 	for _, n := range p.Nodes() {
 		sn := snapshotNode{
@@ -3239,11 +3219,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		sn.Modifiers = nodeModifiersSnapshot(n)
 		sn.DirCaches = nodeDirCaches(n)
 		if w := n.Work(); w != nil {
-			work, err := walker.walk(w, n.ResultStep())
-			if err != nil {
-				return snap, fmt.Errorf("plan node %q: %w", n.ID(), err)
-			}
-			sn.Work = work
+			sn.Work = snapshotWorkOf(w, n.ResultStep())
 		}
 		snap.Nodes = append(snap.Nodes, sn)
 		seen[n.ID()] = true
@@ -3267,11 +3243,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			PipelineRefs: snapshotPipelineRefs(rec.PipelineRefs()),
 		}
 		if w := rec.Work(); w != nil {
-			work, err := walker.walk(w, rec.ResultStep())
-			if err != nil {
-				return snap, fmt.Errorf("plan node %q (on_failure of %q): %w", rec.ID(), n.ID(), err)
-			}
-			recSnap.Work = work
+			recSnap.Work = snapshotWorkOf(w, rec.ResultStep())
 		}
 		snap.Nodes = append(snap.Nodes, recSnap)
 		seen[rec.ID()] = true
@@ -3438,20 +3410,7 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		!m.HasSkipIf
 }
 
-type workWalker struct {
-	stack    []string
-	stackSet map[string]bool
-	memo     map[string]*snapshotWork
-}
-
-func newWorkWalker() *workWalker {
-	return &workWalker{
-		stackSet: map[string]bool{},
-		memo:     map[string]*snapshotWork{},
-	}
-}
-
-func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) (*snapshotWork, error) {
+func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *snapshotWork {
 	out := &snapshotWork{FailurePolicy: string(work.ParallelFailurePolicy())}
 	if resultStep != nil {
 		out.ResultStep = resultStep.ID()
@@ -3466,20 +3425,6 @@ func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) 
 			Risks:     s.Risks(),
 		})
 	}
-	for _, s := range work.Spawns() {
-		spawn := snapshotSpawn{
-			ID:        s.ID(),
-			Needs:     s.DepIDs(),
-			TargetJob: jobName(s.Job()),
-			HasSkipIf: len(s.SkipPredicates()) > 0,
-		}
-		target, err := w.walkJob(s.Job())
-		if err != nil {
-			return nil, err
-		}
-		spawn.TargetWork = target
-		out.Spawns = append(out.Spawns, spawn)
-	}
 	for _, g := range work.Groups() {
 		members := g.Members()
 		ids := make([]string, len(members))
@@ -3491,114 +3436,7 @@ func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) 
 			Members: ids,
 		})
 	}
-	for _, g := range work.SpawnGens() {
-		each := snapshotSpawnEach{
-			ID:    g.ID(),
-			Needs: g.DepIDs(),
-		}
-		if id, job, err := materializeSpawnEachTemplate(g); err == nil && job != nil {
-			each.TargetJob = jobName(job)
-			tmpl, werr := w.walkJob(job)
-			if werr != nil {
-				return nil, werr
-			}
-			each.ItemTemplateWork = tmpl
-			if id != "" {
-				each.Note = fmt.Sprintf("template materialized from zero-value input; sample id=%q", id)
-			} else {
-				each.Note = "template materialized from zero-value input"
-			}
-		} else if err != nil {
-			each.Note = fmt.Sprintf("template not materializable: %s", err.Error())
-		}
-		out.SpawnEach = append(out.SpawnEach, each)
-	}
-	return out, nil
-}
-
-func (w *workWalker) walkJob(job sparkwing.Workable) (*snapshotWork, error) {
-	if job == nil {
-		return nil, nil
-	}
-	key := jobName(job)
-	if w.stackSet[key] {
-		cycle := append([]string{}, w.stack...)
-		cycle = append(cycle, key)
-		return nil, fmt.Errorf("spawn cycle detected: %s", joinCycle(cycle))
-	}
-	if cached, ok := w.memo[key]; ok {
-		return cached, nil
-	}
-	w.stack = append(w.stack, key)
-	w.stackSet[key] = true
-	defer func() {
-		w.stack = w.stack[:len(w.stack)-1]
-		delete(w.stackSet, key)
-	}()
-	work := sparkwing.NewWork()
-	resultStep, err := job.Work(work)
-	if err != nil {
-		return nil, fmt.Errorf("Job.Work failed: %w", err)
-	}
-	out, err := w.walk(work, resultStep)
-	if err != nil {
-		return nil, err
-	}
-	w.memo[key] = out
-	return out, nil
-}
-
-func jobName(job sparkwing.Workable) string {
-	if job == nil {
-		return "<nil>"
-	}
-	t := reflect.TypeOf(job)
-	if t == nil {
-		return "<unknown>"
-	}
-	return t.String()
-}
-
-func joinCycle(parts []string) string {
-	return strings.Join(parts, " -> ")
-}
-
-func materializeSpawnEachTemplate(spec *sparkwing.SpawnGenSpec) (id string, job sparkwing.Workable, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			id = ""
-			job = nil
-			err = fmt.Errorf("generator panicked on zero-value input: %v", r)
-		}
-	}()
-	fn := reflect.ValueOf(spec.Fn())
-	if !fn.IsValid() || fn.Kind() != reflect.Func {
-		return "", nil, errors.New("generator fn is not a function")
-	}
-	t := fn.Type()
-	if t.NumIn() != 1 {
-		return "", nil, fmt.Errorf("generator fn takes %d args (want 1)", t.NumIn())
-	}
-	if t.NumOut() != 2 {
-		return "", nil, fmt.Errorf("generator fn returns %d values (want 2)", t.NumOut())
-	}
-	zero := reflect.Zero(t.In(0))
-	out := fn.Call([]reflect.Value{zero})
-	if !out[0].IsValid() || out[0].Kind() != reflect.String {
-		return "", nil, errors.New("generator fn first return is not string id")
-	}
-	id = out[0].String()
-	if out[1].IsValid() {
-		raw := out[1].Interface()
-		if raw != nil {
-			j, cerr := sparkwing.CoerceSpawnEachJob(raw)
-			if cerr != nil {
-				return id, nil, cerr
-			}
-			job = j
-		}
-	}
-	return id, job, nil
+	return out
 }
 
 func newRunID() string {

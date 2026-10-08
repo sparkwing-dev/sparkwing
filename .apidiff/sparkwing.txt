@@ -82,7 +82,6 @@ func (c *Cmd) Lines() ([]string, error)
 func (c *Cmd) MustBeEmpty(reason string) error
 func (c *Cmd) Run() (ExecResult, error)
 func (c *Cmd) String() (string, error)
-func CoerceSpawnEachJob(v any) (Workable, error)
 const CollectAll ParallelFailurePolicy = "collect-all"
 type ConcurrencyGroup struct {
 }
@@ -360,8 +359,6 @@ func (n *JobNode) Verify(fn VerifyFn) *JobNode
 func (n *JobNode) WhenRunner(labels ...string) *JobNode
 func (n *JobNode) WhenRunnerLabels() []string
 func (n *JobNode) Work() *Work
-func JobSpawn(w *Work, id string, x any) *SpawnSpec
-func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec
 func Key(parts ...any) CacheKey
 func KeyFromFile(path string) KeySource
 type KeySource struct {
@@ -399,7 +396,6 @@ func MemoryGB(n float64) ResourceHint
 func MustConfig(ctx context.Context, name string) string
 func MustSecret(ctx context.Context, name string) string
 func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup
-func NewDetachedNode(id string, job Workable) *JobNode
 func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git
 func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
 func NewPlan() *Plan
@@ -584,7 +580,6 @@ var RuntimePlumbing = struct {
 	Keys: runtimePlumbingKeys{
 		DryRun:           dryRunKey{},
 		Runner:           runnerCtxKey{},
-		SpawnHandler:     keySpawnHandler,
 		StepRange:        stepRangeKey{},
 		JSONRefResolver:  keyJSONRefResolver,
 		PipelineResolver: keyPipelineResolver,
@@ -598,12 +593,10 @@ var RuntimePlumbing = struct {
 		OIDCTokenSource:  oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
-		PlanInsertChild:    (*Plan).insertChild,
 		PlanInsertExpanded: (*Plan).insertExpanded,
 		JobGroupFinalize:   (*JobGroup).finalize,
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
-		SpawnSpecMarkDone:  (*SpawnSpec).markDone,
 		NodeDirCaches:      dirCacheSpecs,
 	},
 }
@@ -661,26 +654,6 @@ type SparkwingFlagDoc struct {
 	Hot bool
 }
 func SparkwingFlagDocs() []SparkwingFlagDoc
-type SpawnGenSpec struct {
-}
-func (g *SpawnGenSpec) DepIDs() []string
-func (g *SpawnGenSpec) Fn() any
-func (g *SpawnGenSpec) ID() string
-func (g *SpawnGenSpec) Items() any
-func (g *SpawnGenSpec) Needs(deps ...WorkDep) *SpawnGenSpec
-type SpawnHandler interface {
-	Spawn(ctx context.Context, parentNodeID, spawnID string, job Workable) (output any, err error)
-}
-type SpawnHandlerFunc func(ctx context.Context, parentNodeID, spawnID string, job Workable) (any, error)
-func (f SpawnHandlerFunc) Spawn(ctx context.Context, parentNodeID, spawnID string, job Workable) (any, error)
-type SpawnSpec struct {
-}
-func (s *SpawnSpec) DepIDs() []string
-func (s *SpawnSpec) ID() string
-func (s *SpawnSpec) Job() Workable
-func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec
-func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec
-func (s *SpawnSpec) SkipPredicates() []SkipPredicate
 const StageAction FailureStage = iota
 const StageVerify
 func Step(w *Work, id string, fn any) *WorkStep
@@ -740,8 +713,6 @@ func (w *Work) Groups() []*StepGroup
 func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy
 func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work
 func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string
-func (w *Work) SpawnGens() []*SpawnGenSpec
-func (w *Work) Spawns() []*SpawnSpec
 func (w *Work) StepByID(id string) *WorkStep
 func (w *Work) Steps() []*WorkStep
 func (w *Work) TopologicalStepOrder() []string

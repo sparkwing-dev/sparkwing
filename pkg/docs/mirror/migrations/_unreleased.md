@@ -983,6 +983,61 @@ argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
 - **Author steps:** settle a node with `FinalizeNodeCredits`; generate a release
   seed as described above under `cmd/sign-manifest is removed`.
 
+## JobSpawn and JobSpawnEach are removed
+
+**Before:** a step graph inserted Plan nodes while it ran. `JobSpawn`
+added one child named `parent/id`, and `JobSpawnEach` one per item; the
+parent's runner stayed suspended until every child finished.
+
+```go
+func (j *Scan) Work(w *sw.Work) (*sw.WorkStep, error) {
+    list := sw.Step(w, "list", j.listTargets)
+    sw.JobSpawnEach(w, j.targets, func(t string) (string, any) {
+        return "scan-" + t, &ScanTarget{Target: t}
+    }).Needs(list)
+    return nil, nil
+}
+```
+
+**After:** Jobs are added on the Plan. A Job produces the item list, and
+`JobFanOutDynamic` creates one child per item once it succeeds; the
+source's runner exits first.
+
+```go
+type ListTargets struct {
+    sw.Base
+    sw.Produces[[]string]
+}
+
+func (j *ListTargets) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "list", j.list), nil // func(ctx) ([]string, error)
+}
+
+func (Scan) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    list := sw.Job(plan, "list", &ListTargets{})
+    sw.JobFanOutDynamic(plan, "scan", list, func(t string) (string, any) {
+        return "scan-" + t, &ScanTarget{Target: t}
+    })
+    return nil
+}
+```
+
+**Author steps:**
+
+- A single `JobSpawn(w, id, job)` becomes `sw.Job(plan, id, job)` with
+  `.Needs(...)` on the Job that ran the steps before it. Steps after the
+  spawn move into a Job that `Needs` the new one, and read its output
+  with `sw.RefTo[T](node)`.
+- A `JobSpawnEach` becomes the Plan shape above.
+- `SkipIf` on a spawn becomes `SkipIf` on the new Job.
+- Child node ids lose the `parent/` prefix; update anything that reads
+  runs by node id, such as `--sw-only` globs and dashboards.
+
+Tools that read plan snapshots, `pipeline plan --json` or the run API's
+`work` object stop seeing `spawns`, `spawn_each`, `cardinality` and
+`cardinality_source`, and the `spawn_dispatched` event is no longer
+written.
+
 ## The job-args schema builder is removed
 
 **Before:** a job embedding `sparkwing.WithArgs[T]` turned every exported

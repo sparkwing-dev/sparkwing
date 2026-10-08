@@ -149,7 +149,6 @@ const (
 	keyJSONRefResolver
 	keyPipelineResolver
 	keyPipelineAwaiter
-	keySpawnHandler
 	keyInputs
 	keyStep
 	keyPipelineConfig

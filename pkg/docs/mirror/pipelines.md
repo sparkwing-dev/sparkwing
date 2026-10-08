@@ -125,12 +125,12 @@ is a layer choice. Internalize this before reading the recipes below.
   Job's runner. Steps share the Job's runner, filesystem, environment,
   and ctx. They have `Needs` for ordering and `SkipIf` for predicates;
   they do **not** carry Job-only modifiers (Retry, Timeout, ...).
-  Promote a step to a Job via `JobSpawn` if it needs one.
+  Promote a step to its own Job if it needs one.
 
 Each pipeline implements `Plan(ctx, plan *sw.Plan, in T, rc sw.RunContext) error`
 which registers nodes on the outer DAG. A job's `Workable.Work` method
 registers its inner steps. The orchestrator materializes the reachable
-graph, including spawn targets, before dispatch so inspection can show it.
+graph before dispatch so inspection can show it.
 
 ### Cost grid
 
@@ -140,14 +140,10 @@ graph, including spawn targets, before dispatch so inspection can show it.
 | `sw.JobFanOut(plan, name, items, fn)` | Plan | many, items in hand at Plan-time | normal nodes; one per element |
 | `sw.JobFanOutDynamic(plan, name, source, fn)` | Plan | many, source's runtime output | source runner exits before fan-out - no stranded compute |
 | `sw.Step(w, id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
-| `sw.JobSpawn(w, id, job)` | Work | one, decided mid-Work | spawning runner stays suspended until child completes |
-| `sw.JobSpawnEach(w, items, fn)` | Work | many, mid-Work fan-out | spawning runner stays suspended across all children |
 
-The verb tells you the cost. The Plan-layer `Job*` adders are cheap;
-the Work-layer `JobSpawn*` adders flag the layer jump and the
-suspended-runner cost. Reach for `JobSpawn` when you genuinely need
-Job-only modifiers (Retry, Requires, distinct runner) on a unit
-decided mid-execution; otherwise stay inside Work.
+Only Plan-layer `Job*` adders create Jobs. A unit that needs Job-only
+modifiers (Retry, Requires, distinct runner) is its own Job; a set of
+Jobs decided by an earlier Job's output is `JobFanOutDynamic`.
 
 ## Trivial single-step jobs
 
@@ -369,51 +365,23 @@ across N members makes them share a single cache entry and replay each
 other's results. Key each member instead, by ranging over
 `group.Members()`; see [authoring-pipelines.md](authoring-pipelines.md).
 
-## Layer escape: JobSpawn
+## Splitting work into Jobs
 
-When a unit of work decided *mid-Work* needs a Job-only modifier
-(Retry, Requires, distinct runner, separate cache key), promote it via
-`sw.JobSpawn`. The spawning runner suspends until the spawned Job
-completes:
-
-```go
-func (j *ScanJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-    analyze := sw.Step(w, "analyze", j.analyze)
-    scan := sw.JobSpawn(w, "compliance", &ComplianceJob{}).Needs(analyze)
-    sw.Step(w, "publish", func(ctx context.Context) error {
-        return publish(ctx, scan)
-    }).Needs(scan)
-    return nil, nil
-}
-```
-
-The spawned Job id is namespaced as `parent/spawnID`
-(e.g. `scan/compliance`) so logs and the run history don't collide.
-
-A spawned Job runs inside its parent node's own process -- a local node
-process, or a pod. It runs under the admission lease its parent already
-holds, so it is not charged against host capacity a second time, and
-concurrent children are capped the way the dispatcher caps nodes. It
-still records its own node row under `parent/spawnID`, its own logs,
-metrics, and output, and a `spawn_dispatched` event on the parent. A
-child whose `WhenRunner` labels the executing runner does not advertise
-is skipped, exactly as a planned node would be.
-
-`sw.JobSpawnEach(w, items, fn)` is the cardinality-many variant. The
-generator runs once Needs are satisfied; each returned `(id, Job)`
-pair becomes a fresh Plan node. The spawning runner stays suspended
-across the entire fan-out:
+When part of a Job needs a Job-only modifier (Retry, Requires, distinct
+runner, separate cache key), make it a Job of its own and order it with
+`Needs`. When the set of Jobs depends on what an earlier Job finds, have
+that Job produce the list and expand it with `sw.JobFanOutDynamic`:
 
 ```go
-sw.JobSpawnEach(w, targets, func(target string) (string, any) {
-    return "deploy-" + target, &Deploy{Target: target}
-}).Needs(buildStep)
+analyze := sw.Job(plan, "analyze", &AnalyzeJob{}) // Produces[[]string]
+sw.JobFanOutDynamic(plan, "compliance", analyze, func(target string) (string, any) {
+    return "scan-" + target, &ComplianceJob{Target: target}
+})
 ```
 
-Reach for spawn primitives sparingly. Each call holds a runner slot
-during the child's lifetime; a deeply nested spawn chain pins one slot
-per layer. The `JobSpawn*` prefix flags the layer jump (and the
-suspended-runner cost) at the call site.
+The source Job's runner exits before the children dispatch, so no
+runner sits suspended while they run, and each child is an ordinary
+node with its own row, logs, retries and runner placement.
 
 ## Modifier scope discipline
 
@@ -435,7 +403,7 @@ suspended-runner cost) at the call site.
 | typed output | both | `Ref[T]` (Job) / `*WorkStep` returned from `Work` (Work) |
 
 A Step that needs Retry / Timeout / Requires is the canonical signal
-to promote it to a Job via `sw.JobSpawn`.
+to promote it to a Job of its own.
 
 ## Scheduling modifiers
 
@@ -481,21 +449,18 @@ sw.GroupJobs(plan, "safety",
 
 Every Job's `Work()` runs during the Pipeline's `Plan()`, not at
 runner dispatch. The orchestrator walks the entire reachable nested
-DAG - including transitive `JobSpawn` targets - before any node runs.
+DAG before any node runs.
 What stays runtime-dynamic is bounded:
 
 - Which Nodes execute (Plan-time branching on `in`, Job `SkipIf`).
 - Which Steps execute (intra-Work `SkipIf`).
-- Whether each `JobSpawn` fires and with what arguments.
 - `JobFanOutDynamic` cardinality (count and keys come from the source's
   runtime output; the per-item shape is known).
 
 Because the structure is reachable from source, `sparkwing pipeline
 explain --name X` and the dashboard render the full Plan -> Job ->
 Work -> Step tree before anything runs. The dashboard's per-Job card
-exposes a collapsible **Work** section showing inner steps and spawn
-declarations as placeholders (filled in once spawned children
-appear).
+exposes a collapsible **Work** section showing its inner steps.
 
 ## Cache
 

@@ -41,7 +41,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Registered() []string` -- Registered returns the names of all registered pipelines, sorted.
 - `func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)` -- RestoreLintCache downloads the blob-store seed for the current WorkDir and expands it into the golangci-lint tool-cache directory.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
-- `func RunWork(ctx context.Context, w *Work) (any, error)` -- RunWork executes w's step + spawn DAG.
+- `func RunWork(ctx context.Context, w *Work) (any, error)` -- RunWork executes w's step DAG.
 - `func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)` -- SaveLintCache compresses the golangci-lint tool-cache directory for the current WorkDir and PUTs it to gcURL/cache/<key>.
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
 - `func SetGit(g *Git)` -- SetGit attaches a fully-populated Git to the runtime.
@@ -730,7 +730,6 @@ type JobNode struct {
 ```
 
 - `func Job(p *Plan, id string, x any) *JobNode` -- Job registers a Workable or func(context.Context) error under id.
-- `func NewDetachedNode(id string, job Workable) *JobNode` -- NewDetachedNode validates a node for runtime insertion without registering it on a Plan.
 - `func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode` -- AfterRun registers a hook invoked after Run and all retries finish.
 - `func (n *JobNode) AfterRunHooks() []AfterRunFn`
 - `func (n *JobNode) ApprovalConfig() *ApprovalConfig` -- ApprovalConfig returns the per-node approval configuration, or nil for non-approval nodes.
@@ -1536,62 +1535,6 @@ type SparkwingFlagDoc struct {
 
 - `func SparkwingFlagDocs() []SparkwingFlagDoc` -- SparkwingFlagDocs returns the canonical sparkwing-owned flag documentation.
 
-### type SpawnGenSpec
-
-SpawnGenSpec is the static record of a JobSpawnEach declaration.
-
-```
-type SpawnGenSpec struct {
-    // contains filtered or unexported fields
-}
-```
-
-- `func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec` -- JobSpawnEach is the cardinality-many variant of JobSpawn.
-- `func (g *SpawnGenSpec) DepIDs() []string` -- DepIDs returns the WorkStep IDs the generator waits on.
-- `func (g *SpawnGenSpec) Fn() any` -- Fn returns the per-item closure.
-- `func (g *SpawnGenSpec) ID() string` -- ID exposes the synthetic id (e.g.
-- `func (g *SpawnGenSpec) Items() any` -- Items returns the input slice value.
-- `func (g *SpawnGenSpec) Needs(deps ...WorkDep) *SpawnGenSpec` -- Needs declares which Steps / Spawns must complete before the generator runs.
-
-### type SpawnHandler
-
-SpawnHandler is the orchestrator-provided callback that fires a SpawnNode declaration from inside an executing Work.
-
-```
-type SpawnHandler interface {
-    Spawn(ctx context.Context, parentNodeID, spawnID string, job Workable) (output any, err error)
-}
-```
-
-
-### type SpawnHandlerFunc
-
-SpawnHandlerFunc adapts a closure into a SpawnHandler.
-
-```
-type SpawnHandlerFunc func(ctx context.Context, parentNodeID, spawnID string, job Workable) (any, error)
-```
-
-- `func (f SpawnHandlerFunc) Spawn(ctx context.Context, parentNodeID, spawnID string, job Workable) (any, error)` -- Spawn implements SpawnHandler.
-
-### type SpawnSpec
-
-SpawnSpec is the static record of a JobSpawn declaration.
-
-```
-type SpawnSpec struct {
-    // contains filtered or unexported fields
-}
-```
-
-- `func JobSpawn(w *Work, id string, x any) *SpawnSpec` -- JobSpawn dispatches a registered Job as a fresh Plan node from inside a Work.
-- `func (s *SpawnSpec) DepIDs() []string` -- DepIDs returns WorkStep IDs the spawn waits on inside its parent Work.
-- `func (s *SpawnSpec) ID() string` -- ID returns the spawn's local id (not the eventual Plan node id, which is namespaced by the spawning Job).
-- `func (s *SpawnSpec) Job() Workable` -- Job returns the spawn's target.
-- `func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec` -- Needs declares which Steps / Spawns inside the same Work must complete before the spawn fires.
-- `func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec` -- SkipIf registers a predicate the orchestrator evaluates before firing the spawn.
-- `func (s *SpawnSpec) SkipPredicates() []SkipPredicate` -- SkipPredicates returns the spawn's registered predicates.
-
 ### type StepError
 
 StepError wraps a step body's error with the originating step ID.
@@ -1707,15 +1650,13 @@ type Work struct {
 - `func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy` -- ParallelFailurePolicy returns the configured policy.
 - `func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work` -- ParallelFailures sets the policy for independent items in this Work.
 - `func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string` -- PreviewSkipForRange computes the (id -> human-readable reason) skip set this Work would apply under the given --start-at / --stop-at bounds, WITHOUT executing any step body.
-- `func (w *Work) SpawnGens() []*SpawnGenSpec` -- SpawnGens returns the JobSpawnEach declarations.
-- `func (w *Work) Spawns() []*SpawnSpec` -- Spawns returns the static JobSpawn declarations registered on this Work.
 - `func (w *Work) StepByID(id string) *WorkStep` -- StepByID returns the step with the given id, or nil if absent.
 - `func (w *Work) Steps() []*WorkStep` -- Steps returns the work's steps in insertion order.
-- `func (w *Work) TopologicalStepOrder() []string` -- TopologicalStepOrder returns Work item IDs in a stable topological order consistent with their Needs DAG: ties broken by registration order (the order Step / SpawnNode / SpawnNodeForEach was called).
+- `func (w *Work) TopologicalStepOrder() []string` -- TopologicalStepOrder returns Work item IDs in a stable topological order consistent with their Needs DAG: ties broken by registration order (the order Step was called).
 
 ### type WorkDep
 
-WorkDep is the closed type set accepted by Work-layer WorkStep.Needs and the Needs methods on StepGroup, SpawnSpec, and SpawnGenSpec.
+WorkDep is the closed type set accepted by Work-layer WorkStep.Needs and StepGroup.Needs.
 
 ```
 type WorkDep interface {
@@ -1745,7 +1686,7 @@ type WorkStep struct {
 - `func (s *WorkStep) IsFinally() bool` -- IsFinally reports whether this step is cleanup that survives sibling failure.
 - `func (s *WorkStep) IsOptional() bool` -- IsOptional reports whether this step's failure is masked from the Job's rollup outcome.
 - `func (s *WorkStep) IsSafeWithoutDryRun() bool` -- IsSafeWithoutDryRun reports whether the step is marked safe.
-- `func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep` -- Needs declares hard upstream Step / Spawn dependencies inside the same Work.
+- `func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep` -- Needs declares hard upstream Step dependencies inside the same Work.
 - `func (s *WorkStep) Optional() *WorkStep` -- Optional marks the step as non-essential: a failure is recorded (still visible in logs and step status) but does not count toward the Job's rollup outcome.
 - `func (s *WorkStep) Output() any` -- Output returns the resolved typed output (after the step completes) or nil.
 - `func (s *WorkStep) OutputType() reflect.Type` -- OutputType returns the typed output reflect.Type, or nil for steps that return only error.
@@ -1765,7 +1706,6 @@ type Workable interface {
 }
 ```
 
-- `func CoerceSpawnEachJob(v any) (Workable, error)` -- CoerceSpawnEachJob normalizes the second-return of a JobSpawnEach per-item callback into a Workable.
 
 ## Constants
 
@@ -1848,7 +1788,6 @@ var RuntimePlumbing = struct {
     Keys: runtimePlumbingKeys{
         DryRun:           dryRunKey{},
         Runner:           runnerCtxKey{},
-        SpawnHandler:     keySpawnHandler,
         StepRange:        stepRangeKey{},
         JSONRefResolver:  keyJSONRefResolver,
         PipelineResolver: keyPipelineResolver,
@@ -1862,12 +1801,10 @@ var RuntimePlumbing = struct {
         OIDCTokenSource:  oidcTokenSourceKey{},
     },
     Fns: runtimePlumbingFns{
-        PlanInsertChild:    (*Plan).insertChild,
         PlanInsertExpanded: (*Plan).insertExpanded,
         JobGroupFinalize:   (*JobGroup).finalize,
         WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
         WorkStepMarkDone:   (*WorkStep).markDone,
-        SpawnSpecMarkDone:  (*SpawnSpec).markDone,
         NodeDirCaches:      dirCacheSpecs,
     },
 }
