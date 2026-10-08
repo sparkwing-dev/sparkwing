@@ -335,11 +335,11 @@ func runCronsUninstall(args []string) error {
 		return runCronsDisarmOne(*name, format, *on)
 	}
 	if *on != "" {
-		roots, rerr := cronsTargetRoots(false)
+		root, rerr := resolveCleanupRoot()
 		if rerr != nil {
 			return fmt.Errorf("crons uninstall: %w", rerr)
 		}
-		return runCronsUninstallProfile(*on, roots[0], format)
+		return runCronsUninstallProfile(*on, root, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -362,10 +362,11 @@ func runCronsUninstall(args []string) error {
 	}
 	roots := armedRoots
 	if !*fleet {
-		roots, err = cronsTargetRoots(false)
-		if err != nil {
-			return fmt.Errorf("crons uninstall: %w", err)
+		root, rerr := resolveCleanupRoot()
+		if rerr != nil {
+			return fmt.Errorf("crons uninstall: %w", rerr)
 		}
+		roots = []string{root}
 	}
 
 	report := cronsUninstallReport{}

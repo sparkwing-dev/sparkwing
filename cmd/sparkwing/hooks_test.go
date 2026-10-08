@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -681,4 +682,24 @@ func readRepoFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
+	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}, false, ""))
+	captureStdout(t, func() {
+		if err := runIn(t, filepath.Join(repo, ".sparkwing"), runHooksUninstall); err != nil {
+			t.Fatalf("hooks uninstall with no sparkwing.yaml or go.mod: %v", err)
+		}
+	})
+	if _, err := os.Stat(hook); !os.IsNotExist(err) {
+		t.Fatalf("managed hook survived uninstall: %v", err)
+	}
 }

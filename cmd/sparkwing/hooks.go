@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -698,7 +699,7 @@ func runHooksUninstall(args []string) error {
 		}
 		return err
 	}
-	repoRoot, _, err := resolveHooksRepo()
+	repoRoot, err := resolveCleanupRoot()
 	if err != nil {
 		return fmt.Errorf("hooks uninstall: %w", err)
 	}
@@ -1016,6 +1017,37 @@ func resolveHooksRepo() (repoRoot, sparkwingDir string, err error) {
 		return filepath.Dir(dir), dir, nil
 	}
 	return "", "", fmt.Errorf("no .sparkwing/ directory in %s or above it (pass -C DIR)", cwd)
+}
+
+// safety: removal must work on a checkout whose project files are gone, or a
+// stale hook keeps refusing commits and a stale schedule keeps firing; so it
+// takes the nearest .sparkwing/ with or without markers, then the git root.
+func resolveCleanupRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	runtimeHome := ""
+	if p, err := paths.DefaultPaths(); err == nil {
+		runtimeHome = filepath.Clean(p.Root)
+	}
+	for dir := filepath.Clean(cwd); ; dir = filepath.Dir(dir) {
+		candidate := filepath.Join(dir, ".sparkwing")
+		if candidate == runtimeHome {
+			break
+		}
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return dir, nil
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	top, err := gitOutput(context.Background(), cwd, nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("no .sparkwing/ directory or git checkout in %s or above it (pass -C DIR)", cwd)
+	}
+	return strings.TrimSpace(top), nil
 }
 
 // safety: the runtime home is also named .sparkwing (~/.sparkwing by default),

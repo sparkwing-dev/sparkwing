@@ -709,3 +709,24 @@ func TestCronsPinAndUnpinRefuseProfile(t *testing.T) {
 		t.Errorf("the crons group still claims every verb but tick takes --profile:\n%s", cmdCrons.Description)
 	}
 }
+
+func TestCronsUninstallStillDisarmsAfterTheProjectFilesAreGone(t *testing.T) {
+	_, _ = cronsTestHome(t)
+	repo := cronsTestRepo(t, cronsMinutelyRepo)
+	captureStdout(t, func() {
+		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
+			t.Fatalf("crons install: %v", err)
+		}
+	})
+	if err := os.Remove(filepath.Join(repo, ".sparkwing", "sparkwing.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runIn(t, repo, runCronsUninstall, "-o", "pretty"); err != nil {
+			t.Fatalf("crons uninstall with the markers gone: %v", err)
+		}
+	})
+	if !strings.Contains(out, "disarmed 1 schedule(s)") {
+		t.Fatalf("uninstall output:\n%s", out)
+	}
+}
