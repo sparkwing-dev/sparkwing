@@ -137,6 +137,10 @@ spec:
                   (dict "flag" "--bucket-store" "value" $bucket.store)
                   (dict "flag" "--bucket-measure-pages" "value" $bucket.measurePages) }}
             {{- $value := $limit.value }}
+            {{- /* A number from a values file is a float64, which toString writes in e-notation past a million. */}}
+            {{- if kindIs "float64" $value }}
+            {{- $value = int64 $value }}
+            {{- end }}
             {{- if not (kindIs "invalid" $value) }}
             {{- if ne (toString $value) "" }}
             - {{ printf "%s=%s" $limit.flag (toString $value) | quote }}
@@ -162,6 +166,32 @@ spec:
             */}}
             {{- if $credentialSources }}
             - "--credentials-dir=/etc/sparkwing/credentials"
+            {{- end }}
+            {{- $c := .Values.controller }}
+            {{- range $setting := list
+                  (dict "flag" "--external-url" "value" $c.externalURL)
+                  (dict "flag" "--oauth-redirect-uris" "value" $c.oauthRedirectURIs)
+                  (dict "flag" "--operator-accounts" "value" $c.operatorAccounts)
+                  (dict "flag" "--github-client-id" "value" (($c.github | default dict).clientID))
+                  (dict "flag" "--github-app-id" "value" (($c.github | default dict).appID))
+                  (dict "flag" "--github-app-slug" "value" (($c.github | default dict).appSlug))
+                  (dict "flag" "--google-client-id" "value" (($c.google | default dict).clientID))
+                  (dict "flag" "--email-sender" "value" (($c.email | default dict).sender))
+                  (dict "flag" "--email-configuration-set" "value" (($c.email | default dict).configurationSet))
+                  (dict "flag" "--cloudfront-domain" "value" (($c.cloudfront | default dict).domain))
+                  (dict "flag" "--cloudfront-key-pair-id" "value" (($c.cloudfront | default dict).keyPairID)) }}
+            {{- $value := $setting.value }}
+            {{- if kindIs "float64" $value }}
+            {{- $value = int64 $value }}
+            {{- end }}
+            {{- if not (kindIs "invalid" $value) }}
+            {{- if ne (toString $value) "" }}
+            - {{ printf "%s=%s" $setting.flag (toString $value) | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- range .Values.controller.extraArgs }}
+            - {{ . | quote }}
             {{- end }}
           env:
             - name: SPARKWING_HOME

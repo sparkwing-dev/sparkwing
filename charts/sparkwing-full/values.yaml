@@ -264,8 +264,59 @@ controller:
   tolerations: []
   affinity: {}
 
+  # Base URL the controller answers on from outside the cluster
+  # (--external-url), such as https://sparkwing.example.com. Sign-in
+  # callbacks and links the controller hands out start here.
+  externalURL: ""
+
+  # Comma-separated dashboard callback URLs a sign-in may return to
+  # (--oauth-redirect-uris).
+  oauthRedirectURIs: ""
+
+  # Comma-separated account ids whose dashboard sessions may use the
+  # operator console (--operator-accounts).
+  operatorAccounts: ""
+
+  # Dashboard sign-in providers. Each secret is a credential file:
+  # github-client-secret and google-client-secret in credentialsSecret.
+  github:
+    # GitHub OAuth app client id (--github-client-id).
+    clientID: ""
+    # The deployment's GitHub App (--github-app-id, --github-app-slug).
+    # Its private key and webhook secret are the github-app-key and
+    # github-app-webhook-secret credential files.
+    appID: ""
+    appSlug: ""
+  google:
+    # Google OAuth client id (--google-client-id).
+    clientID: ""
+
+  # Invitation email through Amazon SES (--email-sender,
+  # --email-configuration-set).
+  email:
+    sender: ""
+    configurationSet: ""
+
+  # CloudFront signing for public-ingress downloads (--cloudfront-domain,
+  # --cloudfront-key-pair-id); the signing key is the cloudfront-key
+  # credential file.
+  cloudfront:
+    domain: ""
+    keyPairID: ""
+
+  # Further controller flags, passed verbatim after the ones above, for a
+  # setting with no value of its own here, such as
+  # --object-store-budget, --cache-blob-store, --logs-archive-store,
+  # --billing-url or --egress-max-downloads. Run
+  # `sparkwing-controller --help` for the list. Never put a secret here;
+  # secrets are credential files.
+  extraArgs: []
+  # - --object-store-budget=put:hour=20000
+
   # Extra env passed to the controller container. Useful for
-  # forwarding GOPRIVATE, OTEL_*, etc.
+  # forwarding GOPRIVATE, OTEL_*, etc. The controller itself reads no
+  # SPARKWING_* setting from the environment; use the values above or
+  # extraArgs.
   extraEnv: []
   # - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   #   value: http://tempo.monitoring.svc.cluster.local:4318/v1/traces

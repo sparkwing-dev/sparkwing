@@ -93,8 +93,10 @@ running install:
 kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
     --from-file=token="$HOME/sparkwing-bootstrap-admin"
 
-# At-rest encryption key for the controller's secrets store.
-# Skip and the controller logs a WARNING + stores plaintext.
+# At-rest encryption key for the controller's secrets store. Skip it and a
+# SQLite controller creates its own key on the first secret write, a
+# PostgreSQL controller refuses secret writes, and a multi-team controller
+# refuses to start; it never stores a secret as plaintext.
 openssl rand -base64 32 > /tmp/sparkwing-key
 kubectl -n sparkwing create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
@@ -248,6 +250,15 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 | `controller.logs.url` | The logs service the controller announces to clients and reads dashboard log panes from, passed as `--logs-url`. | (auto-computed from sub-chart) |
 | `controller.cache.url` | The cache the controller's gitcache proxy forwards to. | (auto-computed from sub-chart) |
+| `controller.externalURL` | Base URL the controller answers on from outside the cluster, passed as `--external-url`. | `""` |
+| `controller.oauthRedirectURIs` | Comma-separated sign-in callback URLs, passed as `--oauth-redirect-uris`. | `""` |
+| `controller.operatorAccounts` | Comma-separated account ids allowed into the operator console, passed as `--operator-accounts`. | `""` |
+| `controller.github.clientID` | GitHub OAuth client id, passed as `--github-client-id`; the secret is the `github-client-secret` credential. | `""` |
+| `controller.github.appID` / `appSlug` | The GitHub App, passed as `--github-app-id` and `--github-app-slug`; its key and webhook secret are the `github-app-key` and `github-app-webhook-secret` credentials. | `""` |
+| `controller.google.clientID` | Google OAuth client id, passed as `--google-client-id`; the secret is the `google-client-secret` credential. | `""` |
+| `controller.email.sender` / `configurationSet` | SES invitation email, passed as `--email-sender` and `--email-configuration-set`. | `""` |
+| `controller.cloudfront.domain` / `keyPairID` | CloudFront download signing, passed as `--cloudfront-domain` and `--cloudfront-key-pair-id`; the key is the `cloudfront-key` credential. | `""` |
+| `controller.extraArgs` | Further controller flags, verbatim, for settings without a value above (`--object-store-budget`, `--cache-blob-store`, `--billing-url`, ...). Never a secret. | `[]` |
 
 ### Security and volume ownership
 
@@ -425,9 +436,9 @@ with their own ingress controller / Gateway / cloud LB. Set
 which serves the API, webhooks (including the GitHub App's
 `POST /webhooks/github-app`), and dashboard on one port. A console host
 and an API host can both point at that Service; a reverse proxy in front
-can still split them. The App's settings come from
-`SPARKWING_GITHUB_APP_*` variables set through `controller.extraEnv`; see
-the GitHub App guide.
+can still split them. The App's settings come from `controller.github`
+and the `github-app-key` and `github-app-webhook-secret` credentials in
+`controller.credentialsSecret`; see the GitHub App guide.
 
 ## Sub-chart dependency
 

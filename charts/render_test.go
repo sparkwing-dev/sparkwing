@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -1043,6 +1044,71 @@ func TestControllerLimitsProfileAndRequestBudgetsReachTheArgs(t *testing.T) {
 	} {
 		if !containsArg(args, want) {
 			t.Errorf("controller args = %v, want %q", args, want)
+		}
+	}
+}
+
+func TestControllerSettingsValuesRenderAsFlags(t *testing.T) {
+	args := renderController(t).Args
+	for _, flag := range []string{"--external-url=", "--github-app-id=", "--google-client-id=", "--cloudfront-domain="} {
+		if arg, ok := hasFlag(args, flag); ok {
+			t.Errorf("default controller passes %s", arg)
+		}
+	}
+	args = renderController(t,
+		"controller.externalURL=https://sw.example",
+		"controller.oauthRedirectURIs=https://sw.example/cb",
+		"controller.operatorAccounts=acct-1",
+		"controller.github.clientID=Iv1.abc",
+		"controller.github.appID=12345",
+		"controller.github.appSlug=sparkwing-ci",
+		"controller.google.clientID=g-123",
+		"controller.email.sender=noreply@sw.example",
+		"controller.email.configurationSet=sw-mail",
+		"controller.cloudfront.domain=d1.cloudfront.net",
+		"controller.cloudfront.keyPairID=K2ABC",
+		"controller.extraArgs[0]=--object-store-budget=put:hour=20000",
+		"controller.extraArgs[1]=--billing-url=https://billing.example").Args
+	for _, want := range []string{
+		"--external-url=https://sw.example",
+		"--oauth-redirect-uris=https://sw.example/cb",
+		"--operator-accounts=acct-1",
+		"--github-client-id=Iv1.abc",
+		"--github-app-id=12345",
+		"--github-app-slug=sparkwing-ci",
+		"--google-client-id=g-123",
+		"--email-sender=noreply@sw.example",
+		"--email-configuration-set=sw-mail",
+		"--cloudfront-domain=d1.cloudfront.net",
+		"--cloudfront-key-pair-id=K2ABC",
+		"--object-store-budget=put:hour=20000",
+		"--billing-url=https://billing.example",
+	} {
+		if !containsArg(args, want) {
+			t.Errorf("controller args = %v, want %q", args, want)
+		}
+	}
+}
+
+func TestControllerNumbersFromAValuesFileRenderWhole(t *testing.T) {
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	body := "controller:\n  github:\n    appID: 1234567\n  bucketCeiling:\n    maxBytes: 107374182400\n"
+	if err := os.WriteFile(values, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := append(helmArgs("./sparkwing-full", "sparkwing", nil, "--show-only", "templates/controller-deployment.yaml"), "-f", values)
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	got := runnerContainer(t, string(out)).Args
+	for _, want := range []string{"--github-app-id=1234567", "--max-bucket-bytes=107374182400"} {
+		if !containsArg(got, want) {
+			t.Errorf("controller args = %v, want %q", got, want)
 		}
 	}
 }

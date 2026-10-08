@@ -453,8 +453,29 @@ ran it.
   by any process: a local `sparkwing run`, the cache and the logs service
   run on the built-in budgets.
 - **Operator steps:** the `sparkwing-full` chart now passes `--dashboard-url`
-  and `--cache-url` as flags and needs no value changes. A manifest of your
-  own moves each variable to its flag:
+  and `--cache-url` as flags. A chart install that set controller settings
+  through `controller.extraEnv` moves each to its value:
+
+  | `controller.extraEnv` name | Chart value |
+  |---|---|
+  | `SPARKWING_EXTERNAL_URL` | `controller.externalURL` |
+  | `SPARKWING_OAUTH_REDIRECT_URIS` | `controller.oauthRedirectURIs` |
+  | `SPARKWING_OPERATOR_ACCOUNTS` | `controller.operatorAccounts` |
+  | `SPARKWING_GITHUB_CLIENT_ID` | `controller.github.clientID` |
+  | `SPARKWING_GITHUB_APP_ID` | `controller.github.appID` |
+  | `SPARKWING_GITHUB_APP_SLUG` | `controller.github.appSlug` |
+  | `SPARKWING_GOOGLE_CLIENT_ID` | `controller.google.clientID` |
+  | `SPARKWING_EMAIL_SENDER` | `controller.email.sender` |
+  | `SPARKWING_EMAIL_CONFIGURATION_SET` | `controller.email.configurationSet` |
+  | `SPARKWING_CLOUDFRONT_DOMAIN` | `controller.cloudfront.domain` |
+  | `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | `controller.cloudfront.keyPairID` |
+  | any other name in the table below | its flag in `controller.extraArgs`, such as `--billing-url=https://...` |
+
+  A secret set through `controller.extraEnv` (`SPARKWING_GITHUB_APP_PRIVATE_KEY`,
+  `SPARKWING_GITHUB_CLIENT_SECRET` and the rest) becomes a key of
+  `controller.credentialsSecret` named after its credential file; see the
+  section on the credentials directory above. A manifest of your own moves
+  each variable to its flag:
 
   | Variable | Flag |
   |---|---|
