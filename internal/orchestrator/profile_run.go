@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // ProfileEnv hands the --profile of a `sparkwing run` invocation to the
@@ -37,6 +38,16 @@ func resolveActiveProfile(projectCfg *projectconfig.Config) (*profile.Profile, *
 		return nil, nil, err
 	}
 	return p, chain, nil
+}
+
+// safety: a coordinated node replans its local dispatcher's run, so it must see
+// the locality and profile that dispatcher saw; any other node runs where a
+// controller dispatched it.
+func nodeProfileResolution(coordinated bool) sparkwing.ProfileResolutionContext {
+	if !coordinated {
+		return sparkwing.ProfileResolutionContext{}
+	}
+	return sparkwing.ProfileResolutionContext{Name: handoffProfile(), IsLocal: true}
 }
 
 // RemoteStateProfile reports whether `sparkwing run --profile` may use p: only
