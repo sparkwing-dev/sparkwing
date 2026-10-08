@@ -6,10 +6,12 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -136,12 +138,13 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 		}
 	}
 	// safety: the cache authenticates every route, and the caller's own bearer is never forwarded.
-	token := s.cacheToken
-	if token == "" {
-		token = bincache.CacheToken()
+	bearer, err := cacheOperatorBearer(time.Now())
+	if err != nil {
+		http.Error(w, "sign the cache request: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	client := &http.Client{
 		Timeout: 30 * time.Minute,
@@ -172,6 +175,24 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		s.logger.Warn("gitcache proxy response write failed", "err", fmt.Sprint(err))
 	}
+}
+
+// safety: the cache accepts only grants, so the controller signs a short-lived operator grant for each call
+// of its own. Without a grant key it sends no bearer, which only a cache started --allow-unauthenticated serves.
+func cacheOperatorBearer(now time.Time) (string, error) {
+	key := os.Getenv(authwire.CacheGrantKeyEnv)
+	if key == "" {
+		return "", nil
+	}
+	return authwire.MintOperatorCacheGrant(key, now)
+}
+
+// safety: the cache's admin routes take only the operator grant, so this is how an
+// operator's admin bearer reaches them.
+func (s *Server) handleCacheStoreCeiling(action string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.proxyGitcacheRequest(w, r, http.MethodPost, "/admin/store-ceiling/"+action, "", nil)
+	})
 }
 
 type streamDeadlineKey struct{}

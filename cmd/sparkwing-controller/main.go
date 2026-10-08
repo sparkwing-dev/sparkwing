@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
@@ -505,7 +504,7 @@ func run(args []string) error {
 	clearEnv("SPARKWING_LOGS_DELETE_TOKEN")
 	srv.WithTeamStorage(controller.TeamStorage{
 		LogsURL: *logsURL, LogsToken: logsDeleteToken,
-		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: bincache.CacheToken(),
+		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL),
 	})
 	if err := configureGitHubApp(srv, githubAppFlags{
 		AppID:        *githubAppID,
@@ -520,8 +519,7 @@ func run(args []string) error {
 		return fmt.Errorf("oidc issuer: %w", oerr)
 	}
 	srv = srv.WithOIDCIssuer(oidcIssuer)
-	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
-		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
+	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL, os.Getenv(authwire.CacheGrantKeyEnv)); err != nil {
 		return err
 	}
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
@@ -755,7 +753,7 @@ func envTruthy(name string) bool {
 
 // safety: the grant is the only boundary between teams inside the cache; without a key
 // every run's grant request would fail at request time instead of at deploy.
-func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey, cacheToken string) error {
+func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey string) error {
 	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
 		return nil
 	}
@@ -763,11 +761,6 @@ func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey,
 		return errors.New("the license allows more than one team and a cache is configured, so " +
 			authwire.CacheGrantKeyEnv + " must hold the key the controller signs cache grants with " +
 			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
-	}
-	if grantKey == cacheToken {
-		return errors.New(authwire.CacheGrantKeyEnv + " equals the cache's operator token " +
-			"(SPARKWING_CACHE_TOKEN); give the grant key a secret of its own, since any holder of " +
-			"the operator token could otherwise mint a grant for any team")
 	}
 	return nil
 }

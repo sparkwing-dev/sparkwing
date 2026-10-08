@@ -112,7 +112,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	}
 	for _, name := range []string{
 		"SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL", "SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL",
-		authwire.CacheTokenEnv, authwire.CacheGrantEnv,
+		authwire.CacheGrantEnv,
 	} {
 		t.Setenv(name, "")
 	}
@@ -130,7 +130,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	var cacheGit atomic.Int32
 	cacheSrv := newGrantCacheWrapped(t, func(h http.Handler) http.Handler { return countPaths(h, &cacheGit, "/git/") })
 	q := neturl.Values{"name": {sourceurl.ClaimedRepoNameFromURL(repoURL)}, "repo": {repoURL}}
-	if code, body := post(t, cacheSrv.URL+"/git/register?"+q.Encode(), operatorCacheToken); code != http.StatusOK ||
+	if code, body := post(t, cacheSrv.URL+"/git/register?"+q.Encode(), operatorCacheGrant(t)); code != http.StatusOK ||
 		!strings.Contains(body, `"cloned":true`) {
 		t.Fatalf("the operator registering the public mirror = %d %s", code, body)
 	}
@@ -197,7 +197,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	// safety: built after the tokens exist, because a controller whose tokens
 	// table is empty serves every request unauthenticated.
 	ctrlSrv := httptest.NewServer(countPaths(controller.New(st, discardLogger()).
-		WithCacheCredentials(cacheSrv.URL, operatorCacheToken).
+		WithCacheURL(cacheSrv.URL).
 		WithCachePodURL(cacheSrv.URL).
 		EnableAuthFromStore().Handler(), &proxied, "/gitcache"))
 	t.Cleanup(ctrlSrv.Close)

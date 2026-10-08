@@ -283,6 +283,7 @@ const ScopeRunsRead = store.ScopeRunsRead
 const ScopeRunsState = store.ScopeRunsState
 const ScopeRunsWrite = store.ScopeRunsWrite
 const ScopeSecretsRead = store.ScopeSecretsRead
+const ScopeStorageCount = store.StorageCountScope
 const ScopeTeamAdmin = store.ScopeTeamAdmin
 const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
@@ -310,7 +311,6 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
-func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
@@ -381,8 +381,7 @@ type TeamStorage struct {
 	LogsURL   string
 	LogsToken string
 
-	CacheURL   string
-	CacheToken string
+	CacheURL string
 }
 type TokenRequestBudget struct {
 	PerTokenMinute int

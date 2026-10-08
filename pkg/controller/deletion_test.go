@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -54,12 +55,13 @@ func (s *storageFake) answer(status int) {
 
 func newStorageFakes(t *testing.T) (logs, cache *storageFake, ts controller.TeamStorage) {
 	t.Helper()
+	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	logs, cache = &storageFake{status: http.StatusNoContent}, &storageFake{status: http.StatusNoContent}
 	logSrv, cacheSrv := httptest.NewServer(http.HandlerFunc(logs.handler)), httptest.NewServer(http.HandlerFunc(cache.handler))
 	t.Cleanup(logSrv.Close)
 	t.Cleanup(cacheSrv.Close)
 	return logs, cache, controller.TeamStorage{
-		LogsURL: logSrv.URL, CacheURL: cacheSrv.URL, CacheToken: "cache-op",
+		LogsURL: logSrv.URL, CacheURL: cacheSrv.URL,
 	}
 }
 
@@ -162,8 +164,13 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	if got := logs.seen(); len(got) != 1 || got[0] != "DELETE /api/v1/teams/acme/logs Bearer "+f.logsToken {
 		t.Fatalf("logs service saw %v, want the team's logs deleted in one call", got)
 	}
-	if got := cache.seen(); len(got) != 1 || got[0] != "DELETE /admin/teams/acme Bearer cache-op" {
+	got := cache.seen()
+	bearer, ok := strings.CutPrefix(strings.Join(got, ""), "DELETE /admin/teams/acme Bearer ")
+	if len(got) != 1 || !ok {
 		t.Fatalf("cache service saw %v", got)
+	}
+	if g, err := authwire.VerifyCacheGrant("grant-key", bearer, time.Now()); err != nil || !g.Operator {
+		t.Fatalf("the purge's bearer = %+v, %v; want an operator grant signed with the grant key", g, err)
 	}
 	var mine []teamDeletionBody
 	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)

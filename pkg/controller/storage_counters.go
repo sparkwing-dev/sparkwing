@@ -1,14 +1,12 @@
 package controller
 
 import (
-	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -33,8 +31,8 @@ type counterCaller struct {
 }
 
 // safety: the counter routes sit outside the principal middleware because
-// the cache's operator token is not a principal; a forwarded credential is
-// authenticated here exactly as the middleware would.
+// the logs service forwards its caller's credential, which is authenticated
+// here exactly as the middleware would and then held to its own team's logs.
 func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterCaller, bool) {
 	scheme, raw, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	raw = strings.TrimSpace(raw)
@@ -42,16 +40,12 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterC
 		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes need a bearer"))
 		return counterCaller{}, false
 	}
-	token := s.cacheToken
-	if token == "" {
-		token = bincache.CacheToken()
-	}
-	if token != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(token)) == 1 {
+	p, err := s.authMiddleware().Authenticate(raw)
+	if err == nil && p != nil && p.HasScope(ScopeStorageCount) {
 		return counterCaller{service: true}, true
 	}
-	p, err := s.authMiddleware().Authenticate(raw)
 	if err != nil || p == nil || !(p.HasScope(ScopeLogsWrite) || p.HasScope(ScopeAdmin)) {
-		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer the cache's operator token or a logs.write credential"))
+		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer a "+ScopeStorageCount+" service token or a logs.write credential"))
 		return counterCaller{}, false
 	}
 	return counterCaller{team: store.NormalizeTeam(p.Team)}, true

@@ -7111,6 +7111,41 @@ paths:
       responses:
         default: {description: Undescribed.}
 
+  /api/v1/cache/store-ceiling/measure:
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Walk the cache's stored trees now and replace its store-ceiling count.
+      description: |
+        Forwards to the cache's own store-ceiling measure route under the
+        operator grant the controller signs with its cache grant key, the only
+        bearer those cache routes take. The cache answers `202` and walks
+        off the request; freeing space on its volume and measuring is what
+        lifts a store-ceiling freeze.
+      responses:
+        "202": {description: "The cache's answer, forwarded verbatim."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No cache is configured on this controller.}
+        "502": {description: The cache is unreachable.}
+
+  /api/v1/cache/store-ceiling/thaw:
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Accept cache uploads until the next store-ceiling measurement.
+      description: |
+        Forwards to the cache's own store-ceiling thaw route under the
+        operator grant the controller signs with its cache grant key. The
+        cache answers `409` when no measurement is scheduled.
+      responses:
+        "200": {description: "The cache's answer, forwarded verbatim."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No cache is configured on this controller.}
+        "409": {description: The cache has no measurement scheduled to end the thaw.}
+        "502": {description: The cache is unreachable.}
+
 components:
   securitySchemes:
     bearerToken:

@@ -16,6 +16,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
+| `POST` | `/api/v1/cache/store-ceiling/measure` | `admin` |
+| `POST` | `/api/v1/cache/store-ceiling/thaw` | `admin` |
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |

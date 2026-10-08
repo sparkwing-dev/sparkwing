@@ -44,10 +44,6 @@ func CacheURL() string {
 	return strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/")
 }
 
-func CacheToken() string {
-	return os.Getenv("SPARKWING_CACHE_TOKEN")
-}
-
 // ErrDigest reports a cached binary whose bytes do not match the digest the cache advertised,
 // or a response that carried no digest at all.
 var ErrDigest = errors.New("remote binary cache: digest verification failed")

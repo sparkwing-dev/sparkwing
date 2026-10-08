@@ -45,12 +45,15 @@ type Config struct {
 
 	TrustForwardedHost bool
 
-	APIToken string
-
-	// GrantKey verifies cache grants. The controller signs grants with the
-	// same key, and no runner holds it. Empty accepts no grants. It must
-	// differ from APIToken.
+	// GrantKey verifies cache grants, the only bearer the cache accepts.
+	// The controller signs grants with the same key, both a run's and the
+	// operator grant for its own calls, and no runner holds it. Empty is
+	// refused unless AllowUnauthenticated opens every route.
 	GrantKey string
+
+	// ControllerToken is the storage.count service token the cache presents
+	// to ControllerURL. Required with ControllerURL.
+	ControllerToken string
 
 	AllowUnauthenticated bool
 
@@ -76,7 +79,7 @@ type Config struct {
 	// bucket, one teams/<team>/ namespace per team. Empty keeps them on
 	// the volume. Credentials and region come from the AWS default chain.
 	BlobStore string
-	// ControllerURL is where the cache asks, with APIToken, to count what
+	// ControllerURL is where the cache asks, with ControllerToken, to count what
 	// each team a grant names stores in BlobStore and downloads, and where
 	// it keeps its egress totals. Empty counts nothing, which a cache with
 	// both GrantKey and BlobStore refuses.
@@ -142,21 +145,22 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("cache: DataDir is required")
 	}
 	// safety: a Secret key holding only a newline must not count as a configured credential.
-	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
 	cfg.GrantKey = strings.TrimSpace(cfg.GrantKey)
-	if cfg.GrantKey != "" && cfg.GrantKey == cfg.APIToken {
-		return nil, fmt.Errorf("cache: the grant key (%s) is the operator token (%s); "+
-			"give it a secret of its own, because whoever holds the key signs access to every team's tree",
-			authwire.CacheGrantKeyCredential, authwire.CacheTokenCredential)
-	}
-	if cfg.APIToken == "" {
+	cfg.ControllerToken = strings.TrimSpace(cfg.ControllerToken)
+	if cfg.GrantKey == "" {
 		if !cfg.AllowUnauthenticated {
-			return nil, fmt.Errorf("cache: an API token is required: put it in " + authwire.CacheTokenCredential +
-				" under --credentials-dir, or pass --allow-unauthenticated to serve the git and blob endpoints to anyone who can reach the port")
+			return nil, fmt.Errorf("cache: a grant key is required: put the key the controller signs cache grants with in " +
+				authwire.CacheGrantKeyCredential + " under --credentials-dir, or pass --allow-unauthenticated to serve " +
+				"the git, blob and admin endpoints to anyone who can reach the port")
 		}
-		log.Printf("WARNING: sparkwing-cache is serving the git and blob endpoints without authentication (--allow-unauthenticated)")
+		log.Printf("WARNING: sparkwing-cache is serving the git, blob and admin endpoints without authentication (--allow-unauthenticated)")
 	} else {
-		log.Printf("sparkwing-cache requires a bearer token on the git and blob endpoints")
+		log.Printf("sparkwing-cache requires a cache grant on the git, blob and admin endpoints")
+	}
+	if cfg.ControllerURL != "" && cfg.ControllerToken == "" {
+		return nil, fmt.Errorf("cache: --controller needs the cache's storage.count service token in %s under --credentials-dir; "+
+			"mint it with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`",
+			authwire.CacheControllerTokenCredential)
 	}
 	if cfg.ProxyDir == "" {
 		cfg.ProxyDir = filepath.Join(cfg.DataDir, "proxy")
@@ -210,7 +214,6 @@ func New(cfg Config) (*Server, error) {
 	proxyMaxAge = cfg.ProxyMaxAge
 	proxyPublicBase = publicBase
 	proxyTrustForwardedHost = cfg.TrustForwardedHost
-	apiToken = cfg.APIToken
 	grantKey = cfg.GrantKey
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
@@ -237,7 +240,7 @@ func New(cfg Config) (*Server, error) {
 	blobStore, counter, counterAuth = nil, nil, ""
 	if cfg.ControllerURL != "" {
 		counter = storagequota.New(cfg.ControllerURL, nil)
-		counterAuth = "Bearer " + cfg.APIToken
+		counterAuth = "Bearer " + cfg.ControllerToken
 	}
 	if cfg.BlobStore != "" {
 		octx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -302,9 +305,9 @@ func New(cfg Config) (*Server, error) {
 
 	s.mux.HandleFunc("/bin/", requireCaller(metered(egress.ClassArtifact, handleBin)))
 	s.mux.HandleFunc("/cache/", requireCaller(metered(egress.ClassArtifact, handleCache)))
-	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
-	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
-	s.mux.HandleFunc("/admin/teams/", requireToken(handleDeleteTeamTree))
+	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireOperator(handleStoreCeilingThaw))
+	s.mux.HandleFunc("/admin/store-ceiling/measure", requireOperator(handleStoreCeilingMeasure))
+	s.mux.HandleFunc("/admin/teams/", requireOperator(handleDeleteTeamTree))
 	s.mux.HandleFunc("/git/register", requireCaller(handleGitRegister))
 	s.mux.HandleFunc("/git/", requireCaller(metered(egress.ClassGit, handleGit)))
 

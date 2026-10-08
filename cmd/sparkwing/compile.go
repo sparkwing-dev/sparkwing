@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
@@ -170,7 +171,7 @@ func pipelineBinary(
 			}
 		}
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if fetchErr := bincache.TryBinary(ctx, gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(ctx, gcURL, authwire.CacheBearerFromEnv(), key, tempPath); fetchErr == nil {
 				source = "gitcache"
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
@@ -198,7 +199,7 @@ func pipelineBinary(
 	}
 	if published && source == "compiled" {
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if err := bincache.UploadBinary(ctx, gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
+			if err := bincache.UploadBinary(ctx, gcURL, authwire.CacheBearerFromEnv(), key, lease.Path()); err != nil {
 				slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
 			}
 		}

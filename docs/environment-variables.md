@@ -132,7 +132,6 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_VERSION_HOLD` | [cli-version](cli-version.md) |
 | `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |
 | `SPARKWING_BOX_ID` | [sdk](sdk.md) |
-| `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_SUBMIT_ENV_ALLOW` | [cli-run](cli-run.md) |
 | `TYPESAFE_API_KEY` | [admission](admission.md) |
 

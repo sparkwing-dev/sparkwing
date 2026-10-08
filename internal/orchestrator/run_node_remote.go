@@ -326,7 +326,6 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_RUN_HANDLE_FILE":          true,
 	"SPARKWING_ONLY":                     true,
 	ArtifactStoreEnvVar:                  true,
-	"SPARKWING_CACHE_TOKEN":              true,
 	authwire.CacheGrantEnv:               true,
 	remoteExecutionCapabilityEnv:         true,
 	remoteExecutionCapabilityInputEnv:    true,

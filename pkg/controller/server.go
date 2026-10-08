@@ -94,7 +94,6 @@ type Server struct {
 	oidc         oidcState
 
 	cacheURL                     string
-	cacheToken                   string
 	downloadFree, downloadFunded int64
 
 	teamStorage        TeamStorage
@@ -289,14 +288,6 @@ func (s *Server) WithDashboardURL(url string) *Server {
 // gitcache registration and clone routes.
 func (s *Server) WithCacheURL(url string) *Server {
 	s.cacheURL = url
-	return s
-}
-
-// WithCacheCredentials configures a private controller-to-cache hop. The
-// bearer is never forwarded to an executor.
-func (s *Server) WithCacheCredentials(url, token string) *Server {
-	s.cacheURL = url
-	s.cacheToken = token
 	return s
 }
 
@@ -881,6 +872,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
 	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
+	mux.Handle("POST /api/v1/cache/store-ceiling/measure", requireScope(ScopeAdmin, s.handleCacheStoreCeiling("measure")))
+	mux.Handle("POST /api/v1/cache/store-ceiling/thaw", requireScope(ScopeAdmin, s.handleCacheStoreCeiling("thaw")))
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/register", requireScope(ScopeNodesClaim,
 		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheRegister))))
 	mux.Handle("GET /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
@@ -1111,8 +1104,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its operator token and the logs
-	// service with the caller's forwarded credential, which these handlers check.
+	// safety: the cache proves itself with its storage.count service token and
+	// the logs service with the caller's forwarded credential, which these handlers check.
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
 	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)

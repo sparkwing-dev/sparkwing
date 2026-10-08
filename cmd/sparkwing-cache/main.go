@@ -56,13 +56,13 @@ func run(args []string) error {
 		cfg.TrustForwardedHost,
 		"honor X-Forwarded-Host and X-Forwarded-Proto when rewriting registry bodies from the request, taking the right-most element of each. Only safe when a reverse proxy is the only route to this port, and inert when --public-url is set.")
 	credentialsDir := fs.String(credentials.FlagName, "",
-		"directory holding the cache's secrets, one file each: "+authwire.CacheTokenCredential+", the bearer token the git and "+
-			"blob endpoints require unless --allow-unauthenticated is set, and "+authwire.CacheGrantKeyCredential+", the key that "+
-			"verifies cache grants, the one the controller signs them with. No runner holds the key, and it must differ "+
-			"from the token. An absent file turns its feature off; an absent grant key accepts no grants.")
+		"directory holding the cache's secrets, one file each: "+authwire.CacheGrantKeyCredential+", the key that "+
+			"verifies cache grants, the one the controller signs them with and the only bearer the git, blob and admin "+
+			"endpoints accept, required unless --allow-unauthenticated is set; and "+authwire.CacheControllerTokenCredential+
+			", the storage.count service token the cache presents to --controller, required with it. No runner holds either.")
 	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
 		cfg.AllowUnauthenticated,
-		"start without a bearer token, leaving the git and blob endpoints open to anyone who can reach the port.")
+		"start without a grant key, leaving the git, blob and admin endpoints open to anyone who can reach the port.")
 	fs.StringVar(&cfg.AutoRegisterRepos, "auto-register-repos",
 		cfg.AutoRegisterRepos,
 		"comma-separated name=url pairs cloned into the gitcache on startup.")
@@ -99,7 +99,7 @@ func run(args []string) error {
 			"on --data-dir. Empty keeps everything on the volume.")
 	fs.StringVar(&cfg.ControllerURL, "controller",
 		cfg.ControllerURL,
-		"controller URL the cache asks, with its token, to count what each team a grant names stores in "+
+		"controller URL the cache asks, with its storage.count service token, to count what each team a grant names stores in "+
 			"--blob-store and downloads in a UTC day, and where it keeps its egress totals. When the controller cannot "+
 			"answer, a team without credits is refused with 503. Required with a grant key and --blob-store.")
 	fs.BoolVar(&cfg.DisableProxy, "disable-proxy", cfg.DisableProxy,
@@ -127,10 +127,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if cfg.APIToken, err = creds.Read(authwire.CacheTokenCredential); err != nil {
+	if cfg.GrantKey, err = creds.Read(authwire.CacheGrantKeyCredential); err != nil {
 		return err
 	}
-	if cfg.GrantKey, err = creds.Read(authwire.CacheGrantKeyCredential); err != nil {
+	if cfg.ControllerToken, err = creds.Read(authwire.CacheControllerTokenCredential); err != nil {
 		return err
 	}
 

@@ -25,7 +25,7 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	}
 	requireGolangciLint(t)
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+	t.Setenv("SPARKWING_CACHE_GRANT", "")
 	root := t.TempDir()
 
 	origin := filepath.Join(root, "origin")

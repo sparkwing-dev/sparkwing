@@ -58,7 +58,7 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	savedMeter := egressMeter
 	egressMeter = nil
 	t.Cleanup(func() { egressMeter = savedMeter })
-	saved := []*string{&dataRoot, &repoDir, &binsDir, &cacheDir, &namesFile, &proxyDir, &sshKeyDir, &apiToken, &teamsDir, &grantKey}
+	saved := []*string{&dataRoot, &repoDir, &binsDir, &cacheDir, &namesFile, &proxyDir, &sshKeyDir, &teamsDir, &grantKey}
 	values := make([]string, len(saved))
 	for i, p := range saved {
 		values[i] = *p
@@ -74,7 +74,7 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	c.DataDir = root
 	c.ProxyDir = filepath.Join(root, "proxy")
 	c.SSHKeyDir = filepath.Join(root, "no-ssh-key")
-	c.APIToken = token
+	c.ControllerToken = token
 	c.GrantKey = testGrantKey(token)
 	c.BlobStore = "s3://" + blobTestBucket + "/cache"
 	_, c.ControllerURL = fakeController(t, token, 1<<40, 0)
@@ -141,7 +141,7 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 		if code, body := send(t, srv, http.MethodGet, w.read, teamB, ""); code == http.StatusOK || strings.Contains(body, "team-a secret") {
 			t.Errorf("team B read team A's %s: %d %q", w.read, code, body)
 		}
-		if code, body := send(t, srv, http.MethodGet, w.read, token, ""); strings.Contains(body, "team-a secret") {
+		if code, body := send(t, srv, http.MethodGet, w.read, operatorGrant(t, token), ""); strings.Contains(body, "team-a secret") {
 			t.Errorf("the operator's namespace served team A's %s: %d", w.read, code)
 		}
 		if code, body := send(t, srv, w.method, w.write, teamB, "team-b poison"); code/100 != 2 {
@@ -176,7 +176,7 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 	if code, _ := send(t, srv, http.MethodDelete, "/admin/teams/team-a", teamA, ""); code != http.StatusUnauthorized {
 		t.Errorf("a grant deleted its own team: %d", code)
 	}
-	if code, body := send(t, srv, http.MethodDelete, "/admin/teams/team-a", token, ""); code != http.StatusNoContent {
+	if code, body := send(t, srv, http.MethodDelete, "/admin/teams/team-a", operatorGrant(t, token), ""); code != http.StatusNoContent {
 		t.Fatalf("delete team-a = %d %s", code, body)
 	}
 	for _, k := range bucketKeys(t, raw) {
