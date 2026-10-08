@@ -45,9 +45,9 @@ The host sets these variables in the SDK process's environment. Values are strin
 | `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_MASK_VALUES_FD` | Descriptor the SDK writes each secret value to, one base64 line per value, so the host masks it in every log | decimal descriptor number of at least 3 | local runner, broker supervisor, launcher Job |
 | `SPARKWING_PARENT_LIVENESS_FD` | Read end of a pipe the host holds open; end of file means the host is gone, and the SDK cancels its work and exits | decimal descriptor number of at least 3 | local runner |
-| `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | local runner, Kubernetes Job |
-| `SPARKWING_RUNNER_TYPE` | Kind of that runner | `local` or `kubernetes` | local runner, Kubernetes Job |
-| `SPARKWING_RUNNER_LABELS` | Labels of that runner, for `WhenRunner` | comma-separated labels | local runner, Kubernetes Job |
+| `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | every path: local runner, Kubernetes and launcher Jobs, and the broker supervisor, which passes on a runner pool's holder prefix or its own `SPARKWING_RUNNER_*` |
+| `SPARKWING_RUNNER_TYPE` | Kind of that runner | `local` or `kubernetes`; unset for a runner that does not classify itself, such as a runner pool on a host | local runner, Kubernetes and launcher Jobs, broker supervisor as above |
+| `SPARKWING_RUNNER_LABELS` | Labels of that runner, for `WhenRunner` | comma-separated labels | local runner, Kubernetes Job, broker supervisor as above; a launcher Job advertises none |
 | `TRACEPARENT` | W3C trace context of the run | `traceparent` header value | trigger children only |
 | `SPARKWING_CACHE_URL` | Artifact store for SDK cache helpers | URL | local runner, Kubernetes and launcher Jobs |
 | `SPARKWING_GITCACHE_URL` | Git mirror for the SDK's clone helper | URL | Kubernetes and launcher Jobs |
