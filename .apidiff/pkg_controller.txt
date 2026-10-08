@@ -322,6 +322,7 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheCredentials(url, token string) *Server
+func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server

@@ -137,9 +137,6 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 	}
 	// safety: the cache authenticates every route, and the caller's own bearer is never forwarded.
 	token := s.cacheToken
-	if token == "" {
-		token = bincache.CacheToken()
-	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

@@ -47,7 +47,6 @@ func (h *downloadHead) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ .
 
 func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	t.Helper()
-	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +87,7 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	}
 	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
-	srv := New(st, nil).WithTeamDownloadCaps(5, 5)
+	srv := New(st, nil).WithTeamDownloadCaps(5, 5).WithCacheGrantKey("grant-key")
 	if err := srv.WithSignedDownloads(bucket, nil, client, "cdn.example.test", "KPAIR", string(pemKey)); err != nil {
 		t.Fatal(err)
 	}

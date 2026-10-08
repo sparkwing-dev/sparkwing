@@ -17,9 +17,9 @@ The App's client id and secret are the ones GitHub sign-in uses, so sign-in and 
 | --- | --- |
 | App id | `--github-app-id` or `SPARKWING_GITHUB_APP_ID` |
 | App slug (the `https://github.com/apps/<slug>` name) | `--github-app-slug` or `SPARKWING_GITHUB_APP_SLUG` |
-| Private key (PEM) | `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` (a path) or `SPARKWING_GITHUB_APP_PRIVATE_KEY` (the PEM text); never a flag |
-| Webhook secret | `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`; never a flag |
-| Client id and secret | `--github-client-id` and `SPARKWING_GITHUB_CLIENT_SECRET`, shared with sign-in |
+| Private key (PEM) | the `github-app-key` [credential](self-hosting.md#controller-credentials) |
+| Webhook secret | the `github-app-webhook-secret` credential |
+| Client id and secret | `--github-client-id` and the `github-client-secret` credential, shared with sign-in |
 | Connect callback | `https://console.sparkwing.dev/github/app/callback`, added to `--oauth-redirect-uris` |
 
 The controller refuses to start with some of the App settings and not the others. `GET /api/v1/capabilities` reports `github_app.slug` when the App is configured.

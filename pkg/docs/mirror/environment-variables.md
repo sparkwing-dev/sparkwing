@@ -28,15 +28,10 @@ Kinds:
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_BILLING_TOKEN` | [auth](auth.md) |
 | `SPARKWING_BILLING_URL` | [auth](auth.md) |
-| `SPARKWING_BOOTSTRAP_ADMIN_TOKEN` | [auth](auth.md), [security](security.md) |
 | `SPARKWING_CACHE_BLOB_STORE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_CACHE_GRANT_KEY` | [gitcache](gitcache.md) |
 | `SPARKWING_CLOUDFRONT_DOMAIN` | [self-hosting](self-hosting.md) |
 | `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | [self-hosting](self-hosting.md) |
-| `SPARKWING_CLOUDFRONT_PRIVATE_KEY` | [self-hosting](self-hosting.md) |
-| `SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE` | [self-hosting](self-hosting.md) |
 | `SPARKWING_DASHBOARD_URL` | [hooks](hooks.md) |
 | `SPARKWING_DEFAULT_PREFER_LABELS` | [scheduling](scheduling.md) |
 | `SPARKWING_EMAIL_CONFIGURATION_SET` | [auth](auth.md) |
@@ -45,31 +40,19 @@ Kinds:
 | `SPARKWING_GITHUB_APP_ID` | [github-app](github-app.md) |
 | `SPARKWING_GITHUB_APP_SLUG` | [github-app](github-app.md) |
 | `SPARKWING_GITHUB_CLIENT_ID` | [auth](auth.md) |
-| `SPARKWING_GITHUB_CLIENT_SECRET` | [auth](auth.md), [github-app](github-app.md) |
 | `SPARKWING_GOOGLE_CLIENT_ID` | [auth](auth.md) |
-| `SPARKWING_GOOGLE_CLIENT_SECRET` | [auth](auth.md) |
-| `SPARKWING_LICENSE` | [auth](auth.md) |
 | `SPARKWING_LOGS_ARCHIVE_STORE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_LOGS_DELETE_TOKEN` | [auth](auth.md) |
 | `SPARKWING_METRICS_ADDR` | [observability](observability.md) |
 | `SPARKWING_OAUTH_REDIRECT_URIS` | [auth](auth.md) |
 | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | [observability](observability.md) |
 | `SPARKWING_OBJECT_STORE_URL` | [observability](observability.md) |
-| `SPARKWING_OIDC_KEY` | [oidc](oidc.md) |
-| `SPARKWING_OIDC_PUBLISHED_KEY` | [oidc](oidc.md) |
 | `SPARKWING_OPERATOR_ACCOUNTS` | [auth](auth.md) |
-| `SPARKWING_PG_URL` | [backup-restore](backup-restore.md), [deployment-modes](deployment-modes.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_REQUIRE_AUTH` | [security](security.md) |
-| `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
-| `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `CACHE_POD_URL` | [gitcache](gitcache.md) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 | `SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` | [observability](observability.md) |
 | `SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS` | [observability](observability.md) |
 | `SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS` | [observability](observability.md) |
-| `SPARKWING_GITHUB_APP_PRIVATE_KEY` | [github-app](github-app.md) |
-| `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` | [github-app](github-app.md) |
-| `SPARKWING_GITHUB_APP_WEBHOOK_SECRET` | [github-app](github-app.md) |
 | `SPARKWING_OBJECT_STORE_PUT_PER_MINUTE` | [observability](observability.md) |
 | `SPARKWING_OBJECT_STORE_PUT_PER_DAY` | [observability](observability.md) |
 | `SPARKWING_OBJECT_STORE_GET_PER_MINUTE` | [observability](observability.md) |
@@ -127,7 +110,9 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_RERUN_IMAGE` | [cli-debug](cli-debug.md) |
 | `SPARKWING_S3_ENDPOINT` | [deployment-modes](deployment-modes.md), [observability](observability.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_SECRETS` | [machine-config](machine-config.md) |
+| `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_KEY_FILE` | [machine-config](machine-config.md), [cli-secrets](cli-secrets.md) |
+| `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
 | `SPARKWING_VERSION_HOLD` | [cli-version](cli-version.md) |
 | `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |

@@ -353,6 +353,63 @@ ran it.
   rather than leaving them beside the flags. `sparkwing-runner agent`, which
   reads `config.yaml`, is unchanged.
 
+## sparkwing-controller reads its secrets from a credentials directory
+
+- **Before:** the controller took each secret from an environment variable,
+  some also from a `*-file` flag or a `*_FILE` variable naming a path, with
+  three different precedence rules between the two forms.
+- **After:** every secret is one file in `--credentials-dir`, under a fixed
+  name. There is no other way in. An absent file leaves its feature off, as an
+  unset variable did. The six `*-file` flags are gone, so a controller started
+  with one exits with an unknown-flag error. The variables below are no longer
+  read.
+- **Operator steps:** the `sparkwing-full` chart projects
+  `controller.databaseSecret`, `controller.secretsKey`,
+  `controller.secretsPreviousKey`, `controller.bootstrapAdminToken` and the
+  runner bundle's cache token and grant key into
+  `/etc/sparkwing/credentials` and passes `--credentials-dir`; those values
+  need no change. Secrets the chart had no value for, which a manifest passed
+  through `controller.extraEnv`, go into one Secret named by the new
+  `controller.credentialsSecret.name`, keyed by file name. For example:
+
+  ```bash
+  kubectl -n sparkwing create secret generic sparkwing-controller-credentials \
+      --from-file=license=license.txt \
+      --from-file=github-app-key=app.pem \
+      --from-literal=github-app-webhook-secret="$WEBHOOK_SECRET" \
+      --from-literal=github-client-secret="$GITHUB_CLIENT_SECRET"
+  helm upgrade sparkwing ./charts/sparkwing-full -f my-values.yaml \
+      --set controller.credentialsSecret.name=sparkwing-controller-credentials
+  ```
+
+  Outside Kubernetes, write each value to its file under a directory only
+  the controller's user can read, and pass `--credentials-dir`.
+
+  | Variable or flag | Credential file |
+  |---|---|
+  | `SPARKWING_PG_URL` | `pg-url` |
+  | `SPARKWING_SECRETS_KEY`, `--secrets-key-file` | `secrets-key` |
+  | `SPARKWING_SECRETS_PREVIOUS_KEY`, `--secrets-previous-key-file` | `secrets-key.previous` |
+  | `SPARKWING_BOOTSTRAP_ADMIN_TOKEN`, `--bootstrap-admin-token-file` | `bootstrap-admin-token` |
+  | `SPARKWING_LICENSE`, `--license-file` | `license` |
+  | `SPARKWING_OIDC_KEY`, `--oidc-key-file` | `oidc-key` |
+  | `SPARKWING_OIDC_PUBLISHED_KEY`, `--oidc-published-key-file` | `oidc-key.published` |
+  | `SPARKWING_GOOGLE_CLIENT_SECRET` | `google-client-secret` |
+  | `SPARKWING_GITHUB_CLIENT_SECRET` | `github-client-secret` |
+  | `SPARKWING_GITHUB_APP_PRIVATE_KEY`, `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` | `github-app-key` |
+  | `SPARKWING_GITHUB_APP_WEBHOOK_SECRET` | `github-app-webhook-secret` |
+  | `SPARKWING_CLOUDFRONT_PRIVATE_KEY`, `SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE` | `cloudfront-key` |
+  | `SPARKWING_LOGS_DELETE_TOKEN` | `logs-delete-token` |
+  | `SPARKWING_BILLING_TOKEN` | `billing-token` |
+  | `SPARKWING_CACHE_TOKEN` | `cache-token` |
+  | `SPARKWING_CACHE_GRANT_KEY` | `cache-grant-key` |
+
+- **Edge cases:** a `--credentials-dir` that names no directory stops the
+  controller. The `sparkwing` CLI still reads `SPARKWING_SECRETS_KEY`,
+  `SPARKWING_SECRETS_PREVIOUS_KEY` and `SPARKWING_CACHE_TOKEN` on a laptop;
+  only the controller stopped. `sparkwing-controller migrate-outputs` takes
+  `--credentials-dir` too, for its `pg-url`.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper

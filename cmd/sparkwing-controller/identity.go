@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 )
 
 type identityFlags struct {
-	LicenseFile        string
+	License            string
 	GoogleClientID     string
 	GoogleClientSecret string
 	GitHubClientID     string
@@ -25,24 +24,10 @@ type identityFlags struct {
 	SignUpGate         string
 }
 
-func readLicense(path string) (string, error) {
-	if path == "" {
-		return os.Getenv("SPARKWING_LICENSE"), nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("--license-file: %w", err)
-	}
-	return string(data), nil
-}
-
 // safety: an unusable license only logs, because a local install runs without one; a half-configured
 // Google client is refused, because it would draw a sign-in button that cannot finish.
 func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Logger) error {
-	raw, err := readLicense(f.LicenseFile)
-	if err != nil {
-		return err
-	}
+	raw := f.License
 	key, err := license.EmbeddedKey()
 	if err != nil {
 		return err

@@ -11,6 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -36,6 +37,8 @@ func runMigrateOutputs(args []string, stdout io.Writer) error {
 	cacheBlobStore := fs.String("cache-blob-store", os.Getenv("SPARKWING_CACHE_BLOB_STORE"),
 		"the cache bucket the controller serves outputs from (s3://bucket/prefix); empty moves them to the output directory")
 	batch := fs.Int("batch", 500, "outputs read per batch")
+	credentialsDir := fs.String(credentials.FlagName, "",
+		"the controller's credentials directory; its "+credPGURL+" file selects the PostgreSQL store")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -47,7 +50,11 @@ func runMigrateOutputs(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	st, err := openControllerStore(ctx, p.StateDB())
+	creds, err := readCredentials(*credentialsDir)
+	if err != nil {
+		return err
+	}
+	st, err := openControllerStore(ctx, p.StateDB(), creds.PGURL)
 	if err != nil {
 		return mapStoreOpenError(err)
 	}

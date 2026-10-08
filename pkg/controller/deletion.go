@@ -440,7 +440,7 @@ func (s *Server) checkLogsDeleteToken(now time.Time) error {
 	raw := s.teamStorage.LogsToken
 	if raw == "" {
 		return errors.New("a logs service is configured but no log-deletion credential is: " +
-			"mint a token with only the " + ScopeLogsDelete + " scope and set SPARKWING_LOGS_DELETE_TOKEN")
+			"mint a token with only the " + ScopeLogsDelete + " scope and put it in the logs-delete-token file of the controller's --credentials-dir")
 	}
 	tok, err := s.store.LookupToken(raw, now)
 	if err != nil {

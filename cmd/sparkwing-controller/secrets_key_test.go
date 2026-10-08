@@ -46,7 +46,7 @@ func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("a multi-team controller started without a secrets key")
 	}
-	if !strings.Contains(err.Error(), "SPARKWING_SECRETS_KEY") {
+	if !strings.Contains(err.Error(), credSecretsKey) {
 		t.Fatalf("refusal = %q, want it to name the key setting", err)
 	}
 }

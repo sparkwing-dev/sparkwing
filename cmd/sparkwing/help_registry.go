@@ -2746,7 +2746,7 @@ var cmdSecretRotate = Command{
 store without --profile, and writes it back sealed under the key that
 controller or this machine's daemon is running with now, in one
 transaction. Run it after moving onto a new key with the old one still
-configured as --secrets-previous-key-file or SPARKWING_SECRETS_PREVIOUS_KEY
+configured as the controller's secrets-key.previous credential
 (locally: set SPARKWING_SECRETS_KEY and SPARKWING_SECRETS_PREVIOUS_KEY and
 run 'sparkwing daemon restart'); drop the old key once a rotation reports
 nothing skipped. A value the controller was holding as plaintext comes out

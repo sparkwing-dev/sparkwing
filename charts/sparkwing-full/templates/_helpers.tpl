@@ -196,18 +196,33 @@ sub-chart's helpers.
 {{- end }}
 
 {{/*
-Mount points for the controller's credential Secrets. Each holds one
-Secret, so the file name inside is the Secret's key and the flag that
-names it is built from both.
+The controller's credentials directory sources: one projected volume
+source per configured Secret, each item renamed to the fixed file name
+the controller reads. Empty when no credential is configured.
 */}}
-{{- define "sparkwing-full.controller.secretsKeyDir" -}}
-/etc/sparkwing/secrets-key
+{{- define "sparkwing-full.controller.credentialSources" -}}
+{{- $c := .Values.controller -}}
+{{- $items := list
+      (dict "ref" $c.databaseSecret "path" "pg-url")
+      (dict "ref" $c.secretsKey "path" "secrets-key")
+      (dict "ref" $c.secretsPreviousKey "path" "secrets-key.previous")
+      (dict "ref" $c.bootstrapAdminToken "path" "bootstrap-admin-token") -}}
+{{- $bundle := index .Values "sparkwing-runner-bundle" -}}
+{{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") -}}
+{{- $items = append $items (dict "ref" (index $bundle "cache" "tokenSecret" | default dict) "path" "cache-token") -}}
+{{- $items = append $items (dict "ref" (index $bundle "cache" "grantKeySecret" | default dict) "path" "cache-grant-key") -}}
+{{- end -}}
+{{- with $c.credentialsSecret.name }}
+- secret:
+    name: {{ . | quote }}
 {{- end }}
-
-{{- define "sparkwing-full.controller.secretsPreviousKeyDir" -}}
-/etc/sparkwing/secrets-previous-key
+{{- range $items }}
+{{- if and (index .ref "name") (index .ref "key") }}
+- secret:
+    name: {{ index .ref "name" | quote }}
+    items:
+      - key: {{ index .ref "key" | quote }}
+        path: {{ .path }}
 {{- end }}
-
-{{- define "sparkwing-full.controller.bootstrapAdminTokenDir" -}}
-/etc/sparkwing/bootstrap-admin-token
+{{- end }}
 {{- end }}

@@ -236,10 +236,11 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.size` | State DB volume size. | `5Gi` |
 | `controller.storage.pvc.storageClassName` | Override default StorageClass. | `""` |
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
-| `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN. Empty keeps SQLite. | `""` |
+| `controller.credentialsSecret.name` | Secret whose keys are [credential file names](../../docs/self-hosting.md#controller-credentials) (`license`, `oidc-key`, `github-app-key`, and the rest), projected whole into the controller's `--credentials-dir`. | `""` |
+| `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN, mounted as the `pg-url` credential. Empty keeps SQLite. | `""` |
 | `controller.databaseSecret.key` | Key holding the PostgreSQL DSN. | `dsn` |
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for GitHub App check run links; invalid values omit the link. | `""` |
-| `controller.secretsKey.name` | Secret holding 32-byte encryption key, mounted as a file and named with `--secrets-key-file`. | `""` |
+| `controller.secretsKey.name` | Secret holding the 32-byte encryption key, mounted as the `secrets-key` credential. | `""` |
 | `controller.secretsPreviousKey.name` | Secret holding the key values were sealed under before `secretsKey`; read-only fallback for the window before `sparkwing secrets rotate` runs. | `""` |
 | `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
 | `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
@@ -351,9 +352,10 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
    service's signal to resolve callers against the controller.
    `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as the
-   credential file `cache-token` and the controller as `SPARKWING_CACHE_TOKEN`,
-   and `sparkwing-runner-bundle.cache.grantKeySecret` what the cache reads as
-   `cache-grant-key` and the controller as `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
+   credential file `cache-token`, and
+   `sparkwing-runner-bundle.cache.grantKeySecret` what both read as
+   `cache-grant-key`; the chart mounts each into both services' credentials
+   directories. A cache-enabled install without the cache
    token fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
    logs-enabled one without the runner token unless

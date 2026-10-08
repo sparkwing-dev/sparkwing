@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -106,7 +105,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	if err := f.srv.WithSignedDownloads(cacheBucket, nil, s3Client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(authwire.CacheGrantKeyEnv, "source-test-grant-key")
+	f.srv.WithCacheGrantKey("source-test-grant-key")
 	runnerRaw, runner, err := team.CreateToken(t.Context(), "source-runner", store.TokenKindRunner,
 		[]string{controller.ScopeTriggersClaim, controller.ScopeNodesClaim}, time.Hour, time.Now())
 	if err != nil {
@@ -117,7 +116,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 		runner.Principal, runner.Prefix, time.Now().Add(time.Hour).UnixNano(), started.RunID); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := authwire.MintClaimCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), user.team, started.RunID,
+	grant, err := authwire.MintClaimCacheGrant("source-test-grant-key", user.team, started.RunID,
 		time.Now(), time.Hour, &authwire.CacheClaim{
 			Kind: "trigger", Generation: 1,
 			Principal: runner.Principal, TokenPrefix: runner.Prefix,
@@ -143,7 +142,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeGrant, err := authwire.MintClaimCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), user.team, started.RunID,
+	nodeGrant, err := authwire.MintClaimCacheGrant("source-test-grant-key", user.team, started.RunID,
 		time.Now(), time.Hour, &authwire.CacheClaim{
 			Kind: "node", NodeID: "compile",
 			HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,

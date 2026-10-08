@@ -42,6 +42,34 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+### Controller credentials
+
+`sparkwing-controller` reads every secret from one directory, named with
+`--credentials-dir`, holding one file per credential under a fixed name. A file
+that is absent leaves the feature it guards off; there is no environment or
+flag form of any of them. The chart projects its Secret values into this
+directory, and `controller.credentialsSecret` names a Secret whose keys are
+these file names, mounted whole.
+
+| File | Holds | Without it |
+|---|---|---|
+| `pg-url` | PostgreSQL connection string for the state store | SQLite at `$SPARKWING_HOME/state.db` |
+| `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-encryption-at-rest) |
+| `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
+| `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
+| `license` | Signed multi-team license | one team |
+| `oidc-key`, `oidc-key.published` | OIDC signing key and the extra key the key set publishes | no ID tokens; see [OIDC](oidc.md) |
+| `google-client-secret`, `github-client-secret` | OAuth client secrets for sign-in | no sign-in with that provider |
+| `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
+| `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
+| `logs-delete-token` | Token with only `logs.delete`, for team deletion | team deletions with logs wait |
+| `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
+| `cache-token` | The cache's operator token, the same value as the cache's own `cache-token` | no controller-to-cache hop |
+| `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
+
+Keep the directory readable by the controller's user alone (`0700`, files
+`0600`); a Kubernetes projected volume with `defaultMode: 0400` does this.
+
 ### Signed downloads through CloudFront
 
 For object-store downloads through a public ingress, configure the controller
@@ -51,11 +79,9 @@ controller announces `data_download_url` to in-cluster callers when that store
 is configured, and to public-ingress callers when CloudFront signing is also
 configured.
 Set `SPARKWING_CLOUDFRONT_DOMAIN` and
-`SPARKWING_CLOUDFRONT_KEY_PAIR_ID`, then provide the signing key with either
-`SPARKWING_CLOUDFRONT_PRIVATE_KEY` or
-`SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE`. Store the key in a Kubernetes Secret
-and mount it as a file; keep it out of Helm values, command arguments, and
-logs. The distribution must serve the private data bucket through its origin
+`SPARKWING_CLOUDFRONT_KEY_PAIR_ID`, then put the signing key in the `cloudfront-key`
+[credential](#controller-credentials). Keep it out of Helm values, command
+arguments, and logs. The distribution must serve the private data bucket through its origin
 access control configuration.
 
 The controller returns a 60-second CloudFront URL for requests arriving
@@ -110,7 +136,7 @@ helm upgrade --install sparkwing charts/sparkwing-full \
     --set controller.storage.type=emptyDir
 ```
 
-The controller reads the Secret as `SPARKWING_PG_URL`. Keep the DSN out of Helm
+The controller reads the Secret as its `pg-url` credential. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 

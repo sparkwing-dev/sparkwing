@@ -5,16 +5,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
 // The cache honors a grant on its signature alone, so a runner token gets one
 // only through a live claim on the run. Otherwise a grant minted just before
 // its minter's removal would keep the team's cache open for its whole life.
 func TestCacheGrantRefusesARunnerTokenWithoutALiveClaim(t *testing.T) {
-	t.Setenv(authwire.CacheGrantKeyEnv, "cache-grant-key-distinct-from-operator-token")
 	f := newTenancyFixture(t, openSQLiteStore(t))
+	f.srv.WithCacheGrantKey("cache-grant-key-distinct-from-operator-token")
 
 	code, raw := f.do(http.MethodPost, "/api/v1/team/runner-tokens", f.editorA,
 		map[string]any{"name": "dave-box", "repos": []string{"github.com/acme/*"}})

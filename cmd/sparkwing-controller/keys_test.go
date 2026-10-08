@@ -19,65 +19,41 @@ func writeFile(t *testing.T, name, content string) string {
 	return path
 }
 
-func TestLoadBootstrapAdminToken(t *testing.T) {
-	const token = "swu_provisionedbootstrapadmin00001"
-
-	t.Run("file", func(t *testing.T) {
-		path := writeFile(t, "token", token+"\n")
-		got, err := loadBootstrapAdminToken(path)
-		if err != nil {
-			t.Fatalf("loadBootstrapAdminToken: %v", err)
+func credentialsDir(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
 		}
-		if got != token {
-			t.Fatalf("token = %q, want %q", got, token)
-		}
-	})
-
-	t.Run("environment wins over the file", func(t *testing.T) {
-		t.Setenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN", token)
-		got, err := loadBootstrapAdminToken(writeFile(t, "token", "swu_ignoredfilevalue0000000000001"))
-		if err != nil {
-			t.Fatalf("loadBootstrapAdminToken: %v", err)
-		}
-		if got != token {
-			t.Fatalf("token = %q, want the environment value", got)
-		}
-	})
-
-	t.Run("environment entry is cleared once read", func(t *testing.T) {
-		t.Setenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN", token)
-		if _, err := loadBootstrapAdminToken(""); err != nil {
-			t.Fatalf("loadBootstrapAdminToken: %v", err)
-		}
-		if got := os.Getenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN"); got != "" {
-			t.Fatalf("SPARKWING_BOOTSTRAP_ADMIN_TOKEN still set to %q after the read", got)
-		}
-	})
-
-	t.Run("unset", func(t *testing.T) {
-		got, err := loadBootstrapAdminToken("")
-		if err != nil {
-			t.Fatalf("loadBootstrapAdminToken: %v", err)
-		}
-		if got != "" {
-			t.Fatalf("token = %q, want empty", got)
-		}
-	})
-
-	t.Run("empty file", func(t *testing.T) {
-		if _, err := loadBootstrapAdminToken(writeFile(t, "token", "  \n")); err == nil {
-			t.Fatal("loadBootstrapAdminToken accepted an empty file")
-		}
-	})
-
-	t.Run("missing file", func(t *testing.T) {
-		if _, err := loadBootstrapAdminToken(filepath.Join(t.TempDir(), "absent")); err == nil {
-			t.Fatal("loadBootstrapAdminToken accepted a path that does not exist")
-		}
-	})
+	}
+	return dir
 }
 
-func TestLoadSecretsCipher_PreviousKey(t *testing.T) {
+func TestReadCredentialsTrimsTokensAndLeavesAbsentFilesOff(t *testing.T) {
+	const token = "swu_provisionedbootstrapadmin00001"
+	creds, err := readCredentials(credentialsDir(t, map[string]string{
+		credBootstrapAdminToken: token + "\n",
+		credPGURL:               "postgres://sparkwing@db/sparkwing\n",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.BootstrapAdminToken != token || creds.PGURL != "postgres://sparkwing@db/sparkwing" {
+		t.Fatalf("credentials = %+v, want the trimmed token and URL", creds)
+	}
+	if creds.License != "" || creds.SecretsKey != nil || creds.OIDCKey != nil {
+		t.Fatalf("credentials = %+v, want every absent file read as off", creds)
+	}
+	if _, err := readCredentials(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("readCredentials accepted a directory that does not exist")
+	}
+	if creds, err := readCredentials(""); err != nil || creds.PGURL != "" {
+		t.Fatalf("readCredentials(\"\") = %+v, %v; want nothing configured", creds, err)
+	}
+}
+
+func TestSecretsKeyCredentials(t *testing.T) {
 	key, err := secrets.GenerateKey()
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
@@ -87,24 +63,19 @@ func TestLoadSecretsCipher_PreviousKey(t *testing.T) {
 		t.Fatalf("keygen: %v", err)
 	}
 	encode := base64.StdEncoding.EncodeToString
+	cipherFrom := func(t *testing.T, files map[string]string) (*secrets.Cipher, error) {
+		t.Helper()
+		creds, err := readCredentials(credentialsDir(t, files))
+		if err != nil {
+			return nil, err
+		}
+		return secretsCipher(creds.SecretsKey, creds.SecretsPreviousKey)
+	}
 
 	t.Run("no keys", func(t *testing.T) {
-		c, err := loadSecretsCipher("", "")
-		if err != nil {
-			t.Fatalf("loadSecretsCipher: %v", err)
-		}
-		if c != nil {
-			t.Fatal("loadSecretsCipher built a cipher with no key configured")
-		}
-	})
-
-	t.Run("current only", func(t *testing.T) {
-		c, err := loadSecretsCipher(writeFile(t, "key", encode(key)), "")
-		if err != nil {
-			t.Fatalf("loadSecretsCipher: %v", err)
-		}
-		if c == nil {
-			t.Fatal("loadSecretsCipher returned no cipher for a configured key")
+		c, err := cipherFrom(t, nil)
+		if err != nil || c != nil {
+			t.Fatalf("cipher = %v, %v; want none with no key configured", c, err)
 		}
 	})
 
@@ -117,49 +88,33 @@ func TestLoadSecretsCipher_PreviousKey(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Seal: %v", err)
 		}
-		c, err := loadSecretsCipher(writeFile(t, "key", encode(key)), writeFile(t, "previous", encode(previous)))
+		c, err := cipherFrom(t, map[string]string{credSecretsKey: encode(key) + "\n", credSecretsPreviousKey: encode(previous)})
 		if err != nil {
-			t.Fatalf("loadSecretsCipher: %v", err)
+			t.Fatalf("cipher: %v", err)
 		}
-		got, err := c.Open(sealed)
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		if got != "supersecret" {
-			t.Fatalf("Open = %q, want supersecret", got)
+		if got, err := c.Open(sealed); err != nil || got != "supersecret" {
+			t.Fatalf("Open = %q, %v; want supersecret", got, err)
 		}
 	})
 
 	t.Run("previous without a current key", func(t *testing.T) {
-		_, err := loadSecretsCipher("", writeFile(t, "previous", encode(previous)))
-		if err == nil {
-			t.Fatal("loadSecretsCipher accepted a previous key with no current one")
-		}
-		if !strings.Contains(err.Error(), "previous secrets key") {
-			t.Fatalf("err = %v, want it to name the previous key", err)
-		}
-	})
-
-	t.Run("environment entries are cleared once read", func(t *testing.T) {
-		t.Setenv("SPARKWING_SECRETS_KEY", encode(key))
-		t.Setenv("SPARKWING_SECRETS_PREVIOUS_KEY", encode(previous))
-		if _, err := loadSecretsCipher("", ""); err != nil {
-			t.Fatalf("loadSecretsCipher: %v", err)
-		}
-		for _, name := range []string{"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY"} {
-			if got := os.Getenv(name); got != "" {
-				t.Fatalf("%s still set to %q after the read", name, got)
-			}
+		_, err := cipherFrom(t, map[string]string{credSecretsPreviousKey: encode(previous)})
+		if err == nil || !strings.Contains(err.Error(), credSecretsPreviousKey) {
+			t.Fatalf("err = %v, want a refusal naming %s", err, credSecretsPreviousKey)
 		}
 	})
 
 	t.Run("raw key bytes", func(t *testing.T) {
-		c, err := loadSecretsCipher(writeFile(t, "key", string(key)), "")
-		if err != nil {
-			t.Fatalf("loadSecretsCipher: %v", err)
+		c, err := cipherFrom(t, map[string]string{credSecretsKey: string(key)})
+		if err != nil || c == nil {
+			t.Fatalf("cipher = %v, %v; want one for a raw 32-byte key file", c, err)
 		}
-		if c == nil {
-			t.Fatal("loadSecretsCipher returned no cipher for a raw 32-byte key file")
+	})
+
+	t.Run("malformed key", func(t *testing.T) {
+		if _, err := cipherFrom(t, map[string]string{credSecretsKey: "not a key"}); err == nil ||
+			!strings.Contains(err.Error(), credSecretsKey) {
+			t.Fatalf("err = %v, want a refusal naming %s", err, credSecretsKey)
 		}
 	})
 }

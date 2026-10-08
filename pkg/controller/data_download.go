@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -142,7 +141,7 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		return "", nil, false
 	}
 	if strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
+		grant, err := authwire.VerifyCacheGrant(s.cacheGrantKey, token, time.Now())
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return "", nil, false

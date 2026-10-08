@@ -171,6 +171,17 @@ controller:
     # the proxy routes answer 404.
     url: ""
 
+  # A Secret whose keys are credential file names the controller reads
+  # from --credentials-dir: license, oidc-key, oidc-key.published,
+  # github-client-secret, google-client-secret, github-app-key,
+  # github-app-webhook-secret, cloudfront-key, logs-delete-token,
+  # billing-token, and the others below. Every key is mounted under its
+  # own name; a key the controller does not know is ignored. The single
+  # Secret values below land in the same directory under their fixed
+  # names.
+  credentialsSecret:
+    name: ""
+
   # Secrets-store encryption key. When set, the controller encrypts
   # secret values stored in the state DB at rest. Without it, the
   # controller logs a WARNING at startup and stores plaintext.

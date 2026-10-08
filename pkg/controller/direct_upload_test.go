@@ -110,7 +110,7 @@ func stringLength(n int) string { return strconv.Itoa(n) }
 
 func claimedUploadGrant(t *testing.T, f *appFixture, team, runID, prefix string) string {
 	t.Helper()
-	t.Setenv(authwire.CacheGrantKeyEnv, "direct-test-grant-key")
+	f.srv.WithCacheGrantKey("direct-test-grant-key")
 	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'running' WHERE id = ?`, runID); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestPendingTriggerCanCommitBinaryCacheUpload(t *testing.T) {
 		token.Principal, prefix, time.Now().Add(time.Hour).UnixNano(), "run-pending-cache"); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(authwire.CacheGrantKeyEnv, "direct-test-grant-key")
+	f.srv.WithCacheGrantKey("direct-test-grant-key")
 	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", owner.team, "run-pending-cache", time.Now(), time.Hour,
 		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: prefix}, testGrantScope)
 	if err != nil {
@@ -590,7 +590,7 @@ func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 		}
 		return s.WithDirectUploads(client, "bucket", "cache")
 	})
-	t.Setenv(authwire.CacheGrantKeyEnv, "claim-grant-signing-key")
+	f.srv.WithCacheGrantKey("claim-grant-signing-key")
 	olga := f.ghUser(501, "olga")
 	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
 	if err != nil {

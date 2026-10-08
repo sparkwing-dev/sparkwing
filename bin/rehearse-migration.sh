@@ -141,16 +141,26 @@ start_controller() {
   port="$(free_port)"
   CONTROLLER_URL="http://127.0.0.1:$port"
   install -d -m 700 "$home/.sparkwing"
-  local -a extra=()
-  [[ -n "$pgurl" ]] && extra+=("SPARKWING_PG_URL=$pgurl")
-  [[ -n "$key" ]] && extra+=("SPARKWING_SECRETS_KEY=$key")
+  local -a extra=() flags=()
+  # safety: a released controller older than --credentials-dir reads these
+  # from its environment, so the rehearsal hands each binary the form it reads.
+  if "$bin" --help 2>&1 | grep -q -- '--credentials-dir'; then
+    local creds="$home/credentials"
+    install -d -m 700 "$creds"
+    [[ -n "$pgurl" ]] && (umask 077 && printf '%s' "$pgurl" > "$creds/pg-url")
+    [[ -n "$key" ]] && (umask 077 && printf '%s' "$key" > "$creds/secrets-key")
+    flags+=(--credentials-dir "$creds")
+  else
+    [[ -n "$pgurl" ]] && extra+=("SPARKWING_PG_URL=$pgurl")
+    [[ -n "$key" ]] && extra+=("SPARKWING_SECRETS_KEY=$key")
+  fi
   start="$(date +%s.%N)"
   START_NS="$(date +%s%N)"
   # safety: env is started directly rather than through controller_env, so $!
   # is the controller itself (env execs it) and not a subshell a signal would
   # stop while the controller kept running.
   env -i PATH="$PATH" HOME="$home" SPARKWING_HOME="$home/.sparkwing" GOMAXPROCS="${GOMAXPROCS:-4}" "${extra[@]}" \
-    "$bin" --addr "127.0.0.1:$port" > "$WORK/$label.log" 2>&1 &
+    "$bin" --addr "127.0.0.1:$port" "${flags[@]}" > "$WORK/$label.log" 2>&1 &
   CONTROLLER_PID=$!
   for _ in $(seq 1 1200); do
     if ! kill -0 "$CONTROLLER_PID" 2>/dev/null; then

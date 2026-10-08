@@ -943,8 +943,8 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   unauthenticated, whatever the tokens table holds. See [auth.md](auth.md).
 - **Provision the first admin token.** Hand the controller the first
   admin credential and it never serves a request unauthenticated:
-  `SPARKWING_BOOTSTRAP_ADMIN_TOKEN` carries the token itself, and
-  `--bootstrap-admin-token-file <path>` reads it from a mounted file.
+  the `bootstrap-admin-token` file in its
+  [`--credentials-dir`](self-hosting.md#controller-credentials) holds it.
   When the tokens table is empty the controller stores that token's
   argon2 hash as an admin credential under the principal
   `bootstrap:admin` before it binds the listener, which satisfies

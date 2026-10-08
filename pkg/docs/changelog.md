@@ -145,7 +145,11 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
-- **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
+
+- **controller (Breaking):** `sparkwing-controller` reads every secret from `--credentials-dir`, one file per credential
+  The files are `pg-url`, `secrets-key`, `secrets-key.previous`, `bootstrap-admin-token`, `license`, `oidc-key`, `oidc-key.published`, `google-client-secret`, `github-client-secret`, `github-app-key`, `github-app-webhook-secret`, `cloudfront-key`, `logs-delete-token`, `billing-token`, `cache-token` and `cache-grant-key`. The sixteen environment variables they replace are no longer read, and `--secrets-key-file`, `--secrets-previous-key-file`, `--bootstrap-admin-token-file`, `--license-file`, `--oidc-key-file` and `--oidc-published-key-file` are gone. `sparkwing-full` projects its existing Secret values into the directory and adds `controller.credentialsSecret` for the rest. In `pkg/controller`, `Server.WithCacheGrantKey` sets the grant key and the server reads neither it nor the cache token from the environment. See [migration guide](docs/migrations/_unreleased.md#sparkwing-controller-reads-its-secrets-from-a-credentials-directory).
+
+ **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
   Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
 
 - **sdk (Breaking):** Remove the `SPARKWING_GITCACHE` alias

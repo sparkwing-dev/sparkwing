@@ -326,7 +326,7 @@ same name to the same URL stays idempotent.
 A multi-team controller gives runners a cache grant instead of the cache's
 token. `POST /api/v1/runs/<run>/cache-grant` answers `{grant, team,
 expires_at}`: a bearer the controller signs with the grant key
-(`SPARKWING_CACHE_GRANT_KEY`), naming the run's team. The route mints only
+(its `cache-grant-key` credential), naming the run's team. The route mints only
 for a live claim on the run: a claim token's grant lasts five minutes and its
 pod renews it, and a runner token must send its exact node or trigger claim
 fence, whose grant lasts six hours. A runner token with no fence gets
@@ -524,8 +524,9 @@ every one; these are the ones a deployment usually sets.
 | `--addr` | Listen address (default: `:8090`) |
 
 A malformed value stops the cache at startup with an error naming the flag.
-The controller reads the same token as `SPARKWING_CACHE_TOKEN`; from its own
-credentials directory it will read the same `cache-token` file name.
+The controller reads the same token, and the same grant key, from the same
+file names in its own `--credentials-dir`, so one projected Secret volume
+serves both.
 
 On the client side, `SPARKWING_GITCACHE_URL` names a specific gitcache base
 URL for git clones: set it to a reachable cache server and sparkwing routes

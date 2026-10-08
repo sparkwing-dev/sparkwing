@@ -14,9 +14,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
@@ -51,21 +50,15 @@ func run(args []string) error {
 		"bind address for the Prometheus /metrics endpoint. Set it to move "+
 			"/metrics off the API listener, and off any ingress fronting that "+
 			"listener, onto its own port. Empty serves /metrics on --addr.")
-	secretsKeyFile := fs.String("secrets-key-file", "",
-		"path to a file containing 32 raw bytes for secret encryption (alternative to SPARKWING_SECRETS_KEY)")
-	secretsPreviousKeyFile := fs.String("secrets-previous-key-file", "",
-		"path to the key secret values were sealed under before the current one "+
-			"(alternative to SPARKWING_SECRETS_PREVIOUS_KEY). Read-only: a stored "+
-			"value that does not open under the current key is tried against this "+
-			"one, so a key swap keeps every value readable until "+
-			"`sparkwing secrets rotate` has re-encrypted them.")
-	bootstrapAdminTokenFile := fs.String("bootstrap-admin-token-file", "",
-		"path to a file holding the first admin token (alternative to "+
-			"SPARKWING_BOOTSTRAP_ADMIN_TOKEN, which carries the value itself). "+
-			"When the tokens table is empty the controller stores the hash of "+
-			"that token as an admin credential before it binds the listener, so "+
-			"a provisioned controller never serves a request unauthenticated. "+
-			"Ignored once any token exists.")
+	credentialsDir := fs.String(credentials.FlagName, "",
+		"directory holding the controller's secrets, one file each under a fixed name: "+
+			strings.Join([]string{
+				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
+				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
+				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey, credLogsDeleteToken,
+				credBillingToken, credCacheToken, credCacheGrantKey,
+			}, ", ")+
+			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	cachePodURL := fs.String("cache-pod-url", os.Getenv("CACHE_POD_URL"),
 		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
 			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
@@ -81,8 +74,8 @@ func run(args []string) error {
 			"where to watch runs. Empty disables the announcement.")
 	billingURL := fs.String("billing-url", os.Getenv("SPARKWING_BILLING_URL"),
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
-			"when a team owner buys credits; the controller authenticates with "+
-			"SPARKWING_BILLING_TOKEN. Empty sells no credits.")
+			"when a team owner buys credits; the controller authenticates with the "+
+			credBillingToken+" credential. Empty sells no credits.")
 	operatorAccounts := fs.String("operator-accounts", os.Getenv("SPARKWING_OPERATOR_ACCOUNTS"),
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console. No token reaches the console. Empty leaves it off.")
@@ -92,16 +85,6 @@ func run(args []string) error {
 		"base URL this controller answers on from outside the cluster, which is "+
 			"where runners read signed filesystem outputs. "+
 			"Empty uses the URL each request arrived at.")
-	oidcKeyFile := fs.String("oidc-key-file", "",
-		"path to an RSA private key PEM (at least 2048 bits) that signs the OIDC ID "+
-			"tokens runs exchange for cloud credentials (alternative to "+oidcKeyEnv+", "+
-			"which carries the PEM itself). The issuer is --external-url. Unset, the "+
-			"controller issues no ID tokens.")
-	oidcPublishedKeyFile := fs.String("oidc-published-key-file", "",
-		"path to a second OIDC key, private or public PEM, that the key set publishes "+
-			"and that never signs (alternative to "+oidcPublishedKeyEnv+"): the next key "+
-			"before a rotation switches signing to it, and the previous key after, so "+
-			"relying parties' cached key sets verify tokens across the switch.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyAddr := fs.String("trusted-proxy-addr", "",
@@ -263,16 +246,12 @@ func run(args []string) error {
 			"listing is the only enumeration the ceiling costs; 0 measures once at "+
 			"startup and never again (env: SPARKWING_OBJECT_STORE_BUCKET_RECONCILE)")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceController, egress.ControllerSurfaces)
-	licenseFile := fs.String("license-file", "",
-		"file holding the signed license that unlocks multi-team hosting. "+
-			"Empty reads the license text from SPARKWING_LICENSE; without a "+
-			"valid license the controller holds one team.")
 	googleClientID := fs.String("google-client-id", os.Getenv("SPARKWING_GOOGLE_CLIENT_ID"),
-		"Google OAuth client id for dashboard sign-in; the secret comes from "+
-			"SPARKWING_GOOGLE_CLIENT_SECRET. Offered only with a multi-team license.")
+		"Google OAuth client id for dashboard sign-in; the secret is the "+
+			credGoogleClientSecret+" credential. Offered only with a multi-team license.")
 	githubClientID := fs.String("github-client-id", os.Getenv("SPARKWING_GITHUB_CLIENT_ID"),
-		"GitHub OAuth app client id for dashboard sign-in; the secret comes from "+
-			"SPARKWING_GITHUB_CLIENT_SECRET. Offered only with a multi-team license.")
+		"GitHub OAuth app client id for dashboard sign-in; the secret is the "+
+			credGitHubClientSecret+" credential. Offered only with a multi-team license.")
 	emailSender := fs.String("email-sender", os.Getenv("SPARKWING_EMAIL_SENDER"),
 		"address invitation emails are sent from through Amazon SES, such as noreply@example.com; "+
 			"credentials and region come from the AWS default chain. Empty sends no email and logs "+
@@ -281,9 +260,8 @@ func run(args []string) error {
 		"SES configuration set every invitation email names, for delivery and bounce events; empty names none")
 	githubAppID := fs.String("github-app-id", os.Getenv("SPARKWING_GITHUB_APP_ID"),
 		"numeric id of the deployment's GitHub App. The App's client id and secret are "+
-			"--github-client-id and SPARKWING_GITHUB_CLIENT_SECRET, its private key comes from "+
-			"SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE or SPARKWING_GITHUB_APP_PRIVATE_KEY, and its "+
-			"webhook secret from SPARKWING_GITHUB_APP_WEBHOOK_SECRET")
+			"--github-client-id and the "+credGitHubClientSecret+" credential, its private key is the "+
+			credGitHubAppKey+" credential, and its webhook secret the "+credGitHubAppWebhookSecret+" credential")
 	githubAppSlug := fs.String("github-app-slug", os.Getenv("SPARKWING_GITHUB_APP_SLUG"),
 		"the GitHub App's name in https://github.com/apps/<slug>, where a team owner installs it")
 	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
@@ -309,6 +287,10 @@ func run(args []string) error {
 			"controller) and for laptop-local use.")
 	_ = fs.Parse(args)
 
+	creds, err := readCredentials(*credentialsDir)
+	if err != nil {
+		return err
+	}
 	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
 		return err
@@ -407,7 +389,7 @@ func run(args []string) error {
 	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	st, serr := openControllerStore(context.Background(), p.StateDB())
+	st, serr := openControllerStore(context.Background(), p.StateDB(), creds.PGURL)
 	if serr != nil {
 		return mapStoreOpenError(serr)
 	}
@@ -422,10 +404,7 @@ func run(args []string) error {
 	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
-	bootstrapToken, bterr := loadBootstrapAdminToken(*bootstrapAdminTokenFile)
-	if bterr != nil {
-		return fmt.Errorf("load bootstrap admin token: %w", bterr)
-	}
+	bootstrapToken := creds.BootstrapAdminToken
 	created, bterr := controller.EnsureBootstrapAdminToken(st, bootstrapToken, time.Now().UTC())
 	if bterr != nil {
 		return fmt.Errorf("bootstrap admin token: %w", bterr)
@@ -441,19 +420,18 @@ func run(args []string) error {
 		}
 	}
 
-	cipher, cerr := loadSecretsCipher(*secretsKeyFile, *secretsPreviousKeyFile)
+	cipher, cerr := secretsCipher(creds.SecretsKey, creds.SecretsPreviousKey)
 	if cerr != nil {
 		return fmt.Errorf("load secrets key: %w", cerr)
 	}
 	if cipher == nil {
 		fmt.Fprintln(os.Stderr,
-			"sparkwing-controller: WARNING: no secrets key configured "+
-				"(SPARKWING_SECRETS_KEY / --secrets-key-file unset); "+
+			"sparkwing-controller: WARNING: no "+credSecretsKey+" credential; "+
 				"secret values will be stored at rest as plaintext")
 	}
 
-	if strings.TrimSpace(*billingURL) != "" && os.Getenv("SPARKWING_BILLING_TOKEN") == "" {
-		return errors.New("--billing-url is set but SPARKWING_BILLING_TOKEN is empty; " +
+	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
+		return errors.New("--billing-url is set but the " + credBillingToken + " credential is absent; " +
 			"the checkout service refuses a controller without its token")
 	}
 
@@ -463,9 +441,10 @@ func run(args []string) error {
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
-		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
+		WithBillingCheckout(*billingURL, creds.BillingToken).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
-		WithCacheURL(*cacheURL).
+		WithCacheCredentials(*cacheURL, creds.CacheToken).
+		WithCacheGrantKey(creds.CacheGrantKey).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
@@ -488,11 +467,11 @@ func run(args []string) error {
 		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 		WithEgressMeter(egress.New(egressCfg))
 	if err := configureIdentity(srv, identityFlags{
-		LicenseFile:        *licenseFile,
+		License:            creds.License,
 		GoogleClientID:     *googleClientID,
-		GoogleClientSecret: os.Getenv("SPARKWING_GOOGLE_CLIENT_SECRET"),
+		GoogleClientSecret: creds.GoogleClientSecret,
 		GitHubClientID:     *githubClientID,
-		GitHubClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
+		GitHubClientSecret: creds.GitHubClientSecret,
 		RedirectURIs:       *oauthRedirectURIs,
 		SignUpGate:         *signUpGate,
 	}, slog.Default()); err != nil {
@@ -504,27 +483,26 @@ func run(args []string) error {
 	// safety: the log-deletion credential is a token carrying only
 	// logs.delete, which reads nothing; without one a team deletion with logs
 	// to remove waits and records why.
-	logsDeleteToken := strings.TrimSpace(os.Getenv("SPARKWING_LOGS_DELETE_TOKEN"))
-	clearEnv("SPARKWING_LOGS_DELETE_TOKEN")
 	srv.WithTeamStorage(controller.TeamStorage{
-		LogsURL: *logsURL, LogsToken: logsDeleteToken,
-		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: bincache.CacheToken(),
+		LogsURL: *logsURL, LogsToken: creds.LogsDeleteToken,
+		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: creds.CacheToken,
 	})
 	if err := configureGitHubApp(srv, githubAppFlags{
-		AppID:        *githubAppID,
-		Slug:         *githubAppSlug,
-		ClientID:     *githubClientID,
-		ClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
-	}, os.Getenv); err != nil {
+		AppID:         *githubAppID,
+		Slug:          *githubAppSlug,
+		ClientID:      *githubClientID,
+		ClientSecret:  creds.GitHubClientSecret,
+		PrivateKey:    creds.GitHubAppKey,
+		WebhookSecret: creds.GitHubAppWebhookSecret,
+	}); err != nil {
 		return err
 	}
-	oidcIssuer, oerr := loadOIDCIssuer(*oidcKeyFile, *oidcPublishedKeyFile, *externalURL, *oidcTokenTTL, os.Stderr)
+	oidcIssuer, oerr := loadOIDCIssuer(creds.OIDCKey, creds.OIDCPublishedKey, *externalURL, *oidcTokenTTL, os.Stderr)
 	if oerr != nil {
 		return fmt.Errorf("oidc issuer: %w", oerr)
 	}
 	srv = srv.WithOIDCIssuer(oidcIssuer)
-	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
-		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
+	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL, creds.CacheGrantKey, creds.CacheToken); err != nil {
 		return err
 	}
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
@@ -565,18 +543,7 @@ func run(args []string) error {
 			return fmt.Errorf("--logs-archive-store: %w", err)
 		}
 		srv = srv.WithStoragePass(cache, logsStore)
-		privateKey := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY")
-		if keyFile := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE"); keyFile != "" {
-			if privateKey != "" {
-				return errors.New("set only one of SPARKWING_CLOUDFRONT_PRIVATE_KEY and SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE")
-			}
-			// #nosec G703 -- the operator configures this private-key file path
-			keyBytes, err := os.ReadFile(keyFile)
-			if err != nil {
-				return fmt.Errorf("CloudFront private key file: %w", err)
-			}
-			privateKey = string(keyBytes)
-		}
+		privateKey := creds.CloudFrontKey
 		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
 		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
 		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
@@ -741,8 +708,8 @@ func checkRequireAuth(st *store.Store, requireAuth bool) error {
 		return nil
 	}
 	return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
-		"the tokens table is empty; supply the first admin token with " +
-		"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN), or " +
+		"the tokens table is empty; supply the first admin token as the " +
+		credBootstrapAdminToken + " credential, or " +
 		"mint one with the controller started unauthenticated and restart " +
 		"with --require-auth")
 }
@@ -764,12 +731,12 @@ func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey,
 	}
 	if grantKey == "" {
 		return errors.New("the license allows more than one team and a cache is configured, so " +
-			authwire.CacheGrantKeyEnv + " must hold the key the controller signs cache grants with " +
+			"the " + credCacheGrantKey + " credential must hold the key the controller signs cache grants with " +
 			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
 	}
 	if grantKey == cacheToken {
-		return errors.New(authwire.CacheGrantKeyEnv + " equals the cache's operator token " +
-			"(SPARKWING_CACHE_TOKEN); give the grant key a secret of its own, since any holder of " +
+		return errors.New("the " + credCacheGrantKey + " credential equals the cache's operator token " +
+			"(" + credCacheToken + "); give the grant key a secret of its own, since any holder of " +
 			"the operator token could otherwise mint a grant for any team")
 	}
 	return nil
@@ -793,7 +760,7 @@ func configureSecrets(ctx context.Context, srv *controller.Server, cipher *secre
 	if cipher == nil {
 		if srv.MultiTeam() {
 			return errors.New("the license allows more than one team, so stored secrets must be encrypted: " +
-				"set SPARKWING_SECRETS_KEY or --secrets-key-file to a base64-encoded 32-byte key " +
+				"put a base64-encoded 32-byte key in the " + credSecretsKey + " credential " +
 				"(generate one with `openssl rand -base64 32`)")
 		}
 		return nil
@@ -806,19 +773,11 @@ func configureSecrets(ctx context.Context, srv *controller.Server, cipher *secre
 	return nil
 }
 
-func loadSecretsCipher(keyFile, previousKeyFile string) (*secrets.Cipher, error) {
-	key, err := loadSecretsKey("SPARKWING_SECRETS_KEY", keyFile)
-	if err != nil {
-		return nil, err
-	}
-	previous, err := loadSecretsKey("SPARKWING_SECRETS_PREVIOUS_KEY", previousKeyFile)
-	if err != nil {
-		return nil, err
-	}
+func secretsCipher(key, previous []byte) (*secrets.Cipher, error) {
 	if key == nil {
 		if previous != nil {
-			return nil, errors.New("a previous secrets key is configured without a current one; " +
-				"set SPARKWING_SECRETS_KEY or --secrets-key-file to the key values are sealed under now")
+			return nil, errors.New("the " + credSecretsPreviousKey + " credential is present without " +
+				credSecretsKey + "; add the key values are sealed under now")
 		}
 		return nil, nil
 	}
@@ -826,33 +785,6 @@ func loadSecretsCipher(keyFile, previousKeyFile string) (*secrets.Cipher, error)
 		return secrets.NewCipher(key)
 	}
 	return secrets.NewCipherWithPrevious(key, previous)
-}
-
-func loadSecretsKey(envName, filePath string) ([]byte, error) {
-	v := os.Getenv(envName)
-	clearEnv(envName)
-	if v != "" {
-		key, err := secrets.DecodeKey(v)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", envName, err)
-		}
-		return key, nil
-	}
-	if filePath == "" {
-		return nil, nil
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", filePath, err)
-	}
-	if len(data) == secrets.KeySize {
-		return data, nil
-	}
-	decoded, derr := secrets.DecodeKey(string(data))
-	if derr != nil {
-		return nil, fmt.Errorf("%s: %w", filePath, derr)
-	}
-	return decoded, nil
 }
 
 func configureMailer(ctx context.Context, srv *controller.Server, sender, configSet string) error {
@@ -865,34 +797,6 @@ func configureMailer(ctx context.Context, srv *controller.Server, sender, config
 	}
 	srv.WithMailer(m)
 	return nil
-}
-
-// safety: a trailing newline from a mounted file or a heredoc is editor noise, not part of the credential.
-func loadBootstrapAdminToken(filePath string) (string, error) {
-	fromEnv := os.Getenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN")
-	clearEnv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN")
-	if v := strings.TrimSpace(fromEnv); v != "" {
-		return v, nil
-	}
-	if filePath == "" {
-		return "", nil
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", filePath, err)
-	}
-	token := strings.TrimSpace(string(data))
-	if token == "" {
-		return "", fmt.Errorf("%s is empty", filePath)
-	}
-	return token, nil
-}
-
-// safety: a credential left in the environment reaches every child process and anything that reads /proc.
-func clearEnv(name string) {
-	if err := os.Unsetenv(name); err != nil {
-		fmt.Fprintf(os.Stderr, "sparkwing-controller: could not clear %s from the environment: %v\n", name, err)
-	}
 }
 
 // safety: an unreadable page budget must not silently become the default, because

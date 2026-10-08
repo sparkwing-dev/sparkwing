@@ -14,7 +14,6 @@ import (
 func TestMigrateOutputsMovesInlineOutputsOnce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
-	unsetenv(t, controllerPostgresEnv)
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(home, "state.db"))
 	if err != nil {
