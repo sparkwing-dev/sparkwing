@@ -4226,8 +4226,8 @@ type RunFilter struct {
 	FinishedAfter  time.Time
 	FinishedBefore time.Time
 	// Text keeps runs containing every term, and ExcludeText drops runs containing any,
-	// case-insensitively in the id, pipeline, repository, branch, SHA, error, trigger
-	// source or status.
+	// in the id, pipeline, repository, branch, SHA, error, trigger source or status. Only
+	// ASCII letters match regardless of case, the same on every backend.
 	Text        []string
 	ExcludeText []string
 
@@ -4264,7 +4264,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
 }
 
 func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(scope, f)
+	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
 		return nil, err
 	}
@@ -4338,7 +4338,7 @@ func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 }
 
 func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(scope, f)
+	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
 		return 0, err
 	}
@@ -4350,7 +4350,7 @@ func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (in
 	return n, nil
 }
 
-func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
+func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []any, error) {
 	if !scope.all && scope.team == "" {
 		return "", nil, ErrNoTeam
 	}
@@ -4418,7 +4418,7 @@ func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
 	if f.HasBeforeCursor() {
 		addClause(runBeforeCursorClause(f.BeforeStartedAt), runBeforeCursorArgs(f)...)
 	}
-	for _, c := range runDisplayFilterClauses(f) {
+	for _, c := range runDisplayFilterClauses(dialect, f) {
 		addClause(c.sql, c.args...)
 	}
 	return where, args, nil

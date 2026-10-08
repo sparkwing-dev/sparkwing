@@ -246,3 +246,23 @@ func TestListRuns_RepoNamesMatchCaseSensitively(t *testing.T) {
 	matchBothWays(t, alpha, runs, store.RunFilter{ExcludeRepoNames: []string{"Web"}}, []string{"lower"})
 	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"owner/web"}}, []string{"lower"})
 }
+
+func TestListRuns_TextFoldsASCIICaseOnlyOnEveryPath(t *testing.T) {
+	st := storetest.New(t).Open(t)
+	alpha := tenantFor(t, st, "alpha")
+	base := time.Unix(1700000000, 0)
+	runs := []store.Run{
+		{ID: "accented", Pipeline: "build", Status: "success", GitBranch: "ÉTAPE", StartedAt: base},
+		{ID: "plain", Pipeline: "build", Status: "success", GitBranch: "etape", StartedAt: base.Add(time.Second)},
+	}
+	for _, r := range runs {
+		if err := alpha.CreateRun(context.Background(), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"ÉTAPE"}}, []string{"accented"})
+	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"Étape"}}, []string{"accented"})
+	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"étape"}}, nil)
+	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"ETAPE"}}, []string{"plain"})
+	matchBothWays(t, alpha, runs, store.RunFilter{ExcludeText: []string{"ÉTAPE"}}, []string{"plain"})
+}

@@ -52,11 +52,29 @@ func shaPrefixClause(prefixes []string) (string, []any) {
 
 func likeContains(term string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(strings.ToLower(term)) + "%"
+	return "%" + r.Replace(asciiLower(term)) + "%"
+}
+
+// safety: text search folds ASCII letters only, on every backend: SQLite's LOWER and LIKE
+// fold nothing else, so folding more in PostgreSQL or Go would select different runs.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
+}
+
+func asciiLowerSQL(dialect Dialect, col string) string {
+	if dialect == DialectPostgres {
+		return "TRANSLATE(" + col + ", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
+	}
+	return "LOWER(" + col + ")"
 }
 
 // safety: each clause filters the whole store, because a filter over one fetched page hides matches on the others.
-func runDisplayFilterClauses(f RunFilter) []sqlClause {
+func runDisplayFilterClauses(dialect Dialect, f RunFilter) []sqlClause {
 	var out []sqlClause
 	for _, list := range []struct {
 		clause string
@@ -108,7 +126,7 @@ func runDisplayFilterClauses(f RunFilter) []sqlClause {
 		parts := make([]string, len(runTextColumns))
 		args := make([]any, len(runTextColumns))
 		for i, col := range runTextColumns {
-			parts[i] = "LOWER(" + col + `) LIKE ? ESCAPE '\'`
+			parts[i] = asciiLowerSQL(dialect, col) + ` LIKE ? ESCAPE '\'`
 			args[i] = likeContains(term)
 		}
 		out = append(out, sqlClause{negate + "(" + strings.Join(parts, " OR ") + ")", args})
@@ -240,7 +258,7 @@ func runMatches(r *Run, f RunFilter) bool {
 		}
 		return false
 	}
-	text := strings.ToLower(strings.Join([]string{r.ID, r.Pipeline, r.DeclaredRepo, r.GithubRepo, r.GitBranch, r.GitSHA, r.Error, r.TriggerSource, r.Status}, "\x00"))
+	text := asciiLower(strings.Join([]string{r.ID, r.Pipeline, r.DeclaredRepo, r.GithubRepo, r.GitBranch, r.GitSHA, r.Error, r.TriggerSource, r.Status}, "\x00"))
 	started := RunCursorKey(r.StartedAt)
 	switch {
 	case len(f.Pipelines) > 0 && !in(f.Pipelines, r.Pipeline),
@@ -266,12 +284,12 @@ func runMatches(r *Run, f RunFilter) bool {
 		return false
 	}
 	for _, term := range f.Text {
-		if !strings.Contains(text, strings.ToLower(term)) {
+		if !strings.Contains(text, asciiLower(term)) {
 			return false
 		}
 	}
 	for _, term := range f.ExcludeText {
-		if strings.Contains(text, strings.ToLower(term)) {
+		if strings.Contains(text, asciiLower(term)) {
 			return false
 		}
 	}

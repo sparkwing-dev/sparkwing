@@ -212,7 +212,7 @@ paths:
           name: q
           schema: {type: string}
           description: >-
-            Whitespace-separated terms a run must contain, case-insensitively, in its id, pipeline, repository, branch, SHA, error, trigger source or status. A term written `-term`, or after a lone `-`, excludes runs containing it.
+            Whitespace-separated terms a run must contain, ignoring the case of ASCII letters only, in its id, pipeline, repository, branch, SHA, error, trigger source or status. A term written `-term`, or after a lone `-`, excludes runs containing it.
         - in: query
           name: after_id
           schema: {type: string}
