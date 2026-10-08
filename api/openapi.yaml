@@ -156,9 +156,79 @@ paths:
           schema: {type: boolean}
           description: When true, exclude child runs.
         - in: query
+          name: exclude_pipeline
+          schema: {type: string}
+          description: csv of pipeline names to leave out.
+        - in: query
+          name: exclude_status
+          schema: {type: string}
+          description: csv of run statuses to leave out.
+        - in: query
+          name: exclude_git_sha
+          schema: {type: string}
+          description: csv of git SHA prefixes to leave out.
+        - in: query
+          name: exclude_git_branch
+          schema: {type: string}
+          description: csv of exact git branch names to leave out.
+        - in: query
+          name: trigger_source
+          schema: {type: string}
+          description: csv of exact trigger sources (`push`, `cron`, `manual`).
+        - in: query
+          name: exclude_trigger_source
+          schema: {type: string}
+          description: csv of trigger sources to leave out; a run without one is kept.
+        - in: query
+          name: repo_name
+          schema: {type: string}
+          description: >-
+            csv of repository names, matched against the whole of, or the last path segment of, the declared repository, else the GitHub repository, else `unknown`.
+        - in: query
+          name: exclude_repo_name
+          schema: {type: string}
+          description: csv of repository names, as `repo_name` matches them, to leave out.
+        - in: query
           name: since
           schema: {type: string, format: duration}
           description: Go duration (`1h`, `30m`). Returns runs younger than this.
+        - in: query
+          name: started_after
+          schema: {type: string, format: date-time}
+          description: RFC 3339 time; runs started at or after it. The later of this and `since` applies.
+        - in: query
+          name: started_before
+          schema: {type: string, format: date-time}
+          description: RFC 3339 time; runs started at or before it.
+        - in: query
+          name: finished_after
+          schema: {type: string, format: date-time}
+          description: RFC 3339 time; finished runs that finished at or after it.
+        - in: query
+          name: finished_before
+          schema: {type: string, format: date-time}
+          description: RFC 3339 time; finished runs that finished at or before it.
+        - in: query
+          name: q
+          schema: {type: string}
+          description: >-
+            Whitespace-separated terms a run must contain, case-insensitively, in its id, pipeline, repository, branch, SHA, error, trigger source or status. A term written `-term`, or after a lone `-`, excludes runs containing it.
+        - in: query
+          name: after_id
+          schema: {type: string}
+          description: >-
+            Cursor: return runs older than this run. Needs `after_started_at`, the run's `started_at` in Unix nanoseconds, or 0 for a run that never started.
+        - in: query
+          name: after_started_at
+          schema: {type: integer, format: int64}
+        - in: query
+          name: before_id
+          schema: {type: string}
+          description: >-
+            Cursor: return the `limit` runs just newer than this run, still newest first. Needs `before_started_at`; may not be combined with `after_id`.
+        - in: query
+          name: before_started_at
+          schema: {type: integer, format: int64}
         - in: query
           name: limit
           schema: {type: integer, minimum: 1}
@@ -167,8 +237,9 @@ paths:
           description: List wrapped under `runs`.
           headers:
             X-Sparkwing-Run-Filter-Version:
-              description: Native identity-filter contract version.
-              schema: {type: string, enum: ["1"]}
+              description: >-
+                Run-list filter contract version. 1 serves the identity filters, 2 adds the `after_id` cursor, and 3 adds the exclusions, trigger, repository name, time range and text filters and the `before_id` cursor.
+              schema: {type: string, enum: ["3"]}
           content:
             application/json:
               schema:
@@ -7316,7 +7387,7 @@ paths:
       tags: [dashboard]
       summary: Search the logs of the caller's team's runs.
       description: >-
-        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team.
+        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team. A response that did not reach the oldest matching run carries `next_cursor`, whose `after_id` and `after_started_at` (a string of Unix nanoseconds) sent back as query values search the runs older than the last one searched.
       responses:
         default: {description: Undescribed.}
 
