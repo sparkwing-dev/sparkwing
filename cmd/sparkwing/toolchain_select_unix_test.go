@@ -412,3 +412,38 @@ func TestEnsureToolchainBinaryRefusesAPinWhoseAssetFailsVerification(t *testing.
 		t.Errorf("error %q does not name the pin", err)
 	}
 }
+
+func TestRunToolchainReplaysTheArgvAfterRootFlags(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	priv := withTestUpdateKey(t)
+	newReleaseServer(t, "v9.9.9", releaseFixture("v9.9.9"), priv, releaseServerOpts{})
+
+	start := t.TempDir()
+	if err := os.Mkdir(filepath.Join(start, "project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(start)
+	args, err := moveRootFlags([]string{"-C", "project", "--profile", "prod", "run", "build", "--sw-dry-run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevArgs := toolchainReplayArgs
+	toolchainReplayArgs = args
+	t.Cleanup(func() { toolchainReplayArgs = prevArgs })
+
+	prev := toolchainExecFn
+	var replayed []string
+	toolchainExecFn = func(_ string, argv, _ []string) error {
+		replayed = argv
+		return nil
+	}
+	t.Cleanup(func() { toolchainExecFn = prev })
+
+	var out bytes.Buffer
+	if err := runToolchain(&out, toolchainDecision{action: toolchainSwitch, installed: "v9.9.8", pin: "v9.9.9"}); err != nil {
+		t.Fatalf("runToolchain: %v", err)
+	}
+	if got := strings.Join(replayed, " "); got != "run build --profile prod --sw-dry-run" {
+		t.Fatalf("replayed argv = %q, want the verb with -C applied and gone", got)
+	}
+}

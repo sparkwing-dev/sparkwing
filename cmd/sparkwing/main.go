@@ -369,6 +369,7 @@ func runSparkwing(args []string) error {
 	if err != nil {
 		return err
 	}
+	toolchainReplayArgs = args
 	if cmd, ok := commandHelp(args); ok {
 		requested, _, err := requestedOutput(args)
 		if err != nil {
