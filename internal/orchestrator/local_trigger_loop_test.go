@@ -118,7 +118,7 @@ func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
 		finished := make(chan struct{})
 		go func() {
 			defer close(finished)
-			runLocalTriggerLoop(ctx, state, "parent", "", quietLogger(), time.Second, childStoreEnv{})
+			runLocalTriggerLoop(ctx, state, "parent", "", "", quietLogger(), time.Second, childStoreEnv{})
 		}()
 		defer func() {
 			cancel()
@@ -190,7 +190,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 			Pipeline:     "child",
 			ParentRunID:  "parent-live",
 			ParentNodeID: "spawn-child",
-		}, repoDir, cache, logger, nil)
+		}, "", repoDir, cache, logger, nil)
 	}
 
 	if err := dispatch("child-one"); err != nil {
@@ -495,7 +495,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 			t.Errorf("close local compile cache: %v", err)
 		}
 	})
-	if err := dispatchLocalTrigger(context.Background(), trig, "", cache, logger, nil); err != nil {
+	if err := dispatchLocalTrigger(context.Background(), trig, "", "", cache, logger, nil); err != nil {
 		t.Fatalf("dispatchLocalTrigger: %v", err)
 	}
 	raw, err = os.ReadFile(outputPath)
@@ -665,7 +665,7 @@ func TestLocalSetupFailureChild(t *testing.T) {
 	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
 		t.Skip("child process fixture")
 	}
-	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN")); err != nil {
+	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), ""); err != nil {
 		t.Fatal(err)
 	}
 }

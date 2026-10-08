@@ -123,10 +123,6 @@ func dispatchRun(args []string) error {
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
 	}
-	if flags.profileGiven {
-		return fmt.Errorf("run: --profile is not accepted; sparkwing run always executes locally against this machine's store. "+
-			"To run on a controller: sparkwing pipeline trigger %s --profile P", pipelineName)
-	}
 	if separator := slices.Index(passthrough, "--"); separator >= 0 {
 		passthrough = slices.Delete(passthrough, separator, separator+1)
 	}
@@ -143,6 +139,15 @@ func dispatchRun(args []string) error {
 	}
 	if err := refuseDetachedOnlyFlags(flags); err != nil {
 		return err
+	}
+	if flags.profile != "" {
+		p, profileErr := resolveProfileFlag(flags.profile)
+		if profileErr != nil {
+			return profileErr
+		}
+		if stateErr := orchestrator.RemoteStateProfile(p); stateErr != nil {
+			return fmt.Errorf("run: %s", strings.Replace(stateErr.Error(), "<pipeline>", pipelineName, 1))
+		}
 	}
 	projectStart := ""
 	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
@@ -260,6 +265,7 @@ func dispatchRun(args []string) error {
 		NoUpdate:     flags.noUpdate || flags.fleet,
 		ExecutionDir: executionDir,
 		AfterChild:   afterChild,
+		Profile:      flags.profile,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
@@ -357,11 +363,15 @@ func dispatchRun(args []string) error {
 	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
 }
 
-// safety: a pipeline binary built against an older SDK selects a remote
-// profile or secrets source from these variables, so an inherited value would
-// send a local run to a remote.
-func stripProfileHandoff(env []string) []string {
-	return removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
+// safety: the pipeline process selects its profile from ProfileEnv, and one
+// built against an older SDK its secrets source from SecretsProfileEnv, so an
+// inherited value would target a remote the invocation never named.
+func handoffProfiles(env []string, profileName string) []string {
+	env = removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
+	if profileName != "" {
+		env = append(env, orchestrator.ProfileEnv+"="+profileName)
+	}
+	return env
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {

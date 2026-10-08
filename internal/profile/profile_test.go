@@ -84,11 +84,13 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoadSaveRoundTrip(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+	mirror := false
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
 			"prod": {
-				Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
-				State:      &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
+				Controller:  &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
+				State:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
+				MirrorLocal: &mirror,
 			},
 		},
 	}
@@ -108,6 +110,9 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 	if prod.State == nil || prod.State.Type != backends.TypeSQLite {
 		t.Errorf("state: %+v", prod.State)
+	}
+	if prod.MirrorLocal == nil || *prod.MirrorLocal != false {
+		t.Errorf("mirror_local: %+v", prod.MirrorLocal)
 	}
 }
 
@@ -155,6 +160,21 @@ func TestDefaultPath_XDG(t *testing.T) {
 	got, err := profile.DefaultPath()
 	if err != nil || got != "/tmp/xdg/sparkwing/config.yaml" {
 		t.Errorf("got (%q, %v), want /tmp/xdg/sparkwing/config.yaml", got, err)
+	}
+}
+
+func TestEffectiveMirrorLocal_DefaultsTrue(t *testing.T) {
+	if !(*profile.Profile)(nil).EffectiveMirrorLocal() {
+		t.Error("nil profile should report MirrorLocal=true (laptop default)")
+	}
+	p := &profile.Profile{}
+	if !p.EffectiveMirrorLocal() {
+		t.Error("unset MirrorLocal should default to true")
+	}
+	f := false
+	p.MirrorLocal = &f
+	if p.EffectiveMirrorLocal() {
+		t.Error("MirrorLocal=false should report false")
 	}
 }
 

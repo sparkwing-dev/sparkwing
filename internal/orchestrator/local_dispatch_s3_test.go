@@ -10,8 +10,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
@@ -67,6 +71,76 @@ func (m *memBucket) List(_ context.Context, prefix string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+func TestSetupLocalExecution_S3StateNoLongerFallsBackInProcess(t *testing.T) {
+	art := newMemBucket()
+	state := s3state.New(art, s3state.WithFlushInterval(10*time.Millisecond))
+	t.Cleanup(func() { _ = state.Close() })
+
+	backends := S3Backends(nil, state, art)
+	opts := &Options{State: state, ArtifactStore: art, RunID: "run-s3-setup"}
+
+	exec, err := setupLocalExecution(t.Context(), newInternalPaths(t), opts, backends, t.TempDir(), quietTestLogger())
+	if err != nil {
+		t.Fatalf("setupLocalExecution: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("object-store state still falls back to in-process execution")
+	}
+	t.Cleanup(exec.cleanup)
+	if exec.runner == nil {
+		t.Fatal("no node runner wired for an object-store run")
+	}
+}
+
+func TestSetupLocalExecution_S3LoopbackServesTheRunsState(t *testing.T) {
+	art := newMemBucket()
+	state := s3state.New(art, s3state.WithFlushInterval(10*time.Millisecond))
+	t.Cleanup(func() { _ = state.Close() })
+
+	ctx := context.Background()
+	const runID = "run-s3-loopback"
+	if err := state.CreateRun(ctx, store.Run{ID: runID, Pipeline: "modetwo", Status: "running"}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	backends := S3Backends(nil, state, art)
+	loopback, err := startRunLoopback(t.Context(), &Options{State: state, ArtifactStore: art, RunID: runID}, backends, quietTestLogger())
+	if err != nil {
+		t.Fatalf("startRunLoopback: %v", err)
+	}
+	t.Cleanup(loopback.Close)
+
+	c := client.NewWithToken(loopback.url, nil, loopback.token)
+	got, err := c.GetRunForExecution(ctx, runID)
+	if err != nil {
+		t.Fatalf("child read of the run: %v", err)
+	}
+	if got.Pipeline != "modetwo" {
+		t.Errorf("pipeline = %q, want modetwo", got.Pipeline)
+	}
+
+	if err := c.CreateNode(ctx, store.Node{RunID: runID, NodeID: "n", Status: "pending"}); err != nil {
+		t.Fatalf("child CreateNode: %v", err)
+	}
+	if err := c.FinishNode(ctx, runID, "n", "success", "", []byte(`{"ok":true}`)); err != nil {
+		t.Fatalf("child FinishNode: %v", err)
+	}
+	n, err := state.GetNode(ctx, runID, "n")
+	if err != nil || n.Outcome != "success" {
+		t.Fatalf("node row in the run's own state = %+v (err=%v)", n, err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, loopback.url+"/api/v1/runs/"+runID, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("unauthenticated probe: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unauthenticated read = %d, want 401", resp.StatusCode)
+	}
 }
 
 func TestStartRunLoopback_SQLiteStillGetsTheRealController(t *testing.T) {

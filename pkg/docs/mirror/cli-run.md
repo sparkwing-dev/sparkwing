@@ -9,10 +9,16 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 Invoke a pipeline
 
 Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline. A run always executes on this machine against its
-local store and secrets; it accepts no --profile. A pipeline whose
-sparkwing.yaml entry names a profile: is pinned to that controller, and run
-refuses it.
+with the named pipeline. A run executes on this machine against its local
+store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
+pinned to that controller, and run refuses it.
+
+--profile NAME is accepted only for a profile with no controller whose state
+is an S3 bucket or a Postgres database: the run executes here and records its
+state, logs and cache to that profile's backends. This is a temporary
+exception for teams that coordinate through shared storage, slated for
+removal; a controller profile is refused with the 'sparkwing pipeline
+trigger' command to use instead.
 
 Pipeline-module builds honor the highest go directive in go.mod and an active
 resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
@@ -130,6 +136,7 @@ is running and exits after five idle minutes; see
 | `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
+| `--profile NAME` | Record the run to the named S3 or Postgres state profile (a temporary exception; controller profiles go through pipeline trigger) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 
 ### Examples

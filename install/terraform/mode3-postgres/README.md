@@ -1,11 +1,14 @@
-# Controller Postgres Terraform module
+# Sparkwing Postgres Terraform module
 
 Stand up the PostgreSQL database a
 [self-hosted controller](../../../docs/deployment-modes.md#hosted-controller)
 uses for its state with one `terraform apply`. The module provisions the
 database, its security group, and its subnet group, and writes the
 connection string to AWS Secrets Manager so the controller reads one
-secret instead of a hand-rolled DSN.
+secret instead of a hand-rolled DSN. The same database can back the
+[Postgres and object storage](../../../docs/deployment-modes.md#postgres-and-object-storage)
+shape, where each runner opens it directly; see
+[pointing runners at the database](#pointing-runners-at-the-database).
 
 This is the database half of a self-hosted controller. Caches and logs
 live in an object store the controller is configured with; this module
@@ -17,10 +20,11 @@ does not create the bucket.
   cheapest at idle) or an Aurora Serverless v2 cluster that scales
   capacity with load. One knob, `engine`, picks between them.
 - A security group that admits the PostgreSQL port only from the
-  controller hosts you name (`allowed_security_group_ids` or `allowed_cidr_blocks`).
+  controller or runner hosts you name (`allowed_security_group_ids` or
+  `allowed_cidr_blocks`).
 - A DB subnet group across the private subnets you supply.
 - A Secrets Manager secret holding the full connection string, for the
-  controller's `SPARKWING_PG_URL`.
+  controller's or runner's `SPARKWING_PG_URL`.
 
 ## What it expects from you
 
@@ -31,13 +35,14 @@ not build a VPC. Supply:
 - `subnet_ids`: at least two private subnets in different availability
   zones (both RDS and Aurora require two AZs).
 - One of `allowed_security_group_ids` or `allowed_cidr_blocks`: who may
-  reach the database. Point this at your controller hosts. With neither set,
+  reach the database. Point this at your controller hosts, or at your
+  runner hosts when runners open the database directly. With neither set,
   nothing can connect. `allowed_cidr_blocks` takes IPv4 CIDRs no wider
   than `/8`; a wider block, `0.0.0.0/0` included, fails validation at plan
   time rather than opening the database port to the internet.
 
-The database is never publicly accessible: the controller reaches it from inside
-the VPC (a peered network, a VPN, or hosts in the same VPC).
+The database is never publicly accessible: the controller or runners reach it
+from inside the VPC (a peered network, a VPN, or hosts in the same VPC).
 
 ## Usage
 
@@ -100,6 +105,48 @@ reach the controller over HTTP with `sparkwing pipeline trigger <pipeline>
 The first controller to start migrates the schema; staggered upgrades are
 covered under
 [schema versioning](../../../docs/deployment-modes.md#schema-versioning).
+
+## Pointing runners at the database
+
+Runners can open the database directly instead of reaching a controller.
+`sparkwing run --profile NAME` with a Postgres state profile is a
+temporary exception slated for removal; a controller is the supported way
+to share runs. Export the DSN on each runner:
+
+```sh
+export SPARKWING_PG_URL="$(aws secretsmanager get-secret-value \
+  --secret-id sparkwing/postgres-dsn \
+  --query SecretString --output text)"
+```
+
+Then add a profile that reads the DSN from that variable:
+
+```yaml
+# ~/.config/sparkwing/config.yaml
+profiles:
+  shared:
+    state:
+      type: postgres
+      url_source: env:SPARKWING_PG_URL
+    cache:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: cache
+    logs:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: logs
+```
+
+```sh
+sparkwing run hello --profile shared
+sparkwing serve start --profile shared --no-local-store --read-only
+```
+
+`sparkwing serve` serves a read-only dashboard over the profile's object
+store; a dashboard with sign-in comes from a controller. The first runner
+to start migrates the schema, and every runner must be upgraded before a
+breaking migration reaches the database.
 
 ## Teardown
 

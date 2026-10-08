@@ -20,15 +20,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -123,7 +128,15 @@ type Options struct {
 	priority    priorityRequest
 	prioritySet bool
 
+	ProfileLookup storeurl.ProfileLookup
+
+	Profile *profile.Profile
+
+	ProfileChain *profile.Chain
+
 	DefaultArgs map[string]string
+
+	MirrorLocal *store.Store
 }
 
 type DebugDirectives struct {
@@ -197,8 +210,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.PipelineYAML != nil {
 
 		guardCtx := pipelines.GuardContext{
-			Args:           invokeArgs,
-			ProfileIsLocal: backends.dispatchesLocally(),
+			Args: invokeArgs,
+		}
+		guardCtx.ProfileIsLocal = backends.dispatchesLocally()
+		if opts.Profile != nil {
+			guardCtx.ProfileName = opts.Profile.Name
 		}
 		if opts.Git != nil {
 			guardCtx.GitBranch = opts.Git.Branch
@@ -297,7 +313,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
-	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{IsLocal: backends.dispatchesLocally()})
+	var profileName string
+	if opts.Profile != nil {
+		profileName = opts.Profile.Name
+	}
+	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
+		Name:    profileName,
+		IsLocal: backends.dispatchesLocally(),
+	})
 
 	// safety: Plan runs before the run has a node to log against, so without a
 	// logger here sparkwing.Info from inside Plan resolves to the no-op sink.
@@ -410,7 +433,17 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		r = NewNodeExecutor(backends)
 	}
 	ctx = secrets.WithMasker(ctx, masker)
-	if opts.SecretSource != nil {
+	secretOpts := opts
+	secretOpts.RunID = runID
+	if resolver, rerr := selectSecretResolver(ctx, secretOpts); rerr != nil {
+		if err := backends.State.FinishRun(ctx, runID, "failed", rerr.Error()); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
+		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil
+	} else if resolver != nil {
+		ctx = sparkwing.WithSecretResolver(ctx,
+			secrets.NewCached(resolver, masker).AsResolver())
+	} else if opts.SecretSource != nil {
 		ctx = sparkwing.WithSecretResolver(ctx,
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
 	}
@@ -426,6 +459,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	if backends.LocalCoordination {
+		profileName := ""
+		if opts.Profile != nil {
+			profileName = opts.Profile.Name
+		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		child := childStoreEnv{}
 		if opts.standalone != nil {
@@ -438,7 +475,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		defer cancelConsumer()
 		go func() {
 			defer triggerLoop.Done()
-			runLocalTriggerLoop(consumerCtx, backends.State, runID, parentTriggerRepoDir(), nil, wedgeBudget, child)
+			runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
 		}()
 	}
 
@@ -750,8 +787,8 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	// safety: a standalone run holds the store the fallback already chose, so
 	// profile resolution must not reopen or replace it.
 	keepState := hosted.APISocket != "" || opts.standalone != nil
-	if err := applyLocalBackends(ctx, &opts, paths, keepState); err != nil {
-		return nil, err
+	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
+		return nil, fmt.Errorf("profile backends: %w", err)
 	}
 	if opts.State == nil {
 		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")
@@ -772,9 +809,42 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 				return nil, err
 			}
 			backends = LocalBackends(paths, st, opts.ArtifactStore)
+		case *s3state.Backend:
+			if opts.LogStore == nil {
+				return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
+			}
+			if ownsState {
+				defer func() {
+					cerr := s.Close()
+					if cerr == nil || err != nil || res == nil || res.Error != nil {
+						return
+					}
+					// safety: in S3-only mode the bucket is the run's only copy, so
+					// state left on this machine's disk is not a finished run.
+					res.Error = fmt.Errorf("persist run state: %w", cerr)
+					res.Status = "failed"
+				}()
+			}
+			backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
+		case *client.Client:
+			var logsBackend LogBackend
+			if opts.LogStore != nil {
+				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
+			} else {
+				logsURL, err := DiscoverLogsURL(ctx, s.BaseURL(), s.Token())
+				if err != nil {
+					return nil, err
+				}
+				logsBackend = NewHTTPLogsWithToken(logsURL, nil, s.Token(), nil)
+			}
+			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
 		default:
 			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 		}
+	}
+	if opts.MirrorLocal != nil {
+		backends.State = newMirrorStateBackend(backends.State, opts.MirrorLocal, nil)
+		defer func() { _ = opts.MirrorLocal.Close() }()
 	}
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)
@@ -809,7 +879,36 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		}
 	}
 
-	return Run(ctx, backends, opts)
+	res, runErr := Run(ctx, backends, opts)
+	if backends.LocalCoordination && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
+		if err := dumpRunState(ctx, canonicalState(backends.State), res.RunID, opts.ArtifactStore); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: state dump failed: %v\n", err)
+		}
+	}
+	return res, runErr
+}
+
+func dumpRunState(ctx context.Context, state StateBackend, runID string, art storage.ArtifactStore) error {
+	run, err := state.GetRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("read run: %w", err)
+	}
+	nodes, err := state.ListNodes(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("list nodes: %w", err)
+	}
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	if err := enc.Encode(map[string]any{"kind": "run", "data": run}); err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if err := enc.Encode(map[string]any{"kind": "node", "data": api.PublicNode(n)}); err != nil {
+			return err
+		}
+	}
+	key := "runs/" + runID + "/state.ndjson"
+	return art.Put(ctx, key, strings.NewReader(buf.String()))
 }
 
 func dispatch(
@@ -1128,6 +1227,18 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 			"logs":  "filesystem",
 			"cache": "filesystem",
 		}
+	} else if opts.Profile != nil && opts.ProfileChain != nil {
+		state, logs, cache := opts.Profile.SurfaceStrings()
+		inv["profile"] = map[string]any{
+			"name":         opts.ProfileChain.Selected,
+			"source":       string(opts.ProfileChain.Source),
+			"mirror_local": opts.Profile.EffectiveMirrorLocal(),
+		}
+		inv["backends"] = map[string]any{
+			"state": state,
+			"logs":  logs,
+			"cache": cache,
+		}
 	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv
@@ -1185,6 +1296,11 @@ func buildRunFlags(opts Options) map[string]any {
 	}
 	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
 		flags["no_update"] = true
+	}
+	if !opts.LocalOnly {
+		if v := handoffProfile(); v != "" {
+			flags["profile"] = v
+		}
 	}
 	if v := os.Getenv("SPARKWING_MODE"); v != "" {
 		flags["mode"] = v
@@ -1615,6 +1731,9 @@ func newDispatchState(
 
 func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
+		if err := s.backends.checkTriggerDispatch(); err != nil {
+			return nil, err
+		}
 		localAdmission, _, _ := localAdmissionFromContext(ctx)
 		config := childAwaitConfig{
 			state:               s.backends.State,

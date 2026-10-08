@@ -298,7 +298,7 @@ func TestLocalTriggerBackends_OpensTheStoreTheParentNamed(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths)
+	backends, _, release, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestLocalTriggerBackends_DefaultsToTheSharedStore(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths)
+	backends, _, release, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}

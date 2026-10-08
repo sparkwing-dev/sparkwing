@@ -721,8 +721,8 @@ instead of naming its replacement.
 - `--profile NAME` may also go before the verb, for verbs that accept it.
   Without it, every verb acts on the local store; see
   [The default profile is removed](#the-default-profile-is-removed). `run`
-  accepts no `--profile`; see
-  [sparkwing run executes only on this machine](#sparkwing-run-executes-only-on-this-machine).
+  accepts `--profile` only for an S3 or Postgres state profile; see
+  [sparkwing run takes --profile only for S3 or Postgres state](#sparkwing-run-takes---profile-only-for-s3-or-postgres-state).
 
 ## The default profile is removed
 
@@ -749,24 +749,22 @@ profile, so a script or shell history shows every remote it touches.
   `SPARKWING_PROFILE` acts on the local store. Reinstall it with the profile
   named: `sparkwing crons install --profile prod`.
 
-## sparkwing run executes only on this machine
+## sparkwing run takes --profile only for S3 or Postgres state
 
-`sparkwing run` executes a pipeline locally against this machine's store,
-logs, cache and secrets, and accepts no `--profile`. `sparkwing pipeline
-trigger --profile P` runs a pipeline on P's controller. The run mode that
-executed locally while recording state, logs and cache to a profile's bucket,
-Postgres database or controller is removed, and so are the bucket-only and
-Postgres-without-controller deployment shapes it served. Read verbs still
-read those backends with `--profile`.
+`sparkwing run` executes a pipeline on this machine. It accepts `--profile P`
+only when P has no controller and its `state:` is an S3 bucket or a Postgres
+database; such a run records to P's backends as it did before. That is a
+temporary exception for teams that coordinate through shared storage, and it
+is slated for removal. `sparkwing pipeline trigger <pipeline> --profile P`
+runs a pipeline on P's controller.
 
 | Before | After |
 |---|---|
-| `sparkwing run deploy --profile prod` | `sparkwing pipeline trigger deploy --profile prod` (add `--working-tree` to run uncommitted changes), or `sparkwing run deploy` to run locally |
-| `sparkwing run build --profile shared` with an S3 or Postgres `state:` surface | Run a controller (Sparkwing Cloud or self-hosted) and `sparkwing pipeline trigger build --profile <controller-profile>`; `sparkwing runs list --profile shared` and `sparkwing serve start --profile shared --read-only` still read the history already in the bucket |
+| `sparkwing run deploy --profile prod` with a controller profile | `sparkwing pipeline trigger deploy --profile prod` (add `--working-tree` to run uncommitted changes), or `sparkwing run deploy` to run locally |
+| `sparkwing run build --profile shared` with an S3 or Postgres `state:` | unchanged |
 | `sparkwing run deploy --sw-secrets prod` | `sparkwing secrets set --name NAME` on this machine for a local run, or `sparkwing pipeline trigger deploy --profile prod` to use prod's controller secrets |
 | `SPARKWING_SECRETS_PROFILE=prod sparkwing run deploy` | as above; the variable is dropped before the pipeline process starts |
 | `pipeline hooks install --profile P` | `pipeline hooks install`; every hook runs its pipelines `--sw-local-only` |
-| `mirror_local:` on a profile in `config.yaml` | Remove the key; it fails the config load |
 | a pipeline with `profile: prod` in `sparkwing.yaml`, run with `sparkwing run release` against prod's backends | `sparkwing pipeline trigger release --profile prod`; `sparkwing run release` refuses a pinned pipeline |
 
 - **Pinned pipelines:** a pipeline's `profile:` field pins it to that
@@ -777,18 +775,16 @@ read those backends with `--profile`.
   profile other than the pin. `pipeline describe` reports `pinned_profile`, and
   `pipeline plan` prints the pin. The pin guards against mistakes; the
   controller decides who may run a pipeline.
-- **Hooks:** a hook installed with `--profile` carries `--profile 'P'` on its
-  `sparkwing run` lines, which `run` refuses, so the commit or push fails
-  until you reinstall: `sparkwing pipeline hooks install`.
-- **Secrets:** a local run reads only this machine's secrets. Controller
-  secrets reach only runs executing on the controller.
-- **CI-embedded mode:** `--sw-mode=ci-embedded` keeps state, logs and cache on
-  the CI runner. A CI job that needs shared history triggers the pipeline on
-  a controller.
+- **Hooks:** a hook installed with `--profile` keeps `--profile 'P'` on its
+  `sparkwing run` lines. With a controller profile, `run` refuses it and the
+  commit or push fails until you reinstall: `sparkwing pipeline hooks
+  install`.
+- **Secrets:** a local run reads this machine's secrets. A run under an S3 or
+  Postgres state profile reads that profile's `secrets:` surface, as before.
+  Controller secrets otherwise reach only runs executing on the controller.
 - **Pipeline processes from an older SDK:** `sparkwing run` and the run
-  consumer drop `SPARKWING_PROFILE` and `SPARKWING_SECRETS_PROFILE` before
-  starting a pipeline binary, so a binary built against an older SDK cannot
-  select a remote from an exported value.
+  consumer drop an inherited `SPARKWING_PROFILE` and `SPARKWING_SECRETS_PROFILE`
+  before starting a pipeline binary, so an exported value selects nothing.
 
 ## Runs verbs fold into status, list and logs
 

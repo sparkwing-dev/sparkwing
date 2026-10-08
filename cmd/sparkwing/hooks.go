@@ -665,7 +665,7 @@ func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(stripProfileHandoff(os.Environ()), "SPARKWING_LOG_FORMAT=quiet")
+	cmd.Env = append(handoffProfiles(os.Environ(), ""), "SPARKWING_LOG_FORMAT=quiet")
 	return cmd, nil
 }
 

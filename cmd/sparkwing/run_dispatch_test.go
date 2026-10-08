@@ -142,19 +142,43 @@ func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
 	}
 }
 
-func TestDispatchRun_RefusesProfileAndNamesTrigger(t *testing.T) {
-	for _, args := range [][]string{{"deploy", "--profile", "prod"}, {"deploy", "--profile=prod"}} {
-		err := dispatchRun(args)
-		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile P") {
-			t.Errorf("dispatchRun(%q) = %v, want a refusal naming pipeline trigger", args, err)
-		}
+func TestParseRunFlags_Profile(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"space-separated", []string{"--profile", "fictional-production"}, "fictional-production"},
+		{"equals-form", []string{"--profile=fictional-production"}, "fictional-production"},
+		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			flags, passthroughArgs := parseRunFlags(testCase.args)
+			if flags.profile != testCase.want {
+				t.Errorf("profile = %q, want %q", flags.profile, testCase.want)
+			}
+			if testCase.want == "" && !slices.Contains(passthroughArgs, "--profile") {
+				t.Errorf("incomplete --profile should pass through; got passthrough=%v", passthroughArgs)
+			}
+		})
+	}
+}
+
+func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
+	flags, passthroughArgs := parseRunFlags([]string{"--profile", "fictional-local", "--target", "fictional-production"})
+	if flags.profile != "fictional-local" {
+		t.Errorf("profile = %q, want fictional-local", flags.profile)
+	}
+	if !slices.Contains(passthroughArgs, "--target") || !slices.Contains(passthroughArgs, "fictional-production") {
+		t.Errorf("--target should fall through to pipeline args; passthrough=%v", passthroughArgs)
 	}
 }
 
 func TestParseRunFlags_RetiredSwProfileIsUnknown(t *testing.T) {
 	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "fictional-remote"})
-	if flags.profileGiven {
-		t.Error("--sw-profile was read as --profile")
+	if flags.profile != "" {
+		t.Errorf("--sw-profile should not set profile; got %q", flags.profile)
 	}
 	if flags.unknownRunnerFlag != "--sw-profile" {
 		t.Errorf("--sw-profile should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
@@ -165,7 +189,7 @@ func TestParseRunFlags_SeparatorPreservesPipelineArguments(t *testing.T) {
 	want := []string{"--", "--sw-priority", "back", "--sw-no-cache", "--sw-mystery", "--profile", "fictional"}
 	args := append([]string{"--sw-priority=front"}, want...)
 	flags, passthroughArgs := parseRunFlags(args)
-	if flags.priority != "front" || !flags.prioritySet || flags.noCache || flags.profileGiven {
+	if flags.priority != "front" || !flags.prioritySet || flags.noCache || flags.profile != "" {
 		t.Fatalf("runner flags = %+v", flags)
 	}
 	if !slices.Equal(passthroughArgs, want) {

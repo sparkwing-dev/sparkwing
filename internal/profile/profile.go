@@ -19,6 +19,8 @@ type Profile struct {
 	State   *backends.Spec `yaml:"state,omitempty"`
 	Cache   *backends.Spec `yaml:"cache,omitempty"`
 	Logs    *backends.Spec `yaml:"logs,omitempty"`
+
+	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
 }
 
 type ControllerSpec struct {
@@ -86,6 +88,13 @@ func (p *Profile) Surfaces() backends.Surfaces {
 		Logs:    p.Logs,
 		State:   p.State,
 	}
+}
+
+func (p *Profile) EffectiveMirrorLocal() bool {
+	if p == nil || p.MirrorLocal == nil {
+		return true
+	}
+	return *p.MirrorLocal
 }
 
 // Config is the profiles section of config.yaml: profile name to profile.

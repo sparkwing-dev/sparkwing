@@ -31,29 +31,33 @@ func TestEveryControllerVerbAcceptsProfile(t *testing.T) {
 	if marked == 0 {
 		t.Fatal("no command is marked ReachesController, so this check proves nothing")
 	}
-	if cmdRun.ReachesController || cmdRun.declaredFlags()["profile"] {
-		t.Error("sparkwing run must execute locally and accept no --profile")
+	if !cmdRun.ReachesController || !cmdRun.declaredFlags()["profile"] {
+		t.Error("sparkwing run takes --profile for an S3 or Postgres state profile and must say so")
 	}
 }
 
-// A local run selects no profile and reads no controller secrets. Non-test code
-// in cmd/sparkwing and internal/orchestrator may name the profile handoff
-// variables only to drop them, and may build a controller secret source only
-// where a controller dispatched the run.
+// A run selects a profile only from its own --profile, and only an S3 or
+// Postgres state profile. Non-test code in cmd/sparkwing and
+// internal/orchestrator may name the handoff variables only where the CLI sets
+// or drops them and the pipeline process reads the one handoff, and may build
+// a controller secret source only where a controller dispatched the run or
+// where that remote-state profile's own secrets surface names one.
 func TestALocalRunReachesNoProfileOrControllerSecrets(t *testing.T) {
 	handoff := map[string]bool{"ProfileEnv": true, "SecretsProfileEnv": true}
 	controllerSecrets := map[string]bool{"controllerSecretSource": true, "GetSecretForRun": true}
 	removed := map[string]bool{
 		"projectDefaultProfile": true, "resolveDefaultProfile": true, "SetDefaultProfile": true,
-		"resolveActiveProfile": true, "applySecretsProfileOverride": true, "remoteSecretSource": true,
-		"selectSecretResolver": true, "ApplyProfileBackends": true, "newMirrorStateBackend": true,
+		"applySecretsProfileOverride": true, "remoteSecretSource": true, "handoffSecretsProfile": true,
 	}
 	type rules struct{ handoff, controllerSecrets map[string]bool }
 	dirs := map[string]rules{
-		".": {handoff: map[string]bool{"stripProfileHandoff": true, "renderHookScript": true}},
+		".": {handoff: map[string]bool{"handoffProfiles": true, "renderHookScript": true}},
 		"../../internal/orchestrator": {
-			handoff:           map[string]bool{"submissionExecutionEnvironment": true},
-			controllerSecrets: map[string]bool{"controllerSecretSource": true, "ExecuteClaimedTrigger": true, "RunNodeOnce": true},
+			handoff: map[string]bool{"handoffProfile": true, "submissionExecutionEnvironment": true},
+			controllerSecrets: map[string]bool{
+				"controllerSecretSource": true, "ExecuteClaimedTrigger": true, "RunNodeOnce": true,
+				"selectSecretResolver": true,
+			},
 		},
 	}
 	checked := 0
@@ -73,7 +77,7 @@ func TestALocalRunReachesNoProfileOrControllerSecrets(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, imp := range file.Imports {
-				if strings.HasSuffix(strings.Trim(imp.Path.Value, `"`), "/internal/secretsource") {
+				if strings.HasSuffix(strings.Trim(imp.Path.Value, `"`), "/internal/secretsource") && name != "source_resolver.go" {
 					t.Errorf("%s imports secretsource, which resolves a profile's remote secrets surface", fset.Position(imp.Pos()))
 				}
 			}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -130,11 +131,44 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 }
 
 func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
-	art, err := coordinatedArtifactStore(ctx, os.Getenv("SPARKWING_LOCAL_ONLY") == "1")
+	projectCfg := bindProjectPipelines()
+	prof, _, err := resolveActiveProfile(projectCfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("run-node --coordinated: resolve profile: %w", err)
 	}
-	return coordinatedLocalSecrets(ctx, runID, pipeline), art, nil, nil
+	localOnly := os.Getenv("SPARKWING_LOCAL_ONLY") == "1"
+
+	var art storage.ArtifactStore
+	var logs LogBackend
+	if localOnly {
+		paths, pathErr := DefaultPaths()
+		if pathErr != nil {
+			return nil, nil, nil, pathErr
+		}
+		art, err = localArtifactStore(paths)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	} else {
+		art, err = coordinatedArtifactStore(ctx, prof)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		logs, err = coordinatedLogBackend(ctx, prof)
+		if err != nil {
+			return nil, art, nil, err
+		}
+	}
+
+	source, err := selectSecretResolver(ctx, Options{Profile: prof, LocalOnly: localOnly, RunID: runID})
+	if err != nil {
+		return nil, art, logs, fmt.Errorf("run-node --coordinated: secrets backend: %w", err)
+	}
+	if source == nil {
+		source = coordinatedLocalSecrets(ctx, runID, pipeline)
+	}
+	return source, art, logs, nil
 }
 
 // safety: the dispatcher hands a node the daemon's socket only when the daemon
@@ -153,9 +187,38 @@ func coordinatedLocalSecrets(ctx context.Context, runID, pipeline string) secret
 	return localsecrets.StoreSource(paths.StateDB(), pipeline)
 }
 
-func coordinatedArtifactStore(ctx context.Context, localOnly bool) (storage.ArtifactStore, error) {
+func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBackend, error) {
+	if prof == nil {
+		return nil, nil
+	}
+	_, logs, _ := profileSurfaceSpecs(prof, "")
+	if logs == nil {
+		return nil, nil
+	}
+	sink, err := storeurl.OpenLogStoreFromSpec(ctx, *logs, profileControllerLookup(prof))
+	if err != nil {
+		return nil, fmt.Errorf(
+			"run-node --coordinated: profile %q declares a %s logs surface this node cannot open: %w",
+			prof.Name, logs.Type, err)
+	}
+	return NewLogStoreBackend(sink, nil), nil
+}
+
+func coordinatedArtifactStore(ctx context.Context, prof *profile.Profile) (storage.ArtifactStore, error) {
+	if prof != nil {
+		if _, _, cache := profileSurfaceSpecs(prof, ""); cache != nil {
+			art, err := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, profileControllerLookup(prof))
+			if err != nil {
+				return nil, fmt.Errorf("run-node --coordinated: cache backend: %w", err)
+			}
+			return art, nil
+		}
+	}
 	url := strings.TrimSpace(os.Getenv(ArtifactStoreEnvVar))
-	if url == "" || localOnly {
+	if url == "" {
+		if !isLocalState(prof.Surfaces().State) {
+			return nil, nil
+		}
 		paths, err := DefaultPaths()
 		if err != nil {
 			return nil, err

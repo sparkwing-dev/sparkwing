@@ -1,0 +1,201 @@
+package orchestrator_test
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+var s3IntegRegisterOnce sync.Once
+
+var s3CachedInvocations atomic.Int32
+
+type s3CachedJobOut struct {
+	Tag string `json:"tag"`
+}
+
+type s3CachedJob struct {
+	sparkwing.Base
+	sparkwing.Produces[s3CachedJobOut]
+}
+
+func (j *s3CachedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", j.run), nil
+}
+
+func (s3CachedJob) run(ctx context.Context) (s3CachedJobOut, error) {
+	s3CachedInvocations.Add(1)
+	return s3CachedJobOut{Tag: "s3-cached-v1"}, nil
+}
+
+type s3CachedPipe struct{ sparkwing.Base }
+
+func (s3CachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	node := sparkwing.Job(plan, "build", &s3CachedJob{})
+	node.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+		return sparkwing.Key("s3-integ", "static-v1"), nil
+	})
+	return nil
+}
+
+type s3TriggerPipe struct{ sparkwing.Base }
+
+func (s3TriggerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "trigger", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[s3CachedJobOut, sparkwing.NoInputs](
+			ctx, "s3-integ-cache", "build",
+			sparkwing.WithFreshTimeout(250*time.Millisecond),
+		)
+		return err
+	})
+	return nil
+}
+
+func registerS3IntegPipelines(t *testing.T) {
+	t.Helper()
+	s3IntegRegisterOnce.Do(func() {
+		sparkwing.Register[sparkwing.NoInputs]("s3-integ-cache",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &s3CachedPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("s3-integ-trigger",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &s3TriggerPipe{} })
+	})
+}
+
+func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
+	registerS3IntegPipelines(t)
+	art, logs := openIntegrationS3(t)
+	paths := newPaths(t)
+
+	s3CachedInvocations.Store(0)
+
+	for _, label := range []string{"A", "B"} {
+		state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+		t.Cleanup(func() { _ = state.Close() })
+		res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
+			Pipeline:      "s3-integ-cache",
+			State:         state,
+			LogStore:      logs,
+			ArtifactStore: art,
+		})
+		if err != nil {
+			t.Fatalf("Run %s: %v", label, err)
+		}
+		if res.Status != "success" {
+			t.Fatalf("Run %s status = %q (err=%v)", label, res.Status, res.Error)
+		}
+	}
+	if got := s3CachedInvocations.Load(); got != 1 {
+		t.Errorf("invocations across two S3-backed runs = %d, want 1", got)
+	}
+}
+
+func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
+	registerS3IntegPipelines(t)
+	art, logs := openIntegrationS3(t)
+	paths := newPaths(t)
+
+	state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+	t.Cleanup(func() { _ = state.Close() })
+	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
+		Pipeline:      "s3-integ-cache",
+		State:         state,
+		LogStore:      logs,
+		ArtifactStore: art,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q", res.Status)
+	}
+
+	b := backend.NewS3Backend(art, logs)
+	got, err := b.GetRun(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got == nil || got.ID != res.RunID {
+		t.Fatalf("GetRun returned %+v, want id %q", got, res.RunID)
+	}
+	if got.Pipeline != "s3-integ-cache" {
+		t.Errorf("pipeline = %q, want s3-integ-cache", got.Pipeline)
+	}
+
+	nodes, err := b.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(nodes) == 0 {
+		t.Error("ListNodes returned no nodes")
+	}
+
+	runs, err := b.ListRuns(context.Background(), store.RunFilter{})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	found := false
+	for _, r := range runs {
+		if r.ID == res.RunID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ListRuns did not surface run %s", res.RunID)
+	}
+}
+
+func TestS3Sharing_TriggerRefusesInsteadOfAwaitingAChildNothingClaims(t *testing.T) {
+	registerS3IntegPipelines(t)
+	art, logs := openIntegrationS3(t)
+	paths := newPaths(t)
+
+	state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+	t.Cleanup(func() { _ = state.Close() })
+	started := time.Now()
+	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
+		Pipeline:      "s3-integ-trigger",
+		State:         state,
+		LogStore:      logs,
+		ArtifactStore: art,
+	})
+	if elapsed, budget := time.Since(started), timingBudget(2*time.Second); elapsed >= budget {
+		t.Fatalf("the refusal took %s, over its %s budget", elapsed, budget)
+	}
+	if err == nil && res != nil && res.Status == "success" {
+		t.Fatalf("trigger pipeline succeeded; the object-store backend has no claim path, so the await must refuse")
+	}
+	if res == nil || res.RunID == "" {
+		t.Fatalf("no run id from RunLocal (res=%v err=%v)", res, err)
+	}
+	nodes, nerr := backend.NewS3Backend(art, logs).ListNodes(context.Background(), res.RunID)
+	if nerr != nil {
+		t.Fatalf("ListNodes: %v", nerr)
+	}
+	reported := ""
+	for _, n := range nodes {
+		if n.NodeID == "trigger" {
+			reported = n.Error
+		}
+	}
+	if !strings.Contains(reported, "Mode 3") {
+		t.Errorf("the refused node does not point at Mode 3: %q", reported)
+	}
+
+	childID, ferr := state.FindSpawnedChildTriggerID(context.Background(), res.RunID, "trigger", "s3-integ-cache")
+	if ferr != nil {
+		t.Fatalf("FindSpawnedChildTriggerID: %v", ferr)
+	}
+	if childID != "" {
+		t.Errorf("a refused await left child trigger %s enqueued for %s/trigger", childID, res.RunID)
+	}
+}

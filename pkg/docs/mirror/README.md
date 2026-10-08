@@ -19,7 +19,7 @@ reaches any controller you can reach, including one a team runs itself.
   [`pipelines.md`](pipelines.md) cover the Go DSL.
 - **Running in CI?** [`ci-embedded.md`](ci-embedded.md) -- `sparkwing
   run --sw-mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
-- **Hosting the controller yourself?**
+- **Hosting the bucket, database, or controller yourself?**
   [`getting-started.md`](getting-started.md#advanced-deployments) names
   each shape in a paragraph;
   [`deployment-modes.md`](deployment-modes.md#advanced-shapes) is the

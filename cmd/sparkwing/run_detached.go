@@ -621,6 +621,9 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 			"Run it in the foreground with `sparkwing run --sw-index`"},
 		{"--sw-dry-run", wf.dryRun, "a dry run finishes in seconds and reports to your terminal; run it in the foreground with `sparkwing run --sw-dry-run`"},
 
+		{"--profile", wf.profile != "", "the resident consumer executes against this home's local store, " +
+			"so a profile's backends would not receive the run; run profile-backed runs in the foreground"},
+
 		{"--sw-start-at", wf.startAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-stop-at", wf.stopAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-only", wf.only != "", "job filtering is not carried on the trigger yet; run it in the foreground"},

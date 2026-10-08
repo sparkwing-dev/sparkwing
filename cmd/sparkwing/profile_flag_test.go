@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,23 @@ func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
 	}
 }
 
+func TestDispatchRun_ProfileNotFoundBeforeCompile(t *testing.T) {
+	writeProfilesFixture(t, `
+profiles:
+  prod: { controller: { url: https://api.example.dev } }
+`)
+	err := dispatchRun([]string{"some-pipeline", "--profile", "ghost"})
+	if err == nil {
+		t.Fatal("expected not-found error")
+	}
+	if !strings.Contains(err.Error(), `profile "ghost" not found`) {
+		t.Errorf("message = %q, want not-found text", err.Error())
+	}
+	if errors.Is(err, errHelpRequested) {
+		t.Error("unexpected help-requested error")
+	}
+}
+
 func TestResolveProfileChain_OnlyTheFlagSelects(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
@@ -75,5 +93,19 @@ profiles:
 	p, chain, _, err = resolveProfileChain("")
 	if err != nil || p != nil || chain.Source != "none" {
 		t.Fatalf("an exported SPARKWING_PROFILE selected %v %+v %v; only --profile may", p, chain, err)
+	}
+}
+
+func TestDispatchRun_RefusesAControllerProfileAndNamesTrigger(t *testing.T) {
+	writeProfilesFixture(t, `
+profiles:
+  prod: { controller: { url: https://api.example.dev } }
+  lite: { state: { type: sqlite } }
+`)
+	for _, name := range []string{"prod", "lite"} {
+		err := dispatchRun([]string{"deploy", "--profile", name})
+		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile "+name) {
+			t.Errorf("run deploy --profile %s = %v, want a refusal naming pipeline trigger", name, err)
+		}
 	}
 }

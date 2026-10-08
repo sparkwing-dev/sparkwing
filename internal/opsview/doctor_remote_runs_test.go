@@ -75,6 +75,7 @@ func TestDiagnose_KeepsRunDirWhenAProfileRecordsRunsElsewhere(t *testing.T) {
       type: s3
       bucket: team
       prefix: logs
+    mirror_local: false
 `)
 	p, ghost := seedRunDirHomeAt(t, home, time.Hour)
 

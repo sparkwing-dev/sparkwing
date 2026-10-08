@@ -34,7 +34,7 @@ func prepareLocalFleetRuntime(backends Backends, opts Options) (*localFleetRunti
 		return nil, errFleetLocalStoreRequired
 	}
 	var st *store.Store
-	switch state := backends.State.(type) {
+	switch state := canonicalState(backends.State).(type) {
 	case localState:
 		st = state.st
 	case *localState:

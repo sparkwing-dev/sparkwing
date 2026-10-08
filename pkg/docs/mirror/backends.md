@@ -9,11 +9,15 @@ declares four persistence surfaces plus how to reach a controller:
 - **secrets** -- where `sparkwing.Secret` values resolve from
 
 A profile describes where a command reads and writes and what auth it
-needs to get there. `sparkwing run` always uses this machine's local
-surfaces; `sparkwing pipeline trigger runs --profile NAME` a pipeline on
-the profile's controller, and read verbs such as `sparkwing runs list
---profile NAME` read the profile's surfaces, including S3 or Postgres
-state written there. Laptop
+needs to get there. `sparkwing pipeline trigger <pipeline> --profile
+NAME` runs a pipeline on the profile's controller, and read verbs such as
+`sparkwing runs list --profile NAME` accept any profile. `sparkwing run`
+executes on this machine and, without `--profile`, uses its local
+surfaces. It accepts `--profile NAME` only for a profile with no
+controller whose state is `s3` or `postgres`, and then records state,
+logs, and cache to that profile's backends; this is a temporary exception
+for teams that coordinate through shared storage, slated for removal.
+Laptop
 profiles live in the `profiles` section of `~/.config/sparkwing/config.yaml`
 (see [Machine settings](machine-config.md)); project profiles
 in `.sparkwing/sparkwing.yaml` (see [config-reference.md](config-reference.md)).
@@ -89,24 +93,46 @@ streaming append, so neither reads them, and a profile that sets one
 anywhere else is refused at load with the key named. A negative value is
 refused the same way.
 
-Each state backend type serves one role. See
-[Deployment modes](deployment-modes.md) for the shapes:
+Each state backend is one deployment shape. See
+[Deployment modes](deployment-modes.md) for when to pick each:
 
-- `sqlite` -- the local path: every `sparkwing run`, and a single-box
-  controller.
-- `postgres` -- a self-hosted controller's database. Read verbs open one
-  directly when a profile names it.
-- `s3` -- per-run NDJSON state on a bucket. Read verbs read run history
-  kept there; no command writes runs to it.
+- `sqlite` -- the local path, and a single-box controller; the default
+  when no profile is selected.
+- `s3` -- per-run NDJSON state on a shared bucket, written by
+  `sparkwing run --profile NAME` (a temporary exception slated for
+  removal). Cache reservation, approvals, and debug pauses coordinate
+  over object-store CAS where the bucket enforces write preconditions.
+  Where it does not, cache reservation degrades to last-write-wins,
+  while approvals and debug pauses report not-supported and need
+  Postgres. Pipeline triggers report not-supported here whatever the
+  bucket does: the backend enqueues a trigger and has no path that
+  claims one, so `sparkwing.RunAndAwait` refuses instead of waiting.
+- `postgres` -- a self-hosted controller's database, or a database
+  runners share through `sparkwing run --profile NAME` (the same
+  temporary exception). Triggers, approvals, debug pauses all work.
 - `controller` -- commands reach a hosted controller over HTTP,
   Sparkwing Cloud included. The controller owns the underlying database.
+  `sparkwing run` refuses a controller profile; use `sparkwing pipeline
+  trigger <pipeline> --profile NAME`.
 
-Any other type fails with an error naming the types its surface accepts.
+Any other type fails at run start with an error naming the types its
+surface accepts.
 
-Local execution is process-per-node. A node body runs in its own process
-of the pipeline binary and reaches run state through a controller the
-dispatcher mounts on loopback for the run, backed by the local SQLite
-database. Nothing local executes inside the dispatcher's own process.
+Local execution is process-per-node under every state backend. A node
+body runs in its own process of the pipeline binary and reaches run
+state through a controller the dispatcher mounts on loopback for the
+run: the full controller when state is a local SQLite database, and the
+node-facing subset of the same API over whatever else the profile named
+-- object-store state included. Nothing local executes inside the
+dispatcher's own process, so a bucket-backed CI run and a laptop run
+behave the same way.
+
+One measurement does not follow. The measured pipeline profiles that
+size admission are folded from the local run store, so only `sqlite`
+state feeds them; a bucket-backed run records its per-node metric
+samples in the bucket but folds no profile and stores no exit
+accounting. Run without `--profile` on the machine whose capacity you
+want learned.
 
 Required fields per type:
 
@@ -123,9 +149,9 @@ not implemented in this build") instead of silently falling back.
 
 The fourth surface, `secrets`, names where `sparkwing.Secret` values
 resolve from (this machine's local secret store or controller-stored); see
-[security.md](security.md). A local run reads only this machine's secret
-store (`sparkwing secrets set`); controller-stored secrets reach only runs
-that execute on the controller.
+[security.md](security.md). A local run reads this machine's secret store
+(`sparkwing secrets set`), unless it runs under an S3 or Postgres state
+profile whose own `secrets:` surface names another source.
 
 With a controller secrets surface, runs and coordinated nodes identify
 the current run so the controller selects that pipeline's scoped values. The
@@ -149,8 +175,9 @@ pipelines:
 A pinned pipeline runs only on that profile's controller.
 `sparkwing run release-prod` refuses it (`pipeline release-prod is pinned
 to profile prod; use sparkwing pipeline trigger release-prod --profile
-prod`), and `sparkwing pipeline trigger` requires `--profile` and
-refuses any profile other than `prod`. `sparkwing pipeline describe`
+prod`), and so do detached runs, crons, and local child pipelines.
+`sparkwing pipeline trigger` requires `--profile` and refuses any profile
+other than `prod`. `sparkwing pipeline describe`
 reports the pin as `pinned_profile` in JSON and a `pinned:` line in text,
 and `sparkwing pipeline plan` prints a `Pinned:` line.
 

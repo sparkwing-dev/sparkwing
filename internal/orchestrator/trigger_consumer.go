@@ -415,7 +415,7 @@ func runClaimedTrigger(
 		return
 	}
 	env = submissionExecutionEnvironment(env, home)
-	err := dispatchLocalTriggerFn(dispatchCtx, trig, "", cache, logger, env)
+	err := dispatchLocalTriggerFn(dispatchCtx, trig, "", "", cache, logger, env)
 	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
 }
 

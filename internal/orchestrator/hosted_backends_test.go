@@ -576,7 +576,7 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths)
+	backends, _, release, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}
@@ -587,6 +587,25 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 	}
 	if _, err := os.Stat(paths.StateDB()); err == nil {
 		t.Fatalf("a child run created %s, which the daemon owns", paths.StateDB())
+	}
+}
+
+func TestLocalTriggerBackends_ANamedProfileKeepsItsOwnStore(t *testing.T) {
+	home := wingdTestHome(t)
+	// safety: a child run resolves the daemon from the environment, as the
+	// process that spawns it does.
+	t.Setenv("SPARKWING_HOME", home)
+	startAPIDaemon(t, home, nil)
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	if _, _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
+		release()
+		t.Fatal("a named profile resolved to the daemon's socket")
 	}
 }
 

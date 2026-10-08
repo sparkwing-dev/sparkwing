@@ -6,13 +6,46 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-func TestCoordinatedArtifactStore_ExplicitEnvNamesTheCache(t *testing.T) {
+func fsCacheProfile(dir string) *profile.Profile {
+	return &profile.Profile{
+		Name:  "test",
+		Cache: &backends.Spec{Type: backends.TypeFilesystem, Path: dir},
+	}
+}
+
+func TestCoordinatedArtifactStore_ProfileWinsOverExplicitEnv(t *testing.T) {
+	profileDir := t.TempDir()
 	envDir := t.TempDir()
 	t.Setenv(ArtifactStoreEnvVar, "fs://"+envDir)
 
-	art, err := coordinatedArtifactStore(context.Background(), false)
+	art, err := coordinatedArtifactStore(context.Background(), fsCacheProfile(profileDir))
+	if err != nil {
+		t.Fatalf("coordinatedArtifactStore: %v", err)
+	}
+	if art == nil {
+		t.Fatal("no artifact store opened for a profile that declares a cache surface")
+	}
+	if err := art.Put(context.Background(), "probe", strings.NewReader("x")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if !dirHasContent(t, profileDir) {
+		t.Error("the profile's cache directory received nothing")
+	}
+	if dirHasContent(t, envDir) {
+		t.Error("the node published into SPARKWING_CACHE_URL while its profile named another store")
+	}
+}
+
+func TestCoordinatedArtifactStore_ExplicitEnvFillsInWithoutAProfileCache(t *testing.T) {
+	envDir := t.TempDir()
+	t.Setenv(ArtifactStoreEnvVar, "fs://"+envDir)
+
+	art, err := coordinatedArtifactStore(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("coordinatedArtifactStore: %v", err)
 	}
@@ -37,7 +70,7 @@ func TestCoordinatedArtifactStore_NeverReadsDevEnv(t *testing.T) {
 		t.Fatalf("write dev.env: %v", err)
 	}
 
-	art, err := coordinatedArtifactStore(context.Background(), false)
+	art, err := coordinatedArtifactStore(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("coordinatedArtifactStore: %v", err)
 	}

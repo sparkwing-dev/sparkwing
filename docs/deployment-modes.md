@@ -3,27 +3,43 @@
 Two paths carry a reader: **Local** and **Sparkwing Cloud**.
 [Getting started](getting-started.md) walks both. This page is the
 storage-and-coordination taxonomy underneath them, for a team that hosts
-its own controller.
+its own state, cache, or controller.
 
 | Shape | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
 | --- | --- | --- | --- | --- | --- |
 | Local | none | -- | -- | -- | filesystem |
 | Sparkwing Cloud | none (hosted) | yes | yes | yes | tokens / sessions |
 | Self-hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
+| Shared object storage² | object store | yes (read-only) | with CAS¹ | approvals + pauses, with CAS¹ | bucket IAM |
+| Postgres + object storage² | object store + Postgres | yes (read-only) | yes | yes | DB roles + bucket IAM |
 
-`sparkwing run` executes on this machine against its local SQLite store,
-logs, cache, and secrets. A profile in `~/.config/sparkwing/config.yaml`
-names a controller or a `state` / `cache` / `logs` triple (see
-[Storage backends](backends.md)). `sparkwing pipeline trigger <pipeline>
---profile NAME` runs a pipeline on that profile's controller, and read
-verbs such as `sparkwing runs list --profile NAME` and `sparkwing serve
-start --profile NAME --read-only` read the profile's backends.
+¹ Shared object storage coordinates cross-runner caching, approvals, and
+debug pauses over object-store conditional-write CAS where the bucket
+enforces write preconditions (S3 today). Where it does not, cache
+reservation degrades to last-write-wins, while approvals and debug pauses
+report not-supported and need Postgres. Pipeline triggers report
+not-supported on a bucket whatever it supports, and need Postgres or a
+controller. See [shared object storage](#shared-object-storage).
+
+² A temporary exception slated for removal. A controller is the supported
+way to share runs.
+
+`sparkwing run` executes on this machine. Without `--profile` it records
+to the local SQLite store, logs, cache, and secrets. A profile in
+`~/.config/sparkwing/config.yaml` names a controller or a `state` /
+`cache` / `logs` triple (see [Storage backends](backends.md)).
+`sparkwing pipeline trigger <pipeline> --profile NAME` runs a pipeline on
+that profile's controller. `sparkwing run <pipeline> --profile NAME`
+accepts only a profile with no controller whose state is an S3 bucket or
+a Postgres database, and records the local run to that profile's
+backends. Read verbs such as `sparkwing runs list --profile NAME` and
+`sparkwing serve start --profile NAME --read-only` accept any profile.
 
 ## Local
 
 SQLite under `~/.sparkwing/state.db`, with per-run logs under
 `~/.sparkwing/runs/<runID>/`. Zero shared
-infrastructure. Every `sparkwing run` records here.
+infrastructure. Every `sparkwing run` without `--profile` records here.
 
 For: a developer working on pipelines on their own laptop, and the other
 machines that developer owns. `sparkwing run <pipeline> --sw-fleet` hands
@@ -58,8 +74,13 @@ what the controller process does and how to run one.
 
 ## Advanced shapes
 
-The rest of this page is for a team that runs its own controller. A
-controller is a profile away: pipeline code does not change.
+The rest of this page is for a team that runs its own controller, bucket,
+or database. Each shape is a profile away: pipeline code does not change.
+A controller is the supported way to share runs. The
+[shared object storage](#shared-object-storage) and
+[Postgres and object storage](#postgres-and-object-storage) shapes, where
+each runner writes the shared backends itself, remain as a temporary
+exception slated for removal.
 
 ### Hosted controller
 
@@ -95,7 +116,7 @@ profiles:
 
 A profile with a `controller:` block points commands at that controller
 over HTTP; the nested `token:` authenticates. `sparkwing pipeline trigger
---profile prod <pipeline>` runs a pipeline there, and `--working-tree` runs
+<pipeline> --profile prod` runs a pipeline there, and `--working-tree` runs
 uncommitted changes from an uploaded snapshot. Register or edit
 profiles with `sparkwing configure profiles`. See
 [Self-hosting](self-hosting.md) for the supported local and controller
@@ -151,9 +172,10 @@ mirrors nothing.
 
 #### Schema versioning
 
-A controller whose state is Postgres (see
-[PostgreSQL state](self-hosting.md#postgresql-state)) records two things
-in that database: the migrations applied, one
+A Postgres state database -- a controller's (see
+[PostgreSQL state](self-hosting.md#postgresql-state)) or the one
+[Postgres and object storage](#postgres-and-object-storage) runners share
+-- records two things: the migrations applied, one
 `sparkwing_schema_version` row each, and the features its schema relies
 on, one `sparkwing_requirements` row each. A binary opens the database
 when it knows every requirement listed, whatever version number the
@@ -162,8 +184,8 @@ schema table holds. On startup:
 - Database at a *lower* version than the binary: the binary runs the
   missing migrations atomically inside one transaction and stamps the
   requirements those versions declare. Concurrent controller instances
-  against a fresh database coordinate via a Postgres advisory lock;
-  exactly one runs the migration.
+  or runners against a fresh database coordinate via a Postgres advisory
+  lock; exactly one runs the migration.
 - Database at the *same* version: nothing to do.
 - Database at a *higher* version than the binary, listing only
   requirements the binary knows: the binary opens it read/write,
@@ -180,9 +202,10 @@ schema table holds. On startup:
 
 Only a breaking migration couples a binary's version to the schema
 version, and `sparkwing_requirements` names exactly which one. Stagger
-those upgrades: upgrade every controller instance *before* you upgrade
-the database, or run mixed versions briefly during a rollout. Clients
-that reach the database through a controller never meet the schema.
+those upgrades: upgrade every binary that opens the database *before*
+you upgrade the database, or run mixed versions briefly during a
+rollout. Clients that reach the database through a controller never meet
+the schema.
 
 #### Testing against Postgres
 
@@ -199,14 +222,15 @@ needs neither Docker nor a database of your own.
 #### One-click provisioning
 
 A Terraform module under `install/terraform/mode3-postgres` stands up the
-Postgres a self-hosted controller uses in one `terraform apply`: the
+Postgres a self-hosted controller or shared-Postgres runners use in one
+`terraform apply`: the
 database (a single RDS instance or an Aurora Serverless v2 cluster, picked
 by one knob), its security group, and its subnet group across the private
 subnets you give it. It writes the connection string to AWS Secrets
-Manager, and the controller reads that DSN as `SPARKWING_PG_URL`. You
-supply the VPC and private subnets; the module places the database into
-networking you already run. Its README covers the variables and how to
-point the controller at the result.
+Manager, and the controller or each runner reads that DSN as
+`SPARKWING_PG_URL`. You supply the VPC and private subnets; the module
+places the database into networking you already run. Its README covers
+the variables and how to point a controller or runner at the result.
 
 ### One of your own machines as the controller
 
@@ -216,28 +240,219 @@ same storage layout as the local path, but fronted by the HTTP
 controller so untrusted clients still never touch the store directly. A
 laptop that triggers pipelines on a desktop you own is this shape: one
 person's own machines, coordinated without an account. Solo operators
-and small teams don't need to stand up Postgres to run it. Reach for
-Postgres + object storage when you outgrow a single box -- more than one
-controller instance, or state and caches that must survive that box. A
+and small teams don't need to stand up Postgres to run it. Back the
+controller with Postgres and object storage when you outgrow a single box
+-- more than one controller instance, or state and caches that must survive that box. A
 team's fleet coordinates through Sparkwing Cloud, or through a controller
 the team runs.
+
+### Shared object storage
+
+Runners write their run state, cache blobs, and log streams to a
+shared object store. The dashboard reads from the same bucket. No
+database and no controller: cross-runner coordination runs over the
+object store itself, through conditional-write compare-and-swap.
+
+For: a small team that wants cross-runner visibility (laptops, CI,
+GitHub Actions) without hosting a database.
+
+`sparkwing run <pipeline> --profile NAME` with a bucket profile is a
+temporary exception slated for removal. A controller is the supported way
+to share runs: [Sparkwing Cloud](#sparkwing-cloud) or a
+[hosted controller](#hosted-controller).
+
+Where the bucket enforces write preconditions, a bucket coordinates
+across runners with no database -- cache reservation, approvals, and
+debug pauses all work. Each is an object-store record mutated under
+compare-and-swap (S3
+`If-None-Match` / `If-Match`); a contended `.Memoize()` key elects one
+leader and the rest coalesce onto its output, the same
+exactly-one-runs shape Postgres gives.
+
+Pipeline triggers are the exception, and CAS does not change it. The
+object-store backend enqueues a trigger and has no path that claims
+one, so `sparkwing.RunAndAwait` refuses with a not-supported error
+naming Postgres rather than waiting on a run that nothing starts. Run
+pipelines that spawn other pipelines on Postgres or a controller.
+
+S3 is the object store that enforces these preconditions. Some
+S3-compatible gateways accept the precondition headers and silently
+ignore them; a runner probes the
+endpoint once and, when it finds the guarantee missing, falls back to
+last-write-wins -- cache reservation degrades to "every runner
+computes and uploads to the same content-addressed key" (safe by
+construction), and approvals and debug pauses report not-supported,
+so reach for Postgres when you need them.
+
+Tradeoff: coordination over one object is slower at the tail than a
+database row lock. A heavily-contended key serializes its acquires
+and releases as compare-and-swap retries against a single object; an
+uncontended key touches it once. When that tail latency matters,
+Postgres row locks are the upgrade.
+
+If a runner's object store is briefly unreachable, run state writes
+stage to a local SQLite outbox (`~/.sparkwing/outbox.db`, one per host,
+honoring `SPARKWING_HOME`) and replay in order when connectivity
+returns, so a transient blip neither fails the run nor loses state. A
+blip that outlasts the run does fail it: finishing a run, and closing
+the state backend, report an error when the run's terminal state is
+still queued locally, and `sparkwing run` prints that error and exits
+non-zero, because the bucket is the run's only copy and the outbox
+sits on a disk a CI runner discards at job end.
+Replay is bounded: the drainer waits an exponentially growing,
+fully jittered interval between cycles that made no progress, and after
+twelve consecutive failures it declares the replay stalled, logs `s3
+state outbox replay gave up`, and drops to one attempt every five
+minutes. The stall reaches an operator through the controller's health
+route, and the drainer clears it the moment a write lands, so a bucket
+that returns hours later still delivers. A bucket that refuses every
+write costs a dozen requests and then twelve an hour, rather than one
+every five seconds for as long as the host lives.
+A write the object-store request budget refuses is never staged: the
+outbox absorbs an outage, and a spent budget is a guard against a
+runaway loop, not an outage to buffer.
+Cache and log writes are not buffered this way: a cache write that
+can't reach the bucket surfaces the error, and the step recomputes on
+a later run rather than reading a half-written result.
+
+```yaml
+# ~/.config/sparkwing/config.yaml
+profiles:
+  shared:
+    state:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: state
+    cache:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: cache
+    logs:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: logs
+```
+
+#### What each runner needs beyond the profile
+
+The profile carries two strings per surface -- `bucket` and `prefix`.
+Everything else is environment, and every runner needs it:
+
+| Variable | Required | What it does |
+|---|---|---|
+| `AWS_REGION` | Yes | The SDK resolves no endpoint without it. Unset is the default state of a runner that has static credentials and no `~/.aws/config`. |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or any other link in the standard AWS credential chain | Yes | Authenticates every read and write. Profiles hold no credential fields. |
+| `SPARKWING_S3_ENDPOINT` | Only for non-AWS S3 | Points the SDK at MinIO, R2, or another S3-compatible endpoint. Setting it also forces path-style addressing, and it applies process-wide: every surface -- state, cache, logs, and the binaries cache -- goes to that endpoint, so one profile cannot mix a MinIO cache with a real-AWS state. |
+
+Secrets are the exception to "no controller": the secrets surface
+takes `controller`, `filesystem`, `env`, or `none`, and has no
+object-store option. A bucket-only team whose pipelines call `Secret()`
+provisions those per host, or runs a controller for that surface
+alone.
+
+Run against it with `sparkwing run <pipeline> --profile shared`, then
+serve a read-only dashboard over the same bucket:
+
+```sh
+sparkwing serve start --profile shared --no-local-store --read-only
+```
+
+It lists runs from the profile's cache store and reads logs from its logs
+store, on a loopback port behind the serve token. A dashboard with
+sign-in for a team comes from a controller.
+
+See [local-execution.md](local-execution.md#per-host-concurrency)
+for the host-local concurrency gate that caps how many `sparkwing run`
+processes a single machine admits at once. The gate is mode-agnostic
+but matters most on a shared bucket, where the state backend doesn't
+incidentally serialize overlapping invocations the way the local path's
+SQLite does.
+
+### Postgres and object storage
+
+Runners write run state to a shared Postgres database and caches /
+logs to a shared object store. The `.Memoize()` DSL routes through
+Postgres `concurrency_*` tables, so cross-runner reservation works
+properly: N runners arriving at the same key elect one leader, the
+rest coalesce and inherit the leader's output. Triggers, approvals,
+and debug pauses all work.
+
+For: a team that wants cross-runner reservation guaranteed by a
+database row lock -- rather than dependent on the bucket's CAS support
+and its tail latency under heavy contention -- but doesn't want to
+host a controller process.
+
+`sparkwing run <pipeline> --profile NAME` with a Postgres profile is a
+temporary exception slated for removal. A controller is the supported way
+to share runs: [Sparkwing Cloud](#sparkwing-cloud) or a
+[hosted controller](#hosted-controller).
+
+Tradeoff: every runner needs Postgres credentials. The trust model
+is "anyone with DB creds can write run state." Suitable for owned
+infrastructure; not suitable for untrusted CI against shared infra
+(use a controller for that).
+
+```yaml
+# ~/.config/sparkwing/config.yaml
+profiles:
+  shared:
+    state:
+      type: postgres
+      url_source: env:SPARKWING_PG_URL
+    cache:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: cache
+    logs:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: logs
+```
+
+`url_source: env:SPARKWING_PG_URL` reads the DSN from the named
+environment variable so the literal connection string stays out of
+yaml.
+
+```sh
+export SPARKWING_PG_URL="postgres://user:pass@db.example/sparkwing?sslmode=require"
+sparkwing run hello --profile shared
+sparkwing serve start --profile shared --no-local-store --read-only
+```
+
+`sparkwing serve` reads the profile's object store, as in
+[shared object storage](#shared-object-storage), not the Postgres
+database. A dashboard with sign-in for a team comes from a controller.
+
+Runners open the database directly, so the
+[schema versioning](#schema-versioning) rules apply to every runner, not
+only to a controller: upgrade every runner before a breaking migration
+reaches the database. The
+[one-click provisioning](#one-click-provisioning) module stands up this
+database too; each runner reads the secret it writes into
+`SPARKWING_PG_URL`.
+
+## Forcing local mode for a single run
+
+`sparkwing run <pipeline> --sw-local-only` ignores the shared surfaces of
+the profile `--profile` names and pins secrets, state, cache, and logs to
+the local secret store, SQLite, and filesystem layout. Git hooks run
+their pipelines this way. Useful for ad-hoc work that shouldn't appear in
+the team dashboard, or for reproducing an issue against known-clean local
+state.
 
 ## Selecting a profile
 
 Profile selection is explicit: pass `--profile NAME` on the command that
 should reach the profile. Neither the environment nor a project-wide
-default selects one. `sparkwing run` takes no `--profile` and refuses one,
-naming `sparkwing pipeline trigger <pipeline> --profile NAME`, the command
-that runs a pipeline on a controller. A pipeline whose
+default selects one. `sparkwing run` accepts `--profile` only for an S3 or
+Postgres state profile with no controller; any other profile is refused
+with a message naming `sparkwing pipeline trigger <pipeline> --profile
+NAME`, the command that runs a pipeline on a controller. A pipeline whose
 `.sparkwing/sparkwing.yaml` entry names `profile:` is pinned to that
 controller profile; see
 [pinning a pipeline to a profile](backends.md#pinning-a-pipeline-to-a-profile).
-
-A profile can name an S3 bucket or a Postgres database as its `state` or
-`logs` surface directly. Read verbs read those backends, so run history
-kept there stays reachable through `sparkwing runs list --profile NAME`
-and `sparkwing serve start --profile NAME --read-only`; no client command
-writes runs to them.
+A CI job names its profile on its own command line (see
+[ci-embedded.md](ci-embedded.md)).
 
 ## Choosing a shape
 
@@ -253,7 +468,13 @@ A practical decision order:
    [Hosted controller](#hosted-controller), or
    [one of your own machines](#one-of-your-own-machines-as-the-controller)
    for a single box.
+4. **A team already coordinating through a bucket or a database it
+   shares, without a controller?**
+   [Shared object storage](#shared-object-storage) or
+   [Postgres and object storage](#postgres-and-object-storage), a
+   temporary exception slated for removal. Each runner needs the
+   environment the profile does not carry; see
+   [what each runner needs](#what-each-runner-needs-beyond-the-profile).
 
-The command picks the shape: `sparkwing run` executes locally, and
-`sparkwing pipeline trigger executes --profile NAME` on a controller.
-Pipeline code doesn't change.
+You can move between shapes by editing a profile; pipeline code doesn't
+change.

@@ -27,12 +27,13 @@ func showSelectedProfile(profileName, output string) error {
 }
 
 type profileEffectiveJSON struct {
-	Name       string `json:"name"`
-	Source     string `json:"source"`
-	Controller string `json:"controller"`
-	State      string `json:"state"`
-	Logs       string `json:"logs"`
-	Cache      string `json:"cache"`
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Controller  string `json:"controller"`
+	State       string `json:"state"`
+	Logs        string `json:"logs"`
+	Cache       string `json:"cache"`
+	MirrorLocal bool   `json:"mirror_local"`
 }
 
 type profileConsideredJSON struct {
@@ -50,12 +51,13 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 	state, logs, cache := p.SurfaceStrings()
 	report := profileReportJSON{
 		Effective: profileEffectiveJSON{
-			Name:       chain.Selected,
-			Source:     string(chain.Source),
-			Controller: p.ControllerURL(),
-			State:      state,
-			Logs:       logs,
-			Cache:      cache,
+			Name:        chain.Selected,
+			Source:      string(chain.Source),
+			Controller:  p.ControllerURL(),
+			State:       state,
+			Logs:        logs,
+			Cache:       cache,
+			MirrorLocal: p.EffectiveMirrorLocal(),
 		},
 		Considered: chainRows(chain),
 	}
@@ -74,6 +76,7 @@ func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string
 	fmt.Fprintf(out, "  state:            %s\n", state)
 	fmt.Fprintf(out, "  logs:             %s\n", logs)
 	fmt.Fprintf(out, "  cache:            %s\n", cache)
+	fmt.Fprintf(out, "  mirror_local:     %t\n", p.EffectiveMirrorLocal())
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "resolution chain considered:")

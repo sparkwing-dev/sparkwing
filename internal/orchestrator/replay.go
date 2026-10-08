@@ -36,7 +36,7 @@ func runReplayNodeCLI(args []string) error {
 		return fmt.Errorf("ensure root: %w", err)
 	}
 	ctx := context.Background()
-	backends, _, releaseBackends, err := localTriggerBackends(ctx, paths)
+	backends, _, releaseBackends, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
 		return err
 	}
