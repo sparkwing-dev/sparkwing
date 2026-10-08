@@ -1093,3 +1093,25 @@ step with the controller's own.
   `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
   writes runs, nodes or triggers of a team other than the default goes
   through that team's handle.
+
+## Node logs without a logs URL reach the controller
+
+- **Before:** a Kubernetes Job, warm runner, self-hosted agent or launcher
+  Job started without a logs URL wrote its node logs to the pod's or
+  machine's own disk, which nobody could read and which went away with the
+  pod.
+- **After:** the runner uploads each node's log as gzip segments plus a
+  sealing manifest through URLs the controller issues, into the
+  controller's cache bucket (`--cache-blob-store`) or, without one, its
+  output directory. The dashboard and `sparkwing runs logs` read them, and
+  deleting a run or a team deletes them. Runners and controllers with a
+  logs URL behave as before.
+- **Operator steps:** none are required. On an S3 cache bucket, add a
+  lifecycle rule that expires `<cache prefix>/logs/r90/` after 90 days;
+  until later releases manage retention, nothing else expires these
+  objects. A controller that keeps them on its own disk keeps them until
+  their run is deleted. Segment bytes do not yet count against a team's
+  storage share.
+- **Mixed versions:** a runner that predates segments keeps its local
+  file, as before. A runner of this release against an older controller
+  finds no `log-segments` route and does the same.

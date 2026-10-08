@@ -1113,8 +1113,10 @@ Log panes read through the logs service named by the controller's
 `--logs-url`. The controller forwards the caller's own credential: a cookie
 session as `Authorization: Session <id>`, or the caller's bearer as it
 arrived. The logs service asks the controller whose run it is, so a read
-answers only for the caller's team. A controller without `--logs-url` shows no
-logs.
+answers only for the caller's team. A node whose runner had no logs URL
+reads from the segments the controller keeps for it (see
+[observability.md](observability.md#runners-without-a-logs-service)), within
+the caller's team, whether or not the controller has `--logs-url`.
 
 Deleting a run from the dashboard needs `admin`, because the controller
 registers `DELETE /api/v1/runs/{id}` at `admin`, so the signed-in account must

@@ -179,6 +179,43 @@ counts as dropped. A pipeline binary that runs its nodes itself, the
 in-process trigger runner, writes straight to the logs service, so on an
 SDK without seals those nodes read `unconfirmed` until the pin moves.
 
+### Runners without a logs service
+
+A Kubernetes Job, warm runner, self-hosted agent or launcher Job started
+without a logs URL keeps its node's log as segments the controller
+stores, instead of on a disk that dies with the pod. The runner process
+that supervises the pipeline binary serves the binary's log appends on
+127.0.0.1, so a binary built against any SDK logs unchanged. It appends
+every line to a spool file and uploads a gzip-compressed segment every
+10 seconds or 1 MiB, whichever comes first; an idle node uploads
+nothing. When the binary exits, the runner uploads the last segment and
+a manifest that lists every segment with its SHA-256 and seals the log.
+The controller issues the upload URLs in batches of 16
+(`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`), presigned into
+its cache bucket when it has `--cache-blob-store`, otherwise signed
+against its own output directory. Segments live under
+`logs/r90/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`.
+A runner whose controller predates segments, or has nowhere to keep
+them, keeps the log on local disk as before.
+
+The dashboard and `sparkwing runs logs` read such a node from its
+segments and verify each one against the manifest's digest. A runner
+lost mid-node loses at most the segment it was filling: once the node
+has been finished for 60 seconds with no manifest, the controller writes
+one listing the segments that landed, and the log reads incomplete:
+
+| State | Meaning | The reader shows |
+|---|---|---|
+| `complete` | The manifest lists every line the runner stored and every segment verified. | Nothing. |
+| `incomplete` | A segment failed to upload or verify, the binary skipped sequence numbers or reported drops, or the runner was lost and the controller sealed the attempt. | `- logs incomplete: ... -` naming the reason |
+| `cut_off` | The binary was killed or never started, sent no seal after numbering its lines, or reached the 64 MiB node cap. | `- logs cut off after line N: ... -` |
+| `streaming` | The node is running, or finished less than 60 seconds ago and its manifest has not landed. | Nothing yet. |
+
+Deleting a run deletes its segments, and so does deleting a team. Nothing
+expires segments on its own yet; see the
+[migration guide](migrations/_unreleased.md#node-logs-without-a-logs-url-reach-the-controller)
+for the lifecycle rule to add.
+
 ## Failure excerpts
 
 A node that fails while running a command records a bounded excerpt of
