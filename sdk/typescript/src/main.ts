@@ -1,12 +1,15 @@
 import { emitDescribe } from "./describe.ts";
-import { once } from "node:events";
 import { serve } from "./runner.ts";
 
 // A pipe is written asynchronously, so process.exit before the queue empties
-// drops whatever the body logged last.
+// drops whatever the body logged last. An empty write's callback fires after
+// every earlier write; 'drain' is not a barrier, since it fires only after a
+// write that returned false. The loop catches writes a drain handler queues.
 async function drained(stream: NodeJS.WriteStream): Promise<void> {
-  await new Promise<void>((resolve) => stream.write("", () => resolve()));
-  while (stream.writableLength > 0) await once(stream, "drain");
+  do {
+    await new Promise<void>((resolve) => stream.write("", () => resolve()));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } while (stream.writableLength > 0);
 }
 
 /**

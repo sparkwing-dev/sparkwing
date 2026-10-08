@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -10,6 +13,7 @@ const example = fileURLToPath(new URL("../examples/hello/pipeline.ts", import.me
 
 const lingering = fileURLToPath(new URL("./fixtures/lingering.ts", import.meta.url));
 const noisy = fileURLToPath(new URL("./fixtures/noisy.ts", import.meta.url));
+const drainwriter = fileURLToPath(new URL("./fixtures/drainwriter.ts", import.meta.url));
 
 function runExample(args: string[], stdin: string, env: Record<string, string> = {}, file = example): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -102,4 +106,36 @@ test("every stderr line a body wrote arrives before the node process exits", asy
   const lines = stderr.split("\n").filter((l) => l !== "");
   assert.equal(lines.length, 4096);
   assert.match(lines[4095] ?? "", /^4095 x{1024}$/);
+});
+
+test("a slow reader and a write queued from a drain handler neither hang the exit nor lose bytes", { timeout: 30_000 }, async () => {
+  const stdin = [
+    { id: "p", op: "plan", pipeline: "drainwriter", run: { run_id: "r1", pipeline: "drainwriter" } },
+    { id: "n", op: "run_node", node: "flood", attempt: 1 },
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n";
+  // stdout goes to a file, which Node writes synchronously, so the exit reaches
+  // the stderr barrier while the drain handler's write is still queued behind
+  // a reader that takes one chunk every few milliseconds.
+  const dir = mkdtempSync(join(tmpdir(), "sw-ts-drain-"));
+  const outFd = openSync(join(dir, "stdout"), "w");
+  const child = spawn(process.execPath, [drainwriter, "--sw-node-protocol"], { stdio: ["pipe", outFd, "pipe"] });
+  closeSync(outFd);
+  const { stdin: input, stderr: errors } = child;
+  assert.ok(input && errors);
+  const guard = setTimeout(() => child.kill("SIGKILL"), 20_000);
+  let stderr = "";
+  errors.on("data", (d) => {
+    stderr += d;
+    errors.pause();
+    setTimeout(() => errors.resume(), 5);
+  });
+  input.end(stdin);
+  const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+  clearTimeout(guard);
+  const stdout = readFileSync(join(dir, "stdout"), "utf8");
+  rmSync(dir, { recursive: true, force: true });
+  assert.equal(code, 0, "the guard killed a node that should have exited");
+  assert.match(stdout, /"reply":"n","ok":true/);
+  assert.equal(stderr.length, 763 * 1024);
+  assert.ok(stderr.endsWith("z".repeat(63 * 1024)));
 });
