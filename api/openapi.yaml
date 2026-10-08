@@ -8889,7 +8889,7 @@ components:
         expires: {type: string, format: date-time}
         source_run_id: {type: string, description: The run the output was read from.}
     CronTimerState:
-      x-sparkwing-go-type: internal/crons.TimerStateView
+      x-sparkwing-go-type: internal/api.TimerStateView
       type: object
       description: |
         The OS timer that calls the tick. A controller reports its own
@@ -8903,7 +8903,7 @@ components:
         binary: {type: string}
         detail: {type: string}
     CronTick:
-      x-sparkwing-go-type: internal/crons.TickView
+      x-sparkwing-go-type: internal/api.TickView
       type: object
       description: The last tick recorded against the store; `at` is empty until one has landed.
       properties:
@@ -8912,7 +8912,7 @@ components:
         version: {type: string}
         error: {type: string}
     CronHealth:
-      x-sparkwing-go-type: internal/crons.HealthView
+      x-sparkwing-go-type: internal/api.HealthView
       type: object
       description: Whether the evaluator is running, and what it holds.
       properties:
@@ -8931,7 +8931,7 @@ components:
         detail: {type: string}
         remedy: {type: string}
     CronLock:
-      x-sparkwing-go-type: internal/crons.LockView
+      x-sparkwing-go-type: internal/api.LockView
       type: object
       description: |
         What a schedule runs. `state` is one of `follows`, `pinned`, `ahead`,
@@ -8943,7 +8943,7 @@ components:
         digest: {type: string}
         state: {type: string, enum: [follows, pinned, ahead, dirty, missing]}
     CronOverrideState:
-      x-sparkwing-go-type: internal/crons.OverrideView
+      x-sparkwing-go-type: internal/api.OverrideView
       type: object
       description: |
         Which declared fields the evaluating side has overridden, and the
@@ -8959,7 +8959,7 @@ components:
         catch_up_ns: {type: integer, format: int64}
         args: {type: object, additionalProperties: {type: string}}
     CronEffective:
-      x-sparkwing-go-type: internal/crons.EffectiveView
+      x-sparkwing-go-type: internal/api.EffectiveView
       type: object
       description: The cadence the schedule actually runs, after any override.
       properties:
@@ -8969,7 +8969,7 @@ components:
         catch_up_ns: {type: integer}
         args: {type: object, additionalProperties: {type: string}}
     CronSchedule:
-      x-sparkwing-go-type: internal/crons.ScheduleView
+      x-sparkwing-go-type: internal/api.ScheduleView
       type: object
       description: |
         One schedule. `name` is the display name; `git_branch` is set only on a
@@ -9001,7 +9001,7 @@ components:
         last_outcome: {type: string}
         next_due_at: {type: string, nullable: true}
     CronFire:
-      x-sparkwing-go-type: internal/crons.FireView
+      x-sparkwing-go-type: internal/api.FireView
       type: object
       description: |
         One resolved due instant. `run_status` is empty when the fire launched
@@ -9017,14 +9017,14 @@ components:
         args: {type: object, additionalProperties: {type: string}}
         run_status: {type: string}
     CronsOverview:
-      x-sparkwing-go-type: internal/crons.OverviewView
+      x-sparkwing-go-type: internal/api.OverviewView
       type: object
       description: The evaluator's health and every schedule it holds.
       properties:
         health: {$ref: "#/components/schemas/CronHealth"}
         schedules: {type: array, items: {$ref: "#/components/schemas/CronSchedule"}}
     CronDetail:
-      x-sparkwing-go-type: internal/crons.DetailView
+      x-sparkwing-go-type: internal/api.DetailView
       type: object
       description: One schedule, its fires newest first, and the instants it matches next.
       properties:
@@ -9088,13 +9088,13 @@ components:
         tripped_at: {type: string, format: date-time}
         tripped_window: {type: string, enum: [minute, day]}
     CronScheduleEnvelope:
-      x-sparkwing-go-type: internal/crons.ScheduleEnvelope
+      x-sparkwing-go-type: internal/api.ScheduleEnvelope
       type: object
       description: What a write to one schedule returns.
       properties:
         schedule: {$ref: "#/components/schemas/CronSchedule"}
     CronRunEnvelope:
-      x-sparkwing-go-type: internal/crons.RunEnvelope
+      x-sparkwing-go-type: internal/api.RunEnvelope
       type: object
       description: What a launch returns.
       properties:
