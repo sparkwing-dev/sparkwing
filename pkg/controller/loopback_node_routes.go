@@ -182,8 +182,14 @@ func (l *Loopback) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 	if !l.ownSlotRun(w, body.RunID) || !l.ownHolder(w, body.HolderID) {
 		return
 	}
+	// safety: joining a live holder renews it and skips the capacity check, and no node process
+	// inherits a holder, so a node may not name one, as the execution broker already refuses.
+	if body.InheritedHolderID != "" {
+		writeError(w, http.StatusForbidden, errors.New("a node process cannot join another holder's slot"))
+		return
+	}
 	resp, err := slots.AcquireSlot(r.Context(), store.AcquireSlotRequest{
-		Key: r.PathValue("key"), HolderID: body.HolderID, InheritedHolderID: body.InheritedHolderID,
+		Key: r.PathValue("key"), HolderID: body.HolderID,
 		RunID: body.RunID, NodeID: body.NodeID, Capacity: body.Max, Cost: body.Cost, Policy: body.Policy,
 		CacheKeyHash: body.CacheKeyHash, CacheTTL: time.Duration(body.CacheTTLNS),
 		CancelTimeout: time.Duration(body.CancelTimeoutNS), Lease: time.Duration(body.LeaseSecs) * time.Second,
