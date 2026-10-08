@@ -21,7 +21,7 @@ import (
 
 // hack: only tests reach this spike. The engine owns the run row, the DAG and
 // dispatch, and drives the pipeline binary only to evaluate the plan and run one
-// node per process; docs/design/engine-hosted-execution.md is the design.
+// node per process; design/engine-hosted-execution.md is the design.
 type hostedRun struct {
 	Describe []byte
 	Binary   string
