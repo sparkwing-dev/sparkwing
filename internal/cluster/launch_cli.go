@@ -85,7 +85,11 @@ func runLaunchCLI(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tel.Shutdown(context.Background()) }()
+	defer func() {
+		if err := tel.Shutdown(context.Background()); err != nil {
+			slog.Warn("telemetry shutdown", "err", err)
+		}
+	}()
 	l := &launcher.Launcher{
 		Kube: kube, Ctrl: client.NewWithToken(cfg.ControllerURL, nil, token), Config: cfg,
 		Holder: "launcher:" + holder, Poll: *poll, Logger: slog.Default(),

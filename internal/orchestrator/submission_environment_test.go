@@ -225,7 +225,7 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 			want: []string{"SPARKWING_PROFILE=dev"},
 		},
 		{
-			name:  "honours the operator allow-list",
+			name:  "honors the operator allow-list",
 			allow: "[AWS_REGION, DOCKER_*]",
 			env: []string{
 				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1", "DOCKER_PASSWORD=p", "LANG=C",
