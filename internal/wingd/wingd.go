@@ -255,7 +255,10 @@ func resolveLayout(home string) (layout, error) {
 		return layout{}, fmt.Errorf("wingd: resolve home identity: %w", err)
 	}
 	dir := filepath.Join(home, "wingd")
-	sock := socketPathForHome(key)
+	sock, err := socketPathForHome(key)
+	if err != nil {
+		return layout{}, err
+	}
 	return layout{
 		home:    home,
 		dir:     dir,
@@ -275,8 +278,12 @@ func (l layout) ensureDir() error {
 	return nil
 }
 
-func socketPathForHome(home string) string {
-	return socketPathIn(socketBaseDir(), home)
+func socketPathForHome(home string) (string, error) {
+	base, err := socketBaseDir()
+	if err != nil {
+		return "", err
+	}
+	return socketPathIn(base, home), nil
 }
 
 func socketPathIn(base, home string) string {
@@ -365,7 +372,11 @@ func PeerSockets(home string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirs, err := filepath.Glob(filepath.Join(socketBaseDir(), socketDirPrefix()+"*"))
+	base, err := socketBaseDir()
+	if err != nil {
+		return nil, err
+	}
+	dirs, err := filepath.Glob(filepath.Join(base, socketDirPrefix()+"*"))
 	if err != nil {
 		return nil, fmt.Errorf("wingd: scan daemon sockets: %w", err)
 	}
@@ -394,17 +405,6 @@ func socketAlive(sock string) bool {
 		return false
 	}
 	return c.Close() == nil
-}
-
-func socketBaseDir() string {
-	// safety: the socket path must be a pure function of the home so every
-	// caller agrees on it whatever the environment. A short shared base keeps
-	// the path inside the sun_path limit; checkSocketBase and checkSocketDir
-	// carry the privacy that a per-user base would otherwise provide.
-	if runtime.GOOS == "windows" {
-		return os.TempDir()
-	}
-	return "/tmp"
 }
 
 func maxSunPath() int {

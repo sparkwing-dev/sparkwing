@@ -793,7 +793,9 @@ environment variable moves it, so a cron job, a privilege-elevated
 shell, and an interactive session all resolve the same socket for the
 same home. It sits under `/tmp` rather than under the home because a
 unix socket path is capped at 104 bytes on macOS. Windows uses the
-process temp directory instead. The trust boundary is the user account,
+`Temp` folder inside the account's LocalAppData known folder, resolved
+from the user token rather than from `TEMP`, `TMP` or `USERPROFILE`, and
+creates that folder when it is missing. The trust boundary is the user account,
 not the machine: everyone logged into the same host as the same user
 shares one daemon and can queue, inspect, cancel, and drain its runs.
 The protocol carries no token, and adding one would not change that -- a
@@ -820,7 +822,7 @@ this user does not own.
 
 The ownership, mode, and peer-credential checks are unix-only. Windows
 reports no uid for a unix socket peer and has no sticky bit, so the
-per-user temp directory is the only separation there, and the daemon
+per-user LocalAppData folder is the only separation there, and the daemon
 does not refuse a connection on credentials.
 
 Root is not excluded by any of this; a root account on the host can read

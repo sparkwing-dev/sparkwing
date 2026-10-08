@@ -10,10 +10,11 @@ func TestUnixSocketHomeIdentityPreservesExactBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := socketPathIn(socketBaseDir(), home); socket != want {
+	base := testSocketBase(t)
+	if want := socketPathIn(base, home); socket != want {
 		t.Fatalf("Unix home bytes changed socket identity: %q, want %q", socket, want)
 	}
-	if socket == socketPathIn(socketBaseDir(), "right") {
+	if socket == socketPathIn(base, "right") {
 		t.Fatal("Unix socket identity collapsed different home spellings")
 	}
 }

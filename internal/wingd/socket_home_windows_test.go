@@ -54,3 +54,25 @@ func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 		})
 	}
 }
+
+func TestWindowsSocketBaseDirIgnoresTheEnvironment(t *testing.T) {
+	base := testSocketBase(t)
+	for _, name := range []string{"TEMP", "TMP", "USERPROFILE"} {
+		t.Setenv(name, t.TempDir())
+		if got := testSocketBase(t); got != base {
+			t.Fatalf("socketBaseDir() = %q with %s moved, want the fixed base %q", got, name, base)
+		}
+	}
+	home := t.TempDir()
+	sock, err := SocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, identity, err := socketHomeIdentity(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := socketPathIn(base, identity); sock != want {
+		t.Fatalf("SocketPath = %q, want the derived path %q", sock, want)
+	}
+}

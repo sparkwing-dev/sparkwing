@@ -148,13 +148,13 @@ func TestValidateSocketDir_AllowsAnAbsentDirectory(t *testing.T) {
 }
 
 func TestSocketBaseDir_IgnoresTheEnvironment(t *testing.T) {
-	base := socketBaseDir()
+	base := testSocketBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", shortSocketBase(t))
-	if got := socketBaseDir(); got != base {
+	if got := testSocketBase(t); got != base {
 		t.Fatalf("socketBaseDir() = %q with a runtime directory set, want the fixed base %q", got, base)
 	}
 	t.Setenv("TMPDIR", shortSocketBase(t))
-	if got := socketBaseDir(); got != base {
+	if got := testSocketBase(t); got != base {
 		t.Fatalf("socketBaseDir() = %q with TMPDIR set, want the fixed base %q", got, base)
 	}
 	home := t.TempDir()
@@ -286,7 +286,7 @@ func TestPeerSockets_SkipsAForeignSocketDirectory(t *testing.T) {
 }
 
 func TestPeerSockets_LeavesOldEmptySocketDirectoriesForStartingDaemons(t *testing.T) {
-	base := socketBaseDir()
+	base := testSocketBase(t)
 	// safety: the base directory is shared by every test binary running as this
 	// user, so a fixed name makes two concurrent runs race on the same mkdir.
 	run := strconv.Itoa(os.Getpid())
