@@ -43,14 +43,22 @@ func TestWatchLiveness_EOFReapsOwnedSessionsEvenWhenCancelIsIgnored(t *testing.T
 
 func TestParentLivenessDescriptorStopsAtThisProcess(t *testing.T) {
 	r, _ := livenessPipe(t)
-	fd := int(r.Fd())
+	// safety: the opened *os.File owns this duplicate, so closing it never touches the pipe's fd.
+	fd, err := syscall.Dup(int(r.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0); errno != 0 {
+		_ = syscall.Close(fd)
 		t.Fatal(errno)
 	}
 	t.Setenv(local.ParentLivenessFDEnv, strconv.Itoa(fd))
-	if openParentLivenessPipe() == nil {
+	opened := openParentLivenessPipe()
+	if opened == nil {
+		_ = syscall.Close(fd)
 		t.Fatal("the descriptor the host named was not opened")
 	}
+	t.Cleanup(func() { _ = opened.Close() })
 	if _, set := os.LookupEnv(local.ParentLivenessFDEnv); set {
 		t.Fatal("the liveness variable stayed in the environment a step command inherits")
 	}
