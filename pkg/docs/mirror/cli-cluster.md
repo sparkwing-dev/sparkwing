@@ -8,13 +8,13 @@ Every `sparkwing cluster` command, flag, and argument, generated from the CLI's 
 
 Operate and inspect the sparkwing cluster
 
-Inspect controller health, executors, admission, users, tokens and
-images. Select the controller with --profile NAME.
-Configure profiles with 'sparkwing configure profiles'.
+Inspect and operate a controller's executors, triggers, admission, users and
+tokens. Select the controller with --profile NAME; connect one with
+'sparkwing cloud connect' and check its health with 'sparkwing cloud status
+--cluster'.
 
-'worker' executes queued triggers on this machine. 'gc' removes stale
-warm-runner storage. Manage secrets with 'sparkwing secrets' and the
-local dashboard with 'sparkwing serve'.
+'worker' executes queued triggers on this machine. Manage secrets with
+'sparkwing secrets' and the local dashboard with 'sparkwing serve'.
 
 ### Subcommands
 
@@ -25,7 +25,6 @@ local dashboard with 'sparkwing serve'.
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
 - `limits` -- Read and set the compute guards
-- `image` -- Rollout helpers for images referenced by a gitops repo
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
 - `object-store` -- Operate the controller's object-store request budget
 
@@ -161,82 +160,6 @@ command narrows to one namespace.
 ```sh
 # Who holds and who's queued
 sparkwing cluster concurrency --namespace deploy-prod --profile prod
-```
-
-## `sparkwing cluster image`
-
-Rollout helpers for images referenced by a gitops repo
-
-Update an image tag in a GitOps repository, commit and push the change,
-sync ArgoCD, and wait for rollout. Publish the image before using these
-commands.
-
-### Subcommands
-
-- `rollout` -- Bump a kustomization image tag, commit+push, sync ArgoCD, optionally wait
-
-### Examples
-
-```sh
-# Update the example runner image
-sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
-```
-
-## `sparkwing cluster image rollout`
-
-Bump a kustomization image tag, commit+push, sync ArgoCD, optionally wait
-
-Rewrites the newTag: field for the image whose entry in the
-gitops repo's kustomization.yaml matches --image (suffix match
-against the ECR / registry URL), commits + pushes the change,
-optionally triggers an ArgoCD sync, and optionally blocks on
-kubectl rollout status.
-
-Gitops repo resolution order:
-  1. --gitops-repo PATH explicit flag
-  2. SPARKWING_GITOPS_REPO explicit environment configuration
-
-If neither is set, rollout exits before reading or changing a repository.
-Sparkwing never guesses a path from the user's home-directory layout.
-
-The command is idempotent: if the newTag already matches --tag
-there is nothing to commit, and the pipeline continues to sync
-+ wait without error. Use --dry-run to preview the plan without
-writing, committing, pushing, syncing, or waiting.
-
-Tool requirements:
-  - argocd missing  -> sync is skipped with a one-line notice
-  - kubectl missing -> --wait / --tail-logs error before side effects
-
-This verb does not build or push the image itself. The consumer
-pipeline that produced --tag is responsible for publishing the
-image to the registry before calling rollout.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--image NAME` | Short image name (matches the suffix of the ECR URL) (required) |
-| `--tag TAG` | New tag to write in kustomization.yaml (required) |
-| `--gitops-repo PATH` | Gitops repo path (or SPARKWING_GITOPS_REPO) |
-| `--namespace NS` | Kubernetes namespace for rollout status + logs (default: sparkwing) |
-| `--argocd-app NAME` | ArgoCD app name (default: derived from --image) |
-| `--message MSG` | Commit message (default: 'chore: bump <image> to <tag>') |
-| `--wait` | Block until 'kubectl rollout status deployment/<image>' returns |
-| `--tail-logs` | After rollout, 'kubectl logs -f -l app=<image>' until ctrl-c |
-| `--dry-run` | Print what would happen without writing, committing, pushing, or syncing |
-
-### Examples
-
-```sh
-# Preview the example runner image update
-sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --dry-run
-
-# Bump and wait for the rollout
-sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
-
-# Bump, sync, wait, then tail pod logs
-sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs
 ```
 
 ## `sparkwing cluster limits`

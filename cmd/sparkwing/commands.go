@@ -38,7 +38,6 @@ var allCommands = []*Command{
 	&cmdHooks, &cmdHooksInstall, &cmdHooksUninstall, &cmdHooksStatus,
 	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete, &cmdSecretRotate,
 	&cmdTriggers, &cmdTriggersList, &cmdTriggersGet,
-	&cmdImage, &cmdImageRollout,
 	&cmdAgents, &cmdAgentsList, &cmdAgentsEnroll, &cmdClusterConcurrency, &cmdClusterObjectStore, &cmdClusterObjectStoreStatus, &cmdClusterObjectStoreResetBreaker,
 	&cmdRunners, &cmdRunnersAdd, &cmdRunnersRemove,
 	&cmdCloud, &cmdCloudConnect, &cmdCloudStatus, &cmdCloudDisconnect,

@@ -713,3 +713,18 @@ instead of naming its replacement.
 | `sparkwing daemon explain --run ID [-o json]` | `sparkwing daemon events --run ID --explain [-o json]` |
 
 The output and exit codes are unchanged.
+
+## cluster image rollout is removed
+
+`sparkwing cluster image rollout --image NAME --tag TAG [--wait] [--tail-logs]`
+edited `images[].newTag` in a gitops checkout's kustomization.yaml, committed
+and pushed, ran `argocd app sync`, and waited with `kubectl rollout status`.
+Run those steps from a pipeline job instead:
+
+```bash
+cd "$GITOPS_REPO" && kustomize edit set image "NAME=REGISTRY/NAME:TAG"
+git commit -am "rollout NAME TAG" && git push
+argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
+```
+
+`SPARKWING_GITOPS_REPO` is no longer read.

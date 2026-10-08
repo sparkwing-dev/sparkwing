@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Remove `cluster image rollout`
+  It bumped a kustomization image tag in a gitops checkout, committed and pushed, synced ArgoCD and waited on the rollout, for one deployment's layout; `SPARKWING_GITOPS_REPO` went with it. A pipeline step that runs those tools does the same job. See [migration guide](docs/migrations/_unreleased.md#cluster-image-rollout-is-removed).
+
 - **cli (Breaking):** `daemon explain --run ID` is `daemon events --run ID --explain`
   Same sentences, the same JSON records with `-o json`, and the same refusal to start the daemon. `--explain` refuses the list filters (`--since`, `--kind`, `--incarnation`, `--limit`, `--offset`) because it reads every record of the run. See [migration guide](docs/migrations/_unreleased.md#daemon-explain-moves-to-daemon-events---explain).
 

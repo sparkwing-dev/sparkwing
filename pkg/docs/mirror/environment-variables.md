@@ -132,7 +132,6 @@ Kinds:
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
 | `SPARKWING_DEV_ENV_DISABLE` | [architecture](architecture.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
-| `SPARKWING_GITOPS_REPO` | [cli-cluster](cli-cluster.md) |
 | `SPARKWING_HASH_ALL_FILES` | [caching](caching.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-fleet](cli-fleet.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |

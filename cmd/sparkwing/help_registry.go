@@ -194,14 +194,14 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Inspect controller health, executors, admission, users, tokens and
-images. Select the controller with --profile NAME.
-Configure profiles with 'sparkwing configure profiles'.
+	Description: `Inspect and operate a controller's executors, triggers, admission, users and
+tokens. Select the controller with --profile NAME; connect one with
+'sparkwing cloud connect' and check its health with 'sparkwing cloud status
+--cluster'.
 
-'worker' executes queued triggers on this machine. 'gc' removes stale
-warm-runner storage. Manage secrets with 'sparkwing secrets' and the
-local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "users", "tokens", "limits", "image", "concurrency", "object-store"},
+'worker' executes queued triggers on this machine. Manage secrets with
+'sparkwing secrets' and the local dashboard with 'sparkwing serve'.`,
+	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "users", "tokens", "limits", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cloud status --profile prod --cluster"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -2827,65 +2827,6 @@ json emits the raw response.`,
 	Examples: []Example{
 		{"Inspect one trigger", "sparkwing cluster triggers get --id run-fictional --profile prod"},
 		{"Raw JSON for scripting", "sparkwing cluster triggers get --id run-fictional --profile prod -o json"},
-	},
-}
-
-var cmdImage = Command{
-	Path:     "sparkwing cluster image",
-	Synopsis: "Rollout helpers for images referenced by a gitops repo",
-	Description: `Update an image tag in a GitOps repository, commit and push the change,
-sync ArgoCD, and wait for rollout. Publish the image before using these
-commands.`,
-	SubcommandOrder: []string{"rollout"},
-	Examples: []Example{
-		{"Update the example runner image", "sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait"},
-	},
-}
-
-var cmdImageRollout = Command{
-	Path:     "sparkwing cluster image rollout",
-	Synopsis: "Bump a kustomization image tag, commit+push, sync ArgoCD, optionally wait",
-	Description: `Rewrites the newTag: field for the image whose entry in the
-gitops repo's kustomization.yaml matches --image (suffix match
-against the ECR / registry URL), commits + pushes the change,
-optionally triggers an ArgoCD sync, and optionally blocks on
-kubectl rollout status.
-
-Gitops repo resolution order:
-  1. --gitops-repo PATH explicit flag
-  2. SPARKWING_GITOPS_REPO explicit environment configuration
-
-If neither is set, rollout exits before reading or changing a repository.
-Sparkwing never guesses a path from the user's home-directory layout.
-
-The command is idempotent: if the newTag already matches --tag
-there is nothing to commit, and the pipeline continues to sync
-+ wait without error. Use --dry-run to preview the plan without
-writing, committing, pushing, syncing, or waiting.
-
-Tool requirements:
-  - argocd missing  -> sync is skipped with a one-line notice
-  - kubectl missing -> --wait / --tail-logs error before side effects
-
-This verb does not build or push the image itself. The consumer
-pipeline that produced --tag is responsible for publishing the
-image to the registry before calling rollout.`,
-	Flags: []FlagSpec{
-		{Name: "image", Argument: "NAME", Desc: "Short image name (matches the suffix of the ECR URL)", Required: true, Group: "Input"},
-		{Name: "tag", Argument: "TAG", Desc: "New tag to write in kustomization.yaml", Required: true, Group: "Input"},
-		{Name: "gitops-repo", Argument: "PATH", Desc: "Gitops repo path (or SPARKWING_GITOPS_REPO)", Group: "Input"},
-		{Name: "namespace", Argument: "NS", Desc: "Kubernetes namespace for rollout status + logs", Default: "sparkwing", Group: "Input"},
-		{Name: "argocd-app", Argument: "NAME", Desc: "ArgoCD app name (default: derived from --image)", Group: "Input"},
-		{Name: "message", Argument: "MSG", Desc: "Commit message (default: 'chore: bump <image> to <tag>')", Group: "Input"},
-		{Name: "wait", Desc: "Block until 'kubectl rollout status deployment/<image>' returns", Group: "Toggles"},
-		{Name: "tail-logs", Desc: "After rollout, 'kubectl logs -f -l app=<image>' until ctrl-c", Group: "Toggles"},
-		{Name: "dry-run", Desc: "Print what would happen without writing, committing, pushing, or syncing", Group: "Toggles"},
-	},
-	GroupOrder: []string{"Input", "Toggles", "System", "Other"},
-	Examples: []Example{
-		{"Preview the example runner image update", "sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --dry-run"},
-		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait"},
-		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs"},
 	},
 }
 

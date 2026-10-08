@@ -498,8 +498,6 @@ func runCluster(args []string) error {
 		return runTokens(args[1:])
 	case "limits":
 		return runComputeLimits(args[1:])
-	case "image":
-		return runImage(args[1:])
 	case "concurrency":
 		return runConcurrency(args[1:])
 	case "object-store":
