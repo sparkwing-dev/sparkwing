@@ -89,6 +89,7 @@ unlock.
 - **Windows daemon:** Launch the background daemon without a console window, keep runs on the same daemon when home paths differ in slashes or drive-letter casing or when processes set different `TEMP` or `TMP` values, capture diagnostic dump identities before replacement, and stop signaling reaped children
 - **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers, and disable interactive credential prompts for unattended requests
 - **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization, preserve native runtime settings, keep the shared daemon available after cancellation, and reclaim abandoned temporary snapshots
+- **Windows worktree snapshots:** Materialize a run's exact source checkout with Git long paths enabled and without line-ending conversion, so a node sees the committed bytes
 - **Windows output storage:** Flush output files through writable handles, replace them durably, and publish restored log archives after closing staging directory handles
 - **Windows Git hooks:** Resolve Git Bash drive paths and detect runnable hooks without relying on Unix executable permission bits
 - **Windows caches:** Reject rooted archive paths, restore contained relative symlinks, and retire completed cache entries after their open writers release them
