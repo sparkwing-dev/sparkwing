@@ -1014,7 +1014,7 @@ and GitHub App browser flows, and a proxy that forwarded an allowlist of
 there.
 
 **After:** `sparkwing-controller` serves the dashboard pages, `/login`,
-password and first-admin sign-in, logout, `/auth/{provider}/start` and
+operator-token sign-in, logout, `/auth/{provider}/start` and
 `/callback`, identity linking at `/auth/{provider}/link`, the GitHub App pages
 under `/github/app/`, and the dashboard's log, grep, event-stream and capacity
 reads, on the same port as its API. Session cookies are `__Host-sw_session` and
@@ -1062,7 +1062,7 @@ attached and needs nothing.
 `/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and
 `GET /api/v1/auth/bootstrap-needed` answer 404. No CLI command called them; a
 client of your own drives the browser pages that replace them.
-`/api/v1/auth/login`, `/api/v1/auth/session` and `/api/v1/auth/logout` remain.
+`/api/v1/auth/session` and `/api/v1/auth/logout` remain.
 
 **Why:** two processes split one browser surface, and the proxy's route
 allowlist and service bearer were a second authorization layer to keep in
@@ -1093,3 +1093,52 @@ step with the controller's own.
   `FailNodeForUnpricedClass` on the run's team handle. Code that reads or
   writes runs, nodes or triggers of a team other than the default goes
   through that team's handle.
+
+## Password users are removed
+
+- **Before:** the controller kept dashboard users with argon2id passwords.
+  `POST /api/v1/auth/login` and the `/login` form exchanged a username and
+  password for a session, `GET`, `POST` and `DELETE /api/v1/users` and
+  `sparkwing cluster users add|list|delete` managed the accounts, and an open
+  single-team controller offered a "Create first admin" form at
+  `/login/bootstrap`.
+- **After:** dashboard sign-in is Google or GitHub, where a multi-team license
+  and an OAuth client offer them, or an operator token: a user token holding
+  `admin`, such as the bootstrap admin token, pasted into the `/login` form.
+  The routes, the form, the CLI commands and the client's `CreateUser`,
+  `ListUsers` and `DeleteUser` are gone; each route answers `404`, or `401` to
+  a request with no credential. Schema v95 drops the users table and ends
+  every password session, so each person signs in again. A token session
+  follows its token: revoking or expiring the token ends it.
+
+Before upgrading:
+
+1. Choose how each person signs in. On a controller with a multi-team license,
+   configure Google or GitHub sign-in (`--google-client-id`,
+   `--github-client-id`, their secrets and `--oauth-redirect-uris`, as
+   [auth.md](../auth.md#google-and-github-sign-in) lists) and invite each
+   former password user to their team. Without a license the controller offers
+   no identity provider, so the operator token is the dashboard's only sign-in.
+2. Make sure the operator holds an admin token. A controller provisioned with
+   `--bootstrap-admin-token-file` (chart: `controller.bootstrapAdminToken.name`)
+   already has one. Otherwise mint one while a password admin can still act:
+
+   ```bash
+   sparkwing cluster tokens create --type user --principal operator \
+       --scope admin --profile prod
+   ```
+
+3. Remove `sparkwing cluster users` from scripts. A script that used
+   `POST /api/v1/auth/login` for a session calls the API with a bearer token
+   instead.
+
+**Edge cases:**
+
+- A password user with a narrower scope set has no direct replacement: an
+  operator token carries `admin`. Give that person an account on a licensed
+  controller with the matching role, or a bearer token of the narrower scopes
+  for the CLI.
+- An open controller (empty tokens table) serves the dashboard without
+  sign-in, as before, and its `/login` redirects to the page asked for.
+- Rolling back to an older binary leaves its password routes failing on the
+  missing table; a token session it reads carries no scope.

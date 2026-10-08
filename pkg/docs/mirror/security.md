@@ -214,27 +214,19 @@ credential.
 
 ## Login and hashing budgets
 
-`POST /api/v1/auth/login` is the controller's only unauthenticated route
-that hashes a password, so it carries its own budgets. One client gets 30
-attempts a minute; the listener as a whole gets 600 per concurrent argon2
-slot, which bounds hashing work without throttling a fleet's real logins.
-Both answer `429` with `Retry-After` once drained.
-
-A failed login also charges a budget keyed on the account **and** the
-client address: 5 failures, refilling one every three minutes. Keying it
-on both is deliberate. An account-only budget would let any stranger lock
-a named user out of the dashboard with 20 requests an hour, so a wrong
-guesser only ever slows itself down; the per-client and listener buckets
-remain the outer bound on how much guessing one source can do. The budget
-charges failures only, so a busy account is never locked out by its
-successes.
+The sign-in routes (`POST /login` and the Google and GitHub flows) are the
+controller's unauthenticated routes that can reach argon2, so they carry
+their own budgets. One client gets 30 attempts a minute; the listener as a
+whole gets 600 per concurrent argon2 slot, which bounds hashing work without
+throttling a fleet's real sign-ins. Both answer `429` with `Retry-After` once
+drained. An operator token posted to `POST /login` is then verified the way a
+bearer is, under the budget below.
 
 Bearer verification carries the same protection, keyed on the client
 address and the 12-character token prefix, which is public
 (`sparkwing cluster tokens list` prints it). Ten failed verifications for one
 prefix from one client in a minute and further attempts answer `429`
-without hashing. Keying on the pair matters for the same reason it does
-for login: a prefix-only budget would let a stranger who reads a prefix
+without hashing. Keying on the pair matters: a prefix-only budget would let a stranger who reads a prefix
 deny that runner its own token on any cold cache. Only a genuine hash
 mismatch spends the budget, so a prefix that matches no stored row costs
 an indexed `SELECT` and nothing more, and a valid token served from the
@@ -243,7 +235,7 @@ rejected raw token for five seconds, so a client replaying one wrong
 guess pays for a single hash; that cache evicts its coldest entries when
 full rather than closing to new ones.
 
-Every argon2id verification, login and bearer-token lookup alike, passes
+Every argon2id token verification, from a bearer or the sign-in form, passes
 through a semaphore sized by `--argon2-memory-budget-mb` (chart:
 `controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
 while it runs, so the default admits four at a time. A hash waits at most
@@ -252,7 +244,7 @@ while it runs, so the default admits four at a time. A hash waits at most
 backlog behind legitimate callers. Raise the budget only alongside the
 pod's memory limit. A runner whose token is in the 60-second principal
 cache never reaches the store or the semaphore at all, so heartbeats are
-unaffected by a login flood.
+unaffected by a sign-in flood.
 
 An unauthenticated caller never sees a store error verbatim. Anything
 that is not an authentication rejection answers `503` with a generic

@@ -145,6 +145,9 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+- **controller + cli (Breaking):** Password users are removed; the dashboard signs in with Google, GitHub or an operator token
+  `POST /api/v1/auth/login`, `GET`/`POST`/`DELETE /api/v1/users`, the `/login/bootstrap` first-admin form and `sparkwing cluster users add|list|delete` are gone, with the client's `CreateUser`, `ListUsers` and `DeleteUser`. The `/login` form takes a user token holding `admin`, such as the bootstrap admin token, and the session follows that token, so revoking it signs its browsers out. Schema v95 drops the users table and ends every password session. Configure an identity provider or hold an admin token before upgrading. See [migration guide](docs/migrations/_unreleased.md#password-users-are-removed).
+
 - **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
   Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
 

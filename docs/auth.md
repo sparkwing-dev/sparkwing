@@ -296,8 +296,8 @@ and the effect.
 Only the operator's own signed-in account reaches it. The controller lists
 operator accounts by account id with `--operator-accounts`
 (`SPARKWING_OPERATOR_ACCOUNTS`, comma-separated), and every route under
-`/api/v1/operator/` answers `403` to any other caller: a team owner, a
-password session and every bearer token, an admin token included. A console
+`/api/v1/operator/` answers `403` to any other caller: a team owner, an
+operator-token session and every bearer token, an admin token included. A console
 action therefore needs the operator's sign-in, not a credential that
 automation can hold. The controller serves the `/operator` page only to a
 listed operator's own signed-in session and answers `403` to every other
@@ -1066,8 +1066,8 @@ the auth middleware runs, so they are open regardless of auth config:
 the health probe (k8s httpGet probes can't carry `Authorization`), the
 service-discovery endpoint
 the runner uses to find the cache pod, the session endpoints a client
-uses to establish, validate, and end a session (`/api/v1/auth/login`,
-`/api/v1/auth/session`, `/api/v1/auth/logout`), the capabilities report a
+uses to validate and end a session (`/api/v1/auth/session`,
+`/api/v1/auth/logout`), the capabilities report a
 signed-out dashboard draws its sign-in page from, and the GitHub webhook,
 which is HMAC-verified instead of bearer-authenticated. The sign-in pages
 (`/login`, `/auth/{provider}/start` and `/auth/{provider}/callback`) and the
@@ -1092,17 +1092,11 @@ through a profile.
 The controller serves the dashboard on the listener that serves its API, so
 the dashboard holds no credential of its own. Every page and API request
 carries the signed-in browser's session, and the controller checks each
-route's scope against that session as it does for any caller. A browser
-session carries the scopes of the user who signed in, so an account holding
-only `runs.read` reads runs and gets `403` on cancel. On a multi-team
-controller the session belongs to one user and one active team, which keeps a
-browser inside its own team.
-
-Create narrower accounts with `sparkwing cluster users add --scope
-runs.read,logs.read`; omitting `--scope` grants `admin`. The first-visit
-bootstrap account defaults to `admin` and may carry more scopes beside it, but
-a scope set that omits `admin` is rejected with `400`, and
-`sparkwing cluster users list` prints the scope set of every account.
+route's scope against that session as it does for any caller. An account
+session carries the scopes of the account's role in its active team, so a
+viewer reads runs and gets `403` on cancel; the session belongs to one account
+and one active team, which keeps a browser inside its own team. An
+operator-token session carries the scopes of the token it was opened with.
 
 Whenever the controller enforces token auth, because a token exists or a
 multi-team license is loaded, it sends a browser without a session to `/login`
@@ -1125,7 +1119,7 @@ scope` and nothing is removed.
 
 The controller's `/login` page offers "Sign in with Google" when its sign-in
 providers include `google` and "Sign in with GitHub" when they include
-`github`, above the password form. Each flow runs on the controller's own
+`github`, above the operator-token form. Each flow runs on the controller's own
 origin: `GET /auth/<provider>/start` creates a state and a PKCE verifier,
 keeps the provider, state, verifier and return path in a ten-minute
 `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), and
@@ -1191,7 +1185,7 @@ such as runners, key on their TCP peer. See
 [security.md](security.md#login-and-hashing-budgets) for the budgets and the
 argon2 memory bound.
 
-The login, first-admin, and logout forms carry a CSRF token in both a
+The sign-in and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. The controller rejects a missing,
 cross-origin, or mismatched token with `403` before it checks a credential.
 Unsafe API requests (`POST`, `PUT`, `PATCH`, and `DELETE`) that the session
@@ -1242,38 +1236,30 @@ somewhere forwarding no trusted `X-Forwarded-Proto`: the controller then sends
 cookie-authenticated writes. The chart passes it whenever the Ingress has
 `ingress.tls`.
 
-## First-visit signup
+## Signing in
+
+Dashboard sign-in is Google or GitHub, where a multi-team license and an OAuth
+client offer them, or an operator token. Sparkwing keeps no passwords.
+
+An operator token is a user token holding the `admin` scope, such as the
+bootstrap admin token below or one minted with `sparkwing cluster tokens
+create --type user --principal NAME --scope admin`. Paste it into the `/login` form and the
+controller opens a browser session for its principal. The session stores no
+copy of the token's scopes: every request reads the token's scopes and team,
+so revoking or expiring the token signs its browsers out on their next
+request. A token without `admin`, and every runner or service token, answers
+`403` and opens no session. Failed attempts spend the same per-prefix and
+per-client budgets a bearer does.
 
 Controller authentication is enabled at startup when the tokens table contains
 an active token. `--require-auth` makes startup fail when it does not, and
 `--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`) puts the
 first admin token in that table before the listener binds, so a provisioned
 controller starts with both satisfied; see the
-[security operator checklist](security.md#operator-checklist).
-
-A freshly-installed sparkwing cluster has no users, so there is
-nothing to log in *as*. While controller authentication is disabled,
-browsing to `/login` on an empty cluster renders a "Create first admin"
-form. Submitting it posts to `/login/bootstrap`, which creates the first
-admin user and signs the new admin in.
-
-The bootstrap path is one-shot and latched: once any user exists, the
-login page shows the standard sign-in form, `/login/bootstrap` refuses,
-and `POST /api/v1/users` goes back to requiring an admin token. There is
-no way to reopen the bootstrap path short of restarting the controller
-against a freshly emptied database.
-
-When controller authentication is enabled, or a multi-team license is
-loaded, `/login` offers no first-admin form and `POST /api/v1/users`
-requires an admin token even if the users table is empty. An operator can use that token with
-`sparkwing cluster users add` to create the first dashboard user. That
-first account has to be an admin, so leave `--scope` off, or name a list
-that contains `admin`; a narrower list is refused with `400` while the
-users table is empty.
-
-After the first admin is created, additional users are added via
-`sparkwing cluster users add`. Pass `--scope` to bound what that account's
-dashboard sessions reach; omitting it grants `admin`.
+[security operator checklist](security.md#operator-checklist). That token is
+how the first operator signs in, by API or by the sign-in form. A controller
+with authentication disabled serves its pages without sign-in, and its
+`/login` sends the browser straight on to the page it asked for.
 
 ## CLI
 

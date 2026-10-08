@@ -161,7 +161,7 @@ export type MeResult =
   | { kind: "operator" }
   | { kind: "unavailable" };
 
-// A password-signed-in operator holds no team identity, and the controller
+// An operator signed in with a token holds no team identity, and the controller
 // refuses /me for that session; the refusal means "no account", not "signed out".
 export async function getMe(): Promise<MeResult> {
   try {

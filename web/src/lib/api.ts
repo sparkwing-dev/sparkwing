@@ -84,7 +84,7 @@ function endSession() {
 }
 
 // A route whose refusal answers a question about the caller, such as /me for an
-// operator signed in with a password, passes speaksForSession: false so its 401
+// operator signed in with a token, passes speaksForSession: false so its 401
 // never reads as the dashboard session ending, which would reload in a loop.
 export interface AuthFetchOptions {
   speaksForSession?: boolean;

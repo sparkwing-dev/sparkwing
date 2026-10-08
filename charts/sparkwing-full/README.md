@@ -324,8 +324,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    (`controller.requireAuth`, on by default), so it never serves a request
    unauthenticated. Without that Secret the render refuses, because a
    controller whose tokens table is empty serves **every endpoint
-   unauthenticated**, token minting and first-admin creation included, to
-   anything that reaches its Service.
+   unauthenticated**, token minting included, to anything that reaches its
+   Service.
 
    `controller.allowOpenBootstrap=true` opts into that open window instead.
    The chart then drops `--require-auth`; mint the first token through the
@@ -364,11 +364,11 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    browser's own credential, so the dashboard needs no token Secret.
 
 3. The controller serves the dashboard and gates its pages behind `/login`
-   whenever it enforces tokens. Create dashboard accounts with
-   `sparkwing cluster users add`, whose `--scope` bounds what a signed-in
-   account reaches. During the `allowOpenBootstrap` window the controller
-   serves pages without sign-in, and `/login` offers a "create first admin"
-   form. Session cookies are `Secure` and `__Host-` prefixed, so configure
+   whenever it enforces tokens. The operator signs in with an admin token,
+   such as the bootstrap admin token; people sign in with Google or GitHub
+   where a multi-team license and an OAuth client offer them. During the
+   `allowOpenBootstrap` window the controller serves pages without sign-in.
+   Session cookies are `Secure` and `__Host-` prefixed, so configure
    an HTTPS ingress before signing in; `ingress.allowInsecure=true` without
    TLS passes `--insecure-cookies`, which drops both so a plain HTTP session
    holds.
@@ -544,9 +544,9 @@ inside the runner pod. See
 [`sparkwing-runner-bundle/README.md`](../sparkwing-runner-bundle/README.md#troubleshooting).
 
 **Dashboard redirects to /login and I have no account**
-A controller that enforces tokens offers no sign-up form. Add an
-account with `sparkwing cluster users add` using an admin token, such
-as the bootstrap admin token.
+A controller that enforces tokens offers no sign-up form. Sign in with an
+admin token, such as the bootstrap admin token, in the `/login` form's
+operator-token field.
 
 **`helm template` fails with "missing in charts/ directory: sparkwing-runner-bundle"**
 The vendored sub-chart tarball was deleted. Restore it with
