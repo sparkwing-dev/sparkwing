@@ -1,0 +1,147 @@
+# pkg/storage/logseg
+
+func AppendHandler(sink *Sink, runID, nodeID string) http.Handler
+func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
+func AttemptPrefix(class, team, runID, nodeID string, attempt, generation int64) (string, error)
+func ClassDays(class string) (int, bool)
+const ClassFree = "r30"
+func ClassPrefix(class string) string
+const ClassStandard = "r90"
+type Completeness struct {
+	State        string
+	Lines        int64
+	MissingLines int64
+	Message      string
+}
+func (c Completeness) SyntheticLine() string
+type End struct {
+	Stopped bool
+}
+var ErrBadManifest = errors.New("logseg: unreadable manifest")
+var ErrClosed = errors.New("logseg: the sink is closed")
+var ErrSealed = errors.New("logseg: the attempt already has a manifest")
+func EscapeNode(nodeID string) string
+type Gap struct {
+	From int64
+	To   int64
+}
+type Log struct {
+	Prefix string
+
+	Manifest *Manifest
+
+	Segments []Segment
+
+	Broken int
+}
+func (l *Log) Completeness(node NodeProgress, now time.Time) Completeness
+func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]byte, error)
+const LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
+const LogSeqHeader = "X-Sparkwing-Log-Seq"
+const LogStreamHeader = "X-Sparkwing-Log-Stream"
+type Manifest struct {
+	Version      int
+	Run          string
+	Node         string
+	Attempt      int64
+	Generation   int64
+	Status       string
+	Reason       string
+	SealedBy     string
+	SealedAt     time.Time
+	FirstSeq     int64
+	LastSeq      int64
+	Lines        int64
+	Bytes        int64
+	DroppedLines int64
+	Gaps         []Gap
+	Segments     []Segment
+}
+func (m Manifest) Marshal() ([]byte, error)
+func ManifestKey(prefix string) string
+const ManifestName = "manifest.json"
+const ManifestVersion = 1
+const MaxAppendBytes = 4 << 20
+const MaxNodeBytes int64 = 64 << 20
+func NewSink(up Uploader, opts Options) (*Sink, error)
+const NoTeam = "_"
+type NodeProgress struct {
+	Started    bool
+	Terminal   bool
+	FinishedAt time.Time
+}
+type Objects interface {
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+
+	List(ctx context.Context, prefix string) ([]string, error)
+}
+func Open(ctx context.Context, objs Objects, prefix string) (*Log, error)
+type Options struct {
+	Run, Node string
+
+	SpoolDir     string
+	Interval     time.Duration
+	SegmentBytes int64
+	MaxBytes     int64
+
+	Live func(data []byte)
+
+	AfterFunc func(d time.Duration, f func()) (stop func() bool)
+
+	Retries   int
+	RetryBase time.Duration
+	RetryMax  time.Duration
+	Logger    *slog.Logger
+}
+func ParseManifest(raw []byte) (*Manifest, error)
+const ReasonByteCap = "byte cap"
+const ReasonDropped = "writer dropped lines"
+const ReasonRunnerLost = "runner lost"
+const ReasonSequenceGap = "sequence gap"
+const ReasonStopped = "node stopped before its log was finished"
+const ReasonUnsealed = "writer did not seal"
+const ReasonUploadFailed = "upload failed"
+func RunPrefix(class, team, runID string) (string, error)
+func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
+	put func(ctx context.Context, key string, body []byte) error,
+) (*Manifest, error)
+const SealGrace = 60 * time.Second
+const SealedByController = "controller"
+const SealedByNode = "node"
+type Segment struct {
+	N           int
+	FirstSeq    int64
+	LastSeq     int64
+	Lines       int64
+	Bytes       int64
+	StoredBytes int64
+	SHA256      string
+}
+const SegmentBytes = 1 << 20
+const SegmentInterval = 10 * time.Second
+func SegmentKey(prefix string, n int) string
+func SegmentNumber(prefix, key string) (int, bool)
+type Sink struct {
+}
+func (s *Sink) Append(data []byte, stream string, first, last int64) error
+func (s *Sink) Close(ctx context.Context, end End) (Manifest, error)
+func (s *Sink) WriterSealed(stream string, finalSeq, dropped int64)
+const StateComplete = "complete"
+const StateCutOff = "cut_off"
+const StateIncomplete = "incomplete"
+const StateStreaming = "streaming"
+const StateUnknown = "unknown"
+const StatusComplete = "complete"
+const StatusCutOff = "cut_off"
+const StatusIncomplete = "incomplete"
+const TruncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
+type Uploader interface {
+	PutSegment(ctx context.Context, seg Segment, body []byte) error
+
+	PutManifest(ctx context.Context, m Manifest) error
+}
+type WriterSeal struct {
+	Stream   string
+	FinalSeq int64
+	Dropped  int64
+}
