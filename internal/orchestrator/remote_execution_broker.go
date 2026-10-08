@@ -318,6 +318,7 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodPost, "/api/v1/concurrency/{key}/heartbeat", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/release", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/cancel-waiter", concurrencyForThisNode},
+	{http.MethodPost, "/api/v1/concurrency/{key}/force-release", oneSegmentKey},
 	{http.MethodGet, "/api/v1/logs/{run}/{node}", nil},
 	{http.MethodPost, "/api/v1/logs/{run}/{node}", nil},
 	{http.MethodGet, "/api/v1/logs/{run}/{node}/seal", nil},

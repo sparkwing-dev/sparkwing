@@ -316,3 +316,34 @@ func TestBrokeredNodeReadsAnotherRunsOutputs(t *testing.T) {
 		t.Fatalf("cache-hit output from the origin run = %s, %v", cached, err)
 	}
 }
+
+func TestBrokeredNodeForceReleasesSupersededHolders(t *testing.T) {
+	st, broker, _ := adminBrokeredNode(t, "newer")
+	ctx := context.Background()
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "older", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "deploy", HolderID: "run-1/older", RunID: "run-1", NodeID: "older", Capacity: 1, Lease: time.Minute,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conc := NewHTTPConcurrency(broker.URL(), nil, broker.capability, time.Minute)
+	got, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
+		Key: "deploy", HolderID: "run-1/newer", RunID: "run-1", NodeID: "newer", Capacity: 1,
+		Policy: store.OnLimitCancelOthers, Lease: time.Minute,
+	})
+	if err != nil || got.Kind != store.AcquireCancellingOthers {
+		t.Fatalf("acquire with cancel-others = %+v, %v", got, err)
+	}
+	dropped, err := conc.ForceReleaseSuperseded(ctx, "deploy")
+	if err != nil {
+		t.Fatalf("force-release through the broker: %v", err)
+	}
+	if len(dropped) != 1 || dropped[0].HolderID != "run-1/older" {
+		t.Fatalf("dropped = %+v, want the superseded holder", dropped)
+	}
+	if _, err := conc.ForceReleaseSuperseded(ctx, "a/b"); err == nil {
+		t.Fatal("force-release of a multi-segment key was forwarded")
+	}
+}
