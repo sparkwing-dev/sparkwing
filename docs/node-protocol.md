@@ -76,7 +76,7 @@ The Go in-process path reads more variables than the contract names. They exist 
 
 **Today.** A node reaches the routes below at `SPARKWING_CONTROLLER_URL` with `Authorization: Bearer <token>`. Three hosts answer them:
 
-- the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`; a run whose state is not a SQLite store gets a **loopback shim** instead, which serves the same routes over that state. A local node reads its secrets from the local secret store, so the shim serves no secrets route; it answers the bounce poll 204 when its state holds no bounce requests, and `execution-start` and `execution-finish` 501 when its state records no execution attempts;
+- the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`; a run whose state is not a SQLite store gets a **loopback shim** instead, which serves the same routes over that state. A local node reads its secrets from the local secret store, so the shim serves no secrets route; it answers the bounce poll 204 when its state holds no bounce requests, `execution-start` and `execution-finish` 501 when its state records no execution attempts, and the concurrency routes from the run's concurrency backend for the nodes a local node spawns;
 - the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller or the logs service;
 - the **controller** itself, for a Kubernetes or launcher Job that holds a claim token.
 

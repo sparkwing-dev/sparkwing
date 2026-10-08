@@ -59,3 +59,44 @@ func TestLoopbackShimServesALocalNodesBounceAndAttemptRoutes(t *testing.T) {
 		t.Fatalf("recorded attempts = %+v, %v", attempts, err)
 	}
 }
+
+func TestLoopbackShimGrantsSlotsToASpawnedNode(t *testing.T) {
+	_, shim := startTestLoopbackShim(t)
+	conc := NewHTTPConcurrency(shim.url, nil, shim.token, time.Minute)
+	ctx := context.Background()
+	got, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
+		Key: "deploy", HolderID: "run-1/build/linux", RunID: "run-1", NodeID: "build/linux", Capacity: 1, Lease: time.Minute,
+	})
+	if err != nil || got.Kind != store.AcquireGranted {
+		t.Fatalf("acquire on the shim = %+v, %v", got, err)
+	}
+	if holder, err := conc.ObserveSlot(ctx, "deploy", "run-1/build/linux"); err != nil || holder.NodeID != "build/linux" {
+		t.Fatalf("observe = %+v, %v", holder, err)
+	}
+	if _, superseded, err := conc.HeartbeatSlot(ctx, "deploy", "run-1/build/linux", time.Minute); err != nil || superseded {
+		t.Fatalf("heartbeat = %v, %v", superseded, err)
+	}
+	queued, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
+		Key: "deploy", HolderID: "run-1/build/darwin", RunID: "run-1", NodeID: "build/darwin", Capacity: 1, Lease: time.Minute,
+	})
+	if err != nil || queued.Kind != store.AcquireQueued {
+		t.Fatalf("second acquire = %+v, %v", queued, err)
+	}
+	if res, err := conc.ResolveWaiter(ctx, "deploy", "run-1", "build/darwin", "", "", "", false); err != nil || res.Status == "" {
+		t.Fatalf("resolve = %+v, %v", res, err)
+	}
+	if cancelled, err := conc.CancelWaiter(ctx, "deploy", "run-1", "build/darwin"); err != nil || !cancelled {
+		t.Fatalf("cancel waiter = %v, %v", cancelled, err)
+	}
+	if _, err := conc.ForceReleaseSuperseded(ctx, "deploy"); err != nil {
+		t.Fatalf("force-release: %v", err)
+	}
+	if err := conc.ReleaseSlot(ctx, "deploy", "run-1/build/linux", "success", "", "", 0); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if _, err := conc.AcquireSlot(ctx, store.AcquireSlotRequest{
+		Key: "deploy", HolderID: "run-2/build", RunID: "run-2", NodeID: "build", Capacity: 1, Lease: time.Minute,
+	}); err == nil {
+		t.Fatal("the shim granted a slot to another run")
+	}
+}

@@ -45,11 +45,14 @@ type LoopbackState interface {
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
 
-// LoopbackConcurrency is the slice of the concurrency backend a node
-// process reads: a parent blocked in RunAndAwait asks whether its
-// child is queued for plan admission so its own timeout can be paused.
-// Nothing a node does acquires or releases a slot -- the dispatcher
-// resolved that before it spawned the process.
+// LoopbackConcurrency is the slice of the concurrency backend every node
+// process reads: a parent blocked in RunAndAwait asks whether its child
+// is queued for plan admission so its own timeout can be paused. The
+// dispatcher resolves a planned node's slots before it spawns the
+// process; a backend that also has the orchestrator's AcquireSlot,
+// ObserveSlot, HeartbeatSlot, ReleaseSlot, ResolveWaiter, CancelWaiter
+// and ForceReleaseSuperseded serves the slot routes for the nodes a node
+// process spawns, and without them those routes answer 501.
 type LoopbackConcurrency interface {
 	State(ctx context.Context, key string) (*store.ConcurrencyState, error)
 }
@@ -229,6 +232,13 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, l.ownRun(l.handleFinishNodeExecutionAttempt)))
 
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleConcurrencyState)))
+	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeRunsState, http.HandlerFunc(l.handleAcquireSlot)))
+	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeRunsState, http.HandlerFunc(l.handleHeartbeatSlot)))
+	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeRunsState, http.HandlerFunc(l.handleReleaseSlot)))
+	mux.Handle("GET /api/v1/concurrency/{key}/holder", requireScope(ScopeRunsState, http.HandlerFunc(l.handleObserveSlot)))
+	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeRunsState, http.HandlerFunc(l.handleResolveWaiter)))
+	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeRunsState, http.HandlerFunc(l.handleCancelWaiter)))
+	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(l.handleForceRelease)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
