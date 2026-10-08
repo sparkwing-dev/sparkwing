@@ -220,7 +220,10 @@ each one against the manifest's digest, and serves a node that wrote none
 from the logs service. A follow of a running node sends the segments
 uploaded so far, then the live ring from the byte where they end, so no
 line is sent twice; when the ring has already dropped bytes, it waits for
-the segment that covers them. A runner
+the segment that covers them. A run's log search and the dashboard's
+cross-run grep read at most 256 MiB of logs and scan for at most 10
+seconds; one that stops at a bound says so in its reply (`truncated`,
+`stopped`). A runner
 lost mid-node loses at most the segment it was filling: once the node
 has been finished for 60 seconds with no manifest, the controller writes
 one listing the segments that landed, and the log reads incomplete:
