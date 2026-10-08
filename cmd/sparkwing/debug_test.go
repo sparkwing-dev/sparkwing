@@ -5,23 +5,33 @@ import (
 )
 
 func TestClaimToPod(t *testing.T) {
-	t.Setenv("SPARKWING_NAMESPACE", "test-ns")
 	cases := []struct {
 		in      string
 		wantPod string
-		wantNs  string
 	}{
-		{"runner:warm-1", "warm-1", "test-ns"},
-		{"pod:run-abc:build", "run-abc:build", "test-ns"},
-		{"agent:laptop", "", "test-ns"},
-		{"", "", "test-ns"},
+		{"runner:warm-1", "warm-1"},
+		{"pod:run-abc:build", "run-abc:build"},
+		{"agent:laptop", ""},
+		{"", ""},
 	}
 	for _, tc := range cases {
-		gotPod, gotNs := claimToPod(tc.in)
-		if gotPod != tc.wantPod || gotNs != tc.wantNs {
-			t.Errorf("claimToPod(%q) = (%q, %q), want (%q, %q)",
-				tc.in, gotPod, gotNs, tc.wantPod, tc.wantNs)
+		if got := claimToPod(tc.in); got != tc.wantPod {
+			t.Errorf("claimToPod(%q) = %q, want %q", tc.in, got, tc.wantPod)
 		}
+	}
+}
+
+func TestParseDebugTarget_NamespaceOnAttachOnly(t *testing.T) {
+	got, err := parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--node", "n1"})
+	if err != nil || got.namespace != defaultDebugNamespace {
+		t.Fatalf("attach default = %+v, %v; want namespace %s", got, err, defaultDebugNamespace)
+	}
+	got, err = parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--node", "n1", "--namespace", "ci"})
+	if err != nil || got.namespace != "ci" {
+		t.Fatalf("attach --namespace ci = %+v, %v", got, err)
+	}
+	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--node", "n1", "--namespace", "ci"}); err == nil {
+		t.Fatal("debug release accepted --namespace")
 	}
 }
 

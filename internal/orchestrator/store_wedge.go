@@ -3,26 +3,21 @@ package orchestrator
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const StoreWedgeBudgetEnvVar = "SPARKWING_STORE_WEDGE_BUDGET"
-
 const DefaultStoreWedgeBudget = 5 * time.Minute
 
-func storeWedgeBudget() (time.Duration, error) {
-	raw := os.Getenv(StoreWedgeBudgetEnvVar)
-	if raw == "" {
-		return DefaultStoreWedgeBudget, nil
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("%s=%q: want a Go duration such as \"5m\"", StoreWedgeBudgetEnvVar, raw)
-	}
-	return d, nil
+var storeWedgeBudget = func() (time.Duration, error) { return DefaultStoreWedgeBudget, nil }
+
+// SetTestStoreWedgeBudget makes every store wedge guard this process starts
+// take budget, or fail to start with err, until the test ends.
+func SetTestStoreWedgeBudget(t interface{ Cleanup(func()) }, budget time.Duration, err error) {
+	original := storeWedgeBudget
+	t.Cleanup(func() { storeWedgeBudget = original })
+	storeWedgeBudget = func() (time.Duration, error) { return budget, err }
 }
 
 type storeWedgeGuard struct {

@@ -46,6 +46,7 @@ exits 0.
 |---|---|
 | `--run ID` | Run ID holding the paused node (required) |
 | `--node NAME` | Node ID to attach to (required) |
+| `--namespace NAME` | Kubernetes namespace of the runner pods (default: sparkwing) |
 | `--profile NAME` | Profile name (cluster mode) |
 
 ### Examples

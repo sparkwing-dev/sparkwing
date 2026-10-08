@@ -140,7 +140,7 @@ func runNodeRemote(
 // safety: a pooled agent serves many runs from one process, so the cache grant is the node's,
 // never one read from the process environment.
 func supervisorArtifactStore(ctx context.Context, controllerURL, runID, cacheURL, cacheGrant string) (storage.ArtifactStore, error) {
-	if ResolveDevEnvURL(ArtifactStoreEnvVar) != "" {
+	if os.Getenv(ArtifactStoreEnvVar) != "" {
 		return resolveArtifactStoreFromEnv(ctx)
 	}
 	var legacy storage.ArtifactStore

@@ -25,12 +25,14 @@ type debugSettings struct {
 
 type runSettings struct {
 	SubmitEnvAllow []string `yaml:"submit_env_allow"`
+	DispatchWait   string   `yaml:"dispatch_wait"`
 }
 
 const (
 	logsDropPolicyKey  = "logs.drop_policy"
 	pauseTimeoutKey    = "debug.pause_timeout"
 	submitEnvAllowKey  = "run.submit_env_allow"
+	dispatchWaitKey    = "run.dispatch_wait"
 	logsDropPolicyWarn = "warn"
 )
 
@@ -109,4 +111,19 @@ func submitEnvAllowSetting() ([]string, string, error) {
 		return nil, path, err
 	}
 	return s.SubmitEnvAllow, path, nil
+}
+
+// safety: zero keeps the plan's own default and a negative value waits
+// forever, the two meanings Options.DispatchWaitTimeout gives them.
+func dispatchWaitSetting() (time.Duration, error) {
+	var s runSettings
+	path, _, err := userconfig.ReadDefault(userconfig.Run, &s)
+	if err != nil {
+		return 0, err
+	}
+	d, err := parseDispatchWaitTimeout(strings.TrimSpace(s.DispatchWait))
+	if err != nil {
+		return 0, fmt.Errorf("%s %s: %w", path, dispatchWaitKey, err)
+	}
+	return d, nil
 }

@@ -598,6 +598,40 @@ ran it.
   run and the trigger does not carry them; a queued run therefore always
   resolves sparks and uses the binary cache.
 
+## The remaining laptop variables are removed
+
+- **Before:** `SPARKWING_DISPATCH_WAIT_TIMEOUT` bounded a run's wait for a
+  dispatch; `SPARKWING_NAMESPACE` named the namespace for
+  `sparkwing debug attach`; the admission daemon read `TYPESAFE_API_KEY` from
+  its environment; `SPARKWING_STORE_WEDGE_BUDGET`,
+  `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` and `SPARKWING_DOCS_BASE_URL` tuned
+  internals for tests; the run-node and trigger paths fell back to
+  `$SPARKWING_HOME/dev.env` for `SPARKWING_CONTROLLER_URL`,
+  `SPARKWING_LOGS_URL` and `SPARKWING_CACHE_URL`, and
+  `SPARKWING_DEV_ENV_DISABLE` closed that fallback.
+- **After:**
+
+  | Before | After |
+  |---|---|
+  | `SPARKWING_DISPATCH_WAIT_TIMEOUT` | `run.dispatch_wait` in config.yaml (a duration, or `off`) |
+  | `SPARKWING_NAMESPACE` | `sparkwing debug attach --namespace` (default `sparkwing`) |
+  | `TYPESAFE_API_KEY` in the daemon's environment | the local secret `TYPESAFE_API_KEY` |
+  | `SPARKWING_STORE_WEDGE_BUDGET`, `SPARKWING_SQLITE_BUSY_TIMEOUT_MS`, `SPARKWING_DOCS_BASE_URL` | removed; the values are fixed, and tests set them in code |
+  | the dev.env fallback on the run-node and trigger paths | removed; those paths read their own environment only |
+  | `SPARKWING_DEV_ENV_DISABLE` | removed |
+
+- **Operator steps:** move an exported dispatch wait into `run.dispatch_wait`;
+  pass `--namespace` to `debug attach`; store the TypeSafe key with
+  `sparkwing secrets set --name TYPESAFE_API_KEY --file <path>` and restart
+  the admission daemon.
+- **Edge cases:** an unparseable `run.dispatch_wait` stops the run at startup,
+  naming the file and key; the variable fell back to the default with a
+  warning. `pkg/store.BusyTimeoutEnvVar` and `pkg/docs.BaseURLEnvVar` are
+  removed; `store.SetTestBusyTimeout` and `docs.SetTestBaseURL` replace them
+  for tests. A CLI verb still finds the local dashboard through dev.env.
+  `SPARKWING_WINGD_BIN` stays: `sparkwing run` sets it for the processes it
+  starts.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper

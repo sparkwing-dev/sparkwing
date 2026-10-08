@@ -168,7 +168,6 @@ const BusinessEventPurchaseLimitRefused = "checkout.purchase_limit_refused"
 const BusinessEventTeamCreated = "team.created"
 const BusinessEventTeamFrozen = "team.frozen"
 const BusinessEventTeamUnfrozen = "team.unfrozen"
-const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
 func CLITokenScopes(role Role) []string
 type CPUClass struct {
@@ -1914,6 +1913,7 @@ type Session struct {
 const SessionIDLen = 32
 func SetArgon2MemoryBudget(budget int64) int
 func SetBinaryVersion(v string)
+func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int)
 type SignInProfile struct {
 	Provider      string
 	Subject       string

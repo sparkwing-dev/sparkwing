@@ -33,31 +33,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// BusyTimeoutEnvVar names the environment override for the SQLite
-// busy_timeout Open and OpenReadOnly apply, in milliseconds. Unset or
-// empty keeps [DefaultBusyTimeoutMS]; anything else must be a positive
-// integer or Open fails loudly, naming the variable and value -- a
-// typo'd override silently reverting to the default would hide the
-// misconfiguration. The knob exists for hosts whose contention profile
-// makes 30s wrong in either direction: diagnostic tooling that wants
-// to fail fast on a wedged database, or a heavily shared host that
-// wants writers to wait longer before erroring with SQLITE_BUSY.
-const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
-
-// DefaultBusyTimeoutMS is the SQLite busy_timeout applied when
-// [BusyTimeoutEnvVar] is unset. See Open for why 30s.
+// DefaultBusyTimeoutMS is the SQLite busy_timeout Open and OpenReadOnly
+// apply, in milliseconds. See Open for why 30s.
 const DefaultBusyTimeoutMS = 30000
 
-func busyTimeoutMS() (int, error) {
-	raw := os.Getenv(BusyTimeoutEnvVar)
-	if raw == "" {
-		return DefaultBusyTimeoutMS, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("%s=%q: want a positive integer of milliseconds", BusyTimeoutEnvVar, raw)
-	}
-	return n, nil
+var busyTimeoutMS = DefaultBusyTimeoutMS
+
+// SetTestBusyTimeout makes every SQLite store this process opens use ms as
+// its busy_timeout until the test ends.
+func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int) {
+	original := busyTimeoutMS
+	t.Cleanup(func() { busyTimeoutMS = original })
+	busyTimeoutMS = ms
 }
 
 // Failure reason codes; empty = no structured reason.
@@ -133,7 +120,7 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 
 // Open initializes a SQLite database at path with WAL + foreign keys.
 //
-// busy_timeout defaults high (30s; override via [BusyTimeoutEnvVar]) so
+// busy_timeout is high (30s) so
 // that under N concurrent writers on
 // one host -- multiple `sparkwing run` invocations plus the dashboard
 // daemon sharing one state.db -- a writer waits on a busy lock instead
@@ -179,10 +166,7 @@ func Open(path string) (*Store, error) {
 	} else if err := tightenExistingSQLite(path); err != nil {
 		return nil, err
 	}
-	dsn, err := sqliteDSN(path)
-	if err != nil {
-		return nil, err
-	}
+	dsn := sqliteDSN(path)
 	backupDir := ""
 	if !newDatabase {
 		backupDir = filepath.Join(filepath.Dir(path), "backups")
@@ -264,12 +248,8 @@ func tightenSQLiteFile(name string) error {
 	return nil
 }
 
-func sqliteDSN(path string) (string, error) {
-	ms, err := busyTimeoutMS()
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", sqliteURI(path), ms), nil
+func sqliteDSN(path string) string {
+	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", sqliteURI(path), busyTimeoutMS)
 }
 
 // safety: SQLite ends a file: URI path at the first unescaped `?` or `#` and
@@ -286,24 +266,20 @@ func sqliteURI(path string) string {
 	return "file:" + escaped
 }
 
-func sqliteReadOnlyDSN(path string) (string, error) {
+func sqliteReadOnlyDSN(path string) string {
 	return sqliteReadOnlyDSNWithMode(path, false)
 }
 
-func sqliteReadOnlySnapshotDSN(path string) (string, error) {
+func sqliteReadOnlySnapshotDSN(path string) string {
 	return sqliteReadOnlyDSNWithMode(path, true)
 }
 
-func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
-	ms, err := busyTimeoutMS()
-	if err != nil {
-		return "", err
-	}
+func sqliteReadOnlyDSNWithMode(path string, immutable bool) string {
 	mode := "mode=ro"
 	if immutable {
 		mode += "&immutable=1"
 	}
-	return fmt.Sprintf("%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", sqliteURI(path), mode, ms), nil
+	return fmt.Sprintf("%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", sqliteURI(path), mode, busyTimeoutMS)
 }
 
 // OpenReadOnly opens an existing SQLite state database for reads only.
@@ -318,8 +294,7 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
 // its own Open). Opening a database whose schema this binary doesn't
 // understand surfaces as query errors at read time, not here.
 func OpenReadOnly(path string) (*Store, error) {
-	dsn, err := sqliteReadOnlyDSN(path)
-	st, err := openReadOnlyDSN(dsn, err)
+	st, err := openReadOnlyDSN(sqliteReadOnlyDSN(path))
 	if err == nil {
 		st.outputDir = filepath.Dir(path)
 	}
@@ -348,8 +323,7 @@ func OpenReadOnlySnapshot(path string) (*Store, error) {
 		_ = cleanup()
 		return nil, err
 	}
-	dsn, err := sqliteReadOnlySnapshotDSN(snapshotPath)
-	st, err := openReadOnlyDSN(dsn, err)
+	st, err := openReadOnlyDSN(sqliteReadOnlySnapshotDSN(snapshotPath))
 	if err != nil {
 		_ = cleanup()
 		return nil, err
@@ -505,10 +479,7 @@ func checkpointSQLiteCopy(path string) error {
 	return errors.Join(checkErr, checkpointErr, db.Close())
 }
 
-func openReadOnlyDSN(dsn string, err error) (*Store, error) {
-	if err != nil {
-		return nil, err
-	}
+func openReadOnlyDSN(dsn string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

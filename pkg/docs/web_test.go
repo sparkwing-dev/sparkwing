@@ -397,26 +397,16 @@ func TestCacheInfo_CountsByCategory(t *testing.T) {
 	}
 }
 
-func TestNewWebClient_HonorsEnvOverride(t *testing.T) {
-	t.Setenv(BaseURLEnvVar, "http://localhost:9999")
-	c := NewWebClient()
-	if c.BaseURL != "http://localhost:9999" {
-		t.Errorf("BaseURL = %q, want env override", c.BaseURL)
-	}
-}
-
-func TestNewWebClient_TrimsTrailingSlash(t *testing.T) {
-	t.Setenv(BaseURLEnvVar, "http://example.com/")
-	c := NewWebClient()
-	if c.BaseURL != "http://example.com" {
+func TestNewWebClient_TestBaseURLTrimsTrailingSlash(t *testing.T) {
+	SetTestBaseURL(t, "http://example.com/")
+	if c := NewWebClient(); c.BaseURL != "http://example.com" {
 		t.Errorf("BaseURL = %q, want trailing-slash stripped", c.BaseURL)
 	}
 }
 
-func TestNewWebClient_FallsBackToDefault(t *testing.T) {
-	t.Setenv(BaseURLEnvVar, "")
-	c := NewWebClient()
-	if c.BaseURL != DefaultBaseURL {
+func TestNewWebClient_IgnoresTheEnvironment(t *testing.T) {
+	t.Setenv("SPARKWING_DOCS_BASE_URL", "http://localhost:9999")
+	if c := NewWebClient(); c.BaseURL != DefaultBaseURL {
 		t.Errorf("BaseURL = %q, want default", c.BaseURL)
 	}
 }

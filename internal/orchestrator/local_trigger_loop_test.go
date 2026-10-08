@@ -665,6 +665,7 @@ func TestLocalSetupFailureChild(t *testing.T) {
 	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
 		t.Skip("child process fixture")
 	}
+	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
 	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +687,6 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", home)
 			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_CHILD", "1")
 			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_RUN", "local-setup-failure")
-			t.Setenv(StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
 			binary, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)

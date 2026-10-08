@@ -349,10 +349,10 @@ func runContextFor(run *store.Run) sparkwing.RunContext {
 
 func runNodeCLI(args []string) error {
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
-	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
-		"controller base URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")
-	logsURL := fs.String("logs", ResolveDevEnvURL("SPARKWING_LOGS_URL"),
-		"logs-service URL (env: SPARKWING_LOGS_URL, falls back to $SPARKWING_HOME/dev.env)")
+	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
+		"controller base URL (env: SPARKWING_CONTROLLER_URL)")
+	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"),
+		"logs-service URL (env: SPARKWING_LOGS_URL)")
 	timeout := fs.Duration("timeout", 0,
 		"max wall-clock duration for the node (0 = none; job-level modifiers still apply)")
 	coordinated := fs.Bool("coordinated", false,

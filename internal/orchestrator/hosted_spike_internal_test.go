@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -176,7 +177,7 @@ func TestHostedCheck_RefusesAdmissionSettingsItDoesNotAdmit(t *testing.T) {
 }
 
 func TestRunHosted_ASetupFailureAfterTheRunRowFinishesIt(t *testing.T) {
-	t.Setenv(StoreWedgeBudgetEnvVar, "not-a-duration")
+	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget not-a-duration"))
 	paths := newInternalPaths(t)
 	res, err := runHosted(t.Context(), hostedRun{
 		Describe: []byte(`[{"name":"p","args":[]}]`),

@@ -25,7 +25,7 @@ Each top-level key is a section with one owner:
 | `machine` | `box_id`, the host identity a box-scoped concurrency group keys on (default: the hostname) | you |
 | `logs` | `drop_policy`: `warn` keeps a run green when log lines are lost; anything else fails the node | you |
 | `debug` | `pause_timeout`, how long a `sparkwing debug` pause holds (default `30m`) | you |
-| `run` | `submit_env_allow`, the extra names and `NAME_*` prefixes a detached run's environment snapshot carries | you |
+| `run` | `submit_env_allow`, the extra names and `NAME_*` prefixes a detached run's environment snapshot carries; `dispatch_wait`, how long a run waits for a dispatch before it is classed as wedged (a duration, or `off` to wait forever; default: the plan's own bound) | you |
 
 Any other top-level key, and any key a section does not define, fails the read
 with the file, line and key named.

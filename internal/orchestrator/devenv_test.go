@@ -33,21 +33,18 @@ func TestReadDevEnvIsEmptyWithoutAFile(t *testing.T) {
 	}
 }
 
-func TestResolveDevEnvURLDropsTheFallbackWhenDisabled(t *testing.T) {
-	root := writeDevEnv(t, "SPARKWING_LOGS_URL=http://127.0.0.1:4345\n")
-	t.Setenv("SPARKWING_HOME", root)
-	t.Setenv("SPARKWING_LOGS_URL", "")
-	t.Setenv(DevEnvDisableEnv, "1")
-
-	if got := ResolveDevEnvURL("SPARKWING_LOGS_URL"); got != "" {
-		t.Fatalf("logs URL = %q, want the fallback closed", got)
+func TestServiceURLsReadOnlyTheProcessEnvironment(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", writeDevEnv(t, "SPARKWING_CACHE_URL=http://127.0.0.1:8090\n"))
+	t.Setenv(ArtifactStoreEnvVar, "")
+	store, err := resolveArtifactStoreFromEnv(t.Context())
+	if err != nil || store != nil {
+		t.Fatalf("artifact store = %v, %v; want none, since dev.env is no longer a fallback", store, err)
 	}
 }
 
-func TestResolveDevEnvURLKeepsTheProcessValueWhenDisabled(t *testing.T) {
+func TestResolveDevEnvURLPrefersTheProcessValue(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", writeDevEnv(t, "SPARKWING_LOGS_URL=http://127.0.0.1:4345\n"))
 	t.Setenv("SPARKWING_LOGS_URL", "http://127.0.0.1:9999")
-	t.Setenv(DevEnvDisableEnv, "1")
 
 	if got := ResolveDevEnvURL("SPARKWING_LOGS_URL"); got != "http://127.0.0.1:9999" {
 		t.Fatalf("logs URL = %q, want the caller's own binding", got)

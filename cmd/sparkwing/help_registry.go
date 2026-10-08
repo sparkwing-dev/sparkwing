@@ -1006,6 +1006,7 @@ exits 0.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the paused node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to attach to", Required: true, Group: "Target"},
+		{Name: "namespace", Argument: "NAME", Desc: "Kubernetes namespace of the runner pods", Default: "sparkwing", Group: "Target"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{

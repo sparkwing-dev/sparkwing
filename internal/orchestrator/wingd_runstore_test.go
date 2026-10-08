@@ -395,7 +395,7 @@ func TestHeldRunStoreOpensAStoreThatAppearsWithoutWaitingOutTheRetry(t *testing.
 
 func blockTheStoreOpen(t *testing.T, home string) *sql.Tx {
 	t.Helper()
-	t.Setenv(store.BusyTimeoutEnvVar, "2000")
+	store.SetTestBusyTimeout(t, 2000)
 	ctx := context.Background()
 	foreign, err := store.Open(PathsAt(home).StateDB())
 	if err != nil {

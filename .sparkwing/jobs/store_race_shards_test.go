@@ -83,7 +83,6 @@ func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 	lines := strings.Split(result.Stdout, "\n")
 	for _, want := range []string{
 		"SPARKWING_HOME=" + home,
-		"SPARKWING_DEV_ENV_DISABLE=1",
 		"GOWORK=off",
 	} {
 		if !slices.Contains(lines, want) {

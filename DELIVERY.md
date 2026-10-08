@@ -228,9 +228,8 @@ file. Other syntax and workflow checks remain active.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
-  node child, pins `SPARKWING_HOME` to a fresh directory of its own, and
-  exports `SPARKWING_DEV_ENV_DISABLE=1` to close the `dev.env` fallback behind
-  every URL. A gate runs inside a sparkwing node, which hands its children the
+  node child and pins `SPARKWING_HOME` to a fresh directory of its own, which
+  holds no `dev.env` for a CLI verb to find a dashboard through. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body

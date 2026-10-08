@@ -50,7 +50,6 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [cli-configure](cli-configure.md), [cli-fleet](cli-fleet.md) |
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
-| `SPARKWING_DEV_ENV_DISABLE` | [architecture](architecture.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-fleet](cli-fleet.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
@@ -63,7 +62,6 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
 | `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |
 | `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
-| `TYPESAFE_API_KEY` | [admission](admission.md) |
 
 ## Configuration: release tooling
 
@@ -198,9 +196,4 @@ Set by Sparkwing for pipeline code and node processes.
 
 | Variable | Why it stays |
 |---|---|
-| `SPARKWING_DISPATCH_WAIT_TIMEOUT` | Bounds how long a run waits for a dispatch; an earlier changelog entry tells users to set it to `off`. |
-| `SPARKWING_STORE_WEDGE_BUDGET` | Bounds how long a wedged store call may block; only tests set it. |
-| `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` | SQLite busy timeout; only tests set it. |
-| `SPARKWING_NAMESPACE` | Kubernetes namespace for `sparkwing debug attach`; only tests set it. |
-| `SPARKWING_DOCS_BASE_URL` | Base URL that `sparkwing docs` links point at; tests set it, and an earlier changelog entry offers it. |
 | `SPARKS_GO_BIN` | The `go` binary the sparks resolver runs when it writes a pipeline's module overlay; nothing sets it. |

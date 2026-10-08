@@ -146,6 +146,9 @@ unlock.
 
 ### Removed
 
+- **cli + orchestrator (Breaking):** The remaining laptop and test variables are removed
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT` becomes `run.dispatch_wait` in config.yaml, `SPARKWING_NAMESPACE` becomes `sparkwing debug attach --namespace`, and the admission daemon reads `TYPESAFE_API_KEY` from the local secret store. `SPARKWING_STORE_WEDGE_BUDGET`, `SPARKWING_SQLITE_BUSY_TIMEOUT_MS`, `SPARKWING_DOCS_BASE_URL` and `SPARKWING_DEV_ENV_DISABLE` are gone, as is the run-node and trigger fallback to `$SPARKWING_HOME/dev.env`. `pkg/store.BusyTimeoutEnvVar` and `pkg/docs.BaseURLEnvVar` give way to `store.SetTestBusyTimeout` and `docs.SetTestBaseURL`. See [migration guide](docs/migrations/_unreleased.md#the-remaining-laptop-variables-are-removed).
+
 - **cli (Breaking):** One-off run switches are `--sw-*` flags, not environment variables
   `sparkwing run` gains `--sw-no-bincache`, `--sw-hash-all-files`, `--sw-artifact-digest-backfill` and `--sw-allow-unadmitted`; `SPARKWING_NO_BINCACHE`, `SPARKWING_HASH_ALL_FILES` and `SPARKWING_ARTIFACT_DIGEST_BACKFILL` are no longer read, and `SPARKWING_NO_SPARKS_RESOLVE` gives way to the existing `--sw-no-update`. `SPARKWING_ALLOW_UNADMITTED` stays only as the variable that carries the flag to the pipeline binary. See [migration guide](docs/migrations/_unreleased.md#one-off-run-switches-become---sw--flags).
 

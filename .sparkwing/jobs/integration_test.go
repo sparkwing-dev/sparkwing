@@ -29,7 +29,6 @@ func TestEnvironment(t *testing.T) {
 		"AWS_ENDPOINT_URL_S3": "http://fixture",
 		"SPARKWING_REQUIRE_PG": "1",
 		"AWS_REGION": "us-east-1",
-		"SPARKWING_DEV_ENV_DISABLE": "1",
 	} {
 		if got := os.Getenv(name); got != want { t.Errorf("%s = %q, want %q", name, got, want) }
 	}

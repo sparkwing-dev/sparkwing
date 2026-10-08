@@ -98,8 +98,8 @@ func TestStoreWedgeGuard_TerminalOnRealWALShmContention(t *testing.T) {
 		t.Skip("waits for the real SQLite contention budget")
 	}
 
-	t.Setenv(StoreWedgeBudgetEnvVar, "5s")
-	t.Setenv(store.BusyTimeoutEnvVar, "2000")
+	SetTestStoreWedgeBudget(t, 5*time.Second, nil)
+	store.SetTestBusyTimeout(t, 2000)
 
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	shmAnchor, err := store.Open(dbPath)

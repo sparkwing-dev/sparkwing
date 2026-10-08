@@ -583,16 +583,12 @@ var productTestKept = map[string]string{
 	"SPARKWING_STOP_AT":       "is consumed before the node's Work body starts",
 }
 
-// safety: the pipeline module cannot import internal/orchestrator, so this
-// spelling of its DevEnvDisableEnv is pinned by a contract test instead.
-// Clearing the two URLs is not enough on its own, because both fall back to
-// the dev.env under the home.
-const devEnvDisableVar = "SPARKWING_DEV_ENV_DISABLE"
-
+// safety: a fresh home also hides the dev.env the local dashboard writes, which
+// a CLI verb would otherwise read for the dashboard's address.
 const productTestHomeVar = "SPARKWING_HOME"
 
 func productTestPins(home string) []string {
-	return []string{devEnvDisableVar + "=1", productTestHomeVar + "=" + shellQuote(home)}
+	return []string{productTestHomeVar + "=" + shellQuote(home)}
 }
 
 func withoutInherited(cmd string, names []string) string {
