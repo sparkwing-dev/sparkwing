@@ -347,8 +347,8 @@ func TestHonestyCheckUsesCurrentCommandGroups(t *testing.T) {
 		want       string
 	}{
 		{"sparkwing docs teleport", "sparkwing docs teleport"},
-		{"sparkwing docs cache teleport", "sparkwing docs cache teleport"},
-		{"sparkwing docs cache info", ""},
+		{"sparkwing pipeline hooks teleport", "sparkwing pipeline hooks teleport"},
+		{"sparkwing pipeline hooks status", ""},
 		{"sparkwing run my-pipeline", ""},
 		{"sparkwing run config", ""},
 	} {

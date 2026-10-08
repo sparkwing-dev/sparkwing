@@ -107,6 +107,9 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Fold seven `docs` verbs into `docs list`, `docs read`, `docs migrations` and the `cache` group
+  `docs guides` is `docs list --guides`; `docs versions` is `docs list --versions` (with `--web` and `--no-cache`); `docs all` is `docs read --all`; `docs migrations list`, `read` and `between` become one leaf, `docs migrations` (the list), `docs migrations --version V` (one guide) and `docs migrations --from A --to B` (a range; bare `between` is `--from v0.0.0`); `docs cache info` is `cache info --docs` and `docs cache clear` is `cache prune --docs`. See [migration guide](docs/migrations/_unreleased.md#docs-verbs-fold-into-list-read-and-migrations).
+
 - **cli (Breaking):** Fold eight `crons` verbs into `crons uninstall`, `crons list`, `crons show` and `crons set`
   `crons disarm NAME` is `crons uninstall --name NAME`; `crons status` is `crons list --timer` with the same exit code; `crons next [--count N]` is `crons list --next N`, and `crons next NAME` is `crons show NAME --next N`; `crons lock` and `unlock` are `crons set NAME --pin` and `--unpin`; `crons pause` and `resume` are `crons set NAME --pause` and `--resume`; `crons reset NAME` is `crons set NAME --reset`. Output, JSON shapes and `--profile` behaviour carry over, and the timer units keep running `crons tick`. See [migration guide](docs/migrations/_unreleased.md#crons-verbs-fold-into-uninstall-list-show-and-set).
 

@@ -494,7 +494,7 @@ func (c *WebClient) ClearCache() (int, error) {
 }
 
 // CacheStats summarizes what's currently stored under CacheDir.
-// Surface from `sparkwing docs cache info`.
+// Surface from `sparkwing cache info --docs`.
 type CacheStats struct {
 	Dir            string `json:"dir"`
 	Exists         bool   `json:"exists"`

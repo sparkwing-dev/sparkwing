@@ -620,3 +620,38 @@ instead of naming its replacement.
   whole repository.
 - **Timer units:** the systemd and launchd units run `sparkwing crons tick`,
   which keeps its name, so an installed timer needs no change.
+
+## Docs verbs fold into list, read and migrations
+
+| Before | After |
+|---|---|
+| `sparkwing docs guides` | `sparkwing docs list --guides` |
+| `sparkwing docs versions [--web] [--no-cache]` | `sparkwing docs list --versions [--web] [--no-cache]` |
+| `sparkwing docs all` | `sparkwing docs read --all` |
+| `sparkwing docs migrations list [--web]` | `sparkwing docs migrations [--web]` |
+| `sparkwing docs migrations read --version V` | `sparkwing docs migrations --version V` |
+| `sparkwing docs migrations read V` | `sparkwing docs migrations V` |
+| `sparkwing docs migrations between --from A --to B` | `sparkwing docs migrations --from A --to B` |
+| `sparkwing docs migrations between` | `sparkwing docs migrations --from v0.0.0` |
+| `sparkwing docs cache info` | `sparkwing cache info --docs` |
+| `sparkwing docs cache clear` | `sparkwing cache prune --docs` |
+
+- **Agents:** a prompt, skill or script that runs
+  `docs migrations read --version V` or `docs migrations between --from A --to B`
+  drops the `read` or `between` word and keeps its flags. A bare
+  `docs migrations` now lists the guides; the every-guide blob that bare
+  `between` printed needs `--from v0.0.0`. The old words fail loudly:
+  `docs migrations read --version V` is refused as an unexpected positional,
+  and a bare `docs migrations read` as an invalid version.
+- **Output and exit codes:** each replacement prints what the old verb printed
+  in every `-o` format and exits the same way, with two exceptions.
+  `cache info --docs` heads its pretty report `DOCS WEB CACHE` instead of
+  `CACHE`, and with `-o plain` prints the cache directory where
+  `docs cache info` refused plain. `cache prune --docs` honours `-o`:
+  `-o json` prints `{"dir": ..., "removed": N}` and `-o plain` the removed
+  count, where `docs cache clear` printed its sentence for every format.
+- **Flag combinations:** `--guides` takes only `--output`; `--versions` takes
+  `--web` and `--no-cache`; `read --all` takes only `--output`. `--version`
+  and `--from`/`--to` on `docs migrations` cannot be combined. `--docs` on
+  `cache info` and `cache prune` refuses `--all`, `--max-bytes` and
+  `--max-entries`. `docs list` now refuses a stray positional.

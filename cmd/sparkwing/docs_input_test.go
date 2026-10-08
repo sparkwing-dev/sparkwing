@@ -27,7 +27,7 @@ func TestDocsMigrationsValidatesWebBoundsBeforeFetching(t *testing.T) {
 	t.Setenv(docs.BaseURLEnvVar, srv.URL)
 	for _, args := range [][]string{{"--from", "bogus", "--to", "v1.2.3"}, {"--from", "v1.0.0", "--to", "bogus"}} {
 		var err error
-		captureStdout(t, func() { err = runDocsMigrationsBetween(append(args, "--web", "--no-cache")) })
+		captureStdout(t, func() { err = runDocsMigrations(append(args, "--web", "--no-cache")) })
 		if err == nil || !strings.Contains(err.Error(), "version") {
 			t.Errorf("%v error=%v", args, err)
 		}

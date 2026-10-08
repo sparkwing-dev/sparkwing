@@ -189,8 +189,8 @@ while you are standing in it.
 ### Read what the release changes
 
 ```bash
-sparkwing docs migrations list
-sparkwing docs migrations read --version <vX.Y.Z>
+sparkwing docs migrations
+sparkwing docs migrations --version <vX.Y.Z>
 ```
 
 A guide exists only for a release carrying a breaking change. It names

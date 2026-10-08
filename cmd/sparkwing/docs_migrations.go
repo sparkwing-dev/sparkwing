@@ -16,41 +16,39 @@ import (
 )
 
 func runDocsMigrations(args []string) error {
-	if len(args) == 0 {
-		PrintHelp(cmdDocsMigrations, os.Stderr)
-		return errors.New("docs migrations: missing subcommand")
-	}
-	switch args[0] {
-	case "list":
-		return runDocsMigrationsList(args[1:])
-	case "read":
-		return runDocsMigrationsRead(args[1:])
-	case "between":
-		return runDocsMigrationsBetween(args[1:])
-	case "help", "-h", "--help":
-		PrintHelp(cmdDocsMigrations, os.Stdout)
-		return nil
-	default:
-		PrintHelp(cmdDocsMigrations, os.Stderr)
-		return fmt.Errorf("docs migrations: unknown verb %q (valid: list, read, between)", args[0])
-	}
-}
-
-func runDocsMigrationsList(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsMigrationsList.Path, flag.ContinueOnError)
+	fs := flag.NewFlagSet(cmdDocsMigrations.Path, flag.ContinueOnError)
+	from := fs.String("from", "", "exclusive lower bound (default v0.0.0 = every guide up through --to)")
+	to := fs.String("to", "", "inclusive upper bound (default = highest version this CLI knows about)")
 	var output string
 	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | table | json | plain")
-	registerWebFlags(fs, &wf, false)
-	if err := parseAndCheck(cmdDocsMigrationsList, fs, args); err != nil {
+	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
+	registerWebFlags(fs, &wf, true)
+	if err := parseAndCheck(cmdDocsMigrations, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("docs migrations list: unexpected positional %q", fs.Arg(0))
+	if fs.NArg() > 1 {
+		return fmt.Errorf("docs migrations: unexpected positional %q", fs.Arg(1))
 	}
+	between := fs.Changed("from") || fs.Changed("to")
+	if fs.NArg() == 1 {
+		if between || wf.version != "" {
+			return fmt.Errorf("docs migrations: unexpected positional %q; --version or --from/--to already pick the guides", fs.Arg(0))
+		}
+		wf.version = fs.Arg(0)
+	}
+	switch {
+	case between:
+		return docsMigrationsBetween(*from, *to, wf, output)
+	case wf.version != "":
+		return docsMigrationsRead(wf, output)
+	}
+	return docsMigrationsList(wf, output)
+}
+
+func docsMigrationsList(wf docsWebFlags, output string) error {
 	ctx, cancel := newWebContext()
 	defer cancel()
 	if !wf.web {
@@ -65,32 +63,14 @@ func runDocsMigrationsList(args []string) error {
 	client.NoCache = wf.noCache
 	entries, err := client.MigrationIndex(ctx)
 	if err != nil {
-		return fmt.Errorf("docs migrations list --web: %w", err)
+		return fmt.Errorf("docs migrations --web: %w", err)
 	}
 	return renderMigrationsList(entries, output)
 }
 
-func runDocsMigrationsRead(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsMigrationsRead.Path, flag.ContinueOnError)
-	var output string
-	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
-	registerWebFlags(fs, &wf, true)
-	if err := parseAndCheck(cmdDocsMigrationsRead, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if wf.version == "" && fs.NArg() > 0 {
-		wf.version = fs.Arg(0)
-	}
-	if wf.version == "" {
-		PrintHelp(cmdDocsMigrationsRead, os.Stderr)
-		return errors.New("docs migrations read: --version is required (e.g. --version v0.4.0)")
-	}
+func docsMigrationsRead(wf docsWebFlags, output string) error {
 	if !semver.IsValid(wf.version) {
-		return fmt.Errorf("docs migrations read: %q is not a valid semver (e.g. v0.4.0); run `sparkwing docs migrations list` to see available versions", wf.version)
+		return fmt.Errorf("docs migrations: %q is not a valid semver (e.g. v0.4.0); run `sparkwing docs migrations` to see available versions", wf.version)
 	}
 
 	ctx, cancel := newWebContext()
@@ -128,32 +108,16 @@ func runDocsMigrationsRead(args []string) error {
 	return writeText(os.Stdout, "document", body, output)
 }
 
-func runDocsMigrationsBetween(args []string) error {
-	fs := flag.NewFlagSet(cmdDocsMigrationsBetween.Path, flag.ContinueOnError)
-	from := fs.String("from", "", "exclusive lower bound (default v0.0.0 = every guide up through --to)")
-	to := fs.String("to", "", "inclusive upper bound (default = highest version this CLI knows about)")
-	var output string
-	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
-	registerWebFlags(fs, &wf, false)
-	if err := parseAndCheck(cmdDocsMigrationsBetween, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func docsMigrationsBetween(from, to string, wf docsWebFlags, output string) error {
+	if from != "" && !semver.IsValid(from) {
+		return fmt.Errorf("docs migrations: --from %q is not a valid version (use vX.Y.Z)", from)
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("docs migrations between: unexpected positional %q (use --from/--to)", fs.Arg(0))
+	if to != "" && !semver.IsValid(to) {
+		return fmt.Errorf("docs migrations: --to %q is not a valid version (use vX.Y.Z)", to)
 	}
-	if *from != "" && !semver.IsValid(*from) {
-		return fmt.Errorf("docs migrations between: --from %q is not a valid version (use vX.Y.Z)", *from)
-	}
-	if *to != "" && !semver.IsValid(*to) {
-		return fmt.Errorf("docs migrations between: --to %q is not a valid version (use vX.Y.Z)", *to)
-	}
-	if *from != "" && *to != "" && semver.Compare(*from, *to) > 0 {
+	if from != "" && to != "" && semver.Compare(from, to) > 0 {
 		fmt.Fprintf(os.Stderr, "%s: --from (%s) is newer than --to (%s); did you swap the args?\n",
-			color.Dim("warning"), *from, *to)
+			color.Dim("warning"), from, to)
 	}
 
 	ctx, cancel := newWebContext()
@@ -167,24 +131,24 @@ func runDocsMigrationsBetween(args []string) error {
 		client.NoCache = wf.noCache
 		all, err := client.MigrationIndex(ctx)
 		if err != nil {
-			return fmt.Errorf("docs migrations between --web: %w", err)
+			return fmt.Errorf("docs migrations --web: %w", err)
 		}
-		entries = filterAndOrderBetween(all, *from, *to)
+		entries = filterAndOrderBetween(all, from, to)
 		bodyFetcher = func(version string) (string, error) {
 			return client.Migration(ctx, version)
 		}
 	} else {
-		picked, err := docs.MigrationsBetween(*from, *to)
+		picked, err := docs.MigrationsBetween(from, to)
 		if err != nil {
-			return fmt.Errorf("docs migrations between: %w", err)
+			return fmt.Errorf("docs migrations: %w", err)
 		}
 		entries = picked
 		bodyFetcher = docs.MigrationsRead
 	}
 
-	body, err := renderBetweenMarkdown(*from, *to, entries, bodyFetcher)
+	body, err := renderBetweenMarkdown(from, to, entries, bodyFetcher)
 	if err != nil {
-		return fmt.Errorf("docs migrations between: %w", err)
+		return fmt.Errorf("docs migrations: %w", err)
 	}
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"

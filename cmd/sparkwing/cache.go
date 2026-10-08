@@ -74,6 +74,7 @@ func runCacheInfo(args []string) error {
 	var all bool
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	fs.BoolVar(&all, "all", false, "List every entry rather than the ten most recent")
+	docsCache := fs.Bool("docs", false, "report the docs --web fetch cache instead")
 	if err := parseAndCheck(cmdCacheInfo, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -85,6 +86,9 @@ func runCacheInfo(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("cache info: unexpected positional %q", fs.Arg(0))
+	}
+	if *docsCache {
+		return docsCacheInfo(output)
 	}
 
 	entries, err := bincache.ScanCache()
@@ -186,6 +190,7 @@ func runCachePrune(args []string) error {
 	fs.StringVar(&maxBytesRaw, "max-bytes", "", "byte ceiling, e.g. 512MiB")
 	fs.IntVar(&maxEntries, "max-entries", -1, "entry ceiling")
 	fs.BoolVar(&all, "all", false, "remove every inactive entry")
+	docsCache := fs.Bool("docs", false, "clear the docs --web fetch cache instead")
 	if err := parseAndCheck(cmdCachePrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -197,6 +202,9 @@ func runCachePrune(args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("cache prune: unexpected positional %q", fs.Arg(0))
+	}
+	if *docsCache {
+		return docsCacheClear(output)
 	}
 	maxBytes := bincache.ConfiguredMaxBytes()
 	if maxBytesRaw != "" {

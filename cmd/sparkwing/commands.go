@@ -17,9 +17,7 @@ import (
 var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdDaemonExplain, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun,
 	&cmdConfigure, &cmdConfigureInit, &cmdConfigureXrepo, &cmdConfigureXrepoList, &cmdConfigureXrepoAdd, &cmdConfigureXrepoRemove, &cmdConfigureXrepoPrune,
-	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsGuides, &cmdDocsAll, &cmdDocsSearch,
-	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
-	&cmdDocsVersions, &cmdDocsCache, &cmdDocsCacheInfo, &cmdDocsCacheClear,
+	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsSearch, &cmdDocsMigrations,
 	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
