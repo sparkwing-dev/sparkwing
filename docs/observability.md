@@ -200,9 +200,19 @@ against its own output directory. Segments live under
 `logs/r90/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`.
 A runner whose controller predates segments, or has nowhere to keep
 them, writes to its logs URL, or keeps the log on local disk without one,
-as before. While a node runs, its runner also posts each line to the
-controller's live ring with the line's byte offset in the log, about
-every 250 ms.
+as before.
+
+A runner pushes a node's lines to the controller's live ring only while
+a viewer watches the node: the dashboard's log stream or `sparkwing runs
+logs --follow` holds a 30-second watch and renews it while open. The
+runner learns of the watch from replies it already receives: the node
+claim heartbeat (every 3 to 5 seconds), the run heartbeat (every 30
+seconds, for a trigger's in-process nodes) and its segment URL requests.
+On the first watched reply it pushes everything after the last uploaded
+segment, then each new line about every 250 ms, each push carrying its
+byte offset in the log; when the watch lapses it stops. An unwatched
+node sends nothing live, and a viewer sees its segments, up to 10
+seconds behind, until the runner joins.
 
 The dashboard and `sparkwing runs logs`, `--follow` and `--grep` read
 through the controller, which serves a node from its segments and verifies

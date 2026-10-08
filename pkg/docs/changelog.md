@@ -89,6 +89,9 @@ unlock.
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
 
+- **runner + controller:** A node's lines reach the live ring only while a viewer watches it
+  The dashboard's log stream and `runs logs --follow` hold a 30-second watch on the node. The controller reports it in the launched pod's claim heartbeat reply (`watched`), in a runner's node claim heartbeat and run heartbeat replies when the request sends `X-Sparkwing-Log-Watch: 1` (answered `200` with `watched` or `watched_nodes` instead of `204`), and in each `log-segments` reply. A runner that keeps the node's log as segments pushes everything after its last uploaded segment when a watch starts and stops when it lapses, so an unwatched node sends nothing live. `Client.WithWatchObserver` hands a process the reports its heartbeats carry.
+
 ### Fixed
 - **Node bounces:** Schema 93 moves bounce requests recorded before they carried a team into their run's team, so a non-default team's open request stays visible and its next request takes the next sequence number instead of colliding. See [Node bounce requests move to their run's team](docs/migrations/_unreleased.md#node-bounce-requests-move-to-their-runs-team).
 - **Run sweeps:** Fail a stale or orphaned run of any team in its own team, and settle an expired trigger claim's run in its team; a non-default team's stale run no longer stops the sweep for every team.
