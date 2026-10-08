@@ -107,13 +107,13 @@ A team stores at most 50 credentials.
 The controller releases a stored credential only when all of these hold:
 
 - the caller holds a live claim on a node or the trigger of the run, with a
-  runner token of the run's own team, both when the request arrives and
+  runner or machine token of the run's own team, both when the request arrives and
   inside the transaction that records the release, which locks the claim, so
   a lease that lapses in between releases nothing;
 - the host of the run's repository is the credential's host;
 - the caller is a cloud runner, one whose token the operator meters, or a
   machine a team owner opted in with
-  `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials` (the dashboard's
+  `PUT /api/v1/team/tokens/{prefix}/git-credentials` (the dashboard's
   **Team > Machines** page).
 
 Otherwise the route answers 403 `git_credential_not_released`, or 409

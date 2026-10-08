@@ -51,7 +51,7 @@ matcher in `pkg/match`, so they agree:
 
 - `name=<agent>` matches only the runner whose token was minted for that
   agent name. A runner asserting `name=...` as a label matches nothing, and a
-  team holds one live runner token per agent name.
+  team holds one live runner or machine token per agent name.
 - `os=` and `arch=` match the platform the runner detects and reports with
   every claim. A runner that reports none falls back to an `os=` or `arch=`
   label.

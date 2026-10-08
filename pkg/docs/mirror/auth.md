@@ -11,6 +11,8 @@ Raw tokens are `<prefix>_<entropy>`:
   or `sparkwing cloud connect --admin-token-stdin`, which mints one and writes the
   profile that holds it).
 - `swr_...` -- runner. Created for remote machine agents or pool replicas.
+- `swt_...` -- team. Minted by a team member, either for the CLI or for a
+  machine, with `POST /api/v1/team/tokens` (see [team tokens](#team-tokens)).
 - `sws_...` -- service. Created for in-cluster back-channel callers.
 
 The **prefix segment** is the first 12 characters of a raw token. It's
@@ -487,7 +489,7 @@ already finished still occupies the budget until it ages out of the hour.
 ### The team-wide runner count
 
 `max_concurrent_runners` counts every cloud runner a team holds, whichever of
-its tokens claimed it, so minting more runner tokens gives a team no more
+its tokens claimed it, so minting more machine tokens gives a team no more
 concurrency than its spend limits assume. It always applies: unset or zero
 means 100 per team, never unlimited. An operator raises one granted team
 past it with `runner_cap` on `POST /api/v1/teams/{team}/trust`
@@ -535,7 +537,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
+| `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
@@ -810,7 +812,7 @@ every request, so a demotion or removal bites on the user's next request:
 | Role     | Scopes                                                                 |
 |----------|------------------------------------------------------------------------|
 | `reader` | `runs.read`, `logs.read`, `triggers.read`                              |
-| `editor` | reader, plus `runs.write`, `runs.control`, `approvals.write`; mints runner tokens for the team |
+| `editor` | reader, plus `runs.write`, `runs.control`, `approvals.write`; mints machine tokens for the team |
 | `owner`  | editor, plus `team.admin`                                              |
 
 No role grants `admin`, which stays the deployment operator's scope. Nobody
@@ -821,26 +823,8 @@ Every `/api/v1/team/...` route acts on the caller's active team, taken from the
 session and never from the request, and an id belonging to another team
 answers 404.
 
-A runner token minted from team settings carries the runner scope set and
-belongs to the team that minted it. It expires once it goes 90 days unused:
-each use moves its expiry to 90 days past that use, written at most once an
-hour, and the runner-token list shows when. Revoking it takes effect at once.
-Removing a member revokes every runner token
-they minted in that team, and demoting a member to `reader` revokes theirs,
-both in the same step as the role change. A team holds at most 100 live runner
-tokens, at most 50 open invitations, and creates at most 100 invitations a day;
-withdrawing an invitation still counts toward that day. No token minted into a
-team carries `admin`.
-
-Any member mints a personal CLI token with `POST /api/v1/team/cli-tokens`,
-from a signed-in session only; a bearer token cannot mint one. It is a user
-token bound to the member and the active team, carrying the member's role
-scopes without `team.admin`, so a reader's token only reads. Token creation
-uses the role held when the token is written, so a pending request cannot
-restore authority after a demotion. It expires 90 days after it is minted. Removing the member, or demoting them to `reader`, revokes
-it with their runner tokens; an owner demoted to `editor` keeps it, since it
-already carried only the editor's scopes. The member lists and revokes their
-own CLI tokens and no one else's, and holds at most 10 live ones in a team.
+A team holds at most 50 open invitations, and creates at most 100 invitations
+a day; withdrawing an invitation still counts toward that day.
 
 With `--email-sender` (env `SPARKWING_EMAIL_SENDER`) set, the controller
 emails each invitation through Amazon SES, taking credentials and region from
@@ -914,10 +898,63 @@ id or email, and deletes a team with `DELETE /api/v1/teams/{team}`; both need
 Owning a secret means creating and deleting it, not keeping it from editors.
 Anyone who can run a team's pipelines -- an editor or above -- can use the
 secrets those pipelines read: they can change what a pipeline runs, and a
-runner token they mint reads the secrets of every run it claims. This is the
+machine token they mint reads the secrets of every run it claims. This is the
 same model as GitHub Actions, where anyone who can push a workflow can use the
 repository's secrets. Grant `editor` only to someone you would hand those
 secrets.
+
+### Team tokens
+
+A member mints a team token with `POST /api/v1/team/tokens`, from a signed-in
+session only; a bearer token cannot mint one. The raw token starts `swt_` and
+belongs to the team that minted it. Its `scopes` come from exactly one of two
+families, and a request that mixes them, names an unknown scope or sends an
+empty list answers `400`:
+
+- A **member** token is for the CLI. Its scopes are a subset of the caller's
+  role scopes without `team.admin`, so a reader's token only reads, and a
+  scope above the caller's role answers `403`. Any member mints one, and the
+  request sends no `name` or `repos`. The token acts as the member and expires
+  90 days after it is minted. A member holds at most 10 live ones in a team.
+  The response carries `token`, `prefix`, `family`, `scopes`, `expires_at`,
+  and the `profile`, `setup` and `run` values the dashboard shows for
+  connecting the CLI.
+- A **machine** token is for a runner. Its scopes are a subset of
+  `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and
+  `logs.write` that includes `nodes.claim` or `triggers.claim`. Minting one
+  needs `editor` (`403` otherwise), and the request names the agent in `name`
+  (1 to 63 letters, digits, `-`, `_` or `.`) and the repositories in `repos`,
+  allowlist patterns that the returned connect `command` passes to the runner.
+  The token's principal is `agent:<name>`, and a name a live machine or runner
+  token already holds answers `409`. It expires once it goes 90 days unused:
+  each use moves its expiry to 90 days past that use, written at most once an
+  hour, and the token list shows when. A team holds at most 100 live machine
+  tokens.
+
+Token creation uses the role held when the token is written, so a pending
+request cannot restore authority after a demotion. No token minted into a team
+carries `admin`.
+
+`GET /api/v1/team/tokens` answers any member with the tokens they minted, of
+either family, and adds every machine token of the team for an editor or
+owner. Each row names `prefix`, `name`, `family`, `scopes`, `created_by`,
+`created_at`, `expires_at`, `last_used_at` and `git_credentials`.
+`DELETE /api/v1/team/tokens/{prefix}` revokes a token at once: the member who
+minted it revokes their own, and an owner revokes any machine token. A token
+the caller cannot see answers `404`, and one they see but may not revoke
+answers `403`. An owner releases stored git credentials to a machine with
+`PUT /api/v1/team/tokens/{prefix}/git-credentials` (see
+[Git credentials](git-credentials.md#who-receives-it)).
+
+Removing a member revokes every token they minted in that team, and demoting a
+member to `reader` revokes them too, both in the same step as the role change.
+An owner demoted to `editor` keeps theirs, since a member token already
+carried only the editor's scopes.
+
+CLI tokens (`swu_`) and runner tokens (`swr_`) minted from team settings
+before team tokens existed keep authenticating as they did until they expire
+or are revoked. The same routes list and revoke them, and they count toward
+the 10 member tokens and 100 machine tokens a team may hold.
 
 ### Linked sign-ins
 

@@ -1142,3 +1142,60 @@ Before upgrading:
   sign-in, as before, and its `/login` redirects to the page asked for.
 - Rolling back to an older binary leaves its password routes failing on the
   missing table; a token session it reads carries no scope.
+
+## Team CLI and runner tokens become team tokens
+
+Scripts that mint team CLI or runner tokens through the API move to one route.
+Tokens already minted keep working.
+
+- **Before:** a team member minted a personal CLI token with
+  `POST /api/v1/team/cli-tokens` and an editor minted a runner token with
+  `POST /api/v1/team/runner-tokens`. Each kind had its own `GET` list and
+  `DELETE /{prefix}` revoke, and an owner released git credentials to a
+  machine with `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials`.
+- **After:** those routes are gone with no alias.
+  `POST /api/v1/team/tokens` mints a team token (`swt_`) whose `scopes` come
+  from exactly one family. Member scopes (`runs.read`, `logs.read`,
+  `triggers.read`, and for an editor or owner `runs.write`, `runs.control`,
+  `approvals.write`) make a CLI token: any member mints one, with no `name` or
+  `repos`, and it lasts 90 days. Machine scopes (`nodes.claim`,
+  `triggers.claim`, `runs.state`, `secrets.read`, `logs.write`, including
+  `nodes.claim` or `triggers.claim`) make a runner token: an editor mints one
+  with `name` and `repos`, and it lasts 90 days past its last use. A request
+  that mixes families, names an unknown scope or sends none answers `400`.
+  `GET /api/v1/team/tokens`, `DELETE /api/v1/team/tokens/{prefix}` and
+  `PUT /api/v1/team/tokens/{prefix}/git-credentials` replace the list, revoke
+  and git-credential routes for both kinds. Schema v96 makes an agent name
+  unique across live runner and machine tokens; it needs no operator action.
+
+To upgrade:
+
+1. Leave existing tokens alone. A `swu_` CLI token or `swr_` runner token
+   minted from team settings keeps authenticating as before until it expires
+   or is revoked, and `GET /api/v1/team/tokens` lists it with the new ones.
+2. Point scripts at the new route and name the scopes. The route still needs
+   a signed-in session, as the old ones did. A runner token becomes this body:
+
+   ```json
+   {"scopes": ["nodes.claim", "triggers.claim", "runs.state", "secrets.read", "logs.write"],
+    "name": "build-box", "repos": ["github.com/acme/*"]}
+   ```
+
+   A CLI token sends the scopes of the caller's role, for an editor
+   `["runs.read", "logs.read", "triggers.read", "runs.write", "runs.control", "approvals.write"]`,
+   and no `name` or `repos`.
+3. Move list, revoke and git-credential calls to `/api/v1/team/tokens` and
+   `/api/v1/team/tokens/{prefix}`. Read each row's `family` to tell a member
+   token from a machine token.
+
+**Edge cases:**
+
+- Minting a machine token whose `name` a live runner or machine token already
+  holds answers `409`, as it did for runner tokens. Revoke the old token
+  first, or pick another name.
+- The 10 live member tokens per member and 100 live machine tokens per team
+  count the old CLI and runner tokens too.
+- Operator tokens (`POST /api/v1/tokens`, `sparkwing cluster tokens`), the
+  bootstrap token, GitHub Actions exchange credentials and local-fleet tokens
+  are unchanged. The dashboard's **Team > Machines** page uses the new routes
+  and works as before.

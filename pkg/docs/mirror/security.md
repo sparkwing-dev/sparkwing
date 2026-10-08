@@ -179,7 +179,7 @@ single-user tool on a single-user machine.
 ## Authentication and authorization
 
 Controller and logs requests carry a bearer token; each route declares
-the scope it needs. Tokens are typed (`swu_`/`swr_`/`sws_`), stored as
+the scope it needs. Tokens are typed (`swu_`/`swr_`/`swt_`/`sws_`), stored as
 argon2id hashes, and never logged in full. The complete model -- token
 kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
@@ -195,7 +195,7 @@ is an `audit` record that adds `ts`, `client_ip`, `client_class`,
 email or a token) and `team`. These also get an `audit` record:
 
 - reads of secrets, tokens and operator routes (`/api/v1/secrets`,
-  `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
+  `/api/v1/tokens`, `/api/v1/team/tokens`,
   `/api/v1/operator/...`);
 - the dashboard's own sign-in and logout routes, and the redirect that finishes
   a browser flow: a completed OAuth sign-in, identity link or GitHub App
