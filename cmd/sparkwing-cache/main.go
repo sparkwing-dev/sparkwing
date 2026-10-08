@@ -95,7 +95,7 @@ func run(args []string) error {
 		cfg.BlobStore,
 		"s3://bucket/prefix that holds the binary, dependency-archive and artifact stores instead of the volume, "+
 			"one teams/<team>/ namespace per team. Region and credentials come from the AWS default chain (IRSA on EKS); "+
-			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors and the registry proxy stay "+
+			"AWS_ENDPOINT_URL_S3 points it at an S3-compatible store. Git mirrors and the registry proxy stay "+
 			"on --data-dir. Empty keeps everything on the volume.")
 	fs.StringVar(&cfg.ControllerURL, "controller",
 		cfg.ControllerURL,

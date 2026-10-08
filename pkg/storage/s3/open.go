@@ -47,8 +47,9 @@ func ParseURL(raw string) (bucket, prefix string, err error) {
 
 // NewClient builds an S3 client the one way this repository builds them:
 // region and credentials from the AWS default chain (IRSA on EKS), the SDK
-// retryer capped at [SDKMaxAttempts], and $SPARKWING_S3_ENDPOINT, when set,
-// as a path-style endpoint for an S3-compatible store. optFns follow those
+// retryer capped at [SDKMaxAttempts], and the endpoint the SDK reads from
+// AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL, addressed path-style when either is
+// set, because an S3-compatible store rarely serves a bucket as a hostname. optFns follow those
 // options, so a caller adds a request budget here.
 //
 // safety: the only S3 client this repository constructs, so the SDK retryer is
@@ -67,14 +68,13 @@ func NewClient(ctx context.Context, optFns ...func(*awss3.Options)) (*awss3.Clie
 		return nil, errors.New(
 			"no AWS region configured, which an s3 backend needs: set AWS_REGION " +
 				"(or a region in ~/.aws/config). For a non-AWS S3-compatible store, " +
-				"set SPARKWING_S3_ENDPOINT as well and any region value will do")
+				"set AWS_ENDPOINT_URL_S3 as well and any region value will do")
 	}
 	opts := []func(*awss3.Options){}
-	if ep := os.Getenv("SPARKWING_S3_ENDPOINT"); ep != "" {
-		opts = append(opts, func(o *awss3.Options) {
-			o.BaseEndpoint = aws.String(ep)
-			o.UsePathStyle = true
-		})
+	// safety: the SDK takes the endpoint from these variables itself but has no
+	// variable for path-style addressing, which MinIO and its kin need.
+	if os.Getenv("AWS_ENDPOINT_URL_S3") != "" || os.Getenv("AWS_ENDPOINT_URL") != "" {
+		opts = append(opts, func(o *awss3.Options) { o.UsePathStyle = true })
 	}
 	return awss3.NewFromConfig(cfg, append(opts, optFns...)...), nil
 }

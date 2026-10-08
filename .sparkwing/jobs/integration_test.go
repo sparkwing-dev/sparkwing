@@ -26,7 +26,7 @@ func TestEnvironment(t *testing.T) {
 	}
 	for name, want := range map[string]string{
 		"SPARKWING_TEST_PG_URL": "postgres://fixture",
-		"SPARKWING_S3_ENDPOINT": "http://fixture",
+		"AWS_ENDPOINT_URL_S3": "http://fixture",
 		"SPARKWING_REQUIRE_PG": "1",
 		"AWS_REGION": "us-east-1",
 		"SPARKWING_DEV_ENV_DISABLE": "1",
@@ -53,7 +53,7 @@ func TestEnvironment(t *testing.T) {
 		"QA_FORBIDDEN="+strings.Join(productTestUnset, ","),
 		"SPARKWING_HOME=parent-home",
 		"SPARKWING_TEST_PG_URL=postgres://fixture",
-		"SPARKWING_S3_ENDPOINT=http://fixture",
+		"AWS_ENDPOINT_URL_S3=http://fixture",
 		"SPARKWING_REQUIRE_PG=1",
 		"AWS_REGION=us-east-1",
 	)

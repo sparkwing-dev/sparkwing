@@ -26,7 +26,7 @@ func s3Env(t *testing.T, endpoint string) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/credentials")
 	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/config")
-	t.Setenv("SPARKWING_S3_ENDPOINT", endpoint)
+	t.Setenv("AWS_ENDPOINT_URL_S3", endpoint)
 }
 
 func countingBucket(t *testing.T, status int) (endpoint string, hits *atomic.Int64) {

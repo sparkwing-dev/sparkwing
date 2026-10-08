@@ -146,6 +146,9 @@ unlock.
 
 ### Removed
 
+- **storage (Breaking):** `AWS_ENDPOINT_URL_S3` replaces `SPARKWING_S3_ENDPOINT`
+  Every S3 client takes its endpoint from the AWS SDK's own `AWS_ENDPOINT_URL_S3` (or `AWS_ENDPOINT_URL`) and addresses buckets path-style when either is set; no process reads `SPARKWING_S3_ENDPOINT`. See [migration guide](docs/migrations/_unreleased.md#aws_endpoint_url_s3-replaces-sparkwing_s3_endpoint).
+
 - **controller (Breaking):** `sparkwing-controller` reads settings from flags only
   None of the 41 configuration variables it read is read any more; each has a flag or is gone. `--cloudfront-domain`, `--cloudfront-key-pair-id` and `--object-store-budget` (`class:window=count` entries) are new, replacing the variables that had no flag. `SPARKWING_OBJECT_STORE_BREAKER` and `SPARKWING_OBJECT_STORE_TRIP_RESET` are gone without replacement, and no process reads the object-store budget variables any more. `sparkwing-full` passes `--dashboard-url` and `--cache-url`. See [migration guide](docs/migrations/_unreleased.md#sparkwing-controller-reads-settings-from-flags-only).
 

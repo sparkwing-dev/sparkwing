@@ -903,7 +903,7 @@ func droppedLogsError(count int, reason string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d log line(s) lost: the log store stayed unreachable past the append retry budget", count)
 	b.WriteString("\n  check: the logs backend this run named in invocation.backends")
-	b.WriteString("\n         (for s3: the bucket, AWS_REGION, credentials, SPARKWING_S3_ENDPOINT)")
+	b.WriteString("\n         (for s3: the bucket, AWS_REGION, credentials, AWS_ENDPOINT_URL_S3)")
 
 	if strings.Contains(reason, "404") {
 		b.WriteString("\n  note:  the store answered 404, so nothing serves log appends at that URL.")

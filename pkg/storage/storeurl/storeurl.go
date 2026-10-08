@@ -11,7 +11,7 @@
 // else $SPARKWING_CACHE_TOKEN, the bearer the cache requires on its routes.
 //
 // S3 credentials + region come from the standard AWS credential
-// chain. $SPARKWING_S3_ENDPOINT overrides BaseEndpoint (R2, MinIO, etc.).
+// chain. AWS_ENDPOINT_URL_S3 points it at R2, MinIO and the like.
 package storeurl
 
 import (

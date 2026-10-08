@@ -144,7 +144,7 @@ func runIntegrationSuite(ctx context.Context) error {
 		"SPARKWING_TEST_PG_URL="+itPGURL,
 		"SPARKWING_REQUIRE_PG=1",
 		"SPARKWING_S3_TEST_BUCKET="+itBucket,
-		"SPARKWING_S3_ENDPOINT="+itS3Endpt,
+		"AWS_ENDPOINT_URL_S3="+itS3Endpt,
 		"AWS_ACCESS_KEY_ID=minioadmin",
 		"AWS_SECRET_ACCESS_KEY=minioadmin",
 		"AWS_REGION=us-east-1",

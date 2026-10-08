@@ -209,7 +209,7 @@ ran it.
   `--require-auth` is a boolean flag, so pass it bare. A retention set through
   `SPARKWING_LOGS_RETENTION` used to count as named and kept an archived
   service off its 90-day default; only `--retention` counts now.
-  `SPARKWING_S3_ENDPOINT` is still read, because it has no flag yet.
+  `SPARKWING_S3_ENDPOINT` gave way to `AWS_ENDPOINT_URL_S3`; see below.
 
 ## sparkwing-cache reads flags and a credentials directory
 
@@ -290,7 +290,8 @@ ran it.
   grant key as `SPARKWING_CACHE_GRANT_KEY`; when it moves to a credentials
   directory it reads the same `cache-token` and `cache-grant-key` file names,
   so one projected Secret volume will serve both. `SPARKWING_S3_ENDPOINT`,
-  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
+  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` changed too; see the
+  sections below.
 
 ## sparkwing-runner reads flags and a credentials directory
 
@@ -492,6 +493,21 @@ ran it.
   `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` the controller could not read
   used to print a warning and keep the default; `--bucket-measure-pages`
   refuses it. In `internal/egress`, `Bind` takes no environment.
+
+## AWS_ENDPOINT_URL_S3 replaces SPARKWING_S3_ENDPOINT
+
+- **Before:** `SPARKWING_S3_ENDPOINT` pointed every S3 client Sparkwing
+  builds at an S3-compatible store and addressed buckets path-style.
+- **After:** the AWS SDK's own `AWS_ENDPOINT_URL_S3`, or `AWS_ENDPOINT_URL`
+  for every AWS service, names the endpoint; the SDK reads it. Sparkwing
+  addresses buckets path-style whenever either is set.
+  `SPARKWING_S3_ENDPOINT` is no longer read by any process.
+- **Operator steps:** rename the variable to `AWS_ENDPOINT_URL_S3` in every
+  environment that set it: a runner, a laptop shell, a CI job, and the
+  controller, cache and logs Deployments.
+- **Edge cases:** `AWS_ENDPOINT_URL` also redirects every other AWS client
+  in the process, such as SES invitation email on the controller; use the
+  S3-specific name unless that is what you want.
 
 ## Leftover variable names are removed
 

@@ -68,7 +68,6 @@ also reads the URLs as a fallback for its own `--controller` and `--logs`.
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
 | `SPARKWING_RERUN_IMAGE` | [cli-debug](cli-debug.md) |
-| `SPARKWING_S3_ENDPOINT` | [deployment-modes](deployment-modes.md), [observability](observability.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_SECRETS` | [machine-config](machine-config.md) |
 | `SPARKWING_SECRETS_KEY` | [backup-restore](backup-restore.md), [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_KEY_FILE` | [machine-config](machine-config.md), [cli-secrets](cli-secrets.md) |
@@ -170,6 +169,8 @@ Set by Sparkwing for pipeline code and node processes.
 |---|---|
 | `ACTIONS_ID_TOKEN_REQUEST_TOKEN` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
 | `ACTIONS_ID_TOKEN_REQUEST_URL` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
+| `AWS_ENDPOINT_URL` | AWS SDK; see [deployment-modes](deployment-modes.md) |
+| `AWS_ENDPOINT_URL_S3` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `GITHUB_REPOSITORY` | GitHub Actions |
 | `GITHUB_RUN_ID` | GitHub Actions |
 | `KUBECONFIG` | Kubernetes client configuration |

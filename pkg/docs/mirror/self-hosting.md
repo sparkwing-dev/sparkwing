@@ -332,8 +332,8 @@ namespace per team, and the volume shrinks to working space. Give each service
 its own prefix in the bucket; neither ever writes at the bucket root or lists
 outside its prefix, so a per-service IAM policy scoped to the prefix is enough.
 Region and credentials come from the AWS default chain (IRSA on EKS, with
-`AWS_REGION` set); no static keys are read. `SPARKWING_S3_ENDPOINT` points
-either service at an S3-compatible store.
+`AWS_REGION` set); no static keys are read. The AWS SDK's own
+`AWS_ENDPOINT_URL_S3` points either service at an S3-compatible store.
 
 | Service | Flag | Keys |
 |---|---|---|
