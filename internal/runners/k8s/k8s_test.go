@@ -70,6 +70,9 @@ func TestBuildJob_ReportsTheCapabilitiesUsedForFallbackEligibility(t *testing.T)
 	if got := env["SPARKWING_RUNNER_TYPE"]; got != "kubernetes" {
 		t.Fatalf("SPARKWING_RUNNER_TYPE = %q, want kubernetes", got)
 	}
+	if got := env["SPARKWING_LOG_FORMAT"]; got != "json" {
+		t.Fatalf("SPARKWING_LOG_FORMAT = %q, want json", got)
+	}
 	if got := env["SPARKWING_RUNNER_NAME"]; got != "job-name" {
 		t.Fatalf("SPARKWING_RUNNER_NAME = %q, want job-name", got)
 	}

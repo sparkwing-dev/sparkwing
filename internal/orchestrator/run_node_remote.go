@@ -233,6 +233,10 @@ func runNodeChild(
 		childBaseEnv,
 		"SPARKWING_CONTROLLER_URL="+broker.URL(),
 		"SPARKWING_LOGS_URL="+childLogsURL,
+		"SPARKWING_RUN_ID="+runID,
+		"SPARKWING_NODE_ID="+nodeID,
+		// safety: this process forwards the child's stdout as log records, whatever the operator chose.
+		"SPARKWING_LOG_FORMAT=json",
 		remoteExecutionCapabilityInputEnv+"=1",
 	)
 	if fence.ClaimGeneration > 0 {

@@ -38,11 +38,11 @@ The host sets these variables in the SDK process's environment. Values are strin
 
 | Variable | Meaning | Value | Set by, today |
 |---|---|---|---|
-| `SPARKWING_RUN_ID` | Run the node belongs to | run id | local runner, Kubernetes and launcher Jobs; the brokered child gets it in argv only |
+| `SPARKWING_RUN_ID` | Run the node belongs to | run id | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_NODE_ID` | Node the process runs | node id | as above |
 | `SPARKWING_CONTROLLER_URL` | Base URL of the node-facing routes | absolute `http` or `https` URL | local runner (loopback controller), broker supervisor (broker URL), Kubernetes and launcher Jobs |
 | `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, local runner without an API socket; the brokered child reads its bearer from stdin instead. A pipeline binary removes it from its environment at start, so the commands a step runs do not inherit it |
-| `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | local runner |
+| `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_MASK_VALUES_FD` | Descriptor the SDK writes each secret value to, one base64 line per value, so the host masks it in every log | decimal descriptor number of at least 3 | local runner, broker supervisor, launcher Job |
 | `SPARKWING_PARENT_LIVENESS_FD` | Read end of a pipe the host holds open; end of file means the host is gone, and the SDK cancels its work and exits | decimal descriptor number of at least 3 | local runner |
 | `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | local runner, Kubernetes Job |

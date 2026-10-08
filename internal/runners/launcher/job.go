@@ -125,6 +125,7 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		{Name: "GOCACHE", Value: "/tmp/go-build"},
 		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
 		{Name: "SPARKWING_SOURCE_DIR", Value: sourceDir},
+		{Name: "SPARKWING_LOG_FORMAT", Value: "json"},
 	}
 	for _, v := range []corev1.EnvVar{
 		{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL},
