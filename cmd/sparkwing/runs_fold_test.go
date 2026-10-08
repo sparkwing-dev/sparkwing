@@ -113,3 +113,30 @@ func TestRunsLogsWithoutRunNeedsGrep(t *testing.T) {
 		t.Fatalf("err = %v, want search flags refused with --run", err)
 	}
 }
+
+func TestRunsListGroupByHonoursTheListingFilters(t *testing.T) {
+	paths := runsFoldHome(t,
+		store.Run{ID: "run-denied", Pipeline: "build", Status: "running", StartedAt: time.Now()},
+		store.Run{ID: "run-timeout", Pipeline: "build", Status: "running", StartedAt: time.Now()},
+	)
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, msg := range map[string]string{"run-denied": "permission denied", "run-timeout": "deadline exceeded"} {
+		if err := st.FinishRun(context.Background(), id, "failed", msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runJobs([]string{"list", "--status", "failed", "--group-by", "run", "--error", "permission", "-o", "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "run-denied") || strings.Contains(out, "run-timeout") {
+		t.Fatalf("failures = %q, want only the run whose error matches --error", out)
+	}
+}

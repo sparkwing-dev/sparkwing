@@ -39,13 +39,19 @@ func listFailures(ctx context.Context, paths orchestrator.Paths, opts orchestrat
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)
 	}
+	// safety: the error, search, exclusion and date filters apply after the
+	// fetch, so the fetch reads a full page to fill --limit with matches.
+	if clientSideFilter(opts.Filter) {
+		filter.Limit = store.MaxRunListLimit
+	}
+	keep := opts.Filter.Matches
 	var rows []failureRow
 	var notes []string
 	var err error
 	if opts.Profile != nil && opts.Profile.ControllerURL() != "" {
-		rows, err = collectRemoteFailures(ctx, opts.Profile.ControllerURL(), opts.Profile.ControllerToken(), filter)
+		rows, err = collectRemoteFailures(ctx, opts.Profile.ControllerURL(), opts.Profile.ControllerToken(), filter, opts.Limit, keep)
 	} else {
-		rows, notes, err = collectLocalFailures(ctx, paths, filter, opts.Limit)
+		rows, notes, err = collectLocalFailures(ctx, paths, filter, opts.Limit, keep)
 	}
 	if err != nil {
 		return err

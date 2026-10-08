@@ -50,6 +50,7 @@ func collectLocalFailures(
 	paths orchestrator.Paths,
 	filter store.RunFilter,
 	limit int,
+	keep func(*store.Run) bool,
 ) ([]failureRow, []string, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, nil, err
@@ -69,12 +70,15 @@ func collectLocalFailures(
 	standalone := orchestrator.OpenStandaloneStores(ctx, paths)
 	defer func() { _ = standalone.Close() }()
 	merged = orchestrator.MergeTaggedRuns(append(merged, standalone.ListRuns(ctx, filter)...))
-	if limit > 0 && len(merged) > limit {
-		merged = merged[:limit]
-	}
 
 	rows := make([]failureRow, 0, len(merged))
 	for _, r := range merged {
+		if limit > 0 && len(rows) == limit {
+			break
+		}
+		if !keep(r.Run) {
+			continue
+		}
 		rows = append(rows, failureRowFor(ctx, standalone, st, r))
 	}
 	return rows, standalone.Notes(), nil
@@ -112,7 +116,7 @@ func failureRowFor(
 	return row
 }
 
-func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter) ([]failureRow, error) {
+func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter, limit int, keep func(*store.Run) bool) ([]failureRow, error) {
 	c := client.NewWithToken(controllerURL, nil, token)
 	runs, err := c.ListRuns(ctx, filter)
 	if err != nil {
@@ -120,6 +124,12 @@ func collectRemoteFailures(ctx context.Context, controllerURL, token string, fil
 	}
 	rows := make([]failureRow, 0, len(runs))
 	for _, r := range runs {
+		if limit > 0 && len(rows) == limit {
+			break
+		}
+		if !keep(r) {
+			continue
+		}
 		row := failureRow{
 			ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status,
 			Store: orchestrator.SharedStoreLabel,
