@@ -299,10 +299,10 @@ operator accounts by account id with `--operator-accounts`
 `/api/v1/operator/` answers `403` to any other caller: a team owner, a
 password session and every bearer token, an admin token included. A console
 action therefore needs the operator's sign-in, not a credential that
-automation can hold. The dashboard serves the page only after the controller
-confirms the session through `GET /api/v1/operator/session`, and it forwards
-the console's writes under the same CSRF check as every other browser write.
-With no account listed, the console is off.
+automation can hold. The controller serves the `/operator` page only to a
+listed operator's own signed-in session and answers `403` to every other
+browser, and the console's writes pass the same CSRF check as every other
+cookie-authenticated write. With no account listed, the console is off.
 
 Every action commits together with its business event, which names the
 operator and the reason: `billing.trust_changed` for trust and the limit,
@@ -766,17 +766,17 @@ token with `--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`).
 With the license and a Google OAuth client (`--google-client-id` or
 `SPARKWING_GOOGLE_CLIENT_ID`, `SPARKWING_GOOGLE_CLIENT_SECRET`, and the
 dashboard callbacks in `--oauth-redirect-uris` or
-`SPARKWING_OAUTH_REDIRECT_URIS`), the dashboard offers Google sign-in. The controller
-runs the server half of a PKCE flow: `POST /api/v1/auth/oauth/google/start`
-returns the authorize URL, state and verifier for a redirect URI on the
-allowlist, and `POST /api/v1/auth/oauth/google/exchange` redeems the code,
-verifies the ID token (signature against Google's published keys, issuer,
-audience, expiry, `email_verified`) and opens a session. The dashboard keeps
-the state and verifier in a `__Host-` cookie and checks the state at its
-callback, which is what proves the same browser finished the flow.
+`SPARKWING_OAUTH_REDIRECT_URIS`), the sign-in page offers Google sign-in. The
+controller runs the whole PKCE flow on its own origin: `GET /auth/google/start`
+creates a state and verifier for a redirect URI on the allowlist, keeps them in
+a `__Host-` cookie, and sends the browser to Google. `GET /auth/google/callback`
+checks the returned state against that cookie, which is what proves the same
+browser finished the flow, then redeems the code, verifies the ID token
+(signature against Google's published keys, issuer, audience, expiry,
+`email_verified`) and opens a session.
 
-GitHub sign-in works the same way through `POST /api/v1/auth/oauth/github/start`
-and `/exchange`, configured with `--github-client-id` (or
+GitHub sign-in works the same way through `GET /auth/github/start` and
+`/auth/github/callback`, configured with `--github-client-id` (or
 `SPARKWING_GITHUB_CLIENT_ID`) and `SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
 It asks for `read:user user:email` only, keys the identity on GitHub's numeric
 account id so a renamed login keeps its account, and trusts only the primary
@@ -927,23 +927,26 @@ own account from **Account -> Linked sign-ins** in the dashboard, whatever
 address the provider holds. Linking adds a way to sign in and moves nothing
 from another account: Sparkwing does not combine accounts.
 
-1. `POST /api/v1/me/identities/{provider}/link {redirect_uri}` returns the
-   provider's authorize URL, a state and a PKCE verifier. The state carries the
-   controller's signature and names the account, the session and the provider,
-   and expires after ten minutes.
-2. The provider returns the browser to the dashboard's sign-in callback,
+1. The page's **Link** button posts to `/auth/{provider}/link` with the
+   session's CSRF token. The controller creates the provider's authorize URL,
+   a state and a PKCE verifier, keeps the state and verifier in its flow
+   cookie, and sends the browser to the provider. The state carries the
+   controller's signature and names the account, the session and the
+   provider, and expires after ten minutes.
+2. The provider returns the browser to the sign-in callback,
    `/auth/{provider}/callback`, so no new redirect URI needs registering. The
-   dashboard keeps the code in its flow cookie and moves on to a same-site page
-   whose request carries the session.
-3. `POST /api/v1/me/identities/{provider}/link/complete {state, verifier, code,
-   redirect_uri}` checks the state against the caller's account and session,
-   records it as used, redeems the code, and attaches the provider account by
-   its stable subject: Google's `sub`, GitHub's numeric id.
+   controller keeps the code in the flow cookie and moves on to
+   `/auth/{provider}/link/complete`, a same-site request that carries the
+   session.
+3. `/auth/{provider}/link/complete` checks the state against the caller's
+   account and session, records it as used, redeems the code, and attaches the
+   provider account by its stable subject: Google's `sub`, GitHub's numeric id.
 
 The controller refuses, and changes nothing, when the provider account is
-already attached to any account (`409 identity_linked_elsewhere`, or
+already attached to any account (`identity_linked_elsewhere`, or
 `identity_already_linked` for this one), or when the account already has a
-sign-in from that provider (`409 provider_already_linked`). A user with a
+sign-in from that provider (`provider_already_linked`). A refused link returns
+the browser to **Account -> Linked sign-ins**, which names the refusal. A user with a
 second Sparkwing account either keeps both, invites one into the other's team
 and switches teams with the team switcher, or deletes the other account and then
 links its sign-in.
@@ -969,8 +972,9 @@ GitHub leaves each GitHub App installation the user connected bound to its
 team; connecting another installation needs a linked GitHub sign-in again.
 
 Link start, link completion and unlinking need a session signed in within the
-last 10 minutes (`403 reauth_required`). An account makes at most ten link
-attempts a minute (`429 rate_limited`); the limit is per controller replica.
+last 10 minutes (`reauth_required`; unlinking answers `403`). An account makes
+at most ten link attempts a minute (`rate_limited`); the limit is per
+controller replica.
 The controller logs `identity.linked`,
 `identity.unlinked` and `identity.change_refused` with the account, the provider
 and, for a change, the provider's subject. `GET /api/v1/me/identities` lists
@@ -1061,12 +1065,13 @@ Routes registered on the controller's outer router are matched before
 the auth middleware runs, so they are open regardless of auth config:
 the health probe (k8s httpGet probes can't carry `Authorization`), the
 service-discovery endpoint
-the runner uses to find the cache pod, the browser session endpoints
-the dashboard uses to establish, validate, and end a session (login,
-logout, session, and the Google sign-in start and exchange), the
-capabilities report a signed-out dashboard draws its sign-in page from,
-the bootstrap probe, and the GitHub webhook, which
-is HMAC-verified instead of bearer-authenticated. The controller's
+the runner uses to find the cache pod, the session endpoints a client
+uses to establish, validate, and end a session (`/api/v1/auth/login`,
+`/api/v1/auth/session`, `/api/v1/auth/logout`), the capabilities report a
+signed-out dashboard draws its sign-in page from, and the GitHub webhook,
+which is HMAC-verified instead of bearer-authenticated. The sign-in pages
+(`/login`, `/auth/{provider}/start` and `/auth/{provider}/callback`) and the
+dashboard bundle's static assets need no session either. The controller's
 `/metrics` is not among them: its run counters name every team's
 pipelines, so on the API listener it needs an `admin` bearer, and
 `--metrics-addr` moves it to a listener of its own that serves it open.
@@ -1075,98 +1080,71 @@ controller's health probe. Every registered
 route is listed in
 [api-reference.md](api-reference.md).
 
-With controller-backed dashboard login enabled, the browser authenticates
-same-origin dashboard requests with its `HttpOnly` session cookie. The
-dashboard validates that session before its server-side proxy adds the service
-bearer to an upstream controller request; the service credential never enters
-browser HTML or JavaScript. CLI and automation clients should authenticate
-directly to the controller through a profile rather than send a bearer to the
-browser-facing dashboard proxy.
+A signed-in browser authenticates its same-origin API requests with its
+`HttpOnly` session cookie, and the controller resolves that session's
+principal and scopes as it does for an `Authorization: Session` credential.
+The cookie authenticates only a request that carries no `Authorization`
+header of its own. CLI and automation clients authenticate with a bearer
+through a profile.
 
 ## Dashboard authorization
 
-The dashboard proxies a fixed list of controller routes: the run, node,
-approval, agent, and trend reads the SPA renders, plus the trigger, cancel,
-retry, debug-release, approval-resolve, and run-delete writes its buttons
-issue. A second list covers the logs service and carries reads only, so the
-browser cannot delete a run's logs or append a forged line through the web pod.
-Every other path under `/api/v1/` answers `404` at the web pod and never
-reaches the upstream, so a signed-in tab cannot mint a token, read a secret, or
-create a user through the proxy. Both lists live in
-`internal/web/proxy_routes.go`, and a test holds each entry to the scope
-`pkg/controller/server.go` and `pkg/logs/server.go` register for that route.
-A third list forwards the identity and team routes (`/api/v1/me`,
-`/api/v1/teams`, `/api/v1/team/...`, invitation accept) with no dashboard
-scope, because a membership role decides them and the controller resolves that
-role on every request.
+The controller serves the dashboard on the listener that serves its API, so
+the dashboard holds no credential of its own. Every page and API request
+carries the signed-in browser's session, and the controller checks each
+route's scope against that session as it does for any caller. A browser
+session carries the scopes of the user who signed in, so an account holding
+only `runs.read` reads runs and gets `403` on cancel. On a multi-team
+controller the session belongs to one user and one active team, which keeps a
+browser inside its own team.
 
-A browser session carries the scopes of the user who signed in. The proxy
-checks them against the target route before forwarding, so an account holding
-only `runs.read` reads runs and gets `403` on cancel. Create narrower accounts
-with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
-`--scope` grants `admin`. The first-visit bootstrap account defaults to
-`admin` and may carry more scopes beside it, but a scope set that omits
-`admin` is rejected with `400`, and `sparkwing cluster users list` prints the
-scope set of every account.
+Create narrower accounts with `sparkwing cluster users add --scope
+runs.read,logs.read`; omitting `--scope` grants `admin`. The first-visit
+bootstrap account defaults to `admin` and may carry more scopes beside it, but
+a scope set that omits `admin` is rejected with `400`, and
+`sparkwing cluster users list` prints the scope set of every account.
 
-Under `--require-login` the web pod reaches the controller as the signed-in
-user: the proxy and the pod's own run, node and event reads send
-`Authorization: Session <id>` for that browser's session, and never the pod's
-service token. On a multi-team controller a service token reads every team,
-so the session, which belongs to one user and one active team, is the only
-credential that keeps a browser inside its own team. The service token still
-authenticates the logs service, which accepts bearers only, and the services
-health probe.
+Whenever the controller enforces token auth, because a token exists or a
+multi-team license is loaded, it sends a browser without a session to `/login`
+for every page except the bundle's static assets. A controller with auth
+disabled serves its pages without sign-in.
 
-Without `--require-login` there is no session, and the web pod's own service
-token carries every request. It needs `runs.read` plus `logs.read`. Add
-`runs.control` where the UI cancels, retries, or releases a debug pause,
-`runs.write` where it submits a trigger, and `approvals.write` where it
-resolves approval gates.
+Log panes read through the logs service named by the controller's
+`--logs-url`. The controller forwards the caller's own credential: a cookie
+session as `Authorization: Session <id>`, or the caller's bearer as it
+arrived. The logs service asks the controller whose run it is, so a read
+answers only for the caller's team. A controller without `--logs-url` shows no
+logs.
 
 Deleting a run from the dashboard needs `admin`, because the controller
-registers `DELETE /api/v1/runs/{id}` at `admin`: the signed-in account must
-carry it, or, without `--require-login`, the web pod's token. Without it the
-dashboard button reports `delete needs the admin scope` and nothing is removed.
+registers `DELETE /api/v1/runs/{id}` at `admin`, so the signed-in account must
+carry it. Without it the dashboard button reports `delete needs the admin
+scope` and nothing is removed.
 
 ### Google and GitHub sign-in
 
-Account sign-in needs a dashboard started with `--controller`, which forwards
-every read with the signed-in user's own session. A dashboard started with
-`--profile` or `--state` reads the operator's store directly, so it offers no
-provider, answers `/auth/<provider>/...` with `404`, and treats any account
-session, or any session acting for a team other than the operator's, as signed
-out.
+The controller's `/login` page offers "Sign in with Google" when its sign-in
+providers include `google` and "Sign in with GitHub" when they include
+`github`, above the password form. Each flow runs on the controller's own
+origin: `GET /auth/<provider>/start` creates a state and a PKCE verifier,
+keeps the provider, state, verifier and return path in a ten-minute
+`__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), and
+redirects to the provider. The provider returns to
+`GET /auth/<provider>/callback`, which refuses a callback whose `state` does
+not match that cookie or whose provider is not the one the flow started with,
+then redeems the code and sets the session cookies. Any other provider name
+answers `404`.
 
-When the controller's `GET /api/v1/capabilities` reports `teams.enabled`, the
-sign-in page offers "Sign in with Google" when `auth.providers` lists `google`
-and "Sign in with GitHub" when it lists `github`, above the password form. Each
-flow runs through the dashboard host: `GET /auth/<provider>/start` asks the
-controller's `POST /api/v1/auth/oauth/<provider>/start` for an authorize URL, a
-state and a PKCE verifier, keeps the provider, state and verifier in a
-ten-minute `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`,
-`Path=/`), and redirects to the provider. The provider returns to
-`GET /auth/<provider>/callback`, which refuses a callback whose `state` does not
-match that cookie or whose provider is not the one the flow started with, then
-has the controller exchange the code and sets the dashboard session cookies.
-Any other provider name answers `404`.
+Register `https://<console-host>/auth/<provider>/callback` as the OAuth
+client's redirect URI (the authorization callback URL on GitHub), and list it
+in `--oauth-redirect-uris`. The scheme follows the same TLS evidence as the
+CSRF origin check, so a controller behind a TLS-terminating proxy needs
+`--trusted-proxy-addr` or `--hsts`. The host is the one the browser used, so a
+controller reached as `http://localhost:4344` uses
+`http://localhost:4344/auth/google/callback`, and reaching it as `127.0.0.1`
+sends a redirect URI the provider does not recognize.
 
-Register `https://<dashboard-host>/auth/<provider>/callback` as the OAuth
-client's redirect URI (the authorization callback URL on GitHub). The scheme
-follows the same TLS evidence as the CSRF origin check, so a dashboard behind a
-TLS-terminating proxy needs `--trusted-proxy-addr` or `--hsts`. The host is the
-one the browser used, so a local dashboard reached as `http://localhost:4343`
-uses `http://localhost:4343/auth/google/callback`, and reaching it as
-`127.0.0.1` sends a redirect URI the provider does not recognize.
-
-`sparkwing-web --require-login` needs a controller session backend. Pass
-`--controller URL`, or select a `--profile` whose `controller.url` is set. A
-state-only configuration such as `--state-spec=postgres://... --require-login`
-now fails at startup instead of silently serving an unauthenticated dashboard.
-The controller URL must be an absolute `http` or `https` URL without embedded
-credentials, a query, or a fragment.
-
-Every dashboard response carries `Content-Security-Policy`
+Every response the controller's browser surface sends carries `Content-Security-Policy`
 (`default-src 'self'` plus a per-response nonce for the bundle's inline
 scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
 `Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when the
@@ -1174,84 +1152,63 @@ request carries evidence of TLS: the listener terminates TLS itself, a request
 accepted on `--trusted-proxy-addr` forwarded `X-Forwarded-Proto: https`, or the
 operator passed `--hsts` because TLS terminates somewhere that forwards no
 trusted header. That same evidence decides the scheme the CSRF origin check
-expects, so a dashboard behind an HTTPS proxy keeps `Secure` cookies without
+expects, so a controller behind an HTTPS proxy keeps `Secure` cookies without
 the insecure-cookie override. The page reads its configuration from
 `/sparkwing-runtime.js`, which carries the dashboard version and the login
-mode. The service bearer stays in the web process and rides only its
-server-side proxy, so the browser talks to one origin and `connect-src 'self'`
+mode. The page calls the API on its own origin, so `connect-src 'self'`
 holds.
 
-A dashboard without `--require-login` on a loopback address answers only
-loopback `Host` names and the hosts named in `--allow-origin`, so a page whose
-DNS name was rebound to `127.0.0.1` gets `403`. It also refuses a browser
-request whose `Origin` is another site, a cross-site subresource request, and
-a browser write whose body is not `application/json`; `sparkwing serve`
-applies the same checks. Pass `--allow-origin https://dash.example` when a
-proxy on the same host publishes the dashboard under that name. A non-loopback
-listener answers whatever name reaches it, so it cannot refuse a rebound name or
-a cross-site read; use `--require-login` there.
+`sparkwing serve` answers only loopback `Host` names and the hosts named in
+its `--allow-origin`, so a page whose DNS name was rebound to `127.0.0.1` gets
+`403`. It also refuses a browser request whose `Origin` is another site, a
+cross-site subresource request, and a browser write whose body is not
+`application/json`.
 
-A dashboard that carries `--token`, runs without `--require-login`, and binds a
-non-loopback address refuses to start, because every caller that reaches the
-listener would drive the controller with that token. Pass `--require-login`,
-bind a loopback address (chart: `web.addr`), or accept the exposure with
-`--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
-In that mode the dashboard still refuses a write a browser sends from another
-site, so a page a visitor or an operator's `kubectl port-forward` session opens
-cannot cancel, retry or launch runs with the token. A `POST`, `PUT`, `PATCH` or
-`DELETE` answers `403` with the reason when its `Origin` host differs from the
-`Host` header, or when its `Sec-Fetch-Site` is `cross-site` or `same-site`. The
-dashboard's own pages send a matching `Origin`, and a client that sends neither
-header, such as `curl` or a script, passes unchanged, because the attack needs a
-victim's browser. A proxy in front of the dashboard must pass the browser's
-`Host` through, or same-origin writes are refused too. Reads are not checked.
-`--token` with no controller, logs, or profile backend is a startup error too:
-nothing would authenticate with it, so the dashboard would serve
-unauthenticated while the flag suggested otherwise.
+The controller refuses a write a browser sends from another site to any route
+under `/api/`, whether or not it enforces auth, so a page a visitor opens
+cannot drive an open controller from the visitor's browser. A `POST`, `PUT`,
+`PATCH` or `DELETE` answers `403` with the reason when its `Origin` host
+differs from the `Host` header, or when its `Sec-Fetch-Site` is `cross-site`
+or `same-site`. The dashboard's own pages send a matching `Origin`, and a
+client that sends neither header, such as `curl` or a script, passes
+unchanged, because the attack needs a victim's browser. A proxy in front of
+the controller must pass the browser's `Host` through, or same-origin writes
+are refused too. Reads are not checked.
 
 Login throttling uses the TCP peer address and ignores forwarded headers by
-default. `sparkwing-web` and `sparkwing-controller` each take
-`--trusted-proxy-addr=<host:port>`, a second listener that serves the same
-routes. On that listener alone, a request's single `X-Real-IP` is the client
-address; on `--addr` the header is ignored, and `X-Forwarded-For` is never
-taken as a client address on either. Point the fronting proxy at the trusted
+default. `sparkwing-controller` takes `--trusted-proxy-addr=<host:port>`, a
+second listener that serves the same routes. On that listener alone, a
+request's single `X-Real-IP` is the client address and its
+`X-Forwarded-Proto: https` is evidence of TLS; on `--addr` both headers are
+ignored, and `X-Forwarded-For` is never taken as a client address on either. Point the fronting proxy at the trusted
 listener, make it overwrite `X-Real-IP` on every request (ingress-nginx does by
 default), and let nothing else reach that port, for example with a
 NetworkPolicy.
 
-`sparkwing-web` sends the address it settled on as `X-Real-IP` on every call it
-makes to the controller while serving a browser: login, OAuth, proxied
-`/api/v1/` requests, and backend reads alike. Point its `--controller` at the
-controller's trusted listener. The logs service never receives the header. The
-controller keys login throttling, the per-prefix bearer failure budget, and the
+The controller keys login throttling, the per-prefix bearer failure budget, and the
 `client_ip` of its audit records on that one address, and callers on `--addr`,
 such as runners, key on their TCP peer. See
 [security.md](security.md#login-and-hashing-budgets) for the budgets and the
 argon2 memory bound.
 
 The login, first-admin, and logout forms carry a CSRF token in both a
-`SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
-cross-origin, or mismatched token with `403` before it calls the controller.
-Unsafe browser API requests (`POST`, `PUT`, `PATCH`, and `DELETE` under
-`/api/v1/`) also require a same-origin request whose `X-CSRF-Token` header
-matches both the browser's CSRF cookie and the live controller session.
-The dashboard proxy removes browser cookies and the CSRF header before adding
-its server-side bearer to controller or logs-service requests.
-Logout also verifies the token against the live controller session. It clears
-the browser session only after the controller confirms revocation; a controller
-failure returns `502` and leaves the cookies in place so the browser does not
-claim a session was revoked when it was not.
+`SameSite=Strict` cookie and a hidden field. The controller rejects a missing,
+cross-origin, or mismatched token with `403` before it checks a credential.
+Unsafe API requests (`POST`, `PUT`, `PATCH`, and `DELETE`) that the session
+cookie authenticates also require a same-origin request whose `X-CSRF-Token`
+header matches both the browser's CSRF cookie and the live session.
+Logout also verifies the token against the live session. It clears the browser
+session only after the session is deleted; a store failure answers `5xx` and
+leaves the cookies in place so the browser does not claim a session was
+revoked when it was not.
 
-The dashboard resolves the controller session on every HTML, data, and API
-request. Hashed files under `/_next/static/` contain no tenant data and do not
-touch the session backend. Deleting a session on another web replica or at the
-controller therefore takes effect on the next protected data request rather
-than after a local cache expires. A controller `401` authoritatively clears the
-browser session; a controller outage, `5xx`, or malformed response returns
-`502` and preserves the cookies so a transient failure cannot log out every
-user. The controller answers `5xx` when the state store or the session signing
-key is unreadable, so only an unknown or expired session reaches the browser as
-`401`. Browser redirects preserve the original path and query as one encoded
+The controller resolves the session on every page and API request. The
+bundle's favicons and hashed build assets contain no tenant data and skip the
+session lookup. Deleting a session therefore takes effect on the next request
+on any replica. An unknown or expired session answers `401` and clears the
+cookies; an unreadable state store or session signing key answers `503` with
+`Retry-After` and keeps them, so a transient failure cannot sign every user
+out. Browser redirects preserve the original path and query as one encoded
 `next` value and accept only same-origin absolute paths.
 
 The session and CSRF cookies are named `__Host-sw_session` and
@@ -1270,15 +1227,20 @@ Both sign-in cookies persist across browser restarts for 30 days. Their
 presence does not extend a controller session: the controller checks the
 session on every protected request and clears invalid cookies.
 
-Login cookies are `Secure` by default, so a login-required dashboard must be
-served over HTTPS. A plain `http://localhost` port-forward can reach health
-endpoints but cannot retain those cookies. For a loopback-only development
-process, `--insecure-cookies` permits HTTP cookies. The same flag is how an
-operator who publishes the dashboard over plain HTTP through a proxy or
-ingress accepts session cookies that travel without TLS; the chart renders it
-whenever `ingress.allowInsecure` opts a TLS-less ingress in. A proxy or sidecar
-in front of a loopback bind carries the cookie unencrypted to everything it
-publishes, so pass the flag only where that is acceptable.
+Session cookies are `Secure` by default, so a controller that requires
+sign-in must be reached over HTTPS; a browser that does not treat
+`http://localhost` as a secure origin drops them over a plain port-forward. An
+operator who publishes the controller over plain HTTP passes
+`--insecure-cookies`, which drops `Secure` and the `__Host-` prefix so a
+browser keeps its session. The cookies then travel readable to every hop on
+the path. The chart passes the flag whenever `ingress.allowInsecure` opts a
+TLS-less Ingress in.
+
+`--hsts` asserts that browsers reach the controller over TLS that terminates
+somewhere forwarding no trusted `X-Forwarded-Proto`: the controller then sends
+`Strict-Transport-Security` and requires an `https` origin on
+cookie-authenticated writes. The chart passes it whenever the Ingress has
+`ingress.tls`.
 
 ## First-visit signup
 
@@ -1292,19 +1254,18 @@ controller starts with both satisfied; see the
 A freshly-installed sparkwing cluster has no users, so there is
 nothing to log in *as*. While controller authentication is disabled,
 browsing to `/login` on an empty cluster renders a "Create first admin"
-form. Submitting it creates the first admin user via `POST
-/api/v1/users`, then signs the new admin in automatically.
+form. Submitting it posts to `/login/bootstrap`, which creates the first
+admin user and signs the new admin in.
 
-The bootstrap path is one-shot and latched: once any user exists,
-the controller serves `{"needed": false}` to the probe, the login
-page reverts to the standard sign-in form, and `POST /api/v1/users`
-goes back to requiring an admin token. There is no way to reopen
-the bootstrap path short of restarting the controller against a
-freshly emptied database.
+The bootstrap path is one-shot and latched: once any user exists, the
+login page shows the standard sign-in form, `/login/bootstrap` refuses,
+and `POST /api/v1/users` goes back to requiring an admin token. There is
+no way to reopen the bootstrap path short of restarting the controller
+against a freshly emptied database.
 
-When controller authentication is enabled, the bootstrap probe reports
-`{"needed": false}` and `POST /api/v1/users` requires an admin token even
-if the users table is empty. An operator can use that token with
+When controller authentication is enabled, or a multi-team license is
+loaded, `/login` offers no first-admin form and `POST /api/v1/users`
+requires an admin token even if the users table is empty. An operator can use that token with
 `sparkwing cluster users add` to create the first dashboard user. That
 first account has to be an admin, so leave `--scope` off, or name a list
 that contains `admin`; a narrower list is refused with `400` while the

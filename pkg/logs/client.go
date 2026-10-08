@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -199,6 +200,7 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 		return err
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	setClaimHeaders(ctx, req)
 	if seq, ok := appendSequenceFromContext(ctx); ok {
 		req.Header.Set(LogStreamHeader, seq.stream)

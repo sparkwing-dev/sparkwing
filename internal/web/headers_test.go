@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"crypto/tls"
 	"io/fs"
 	"net/http"
@@ -24,8 +23,8 @@ func testBundle() fs.FS {
 }
 
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
-	handler := HandlerFromOptionsWithBundle(HandlerOptions{Version: "v1.2.3"}, testBundle())
-	for _, path := range []string{"/", "/api/health", "/sparkwing-runtime.js", "/_next/static/app.js"} {
+	handler := SecurityHeaders(false, Pages(testBundle()))
+	for _, path := range []string{"/", "/docs", "/_next/static/app.js"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -60,7 +59,7 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 func TestHSTSNeedsTLSEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		opts      HandlerOptions
+		hsts      bool
 		trusted   bool
 		forwarded string
 		tls       bool
@@ -71,7 +70,7 @@ func TestHSTSNeedsTLSEvidence(t *testing.T) {
 		{name: "trusted listener forwarded https", trusted: true, forwarded: "https", want: hstsValue},
 		{name: "plain listener forwarded https", forwarded: "https"},
 		{name: "trusted listener forwarded http", trusted: true, forwarded: "http"},
-		{name: "operator asserts TLS", opts: HandlerOptions{HSTS: true}, want: hstsValue},
+		{name: "operator asserts TLS", hsts: true, want: hstsValue},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -82,7 +81,7 @@ func TestHSTSNeedsTLSEvidence(t *testing.T) {
 			if tc.tls {
 				req.TLS = &tls.ConnectionState{}
 			}
-			h := HandlerFromOptionsWithBundle(tc.opts, testBundle())
+			h := SecurityHeaders(tc.hsts, Pages(testBundle()))
 			if tc.trusted {
 				h = ratelimit.TrustedListener(h)
 			}
@@ -142,7 +141,7 @@ func TestServedHTMLNoncesEveryInlineScriptShape(t *testing.T) {
 		)},
 	}
 	rec := httptest.NewRecorder()
-	HandlerFromOptionsWithBundle(HandlerOptions{}, bundle).
+	SecurityHeaders(false, Pages(bundle)).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	_, rest, ok := strings.Cut(rec.Header().Get("Content-Security-Policy"), "'nonce-")
@@ -162,18 +161,9 @@ func TestServedHTMLNoncesEveryInlineScriptShape(t *testing.T) {
 	}
 }
 
-func TestServeWithOptionsRefusesRemoteTokenBind(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := ServeWithOptions(ctx, HandlerOptions{Token: "service-token"}, "0.0.0.0:0")
-	if err == nil || !strings.Contains(err.Error(), "non-loopback") {
-		t.Fatalf("ServeWithOptions error = %v, want the non-loopback refusal", err)
-	}
-}
-
 func TestDashboardHTMLNoncesItsInlineScripts(t *testing.T) {
 	rec := httptest.NewRecorder()
-	HandlerFromOptionsWithBundle(HandlerOptions{}, testBundle()).
+	SecurityHeaders(false, Pages(testBundle())).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	csp := rec.Header().Get("Content-Security-Policy")
@@ -191,177 +181,5 @@ func TestDashboardHTMLNoncesItsInlineScripts(t *testing.T) {
 	}
 	if strings.Contains(body, `<script nonce="`+nonce+`" src=`) {
 		t.Errorf("nonce leaked onto an external script: %s", body)
-	}
-}
-
-func TestNoBearerReachesTheBrowser(t *testing.T) {
-	for _, requireLogin := range []bool{false, true} {
-		opts := HandlerOptions{
-			Token:             "service-token",
-			ControllerURL:     "http://controller.test",
-			AuthControllerURL: "http://controller.test",
-			RequireLogin:      requireLogin,
-		}
-		handler := HandlerFromOptionsWithBundle(opts, testBundle())
-		for _, path := range []string{"/", "/sparkwing-runtime.js"} {
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-			if strings.Contains(rec.Body.String(), "service-token") {
-				t.Errorf("require-login=%v %s exposed the service token: %s",
-					requireLogin, path, rec.Body.String())
-			}
-		}
-	}
-}
-
-func TestRuntimeConfigCannotBreakOutOfItsScript(t *testing.T) {
-	hostile := "</script><script>alert(1)</script>\u2028\u2029"
-	rec := httptest.NewRecorder()
-	runtimeConfigHandler(HandlerOptions{Version: hostile})(
-		rec, httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil))
-
-	body := rec.Body.String()
-	for _, forbidden := range []string{"</script", "<script", "\u2028", "\u2029"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("runtime config left %q unescaped: %s", forbidden, body)
-		}
-	}
-	if !strings.Contains(body, `\u003c/script\u003e`) {
-		t.Errorf("runtime config lost the escaped payload: %s", body)
-	}
-}
-
-func TestJSStringLiteralEscapes(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "plain", in: "v1.2.3", want: `"v1.2.3"`},
-		{name: "script close", in: "</script>", want: `"\u003c/script\u003e"`},
-		{name: "ampersand", in: "a&b", want: `"a\u0026b"`},
-		{name: "line separator", in: "a\u2028b", want: `"a\u2028b"`},
-		{name: "paragraph separator", in: "a\u2029b", want: `"a\u2029b"`},
-		{name: "quote", in: `a"b`, want: `"a\"b"`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := jsStringLiteral(tc.in); got != tc.want {
-				t.Errorf("jsStringLiteral(%q) = %s, want %s", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestValidateRemoteExposure(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		opts    HandlerOptions
-		addr    string
-		wantErr bool
-	}{
-		{name: "loopback with token", opts: HandlerOptions{Token: "t"}, addr: "127.0.0.1:4343"},
-		{name: "localhost with token", opts: HandlerOptions{Token: "t"}, addr: "localhost:4343"},
-		{name: "ipv6 loopback with token", opts: HandlerOptions{Token: "t"}, addr: "[::1]:4343"},
-		{name: "remote without token", addr: "0.0.0.0:4343"},
-		{
-			name: "remote token with login",
-			opts: HandlerOptions{Token: "t", RequireLogin: true},
-			addr: "0.0.0.0:4343",
-		},
-		{
-			name: "remote token with opt-in",
-			opts: HandlerOptions{Token: "t", AllowUnauthenticatedRemote: true},
-			addr: "0.0.0.0:4343",
-		},
-		{
-			name:    "wildcard bind",
-			opts:    HandlerOptions{Token: "t"},
-			addr:    "0.0.0.0:4343",
-			wantErr: true,
-		},
-		{
-			name:    "routable bind",
-			opts:    HandlerOptions{Token: "t"},
-			addr:    "10.0.0.5:4343",
-			wantErr: true,
-		},
-		{
-			name:    "port only",
-			opts:    HandlerOptions{Token: "t"},
-			addr:    ":4343",
-			wantErr: true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateRemoteExposure(tc.opts, tc.addr)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("validateRemoteExposure(%q) error = %v, want error %v", tc.addr, err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateCookieExposure(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		opts    HandlerOptions
-		addr    string
-		wantErr bool
-	}{
-		{name: "secure cookies anywhere", addr: "0.0.0.0:4343"},
-		{
-			name: "insecure on loopback",
-			opts: HandlerOptions{InsecureCookies: true},
-			addr: "127.0.0.1:4343",
-		},
-		{
-			name: "insecure on localhost",
-			opts: HandlerOptions{InsecureCookies: true},
-			addr: "localhost:4343",
-		},
-		{
-			name: "insecure on IPv6 loopback",
-			opts: HandlerOptions{InsecureCookies: true},
-			addr: "[::1]:4343",
-		},
-		{
-			name: "insecure remote with opt-in",
-			opts: HandlerOptions{InsecureCookies: true, AllowInsecureCookiesRemote: true},
-			addr: "0.0.0.0:4343",
-		},
-		{
-			name:    "insecure on wildcard bind",
-			opts:    HandlerOptions{InsecureCookies: true},
-			addr:    "0.0.0.0:4343",
-			wantErr: true,
-		},
-		{
-			name:    "insecure on routable bind",
-			opts:    HandlerOptions{InsecureCookies: true},
-			addr:    "10.0.0.5:4343",
-			wantErr: true,
-		},
-		{
-			name:    "insecure on port only",
-			opts:    HandlerOptions{InsecureCookies: true},
-			addr:    ":4343",
-			wantErr: true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateCookieExposure(tc.opts, tc.addr)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("validateCookieExposure(%q) error = %v, want error %v", tc.addr, err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestServeRejectsInsecureCookiesOnNonLoopbackBind(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	err := ServeWithOptions(ctx, HandlerOptions{InsecureCookies: true}, "0.0.0.0:0")
-	if err == nil || !strings.Contains(err.Error(), "insecure cookies") {
-		t.Fatalf("ServeWithOptions error = %v, want an insecure-cookie refusal", err)
 	}
 }

@@ -35,7 +35,7 @@ func TestReleaseTargetBuildsAllSupportedBinaries(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := 6
+				want := 5
 				if target == "windows" {
 					want = 2
 				}

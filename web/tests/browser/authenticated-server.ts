@@ -9,8 +9,8 @@ const prebuiltFixtureEnvironment = "AUTHENTICATED_DASHBOARD_FIXTURE";
 
 type StartedFixture = {
   origin: string;
-  controller_origin: string;
-  service_token: string;
+  control_origin: string;
+  admin_token: string;
 };
 
 export type AuthenticatedDashboard = StartedFixture & {
@@ -193,9 +193,7 @@ export async function startAuthenticatedDashboard(
     const fixture = spawn(
       binary,
       ["--fixture-home", join(temporary, "fixture-home"), "--web-out", output],
-      {
-        cwd: repositoryRoot,
-      },
+      { cwd: repositoryRoot, env: process.env },
     );
     child = fixture;
     const started = await waitForStart(fixture);

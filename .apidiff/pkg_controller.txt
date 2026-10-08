@@ -71,6 +71,23 @@ const ComputeLimitRetryAfterSeconds = 5
 const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
+type Dashboard struct {
+	Local bool
+
+	HSTS bool
+
+	Version string
+
+	Bundle fs.FS
+
+	Logs storage.LogStore
+
+	Paths paths.Paths
+
+	Capabilities backend.Capabilities
+
+	InsecureCookies bool
+}
 type DataDownloadResponse struct {
 	URL     string
 	SHA256  string
@@ -324,6 +341,7 @@ func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
+func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
@@ -422,13 +440,17 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
+func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
+func (t forwardCredential) RoundTrip(req *http.Request) (*http.Response, error)
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (g googleProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g googleProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (hashingBudgetCollector) Collect(ch chan<- prometheus.Metric)
 func (hashingBudgetCollector) Describe(ch chan<- *prometheus.Desc)
+func (l liveLogReader) ReadNodeLiveLog(_ context.Context, runID, nodeID string, since int64) ([]byte, int64, bool, bool, error)
+func (l liveLogReader) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
 func (l *liveLogs) Append(runID, nodeID string, data []byte)
 func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
@@ -440,6 +462,8 @@ func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
 func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
 func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
+func (pipeSink) Flush() error
 func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error
+func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)

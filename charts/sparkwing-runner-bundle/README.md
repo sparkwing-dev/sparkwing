@@ -8,16 +8,18 @@ This is the chart referenced by architectural decision 0001
 ("data plane lives with the runner"). When you run self-hosted
 runners against a remote controller (Sparkwing Cloud, or a
 self-hosted controller in another cluster), the runner, the git
-cache, and the log store all live next to your compute. Logs and
-artifacts never cross the VPC boundary; the controller only sees
-control-plane traffic.
+cache, and the log store all live next to your compute. Artifacts
+never cross the VPC boundary. The controller sees control-plane
+traffic plus the log reads a signed-in dashboard makes, which it
+forwards to the logs service named by its `--logs-url`.
 
 The chart is **not** a full self-host install. It deliberately
 omits:
 
-- `sparkwing-controller` (orchestrator) -- ships in the
-  `sparkwing-full` (full self-host) chart.
-- `sparkwing-web` (SPA host) -- same.
+- `sparkwing-controller` (orchestrator, which also serves the
+  dashboard) -- ships in the `sparkwing-full` (full self-host) chart.
+  Its console and API hosts both route to the controller Service; a
+  reverse proxy in front can still split them.
 
 If you want the whole stack in one cluster, install
 `sparkwing-full`. Use this chart when the controller already

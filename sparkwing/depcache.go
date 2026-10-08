@@ -1,19 +1,10 @@
 package sparkwing
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"log/slog"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	goruntime "runtime"
-	"strings"
-	"sync"
-	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 )
 
 // DirCache describes one directory a node restores before running and
@@ -34,15 +25,7 @@ import (
 // the node runs as if no cache were declared; no cache condition ever
 // fails a node.
 type DirCache struct {
-	name string
-
-	path string
-
-	keyScope string
-
-	resolvePath func() (string, error)
-
-	keyFiles []string
+	spec depcache.Spec
 }
 
 // KeySource names the file whose content keys a [Dir] cache.
@@ -68,11 +51,11 @@ func KeyFromFile(path string) KeySource {
 // node runs, so the same declaration lands on the right directory on
 // a laptop and in a runner pod.
 func GoModules() DirCache {
-	return DirCache{
-		name:        "go-modules",
-		resolvePath: resolveGoModCache,
-		keyFiles:    []string{"go.sum"},
-	}
+	return DirCache{spec: depcache.Spec{
+		Name:     "go-modules",
+		Resolver: depcache.ResolverGoModules,
+		KeyFiles: []string{"go.sum"},
+	}}
 }
 
 // NpmCache caches npm's content-addressed cache directory, keyed on
@@ -91,11 +74,11 @@ func GoModules() DirCache {
 // `npm config get cache`, then $HOME/.npm, resolved where the node
 // runs.
 func NpmCache() DirCache {
-	return DirCache{
-		name:        "npm",
-		resolvePath: resolveNpmCacheDir,
-		keyFiles:    []string{"package-lock.json"},
-	}
+	return DirCache{spec: depcache.Spec{
+		Name:     "npm",
+		Resolver: depcache.ResolverNpm,
+		KeyFiles: []string{"package-lock.json"},
+	}}
 }
 
 // Dir declares a cache over an arbitrary directory, keyed by an
@@ -106,20 +89,21 @@ func NpmCache() DirCache {
 //
 // name in keys and logs is derived from the directory's base name.
 func Dir(path string, key KeySource) DirCache {
-	return DirCache{
-		name:     filepath.Base(filepath.Clean(path)),
-		path:     path,
-		keyScope: filepath.ToSlash(filepath.Clean(path)),
-		keyFiles: key.files,
-	}
+	return DirCache{spec: depcache.Spec{
+		Name:     filepath.Base(filepath.Clean(path)),
+		Path:     path,
+		KeyScope: filepath.ToSlash(filepath.Clean(path)),
+		KeyFiles: key.files,
+	}}
 }
 
-// CacheDir registers dependency-directory caches on the node: each
-// declared directory is restored from the cache before the node's Run
-// (on an exact key hit) and saved back after a successful Run whose
-// restore missed. The key is derived from the lockfile's content plus
-// GOOS/GOARCH, so a bumped dependency or a different platform gets a
-// fresh cache instead of a poisoned hit.
+// CacheDir registers dependency-directory caches on the node: the
+// engine restores each declared directory from the cache before the
+// node's BeforeRun hooks and Run (on an exact key hit) and saves it back
+// after a successful Run and its AfterRun hooks when the restore missed.
+// The key is derived from the lockfile's content plus GOOS/GOARCH, so a
+// bumped dependency or a different platform gets a fresh cache instead
+// of a poisoned hit.
 //
 //	sparkwing.Job(plan, "test", runTests).
 //	    CacheDir(sparkwing.GoModules())
@@ -139,16 +123,13 @@ func Dir(path string, key KeySource) DirCache {
 // errors.
 func (n *JobNode) CacheDir(caches ...DirCache) *JobNode {
 	for _, c := range caches {
-		if c.path == "" && c.resolvePath == nil {
+		if c.spec.Path == "" && c.spec.Resolver == "" {
 			panic("sparkwing: CacheDir: Dir path must not be empty")
 		}
-		if len(c.keyFiles) == 0 {
-			panic(fmt.Sprintf("sparkwing: CacheDir: %s: key source must name at least one file", c.name))
+		if len(c.spec.KeyFiles) == 0 {
+			panic(fmt.Sprintf("sparkwing: CacheDir: %s: key source must name at least one file", c.spec.Name))
 		}
 		n.dirCaches = append(n.dirCaches, c)
-		st := &dirCacheRun{spec: c, node: n.id}
-		n.BeforeRun(st.restore)
-		n.AfterRun(st.save)
 	}
 	return n
 }
@@ -157,233 +138,13 @@ func (n *JobNode) CacheDir(caches ...DirCache) *JobNode {
 // in declaration order. Empty when [JobNode.CacheDir] was not called.
 func (n *JobNode) DirCaches() []DirCache { return n.dirCaches }
 
-var depCacheKeyRE = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
-
-var depCacheDirLocks sync.Map
-
-func lockDepCacheDir(dir string) func() {
-	m, _ := depCacheDirLocks.LoadOrStore(filepath.Clean(dir), &sync.Mutex{})
-	mu := m.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
-}
-
-type dirCacheRun struct {
-	spec dirCacheSpecAlias
-	node string
-
-	disabled   bool
-	key        string
-	dir        string
-	missed     bool
-	emptyStart bool
-}
-
-type dirCacheSpecAlias = DirCache
-
-func (st *dirCacheRun) restore(ctx context.Context) error {
-	workdir := depCacheWorkdir()
-
-	lockPath, ok := firstExisting(workdir, st.spec.keyFiles)
-	if !ok {
-		slog.Warn("depcache: no key file found; dependency cache disabled for this run",
-			"node", st.node, "cache", st.spec.name, "looked_for", strings.Join(st.spec.keyFiles, ", "), "workdir", workdir)
-		st.disabled = true
+func dirCacheSpecs(n *JobNode) []depcache.Spec {
+	if len(n.dirCaches) == 0 {
 		return nil
 	}
-
-	key, err := deriveDepCacheKey(st.spec.name, st.spec.keyScope, lockPath)
-	if err != nil {
-		slog.Warn("depcache: key derivation failed; dependency cache disabled for this run",
-			"node", st.node, "cache", st.spec.name, "err", err)
-		st.disabled = true
-		return nil
+	out := make([]depcache.Spec, len(n.dirCaches))
+	for i, c := range n.dirCaches {
+		out[i] = c.spec
 	}
-	st.key = key
-
-	dir, err := st.spec.targetDir(workdir)
-	if err != nil {
-		slog.Warn("depcache: cannot resolve cache directory; dependency cache disabled for this run",
-			"node", st.node, "cache", st.spec.name, "err", err)
-		st.disabled = true
-		return nil
-	}
-	st.dir = dir
-
-	notEmpty, _ := dirHasEntries(dir)
-	st.emptyStart = !notEmpty
-
-	unlock := lockDepCacheDir(dir)
-	defer unlock()
-
-	backend := selectDepCacheBackend()
-	hit, err := backend.exists(ctx, key)
-	if err != nil {
-		slog.Warn("depcache: backend probe failed; running uncached",
-			"node", st.node, "cache", st.spec.name, "backend", backend.label(), "err", err)
-		st.disabled = true
-		return nil
-	}
-	if !hit {
-		st.missed = true
-		slog.Info("depcache: miss; will save after success",
-			"node", st.node, "cache", st.spec.name, "key", key, "backend", backend.label())
-		return nil
-	}
-
-	if notEmpty {
-		slog.Info("depcache: directory already has content; skipping restore",
-			"node", st.node, "cache", st.spec.name, "dir", dir)
-		return nil
-	}
-
-	start := time.Now()
-	size, err := backend.fetch(ctx, key, dir)
-	if err != nil {
-		slog.Warn("depcache: restore failed; running uncached",
-			"node", st.node, "cache", st.spec.name, "key", key, "err", err)
-		return nil
-	}
-	slog.Info(fmt.Sprintf("depcache: restored %s (%s) in %s",
-		st.spec.name, humanBytes(size), time.Since(start).Round(100*time.Millisecond)),
-		"node", st.node, "key", key, "backend", backend.label())
-	return nil
-}
-
-func (st *dirCacheRun) save(ctx context.Context, runErr error) {
-	if st.disabled || !st.missed || runErr != nil || st.key == "" {
-		return
-	}
-
-	if !st.emptyStart {
-		return
-	}
-
-	unlock := lockDepCacheDir(st.dir)
-	defer unlock()
-
-	if hasEntries, _ := dirHasEntries(st.dir); !hasEntries {
-		slog.Warn("depcache: nothing to save (directory missing or empty)",
-			"node", st.node, "cache", st.spec.name, "dir", st.dir)
-		return
-	}
-
-	backend := selectDepCacheBackend()
-	start := time.Now()
-	size, err := backend.store(ctx, st.key, st.dir)
-	if err != nil {
-		slog.Warn("depcache: save failed; next run will re-download",
-			"node", st.node, "cache", st.spec.name, "key", st.key, "err", err)
-		return
-	}
-	slog.Info(fmt.Sprintf("depcache: saved %s (%s) in %s",
-		st.spec.name, humanBytes(size), time.Since(start).Round(100*time.Millisecond)),
-		"node", st.node, "key", st.key, "backend", backend.label())
-}
-
-func (c DirCache) targetDir(workdir string) (string, error) {
-	if c.resolvePath != nil {
-		return c.resolvePath()
-	}
-	if filepath.IsAbs(c.path) {
-		return c.path, nil
-	}
-	return filepath.Join(workdir, c.path), nil
-}
-
-func deriveDepCacheKey(name, scope, lockPath string) (string, error) {
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		return "", fmt.Errorf("read key file %s: %w", lockPath, err)
-	}
-	h := sha256.New()
-	h.Write([]byte(scope))
-	h.Write([]byte{0})
-	h.Write(data)
-	sum := h.Sum(nil)
-	key := fmt.Sprintf("dep-%s-%s-%s-%s",
-		cacheSegment(name, "dir"), goruntime.GOOS, goruntime.GOARCH, hex.EncodeToString(sum[:8]))
-	if !depCacheKeyRE.MatchString(key) {
-		return "", fmt.Errorf("derived key %q is not cache-safe", key)
-	}
-	return key, nil
-}
-
-func depCacheWorkdir() string {
-	if wd := WorkDir(); wd != "" {
-		return wd
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		return cwd
-	}
-	return "."
-}
-
-func resolveNpmCacheDir() (string, error) {
-	if v := os.Getenv("npm_config_cache"); v != "" {
-		return v, nil
-	}
-	if out, err := exec.Command("npm", "config", "get", "cache").Output(); err == nil {
-		if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
-			return v, nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve npm cache dir: %w", err)
-	}
-	return filepath.Join(home, ".npm"), nil
-}
-
-func resolveGoModCache() (string, error) {
-	if v := os.Getenv("GOMODCACHE"); v != "" {
-		return v, nil
-	}
-	if out, err := exec.Command("go", "env", "GOMODCACHE").Output(); err == nil {
-		if v := strings.TrimSpace(string(out)); v != "" {
-			return v, nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve GOMODCACHE: %w", err)
-	}
-	return filepath.Join(home, "go", "pkg", "mod"), nil
-}
-
-func firstExisting(workdir string, candidates []string) (string, bool) {
-	for _, c := range candidates {
-		p := c
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(workdir, c)
-		}
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return p, true
-		}
-	}
-	return "", false
-}
-
-func dirHasEntries(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return len(entries) > 0, nil
-}
-
-func humanBytes(n int64) string {
-	const unit = 1000
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTP"[exp])
+	return out
 }

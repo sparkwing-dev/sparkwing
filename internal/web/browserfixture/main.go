@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,17 +12,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	dashboard "github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-const serviceToken = "browser-fixture-service-token"
 
 type fixtureConfig struct {
 	home   string
@@ -70,171 +67,28 @@ func parseFixtureConfig(args []string) (fixtureConfig, error) {
 	return fixtureConfig{home: home.value, webOut: webOut.value}, nil
 }
 
-type controllerState struct {
-	sync.Mutex
-	created             bool
-	loginCalls          int
-	sessionHeaders      []string
-	logoutSessions      []string
-	proxyAuthorizations []string
-	proxyCookies        []string
-	proxyCSRFHeaders    []string
-	mutationBodies      []string
-	activeSessions      map[string]bool
-}
-
-type stateSnapshot struct {
-	Created             bool     `json:"created"`
-	LoginCalls          int      `json:"login_calls"`
-	SessionHeaders      []string `json:"session_headers"`
-	LogoutSessions      []string `json:"logout_sessions"`
-	ProxyAuthorizations []string `json:"proxy_authorizations"`
-	ProxyCookies        []string `json:"proxy_cookies"`
-	ProxyCSRFHeaders    []string `json:"proxy_csrf_headers"`
-	MutationBodies      []string `json:"mutation_bodies"`
-	ActiveSessions      []string `json:"active_sessions"`
-}
-
-func (s *controllerState) snapshot() stateSnapshot {
-	s.Lock()
-	defer s.Unlock()
-	active := make([]string, 0, len(s.activeSessions))
-	for sessionID := range s.activeSessions {
-		active = append(active, sessionID)
-	}
-	return stateSnapshot{
-		Created:             s.created,
-		LoginCalls:          s.loginCalls,
-		SessionHeaders:      append([]string{}, s.sessionHeaders...),
-		LogoutSessions:      append([]string{}, s.logoutSessions...),
-		ProxyAuthorizations: append([]string{}, s.proxyAuthorizations...),
-		ProxyCookies:        append([]string{}, s.proxyCookies...),
-		ProxyCSRFHeaders:    append([]string{}, s.proxyCSRFHeaders...),
-		MutationBodies:      append([]string{}, s.mutationBodies...),
-		ActiveSessions:      active,
-	}
-}
-
-func (s *controllerState) handler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/__fixture/state" {
-		_ = json.NewEncoder(w).Encode(s.snapshot())
-		return
-	}
-	if r.URL.Path == "/__fixture/revoke" {
-		s.Lock()
-		delete(s.activeSessions, r.URL.Query().Get("session_id"))
-		s.Unlock()
+// safety: the control listener is a second loopback server, so the dashboard's own origin answers only what a
+// deployed controller answers.
+func controlHandler(st *store.Store) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /__fixture/state", func(w http.ResponseWriter, _ *http.Request) {
+		var sessions int
+		if err := st.DB().QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&sessions); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(map[string]int{"sessions": sessions}); err != nil {
+			log.Printf("browser fixture state: %v", err)
+		}
+	})
+	mux.HandleFunc("POST /__fixture/revoke", func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := st.DB().Exec(`DELETE FROM sessions`); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	s.Lock()
-	defer s.Unlock()
-	switch r.URL.Path {
-	case "/api/v1/auth/bootstrap-needed":
-		_ = json.NewEncoder(w).Encode(map[string]bool{"needed": !s.created})
-	case "/api/v1/users":
-		var body map[string]string
-		if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil ||
-			body["name"] != "admin" || body["password"] != "correct-horse" || s.created {
-			http.Error(w, "bad bootstrap request", http.StatusBadRequest)
-			return
-		}
-		s.created = true
-		w.WriteHeader(http.StatusCreated)
-	case "/api/v1/auth/login":
-		var body map[string]string
-		if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil ||
-			!s.created || body["username"] != "admin" || body["password"] != "correct-horse" {
-			http.Error(w, "bad login request", http.StatusUnauthorized)
-			return
-		}
-		s.loginCalls++
-		sessionID := fmt.Sprintf("session-%d", s.loginCalls)
-		s.activeSessions[sessionID] = true
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"session_id": sessionID,
-			"csrf_token": "csrf-token",
-			"principal":  "admin",
-			"scopes":     []string{"admin"},
-			"expires_at": time.Now().Add(time.Hour).Unix(),
-		})
-	case "/api/v1/auth/session":
-		header := r.Header.Get("Authorization")
-		s.sessionHeaders = append(s.sessionHeaders, header)
-		const prefix = "Session "
-		if len(header) <= len(prefix) || header[:len(prefix)] != prefix || !s.activeSessions[header[len(prefix):]] {
-			http.Error(w, "invalid session", http.StatusUnauthorized)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"principal":  "admin",
-			"scopes":     []string{"admin"},
-			"csrf_token": "csrf-token",
-			"expires_at": time.Now().Add(time.Hour).Unix(),
-		})
-	case "/api/v1/auth/logout":
-		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		sessionID := body["session_id"]
-		s.logoutSessions = append(s.logoutSessions, sessionID)
-		delete(s.activeSessions, sessionID)
-		w.WriteHeader(http.StatusNoContent)
-	case "/api/v1/runs":
-		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
-		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
-		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
-		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []any{}})
-	case "/api/v1/runs/cancel-me/cancel":
-		body, _ := io.ReadAll(r.Body)
-		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
-		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
-		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
-		s.mutationBodies = append(s.mutationBodies, string(body))
-		w.WriteHeader(http.StatusNoContent)
-	case "/api/v1/approvals/pending":
-		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
-		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
-		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
-		_ = json.NewEncoder(w).Encode(map[string]any{"approvals": []any{}})
-	case "/api/v1/health":
-		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
-		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
-		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	case "/api/v1/team/github-app/connect":
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"install_url":   "https://github.example/apps/sparkwing/installations/new?state=picker-state",
-			"authorize_url": "https://github.example/login/oauth/authorize?state=picker-state",
-			"state":         "picker-state", "verifier": "picker-verifier",
-		}); err != nil {
-			log.Printf("browser fixture connect: %v", err)
-		}
-	case "/api/v1/team/github-app/connect/available":
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"authorization": "picker-proof",
-			"installations": []map[string]any{
-				{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization"},
-				{"installation_id": 43, "account_login": "bound-org", "account_type": "Organization"},
-			},
-		}); err != nil {
-			log.Printf("browser fixture available: %v", err)
-		}
-	case "/api/v1/team/github-app/connect/select":
-		var body struct {
-			InstallationID int64 `json:"installation_id"`
-		}
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body.InstallationID != 42 {
-			http.Error(w, "invalid selection", http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(map[string]any{"installation_id": 42, "account_login": "octo-org"}); err != nil {
-			log.Printf("browser fixture select: %v", err)
-		}
-	default:
-		http.NotFound(w, r)
-	}
+	})
+	return mux
 }
 
 func listen(handler http.Handler) (net.Listener, *http.Server, error) {
@@ -259,42 +113,55 @@ func main() {
 	if err := os.MkdirAll(config.home, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	dashboardPaths := paths.PathsAt(filepath.Join(config.home, "home"))
-	if err := dashboardPaths.EnsureRoot(); err != nil {
+	home := paths.PathsAt(filepath.Join(config.home, "home"))
+	if err := home.EnsureRoot(); err != nil {
 		log.Fatal(err)
 	}
-	stateStore, err := store.Open(dashboardPaths.StateDB())
+	st, err := store.Open(home.StateDB())
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() { _ = stateStore.Close() }()
-
-	state := &controllerState{activeSessions: map[string]bool{}}
-	controllerListener, controllerServer, err := listen(http.HandlerFunc(state.handler))
+	defer func() {
+		if err := st.Close(); err != nil {
+			log.Printf("browser fixture store close: %v", err)
+		}
+	}()
+	now := time.Now().UTC()
+	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
 	if err != nil {
 		log.Fatal(err)
 	}
-	controllerOrigin := "http://" + controllerListener.Addr().String()
-	dashboardHandler := dashboard.HandlerFromOptionsWithBundle(dashboard.HandlerOptions{
-		Backend:       backend.NewStoreBackend(stateStore, dashboardPaths, nil),
-		Paths:         dashboardPaths,
-		ControllerURL: controllerOrigin,
-		Token:         serviceToken,
-		Version:       "auth-browser-fixture",
-		RequireLogin:  true,
+	if _, err := st.CreateUser(fixtureUser, fixturePassword, []string{controller.ScopeAdmin}, now); err != nil {
+		log.Fatal(err)
+	}
+	srv := controller.New(st, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{
+		Bundle:  os.DirFS(config.webOut),
+		Version: "auth-browser-fixture",
+		Paths:   home,
 		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure.
 		InsecureCookies: true,
-	}, os.DirFS(config.webOut))
-	dashboardListener, dashboardServer, err := listen(dashboardHandler)
+	})
+	defer func() {
+		if err := srv.Shutdown(context.Background()); err != nil {
+			log.Printf("browser fixture shutdown: %v", err)
+		}
+	}()
+
+	dashboardListener, dashboardServer, err := listen(srv.Handler())
 	if err != nil {
-		_ = controllerServer.Close()
 		log.Fatal(err)
 	}
-
+	controlListener, controlServer, err := listen(controlHandler(st))
+	if err != nil {
+		if err := dashboardServer.Close(); err != nil {
+			log.Printf("browser fixture close: %v", err)
+		}
+		log.Fatal(err)
+	}
 	started := map[string]string{
-		"origin":            "http://" + dashboardListener.Addr().String(),
-		"controller_origin": controllerOrigin,
-		"service_token":     serviceToken,
+		"origin":         "http://" + dashboardListener.Addr().String(),
+		"control_origin": "http://" + controlListener.Addr().String(),
+		"admin_token":    token,
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(started); err != nil {
 		log.Fatal(err)
@@ -303,6 +170,14 @@ func main() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	<-signals
-	_ = dashboardServer.Close()
-	_ = controllerServer.Close()
+	for _, server := range []*http.Server{dashboardServer, controlServer} {
+		if err := server.Close(); err != nil {
+			log.Printf("browser fixture close: %v", err)
+		}
+	}
 }
+
+const (
+	fixtureUser     = "admin"
+	fixturePassword = "correct-horse"
+)

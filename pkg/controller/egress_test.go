@@ -408,3 +408,52 @@ func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 		}
 	}
 }
+
+// safety: the dashboard's node log stream and the live log stream draw on one
+// per-principal stream cap, so neither route is a way around the other's.
+func TestDashboardLogStreamSharesTheLiveLogStreamCap(t *testing.T) {
+	const (
+		live      = "/api/v1/runs/r1/nodes/n1/logs/stream"
+		dashboard = "/api/v1/runs/r1/logs/n1/stream"
+	)
+	for _, tc := range []struct{ held, refused string }{
+		{live, dashboard},
+		{dashboard, live},
+	} {
+		t.Run(tc.held, func(t *testing.T) {
+			f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 1})
+			seedLiveLog(t, f, "r1", "n1", "hello\n")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+tc.held, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+f.adminToken)
+			open, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = open.Body.Close() }()
+			if open.StatusCode != http.StatusOK {
+				t.Fatalf("held stream %s = %d, want 200", tc.held, open.StatusCode)
+			}
+			if _, err := open.Body.Read(make([]byte, 1)); err != nil {
+				t.Fatalf("read the held stream: %v", err)
+			}
+			req, err = http.NewRequestWithContext(ctx, http.MethodGet, f.url+tc.refused, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+f.adminToken)
+			second, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = second.Body.Close() }()
+			if second.StatusCode != http.StatusTooManyRequests {
+				t.Fatalf("%s while %s holds the only slot = %d, want 429", tc.refused, tc.held, second.StatusCode)
+			}
+		})
+	}
+}

@@ -47,7 +47,6 @@ var publishImageBinaries = []string{
 	"sparkwing-runner",
 	"sparkwing-cache",
 	"sparkwing-logs",
-	"sparkwing-web",
 }
 
 func scannedDigest(binary string) string {

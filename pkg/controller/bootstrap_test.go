@@ -83,7 +83,7 @@ func TestBootstrap_AuthEnabledRequiresAdminForFirstUser(t *testing.T) {
 	}
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
-	srv := httptest.NewServer(controller.New(st, logger).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, logger).EnableAuthFromStore().WithDashboard(controller.Dashboard{}).Handler())
 	defer srv.Close()
 
 	if getBootstrapNeeded(t, srv.URL) {
@@ -163,21 +163,19 @@ func TestBootstrap_ConcurrentSignupRace(t *testing.T) {
 
 func getBootstrapNeeded(t *testing.T, base string) bool {
 	t.Helper()
-	resp, err := http.Get(base + "/api/v1/auth/bootstrap-needed")
+	resp, err := http.Get(base + "/login")
 	if err != nil {
-		t.Fatalf("get bootstrap-needed: %v", err)
+		t.Fatalf("get login: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("bootstrap-needed status=%d", resp.StatusCode)
+		t.Fatalf("login status=%d", resp.StatusCode)
 	}
-	var body struct {
-		Needed bool `json:"needed"`
+	page, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	return body.Needed
+	return strings.Contains(string(page), "Create first admin")
 }
 
 func postJSONWithStatus(t *testing.T, url string, body any) (int, string) {
