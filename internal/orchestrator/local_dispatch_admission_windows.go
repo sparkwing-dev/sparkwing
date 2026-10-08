@@ -24,6 +24,10 @@ func prepareLocalDispatchAdmission(ctx context.Context, env []string) (func(), e
 	admission := LocalAdmission{Home: home, Version: sparkwingModuleVersion(), PipelineClient: true}
 	cl, err := wingdclient.EnsureDaemon(ctx, admission.clientOptions())
 	if err != nil {
+		// safety: the child meets the same daemon gap and runs standalone, as a Unix child does.
+		if standaloneReasonFor(err) != "" {
+			return func() {}, nil
+		}
 		return nil, err
 	}
 	return func() { _ = cl.Close() }, nil

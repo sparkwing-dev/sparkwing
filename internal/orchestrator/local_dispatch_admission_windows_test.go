@@ -4,7 +4,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -29,14 +28,15 @@ func TestLocalDispatchAdmissionUsesChildHome(t *testing.T) {
 	}
 }
 
-func TestLocalDispatchAdmissionSurfacesUnusableHost(t *testing.T) {
+func TestLocalDispatchAdmissionLeavesUnusableHostToStandaloneChild(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, filepath.Join(t.TempDir(), "missing.exe"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	closeAdmission, err := prepareLocalDispatchAdmission(ctx, []string{"SPARKWING_HOME=" + wingdTestHome(t)})
-	if !errors.Is(err, wingdclient.ErrDaemonHostUnusable) || closeAdmission != nil {
-		t.Fatalf("prepare admission = %v, %v; want unusable host", closeAdmission != nil, err)
+	if err != nil || closeAdmission == nil {
+		t.Fatalf("prepare admission = %v, %v; want the child left to run standalone", closeAdmission != nil, err)
 	}
+	closeAdmission()
 }
 
 func TestLocalDispatchAdmissionPreservesNoHostFallback(t *testing.T) {
