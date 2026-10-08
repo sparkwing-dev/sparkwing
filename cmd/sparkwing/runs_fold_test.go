@@ -178,3 +178,27 @@ func TestRunsLogsSinceAcceptsDays(t *testing.T) {
 		t.Fatalf("runs logs --grep --since 7d: %v", err)
 	}
 }
+
+func TestRunsListGroupByKeepsTheStoresNormalizedSHAMatch(t *testing.T) {
+	paths := runsFoldHome(t,
+		store.Run{ID: "run-sha", Pipeline: "build", Status: "running", StartedAt: time.Now(), GitSHA: "abc123def456"},
+	)
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(context.Background(), "run-sha", "failed", "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runJobs([]string{"list", "--status", "failed", "--group-by", "run", "--sha", " abc123 ", "-o", "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "run-sha") {
+		t.Fatalf("failures = %q, want the run the store matched on its trimmed SHA prefix", out)
+	}
+}

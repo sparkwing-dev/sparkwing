@@ -46,7 +46,11 @@ func listFailures(ctx context.Context, paths orchestrator.Paths, opts orchestrat
 	if clientSideFilter(opts.Filter) {
 		filter.Limit = store.MaxRunListLimit
 	}
-	keep := opts.Filter.Matches
+	// safety: the store already applied (and normalized) the branch and SHA
+	// includes, so the client-side pass checks only what the store cannot.
+	post := opts.Filter
+	post.Branches, post.SHAPrefixes = nil, nil
+	keep := post.Matches
 	var rows []failureRow
 	var notes []string
 	var err error
