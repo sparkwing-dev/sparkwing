@@ -10,20 +10,20 @@ A restore needs all of the following. A backup that skips any of it
 restores a controller that starts and still cannot do its job.
 
 - **The state database.** SQLite at `$SPARKWING_HOME/state.db`, or the
-  PostgreSQL database named by `SPARKWING_PG_URL`. It holds runs,
+  PostgreSQL database named by the controller's `pg-url` credential. It holds runs,
   nodes, events, secrets, credits, API tokens, dashboard users, cron
   schedules, and the schema version the binary matches itself against.
-- **The secrets key**, `SPARKWING_SECRETS_KEY` or the file behind
-  `--secrets-key-file`. Secret values are sealed in the database under
-  it. Restoring the database without the key restores rows nothing can
+- **The secrets key**: the `secrets-key` file in the controller's
+  `--credentials-dir`, or, on a single-team SQLite controller given none,
+  the `secrets.key` it created beside `state.db`. Secret values are sealed
+  in the database under it. Restoring the database without the key restores rows nothing can
   open. Started with some other key, the controller refuses to start
-  once that key opens none of the values it samples; started with no key,
-  it starts and answers each read of a sealed value with an error.
-  During a key rotation the same is true of
-  `SPARKWING_SECRETS_PREVIOUS_KEY`.
+  once that key opens none of the values it samples, and started with no
+  key it refuses to create a new one beside sealed values.
+  During a key rotation the same is true of `secrets-key.previous`.
 - **The controller's own start-up configuration**: its flags and the
-  rest of its environment, including the `SPARKWING_GITHUB_APP_*`
-  settings and the announced service URLs. On Kubernetes that is the Helm values file and the Secrets it
+  rest of its credentials directory, including the GitHub App settings
+  and the announced service URLs. On Kubernetes that is the Helm values file and the Secrets it
   names; on a single machine it is the unit file and its environment.
 
 What the state database does not hold, and what a restore therefore
@@ -39,6 +39,11 @@ controller serves run and node records without them.
 
 ## Back up
 
+The commands below write `$CREDS` for the controller's `--credentials-dir`.
+A single-team SQLite controller that was never given a `secrets-key` keeps
+the key it created at `$SPARKWING_HOME/secrets.key`; the copy falls back to
+that file.
+
 ### SQLite
 
 Stop the controller first, because a file copy taken while the
@@ -51,7 +56,8 @@ install -d -m 700 "$DEST"
 cp -p "$SPARKWING_HOME/state.db" "$DEST/state.db"
 cp -p "$SPARKWING_HOME/state.db-wal" "$DEST/" 2>/dev/null || true
 cp -p "$SPARKWING_HOME/state.db-shm" "$DEST/" 2>/dev/null || true
-printf %s "$SPARKWING_SECRETS_KEY" > "$DEST/secrets.key"
+cp -p "$CREDS/secrets-key" "$DEST/secrets.key" 2>/dev/null ||
+    cp -p "$SPARKWING_HOME/secrets.key" "$DEST/secrets.key"
 chmod 600 "$DEST"/*
 ( cd "$DEST" && sha256sum ./* > SHA256SUMS )
 ```
@@ -90,8 +96,9 @@ STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
 DEST=/var/backups/sparkwing/$STAMP
 install -d -m 700 "$DEST"
 pg_dump --format=custom --no-owner --no-privileges \
-    --file="$DEST/controller.dump" "$SPARKWING_PG_URL"
-printf %s "$SPARKWING_SECRETS_KEY" > "$DEST/secrets.key"
+    --file="$DEST/controller.dump" "$(cat "$CREDS/pg-url")"
+cp -p "$CREDS/secrets-key" "$DEST/secrets.key" 2>/dev/null ||
+    cp -p "$SPARKWING_HOME/secrets.key" "$DEST/secrets.key"
 chmod 600 "$DEST"/*
 ( cd "$DEST" && sha256sum ./* > SHA256SUMS )
 ```
@@ -116,10 +123,11 @@ install -d -m 700 "$SCRATCH/controller-home"
 cp -p "$DEST/state.db" "$SCRATCH/controller-home/state.db"
 cp -p "$DEST"/state.db-wal "$SCRATCH/controller-home/" 2>/dev/null || true
 cp -p "$DEST"/state.db-shm "$SCRATCH/controller-home/" 2>/dev/null || true
+install -d -m 700 "$SCRATCH/credentials"
+cp -p "$DEST/secrets.key" "$SCRATCH/credentials/secrets-key"
 
 SPARKWING_HOME="$SCRATCH/controller-home" \
-SPARKWING_SECRETS_KEY="$(cat "$DEST/secrets.key")" \
-    sparkwing-controller --addr 127.0.0.1:4456
+    sparkwing-controller --addr 127.0.0.1:4456 --credentials-dir "$SCRATCH/credentials"
 ```
 
 For a PostgreSQL backup, restore the archive into a database of its own
@@ -130,9 +138,8 @@ createdb sparkwing_verify
 pg_restore --no-owner --no-privileges --exit-on-error \
     --dbname="postgres://.../sparkwing_verify" "$DEST/controller.dump"
 
-SPARKWING_PG_URL="postgres://.../sparkwing_verify" \
-SPARKWING_SECRETS_KEY="$(cat "$DEST/secrets.key")" \
-    sparkwing-controller --addr 127.0.0.1:4456
+(umask 077 && printf %s "postgres://.../sparkwing_verify" > "$SCRATCH/credentials/pg-url")
+sparkwing-controller --addr 127.0.0.1:4456 --credentials-dir "$SCRATCH/credentials"
 ```
 
 The controller prints the schema it opened as its first line:
@@ -173,8 +180,8 @@ pg_restore --no-owner --no-privileges --exit-on-error \
     --dbname="postgres://.../sparkwing_restored" "$DEST/controller.dump"
 ```
 
-Start the controller with `SPARKWING_SECRETS_KEY` set to the key from
-the same backup directory, and with `SPARKWING_PG_URL` pointing at the
+Start the controller with its `secrets-key` credential holding the key
+from the same backup directory, and its `pg-url` credential naming the
 restored database. Then run [Verify the install](#verify-the-install).
 
 Keep `state.db.displaced` and the old database until the verification
@@ -220,8 +227,7 @@ it reached:
 
 ```bash
 SPARKWING_HOME="$SCRATCH/controller-home" \
-SPARKWING_SECRETS_KEY="$(cat "$DEST/secrets.key")" \
-    <new sparkwing-controller> --addr 127.0.0.1:4456
+    <new sparkwing-controller> --addr 127.0.0.1:4456 --credentials-dir "$SCRATCH/credentials"
 ```
 
 Stop it, and start the **previous** controller against the same migrated

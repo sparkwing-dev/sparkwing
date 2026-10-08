@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,12 +43,30 @@ func secretsTestServer(t *testing.T, features ...string) (*controller.Server, *s
 	return srv, st
 }
 
+func postSecret(t *testing.T, srv *controller.Server, name, value string) *http.Response {
+	t.Helper()
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	body, _ := json.Marshal(map[string]string{"name": name, "value": value})
+	resp, err := http.Post(ts.URL+"/api/v1/secrets", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func keyFileIn(t *testing.T) string {
+	t.Helper()
+	return generatedKeyPath(filepath.Join(t.TempDir(), "state.db"))
+}
+
 func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
-	srv, _ := secretsTestServer(t, license.FeatureMultiTeam)
+	srv, st := secretsTestServer(t, license.FeatureMultiTeam)
 	if !srv.MultiTeam() {
 		t.Fatal("the test license did not make the controller multi-team")
 	}
-	err := configureSecrets(context.Background(), srv, nil)
+	err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyFileIn(t))
 	if err == nil {
 		t.Fatal("a multi-team controller started without a secrets key")
 	}
@@ -51,40 +75,105 @@ func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
 	}
 }
 
-func TestConfigureSecrets_SingleTeamStartsWithoutAKey(t *testing.T) {
+func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testing.T) {
+	srv, st := secretsTestServer(t)
+	keyPath := keyFileIn(t)
+	if err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyPath); err != nil {
+		t.Fatalf("a single-team controller refused to start without a key: %v", err)
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("stat %s = %v, want no key before any secret is written", keyPath, err)
+	}
+	if resp := postSecret(t, srv, "TOKEN", "first-value"); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST secret = %d, want 204", resp.StatusCode)
+	}
+	info, err := os.Stat(keyPath)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("key file %s = %v, %v; want one with mode 0600 after the first secret", keyPath, info, err)
+	}
+	row, err := st.GetSecret("TOKEN")
+	if err != nil || !secrets.IsBound(row.Value) {
+		t.Fatalf("stored value = %v, %v; want a sealed envelope", row, err)
+	}
+
+	restarted := controller.New(st, nil)
+	if err := configureSecrets(context.Background(), restarted, st, controllerCredentials{}, keyPath); err != nil {
+		t.Fatalf("restart with the generated key: %v", err)
+	}
+	if resp := postSecret(t, restarted, "OTHER", "second-value"); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST after restart = %d, want 204", resp.StatusCode)
+	}
+}
+
+func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *testing.T) {
+	srv, st := secretsTestServer(t)
+	keyPath := keyFileIn(t)
+	if err := configureSecrets(context.Background(), srv, st, controllerCredentials{}, keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if resp := postSecret(t, srv, "TOKEN", "v"); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST secret = %d", resp.StatusCode)
+	}
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	err := configureSecrets(context.Background(), controller.New(st, nil), st, controllerCredentials{}, keyPath)
+	if err == nil || !strings.Contains(err.Error(), keyPath) {
+		t.Fatalf("start after losing the key = %v, want a refusal naming %s", err, keyPath)
+	}
+}
+
+func TestConfigureSecrets_PlaintextRowsAreSealedAtStartup(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		features []string
+		creds    func(t *testing.T) controllerCredentials
 	}{
-		{"no license", nil},
-		{"a license without multi-team", []string{"something-else"}},
+		{"multi-team with a key", []string{license.FeatureMultiTeam}, func(t *testing.T) controllerCredentials {
+			key, err := secrets.GenerateKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			return controllerCredentials{SecretsKey: key}
+		}},
+		{"single-team SQLite without a key", nil, func(*testing.T) controllerCredentials { return controllerCredentials{} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, _ := secretsTestServer(t, tc.features...)
-			if err := configureSecrets(context.Background(), srv, nil); err != nil {
-				t.Fatalf("a single-team controller refused to start without a key: %v", err)
+			srv, st := secretsTestServer(t, tc.features...)
+			if err := st.CreateOrReplaceSecret(store.Secret{
+				Name: "TOKEN", Value: "written-before-the-key", Principal: "seed", Masked: true,
+			}, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			if err := configureSecrets(context.Background(), srv, st, tc.creds(t), keyFileIn(t)); err != nil {
+				t.Fatalf("configureSecrets: %v", err)
+			}
+			row, err := st.GetSecret("TOKEN")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !secrets.IsBound(row.Value) || strings.Contains(row.Value, "written-before-the-key") {
+				t.Fatalf("stored value after start = %.12q..., want a team-bound envelope", row.Value)
 			}
 		})
 	}
 }
 
-func TestConfigureSecrets_MultiTeamWithAKeySealsPlaintextRows(t *testing.T) {
-	srv, st := secretsTestServer(t, license.FeatureMultiTeam)
-	if err := st.CreateOrReplaceSecret(store.Secret{
-		Name: "TOKEN", Value: "written-before-the-key", Principal: "seed", Masked: true,
-	}, time.Now().UTC()); err != nil {
+func TestKeylessControllerRefusesSecretWritesAndPlaintextRows(t *testing.T) {
+	srv, st := secretsTestServer(t)
+	srv.WithSecretsCipher(keylessCipher{})
+	resp := postSecret(t, srv, "TOKEN", "v")
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), credSecretsKey) {
+		t.Fatalf("POST secret = %d %s, want 409 naming the %s credential", resp.StatusCode, body, credSecretsKey)
+	}
+	if err := refusePlaintextSecrets(context.Background(), st); err != nil {
+		t.Fatalf("an empty store refused: %v", err)
+	}
+	if err := st.CreateOrReplaceSecret(store.Secret{Name: "OLD", Value: "plain", Principal: "seed"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	key, _ := secrets.GenerateKey()
-	c, _ := secrets.NewCipher(key)
-	if err := configureSecrets(context.Background(), srv, c); err != nil {
-		t.Fatalf("configureSecrets: %v", err)
-	}
-	row, err := st.GetSecret("TOKEN")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !secrets.IsBound(row.Value) || strings.Contains(row.Value, "written-before-the-key") {
-		t.Fatalf("stored value after start = %.12q..., want a team-bound envelope", row.Value)
+	if err := refusePlaintextSecrets(context.Background(), st); err == nil || !strings.Contains(err.Error(), "1 secrets as plaintext") {
+		t.Fatalf("plaintext row = %v, want a refusal counting it", err)
 	}
 }

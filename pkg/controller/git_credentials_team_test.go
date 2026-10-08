@@ -299,7 +299,7 @@ func TestTeamGitCredentialIsOwnerManagedAndWriteOnly(t *testing.T) {
 }
 
 func TestTeamGitCredentialNeedsASecretsKey(t *testing.T) {
-	f := newAppFixture(t)
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server { return s.WithSecretsCipher(nil) })
 	olga := f.ghUser(501, "olga")
 	var out struct {
 		Error string `json:"error"`

@@ -1,6 +1,7 @@
 package launcher_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -41,7 +43,7 @@ func newLaunchFixture(t *testing.T, wrap ...func(http.Handler) http.Handler) lau
 	if _, _, err := st.CreateToken("operator", store.TokenKindService, []string{controller.ScopeAdmin}, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	h := controller.New(st, nil).EnableAuthFromStore().Handler()
+	h := controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(fixtureCipher(t)).Handler()
 	for _, w := range wrap {
 		h = w(h)
 	}
@@ -414,4 +416,13 @@ func TestRun_PausesClaimsWhileItsJobsAreNotYetRunning(t *testing.T) {
 			}
 		})
 	}
+}
+
+func fixtureCipher(t *testing.T) *secrets.Cipher {
+	t.Helper()
+	c, err := secrets.NewCipher(bytes.Repeat([]byte{7}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

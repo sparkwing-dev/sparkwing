@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
@@ -420,16 +422,6 @@ func run(args []string) error {
 		}
 	}
 
-	cipher, cerr := secretsCipher(creds.SecretsKey, creds.SecretsPreviousKey)
-	if cerr != nil {
-		return fmt.Errorf("load secrets key: %w", cerr)
-	}
-	if cipher == nil {
-		fmt.Fprintln(os.Stderr,
-			"sparkwing-controller: WARNING: no "+credSecretsKey+" credential; "+
-				"secret values will be stored at rest as plaintext")
-	}
-
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
 		return errors.New("--billing-url is set but the " + credBillingToken + " credential is absent; " +
 			"the checkout service refuses a controller without its token")
@@ -520,7 +512,7 @@ func run(args []string) error {
 	// safety: auth resolves after the license is installed, because the license decides
 	// whether an empty tokens table may serve unauthenticated.
 	srv.EnableAuthFromStore()
-	if err := configureSecrets(ctx, srv, cipher); err != nil {
+	if err := configureSecrets(ctx, srv, st, creds, generatedKeyPath(p.StateDB())); err != nil {
 		return err
 	}
 	if *bucketMeasurePages < 1 {
@@ -753,24 +745,49 @@ func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) er
 		"(--archive-store) keep their objects in, because free-tier allowances are enforced only there")
 }
 
-// safety: a multi-team controller holds other people's credentials, so it
-// refuses to start rather than store them as plaintext; a single-team
-// install keeps starting without a key, as it always has.
-func configureSecrets(ctx context.Context, srv *controller.Server, cipher *secrets.Cipher) error {
-	if cipher == nil {
-		if srv.MultiTeam() {
-			return errors.New("the license allows more than one team, so stored secrets must be encrypted: " +
-				"put a base64-encoded 32-byte key in the " + credSecretsKey + " credential " +
-				"(generate one with `openssl rand -base64 32`)")
-		}
-		return nil
-	}
-	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
-	srv.WithSecretsCipher(cipher)
-	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
+// safety: no secret is stored as plaintext; a multi-team controller holds other
+// people's credentials, so it refuses to start keyless, and a PostgreSQL one has
+// no volume to keep a generated key on, so it starts and refuses secret writes.
+func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Store,
+	creds controllerCredentials, keyPath string,
+) error {
+	cipher, err := secretsCipher(creds.SecretsKey, creds.SecretsPreviousKey)
+	if err != nil {
 		return err
 	}
-	return nil
+	switch {
+	case cipher != nil:
+		// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
+		srv.WithSecretsCipher(cipher)
+	case srv.MultiTeam():
+		return errors.New("the license allows more than one team, so stored secrets must be encrypted: " +
+			"put a base64-encoded 32-byte key in the " + credSecretsKey + " credential " +
+			"(generate one with `openssl rand -base64 32`)")
+	case st.Dialect() == store.DialectSQLite:
+		ring, err := localsecrets.NewStoreKeyring(keyPath, nil,
+			"Restore that key to "+keyPath+", or put it in the "+credSecretsKey+" credential, and start again.")
+		if err != nil {
+			return fmt.Errorf("secrets key %s: %w", keyPath, err)
+		}
+		if err := ring.MissingKey(ctx, st); err != nil {
+			return err
+		}
+		srv.WithSecretsCipher(ring.For(st))
+	default:
+		if err := refusePlaintextSecrets(ctx, st); err != nil {
+			return err
+		}
+		srv.WithSecretsCipher(keylessCipher{})
+		return nil
+	}
+	_, err = srv.ResealStoredSecrets(ctx)
+	return err
+}
+
+// safety: the generated key sits beside the database on its volume, so a
+// backup or restore of one carries the other.
+func generatedKeyPath(stateDB string) string {
+	return filepath.Join(filepath.Dir(stateDB), "secrets.key")
 }
 
 func secretsCipher(key, previous []byte) (*secrets.Cipher, error) {

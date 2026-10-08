@@ -83,6 +83,7 @@ type Keyring struct {
 	fromEnv   bool
 	mayCreate bool
 	previous  []byte
+	restore   string
 
 	mu     sync.Mutex
 	cipher *secrets.Cipher
@@ -119,6 +120,25 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	}
 	if k.cipher, err = newCipher(current, previous); err != nil {
 		return nil, err
+	}
+	return k, nil
+}
+
+// NewStoreKeyring returns a keyring whose key lives in the file at path,
+// beside the store it seals for, and is created there on the first seal.
+// previous opens values sealed under an older key. restore is what a refusal
+// tells the operator to do when the store already holds values sealed under a
+// key path does not hold, such as where the original key belongs.
+func NewStoreKeyring(path string, previous []byte, restore string) (*Keyring, error) {
+	k := &Keyring{path: path, previous: previous, mayCreate: true, restore: restore}
+	current, err := readKeyFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if current != nil {
+		if k.cipher, err = newCipher(current, previous); err != nil {
+			return nil, err
+		}
 	}
 	return k, nil
 }
@@ -215,8 +235,12 @@ func (k *Keyring) ensure(ctx context.Context, st *store.Store) (*secrets.Cipher,
 			"local secret with `sparkwing secrets set`, which starts the daemon; if the daemon runs with %s, "+
 			"set it for this process too%.0w", ErrNoKeyToCreate, k.path, KeyEnv, secrets.ErrKeyRefused)
 	}
-	if err := configguard.GuardWrite("the local secrets key", KeyFileEnv, k.path); err != nil {
-		return nil, fmt.Errorf("%w%.0w", err, secrets.ErrKeyRefused)
+	// safety: a store keyring's file sits beside the database the process
+	// already writes, so only the machine key in the config directory is guarded.
+	if k.restore == "" {
+		if err := configguard.GuardWrite("the local secrets key", KeyFileEnv, k.path); err != nil {
+			return nil, fmt.Errorf("%w%.0w", err, secrets.ErrKeyRefused)
+		}
 	}
 	key, err := k.create()
 	if err != nil {
@@ -321,6 +345,10 @@ func (k *Keyring) missingLocked(ctx context.Context, st *store.Store) error {
 	}
 	if len(sealed) == 0 {
 		return nil
+	}
+	if k.restore != "" {
+		return fmt.Errorf("%w: the secrets store holds values sealed under a key this process does not have, "+
+			"so it will not create a new one at %s. %s%.0w", ErrNoKey, k.path, k.restore, secrets.ErrKeyRefused)
 	}
 	return fmt.Errorf("%w: the local secrets store holds values sealed under a key this process does not have, "+
 		"so it will not create a new one. Restore that key to %s, or set %s to it (base64 of its 32 bytes) "+

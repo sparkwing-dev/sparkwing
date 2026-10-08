@@ -182,12 +182,12 @@ controller:
   credentialsSecret:
     name: ""
 
-  # Secrets-store encryption key. When set, the controller encrypts
-  # secret values stored in the state DB at rest. Without it, the
-  # controller logs a WARNING at startup and stores plaintext.
-  # Generate with `openssl rand -base64 32`.
+  # Secrets-store encryption key, mounted as the secrets-key credential.
+  # Without it a SQLite controller creates its own key beside state.db on
+  # the first secret write, a PostgreSQL controller refuses secret
+  # writes, and a multi-team controller refuses to start. Generate with
+  # `openssl rand -base64 32`.
   secretsKey:
-    # Empty name disables; controller runs with plaintext secrets.
     name: ""
     key: key
 

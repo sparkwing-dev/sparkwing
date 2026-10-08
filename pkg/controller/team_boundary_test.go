@@ -115,7 +115,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		t.Fatal(err)
 	}
 	raw, pub := multiTeamLicense(t)
-	srv := controller.New(st, nil).EnableAuthFromStore().
+	srv := controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

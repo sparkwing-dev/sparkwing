@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -93,7 +94,15 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 				}
 				got := make(map[[2]string]string)
 				for _, row := range rows {
-					got[[2]string{row.Name, row.Pipeline}] = row.Value
+					value := row.Value
+					if secrets.IsEncrypted(value) {
+						opened, err := testCipher(t).OpenBound(string(tn.Team()), row.Name, row.Pipeline, row.Shared, row.Masked, value)
+						if err != nil {
+							t.Fatal(err)
+						}
+						value = opened
+					}
+					got[[2]string{row.Name, row.Pipeline}] = value
 				}
 				if !reflect.DeepEqual(got, want[tn.Team()]) {
 					t.Fatalf("%s secrets = %#v, want %#v", tn.Team(), got, want[tn.Team()])

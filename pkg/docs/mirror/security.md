@@ -560,28 +560,29 @@ sender picks.
 
 ## Secrets at rest
 
-Configure a master key and secret values are encrypted with an
-XChaCha20-Poly1305 AEAD cipher (`internal/secrets`), under a fresh random
-nonce per value, before they reach the database. The key is 32 random
-bytes, base64-encoded; generate one with `openssl rand -base64 32`.
-Provide it via:
+Secret values are encrypted with an XChaCha20-Poly1305 AEAD cipher
+(`internal/secrets`), under a fresh random nonce per value, before they
+reach the database. No secret is ever stored as plaintext. The key is 32
+random bytes. Give it to the controller as the `secrets-key` file in its
+[`--credentials-dir`](self-hosting.md#controller-credentials), raw or
+base64-encoded; generate one with `openssl rand -base64 32`. The chart
+projects `controller.secretsKey` into that directory.
 
-- `--secrets-key-file <path>` -- a file holding the raw or base64 key, or
-- `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key.
+Without that file the controller does one of three things:
 
-Prefer the file. The chart mounts `controller.secretsKey` as a file and
-renders the flag, because an environment entry is readable through
-`/proc` and is inherited by anything the container execs. The controller
-clears either variable from its own environment as soon as it reads it,
-so a value supplied that way does not outlive startup.
+- **A license that allows more than one team:** it refuses to start,
+  because it holds other people's credentials.
+- **One team, SQLite state:** it creates a key on the first secret write
+  and keeps it in `secrets.key` beside the database, on the same volume,
+  mode `0600`. It reads that file on every later start. A store that
+  already holds sealed values and no key file refuses to start rather
+  than create a second key.
+- **One team, PostgreSQL state:** it starts and serves everything else,
+  and refuses each secret write with `409` naming the `secrets-key` file
+  to add. It has no volume of its own to keep a generated key on.
 
-A controller whose license allows more than one team refuses to start
-without a key, because it holds other people's credentials. A
-single-team install, a laptop controller included, still starts without
-one: it stores secret values as plaintext and logs a warning at startup.
-Nothing generates a key on its own; losing the key loses every value
-sealed under it, so it is backed up beside the database (see
-[backup-restore.md](backup-restore.md)).
+Losing the key loses every value sealed under it, so back it up beside the
+database (see [backup-restore.md](backup-restore.md)).
 
 Each envelope (`enc:v3:`) is bound, as additional authenticated data, to
 the fields of the row that decide who may read it: the team that owns
@@ -595,8 +596,11 @@ answers there. A read that fails to open answers `500`, never an empty
 value.
 
 Every start with a key reseals the table before the controller serves a
-request. A row held as plaintext, because it was written while the
-controller ran without a key, is sealed. An envelope from before team
+request. A row held as plaintext, because an older controller wrote it
+while it ran without a key, is sealed; a SQLite controller without a key
+creates its key to do so. A PostgreSQL controller without a key that
+finds a plaintext row refuses to start and names the `secrets-key` file
+that lets it seal them. An envelope from before team
 binding (`enc:v1:`, bound to nothing, or `enc:v2:`, bound to the row but
 not its team) is opened and resealed with its team. Those older envelopes
 were only ever written into the `default` team, so one found in any other
@@ -618,11 +622,9 @@ team (`"bound"` on the API) and `false` for one that is plaintext or an
 older envelope.
 
 A stored envelope carries no key id, so the controller opens it by
-trying the keys it holds. Name the key values were sealed under before
-the current one and it becomes a read-only fallback:
-
-- `--secrets-previous-key-file <path>`, or
-- `SPARKWING_SECRETS_PREVIOUS_KEY`.
+trying the keys it holds. Put the key values were sealed under before the
+current one in the `secrets-key.previous` credential and it becomes a
+read-only fallback.
 
 A value that does not open under the current key is tried against that
 one, which keeps every value readable across a key change. Close the

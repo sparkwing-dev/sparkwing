@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -29,7 +30,15 @@ func TestForegroundControllerSecretsSelectRunPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore()
+	key, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := secrets.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(cipher)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	httpSrv := httptest.NewServer(srv.Handler())
 	t.Cleanup(httpSrv.Close)

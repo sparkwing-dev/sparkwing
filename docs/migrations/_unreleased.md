@@ -410,6 +410,28 @@ ran it.
   only the controller stopped. `sparkwing-controller migrate-outputs` takes
   `--credentials-dir` too, for its `pg-url`.
 
+## The controller never stores a secret as plaintext
+
+- **Before:** a single-team controller started without a secrets key
+  stored every secret value as plaintext and logged a warning.
+- **After:** no secret is stored as plaintext. Without the `secrets-key`
+  credential, a multi-team controller refuses to start, as before. A
+  single-team SQLite controller creates a key on the first secret write and
+  keeps it in `secrets.key` beside `state.db`, mode `0600`. A single-team
+  PostgreSQL controller starts and refuses each secret write with `409`
+  naming the file to add. A server built from `pkg/controller` with no
+  cipher refuses secret reads and writes with `503`.
+- **Operator steps:** a SQLite controller needs nothing, but back up
+  `secrets.key` with `state.db` from now on. A PostgreSQL controller that
+  stores secrets needs a key: create one with `openssl rand -base64 32`,
+  put it in the `secrets-key` credential (chart: `controller.secretsKey`),
+  and restart.
+- **Edge cases:** rows an older controller stored as plaintext are sealed
+  at startup. A SQLite controller creates its key to do so; a PostgreSQL
+  controller without a key refuses to start while any plaintext row remains,
+  and says how many. A SQLite store that holds sealed values but has lost
+  its `secrets.key` refuses to start rather than create a second key.
+
 ## Leftover variable names are removed
 
 - **Before:** `SPARKWING_GITCACHE` named a gitcache for the SDK's clone helper
