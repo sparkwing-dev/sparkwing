@@ -1,5 +1,13 @@
 import { emitDescribe } from "./describe.ts";
+import { once } from "node:events";
 import { serve } from "./runner.ts";
+
+// A pipe is written asynchronously, so process.exit before the queue empties
+// drops whatever the body logged last.
+async function drained(stream: NodeJS.WriteStream): Promise<void> {
+  await new Promise<void>((resolve) => stream.write("", () => resolve()));
+  while (stream.writableLength > 0) await once(stream, "drain");
+}
 
 /**
  * The entry point a pipeline file calls after defining its pipelines.
@@ -15,7 +23,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   if (argv.length === 1 && argv[0] === "--sw-node-protocol") {
     await serve({ input: process.stdin, output: process.stdout });
-    await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
+    await Promise.all([drained(process.stdout), drained(process.stderr)]);
     process.exit(0);
   }
   process.stderr.write("usage: <pipeline file> --describe | --sw-node-protocol\n");

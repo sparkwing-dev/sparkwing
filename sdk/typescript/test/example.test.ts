@@ -9,6 +9,7 @@ import { grantFor } from "./helpers.ts";
 const example = fileURLToPath(new URL("../examples/hello/pipeline.ts", import.meta.url));
 
 const lingering = fileURLToPath(new URL("./fixtures/lingering.ts", import.meta.url));
+const noisy = fileURLToPath(new URL("./fixtures/noisy.ts", import.meta.url));
 
 function runExample(args: string[], stdin: string, env: Record<string, string> = {}, file = example): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -88,4 +89,17 @@ test("the node process exits at end of stdin even when a body left an interval r
   assert.equal(code, 0, `killed by the guard or failed: ${stderr}`);
   const reply = stdout.trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l["reply"] === "n");
   assert.deepEqual(reply?.["result"], { outcome: "success", output: { started: true } });
+});
+
+test("every stderr line a body wrote arrives before the node process exits", async () => {
+  const stdin = [
+    { id: "p", op: "plan", pipeline: "noisy", run: { run_id: "r1", pipeline: "noisy" } },
+    { id: "n", op: "run_node", node: "shout", attempt: 1 },
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n";
+  const { code, stdout, stderr } = await runExample(["--sw-node-protocol"], stdin, {}, noisy);
+  assert.equal(code, 0);
+  assert.match(stdout, /"reply":"n","ok":true/);
+  const lines = stderr.split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 4096);
+  assert.match(lines[4095] ?? "", /^4095 x{1024}$/);
 });
