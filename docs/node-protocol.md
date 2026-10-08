@@ -41,16 +41,15 @@ The host sets these variables in the SDK process's environment. Values are strin
 | `SPARKWING_RUN_ID` | Run the node belongs to | run id | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_NODE_ID` | Node the process runs | node id | as above |
 | `SPARKWING_CONTROLLER_URL` | Base URL of the node-facing routes | absolute `http` or `https` URL | local runner (loopback controller), broker supervisor (broker URL), Kubernetes and launcher Jobs |
-| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, local runner without an API socket; the brokered child reads its bearer from stdin instead. A pipeline binary removes it from its environment at start, so the commands a step runs do not inherit it |
+| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, local runner without an API socket; the brokered child reads its bearer from stdin instead. The local runner never passes on a bearer it inherited. On the API socket path the local child gets no bearer and a URL only the socket reaches, so that path serves the Go SDK alone. A pipeline binary removes the variable from its environment at start, so the commands a step runs do not inherit it |
 | `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
 | `SPARKWING_MASK_VALUES_FD` | Descriptor the SDK writes each secret value to, one base64 line per value, so the host masks it in every log | decimal descriptor number of at least 3 | local runner, broker supervisor, launcher Job |
 | `SPARKWING_PARENT_LIVENESS_FD` | Read end of a pipe the host holds open; end of file means the host is gone, and the SDK cancels its work and exits | decimal descriptor number of at least 3 | local runner |
 | `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | every path: local runner, Kubernetes and launcher Jobs, and the broker supervisor, which passes on a runner pool's holder prefix or its own `SPARKWING_RUNNER_*` |
 | `SPARKWING_RUNNER_TYPE` | Kind of that runner | `local` or `kubernetes`; unset for a runner that does not classify itself, such as a runner pool on a host | local runner, Kubernetes and launcher Jobs, broker supervisor as above |
 | `SPARKWING_RUNNER_LABELS` | Labels of that runner, for `WhenRunner` | comma-separated labels | local runner, Kubernetes Job, broker supervisor as above; a launcher Job advertises none |
-| `TRACEPARENT` | W3C trace context of the run | `traceparent` header value | trigger children only |
-| `SPARKWING_CACHE_URL` | Artifact store for SDK cache helpers | URL | local runner, Kubernetes and launcher Jobs |
-| `SPARKWING_GITCACHE_URL` | Git mirror for the SDK's clone helper | URL | Kubernetes and launcher Jobs |
+| `SPARKWING_CACHE_URL` | Artifact store for SDK cache helpers | URL | local runner and Kubernetes and launcher Jobs when an artifact store is configured; the brokered child reaches the supervisor's store at `/bin/` on `SPARKWING_CONTROLLER_URL` with its own bearer instead |
+| `SPARKWING_GITCACHE_URL` | Git mirror for the SDK's clone helper | URL | Kubernetes and launcher Jobs when a mirror is configured; a local node clones directly, and a brokered child's supervisor has already fetched the source |
 | `SPARKWING_CACHE_GRANT` | Run-scoped bearer for the two caches above | opaque token | broker supervisor, launcher Job, Kubernetes Job |
 
 The last three rows apply only while an SDK ships its own cache helpers. Under the hosted model the host restores and saves dependency caches from the describe document and points `git` at the mirror through `GIT_CONFIG_COUNT` entries, so a hosted SDK needs none of the three.
@@ -58,6 +57,8 @@ The last three rows apply only while an SDK ships its own cache helpers. Under t
 The dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST` are not part of this contract: every package manager already reads them, so the host sets them and the SDK does nothing.
 
 Run options are not environment variables in this contract; [Run options](#run-options) carries them.
+
+**Target:** `TRACEPARENT` carries the run's W3C trace context into the SDK process. No path sets or reads it today.
 
 ### Variables outside the contract
 
