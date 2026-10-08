@@ -41,7 +41,7 @@ The host sets these variables in the SDK process's environment. Values are strin
 | `SPARKWING_RUN_ID` | Run the node belongs to | run id | local runner, Kubernetes and launcher Jobs; the brokered child gets it in argv only |
 | `SPARKWING_NODE_ID` | Node the process runs | node id | as above |
 | `SPARKWING_CONTROLLER_URL` | Base URL of the node-facing routes | absolute `http` or `https` URL | local runner (loopback controller), broker supervisor (broker URL), Kubernetes and launcher Jobs |
-| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, local runner without an API socket; the brokered child reads its bearer from stdin instead. A pipeline binary removes it from its environment at start, so the commands a step runs do not inherit it |
+| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, where it is the node's claim token, local runner without an API socket; the brokered child reads its bearer from stdin instead. A pipeline binary removes it from its environment at start, so the commands a step runs do not inherit it |
 | `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | local runner |
 | `SPARKWING_MASK_VALUES_FD` | Descriptor the SDK writes each secret value to, one base64 line per value, so the host masks it in every log | decimal descriptor number of at least 3 | local runner, broker supervisor, launcher Job |
 | `SPARKWING_PARENT_LIVENESS_FD` | Read end of a pipe the host holds open; end of file means the host is gone, and the SDK cancels its work and exits | decimal descriptor number of at least 3 | local runner |
@@ -77,8 +77,8 @@ The Go in-process path reads more variables than the contract names. They exist 
 **Today.** A node reaches the routes below at `SPARKWING_CONTROLLER_URL` with `Authorization: Bearer <token>`. Three hosts answer them:
 
 - the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`;
-- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller or the logs service;
-- the **controller** itself, for a Kubernetes or launcher Job that holds a claim token.
+- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the node's claim token, sets the claim-fence headers itself, and forwards to the controller or the logs service;
+- the **controller** itself, for a Kubernetes or launcher Job that holds its node's claim token. A runner's node claim token reaches only its claim's run, writes only to its own node and carries its claim's fence whatever headers it sends ([auth](auth.md#claim-tokens)).
 
 The Go child on a local run may use the unix socket in `SPARKWING_API_SOCKET` instead of URL plus bearer. The socket stays as a Go-only optimization; it is not part of the contract.
 

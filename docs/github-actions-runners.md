@@ -115,6 +115,8 @@ Every request the credential makes passes a fence that lists the routes it may u
 | `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |
 | anything else | 403 |
 
+The work the credential claims runs on the claim token each claim returns, which acts as the credential confined to that one claim, so the same fence applies to it.
+
 ## Runner behavior
 
 `sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims both triggers and nodes. It plans claimed triggers in the job with the in-process node runner. It stops taking new work ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.

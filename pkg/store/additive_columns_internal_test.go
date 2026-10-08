@@ -198,6 +198,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v97 drops the executor and offer tables and adds nothing; an older
 	// binary fails its claim and readiness statements that name them, loudly.
 	97: nil,
+	// safety: v98 adds the trigger claim token table and no column; an older
+	// binary never mints into it, and a token it holds no row for is refused.
+	98: nil,
 }
 
 func columnSpecMaps() []map[string]string {

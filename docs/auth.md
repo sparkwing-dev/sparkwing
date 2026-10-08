@@ -14,6 +14,9 @@ Raw tokens are `<prefix>_<entropy>`:
 - `swt_...` -- team. Minted by a team member, either for the CLI or for a
   machine, with `POST /api/v1/team/tokens` (see [team tokens](#team-tokens)).
 - `sws_...` -- service. Created for in-cluster back-channel callers.
+- `swc_...` -- claim. Minted by the controller with each claim it awards and
+  returned once in the claim's answer; nobody creates one by hand (see
+  [claim tokens](#claim-tokens)).
 
 The **prefix segment** is the first 12 characters of a raw token. It's
 a non-secret identifier used in `sparkwing cluster tokens list`, `revoke`, and
@@ -636,6 +639,48 @@ Ordinary node reads return executor and attempt attribution but remove holder
 and reservation values; claim responses still return the fence the winner must
 present.
 
+### Claim tokens
+
+Every claim answers with a `claim_token`, and the process that runs the
+claimed work authenticates with it instead of the credential that claimed.
+`POST /api/v1/nodes/claim` and `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`
+return a node claim token, and `POST /api/v1/triggers/claim` and
+`POST /api/v1/triggers/{id}/claim` a trigger claim token. The runner keeps its
+own token for claiming, heartbeating and its own calls; a pooled node's
+supervisor, the brokered child behind it and a Kubernetes Job run on the
+node's claim token, and the Job spec carries nothing else that
+authenticates.
+
+A node claim token acts as the runner that made the claim, confined to that
+claim:
+
+- It reaches only routes under the claim's run (`/api/v1/runs/{run}`,
+  `/api/v1/runs/{run}/...`, `GET /api/v1/triggers/{run}`), the run's
+  secrets, the slot routes for its own `run/node` holder and
+  `GET /api/v1/services`. Anything else answers `403 claim_mismatch`.
+- It reads any node of its run but writes only to its own node. Of the
+  run-level writes it makes only a node's own: events, the run heartbeat, the
+  cache grant, the source credential and token routes and the run's Git
+  proxy. Run create and finish, plan, node create and the readiness routes
+  answer `403 claim_mismatch`.
+- Every request carries the claim's own holder, membership, reservation and
+  generation, whatever fence headers it sent, and never a trigger generation,
+  so it never acts as the run's dispatcher.
+- It holds `nodes.claim`, `runs.state` and `logs.write` where the runner
+  holds them, and never `admin`, so the claim's fence binds it even when an
+  operator token claimed.
+- It stops when the claim ends: the node finishes, the lease lapses, the node
+  is claimed again, or the runner's own token is revoked or expires. A
+  request after that answers `403 claim_ended`, or `401` for a dead runner
+  token.
+
+A trigger claim token answers `GET /api/v1/secrets/{name}` alone, for the
+trigger's own run, and stops with the trigger claim. A trigger child that runs
+a node in its own process does so under the trigger claim, which is why the
+trigger claim reads secrets. Every other route a trigger child calls goes
+through the runner's loopback trigger broker, which admits only its run's
+routes and forwards them with the runner's token.
+
 `PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
 pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every
 later run of it. The caller must hold a live claim on some run of that
@@ -713,9 +758,11 @@ name the same repository and it means nothing either way.
   run's pipeline, falling back to an unscoped row only when that row is shared.
   A caller holding no claim reads nothing. A caller holding claims in one
   pipeline may omit `?run`; holding claims in two, it must name the run.
-- A controller-dispatched work node's claim token names its own run with
-  `?run=<id>` and reads only a name its accepted plan declares, resolved like
-  the row above. The pipeline's code declares its secrets, as in GitHub
+- A claim token (a controller-dispatched work node's, a runner's node claim
+  or a runner's trigger claim) names its own run with `?run=<id>` and reads
+  only a name the run's plan declares, resolved like the row above. Each
+  release is recorded as a `secret_released` event on the run, naming the
+  node for a node's claim. The pipeline's code declares its secrets, as in GitHub
   Actions, so push access to the repository is the trust boundary; fork pull
   requests never run on this path. A plan is refused when a declared name
   breaks the secret-name grammar or it declares more than 100 names, and a

@@ -150,6 +150,47 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 	}
 }
 
+// A secret read leaves the broker under the trigger's claim token, so the
+// controller releases only what the run's plan declares and records it; every
+// other route keeps the runner's token.
+func TestTriggerBrokerReadsSecretsWithTheTriggerClaimToken(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[string]string{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen[r.URL.Path] = r.Header.Get("Authorization")
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "", "runner-token",
+		&store.Trigger{ID: "run-a", Pipeline: "build", ClaimToken: "swc_trigger-claim"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close(context.Background())
+	for _, path := range []string{"/api/v1/secrets/DEPLOY_KEY?run=run-a", "/api/v1/runs/run-a"} {
+		req, err := http.NewRequest(http.MethodGet, broker.URL()+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+broker.Capability())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := seen["/api/v1/secrets/DEPLOY_KEY"]; got != "Bearer swc_trigger-claim" {
+		t.Errorf("the secret read went upstream with %q, want the trigger claim token", got)
+	}
+	if got := seen["/api/v1/runs/run-a"]; got != "Bearer runner-token" {
+		t.Errorf("the run read went upstream with %q, want the runner token", got)
+	}
+}
+
 // A cross-pipeline Ref reads the latest run of another pipeline in the team
 // and then that run's outputs; a retry reads its source attempt's nodes and
 // looks up the child that attempt spawned. Neither opens a run the pipeline

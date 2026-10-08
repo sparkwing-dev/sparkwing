@@ -1077,7 +1077,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 97
+const expectedSchemaVersion = 98
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -2162,6 +2162,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return widenAgentNameIndex(ctx, tx, time.Now())
 	case 97:
 		return dropAssistedOffers(ctx, tx)
+	case 98:
+		return applyTriggerClaimTokensMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2633,6 +2635,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return widenAgentNameIndex(ctx, tx, time.Now())
 	case 97:
 		return dropAssistedOffers(ctx, tx)
+	case 98:
+		return applyTriggerClaimTokensMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -4559,6 +4563,11 @@ type Node struct {
 	// onto the replayed node so the producer's file set reproduces
 	// without re-running it.
 	ArtifactManifest string `json:"artifact_manifest,omitempty"`
+
+	// ClaimToken is set only on the answer to a runner's claim: the claim
+	// token the node's process authenticates with in place of the runner's
+	// own credential. It stops working when the claim ends.
+	ClaimToken string `json:"claim_token,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -6182,8 +6191,12 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	n, err := s.awardScannedNodeTx(ctx, tx, candidate, claimant, holderID, coordinatorID, lease, placement, readyClause, scope, time.Now())
+	now := time.Now()
+	n, err := s.awardScannedNodeTx(ctx, tx, candidate, claimant, holderID, coordinatorID, lease, placement, readyClause, scope, now)
 	if err != nil || n == nil {
+		return nil, err
+	}
+	if err := mintRunnerNodeTokenTx(ctx, tx, claimant, scope.team, n, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7024,6 +7037,10 @@ type Trigger struct {
 	// last to finish wins regardless of which one the store considers
 	// current.
 	ClaimSeq int64 `json:"claim_seq,omitempty"`
+	// ClaimToken is set only on the answer to a runner's trigger claim: the
+	// claim token that reads the run's declared secrets while the claim
+	// lives.
+	ClaimToken string `json:"claim_token,omitempty"`
 	// WebhookDelivery is the provider's delivery id for the webhook that
 	// created this trigger, empty for every other submission path. At
 	// most one trigger may carry any given non-empty value across the
@@ -7759,6 +7776,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		`SELECT claim_seq FROM triggers WHERE id = ?`, t.ID).Scan(&t.ClaimSeq); err != nil {
 		return nil, err
 	}
+	if err := mintTriggerClaimTokenTx(ctx, tx, claimant, &t, now); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -8470,6 +8490,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		return nil, err
 	}
 	if err := reserveTriggerCreditsTx(ctx, tx, claimant, t.Team, t.ID, now); err != nil {
+		return nil, err
+	}
+	if err := mintTriggerClaimTokenTx(ctx, tx, claimant, &t, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

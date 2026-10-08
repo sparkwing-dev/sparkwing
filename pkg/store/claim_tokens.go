@@ -30,6 +30,12 @@ type ClaimTokenKind string
 const (
 	ClaimTokenPlan ClaimTokenKind = "plan"
 	ClaimTokenWork ClaimTokenKind = "work"
+	// ClaimTokenNode is a runner's claim on one node of a run its trigger
+	// holder drives; see [Store.AuthorizeRunnerClaim].
+	ClaimTokenNode ClaimTokenKind = "node"
+	// ClaimTokenTrigger is a runner's claim on a trigger, which the secret
+	// route alone answers.
+	ClaimTokenTrigger ClaimTokenKind = "trigger"
 )
 
 // ClaimRouteClass is the authority a route asks of a claim token.
@@ -137,6 +143,12 @@ func mintClaimTokenTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	if !expiresAt.After(now) || expiresAt.Sub(now) > MaxClaimTokenLifetime {
 		return "", fmt.Errorf("claim token expiry must fall within %s of now", MaxClaimTokenLifetime)
 	}
+	return insertClaimTokenTx(ctx, tx, team, runID, nodeID, generation, kind, expiresAt, now)
+}
+
+func insertClaimTokenTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, generation int64,
+	kind ClaimTokenKind, expiresAt, now time.Time,
+) (string, error) {
 	live, err := claimLiveTx(ctx, tx, team, runID, nodeID, generation, now)
 	if err != nil {
 		return "", err
@@ -144,11 +156,10 @@ func mintClaimTokenTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	if !live {
 		return "", ErrClaimNotLive
 	}
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	raw, err := newClaimTokenRaw()
+	if err != nil {
 		return "", err
 	}
-	raw := ClaimTokenPrefix + "_" + base64.RawURLEncoding.EncodeToString(buf)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO claim_tokens
        (digest, prefix, team, run_id, node_id, claim_generation, kind, created_at, expires_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -160,6 +171,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		return "", err
 	}
 	return raw, nil
+}
+
+func newClaimTokenRaw() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return ClaimTokenPrefix + "_" + base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func claimLiveTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, generation int64, now time.Time) (bool, error) {
@@ -182,8 +201,15 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 	if !strings.HasPrefix(raw, ClaimTokenPrefix+"_") || len(raw) < PrefixLen {
 		return ClaimToken{}, ErrClaimTokenInvalid
 	}
-	return s.authorizeClaim(ctx, `c.digest = ?`, []any{claimTokenDigest(raw)}, class, now)
+	digest := claimTokenDigest(raw)
+	tok, err := s.authorizeClaim(ctx, `c.digest = ?`, []any{digest}, class, now)
+	if errors.Is(err, errClaimTokenUnknown) {
+		return s.authorizeTriggerClaim(ctx, digest, class, now)
+	}
+	return tok, err
 }
+
+var errClaimTokenUnknown = fmt.Errorf("%w: no such token", ErrClaimTokenInvalid)
 
 // CheckClaimSensitive applies [ClaimSensitive] to the claim tok names, for a
 // use that outlasts the request that authorized it: a fetch that ran for
@@ -211,7 +237,7 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 		&tok.Prefix, &team, &tok.RunID, &tok.NodeID, &tok.Generation, &kind, &expires,
 		&status, &claimedBy, &lease, &nodeGen)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ClaimToken{}, ErrClaimTokenInvalid
+		return ClaimToken{}, errClaimTokenUnknown
 	}
 	if err != nil {
 		return ClaimToken{}, err
@@ -222,6 +248,10 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 	}
 	live := status.Valid && status.String != nodeStatusDone && claimedBy.Valid &&
 		lease.Valid && lease.Int64 > now.UnixNano() && nodeGen.Int64 == tok.Generation
+	return s.applyClaimClass(ctx, tok, live, class)
+}
+
+func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, class ClaimRouteClass) (ClaimToken, error) {
 	switch class {
 	case ClaimResult:
 		tok.Ended = !live

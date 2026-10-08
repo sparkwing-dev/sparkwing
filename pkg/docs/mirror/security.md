@@ -50,7 +50,7 @@ attempt ordinal. The child does not inherit arbitrary agent service credentials,
 and its capability cannot claim or renew work, manage runners, or call
 administrative routes. A claimed trigger's pipeline binary, which plans the
 run, gets the same kind of loopback capability, limited to its own run and
-the child runs it spawns, from a runner using the in-process node runner.
+the child runs it spawns, whichever node runner the runner uses.
 The broker names the run on every route it forwards, so a runner holding two
 runs never lets one read the other. Two lookups reach beyond it, both scoped
 to the team by the controller: a cross-pipeline `Ref` reads another
@@ -58,10 +58,13 @@ pipeline's latest run and then only that run's node outputs, and a retry
 asks which child its source attempt spawned so it reuses that child. The latest-run lookup
 admits any pipeline in the team, not only a declared `Ref`; that is the trust
 the pipeline's own code already has, since it can reference any team
-pipeline's latest run. A runner using the Kubernetes or
-warm node runner still hands its token to the trigger's binary, because the
-Jobs that binary creates need it; controller dispatch (`sparkwing-runner
-launch`) instead gives each Job a claim token for its assigned work.
+pipeline's latest run. Every claim returns a claim token bound to the claim,
+and the work the claim runs uses it in place of the runner's token: a pooled
+node's supervisor, a Kubernetes Job the trigger's binary creates, and a Job
+controller dispatch (`sparkwing-runner launch`) creates. A Job spec therefore
+carries one node's claim token, which reaches only that claim's run and node
+and stops working when the claim ends; see
+[auth.md](auth.md#claim-tokens).
 
 **Hosted execution also depends on the cluster configuration.** The launcher
 keeps its service credential outside the Job. Its Job builder disables
@@ -120,7 +123,7 @@ run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
 `sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
-separate Job pods, while its planning process still has the runner-token
+separate Job pods, while its planning process still has the run-wide broker
 authority described above.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`

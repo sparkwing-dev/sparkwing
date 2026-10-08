@@ -2061,6 +2061,14 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
+	// safety: the logs service files a claim token's write under the team and
+	// attempt this answer names, which for a runner's node claim are the ones
+	// just checked against its live claim.
+	if rc, ok := runnerClaimFromContext(r.Context()); ok && hasNodeIdentity {
+		w.Header().Set(store.ClaimTeamHeader, string(rc.Token.Team))
+		w.Header().Set(store.ClaimGenerationHeader, strconv.FormatInt(rc.Token.Generation, 10))
+		w.Header().Set(store.AttemptOrdinalHeader, r.Header.Get(store.AttemptOrdinalHeader))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

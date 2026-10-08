@@ -45,7 +45,9 @@ namespace-scoped Job and pod-read permissions, and requires
 `runner.automountServiceAccountToken=true` so the trigger worker can call the
 Kubernetes API. `runner.triggerRunner.labels` declares static capabilities
 common to every spawned Job; it is empty by default and separate from the
-outer pool's `runner.labels`. The spawned Jobs mount no ServiceAccount token.
+outer pool's `runner.labels`. The spawned Jobs mount no ServiceAccount token,
+and each carries its node's claim token in `SPARKWING_AGENT_TOKEN` rather than
+the runner's bearer.
 
 A Job for a cpu class above the warm one selects and tolerates the
 `sparkwing.dev/cpu-band: small` band, on top of whatever node selector and

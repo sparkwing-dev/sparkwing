@@ -3,6 +3,7 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -38,7 +39,7 @@ func jobEnv(t *testing.T, cfg Config) map[string]string {
 	t.Helper()
 	r := New(nil, nil, cfg, nil)
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	containers := job.Spec.Template.Spec.Containers
 	if len(containers) != 1 {
 		t.Fatalf("containers = %d, want 1", len(containers))
@@ -211,7 +212,7 @@ func TestResolveDependencyProxy(t *testing.T) {
 func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
 		t.Fatalf("imagePullPolicy = %q, want IfNotPresent", got)
 	}
@@ -220,7 +221,7 @@ func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 func TestBuildJob_HonoursConfiguredPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", ImagePullPolicy: corev1.PullAlways}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
 		t.Fatalf("imagePullPolicy = %q, want Always", got)
 	}
@@ -263,7 +264,7 @@ func TestBuildJob_UsesWritableGoCachePaths(t *testing.T) {
 func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	container := job.Spec.Template.Spec.Containers[0]
 	if !reflect.DeepEqual(container.Command, []string{"sparkwing-runner"}) {
 		t.Fatalf("command = %#v, want sparkwing-runner", container.Command)
@@ -279,7 +280,7 @@ func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	pod := job.Spec.Template.Spec
 	if pod.SecurityContext == nil {
 		t.Fatal("pod security context is nil")
@@ -312,7 +313,7 @@ func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 func TestBuildJob_MountsScratchOverEveryWritablePath(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	pod := job.Spec.Template.Spec
 	if len(pod.Volumes) != 1 || pod.Volumes[0].Name != scratchVolumeName || pod.Volumes[0].EmptyDir == nil {
 		t.Fatalf("pod volumes = %#v, want one scratch emptyDir", pod.Volumes)
@@ -555,7 +556,7 @@ func TestBuildJob_QuarterCorePinKeepsItsRequestWithTwoCoreBill(t *testing.T) {
 	r := New(client, nil, Config{Image: "runner", CPURequest: "100m", MemoryRequest: "128Mi"}, nil)
 	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
 		capacity.Resolution{Cores: 0.25, MemoryBytes: 256 << 20, Source: store.CostSourcePin},
-		store.CPUClass{Cores: 2, MemoryBytes: 8 << 30}, store.NodeClaimFence{})
+		store.CPUClass{Cores: 2, MemoryBytes: 8 << 30}, store.NodeClaimFence{}, "")
 	request := job.Spec.Template.Spec.Containers[0].Resources.Requests
 	if got := milli(request[corev1.ResourceCPU]); got != 250 {
 		t.Errorf("cpu request = %dm, want 250m for a quarter-core node", got)
@@ -578,7 +579,7 @@ func TestImpossibleShapeFailsBeforeJobCreation(t *testing.T) {
 	r := New(client, nil, Config{Image: "runner"}, nil)
 	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
 		capacity.Resolution{Cores: 1, MemoryBytes: 512 << 20, Source: store.CostSourcePin},
-		store.CPUClass{}, store.NodeClaimFence{})
+		store.CPUClass{}, store.NodeClaimFence{}, "")
 	msg := r.impossibleShape(t.Context(), job)
 	if !strings.Contains(msg, "1 cpu") || !strings.Contains(msg, "allocatable") {
 		t.Fatalf("impossible shape = %q, want clear CPU and allocatable error", msg)
@@ -597,7 +598,7 @@ func TestImpossibleShapeAllowsLargerJobPoolNodeToScale(t *testing.T) {
 	r := New(client, nil, Config{Image: "runner"}, nil)
 	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
 		capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
-		store.CPUClass{Cores: 4, MemoryBytes: 16 << 30}, store.NodeClaimFence{})
+		store.CPUClass{Cores: 4, MemoryBytes: 16 << 30}, store.NodeClaimFence{}, "")
 	if msg := r.impossibleShape(t.Context(), job); msg != "" {
 		t.Fatalf("autoscaling job pool refused larger pod: %s", msg)
 	}
@@ -929,7 +930,7 @@ func TestResolveResources_StaysQuietUnderTheCeiling(t *testing.T) {
 func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", ServiceAccountName: "runner-jobs"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	pod := job.Spec.Template.Spec
 	if pod.ServiceAccountName != "runner-jobs" {
 		t.Fatalf("service account = %q, want runner-jobs", pod.ServiceAccountName)
@@ -967,7 +968,7 @@ func TestBuildJob_OmitsTheGrantWhenTheRunHasNone(t *testing.T) {
 
 func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", GitcacheURL: "http://cache.local"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	var got string
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "SPARKWING_GITCACHE_URL" {
@@ -977,7 +978,7 @@ func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
 	if got != "http://cache.local" {
 		t.Fatalf("SPARKWING_GITCACHE_URL = %q, want the configured gitcache", got)
 	}
-	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	for _, e := range bare.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "SPARKWING_GITCACHE_URL" {
 			t.Fatalf("an unset gitcache must not reach the pod, got %q", e.Value)
@@ -989,7 +990,7 @@ func fenceJobEnv(t *testing.T, fence store.NodeClaimFence) map[string]string {
 	t.Helper()
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{}, store.CPUClass{}, fence)
+		capacity.Resolution{}, store.CPUClass{}, fence, "")
 	out := map[string]string{}
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		out[e.Name] = e.Value
@@ -1091,10 +1092,90 @@ func TestRunNode_ClaimsTheNodeBeforeItCreatesTheJob(t *testing.T) {
 	}
 }
 
+// Reading a Job spec yields the node's claim token, bound to that one claim,
+// and never the dispatcher's own credential.
+func TestRunNode_TheJobCarriesTheNodesClaimTokenNotTheDispatchersBearer(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	bearer, _, err := st.CreateToken("dispatcher", store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	kcli := fake.NewSimpleClientset()
+	created := make(chan *batchv1.Job, 1)
+	var liveClaim store.RunnerClaim
+	var liveErr error
+	kcli.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		job := action.(k8stesting.CreateAction).GetObject().(*batchv1.Job)
+		for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+			if e.Name == "SPARKWING_AGENT_TOKEN" {
+				liveClaim, liveErr = st.AuthorizeRunnerClaim(ctx, e.Value, time.Now())
+			}
+		}
+		select {
+		case created <- job:
+		default:
+		}
+		return false, nil, nil
+	})
+	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.Job{Status: batchv1.JobStatus{Succeeded: 1}}, nil
+	})
+	r := New(kcli, client.NewWithToken(srv.URL, nil, bearer), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	r.RunNode(runCtx, runner.Request{RunID: "run-1", NodeID: "build"})
+
+	var job *batchv1.Job
+	select {
+	case job = <-created:
+	default:
+		t.Fatal("no Job was created")
+	}
+	var token string
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if strings.Contains(e.Value, bearer) {
+			t.Fatalf("%s carries the dispatcher's bearer", e.Name)
+		}
+		if e.Name == "SPARKWING_AGENT_TOKEN" {
+			token = e.Value
+		}
+	}
+	if liveErr != nil {
+		t.Fatalf("the Job's token %q did not authorize the node's claim while the Job ran: %v", token, liveErr)
+	}
+	if liveClaim.Token.RunID != "run-1" || liveClaim.Token.NodeID != "build" || liveClaim.Claimant.TokenPrefix != bearer[:store.PrefixLen] {
+		t.Fatalf("the Job's token names %+v", liveClaim)
+	}
+	if _, err := st.AuthorizeRunnerClaim(ctx, token, time.Now()); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("the Job's token after its node ended = %v, want ErrClaimNotLive", err)
+	}
+}
+
 func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if job.Spec.ActiveDeadlineSeconds == nil {
 		t.Fatal("the Job carries no ActiveDeadlineSeconds, so a wedged pod outlives its run")
 	}
@@ -1104,7 +1185,7 @@ func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
 
 	tuned := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 90 * time.Minute}}
 	job = tuned.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if want := int64((90 * time.Minute).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("configured ActiveDeadlineSeconds = %d, want %d", *job.Spec.ActiveDeadlineSeconds, want)
 	}
@@ -1115,7 +1196,7 @@ func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T
 	node := sparkwing.Job(plan, "slow", func(context.Context) error { return nil }).Timeout(time.Hour)
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "slow", Node: node},
-		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
 			*job.Spec.ActiveDeadlineSeconds, want)
@@ -1127,13 +1208,13 @@ func TestBuildJob_ADeclaredTimeoutCannotOutliveTheCeiling(t *testing.T) {
 	node := sparkwing.Job(plan, "forever", func(context.Context) error { return nil }).Timeout(30 * 24 * time.Hour)
 	req := runner.Request{RunID: "run-1", NodeID: "forever", Node: node}
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if want := int64(MaxDeclaredJobActiveDeadline.Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the %s ceiling (%d)",
 			*job.Spec.ActiveDeadlineSeconds, MaxDeclaredJobActiveDeadline, want)
 	}
 	operator := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 48 * time.Hour}}
-	job = operator.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	job = operator.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if want := int64((48 * time.Hour).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the operator's longer deadline (%d)",
 			*job.Spec.ActiveDeadlineSeconds, want)
@@ -1272,7 +1353,7 @@ func classJob(t *testing.T, cfg Config, cores int64) *batchv1.Job {
 	class := store.CPUClass{Cores: cores, MemoryBytes: store.CPUClassMemoryBytes(cores)}
 	return (&Runner{cfg: cfg}).buildJob("job-name",
 		runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{Source: store.CostSourceDefault}, class, store.NodeClaimFence{})
+		capacity.Resolution{Source: store.CostSourceDefault}, class, store.NodeClaimFence{}, "")
 }
 
 func bandToleration(pod corev1.PodSpec) *corev1.Toleration {

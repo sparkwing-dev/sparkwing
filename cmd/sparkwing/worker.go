@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runWorker(args []string) error {
@@ -118,23 +119,34 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), logsURL, token, heartbeat)
+		if err := dispatchTrigger(ctx, self, trigger, prof.ControllerURL(), logsURL, token, heartbeat); err != nil {
+			fmt.Fprintf(os.Stderr, "worker: handle-trigger %s: %v\n", trigger.ID, err)
+		}
 	}
 }
 
-func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, logsURL, token string, heartbeat time.Duration) {
-	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(triggerID, controllerURL, logsURL, heartbeat)...)
-	cmd := exec.CommandContext(ctx, self, args...)
-	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
-	cmd.Env = os.Environ()
-	if token != "" {
-		cmd.Env = append(cmd.Env, "SPARKWING_AGENT_TOKEN="+token)
+// safety: handle-trigger runs the team's pipeline code, so it reaches the
+// controller through a broker that admits only its run's routes, and the
+// profile's token stays in this process.
+func dispatchTrigger(ctx context.Context, self string, trigger *store.Trigger, controllerURL, logsURL, token string, heartbeat time.Duration) error {
+	broker, err := orchestrator.StartTriggerBroker(controllerURL, logsURL, token, trigger, nil)
+	if err != nil {
+		return fmt.Errorf("start trigger broker: %w", err)
 	}
+	defer broker.Close(ctx)
+	if logsURL != "" {
+		logsURL = broker.URL()
+	}
+	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(trigger.ID, broker.URL(), logsURL, heartbeat)...)
+	cmd := exec.CommandContext(ctx, self, args...)
+	// safety: the child reads the capability from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
+	cmd.Env = append(os.Environ(), "SPARKWING_AGENT_TOKEN="+broker.Capability())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "worker: handle-trigger %s exited: %v\n", triggerID, err)
+		return fmt.Errorf("exited: %w", err)
 	}
+	return nil
 }
 
 func sleepOrCancel(ctx context.Context, d time.Duration) {

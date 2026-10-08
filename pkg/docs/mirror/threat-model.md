@@ -18,8 +18,10 @@ per-repository consent step.
 ## What is isolated
 
 **The job body runs in a child process with its own credential.** Every node a
-runner claims executes this way. The supervisor keeps the runner token, and
-the child never sees it: the supervisor starts a broker on `127.0.0.1`, mints a
+runner claims executes this way. The runner token stays in the runner process,
+which claims and renews the node; the supervisor works on the node's claim
+token, which reaches only that claim's run and node and dies with the claim,
+and the child sees neither: the supervisor starts a broker on `127.0.0.1`, mints a
 32-byte random capability that lives as long as that one node, and hands it to
 the child on stdin rather than through the environment or argv, where any
 process on the machine could read it. `internal/orchestrator` builds both the
@@ -31,7 +33,7 @@ reads node metadata and outputs within that run for dependencies, and proxies
 concurrency acquire, observation, renewal, waiter resolution, waiter
 cancellation, and release
 for that node's holder. The controller resolves concurrency keys in the
-runner token's team, so the same key in another team remains separate. The
+claim's team, so the same key in another team remains separate. The
 broker answers everything else with `403`, so the child cannot claim work, renew a
 claim, or call an administrative route. It also strips
 the claim headers the child sends and stamps the supervisor's own, so the child
@@ -100,16 +102,14 @@ digest, a file count, and byte totals rather than names
 account.
 
 **A trigger consumer's child.** A pool started with `--also-claim-triggers`
-compiles the triggering branch and runs its binary with the runner's
-`SPARKWING_AGENT_TOKEN` in the environment
-(`internal/cluster/trigger_loop.go`), which is the runner's own credential
-rather than a per-node capability, and none of the child-environment filtering
-above applies to it. The pipeline binary removes the token from its own
-environment at start and masks it in node output
-(`internal/orchestrator/agent_token.go`), so commands the team's code starts do
-not inherit it, but the team's code runs in the process that holds it, and
-`/proc/<pid>/environ` still shows the value the process started with. `sparkwing cluster runners add` never sets that flag, so a
-desktop added by the installer does not take that path.
+compiles the triggering branch and runs its binary, which plans and drives the
+whole run. It holds a capability for a loopback broker in the runner process
+rather than the runner's token, and the broker admits only its run's routes
+(`internal/orchestrator/trigger_broker.go`), but that is a run's worth of
+authority, wider than one node's, and the child-environment filtering above
+does not apply to it. A Kubernetes or warm trigger child creates Jobs, each
+carrying its node's claim token. `sparkwing cluster runners add` never sets
+that flag, so a desktop added by the installer does not take that path.
 
 **The contribution cap.** A runner's `--contribution` value caps the headroom it
 advertises when it claims (`internal/cluster/headroom.go`), so it bounds how

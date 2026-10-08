@@ -25,12 +25,15 @@ import (
 // TriggerBroker stands between a claimed trigger's pipeline binary and the
 // controller. The binary is the team's own code, so it holds a capability
 // that this broker accepts only for the claimed run's routes, and the
-// runner's token stays in the runner process.
+// runner's token stays in the runner process. A secret read goes upstream
+// with the trigger's claim token, so the controller releases only what the
+// run's plan declares, and records each release.
 type TriggerBroker struct {
 	server        *http.Server
 	listener      net.Listener
 	capability    string
 	upstreamToken string
+	claimToken    string
 	runID         string
 	retryOf       string
 	pipeline      string
@@ -64,7 +67,7 @@ func StartTriggerBroker(controllerURL, logsURL, upstreamToken string, trigger *s
 	}
 	b := &TriggerBroker{
 		listener: listener, capability: base64.RawURLEncoding.EncodeToString(raw),
-		upstreamToken: upstreamToken, runID: trigger.ID, retryOf: trigger.RetryOf, pipeline: trigger.Pipeline,
+		upstreamToken: upstreamToken, claimToken: trigger.ClaimToken, runID: trigger.ID, retryOf: trigger.RetryOf, pipeline: trigger.Pipeline,
 		controller: brokerProxy(controllerTarget, logger), logger: logger,
 		children: map[string]bool{}, refRuns: map[string]bool{},
 	}
@@ -135,7 +138,11 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "trigger capability does not allow this route", http.StatusForbidden)
 		return
 	}
-	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
+	upstream := b.upstreamToken
+	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") && b.claimToken != "" {
+		upstream = b.claimToken
+	}
+	r.Header.Set("Authorization", "Bearer "+upstream)
 	if logs {
 		b.logs.ServeHTTP(w, r)
 		return

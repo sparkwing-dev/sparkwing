@@ -87,8 +87,6 @@ type Config struct {
 
 	BackoffLimit int32
 
-	AgentToken string
-
 	PollInterval time.Duration
 
 	TTLSecondsAfterFinished int32
@@ -155,7 +153,7 @@ func (r *Runner) AdvertisedLabels() []string {
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	res := r.resolveResources(ctx, req)
-	fence, class, refused := r.claimNode(ctx, req, name)
+	fence, class, token, refused := r.claimNode(ctx, req, name)
 	if refused != nil {
 		if ctx.Err() != nil {
 			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
@@ -165,7 +163,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	// safety: the dispatcher reached here holding the run's trigger claim,
 	// and the controller refuses a request that carries both identities.
 	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
-	job := r.buildJob(name, req, res, class, fence)
+	job := r.buildJob(name, req, res, class, fence, token)
 	if msg := r.impossibleShape(ctx, job); msg != "" {
 		r.failNode(ctx, req, msg, store.FailureUnknown, eventClassRefused)
 		return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
@@ -551,7 +549,7 @@ const MaxDeclaredJobActiveDeadline = 24 * time.Hour
 // so the claim waits it out and asks again instead of failing the node.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
-) (store.NodeClaimFence, store.CPUClass, error) {
+) (store.NodeClaimFence, store.CPUClass, string, error) {
 	holderID := "k8s-job:" + jobName
 	shed := client.NewShedLog(client.ShedWarnInterval)
 	bound := claimRetryBound(req)
@@ -583,19 +581,19 @@ func (r *Runner) claimNode(
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return store.NodeClaimFence{}, store.CPUClass{}, ctx.Err()
+			return store.NodeClaimFence{}, store.CPUClass{}, "", ctx.Err()
 		case <-timer.C:
 		}
 	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",
 			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
-		return store.NodeClaimFence{}, store.CPUClass{}, err
+		return store.NodeClaimFence{}, store.CPUClass{}, "", err
 	}
 	return store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, nil
+	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, n.ClaimToken, nil
 }
 
 const eventClaimRefused = "job_claim_refused"
@@ -872,8 +870,11 @@ const (
 	ClaimLeaseSecondsEnv = "SPARKWING_NODE_CLAIM_LEASE_SECONDS"
 )
 
+// safety: token is the node's claim token and the only credential the pod
+// receives, so reading the Job spec yields one claim's credential.
 func (r *Runner) buildJob(
 	name string, req runner.Request, res capacity.Resolution, class store.CPUClass, fence store.NodeClaimFence,
+	token string,
 ) *batchv1.Job {
 	env := []corev1.EnvVar{
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
@@ -899,8 +900,8 @@ func (r *Runner) buildJob(
 	if r.cfg.GitcacheURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_GITCACHE_URL", Value: r.cfg.GitcacheURL})
 	}
-	if r.cfg.AgentToken != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})
+	if token != "" {
+		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: token})
 	}
 	// safety: the pod runs the team's code, so of the cache credentials it gets only
 	// the run's grant, which opens that team's trees and no other's.

@@ -9,8 +9,7 @@ import (
 
 // safety: the pipeline binary is the team's own code, so it inherits no launcher
 // credentials, only the runtime, non-credential settings, its run's grant, and the
-// bearer execHandleTrigger chose: the broker capability, or for a Kubernetes or
-// warm runner the runner token its Jobs need.
+// trigger broker's capability.
 func triggerChildEnv(base []string, opts TriggerLoopOptions, cacheGrant string) []string {
 	out := make([]string, 0, len(base)+6)
 	for _, item := range base {

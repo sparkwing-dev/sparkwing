@@ -211,7 +211,11 @@ release before enabling it.
 
 The runner reads its bearer token from `controller.tokenSecret`, which the
 chart projects as the file `agent-token` under `--credentials-dir`, and uses it
-for controller claims and writes to the logs service. Mint it with
+to claim, renew its claims and make its own controller calls. The work a claim
+runs uses the claim token the controller returns with it: a node the runner
+executes, every Job a `k8s` or `warm` trigger runner creates, and the trigger's
+own secret reads. A Job spec carries its node's claim token, never this
+bearer. Mint it with
 `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
 `logs.write`: enough to claim triggers and nodes, drive the runs it claimed
 from plan to finish, read the secrets its repository owns, and ship logs. It

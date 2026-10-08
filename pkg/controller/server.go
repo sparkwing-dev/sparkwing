@@ -1105,7 +1105,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret), ScopeTeamAdmin))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListSecrets), ScopeTeamAdmin))
-	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimWorkKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
+	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimSecretKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
@@ -1169,8 +1169,8 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
 	return noStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if raw, route := claimRouteFor(mux, r); route != nil {
-			s.serveClaim(w, r, raw, route, next)
+		if raw, route := claimRouteFor(mux, r); raw != "" {
+			s.serveClaimBearer(w, r, raw, route, next, byToken)
 			return
 		}
 		if sess := browserSessionFrom(r.Context()); sess != nil {

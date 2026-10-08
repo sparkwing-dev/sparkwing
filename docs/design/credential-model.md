@@ -62,27 +62,47 @@ used to branch on `kind = runner` or `kind = user` asks which family the
 credential belongs to instead; an old `swr_` row is machine family and an old
 team-minted `swu_` row is member family, so nothing is re-issued.
 
-## Claim tokens and what derives from them
+## Claim tokens and what derives from them (landed)
 
-The controller mints a claim token when it hands a node to a launcher Job
-and binds it to the team, run, node and claim generation. Cache grants,
-data-plane downloads and output uploads already derive from a claim and are
-never mintable from a bearer alone.
+Every claim returns a claim token bound to the team, run, claim and its
+generation. Cache grants, data-plane downloads and output uploads derive from
+a claim and are never mintable from a bearer alone. There are four kinds:
 
-Two paths still let a machine bearer act for a node it holds without a
-claim token: self-hosted runners claim with their `swr_`/machine bearer and
-the controller mints them no claim token, and the bearer secret release
-below. Closing both is one change: every claim, launcher or runner, returns
-a claim token, and the node's process uses that token, never the machine
-bearer, for everything run-scoped.
+- **`plan` and `work`**: the launcher's claims on a controller-dispatched
+  run. Each answers only the routes written for its kind and expires with its
+  Job's deadline.
+- **`node`**: a runner's claim on one node, returned as `claim_token` by
+  `POST /api/v1/nodes/claim` and `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`.
+  It authenticates as the runner that made the claim, confined to the claim:
+  it reaches only the claim's run, writes only to its own node, never acts
+  as the trigger claimant, and every request carries the claim's own fence
+  whatever headers it sent. It drops `admin`, keeping only `nodes.claim`,
+  `runs.state` and `logs.write` of what the runner holds. It stops when the
+  claim ends (finish, lapse, a later claim of the node) or when the runner's
+  own credential is revoked.
+- **`trigger`**: a runner's trigger claim, returned as `claim_token` by both
+  trigger claim routes and stored in `trigger_claim_tokens` (schema v98),
+  because the run row does not exist when the trigger is claimed. It answers
+  the secret route alone and stops with the trigger claim.
+
+The machine bearer stays in the runner process. A pooled node's supervisor
+and the brokered child behind it run on the node's claim token. A Kubernetes
+Job carries its node's claim token in `SPARKWING_AGENT_TOKEN`, so reading a
+Job spec yields a credential bound to one node's claim. Every trigger child,
+including a Kubernetes or warm runner's and `sparkwing cluster worker`'s,
+reaches the controller through the runner's trigger broker, which forwards
+the child's secret reads with the trigger's claim token and its other run
+routes with the runner's bearer. A trigger child that runs a node in its own
+process does so under the trigger claim, which is why a trigger claim reads
+secrets at all.
 
 ### Secret release becomes claim-bound
 
 Today `GET /api/v1/secrets/{name}` has two node paths:
 
-- with a claim token, `ReleaseClaimSecret` checks the work claim, checks
-  that the run's plan declares the secret, applies the sensitive fence and
-  records a `secret_released` event;
+- with a claim token (work, runner node or trigger), `ReleaseClaimSecret`
+  checks the claim, checks that the run's plan declares the secret, applies
+  the sensitive fence and records a `secret_released` event;
 - with a bearer holding `secrets.read`, the controller finds the run the
   principal holds a claim in (`ClaimedRunFor`, or the only one it holds) and
   returns any secret of that pipeline, with no declaration check and no
@@ -90,11 +110,10 @@ Today `GET /api/v1/secrets/{name}` has two node paths:
 
 Plan:
 
-1. Runner claims (`POST /api/v1/nodes/claim` and the trigger claim) return a
-   claim token next to the claim, minted by the same store call the launcher
-   path uses. The runner hands it to the node process the way it hands the
-   launcher's token today.
-2. The node's secret client sends the claim token.
+1. Runner claims return a claim token next to the claim (landed, above).
+2. The node's secret client sends the claim token (landed: a pooled node and
+   a Kubernetes Job run on theirs, and the trigger broker forwards secret
+   reads with the trigger's).
 3. The bearer branch of the secret route goes: a machine
    bearer reading a secret answers `403 claim_required`, and `secrets.read`
    leaves the machine family. Operator and team-admin reads by name stay;
@@ -102,8 +121,9 @@ Plan:
 4. Every node read then passes the declaration check and leaves an event,
    which is what the audit log promises.
 
-Steps 1 to 3 land together: a runner older than this change cannot read
-secrets from an upgraded controller, which the migration note says.
+Step 3 lands after steps 1 and 2 reach runners: a runner older than step 1
+cannot read secrets from a controller with step 3, which the migration note
+says.
 
 ## Service credentials
 
@@ -204,9 +224,10 @@ with this design:
   token, under the plan declaration and with an audit event; a team token
   keeps no `secrets.read`, and management reads by name stay with the
   operator and team admins.
-- **Claim tokens for every pod.** Kubernetes Jobs carry the node's claim
-  token, not the runner's bearer, so reading a Job spec yields a credential
-  bound to one node's claim.
+- **Claim tokens for every pod (landed).** Every runner claim returns a
+  claim token, the node's process uses it in place of the runner's bearer,
+  and a Kubernetes Job carries its node's claim token, so reading a Job spec
+  yields a credential bound to one node's claim.
 
 ## Decisions still open
 

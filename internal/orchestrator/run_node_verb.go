@@ -65,7 +65,13 @@ func RunNodeCommand(args []string) error {
 	defer abandon(nil)
 
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
-	if isClaimToken(token) && apiSocket == "" {
+	fence, lease, err := dispatchedNodeClaim()
+	if err != nil {
+		return err
+	}
+	// safety: a dispatcher's Job names the claim it took, and its claim token
+	// acts under that claim's fence; only a launcher's Job names none.
+	if isClaimToken(token) && apiSocket == "" && fence.HolderID == "" {
 		return runLaunchedNode(ctx, *controllerURL, runID, nodeID, token, slog.Default())
 	}
 	if token == "" {
@@ -78,10 +84,6 @@ func RunNodeCommand(args []string) error {
 	}
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
-	fence, lease, err := dispatchedNodeClaim()
-	if err != nil {
-		return err
-	}
 	if fence.HolderID != "" {
 		holderID = fence.HolderID
 		runOpts = append(runOpts, ClaimedNodeFence(fence))

@@ -746,7 +746,10 @@ func executePooledNode(
 		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
-	grant := orchestrator.RequestRunCacheGrant(heartbeatCtx, controllerURL, token, n.RunID, logger)
+	// safety: the node's work runs on its claim token, so the runner's bearer
+	// serves only the claim's heartbeat and setup failures from this process.
+	claimToken := n.ClaimToken
+	grant := orchestrator.RequestRunCacheGrant(heartbeatCtx, controllerURL, claimToken, n.RunID, logger)
 	var announced string
 	if grant != "" {
 		services, err := discovery.ServicesFor(execCtx, controllerURL, token)
@@ -756,7 +759,7 @@ func executePooledNode(
 		announced = services.CachePod
 	}
 	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
-	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
+	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, claimToken,
 		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
 	cancel()

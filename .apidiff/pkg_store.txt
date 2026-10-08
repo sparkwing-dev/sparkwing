@@ -310,8 +310,10 @@ type ClaimToken struct {
 	Ended bool
 }
 type ClaimTokenKind string
+const ClaimTokenNode ClaimTokenKind = "node"
 const ClaimTokenPlan ClaimTokenKind = "plan"
 const ClaimTokenPrefix = "swc"
+const ClaimTokenTrigger ClaimTokenKind = "trigger"
 const ClaimTokenWork ClaimTokenKind = "work"
 type ClaimedRun struct {
 	Team     Team
@@ -789,6 +791,7 @@ var ErrCLITokenLimit = errors.New("store: this member holds as many member token
 var ErrCheckoutNotFound = errors.New("credits: the team holds no checkout for this session")
 var ErrClaimCancelRequested = errors.New("store: the run this claim belongs to is being cancelled")
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
+var ErrClaimNotRunner = errors.New("store: the claim token is not a runner's node claim")
 var ErrClaimResultConflict = errors.New("store: the claim committed a different result or none")
 var ErrClaimTokenInvalid = errors.New("store: invalid or expired claim token")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
@@ -1388,6 +1391,8 @@ type Node struct {
 	ProcessWallNanos int64
 
 	ArtifactManifest string
+
+	ClaimToken string
 }
 type NodeAttention struct {
 	Team          Team
@@ -1763,6 +1768,11 @@ type RunTrend struct {
 	FinishedAt *time.Time
 	Cached     bool
 }
+type RunnerClaim struct {
+	Token    ClaimToken
+	Claimant ClaimIdentity
+	Fence    NodeClaimFence
+}
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
 type RunnerPresence struct {
 	Name string
@@ -2091,6 +2101,7 @@ func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor strin
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
+func (s *Store) AuthorizeRunnerClaim(ctx context.Context, raw string, now time.Time) (RunnerClaim, error)
 func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, repo string, refs []string) (Upload, error)
 func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
@@ -2850,6 +2861,8 @@ type Trigger struct {
 	IdempotencyKey string
 
 	ClaimSeq int64
+
+	ClaimToken string
 
 	WebhookDelivery string
 

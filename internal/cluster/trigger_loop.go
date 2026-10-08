@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -338,18 +339,19 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) error {
 	// safety: the child is the team's own code, so it reaches the controller
 	// through a broker that admits only its run's routes, and the runner's
-	// token stays here. A Kubernetes or warm runner hands the token to the
-	// Jobs it creates, which cannot reach this loopback broker.
-	if opts.RunnerKind == "" || opts.RunnerKind == "inprocess" {
-		broker, err := orchestrator.StartTriggerBroker(opts.ControllerURL, opts.LogsURL, opts.Token, trigger, logger)
-		if err != nil {
-			return fmt.Errorf("start trigger broker: %w", err)
-		}
-		defer broker.Close(ctx)
-		opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
-		if opts.LogsURL != "" {
-			opts.LogsURL = broker.URL()
-		}
+	// token stays here. The Jobs a Kubernetes or warm child creates cannot
+	// reach this loopback broker, so they carry their nodes' claim tokens and
+	// the controller's own addresses.
+	opts.K8sCtrlURL = cmp.Or(opts.K8sCtrlURL, opts.ControllerURL)
+	opts.K8sLogsURL = cmp.Or(opts.K8sLogsURL, opts.LogsURL)
+	broker, err := orchestrator.StartTriggerBroker(opts.ControllerURL, opts.LogsURL, opts.Token, trigger, logger)
+	if err != nil {
+		return fmt.Errorf("start trigger broker: %w", err)
+	}
+	defer broker.Close(ctx)
+	opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
+	if opts.LogsURL != "" {
+		opts.LogsURL = broker.URL()
 	}
 	childArgs := handleTriggerArgs(trigger.ID, opts)
 	homeScratch := filepath.Join(bincache.SparkwingHome(), "tmp")

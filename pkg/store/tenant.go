@@ -320,6 +320,7 @@ var tenantTables = []string{
 	"team_build_trust",
 	"uploads",
 	"tokens",
+	"trigger_claim_tokens",
 	"triggers",
 }
 
@@ -333,7 +334,7 @@ var keyedAtCreation = []string{
 	"storage_commit_receipts", "storage_reservations", "team_download_day", "team_storage",
 	"uploads", "data_objects",
 	"team_build_trust",
-	"claim_tokens", "child_invocations",
+	"claim_tokens", "child_invocations", "trigger_claim_tokens",
 	"business_events",
 	"repos",
 	"card_charges", "card_attempts", "card_refunds", "team_spend_days",

@@ -1259,3 +1259,45 @@ To upgrade:
 - Runs record no `executor_offer_received`, `executor_offer_expired`,
   `executor_offer_declined`, `executor_offer_awarded` or `executor_selected`
   events from now on; runs already stored keep theirs.
+
+## Runner claims answer with claim tokens
+
+A runner's credential stays in the runner. The process that runs a node's
+code, and every Kubernetes Job a runner creates, authenticates with the
+node's claim token instead.
+
+- **Before:** a self-hosted runner, a Kubernetes or warm trigger runner and
+  `sparkwing cluster worker` handed their bearer to the code they ran. A
+  Kubernetes or warm runner passed it to the `handle-trigger` child, and the
+  Kubernetes node runner wrote it into every Job's `SPARKWING_AGENT_TOKEN` as
+  a literal value, readable by anyone who can `get` Jobs in the namespace.
+- **After:** the node claim routes (`POST /api/v1/nodes/claim`,
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`) and the trigger claim routes
+  (`POST /api/v1/triggers/claim`, `POST /api/v1/triggers/{id}/claim`) add a
+  `claim_token` field. A node's claim token acts as the runner that made the
+  claim, confined to the claim's run and to writes on its own node, and stops
+  when the claim ends. A trigger's claim token reads the run's declared
+  secrets. A Job's `SPARKWING_AGENT_TOKEN` holds its node's claim token, and
+  every trigger child reaches the controller through a loopback broker that
+  admits only its run's routes. Schema v98 adds the `trigger_claim_tokens`
+  table; it needs no operator action.
+
+To upgrade:
+
+1. Upgrade the controller and every runner together: the runner bundle, the
+   `sparkwing-runner runner` service, GitHub Actions runners and
+   `sparkwing cluster worker`. A runner from this release gets no claim token
+   from an older controller, and its nodes fail with `401`.
+2. Leave runner tokens as they are. They keep claiming, heartbeating and
+   making the runner's own calls; only the work they claim moves to claim
+   tokens.
+
+**Edge cases:**
+
+- A runner older than this release keeps working against the upgraded
+  controller, ignoring the `claim_token` field and running nodes on its
+  bearer.
+- A node's claim token answers `403 claim_mismatch` for a route outside its
+  run or a write to another node, and `403 claim_ended` once its claim has
+  ended. A pipeline that reached another run through its runner's bearer
+  from inside a node no longer can.
