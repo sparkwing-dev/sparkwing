@@ -93,7 +93,9 @@ Job spec yields a credential bound to one node's claim. Every trigger child,
 including a Kubernetes or warm runner's and `sparkwing cluster worker`'s,
 reaches the controller through the runner's trigger broker, which forwards
 the child's secret reads with the trigger's claim token and its other run
-routes with the runner's bearer. A trigger child that runs a node in its own
+routes with the runner's bearer. On an open controller, which mints no claim
+token for an anonymous claim, the runner holds no bearer either, and the
+broker forwards the read with none, as the controller answers it directly. A trigger child that runs a node in its own
 process does so under the trigger claim, which is why a trigger claim reads
 secrets at all.
 

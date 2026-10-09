@@ -688,7 +688,9 @@ source credential (see [Git credentials](git-credentials.md)). A trigger child t
 a node in its own process does so under the trigger claim, which is why the
 trigger claim reads secrets. Every other route a trigger child calls goes
 through the runner's loopback trigger broker, which admits only its run's
-routes and forwards them with the runner's token.
+routes and forwards them with the runner's token. On an open controller,
+which mints no claim token, the broker forwards the secret read with no
+bearer, as the controller answers it directly.
 
 `PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
 pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every

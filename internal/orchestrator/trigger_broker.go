@@ -140,13 +140,18 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream := b.upstreamToken
 	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") {
-		if b.claimToken == "" {
+		// safety: an open controller mints no claim token and the runner holds
+		// no bearer, so the read goes without one, as it would directly.
+		if b.claimToken == "" && b.upstreamToken != "" {
 			http.Error(w, "the trigger claim carried no claim token, which a secret read needs", http.StatusForbidden)
 			return
 		}
 		upstream = b.claimToken
 	}
-	r.Header.Set("Authorization", "Bearer "+upstream)
+	r.Header.Del("Authorization")
+	if upstream != "" {
+		r.Header.Set("Authorization", "Bearer "+upstream)
+	}
 	if logs {
 		b.logs.ServeHTTP(w, r)
 		return
