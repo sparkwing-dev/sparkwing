@@ -24,11 +24,7 @@ func newRecordingStore(t *testing.T) (*Store, *sqlStatementRecorder) {
 	if err := preparePrivateSQLite(path); err != nil {
 		t.Fatal(err)
 	}
-	dsn, err := sqliteDSN(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := openSQL(driverName, dsn, DialectSQLite)
+	st, err := openSQL(driverName, sqliteDSN(path), DialectSQLite)
 	if err != nil {
 		t.Fatal(err)
 	}

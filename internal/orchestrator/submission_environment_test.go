@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -279,14 +280,20 @@ func TestSubmissionWithoutCapturedEnvironmentUsesConsumerEnvironment(t *testing.
 
 func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		env  []string
-		want []string
+		name  string
+		allow string
+		env   []string
+		want  []string
 	}{
 		{
 			name: "keeps the dispatch snapshot shape",
 			env:  []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u", "AWS_REGION=us-east-1"},
 			want: []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u"},
+		},
+		{
+			name: "carries the S3 endpoint and the config directory",
+			env:  []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/u/.cfg", "AWS_PROFILE=x"},
+			want: []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/u/.cfg"},
 		},
 		{
 			name: "drops credential-shaped names",
@@ -299,26 +306,20 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 			want: []string{"SPARKWING_PROFILE=dev"},
 		},
 		{
-			name: "honours the operator allow-list",
+			name:  "honors the operator allow-list",
+			allow: "[AWS_REGION, DOCKER_*]",
 			env: []string{
-				submissionEnvironmentAllowKey + "=AWS_REGION,DOCKER_*",
 				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1", "DOCKER_PASSWORD=p", "LANG=C",
 			},
-			want: []string{
-				submissionEnvironmentAllowKey + "=AWS_REGION,DOCKER_*",
-				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1",
-			},
+			want: []string{"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1"},
 		},
 		{
-			name: "carries the allow-listed agent socket and docker certificate directory",
+			name:  "carries the allow-listed agent socket and docker certificate directory",
+			allow: "[SSH_AUTH_SOCK, DOCKER_CERT_PATH]",
 			env: []string{
-				submissionEnvironmentAllowKey + "=SSH_AUTH_SOCK,DOCKER_CERT_PATH",
 				"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker",
 			},
-			want: []string{
-				submissionEnvironmentAllowKey + "=SSH_AUTH_SOCK,DOCKER_CERT_PATH",
-				"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker",
-			},
+			want: []string{"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker"},
 		},
 		{
 			name: "drops a credential hidden in a URL query or path",
@@ -338,6 +339,7 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			writeMachineSettings(t, "run:\n  submit_env_allow: "+cmp.Or(tc.allow, "[]")+"\n")
 			home := t.TempDir()
 			const runID = "run-filter"
 			if err := CaptureSubmissionEnvironment(home, runID, tc.env, quietLogger()); err != nil {
@@ -358,13 +360,14 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 }
 
 func TestCaptureSubmissionEnvironmentRejectsABareWildcard(t *testing.T) {
+	writeMachineSettings(t, "run:\n  submit_env_allow: [\"*\"]\n")
 	err := CaptureSubmissionEnvironment(t.TempDir(), "run-wildcard",
-		[]string{submissionEnvironmentAllowKey + "=*", "AWS_REGION=us-east-1"}, quietLogger())
+		[]string{"AWS_REGION=us-east-1"}, quietLogger())
 	if err == nil {
 		t.Fatal("CaptureSubmissionEnvironment error = nil, want a rejection of the bare wildcard")
 	}
-	if !strings.Contains(err.Error(), submissionEnvironmentAllowKey) {
-		t.Fatalf("error = %v, want it to name %s", err, submissionEnvironmentAllowKey)
+	if !strings.Contains(err.Error(), submitEnvAllowKey) {
+		t.Fatalf("error = %v, want it to name %s", err, submitEnvAllowKey)
 	}
 }
 

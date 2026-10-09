@@ -22,7 +22,7 @@ import (
 const ArtifactStoreEnvVar = "SPARKWING_CACHE_URL"
 
 func resolveArtifactStoreFromEnv(ctx context.Context) (storage.ArtifactStore, error) {
-	url := ResolveDevEnvURL(ArtifactStoreEnvVar)
+	url := os.Getenv(ArtifactStoreEnvVar)
 	if url == "" {
 		return nil, nil
 	}

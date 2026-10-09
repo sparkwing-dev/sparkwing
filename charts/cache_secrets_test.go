@@ -5,16 +5,6 @@ import (
 	"testing"
 )
 
-func secretRef(t *testing.T, c renderedContainer, name string) *renderedSecretKeyRef {
-	t.Helper()
-	for _, env := range c.Env {
-		if env.Name == name && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
-			return env.ValueFrom.SecretKeyRef
-		}
-	}
-	return nil
-}
-
 func sameSecret(a, b *renderedSecretKeyRef) bool {
 	return a != nil && b != nil && a.Name == b.Name && a.Key == b.Key
 }
@@ -66,14 +56,14 @@ func TestCacheSecretsAreNeverTheRunnersToken(t *testing.T) {
 	}
 	runner := renderRunner(t)
 	cache := renderCache(t)
-	controller := renderController(t)
+	controller := renderControllerYAML(t)
 	agent := credentialRef(t, runner, "agent-token")
 	if agent == nil {
 		t.Fatal("the runner projects no agent-token credential")
 	}
 	for name, ref := range map[string]*renderedSecretKeyRef{
-		"cache cache-grant-key":                credentialRef(t, cache, "cache-grant-key"),
-		"controller SPARKWING_CACHE_GRANT_KEY": secretRef(t, controller, "SPARKWING_CACHE_GRANT_KEY"),
+		"cache cache-grant-key":      credentialRef(t, cache, "cache-grant-key"),
+		"controller cache-grant-key": credentialRef(t, controller, "cache-grant-key"),
 	} {
 		if ref == nil {
 			t.Errorf("%s is not a secretKeyRef", name)
@@ -83,7 +73,7 @@ func TestCacheSecretsAreNeverTheRunnersToken(t *testing.T) {
 			t.Errorf("%s reads %s/%s, the runner's own token", name, ref.Name, ref.Key)
 		}
 	}
-	if !sameSecret(credentialRef(t, cache, "cache-grant-key"), secretRef(t, controller, "SPARKWING_CACHE_GRANT_KEY")) {
+	if !sameSecret(credentialRef(t, cache, "cache-grant-key"), credentialRef(t, controller, "cache-grant-key")) {
 		t.Error("the controller signs grants with a key the cache does not verify with")
 	}
 	if ref := credentialRef(t, runner, "cache-grant-key"); ref != nil {

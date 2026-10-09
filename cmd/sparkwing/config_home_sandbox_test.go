@@ -19,7 +19,7 @@ func scratchUserConfigDir(t *testing.T) string {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	for _, env := range []string{
-		userconfig.PathEnv, localsecrets.KeyFileEnv, versionHoldEnv,
+		userconfig.PathEnv, localsecrets.KeyFileEnv,
 	} {
 		t.Setenv(env, "")
 	}

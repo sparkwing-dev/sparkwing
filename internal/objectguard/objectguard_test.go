@@ -255,8 +255,7 @@ func TestRefusalNamesBothRemedies(t *testing.T) {
 		t.Fatal("the request past the budget was allowed")
 	}
 	for _, want := range []string{
-		"SPARKWING_OBJECT_STORE_BREAKER=off",
-		"SPARKWING_OBJECT_STORE_PUT_PER_MINUTE",
+		"--object-store-budget put:minute",
 		"sparkwing cluster object-store reset-breaker",
 		"belongs to this process alone",
 	} {

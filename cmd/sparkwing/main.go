@@ -13,6 +13,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -241,10 +242,16 @@ func dispatchRun(args []string) error {
 	if flags.localOnly {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
+	if flags.allowUnadmitted {
+		env = setEnv(env, orchestrator.AllowUnadmittedEnv, "1")
+	}
+	bincache.SetHashAllFiles(flags.hashAllFiles)
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
+		NoUpdate:       flags.noUpdate,
+		NoBincache:     flags.noBincache,
+		DigestBackfill: flags.digestBackfill,
+		ExecutionDir:   executionDir,
+		AfterChild:     afterChild,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)

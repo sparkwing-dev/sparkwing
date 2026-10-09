@@ -38,7 +38,6 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv(authwire.CacheGrantEnv, "")
-	t.Setenv(authwire.CacheGrantKeyEnv, cacheGrantKey)
 
 	origins := t.TempDir()
 	ran := make(chan []byte, 1)
@@ -61,7 +60,7 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ctrlSrv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cacheSrv.URL).Handler())
+	ctrlSrv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cacheSrv.URL).WithCacheGrantKey(cacheGrantKey).Handler())
 	t.Cleanup(ctrlSrv.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -212,7 +211,6 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(authwire.CacheGrantKeyEnv, cacheGrantKey)
 
 	origins := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "ran")
@@ -227,7 +225,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctrlSrv := httptest.NewServer(controller.New(st, discardLogger()).
-		WithCacheURL(cacheSrv.URL).EnableAuthFromStore().Handler())
+		WithCacheURL(cacheSrv.URL).WithCacheGrantKey(cacheGrantKey).EnableAuthFromStore().Handler())
 	t.Cleanup(ctrlSrv.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

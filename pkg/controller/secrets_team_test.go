@@ -34,19 +34,20 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 	now := time.Now().UTC()
 	for _, row := range []struct {
 		write       func(store.Secret, time.Time) error
+		team        store.Team
 		name, value string
 		pipeline    string
 		shared      bool
 	}{
-		{st.CreateOrReplaceSecret, "API_KEY", "default-team-value", "deploy", false},
-		{acme.CreateOrReplaceSecret, "API_KEY", "acme-value", "deploy", false},
-		{st.CreateOrReplaceSecret, "NPM_TOKEN", "default-npm", "", true},
-		{acme.CreateOrReplaceSecret, "NPM_TOKEN", "acme-npm", "", true},
+		{st.CreateOrReplaceSecret, store.DefaultTeam, "API_KEY", "default-team-value", "deploy", false},
+		{acme.CreateOrReplaceSecret, "acme", "API_KEY", "acme-value", "deploy", false},
+		{st.CreateOrReplaceSecret, store.DefaultTeam, "NPM_TOKEN", "default-npm", "", true},
+		{acme.CreateOrReplaceSecret, "acme", "NPM_TOKEN", "acme-npm", "", true},
 	} {
-		if err := row.write(store.Secret{
+		if err := row.write(sealedSecret(t, row.team, store.Secret{
 			Name: row.name, Value: row.value, Principal: "root", Pipeline: row.pipeline,
 			Masked: true, Shared: row.shared,
-		}, now); err != nil {
+		}), now); err != nil {
 			t.Fatalf("seed %s=%s: %v", row.name, row.value, err)
 		}
 	}
@@ -60,7 +61,7 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).Handler())
 	t.Cleanup(srv.Close)
 	c := client.NewWithToken(srv.URL, nil, raw)
 

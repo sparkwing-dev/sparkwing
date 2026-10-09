@@ -92,7 +92,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	if key == nil {
 		key, _ = licensetest.NewKey(t)
 	}
-	srv := controller.New(st, o.logger).EnableAuthFromStore().
+	srv := controller.New(st, o.logger).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).

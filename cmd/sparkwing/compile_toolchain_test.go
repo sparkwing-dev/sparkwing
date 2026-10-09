@@ -46,7 +46,8 @@ func TestPipelineToolchainOverrideDoesNotReachRuntime(t *testing.T) {
 	// safety: the cached path replaces its process with the pipeline, so the
 	// launch runs in a child and the parent reads what the pipeline recorded.
 	if dir := os.Getenv("SPARKWING_TEST_TOOLCHAIN_CHILD_DIR"); dir != "" {
-		if err := compileAndExec(dir, nil, os.Environ(), compileOptions{NoUpdate: true}); err != nil {
+		uncached := os.Getenv("SPARKWING_TEST_TOOLCHAIN_UNCACHED") == "true"
+		if err := compileAndExec(dir, nil, os.Environ(), compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -107,12 +108,9 @@ exit 1
 			t.Setenv("BUILD_LOG", buildLog)
 			t.Setenv("RUNTIME_LOG", runtimeLog)
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
-			t.Setenv("SPARKWING_NO_BINCACHE", "")
-			if uncached {
-				t.Setenv("SPARKWING_NO_BINCACHE", "1")
-			}
 			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideDoesNotReachRuntime$")
-			child.Env = append(os.Environ(), "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir)
+			child.Env = append(os.Environ(), "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir,
+				fmt.Sprintf("SPARKWING_TEST_TOOLCHAIN_UNCACHED=%t", uncached))
 			if out, err := child.CombinedOutput(); err != nil {
 				t.Fatalf("launch: %v: %s", err, out)
 			}

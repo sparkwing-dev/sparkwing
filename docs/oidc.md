@@ -15,17 +15,18 @@ The model matches GitHub Actions' `id-token: write`: the cloud provider fetches 
 
 The issuer is the controller's `--external-url`. It must be an `https` origin with no path, query or fragment, because every cloud provider fetches `<issuer>/.well-known/openid-configuration` and compares the token's `iss` claim to the issuer byte for byte. AWS also expects no port.
 
-Generate an RSA key and give it to the controller:
+Generate an RSA key and give it to the controller as the `oidc-key` file in its
+[`--credentials-dir`](self-hosting.md#controller-credentials):
 
 ```sh
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc-signing.pem
 ```
 
-| Flag | Environment | Meaning |
-|---|---|---|
-| `--oidc-key-file` | `SPARKWING_OIDC_KEY` (the PEM itself) | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Without it the controller issues no tokens and the three routes answer 404. |
-| `--oidc-published-key-file` | `SPARKWING_OIDC_PUBLISHED_KEY` (the PEM itself) | A second key, as a private or public key PEM, that the key set publishes and that never signs: the next key before a rotation, the previous key after one. |
-| `--oidc-token-ttl` | | Token lifetime. Default `10m`, at most `1h`, at least `1m`. |
+| Setting | Meaning |
+|---|---|
+| `oidc-key` credential | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Without it the controller issues no tokens and the three routes answer 404. |
+| `oidc-key.published` credential | A second key, as a private or public key PEM, that the key set publishes and that never signs: the next key before a rotation, the previous key after one. |
+| `--oidc-token-ttl` | Token lifetime. Default `10m`, at most `1h`, at least `1m`. |
 
 The controller refuses to start when a key is set and `--external-url` is empty or is not an `https` origin. It never logs key material; the startup line names the key ids.
 
@@ -35,10 +36,10 @@ Each key's `kid` is its RFC 7638 JWK thumbprint, so the same key always publishe
 
 Relying parties cache the key set for up to an hour, so a new key is published before anything signs with it:
 
-1. **Publish the next key.** Keep the current key in `--oidc-key-file` and put the new key in `--oidc-published-key-file`. Tokens still carry the current `kid`.
+1. **Publish the next key.** Keep the current key in `oidc-key` and put the new key in `oidc-key.published`. Tokens still carry the current `kid`.
 2. **Wait longer than the one-hour cache time**, so every relying party's cached key set holds the new key.
-3. **Switch signing.** Put the new key in `--oidc-key-file` and the old key in `--oidc-published-key-file`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
-4. **Wait longer than one token lifetime**, so every old-key token has expired, then drop `--oidc-published-key-file`.
+3. **Switch signing.** Put the new key in `oidc-key` and the old key in `oidc-key.published`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
+4. **Wait longer than one token lifetime**, so every old-key token has expired, then remove `oidc-key.published`.
 
 Switching signing before step 2 has passed makes a relying party that cached the old key set reject new tokens until its cache expires.
 

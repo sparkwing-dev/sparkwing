@@ -34,7 +34,7 @@ func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").Handler())
 	defer srv.Close()
 	for name, request := range map[string]*http.Request{
 		"register": mustRequest(t, http.MethodPost,
@@ -80,7 +80,6 @@ func operatorGrantHeader(header string) bool {
 // controller with its admin bearer; the controller forwards them under an
 // operator grant, and no other credential reaches them.
 func TestCacheStoreCeilingRoutesForwardUnderTheOperatorGrant(t *testing.T) {
-	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	var seen []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !operatorGrantHeader(r.Header.Get("Authorization")) {
@@ -104,7 +103,7 @@ func TestCacheStoreCeilingRoutesForwardUnderTheOperatorGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").EnableAuthFromStore().Handler())
 	defer srv.Close()
 	post := func(path, bearer string) int {
 		req := mustRequest(t, http.MethodPost, srv.URL+path, nil)
@@ -133,7 +132,6 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); !operatorGrantHeader(got) {
@@ -173,7 +171,7 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctrl := controller.New(st, nil).
-		WithCacheURL(cache.URL).
+		WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").
 		WithAuthenticator(controller.NewAuthenticator(st, time.Minute))
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
@@ -230,7 +228,6 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	repoURL := "git@github.com:acme/widgets.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
@@ -306,7 +303,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
+	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
 	for range 2 {
@@ -398,7 +395,7 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
+	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").Handler())
 	server.Config.WriteTimeout = 20 * time.Millisecond
 	server.Start()
 	defer server.Close()
@@ -420,7 +417,6 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 // mirrors, even of the repository the run names: the mirror's name is the
 // URL's digest, the same for every team.
 func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
-	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	repoURL := "git@github.com:victim/app.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
@@ -465,7 +461,7 @@ func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
+	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
 	claimed, err := client.NewWithToken(srv.URL, nil, runner).

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -42,7 +41,7 @@ func DrainGitHubChecks(ctx context.Context, s *Server) error {
 // VerifyLiveDataGrant exposes the check every controller use of a cache
 // grant makes, reporting whether the grant is limited to binary uploads.
 func VerifyLiveDataGrant(ctx context.Context, s *Server, raw string) (bool, error) {
-	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), raw, time.Now())
+	grant, err := authwire.VerifyCacheGrant(s.cacheGrantKey, raw, time.Now())
 	if err != nil {
 		return false, err
 	}

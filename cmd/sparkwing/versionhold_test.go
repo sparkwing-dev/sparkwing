@@ -94,16 +94,26 @@ func TestResolveVersionHold_EnvOverridesFile(t *testing.T) {
 	// safety: version hold refuses a write outside the sparkwing home in use,
 	// and this one keeps the config the test writes inside the home it names.
 	t.Setenv("SPARKWING_HOME", dir)
-	t.Setenv(versionHoldEnv, "")
+	t.Setenv("SPARKWING_VERSION_HOLD", "v0.10")
 	if err := runVersionHold([]string{"--set", "v0.15"}); err != nil {
 		t.Fatalf("set hold: %v", err)
 	}
-	if h := resolveVersionHold(); h.Value != "v0.15" || h.Source == versionHoldEnv {
-		t.Fatalf("file hold = %+v, want value v0.15 from file", h)
+	if h := resolveVersionHold(); h.Value != "v0.15" {
+		t.Fatalf("hold = %+v, want v0.15 from the file; the environment is no longer read", h)
 	}
-	t.Setenv(versionHoldEnv, "v0.10")
-	if h := resolveVersionHold(); h.Value != "v0.10" || h.Source != versionHoldEnv {
-		t.Fatalf("env hold = %+v, want value v0.10 from env", h)
+}
+
+func writeVersionHold(t *testing.T, value string) {
+	t.Helper()
+	path, err := versionHoldPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -113,7 +123,6 @@ func TestRunVersionHold_SetClearRoundTrip(t *testing.T) {
 	// safety: version hold refuses a write outside the sparkwing home in use,
 	// and this one keeps the config the test writes inside the home it names.
 	t.Setenv("SPARKWING_HOME", dir)
-	t.Setenv(versionHoldEnv, "")
 	if err := runVersionHold([]string{"--set", "v0.15"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -130,11 +139,10 @@ func TestRunVersionHold_SetClearRoundTrip(t *testing.T) {
 
 func TestResolveVersionHoldNormalizesOperatorInput(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv(versionHoldEnv, "0.15")
+	writeVersionHold(t, "0.15")
 	if hold := resolveVersionHold(); hold.Value != "v0.15" || !exceedsHold("v0.16.0", hold.Value) {
-		t.Fatalf("environment hold=%+v", hold)
+		t.Fatalf("hold=%+v", hold)
 	}
-	t.Setenv(versionHoldEnv, "")
 	path, err := versionHoldPath()
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +160,7 @@ func TestResolveVersionHoldNormalizesOperatorInput(t *testing.T) {
 
 func TestInvalidVersionHoldBlocksUpdateBeforeDownload(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv(versionHoldEnv, "not-a-version")
+	writeVersionHold(t, "not-a-version")
 	original := updateDownloadInstall
 	t.Cleanup(func() { updateDownloadInstall = original })
 	downloaded := false

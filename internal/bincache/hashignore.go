@@ -3,15 +3,19 @@ package bincache
 import (
 	"bytes"
 	"errors"
-	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 )
 
-const HashAllFilesEnv = "SPARKWING_HASH_ALL_FILES"
+var hashAllFiles atomic.Bool
+
+// SetHashAllFiles makes every cache key this process computes hash the
+// files Git ignores too, which `sparkwing run --sw-hash-all-files` asks for.
+func SetHashAllFiles(on bool) { hashAllFiles.Store(on) }
 
 func ignoredUnder(dir string, candidates []string) map[string]bool {
-	if len(candidates) == 0 || os.Getenv(HashAllFilesEnv) != "" {
+	if len(candidates) == 0 || hashAllFiles.Load() {
 		return nil
 	}
 

@@ -26,7 +26,7 @@ func s3Env(t *testing.T, endpoint string) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/credentials")
 	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/config")
-	t.Setenv("SPARKWING_S3_ENDPOINT", endpoint)
+	t.Setenv("AWS_ENDPOINT_URL_S3", endpoint)
 }
 
 func countingBucket(t *testing.T, status int) (endpoint string, hits *atomic.Int64) {
@@ -48,7 +48,7 @@ func countingBucket(t *testing.T, status int) (endpoint string, hits *atomic.Int
 func useLimiter(t *testing.T, l *objectguard.Limiter) {
 	t.Helper()
 	prior := sharedLimiter
-	sharedLimiter = func() (*objectguard.Limiter, error) { return l, nil }
+	sharedLimiter = func() *objectguard.Limiter { return l }
 	t.Cleanup(func() { sharedLimiter = prior })
 }
 
@@ -107,8 +107,7 @@ func TestTrippedBudgetSurfacesAReadableStoreError(t *testing.T) {
 		"s3 put second",
 		"object-store put budget exceeded",
 		"belongs to this process alone",
-		"SPARKWING_OBJECT_STORE_BREAKER=off",
-		"SPARKWING_OBJECT_STORE_PUT_PER_MINUTE",
+		"--object-store-budget put:minute",
 		"sparkwing cluster object-store reset-breaker",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -169,7 +168,7 @@ func TestTrippedBudgetFailsARunsStateWriteClosed(t *testing.T) {
 	if strings.Contains(err.Error(), "queued in the local outbox") {
 		t.Fatalf("a refused write was staged to the outbox instead of failing closed: %v", err)
 	}
-	for _, want := range []string{"object-store put budget exceeded", "SPARKWING_OBJECT_STORE_BREAKER=off"} {
+	for _, want := range []string{"object-store put budget exceeded", "--object-store-budget"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the run's failure does not mention %q:\n%v", want, err)
 		}

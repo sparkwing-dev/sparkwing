@@ -55,7 +55,6 @@ func (s *storageFake) answer(status int) {
 
 func newStorageFakes(t *testing.T) (logs, cache *storageFake, ts controller.TeamStorage) {
 	t.Helper()
-	t.Setenv(authwire.CacheGrantKeyEnv, "grant-key")
 	logs, cache = &storageFake{status: http.StatusNoContent}, &storageFake{status: http.StatusNoContent}
 	logSrv, cacheSrv := httptest.NewServer(http.HandlerFunc(logs.handler)), httptest.NewServer(http.HandlerFunc(cache.handler))
 	t.Cleanup(logSrv.Close)
@@ -76,7 +75,7 @@ func newDeletionFixture(t *testing.T, ts controller.TeamStorage) *identityFixtur
 	}
 	ts.LogsToken = token
 	f.logsToken = token
-	f.srv.WithTeamStorage(ts)
+	f.srv.WithTeamStorage(ts).WithCacheGrantKey("grant-key")
 	return f
 }
 

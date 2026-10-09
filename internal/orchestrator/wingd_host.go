@@ -8,6 +8,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+// AllowUnadmittedEnv carries `sparkwing run --sw-allow-unadmitted` to the
+// pipeline binary, which then runs without the admission daemon.
 const AllowUnadmittedEnv = "SPARKWING_ALLOW_UNADMITTED"
 
 const installAdvice = "curl -fsSL https://sparkwing.dev/install.sh | sh"

@@ -57,10 +57,10 @@ func TestCompileAndExecStopsTheToolchainOnTermination(t *testing.T) {
 	grandchildPIDFile := filepath.Join(scratch, "grandchild.pid")
 
 	child := exec.Command(os.Args[0], "-test.run=^TestCompileAndExecStopsTheToolchainOnTermination$")
-	// safety: three ambient settings route compileAndExec away from the
+	// safety: two ambient settings route compileAndExec away from the
 	// compile this test drives, so they are cleared rather than inherited.
 	child.Env = append(scrubbed(os.Environ(),
-		"SPARKWING_NO_BINCACHE", "SPARKWING_FLEET", "SPARKWING_GITCACHE_URL"),
+		"SPARKWING_FLEET", "SPARKWING_GITCACHE_URL"),
 		"SPARKWING_TEST_COMPILE_INTERRUPT_CHILD=1",
 		"SPARKWING_TEST_FLEET_COMPILE_DIR="+pipelineDir,
 		"SPARKWING_TEST_GO_PID="+goPIDFile,

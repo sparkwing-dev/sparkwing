@@ -44,20 +44,12 @@ func objectStoreBreakerState(l *objectguard.Limiter) ObjectStoreBreakerResponse 
 }
 
 func (s *Server) handleObjectStoreBreaker(w http.ResponseWriter, _ *http.Request) {
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
+	limiter := objectguard.Shared()
 	writeJSON(w, http.StatusOK, objectStoreBreakerState(limiter))
 }
 
 func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Request) {
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
+	limiter := objectguard.Shared()
 	resp := objectStoreBreakerState(limiter)
 	for _, c := range limiter.Reset() {
 		resp.Cleared = append(resp.Cleared, string(c))
@@ -76,11 +68,7 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 // classes refuse and never what their limits are, and a failed measurement is
 // named here while its error goes to the log and the admin breaker route.
 func objectStoreHealth(bucket bool) (map[string]any, []string) {
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		return map[string]any{"tripped": false},
-			[]string{"object-store budget unavailable"}
-	}
+	limiter := objectguard.Shared()
 	state := limiter.State()
 	summary := map[string]any{"tripped": state.Tripped, "enabled": state.Enabled}
 	var problems []string
@@ -190,11 +178,7 @@ func (s *Server) bucketMeasured() bool {
 // perf: an install with neither a bucket nor a ceiling returns before the
 // first listing, so it never pays to enumerate anything.
 func (s *Server) runBucketCeiling(ctx context.Context) {
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		s.logger.Warn("object-store bucket ceiling", "err", err)
-		return
-	}
+	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
 	if !ceiling.Enforced() && !s.bucketMeasured() {
 		return

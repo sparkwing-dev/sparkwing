@@ -1,7 +1,6 @@
 # pkg/docs
 
 func All() string
-const BaseURLEnvVar = "SPARKWING_DOCS_BASE_URL"
 type CacheStats struct {
 	Dir            string
 	Exists         bool
@@ -71,6 +70,7 @@ type Section struct {
 	Breadcrumb string
 }
 func Sections(slug string) ([]Section, error)
+func SetTestBaseURL(t interface{ Cleanup(func()) }, base string)
 var Version string
 type Versions struct {
 	Latest   string

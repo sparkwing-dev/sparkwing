@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -84,8 +85,8 @@ func (s *Server) boundCipher(w http.ResponseWriter) (BoundCipher, bool) {
 	if !ok || s.secretsCipher == nil {
 		writeAuthError(w, http.StatusConflict, authErrorBody{
 			Code: "secrets_key_required",
-			Message: "this controller stores no secret sealed, so it holds no git credential; " +
-				"start it with SPARKWING_SECRETS_KEY",
+			Message: "this controller has no secrets key, so it holds no git credential; " +
+				"give it one and restart",
 		})
 		return nil, false
 	}
@@ -179,6 +180,10 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	sealed, err := sealSecret(cipher, gitCredentialBinding(t.Team(), host), secret)
+	if errors.Is(err, secrets.ErrKeyRefused) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		s.writeInternalError(w, r, "seal git credential", err)
 		return

@@ -117,12 +117,10 @@ func TestWindowsVerifyIsolatesSubcommandsAndPreservesFailures(t *testing.T) {
 	}
 	parentHome := t.TempDir()
 	t.Setenv(productTestHomeVar, parentHome)
-	t.Setenv(devEnvDisableVar, "")
 	var probe strings.Builder
 	for _, name := range productTestUnset {
 		fmt.Fprintf(&probe, `[ "${%s+x}" != x ] || exit 33; `, name)
 	}
-	probe.WriteString(`[ "$SPARKWING_DEV_ENV_DISABLE" = 1 ] || exit 34; `)
 	probe.WriteString(`printf '%s' "$SPARKWING_HOME"; exit 17`)
 	err := runWindowsVerifyIsolated(t.Context(), probe.String())
 	if err == nil {

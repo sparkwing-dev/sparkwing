@@ -180,8 +180,8 @@ so no caller chooses the team a payment funds. The dashboard posts only the
 amount to `POST /api/v1/team/billing/checkout`, which needs an owner of the
 active team. The controller takes the team from that session, refuses an
 amount outside the range, and asks the hosted checkout service at
-`--billing-url` (`SPARKWING_BILLING_URL`), authenticated with
-`SPARKWING_BILLING_TOKEN`, to open a session for that team. The browser is
+`--billing-url`, authenticated with the
+`billing-token` credential, to open a session for that team. The browser is
 sent to the page it returns. When Stripe confirms the payment, the checkout
 service verifies the webhook and grants the credits to the team the session
 names through `POST /api/v1/credits/grants`, keyed on the payment id so a
@@ -300,7 +300,7 @@ and the effect.
 
 Only the operator's own signed-in account reaches it. The controller lists
 operator accounts by account id with `--operator-accounts`
-(`SPARKWING_OPERATOR_ACCOUNTS`, comma-separated), and every route under
+(comma-separated), and every route under
 `/api/v1/operator/` answers `403` to any other caller: a team owner, an
 operator-token session and every bearer token, an admin token included. A console
 action therefore needs the operator's sign-in, not a credential that
@@ -823,7 +823,7 @@ multi-team license. The license is one line,
 `features` (`multi-team`, `metering`), `issued_to`, `issued_at` and `expires_at` (RFC
 3339), and the signature is Ed25519 over those payload bytes. The controller
 verifies it against a public key compiled into the binary and reads it from
-`--license-file` or from `SPARKWING_LICENSE`. A missing, malformed, expired or
+the `license` file in the controller's `--credentials-dir`. A missing, malformed, expired or
 wrongly signed license is logged at startup and leaves the controller holding
 one team; it never stops the controller starting.
 
@@ -831,12 +831,11 @@ A multi-team controller always requires authentication. A request with no
 credential would act as the operator of `default`, so the license turns token
 auth on even while the tokens table is empty, and such a request gets 401. With
 no token yet, only Google or GitHub sign-in sessions are accepted; supply the first admin
-token with `--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`).
+token as the `bootstrap-admin-token` credential.
 
-With the license and a Google OAuth client (`--google-client-id` or
-`SPARKWING_GOOGLE_CLIENT_ID`, `SPARKWING_GOOGLE_CLIENT_SECRET`, and the
-dashboard callbacks in `--oauth-redirect-uris` or
-`SPARKWING_OAUTH_REDIRECT_URIS`), the sign-in page offers Google sign-in. The
+With the license and a Google OAuth client (`--google-client-id`, the
+`google-client-secret` credential, and the dashboard callbacks in
+`--oauth-redirect-uris`), the sign-in page offers Google sign-in. The
 controller runs the whole PKCE flow on its own origin: `GET /auth/google/start`
 creates a state and verifier for a redirect URI on the allowlist, keeps them in
 a `__Host-` cookie, and sends the browser to Google. `GET /auth/google/callback`
@@ -846,8 +845,7 @@ browser finished the flow, then redeems the code, verifies the ID token
 `email_verified`) and opens a session.
 
 GitHub sign-in works the same way through `GET /auth/github/start` and
-`/auth/github/callback`, configured with `--github-client-id` (or
-`SPARKWING_GITHUB_CLIENT_ID`) and `SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
+`/auth/github/callback`, configured with `--github-client-id` and the `github-client-secret` credential under the same license and redirect allowlist.
 It asks for `read:user user:email` only, keys the identity on GitHub's numeric
 account id so a renamed login keeps its account, and trusts only the primary
 email GitHub has verified, never the profile's public email. When the client id
@@ -894,10 +892,9 @@ answers 404.
 A team holds at most 50 open invitations, and creates at most 100 invitations
 a day; withdrawing an invitation still counts toward that day.
 
-With `--email-sender` (env `SPARKWING_EMAIL_SENDER`) set, the controller
+With `--email-sender` set, the controller
 emails each invitation through Amazon SES, taking credentials and region from
-the AWS default chain; `--email-configuration-set`
-(`SPARKWING_EMAIL_CONFIGURATION_SET`) names the SES configuration set every
+the AWS default chain; `--email-configuration-set` names the SES configuration set every
 message carries. The email names the inviter by display name, the team, the
 role and the accept link, and says the invitation expires in seven days; it
 strips control and bidirectional-formatting characters from names and caps
@@ -925,12 +922,12 @@ One replica works on a deletion at a time, under a five-minute lease it renews
 before each step. A pass that fails leaves the deletion where it was with the
 error recorded and the next pass starts that step again;
 `GET /api/v1/me/team-deletions` shows the requester its state. The slug is
-never registered again. The controller deletes logs with the token in
-`SPARKWING_LOGS_DELETE_TOKEN`, which must carry exactly the `logs.delete`
+never registered again. The controller deletes logs with the token in its
+`logs-delete-token` credential, which must carry exactly the `logs.delete`
 scope; mint one as the operator with `sparkwing cluster tokens create --type service --principal controller-logs --scope logs.delete`. With a logs service
 configured and no such token, or one carrying any other scope, a deletion
 stays pending and records why. The controller deletes the team's cache tree
-under an operator grant it signs with `SPARKWING_CACHE_GRANT_KEY`, the key the
+under an operator grant it signs with its `cache-grant-key` credential, the key the
 cache verifies grants with. The purge deletes the team's logs with one
 `DELETE /api/v1/teams/{team}/logs`, which removes every run the logs service
 recorded for the team and its archived namespace; a logs service without an
@@ -1360,8 +1357,7 @@ per-client budgets a bearer does.
 
 Controller authentication is enabled at startup when the tokens table contains
 an active token. `--require-auth` makes startup fail when it does not, and
-`--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`) puts the
-first admin token in that table before the listener binds, so a provisioned
+the `bootstrap-admin-token` credential puts the first admin token in that table before the listener binds, so a provisioned
 controller starts with both satisfied; see the
 [security operator checklist](security.md#operator-checklist). That token is
 how the first operator signs in, by API or by the sign-in form. A controller

@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -138,7 +137,7 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 		}
 	}
 	// safety: the cache authenticates every route, and the caller's own bearer is never forwarded.
-	bearer, err := cacheOperatorBearer(time.Now())
+	bearer, err := s.cacheOperatorBearer(time.Now())
 	if err != nil {
 		http.Error(w, "sign the cache request: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -179,12 +178,11 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 
 // safety: the cache accepts only grants, so the controller signs a short-lived operator grant for each call
 // of its own. Without a grant key it sends no bearer, which only a cache started --allow-unauthenticated serves.
-func cacheOperatorBearer(now time.Time) (string, error) {
-	key := os.Getenv(authwire.CacheGrantKeyEnv)
-	if key == "" {
+func (s *Server) cacheOperatorBearer(now time.Time) (string, error) {
+	if s.cacheGrantKey == "" {
 		return "", nil
 	}
-	return authwire.MintOperatorCacheGrant(key, now)
+	return authwire.MintOperatorCacheGrant(s.cacheGrantKey, now)
 }
 
 // safety: the cache's admin routes take only the operator grant, so this is how an

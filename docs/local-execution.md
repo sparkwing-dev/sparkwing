@@ -295,8 +295,10 @@ The outer CLI passes the path to the pipeline process through
 
 A foreground run inherits the whole environment of the shell that starts
 it. A detached run carries a filtered snapshot of it: every `SPARKWING_*`
-and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`, and
-`KUBERNETES_SERVICE_HOST`. Sparkwing drops the credential-shaped part of
+and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`,
+`KUBERNETES_SERVICE_HOST`, `XDG_CONFIG_HOME` (so the run reads the same
+config.yaml), and the S3 endpoint names `AWS_ENDPOINT_URL` and
+`AWS_ENDPOINT_URL_S3`. Sparkwing drops the credential-shaped part of
 that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`,
 `PAT` and similar, bearer headers, PEM blocks, JSON documents with a
 credential field, and URLs whose userinfo, query, or path names a
@@ -304,16 +306,16 @@ credential -- so a queued run never writes one to disk. A submission never
 inherits values from the shell that started the consumer or from another
 submission.
 
-Set `SPARKWING_SUBMIT_ENV_ALLOW` to a comma-separated list to widen the
-snapshot; an entry ending in `*` matches a prefix, and a bare `*` is
-refused rather than silently allowing nothing. The credential filter still
-applies to what the list names, and logs at warn the names it drops, so a
-pipeline that needs a credential takes it from the secret store rather than
-the submitting shell.
+List more names under `run.submit_env_allow` in
+[config.yaml](machine-config.md) to widen the snapshot; an entry ending in
+`*` matches a prefix, and a bare `*` is refused rather than silently
+allowing nothing. The credential filter still applies to what the list
+names, and logs at warn the names it drops, so a pipeline that needs a
+credential takes it from the secret store rather than the submitting shell.
 
-```bash
-SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
-  sparkwing run deploy --sw-detached
+```yaml
+run:
+  submit_env_allow: [AWS_PROFILE, AWS_REGION, KUBECONFIG, DOCKER_HOST, SSH_AUTH_SOCK]
 ```
 
 Sparkwing stores the snapshot outside the runs database with mode `0600`,
@@ -850,8 +852,8 @@ and node. Execution start, finish, and logs also require the
 acknowledged attempt ordinal. That capability cannot claim or renew work,
 manage runners, or call administrative routes. The child inherits only the
 minimum runtime environment plus non-credential variables explicitly named by
-`SPARKWING_SUBMIT_ENV_ALLOW`, not the agent service's arbitrary cloud, cache,
-or service credentials.
+`run.submit_env_allow` in the agent machine's config.yaml, not the agent
+service's arbitrary cloud, cache, or service credentials.
 
 This is credential isolation, not an OS sandbox. Pipeline code can still read
 files, use the network, and start processes with every permission the agent OS
@@ -1187,12 +1189,12 @@ daemon that is not behind this pipeline, so the block carries the
 daemon's own reason and points at `sparkwing daemon status` rather than
 at an upgrade.
 
-**`SPARKWING_ALLOW_UNADMITTED=1` is set** -- the operator asked for the
-direct path, for a box whose other work they know. The block says so and
-names `unset SPARKWING_ALLOW_UNADMITTED`; it is read strictly, so only
-the exact value `1` turns the check off. The variable is an environment
-variable rather than a flag because the runs that need it are the ones no
-CLI launched.
+**`--sw-allow-unadmitted` is set** -- the operator asked for the direct
+path, for a box whose other work they know. The block says so and names
+the run without the flag as the way back. `sparkwing run` carries the flag
+to the pipeline binary as `SPARKWING_ALLOW_UNADMITTED=1`; a pipeline binary
+no CLI launched reads that variable the same way, strictly, so only the
+exact value `1` turns the check off.
 
 A pipeline that reserves host capacity with a plan-level or node-level
 `.Resources()` pin is not an exception. It runs standalone rather than
@@ -1639,22 +1641,17 @@ ignore-external # admit against total capacity, ignoring external load
 
 #### Where to set it
 
-The same value is read from several settings, resolved in the order the
-rest of the wing family uses -- the more specific setting wins:
+The budget is read from two settings, and the more specific one wins:
 
 | Setting | Reaches | Lives until |
 |---|---|---|
 | Internal daemon `--budget` argument (not a public CLI command) | that daemon process | that daemon exits |
-| `SPARKWING_BUDGET` in the environment | any daemon spawned from that environment | that daemon exits |
 | `admission.budget` in `~/.config/sparkwing/config.yaml` (see [Machine settings](machine-config.md)) | every daemon on the machine | you edit or delete the key |
 
-The config.yaml key is the durable one, and it is the setting to reach for
-when you mean "this machine, from now on". The admission daemon is
-started on demand by whichever run needs it first, inheriting that
-process's environment, so a budget exported in one shell applies to
-whatever daemon that shell happened to spawn and disappears with it. The
-file is read at daemon startup, so a budget written there is in force
-again the moment a daemon respawns.
+The config.yaml key is the setting to reach for. The admission daemon is
+started on demand by whichever run needs it first, and it reads the file at
+startup, so a budget written there is in force again the moment a daemon
+respawns.
 
 The key holds one setting in the grammar above, and a YAML comment keeps
 the reason a budget is in force next to the budget:

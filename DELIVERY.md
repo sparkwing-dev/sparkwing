@@ -228,9 +228,8 @@ file. Other syntax and workflow checks remain active.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
-  node child, pins `SPARKWING_HOME` to a fresh directory of its own, and
-  exports `SPARKWING_DEV_ENV_DISABLE=1` to close the `dev.env` fallback behind
-  every URL. A gate runs inside a sparkwing node, which hands its children the
+  node child and pins `SPARKWING_HOME` to a fresh directory of its own, which
+  holds no `dev.env` for a CLI verb to find a dashboard through. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body
@@ -367,8 +366,7 @@ file. Other syntax and workflow checks remain active.
   `config.yaml`, `SPARKWING_SECRETS_KEY_FILE` for the local secrets key. The
   local secrets themselves live in the home's own `state.db`, and the home
   does not import the machine's `secrets.env` or `config.env`. No variable
-  moves `version-hold`; `SPARKWING_VERSION_HOLD` holds one shell without
-  writing it.
+  moves `version-hold`.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is

@@ -54,7 +54,7 @@ func TestControllerCacheArtifactRoundTripAgainstTheBinRoute(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); err != nil {
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest, false); err != nil {
 		t.Fatalf("FetchFromArtifactStore: %v", err)
 	}
 	got, err := os.ReadFile(dest)

@@ -196,18 +196,73 @@ sub-chart's helpers.
 {{- end }}
 
 {{/*
-Mount points for the controller's credential Secrets. Each holds one
-Secret, so the file name inside is the Secret's key and the flag that
-names it is built from both.
+The controller's credentials directory sources: one projected volume
+source per configured Secret, each item renamed to the fixed file name
+the controller reads. Empty when no credential is configured.
 */}}
-{{- define "sparkwing-full.controller.secretsKeyDir" -}}
-/etc/sparkwing/secrets-key
+{{- define "sparkwing-full.controller.credentialSources" -}}
+{{- $c := .Values.controller -}}
+{{- $items := list
+      (dict "ref" $c.databaseSecret "path" "pg-url")
+      (dict "ref" $c.secretsKey "path" "secrets-key")
+      (dict "ref" $c.secretsPreviousKey "path" "secrets-key.previous")
+      (dict "ref" $c.bootstrapAdminToken "path" "bootstrap-admin-token") -}}
+{{- $bundle := index .Values "sparkwing-runner-bundle" -}}
+{{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") -}}
+{{- $items = append $items (dict "ref" (index $bundle "cache" "grantKeySecret" | default dict) "path" "cache-grant-key") -}}
+{{- end -}}
+{{- with include "sparkwing-full.controller.credentialsBundle" . }}
+- secret:
+    name: {{ . | quote }}
+{{- end }}
+{{- range $items }}
+{{- if and (index .ref "name") (index .ref "key") }}
+- secret:
+    name: {{ index .ref "name" | quote }}
+    items:
+      - key: {{ index .ref "key" | quote }}
+        path: {{ .path }}
+{{- end }}
+{{- end }}
 {{- end }}
 
-{{- define "sparkwing-full.controller.secretsPreviousKeyDir" -}}
-/etc/sparkwing/secrets-previous-key
-{{- end }}
+{{/*
+The controller.credentialsSecret name, or empty. A release installed before
+the value existed has no credentialsSecret map under --reuse-values.
+*/}}
+{{- define "sparkwing-full.controller.credentialsBundle" -}}
+{{- get (.Values.controller.credentialsSecret | default dict) "name" -}}
+{{- end -}}
 
-{{- define "sparkwing-full.controller.bootstrapAdminTokenDir" -}}
-/etc/sparkwing/bootstrap-admin-token
-{{- end }}
+{{/*
+"true" when the controller may receive a bootstrap admin token: through
+bootstrapAdminToken, or possibly through credentialsSecret, whose keys the
+chart cannot see. Empty otherwise.
+*/}}
+{{- define "sparkwing-full.controller.hasBootstrapAdminToken" -}}
+{{- if or .Values.controller.bootstrapAdminToken.name (include "sparkwing-full.controller.credentialsBundle" .) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+"true" when the controller may receive a current secrets key: through
+secretsKey, or possibly through credentialsSecret. Empty otherwise.
+*/}}
+{{- define "sparkwing-full.controller.hasSecretsKey" -}}
+{{- if or .Values.controller.secretsKey.name (include "sparkwing-full.controller.credentialsBundle" .) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+"true" when the controller deployment passes --require-auth. An explicit
+allowOpenBootstrap without a separate bootstrapAdminToken drops it, even when
+a credentialsSecret is set, since that bundle may carry only OAuth credentials.
+The Ingress guard reads the same answer so the two cannot disagree.
+*/}}
+{{- define "sparkwing-full.controller.rendersRequireAuth" -}}
+{{- if and .Values.controller.requireAuth (or .Values.controller.bootstrapAdminToken.name (ne .Values.controller.allowOpenBootstrap true)) -}}
+true
+{{- end -}}
+{{- end -}}

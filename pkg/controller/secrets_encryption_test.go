@@ -358,25 +358,17 @@ func getSecretStatus(t *testing.T, url string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-func TestSecrets_NoCipherStoresPlaintext(t *testing.T) {
+func TestSecrets_NoCipherStoresNothing(t *testing.T) {
 	srv, st := newSecretsTestServer(t, nil)
 
 	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
 		map[string]string{"name": "TOKEN", "value": "abc"})
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("POST status = %d", resp.StatusCode)
-	}
 	resp.Body.Close()
-
-	row, err := st.GetSecret("TOKEN")
-	if err != nil {
-		t.Fatalf("GetSecret: %v", err)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("POST status = %d, want 503 from a server with no secrets key", resp.StatusCode)
 	}
-	if secrets.IsEncrypted(row.Value) {
-		t.Fatal("no cipher configured but value was encrypted")
-	}
-	if row.Value != "abc" {
-		t.Fatalf("on-disk = %q, want abc", row.Value)
+	if row, err := st.GetSecret("TOKEN"); err == nil && row != nil {
+		t.Fatalf("a server with no key stored %q", row.Value)
 	}
 }
 

@@ -78,16 +78,14 @@ The ceiling shape controls its reach:
 
 With no flags, prints the current hold and where it is set. The hold
 persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
-version-hold); the SPARKWING_VERSION_HOLD environment variable
-overrides the file for a shell or a whole fleet. Releases beyond the
-hold still show in 'sparkwing version' so the operator sees what is
+version-hold). Releases beyond the hold still show in 'sparkwing version' so the operator sees what is
 being deferred.
 
 SPARKWING_HOME does not move this file; it is the state, cache and
 logs root, and the hold is machine-wide even though the toolchains it
 governs live under that root. A --set or --clear from a command
 running under a home of its own is refused rather than applied to the
-machine's hold: set SPARKWING_VERSION_HOLD to hold that shell alone.
+machine's hold.
 
 ### Flags
 

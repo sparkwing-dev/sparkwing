@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 )
 
 func main() {
@@ -95,7 +96,7 @@ func run(args []string) error {
 		cfg.BlobStore,
 		"s3://bucket/prefix that holds the binary, dependency-archive and artifact stores instead of the volume, "+
 			"one teams/<team>/ namespace per team. Region and credentials come from the AWS default chain (IRSA on EKS); "+
-			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors and the registry proxy stay "+
+			"AWS_ENDPOINT_URL_S3 points it at an S3-compatible store. Git mirrors and the registry proxy stay "+
 			"on --data-dir. Empty keeps everything on the volume.")
 	fs.StringVar(&cfg.ControllerURL, "controller",
 		cfg.ControllerURL,
@@ -116,7 +117,8 @@ func run(args []string) error {
 			"which costs one upstream fetch each. 0 leaves the proxy unbounded.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		cfg.GitForkLimit, "max concurrent git subprocesses.")
-	readEgress := egress.Bind(fs, nil, egress.ServiceCache, egress.CacheSurfaces)
+	readEgress := egress.Bind(fs, egress.CacheSurfaces)
+	readLog := logutil.Bind(fs)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -134,6 +136,7 @@ func run(args []string) error {
 		return err
 	}
 
+	cfg.Log = readLog()
 	egressCfg, named, err := readEgress()
 	if err != nil {
 		return err

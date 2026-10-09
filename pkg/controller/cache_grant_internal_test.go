@@ -16,7 +16,6 @@ import (
 
 func cacheGrantServer(t *testing.T, grantKey string) *Server {
 	t.Helper()
-	t.Setenv(authwire.CacheGrantKeyEnv, grantKey)
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +35,7 @@ func cacheGrantServer(t *testing.T, grantKey string) *Server {
 		poolRunner.Name, poolRunner.TokenPrefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, nil).WithCacheURL("http://cache.invalid")
+	return New(st, nil).WithCacheURL("http://cache.invalid").WithCacheGrantKey(grantKey)
 }
 
 var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: store.MachineTokenScopes()}

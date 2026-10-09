@@ -48,7 +48,7 @@ func newScopedFixture(t *testing.T, scopes []string) (scopedFixture, string) {
 	if err != nil {
 		t.Fatalf("CreateToken runner: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).Handler())
 	t.Cleanup(srv.Close)
 	return scopedFixture{url: srv.URL, store: st}, raw
 }
@@ -64,9 +64,9 @@ func seedRepoTrigger(t *testing.T, st *store.Store, id, repo string) {
 
 func seedSecret(t *testing.T, st *store.Store, name, value, pipeline string, shared bool) {
 	t.Helper()
-	if err := st.CreateOrReplaceSecret(store.Secret{
+	if err := st.CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{
 		Name: name, Value: value, Principal: "root", Pipeline: pipeline, Masked: true, Shared: shared,
-	}, time.Now().UTC()); err != nil {
+	}), time.Now().UTC()); err != nil {
 		t.Fatalf("CreateOrReplaceSecret %s/%s: %v", name, pipeline, err)
 	}
 }

@@ -28,11 +28,17 @@ var envAllowPrefixes = []string{
 	"GITHUB_",
 }
 
+// safety: the AWS SDK reads the S3 endpoint from its own names, so a run
+// against MinIO or R2 would reach AWS without them; XDG_CONFIG_HOME locates
+// config.yaml, without which a child reads another file's settings.
 var envAllowExact = map[string]bool{
 	"KUBERNETES_SERVICE_HOST": true,
 	"PATH":                    true,
 	"HOME":                    true,
 	"HOSTNAME":                true,
+	"AWS_ENDPOINT_URL_S3":     true,
+	"AWS_ENDPOINT_URL":        true,
+	"XDG_CONFIG_HOME":         true,
 }
 
 func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, node *sparkwing.JobNode) error {

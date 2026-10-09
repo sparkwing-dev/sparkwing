@@ -185,7 +185,7 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 		t.Fatal(err)
 	}
 	for _, name := range []string{"DEPLOY_TOKEN", "UNDECLARED"} {
-		if err := tn.CreateOrReplaceSecret(store.Secret{Name: name, Value: "v-" + name, Pipeline: "build", Masked: true}, time.Now()); err != nil {
+		if err := tn.CreateOrReplaceSecret(sealedSecret(t, store.Team(olga.team), store.Secret{Name: name, Value: "v-" + name, Pipeline: "build", Masked: true}), time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}

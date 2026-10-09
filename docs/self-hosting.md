@@ -42,6 +42,34 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+### Controller credentials
+
+`sparkwing-controller` reads every secret from one directory, named with
+`--credentials-dir`, holding one file per credential under a fixed name. A file
+that is absent leaves the feature it guards off, and a file that is present
+but empty or only whitespace stops startup, naming the file; there is no
+environment or flag form of any of them. The chart projects its Secret values into this
+directory, and `controller.credentialsSecret` names a Secret whose keys are
+these file names, mounted whole.
+
+| File | Holds | Without it |
+|---|---|---|
+| `pg-url` | PostgreSQL connection string for the state store | SQLite at `$SPARKWING_HOME/state.db` |
+| `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-encryption-at-rest) |
+| `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
+| `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
+| `license` | Signed multi-team license | one team |
+| `oidc-key`, `oidc-key.published` | OIDC signing key and the extra key the key set publishes | no ID tokens; see [OIDC](oidc.md) |
+| `google-client-secret`, `github-client-secret` | OAuth client secrets for sign-in | no sign-in with that provider |
+| `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
+| `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
+| `logs-delete-token` | Token with only `logs.delete`, for team deletion | team deletions with logs wait |
+| `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
+| `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
+
+Keep the directory readable by the controller's user alone (`0700`, files
+`0600`); a Kubernetes projected volume with `defaultMode: 0400` does this.
+
 ### Signed downloads through CloudFront
 
 For object-store downloads through a public ingress, configure the controller
@@ -50,12 +78,10 @@ Point `--cache-blob-store` at the cache service's S3 bucket and prefix; the
 controller announces `data_download_url` to in-cluster callers when that store
 is configured, and to public-ingress callers when CloudFront signing is also
 configured.
-Set `SPARKWING_CLOUDFRONT_DOMAIN` and
-`SPARKWING_CLOUDFRONT_KEY_PAIR_ID`, then provide the signing key with either
-`SPARKWING_CLOUDFRONT_PRIVATE_KEY` or
-`SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE`. Store the key in a Kubernetes Secret
-and mount it as a file; keep it out of Helm values, command arguments, and
-logs. The distribution must serve the private data bucket through its origin
+Pass `--cloudfront-domain` and `--cloudfront-key-pair-id`, then put the
+signing key in the `cloudfront-key`
+[credential](#controller-credentials). Keep it out of Helm values, command
+arguments, and logs. The distribution must serve the private data bucket through its origin
 access control configuration.
 
 The controller returns a 60-second CloudFront URL for requests arriving
@@ -110,7 +136,7 @@ helm upgrade --install sparkwing charts/sparkwing-full \
     --set controller.storage.type=emptyDir
 ```
 
-The controller reads the Secret as `SPARKWING_PG_URL`. Keep the DSN out of Helm
+The controller reads the Secret as its `pg-url` credential. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 
@@ -305,8 +331,8 @@ namespace per team, and the volume shrinks to working space. Give each service
 its own prefix in the bucket; neither ever writes at the bucket root or lists
 outside its prefix, so a per-service IAM policy scoped to the prefix is enough.
 Region and credentials come from the AWS default chain (IRSA on EKS, with
-`AWS_REGION` set); no static keys are read. `SPARKWING_S3_ENDPOINT` points
-either service at an S3-compatible store.
+`AWS_REGION` set); no static keys are read. The AWS SDK's own
+`AWS_ENDPOINT_URL_S3` points either service at an S3-compatible store.
 
 | Service | Flag | Keys |
 |---|---|---|
@@ -350,8 +376,7 @@ with a `cache-grant-key` and `--blob-store` refuses to start without
 token. The logs service reaches the
 same controller through its `--controller` with the appending caller's own
 credential. Give the controller `--cache-blob-store` and
-`--logs-archive-store` (or `SPARKWING_CACHE_BLOB_STORE` and
-`SPARKWING_LOGS_ARCHIVE_STORE`), the same URLs the services use, and its hourly
+`--logs-archive-store`, the same URLs the services use, and its hourly
 storage pass lists both to reconcile the counts and expires a team's cache
 objects 30 days after their last write. The controller's role then needs
 `s3:ListBucket` and `s3:DeleteObject` on the cache's prefix and

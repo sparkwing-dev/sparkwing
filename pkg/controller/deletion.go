@@ -440,7 +440,7 @@ func (s *Server) checkLogsDeleteToken(now time.Time) error {
 	raw := s.teamStorage.LogsToken
 	if raw == "" {
 		return errors.New("a logs service is configured but no log-deletion credential is: " +
-			"mint a token with only the " + ScopeLogsDelete + " scope and set SPARKWING_LOGS_DELETE_TOKEN")
+			"mint a token with only the " + ScopeLogsDelete + " scope and put it in the logs-delete-token file of the controller's --credentials-dir")
 	}
 	tok, err := s.store.LookupToken(raw, now)
 	if err != nil {
@@ -461,7 +461,7 @@ func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
 		return nil
 	}
 	target := strings.TrimRight(ts.CacheURL, "/") + "/admin/teams/" + url.PathEscape(string(team))
-	bearer, err := cacheOperatorBearer(time.Now())
+	bearer, err := s.cacheOperatorBearer(time.Now())
 	if err != nil {
 		return fmt.Errorf("sign the cache deletion: %w", err)
 	}

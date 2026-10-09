@@ -209,7 +209,7 @@ ran it.
   `--require-auth` is a boolean flag, so pass it bare. A retention set through
   `SPARKWING_LOGS_RETENTION` used to count as named and kept an archived
   service off its 90-day default; only `--retention` counts now.
-  `SPARKWING_S3_ENDPOINT` is still read, because it has no flag yet.
+  `SPARKWING_S3_ENDPOINT` gave way to `AWS_ENDPOINT_URL_S3`; see below.
 
 ## sparkwing-cache reads flags and a credentials directory
 
@@ -283,8 +283,11 @@ ran it.
   start on the default; with the value moved to its flag it refuses to start,
   so check the value before the upgrade. `--allow-unauthenticated` is a boolean
   flag: pass it bare, because `--allow-unauthenticated=yes` is refused.
-  The controller still reads the grant key as `SPARKWING_CACHE_GRANT_KEY`. `SPARKWING_S3_ENDPOINT`,
-  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` are still read.
+  The controller reads the same grant key from the `cache-grant-key` file in
+  its own `--credentials-dir`, so one projected Secret volume serves both.
+  `SPARKWING_S3_ENDPOINT`,
+  `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL` changed too; see the
+  sections below.
 
 ## sparkwing-runner reads flags and a credentials directory
 
@@ -346,6 +349,310 @@ ran it.
   variables if they remain in the runner pod's environment, so delete them
   rather than leaving them beside the flags. `sparkwing-runner agent`, which
   reads `config.yaml`, is unchanged.
+
+## sparkwing-controller reads its secrets from a credentials directory
+
+- **Before:** the controller took each secret from an environment variable,
+  some also from a `*-file` flag or a `*_FILE` variable naming a path, with
+  three different precedence rules between the two forms.
+- **After:** every secret is one file in `--credentials-dir`, under a fixed
+  name. There is no other way in. An absent file leaves its feature off, as an
+  unset variable did. The six `*-file` flags are gone, so a controller started
+  with one exits with an unknown-flag error. The variables below are no longer
+  read.
+- **Operator steps:** the `sparkwing-full` chart projects
+  `controller.databaseSecret`, `controller.secretsKey`,
+  `controller.secretsPreviousKey`, `controller.bootstrapAdminToken` and the
+  runner bundle's cache grant key into
+  `/etc/sparkwing/credentials` and passes `--credentials-dir`; those values
+  need no change. Secrets the chart had no value for, which a manifest passed
+  through `controller.extraEnv`, go into one Secret named by the new
+  `controller.credentialsSecret.name`, keyed by file name. For example:
+
+  ```bash
+  kubectl -n sparkwing create secret generic sparkwing-controller-credentials \
+      --from-file=license=license.txt \
+      --from-file=github-app-key=app.pem \
+      --from-literal=github-app-webhook-secret="$WEBHOOK_SECRET" \
+      --from-literal=github-client-secret="$GITHUB_CLIENT_SECRET"
+  helm upgrade sparkwing ./charts/sparkwing-full -f my-values.yaml \
+      --set controller.credentialsSecret.name=sparkwing-controller-credentials
+  ```
+
+  Outside Kubernetes, write each value to its file under a directory only
+  the controller's user can read, and pass `--credentials-dir`.
+
+  | Variable or flag | Credential file |
+  |---|---|
+  | `SPARKWING_PG_URL` | `pg-url` |
+  | `SPARKWING_SECRETS_KEY`, `--secrets-key-file` | `secrets-key` |
+  | `SPARKWING_SECRETS_PREVIOUS_KEY`, `--secrets-previous-key-file` | `secrets-key.previous` |
+  | `SPARKWING_BOOTSTRAP_ADMIN_TOKEN`, `--bootstrap-admin-token-file` | `bootstrap-admin-token` |
+  | `SPARKWING_LICENSE`, `--license-file` | `license` |
+  | `SPARKWING_OIDC_KEY`, `--oidc-key-file` | `oidc-key` |
+  | `SPARKWING_OIDC_PUBLISHED_KEY`, `--oidc-published-key-file` | `oidc-key.published` |
+  | `SPARKWING_GOOGLE_CLIENT_SECRET` | `google-client-secret` |
+  | `SPARKWING_GITHUB_CLIENT_SECRET` | `github-client-secret` |
+  | `SPARKWING_GITHUB_APP_PRIVATE_KEY`, `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` | `github-app-key` |
+  | `SPARKWING_GITHUB_APP_WEBHOOK_SECRET` | `github-app-webhook-secret` |
+  | `SPARKWING_CLOUDFRONT_PRIVATE_KEY`, `SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE` | `cloudfront-key` |
+  | `SPARKWING_LOGS_DELETE_TOKEN` | `logs-delete-token` |
+  | `SPARKWING_BILLING_TOKEN` | `billing-token` |
+  | `SPARKWING_CACHE_GRANT_KEY` | `cache-grant-key` |
+
+- **Edge cases:** a `--credentials-dir` that names no directory stops the
+  controller, and so does any credential file that is present but empty or
+  only whitespace, naming the file: an empty `pg-url` would otherwise select
+  SQLite and an empty `bootstrap-admin-token` would leave the API open. An
+  absent file still leaves that credential unset. The `sparkwing` CLI still reads `SPARKWING_SECRETS_KEY` and
+  `SPARKWING_SECRETS_PREVIOUS_KEY` on a laptop; only the controller stopped.
+  `SPARKWING_CACHE_TOKEN` is read nowhere (see
+  [The cache's static operator token is removed](#the-caches-static-operator-token-is-removed)). `sparkwing-controller migrate-outputs` takes
+  `--credentials-dir` too, for its `pg-url`.
+
+## The controller never stores a secret as plaintext
+
+- **Before:** a single-team controller started without a secrets key
+  stored every secret value as plaintext and logged a warning.
+- **After:** no secret is stored as plaintext. Without the `secrets-key`
+  credential, a multi-team controller refuses to start, as before. A
+  single-team SQLite controller creates a key on the first secret write and
+  keeps it in `secrets.key` beside `state.db`, mode `0600`. A single-team
+  PostgreSQL controller starts and refuses each secret write with `409`
+  naming the file to add. A server built from `pkg/controller` with no
+  cipher refuses secret reads and writes with `503`.
+- **Operator steps:** a SQLite controller needs nothing, but back up
+  `secrets.key` with `state.db` from now on. A PostgreSQL controller that
+  stores secrets needs a key: create one with `openssl rand -base64 32`,
+  put it in the `secrets-key` credential (chart: `controller.secretsKey`),
+  and restart.
+- **Edge cases:** rows an older controller stored as plaintext are sealed
+  at startup. A SQLite controller creates its key to do so; a PostgreSQL
+  controller without a key refuses to start while any plaintext row remains,
+  and says how many. A SQLite store that holds sealed values but has lost
+  its `secrets.key` refuses to start rather than create a second key.
+
+## sparkwing-controller reads settings from flags only
+
+- **Before:** most controller flags took their default from an environment
+  variable, and a few settings existed only as variables: the CloudFront
+  domain and key pair id, the object-store request budgets, the breaker
+  switch and its trip reset.
+- **After:** the controller reads no configuration variable. Every setting
+  is a flag; a malformed value stops it at startup naming the flag. Two
+  settings gained a flag, `--cloudfront-domain` and `--cloudfront-key-pair-id`,
+  and the eight budget variables became one flag, `--object-store-budget`.
+  `SPARKWING_OBJECT_STORE_BREAKER` and `SPARKWING_OBJECT_STORE_TRIP_RESET`
+  are gone without a replacement: nothing set them, the breaker stays on, a
+  day trip clears when its day rolls, and `sparkwing cluster object-store
+  reset-breaker` clears one sooner. The budget variables are no longer read
+  by any process: a local `sparkwing run`, the cache and the logs service
+  run on the built-in budgets.
+- **Operator steps:** the `sparkwing-full` chart now passes `--dashboard-url`
+  and `--cache-url` as flags. A chart install that set controller settings
+  through `controller.extraEnv` moves each to its value:
+
+  | `controller.extraEnv` name | Chart value |
+  |---|---|
+  | `SPARKWING_EXTERNAL_URL` | `controller.externalURL` |
+  | `SPARKWING_OAUTH_REDIRECT_URIS` | `controller.oauthRedirectURIs` |
+  | `SPARKWING_OPERATOR_ACCOUNTS` | `controller.operatorAccounts` |
+  | `SPARKWING_GITHUB_CLIENT_ID` | `controller.github.clientID` |
+  | `SPARKWING_GITHUB_APP_ID` | `controller.github.appID` |
+  | `SPARKWING_GITHUB_APP_SLUG` | `controller.github.appSlug` |
+  | `SPARKWING_GOOGLE_CLIENT_ID` | `controller.google.clientID` |
+  | `SPARKWING_EMAIL_SENDER` | `controller.email.sender` |
+  | `SPARKWING_EMAIL_CONFIGURATION_SET` | `controller.email.configurationSet` |
+  | `SPARKWING_CLOUDFRONT_DOMAIN` | `controller.cloudfront.domain` |
+  | `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | `controller.cloudfront.keyPairID` |
+  | any other name in the table below | its flag in `controller.extraArgs`, such as `--billing-url=https://...` |
+
+  A secret set through `controller.extraEnv` (`SPARKWING_GITHUB_APP_PRIVATE_KEY`,
+  `SPARKWING_GITHUB_CLIENT_SECRET` and the rest) becomes a key of
+  `controller.credentialsSecret` named after its credential file; see the
+  section on the credentials directory above. A manifest of your own moves
+  each variable to its flag:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_METRICS_ADDR` | `--metrics-addr` |
+  | `CACHE_POD_URL` | `--cache-pod-url` |
+  | `SPARKWING_LOGS_URL` | `--logs-url` |
+  | `SPARKWING_DASHBOARD_URL` | `--dashboard-url` |
+  | `SPARKWING_BILLING_URL` | `--billing-url` |
+  | `SPARKWING_OPERATOR_ACCOUNTS` | `--operator-accounts` |
+  | `SPARKWING_CACHE_URL` | `--cache-url` |
+  | `SPARKWING_EXTERNAL_URL` | `--external-url` |
+  | `SPARKWING_DEFAULT_PREFER_LABELS` | `--default-prefer-labels` |
+  | `SPARKWING_OBJECT_STORE_URL` | `--bucket-store` |
+  | `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | `--max-bucket-bytes` |
+  | `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | `--max-bucket-objects` |
+  | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | `--warn-bucket-bytes` |
+  | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | `--warn-bucket-objects` |
+  | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | `--bucket-reconcile` |
+  | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | `--bucket-measure-pages` |
+  | `SPARKWING_OBJECT_STORE_<CLASS>_PER_<WINDOW>` | `--object-store-budget class:window=count,...` |
+  | `SPARKWING_CACHE_BLOB_STORE` | `--cache-blob-store` (also on `migrate-outputs`) |
+  | `SPARKWING_LOGS_ARCHIVE_STORE` | `--logs-archive-store` |
+  | `SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` | `--egress-daily-alarm-bytes` |
+  | `SPARKWING_CONTROLLER_EGRESS_MAX_DOWNLOADS` | `--egress-max-downloads` |
+  | `SPARKWING_CONTROLLER_EGRESS_MAX_LOG_STREAMS` | `--egress-max-log-streams` |
+  | `SPARKWING_GOOGLE_CLIENT_ID` | `--google-client-id` |
+  | `SPARKWING_GITHUB_CLIENT_ID` | `--github-client-id` |
+  | `SPARKWING_GITHUB_APP_ID` | `--github-app-id` |
+  | `SPARKWING_GITHUB_APP_SLUG` | `--github-app-slug` |
+  | `SPARKWING_OAUTH_REDIRECT_URIS` | `--oauth-redirect-uris` |
+  | `SPARKWING_EMAIL_SENDER` | `--email-sender` |
+  | `SPARKWING_EMAIL_CONFIGURATION_SET` | `--email-configuration-set` |
+  | `SPARKWING_REQUIRE_AUTH` | `--require-auth` (chart: `controller.requireAuth`) |
+  | `SPARKWING_CLOUDFRONT_DOMAIN` | `--cloudfront-domain` |
+  | `SPARKWING_CLOUDFRONT_KEY_PAIR_ID` | `--cloudfront-key-pair-id` |
+
+- **Edge cases:** `SPARKWING_REQUIRE_AUTH` accepted `yes` and `on`;
+  `--require-auth` is a boolean flag, so pass it bare. A
+  `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` the controller could not read
+  used to print a warning and keep the default; `--bucket-measure-pages`
+  refuses it. In `internal/egress`, `Bind` takes no environment.
+
+## AWS_ENDPOINT_URL_S3 replaces SPARKWING_S3_ENDPOINT
+
+- **Before:** `SPARKWING_S3_ENDPOINT` pointed every S3 client Sparkwing
+  builds at an S3-compatible store and addressed buckets path-style.
+- **After:** the AWS SDK's own `AWS_ENDPOINT_URL_S3`, or `AWS_ENDPOINT_URL`
+  for every AWS service, names the endpoint; the SDK reads it. Sparkwing
+  addresses buckets path-style whenever either is set.
+  `SPARKWING_S3_ENDPOINT` is no longer read by any process.
+- **Operator steps:** rename the variable to `AWS_ENDPOINT_URL_S3` in every
+  environment that set it: a runner, a laptop shell, a CI job, and the
+  controller, cache and logs Deployments.
+- **Edge cases:** a detached run and a remote node child carry both names
+  from the submitting environment, as they carried `SPARKWING_S3_ENDPOINT`.
+  `AWS_ENDPOINT_URL` also redirects every other AWS client
+  in the process, such as SES invitation email on the controller; use the
+  S3-specific name unless that is what you want.
+
+## Services take --log-format and --log-level
+
+- **Before:** `sparkwing-cache` alone read `SPARKWING_LOG_FORMAT=json` and
+  `SPARKWING_LOG_LEVEL` and wrote its log to stdout; the other services
+  wrote text at info level to stderr whatever was set.
+- **After:** the controller, cache, logs service, runner and launcher take
+  `--log-format text|json` and `--log-level debug|info|warn|error`, write to
+  stderr, and stop at startup on a value they do not know. No service reads
+  the two variables; the `sparkwing` CLI and the pipeline binary still do.
+- **Operator steps:** replace `SPARKWING_LOG_FORMAT=json` and
+  `SPARKWING_LOG_LEVEL` on a cache Deployment with the flags. A log shipper
+  that read the cache's stdout reads its stderr instead.
+
+## Machine settings move from the environment to config.yaml
+
+- **Before:** the `sparkwing` CLI, the admission daemon and the pipeline
+  binary read these machine settings from the environment:
+
+  | Variable | config.yaml key |
+  |---|---|
+  | `SPARKWING_BUDGET` | `admission.budget` (already read; the variable no longer overrides it) |
+  | `SPARKWING_CACHE_MAX_BYTES` | `cache.max_bytes` |
+  | `SPARKWING_CACHE_MAX_ENTRIES` | `cache.max_entries` |
+  | `SPARKWING_NO_AUTO_REGISTER=1` | `repos.auto_register: false` |
+  | `SPARKWING_AUTO_REGISTER_WORKTREES=1` | `repos.include_worktrees: true` |
+  | `SPARKWING_BOX_ID` | `machine.box_id` |
+  | `SPARKWING_LOGS_DROP_POLICY=warn` | `logs.drop_policy: warn` |
+  | `SPARKWING_PAUSE_TIMEOUT` | `debug.pause_timeout` |
+  | `SPARKWING_SUBMIT_ENV_ALLOW` (comma-separated) | `run.submit_env_allow` (a YAML list) |
+  | `SPARKWING_RERUN_IMAGE` | `rerun_image` on the profile `debug rerun --profile` names |
+
+  `SPARKWING_VERSION_HOLD` overrode the version-hold file for one shell.
+- **After:** none of those variables is read. Each setting lives in
+  [config.yaml](../machine-config.md) and holds for every process on the
+  machine. The version hold is the file `sparkwing version hold --set`
+  writes, alone. `sparkwing cache prune --max-bytes` and `--max-entries`
+  still override the cache ceilings for one prune, and `debug rerun --image`
+  still overrides the profile's image.
+- **Operator steps:** move each exported value into the matching key, for
+  example:
+
+  ```yaml
+  cache:
+    max_bytes: 4GiB
+  machine:
+    box_id: rack-3-host-7
+  run:
+    submit_env_allow: [AWS_PROFILE, AWS_REGION, DOCKER_*]
+  ```
+
+  A shell that exported `SPARKWING_VERSION_HOLD` runs
+  `sparkwing version hold --set <version>` instead.
+- **Edge cases:** `cache.max_bytes`, `cache.max_entries` and
+  `run.submit_env_allow` refuse a value they cannot parse, naming the file
+  and key; the variables fell back to the default silently. A misspelled key
+  in any section fails the read. A container that set `SPARKWING_BOX_ID`
+  points `SPARKWING_CONFIG` at a file carrying `machine.box_id`. The detached
+  run snapshot no longer carries `SPARKWING_SUBMIT_ENV_ALLOW` itself.
+  `SPARKWING_ADMISSION_CLASS` stays: a hook sets it for the run it starts,
+  and it goes with `AdmissionClass`.
+
+## One-off run switches become --sw-* flags
+
+- **Before:** five environment variables switched `sparkwing run`
+  behaviour for one invocation: `SPARKWING_NO_BINCACHE`,
+  `SPARKWING_NO_SPARKS_RESOLVE`, `SPARKWING_HASH_ALL_FILES`,
+  `SPARKWING_ARTIFACT_DIGEST_BACKFILL` and `SPARKWING_ALLOW_UNADMITTED`.
+- **After:** `sparkwing run` takes the flags instead:
+
+  | Variable | Flag |
+  |---|---|
+  | `SPARKWING_NO_BINCACHE=1` | `--sw-no-bincache` |
+  | `SPARKWING_NO_SPARKS_RESOLVE=1` | `--sw-no-update`, which already skipped sparks resolution |
+  | `SPARKWING_HASH_ALL_FILES=1` | `--sw-hash-all-files` |
+  | `SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` | `--sw-artifact-digest-backfill` |
+  | `SPARKWING_ALLOW_UNADMITTED=1` | `--sw-allow-unadmitted` |
+
+  The first four variables are no longer read. `sparkwing run` carries
+  `--sw-allow-unadmitted` to the pipeline binary as
+  `SPARKWING_ALLOW_UNADMITTED=1`, which a pipeline binary no CLI launched
+  still reads.
+- **Operator steps:** replace each exported variable with its flag on the
+  `sparkwing run` command line; a CI step that set
+  `SPARKWING_NO_SPARKS_RESOLVE` passes `--sw-no-update`.
+- **Edge cases:** a detached run (`--sw-detached`) refuses each of the
+  flags, as it refuses `--sw-no-update`, because the consumer compiles the
+  run and the trigger does not carry them; a queued run therefore always
+  resolves sparks and uses the binary cache.
+
+## The remaining laptop variables are removed
+
+- **Before:** `SPARKWING_DISPATCH_WAIT_TIMEOUT` bounded a run's wait for a
+  dispatch; `SPARKWING_NAMESPACE` named the namespace for
+  `sparkwing debug attach`; the admission daemon read `TYPESAFE_API_KEY` from
+  its environment; `SPARKWING_STORE_WEDGE_BUDGET`,
+  `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` and `SPARKWING_DOCS_BASE_URL` tuned
+  internals for tests; the run-node and trigger paths fell back to
+  `$SPARKWING_HOME/dev.env` for `SPARKWING_CONTROLLER_URL`,
+  `SPARKWING_LOGS_URL` and `SPARKWING_CACHE_URL`, and
+  `SPARKWING_DEV_ENV_DISABLE` closed that fallback.
+- **After:**
+
+  | Before | After |
+  |---|---|
+  | `SPARKWING_DISPATCH_WAIT_TIMEOUT` | `run.dispatch_wait` in config.yaml (a duration, or `off`) |
+  | `SPARKWING_NAMESPACE` | `sparkwing debug attach --namespace` (default `sparkwing`) |
+  | `TYPESAFE_API_KEY` in the daemon's environment | the local secret `TYPESAFE_API_KEY` |
+  | `SPARKWING_STORE_WEDGE_BUDGET`, `SPARKWING_SQLITE_BUSY_TIMEOUT_MS`, `SPARKWING_DOCS_BASE_URL` | removed; the values are fixed, and tests set them in code |
+  | the dev.env fallback on the run-node and trigger paths | removed; those paths read their own environment only |
+  | `SPARKWING_DEV_ENV_DISABLE` | removed |
+
+- **Operator steps:** move an exported dispatch wait into `run.dispatch_wait`;
+  pass `--namespace` to `debug attach`; store the TypeSafe key with
+  `sparkwing secrets set --name TYPESAFE_API_KEY --file <path>` and restart
+  the admission daemon.
+- **Edge cases:** an unparseable `run.dispatch_wait` stops the run at startup,
+  naming the file and key; the variable fell back to the default with a
+  warning. `pkg/store.BusyTimeoutEnvVar` and `pkg/docs.BaseURLEnvVar` are
+  removed; `store.SetTestBusyTimeout` and `docs.SetTestBaseURL` replace them
+  for tests. A CLI verb still finds the local dashboard through dev.env.
+  `SPARKWING_WINGD_BIN` stays: `sparkwing run` sets it for the processes it
+  starts.
 
 ## Leftover variable names are removed
 
@@ -935,7 +1242,7 @@ argocd app sync APP && kubectl rollout status deploy/NAME -n NAMESPACE
   connection.
 - **Operator steps:** a cache that accepted the agent token because its API
   token was set to the same value now needs the controller to mint cache grants
-  (`SPARKWING_CACHE_GRANT_KEY` on the controller and the cache), or the dependency cache runs without the service.
+  (the `cache-grant-key` credential on the controller and the cache), or the dependency cache runs without the service.
 
 ## cmd/sign-manifest is removed
 
@@ -1475,8 +1782,8 @@ To upgrade:
 - **After:** the cache accepts cache grants only, signed with
   `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
   the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
-  controller signs a five-minute operator grant with
-  `SPARKWING_CACHE_GRANT_KEY`. The cache authenticates to the controller's
+  controller signs a five-minute operator grant with its own
+  `cache-grant-key` credential. The cache authenticates to the controller's
   counter routes with a `service` token holding only the new operator-only
   `storage.count` scope, read from the file `controller-token` under
   `--credentials-dir`; a cache with `--controller` refuses to start without
@@ -1502,9 +1809,10 @@ To upgrade:
      `--credentials-dir`, beside `cache-grant-key`. The charts do not start
      the cache with `--controller`, so a chart install skips this step.
   2. Make sure the cache and the controller hold the same grant key:
-     `cache.grantKeySecret` in the runner-bundle chart (the full chart passes
-     it to the controller as `SPARKWING_CACHE_GRANT_KEY`), or
-     `cache-grant-key` and `SPARKWING_CACHE_GRANT_KEY` in your own manifests.
+     `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
+     it into the controller's credentials directory too), or the
+     `cache-grant-key` file in both services' `--credentials-dir` in your own
+     manifests.
      An install that had only the cache token creates one:
 
      ```bash

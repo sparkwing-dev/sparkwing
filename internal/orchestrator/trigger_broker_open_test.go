@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func declaredSecretTrigger(t *testing.T, st *store.Store) {
+func declaredSecretTrigger(t *testing.T, st *store.Store) *secrets.Cipher {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
@@ -31,9 +32,22 @@ func declaredSecretTrigger(t *testing.T, st *store.Store) {
 		[]byte(`{"nodes":[],"secrets":[{"name":"DEPLOY_KEY","required":true}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateOrReplaceSecret(store.Secret{Name: "DEPLOY_KEY", Value: "v-deploy", Pipeline: "build", Masked: true}, now); err != nil {
+	key, err := secrets.GenerateKey()
+	if err != nil {
 		t.Fatal(err)
 	}
+	cipher, err := secrets.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := cipher.SealBound(string(store.DefaultTeam), "DEPLOY_KEY", "build", false, true, "v-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateOrReplaceSecret(store.Secret{Name: "DEPLOY_KEY", Value: sealed, Pipeline: "build", Masked: true}, now); err != nil {
+		t.Fatal(err)
+	}
+	return cipher
 }
 
 func brokeredSecretRead(t *testing.T, broker *orchestrator.TriggerBroker) (int, string) {
@@ -65,12 +79,12 @@ func TestTriggerBrokerReadsSecretsFromAnOpenController(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	declaredSecretTrigger(t, st)
+	cipher := declaredSecretTrigger(t, st)
 	trig, err := st.ClaimSpecificTrigger(context.Background(), "run-a", time.Minute)
 	if err != nil || trig == nil || trig.ClaimToken != "" {
 		t.Fatalf("an anonymous trigger claim = %+v, %v; want one with no claim token", trig, err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
 	broker, err := orchestrator.StartTriggerBroker(srv.URL, "", "", trig, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -90,13 +104,13 @@ func TestTriggerBrokerRefusesASecretReadWithoutAClaimTokenWhenAuthenticating(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	declaredSecretTrigger(t, st)
+	cipher := declaredSecretTrigger(t, st)
 	runner, _, err := st.CreateToken("runner-a", store.TokenKindRunner,
 		[]string{controller.ScopeTriggersClaim, controller.ScopeRunsState}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
 	broker, err := orchestrator.StartTriggerBroker(srv.URL, "", runner,
 		&store.Trigger{ID: "run-a", Pipeline: "build"}, slog.New(slog.NewTextHandler(io.Discard, nil)))

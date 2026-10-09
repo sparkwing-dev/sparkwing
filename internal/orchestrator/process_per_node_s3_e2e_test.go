@@ -56,7 +56,7 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		"SPARKWING_CONFIG="+profiles,
 		"SPARKWING_PROFILE=modetwo",
 		"SPARKWING_LOCAL_ONLY=",
-		"SPARKWING_S3_ENDPOINT="+endpoint,
+		"AWS_ENDPOINT_URL_S3="+endpoint,
 		"AWS_REGION=us-east-1",
 		"AWS_ACCESS_KEY_ID=test",
 		"AWS_SECRET_ACCESS_KEY=test",

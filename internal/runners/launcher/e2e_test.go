@@ -221,7 +221,11 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if _, err := f.st.DB().ExecContext(ctx, `UPDATE triggers SET pipeline = 'e2e' WHERE id = 'run-e2e'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.st.CreateOrReplaceSecret(store.Secret{Name: "E2E_TOKEN", Value: "tok-e2e-value", Pipeline: "e2e", Masked: true}, time.Now()); err != nil {
+	sealed, err := fixtureCipher(t).SealBound(string(store.DefaultTeam), "E2E_TOKEN", "e2e", false, true, "tok-e2e-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.CreateOrReplaceSecret(store.Secret{Name: "E2E_TOKEN", Value: sealed, Pipeline: "e2e", Masked: true}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))

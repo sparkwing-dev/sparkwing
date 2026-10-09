@@ -14,10 +14,10 @@ import (
 
 func runHandleTriggerCLI(args []string) error {
 	fs := flag.NewFlagSet("handle-trigger", flag.ExitOnError)
-	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
-		"controller URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")
-	logsURL := fs.String("logs", ResolveDevEnvURL("SPARKWING_LOGS_URL"),
-		"logs service URL (env: SPARKWING_LOGS_URL, falls back to $SPARKWING_HOME/dev.env)")
+	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
+		"controller URL (env: SPARKWING_CONTROLLER_URL)")
+	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"),
+		"logs service URL (env: SPARKWING_LOGS_URL)")
 	token := fs.String("token", agentToken,
 		"bearer token for controller + logs calls (env: SPARKWING_AGENT_TOKEN)")
 	heartbeat := fs.Duration("heartbeat", 0,

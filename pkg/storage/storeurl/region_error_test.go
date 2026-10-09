@@ -19,7 +19,7 @@ func TestNewS3Client_MissingRegionNamesTheRemedy(t *testing.T) {
 	if err == nil {
 		t.Fatal("got nil, want an error naming the missing region")
 	}
-	for _, want := range []string{"AWS_REGION", "s3 backend", "SPARKWING_S3_ENDPOINT"} {
+	for _, want := range []string{"AWS_REGION", "s3 backend", "AWS_ENDPOINT_URL_S3"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q should mention %q", err.Error(), want)
 		}

@@ -186,8 +186,8 @@ arbitration -- fine for a host that runs one pipeline at a time.
 `.Concurrency()` groups still hold, through the shared store instead of
 the daemon. The exception is a pipeline that reserves host capacity with
 `.Resources()`: that run fails instead, naming the fix, because CPU and
-memory have no fallback arbiter (`SPARKWING_ALLOW_UNADMITTED=1` overrides
-it if you know what else runs on the box). Put the CLI on the box when
+memory have no fallback arbiter (`sparkwing run --sw-allow-unadmitted`
+overrides it if you know what else runs on the box). Put the CLI on the box when
 concurrent runs there should queue against each other -- see
 [local-execution.md](local-execution.md#who-hosts-the-daemon).
 

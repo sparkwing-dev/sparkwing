@@ -460,9 +460,7 @@ authenticated_values="$artifact_dir/values-authenticated.yaml"
 write_bootstrap_values "$bootstrap_values"
 cat >"$authenticated_values" <<'EOF'
 controller:
-  extraEnv:
-    - name: SPARKWING_REQUIRE_AUTH
-      value: "true"
+  requireAuth: true
 web:
   requireLogin: true
   tokenSecret:

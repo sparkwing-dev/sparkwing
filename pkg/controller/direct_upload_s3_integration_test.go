@@ -26,7 +26,7 @@ import (
 
 func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 	bucketName := os.Getenv("SPARKWING_S3_TEST_BUCKET")
-	if bucketName == "" || os.Getenv("SPARKWING_S3_ENDPOINT") == "" {
+	if bucketName == "" || os.Getenv("AWS_ENDPOINT_URL_S3") == "" {
 		t.Skip("S3 integration bucket and endpoint required")
 	}
 	s, grant, _ := downloadFixture(t)
@@ -47,7 +47,7 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 		t.Fatal("AWS_REGION or a profile region is required for the S3 integration test")
 	}
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String(os.Getenv("SPARKWING_S3_ENDPOINT"))
+		o.BaseEndpoint = aws.String(os.Getenv("AWS_ENDPOINT_URL_S3"))
 		o.UsePathStyle = true
 	})
 	store, err := teamblob.New(teamblob.Options{Bucket: bucketName, Prefix: prefix, Client: client})

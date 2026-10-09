@@ -1,8 +1,9 @@
 // Package userconfig owns config.yaml, the one settings file in the sparkwing
 // user config directory. Each top-level key is a section that belongs to one
 // package, which keeps its own typed struct and validation: admission and its
-// budget to internal/wingd, agent to internal/agentconfig, profiles to
-// internal/profile and repos to internal/repos.
+// budget to internal/wingd, agent to internal/agentconfig, cache to
+// internal/bincache, profiles to internal/profile, repos to internal/repos,
+// and debug, logs, machine and run to internal/orchestrator.
 //
 // [Read] decodes one section and rejects unknown keys. [Update] and [Write]
 // rewrite one section under a lock, keeping every other section and the
@@ -38,11 +39,16 @@ const PathEnv = "SPARKWING_CONFIG"
 const (
 	Admission = "admission"
 	Agent     = "agent"
+	Cache     = "cache"
+	Debug     = "debug"
+	Logs      = "logs"
+	Machine   = "machine"
 	Profiles  = "profiles"
 	Repos     = "repos"
+	Run       = "run"
 )
 
-var sections = []string{Admission, Agent, Profiles, Repos}
+var sections = []string{Admission, Agent, Cache, Debug, Logs, Machine, Profiles, Repos, Run}
 
 // Path reports the settings file: $SPARKWING_CONFIG when set, else config.yaml
 // in [fssecure.ConfigDir]. SPARKWING_HOME does not move it, because a profile
@@ -75,6 +81,17 @@ func Read(path, section string, out any) (bool, error) {
 		return false, err
 	}
 	return decodeSection(path, data, section, out)
+}
+
+// ReadDefault is [Read] on the file [Path] reports, which it returns so a
+// caller can name the file in an error.
+func ReadDefault(section string, out any) (string, bool, error) {
+	path, err := Path()
+	if err != nil {
+		return "", false, err
+	}
+	found, err := Read(path, section, out)
+	return path, found, err
 }
 
 // Node returns section of the settings file at path as parsed YAML, or nil

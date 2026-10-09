@@ -84,6 +84,7 @@ func openSQLiteStore(t *testing.T) *store.Store {
 
 type tenancyFixture struct {
 	t     *testing.T
+	srv   *controller.Server
 	url   string
 	st    *store.Store
 	teamA *store.Tenant
@@ -114,12 +115,12 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		t.Fatal(err)
 	}
 	raw, pub := multiTeamLicense(t)
-	srv := controller.New(st, nil).EnableAuthFromStore().
+	srv := controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	f := &tenancyFixture{t: t, url: ts.URL, st: st}
+	f := &tenancyFixture{t: t, srv: srv, url: ts.URL, st: st}
 
 	alice, teamA := signUp(t, st, "alice")
 	bob, teamB := signUp(t, st, "bob")

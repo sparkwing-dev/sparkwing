@@ -112,9 +112,9 @@ helm install runners ./charts/sparkwing-runner-bundle \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-The controller the runners claim from needs the same grant key as
-`SPARKWING_CACHE_GRANT_KEY`: it signs runs' grants with it, and the operator
-grant it presents on its own calls to the cache.
+The controller the runners claim from needs the same grant key, as the
+`cache-grant-key` file in its own `--credentials-dir`: it signs runs' grants
+with it, and the operator grant it presents on its own calls to the cache.
 
 For a fully unauthenticated test cluster, opt the cache and the logs
 service out of their token requirement explicitly:

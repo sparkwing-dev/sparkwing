@@ -48,15 +48,26 @@ func Open(path string) (Dir, error) {
 // whitespace trimmed, so a Secret value ending in a newline matches the
 // token a client sends. An absent file reads as "".
 func (d Dir) Read(name string) (string, error) {
+	data, err := d.ReadBytes(name)
+	return strings.TrimSpace(string(data)), err
+}
+
+// ReadBytes returns the credential stored under name exactly as the file
+// holds it, for a binary key whose edges may be whitespace bytes. An absent
+// file reads as nil.
+func (d Dir) ReadBytes(name string) ([]byte, error) {
 	if d.path == "" {
-		return "", nil
+		return nil, nil
 	}
 	data, err := os.ReadFile(filepath.Join(d.path, name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+		return nil, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("credential %s: %w", name, err)
+		return nil, fmt.Errorf("credential %s: %w", name, err)
 	}
-	return strings.TrimSpace(string(data)), nil
+	return data, nil
 }
+
+// Path reports the directory, or "" when none was named.
+func (d Dir) Path() string { return d.path }

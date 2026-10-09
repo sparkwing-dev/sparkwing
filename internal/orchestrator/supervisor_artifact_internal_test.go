@@ -13,7 +13,6 @@ import (
 // artifacts go to carries that node's grant, not one from the environment.
 func TestSupervisorArtifactsGoToTheNodesCacheWithItsGrant(t *testing.T) {
 	t.Setenv(ArtifactStoreEnvVar, "")
-	t.Setenv(DevEnvDisableEnv, "1")
 	var bearer atomic.Value
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bearer.Store(r.Header.Get("Authorization"))

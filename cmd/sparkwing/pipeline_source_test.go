@@ -77,10 +77,11 @@ func TestDeclaredPipelineSourceForeground(t *testing.T) {
 	for _, uncached := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cached", true: "uncached"}[uncached], func(t *testing.T) {
 			e := declaredSourceFixture(t)
+			args := []string{"run", "fixture"}
 			if uncached {
-				e.extraEnv = append(e.extraEnv, "SPARKWING_NO_BINCACHE=1")
+				args = append(args, "--sw-no-bincache")
 			}
-			if out, err := e.run("run", "fixture"); err != nil {
+			if out, err := e.run(args...); err != nil {
 				t.Fatalf("run: %v: %s", err, out)
 			}
 			body, err := os.ReadFile(e.marker)

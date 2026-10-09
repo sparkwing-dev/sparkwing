@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-const versionHoldEnv = "SPARKWING_VERSION_HOLD"
-
 type versionHold struct {
 	Value  string `json:"value"`
 	Source string `json:"source"`
@@ -25,16 +23,11 @@ type versionHold struct {
 }
 
 func resolveVersionHold() versionHold {
-	environment := sharedtoolchain.Hold{Value: os.Getenv(versionHoldEnv), Source: versionHoldEnv}
-	path := ""
-	if strings.TrimSpace(environment.Value) == "" {
-		var err error
-		path, err = versionHoldPath()
-		if err != nil {
-			return versionHold{Source: "version-hold configuration", Error: fmt.Sprintf("resolve operator hold: %v", err)}
-		}
+	path, err := versionHoldPath()
+	if err != nil {
+		return versionHold{Source: "version-hold configuration", Error: fmt.Sprintf("resolve operator hold: %v", err)}
 	}
-	hold, readErr := sharedtoolchain.ResolveHold(environment, path)
+	hold, readErr := sharedtoolchain.ResolveHold(path)
 	report := versionHold{Value: hold.Value, Source: hold.Source}
 	if readErr != nil {
 		report.Error = readErr.Error()
@@ -57,14 +50,9 @@ func versionHoldPath() (string, error) {
 
 // safety: the hold file is machine-wide while the toolchains it governs live
 // under SPARKWING_HOME, so a command under a scratch home that wrote or
-// removed it would change every other shell's ceiling unannounced. No variable
-// moves the file, but SPARKWING_VERSION_HOLD holds this shell without one.
+// removed it would change every other shell's ceiling unannounced.
 func guardVersionHoldWrite(path string) error {
-	err := configguard.GuardWrite("the version hold", "", path)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%w, or set %s for this shell instead", err, versionHoldEnv)
+	return configguard.GuardWrite("the version hold", "", path)
 }
 
 func normalizeHold(raw string) (string, error) {
@@ -139,9 +127,6 @@ func runVersionHold(args []string) error {
 			return fmt.Errorf("write hold: %w", err)
 		}
 		fmt.Printf("version hold set to %s (%s)\n", value, path)
-		if env := strings.TrimSpace(os.Getenv(versionHoldEnv)); env != "" && env != value {
-			fmt.Printf("note: %s=%s is set and overrides this file for the current shell\n", versionHoldEnv, env)
-		}
 		return nil
 	case *clear:
 		path, err := versionHoldPath()
@@ -155,9 +140,6 @@ func runVersionHold(args []string) error {
 			return fmt.Errorf("clear hold: %w", err)
 		}
 		fmt.Println("version hold cleared")
-		if env := strings.TrimSpace(os.Getenv(versionHoldEnv)); env != "" {
-			fmt.Printf("note: %s=%s is still set and holds upgrades for the current shell\n", versionHoldEnv, env)
-		}
 		return nil
 	default:
 		hold := resolveVersionHold()

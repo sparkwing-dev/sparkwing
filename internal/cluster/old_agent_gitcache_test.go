@@ -51,7 +51,6 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv(authwire.CacheGrantEnv, "")
-	t.Setenv(authwire.CacheGrantKeyEnv, cacheGrantKey)
 
 	origins := t.TempDir()
 	sha := makePrivateOrigin(t, filepath.Join(origins, "acme", "private.git"), filepath.Join(t.TempDir(), "unused"))
@@ -120,7 +119,7 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 	// safety: built after the tokens exist, because a controller whose tokens
 	// table is empty serves every request unauthenticated.
 	ctrlSrv := httptest.NewServer(controller.New(st, discardLogger()).
-		WithCacheURL(cacheSrv.URL).EnableAuthFromStore().Handler())
+		WithCacheURL(cacheSrv.URL).WithCacheGrantKey(cacheGrantKey).EnableAuthFromStore().Handler())
 	t.Cleanup(ctrlSrv.Close)
 	claim := func(token, runID, holder string) {
 		t.Helper()
