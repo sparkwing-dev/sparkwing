@@ -180,11 +180,22 @@ func randomText(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-// safety: a migration that retires a credential removes its rows by design, so
-// these tables may lose rows without the rehearsal calling it data loss.
+// safety: a migration that retires a credential or a protocol removes its rows by
+// design, so these tables may lose rows without the rehearsal calling it data loss.
 var retiredRows = map[string]string{
-	"users":    "password sign-in was removed",
-	"sessions": "password sessions end; each person signs in again",
+	"users":             "password sign-in was removed",
+	"sessions":          "password sessions end; each person signs in again",
+	"executors":         "the assisted-offer claim protocol was removed",
+	"node_claim_offers": "the assisted-offer claim protocol was removed",
+}
+
+// safety: named key by key, so any other metadata row a migration loses still
+// fails the comparison.
+var retiredKeys = map[string]map[string]string{
+	"sparkwing_meta": {
+		"bootstrap_latch":         "password sign-in was removed",
+		"controller_authority_id": "the assisted-offer claim protocol was removed",
+	},
 }
 
 func runCanary(args []string) error {
@@ -661,6 +672,10 @@ func runCompare(args []string) error {
 		return fmt.Errorf("open migrated: %w", err)
 	}
 	defer closeLogged("migrated store", after)
+	return compareStores(before, after, *want)
+}
+
+func compareStores(before, after *db, want int) error {
 	bi, err := takeInventory(before)
 	if err != nil {
 		return err
@@ -670,10 +685,10 @@ func runCompare(args []string) error {
 		return err
 	}
 	var c checker
-	if ai.SchemaVersion == *want {
+	if ai.SchemaVersion == want {
 		c.pass("schema version %d -> %d", bi.SchemaVersion, ai.SchemaVersion)
 	} else {
-		c.fail("schema version is %d, want %d", ai.SchemaVersion, *want)
+		c.fail("schema version is %d, want %d", ai.SchemaVersion, want)
 	}
 	for _, v := range ai.Versions {
 		if v.Version > bi.SchemaVersion {
@@ -736,9 +751,14 @@ func runCompare(args []string) error {
 		}
 		missing := 0
 		for k := range bk {
-			if _, ok := ak[k]; !ok {
-				missing++
+			if _, ok := ak[k]; ok {
+				continue
 			}
+			if keyWhy, ok := retiredKeys[t][k]; ok {
+				c.note("%s: %s retired by the migration (%s)", t, k, keyWhy)
+				continue
+			}
+			missing++
 		}
 		switch {
 		case missing > 0 && retired:
@@ -1008,16 +1028,23 @@ func runAPICheck(args []string) error {
 	}
 	checkSecretValues(&c, bearer, inv.SecretRows, canaryDigests, *keyed)
 
-	code, err := anon.do("POST", "/api/v1/auth/login", map[string]string{}, nil)
-	switch {
-	case code == 0:
-		c.fail("the retired password login route: %v", err)
-	case code == http.StatusOK || code == http.StatusBadRequest:
-		c.fail("the retired password login route still answers (%d)", code)
-	default:
-		c.pass("the retired password login route is gone (%d)", code)
-	}
+	probeRetiredLogin(&c, bearer)
 	return c.err()
+}
+
+// safety: the probe authenticates, so only the router's own 404 proves the route
+// is gone; a refusal, a throttle or an outage proves nothing and fails.
+func probeRetiredLogin(c *checker, cl client) {
+	code, err := cl.do("POST", "/api/v1/auth/login", map[string]string{}, nil)
+	if code == http.StatusNotFound {
+		c.pass("the retired password login route is gone (404)")
+		return
+	}
+	if code == 0 {
+		c.fail("the retired password login route: %v", err)
+		return
+	}
+	c.fail("the retired password login route answered %d, want 404", code)
 }
 
 // safety: values are compared by digest and never printed, because the copy
