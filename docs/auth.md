@@ -662,7 +662,8 @@ claim:
   `GET /api/v1/services`. Anything else answers `403 claim_mismatch`.
 - It reads any node of its run but writes only to its own node. Of the
   run-level writes it makes only a node's own: events, the run heartbeat, the
-  cache grant, the run's source credential and the run's Git proxy. Run
+  cache grant, the run's workload OIDC token, the run's source credential and
+  the run's Git proxy. Run
   create and finish, plan, node create and the readiness routes answer
   `403 claim_mismatch`.
 - Every request carries the claim's own holder, membership, reservation and

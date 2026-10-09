@@ -96,9 +96,10 @@ func bindRunnerClaimFence(r *http.Request, fence store.NodeClaimFence) {
 }
 
 // safety: these are the run-level writes a node makes; every other write
-// under the run is a dispatcher's, which a node claim never acts as.
+// under the run is a dispatcher's, which a node claim never acts as. The
+// workload token route checks the claim again before it mints.
 var runnerClaimRunWrites = map[string]bool{
-	"/events": true, "/heartbeat": true, "/cache-grant": true,
+	"/events": true, "/heartbeat": true, "/cache-grant": true, "/oidc-token": true,
 }
 
 func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {
