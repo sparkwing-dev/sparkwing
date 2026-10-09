@@ -1819,7 +1819,14 @@ var migrationRequirements = map[int][]string{
 	87: {cardBillingRequirement},
 	88: {claimCacheScopeRequirement},
 	89: {metricSampleKindRequirement, "process-tree-accounting"},
+	95: {tokenSessionsRequirement},
 }
+
+// safety: v95 drops the password users table and the steps after it drop the
+// assisted-offer tables, so a binary predating them would open the store and
+// then fail its sign-in, claim and readiness statements; the requirement makes
+// it refuse the store whole, which is the only state a rollback may reach.
+const tokenSessionsRequirement = "token-sessions-v1"
 
 // safety: v88 scopes a claim token's binaries by repository and git ref, and a
 // binary predating it reads them unscoped, so a feature branch's binary could

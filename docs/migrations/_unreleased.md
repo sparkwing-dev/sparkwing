@@ -1556,8 +1556,10 @@ Before upgrading:
   for the CLI.
 - An open controller (empty tokens table) serves the dashboard without
   sign-in, as before, and its `/login` redirects to the page asked for.
-- Rolling back to an older binary leaves its password routes failing on the
-  missing table; a token session it reads carries no scope.
+- Rollback: schema v95 declares the `token-sessions-v1` requirement, so an
+  older controller or CLI refuses to open the upgraded store and names the
+  release it needs. Roll back by restoring the SQLite copy the upgrade wrote
+  under `backups/`, or a PostgreSQL backup taken before the upgrade.
 
 ## Team CLI and runner tokens become team tokens
 
@@ -1639,9 +1641,8 @@ runners, which claim nodes the way warm trigger runners always have.
   show the runners that claimed in the last hour with the labels, slot limit
   and headroom they advertised; `active_slots`, `base_priority`,
   `priority_ceiling`, `budget` and the `gateway` type are gone. Schema v97
-  drops the executor and offer tables. An older controller pointed at the
-  upgraded database fails its claim and mark-ready statements rather than
-  running nodes.
+  drops the executor and offer tables. An older controller refuses the
+  upgraded database through the requirement v95 declares.
 
 To upgrade:
 
