@@ -38,7 +38,7 @@ func (b *ClientBackend) Capabilities(context.Context) (Capabilities, error) {
 	if b.caps.Mode == "" {
 		return Capabilities{
 			Mode:     "cluster",
-			Storage:  CapabilitiesStorage{Artifacts: "custom", Logs: "sparkwinglogs", Runs: "controller"},
+			Storage:  CapabilitiesStorage{Artifacts: "custom", Logs: "segments", Runs: "controller"},
 			Features: []string{"pipelines", "runs", "logs", "secrets", "approvals", "cross-pipeline-refs"},
 		}, nil
 	}

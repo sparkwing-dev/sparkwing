@@ -11,19 +11,23 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+type manifestVerdicts struct {
+	storage.LogStore
+	verdicts map[string]logseg.Completeness
+}
+
+func (m manifestVerdicts) NodeLogCompleteness(_ context.Context, _, nodeID string, _ logseg.NodeProgress, _ time.Time) (logseg.Completeness, bool, error) {
+	c, ok := m.verdicts[nodeID]
+	return c, ok, nil
+}
+
 func TestNodeLogCompleteness_ReportsTheVerdictTheDashboardDraws(t *testing.T) {
 	ctx := context.Background()
-	logSrv, err := logs.New(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hs := httptest.NewServer(logSrv.Handler())
-	defer hs.Close()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -44,37 +48,29 @@ func TestNodeLogCompleteness_ReportsTheVerdictTheDashboardDraws(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET finished_at = ?`, time.Now().Add(-2*logs.SealGrace).UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	client := logs.NewClient(hs.URL, nil)
-	for _, id := range []string{"sealed", "silent"} {
-		if err := client.Append(logs.WithAppendSequence(ctx, "s1", 1), "run-1", id, []byte("hello\n")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := client.Seal(ctx, "run-1", "sealed", logs.Seal{Stream: "s1", FinalSeq: 1, Lines: 1}); err != nil {
-		t.Fatal(err)
-	}
+	logStore := manifestVerdicts{verdicts: map[string]logseg.Completeness{
+		"sealed": {State: logseg.StateComplete, Lines: 1},
+		"silent": {State: logseg.StateCutOff, Lines: 1, Message: "the log stopped before its writer finished"},
+	}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness",
-		NodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, sparkwinglogs.New(hs.URL, nil, ""))))
-	get := func(node string, want int) logs.Completeness {
+		NodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, logStore)))
+	get := func(node string, want int) logseg.Completeness {
 		t.Helper()
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-1/logs/"+node+"/completeness", nil))
 		if rec.Code != want {
 			t.Fatalf("%s: status = %d, want %d; %s", node, rec.Code, want, rec.Body.String())
 		}
-		var c logs.Completeness
+		var c logseg.Completeness
 		_ = json.Unmarshal(rec.Body.Bytes(), &c)
 		return c
 	}
-	if c := get("sealed", http.StatusOK); c.State != logs.StateComplete || c.Message != "" {
+	if c := get("sealed", http.StatusOK); c.State != logseg.StateComplete || c.Message != "" {
 		t.Fatalf("sealed node = %+v", c)
 	}
-	if c := get("silent", http.StatusOK); c.State != logs.StateCutOff || c.Message == "" {
+	if c := get("silent", http.StatusOK); c.State != logseg.StateCutOff || c.Message == "" {
 		t.Fatalf("unsealed node = %+v", c)
 	}
 	get("nope", http.StatusNotFound)
@@ -82,7 +78,7 @@ func TestNodeLogCompleteness_ReportsTheVerdictTheDashboardDraws(t *testing.T) {
 	mux = http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness",
 		NodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, nil)))
-	if c := get("silent", http.StatusOK); c.State != logs.StateUnknown {
-		t.Fatalf("store without seals = %+v", c)
+	if c := get("silent", http.StatusOK); c.State != logseg.StateUnknown {
+		t.Fatalf("store without manifests = %+v", c)
 	}
 }

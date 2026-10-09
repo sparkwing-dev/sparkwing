@@ -34,15 +34,14 @@ const (
 )
 
 type identityFixture struct {
-	t         *testing.T
-	url       string
-	store     *store.Store
-	google    *googletest.Issuer
-	github    *githubtest.Server
-	admin     string
-	srv       *controller.Server
-	logsToken string
-	lastPage  string
+	t        *testing.T
+	url      string
+	store    *store.Store
+	google   *googletest.Issuer
+	github   *githubtest.Server
+	admin    string
+	srv      *controller.Server
+	lastPage string
 }
 
 type fixtureOpts struct {

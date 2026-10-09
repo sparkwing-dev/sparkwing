@@ -88,7 +88,7 @@ func TestCreateToken_ValidScopesAccepted(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 
-	want := []string{"runs.read", "runs.write", "logs.write", "admin"}
+	want := []string{"runs.read", "runs.write", "logs.read", "admin"}
 	status, body := postJSONWithStatus(t, base+"/api/v1/tokens",
 		createTokenBody("deploy-bot", want))
 	if status != http.StatusCreated {

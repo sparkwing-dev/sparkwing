@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -25,10 +24,6 @@ const TeamDeletionInterval = time.Minute
 // data, and the operator credentials the controller deletes it with. A
 // service left empty holds nothing for this controller to delete.
 type TeamStorage struct {
-	// LogsURL and LogsToken reach the logs service, which keeps node logs
-	// under bare run ids. LogsToken must carry exactly the logs.delete scope.
-	LogsURL   string
-	LogsToken string
 	// CacheURL and CacheToken reach the cache service, which keeps each
 	// team's artifacts, binaries and build cache in a tree of its own.
 	CacheURL   string
@@ -334,18 +329,14 @@ func (s *Server) deletionHolder() string {
 	return s.deletionHolderID
 }
 
-// safety: stored objects go before rows, because the run rows are the only
-// index of what the logs service holds for the team.
+// safety: stored objects go before rows, because the team's rows are the
+// only index of some of what the cache holds for it.
 func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) error {
 	op := s.store.AsOperator()
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	runIDs, err := op.TeamRunIDs(ctx, team)
-	if err != nil {
-		return err
-	}
-	if err := s.purgeTeamLogs(ctx, team, runIDs, now); err != nil {
+	if err := s.purgeTeamLogs(ctx, team); err != nil {
 		return err
 	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {
@@ -373,42 +364,13 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 	return s.store.AsOperator().FinishTeamRecheck(ctx, team, s.deletionHolder(), now)
 }
 
-func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []string, now time.Time) error {
+func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
 	if objs := s.logObjects(); objs != nil {
 		for _, class := range s.logClasses() {
 			prefix := logseg.ClassPrefix(class) + "teams/" + string(team) + "/"
 			if err := objs.deletePrefix(ctx, prefix); err != nil {
 				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
 			}
-		}
-	}
-	ts := s.teamStorage
-	if ts.LogsURL == "" || len(runIDs) == 0 {
-		return nil
-	}
-	if err := s.checkLogsDeleteToken(now); err != nil {
-		return err
-	}
-	// safety: the team route removes the team's archived namespace and every
-	// run the logs service recorded for it in one call; a service without an
-	// archive store answers it 404, and only then are runs deleted one by one.
-	teamTarget := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/teams/" + url.PathEscape(string(team)) + "/logs"
-	err := deleteRemote(ctx, teamTarget, ts.LogsToken)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, errRemoteNotFound) {
-		return fmt.Errorf("delete the team's logs: %w", err)
-	}
-	base := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/logs/"
-	for i, id := range runIDs {
-		if i > 0 && i%100 == 0 {
-			if err := s.holdDeletion(ctx, team, time.Now()); err != nil {
-				return err
-			}
-		}
-		if err := deleteRemote(ctx, base+url.PathEscape(id), ts.LogsToken); err != nil {
-			return fmt.Errorf("delete logs of run %s: %w", id, err)
 		}
 	}
 	return nil
@@ -431,35 +393,7 @@ func deleteRemote(ctx context.Context, target, bearer string) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		err := fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body)))
-		if resp.StatusCode == http.StatusNotFound {
-			err = fmt.Errorf("%w: %w", errRemoteNotFound, err)
-		}
-		return errors.Join(err, rerr)
-	}
-	return nil
-}
-
-var errRemoteNotFound = errors.New("remote answered 404")
-
-// safety: the logs service lets an admin bearer delete and read every team's
-// logs, so the controller spends only a credential that carries the
-// log-deletion scope and nothing that reads or administers.
-func (s *Server) checkLogsDeleteToken(now time.Time) error {
-	raw := s.teamStorage.LogsToken
-	if raw == "" {
-		return errors.New("a logs service is configured but no log-deletion credential is: " +
-			"mint a token with only the " + ScopeLogsDelete + " scope and set SPARKWING_LOGS_DELETE_TOKEN")
-	}
-	tok, err := s.store.LookupToken(raw, now)
-	if err != nil {
-		return fmt.Errorf("the log-deletion credential does not authenticate: %w", err)
-	}
-	if !slices.Contains(tok.Scopes, ScopeLogsDelete) || slices.ContainsFunc(tok.Scopes, func(sc string) bool {
-		return sc != ScopeLogsDelete
-	}) {
-		return fmt.Errorf("the log-deletion credential must carry exactly the %s scope; it carries %v",
-			ScopeLogsDelete, tok.Scopes)
+		return errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
 	}
 	return nil
 }

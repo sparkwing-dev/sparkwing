@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
 // safety: a run on this machine whose state lives on a segment-keeping controller cuts and uploads its nodes'
@@ -30,23 +30,23 @@ var (
 	_ logSealer        = (*segmentLogStore)(nil)
 )
 
-// safety: nil when the controller keeps no segments or cannot say, so the run's logs go where they went before.
-func controllerSegmentLogs(ctx context.Context, ctrl *client.Client, logger *slog.Logger) *segmentLogStore {
-	if logger == nil {
-		logger = slog.Default()
-	}
+// safety: a controller that keeps no node logs, or cannot say, is an error, because a run whose state it holds
+// has nowhere else to put them.
+func controllerSegmentLogs(ctx context.Context, ctrl *client.Client, logger *slog.Logger) (*segmentLogStore, error) {
 	keeps, err := ctrl.KeepsLogSegments(ctx)
 	if err != nil {
-		logger.Warn("node logs go to the controller's logs service: it did not say whether it keeps segments",
-			"controller", ctrl.BaseURL(), "err", err)
+		return nil, fmt.Errorf("ask controller %s whether it keeps node logs: %w", ctrl.BaseURL(), err)
 	}
 	if !keeps {
-		return nil
+		return nil, fmt.Errorf("controller %s keeps no node logs: it needs a cache bucket (--cache-blob-store) or a state store with an output directory", ctrl.BaseURL())
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &segmentLogStore{
 		NodeLogs: ctrl.NodeLogs(), ctrl: ctrl, logger: logger,
 		nodes: map[string]*nodeLogSink{}, failed: map[string]error{},
-	}
+	}, nil
 }
 
 // safety: a node whose segment URLs were refused keeps refusing for this
@@ -80,12 +80,12 @@ func (s *segmentLogStore) Append(ctx context.Context, runID, nodeID string, data
 	if err != nil {
 		return err
 	}
-	stream, first, last, _ := logs.AppendSequenceRangeFrom(ctx)
-	return n.sink.Append(data, stream, first, last)
+	r, _ := appendRangeFrom(ctx)
+	return n.sink.Append(data, r.stream, r.first, r.last)
 }
 
 // Seal records the writer's seal and writes the node's manifest.
-func (s *segmentLogStore) Seal(ctx context.Context, runID, nodeID string, seal logs.Seal) error {
+func (s *segmentLogStore) Seal(ctx context.Context, runID, nodeID string, seal logseg.WriterSeal) error {
 	n, err := s.sink(ctx, runID, nodeID)
 	if err != nil {
 		return err

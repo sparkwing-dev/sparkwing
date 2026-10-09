@@ -33,18 +33,15 @@ type DataDownloadResponse struct {
 	Expires time.Time `json:"expires"`
 }
 
-// WithSignedDownloads enables one-object download signing for the cache and
-// logs buckets. Empty CloudFront settings leave the ingress path unavailable.
-func (s *Server) WithSignedDownloads(cache, logs *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error {
+// WithSignedDownloads enables one-object download signing for the cache
+// bucket. Empty CloudFront settings leave the ingress path unavailable.
+func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error {
 	if client == nil {
 		return errors.New("signed downloads need an S3 client")
 	}
 	stores := map[store.StorageKind]*teamblob.Store{}
 	if cache != nil {
 		stores[store.StorageCache] = cache
-	}
-	if logs != nil {
-		stores[store.StorageLogs] = logs
 	}
 	var cdn *sign.URLSigner
 	if domain != "" || keyPairID != "" || privateKey != "" {
@@ -150,10 +147,6 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
 			return "", nil, false
 		}
-		if kind == "log" {
-			writeError(w, http.StatusForbidden, errors.New("cache grants cannot sign log downloads"))
-			return "", nil, false
-		}
 		if _, err := s.verifyLiveDataGrant(r.Context(), grant, kind == "source" || kind == "binary"); err != nil {
 			writeError(w, http.StatusForbidden, err)
 			return "", nil, false
@@ -169,12 +162,8 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		writeError(w, http.StatusForbidden, errors.New("source downloads need the run's live claim grant"))
 		return "", nil, false
 	}
-	requiredScope := ScopeRunsRead
-	if kind == "log" {
-		requiredScope = ScopeLogsRead
-	}
-	if !p.HasScope(requiredScope) && !p.HasScope(ScopeAdmin) {
-		writeError(w, http.StatusForbidden, fmt.Errorf("download needs %s", requiredScope))
+	if !p.HasScope(ScopeRunsRead) && !p.HasScope(ScopeAdmin) {
+		writeError(w, http.StatusForbidden, fmt.Errorf("download needs %s", ScopeRunsRead))
 		return "", nil, false
 	}
 	if p.Kind == store.TokenKindRunner && !p.HasScope(ScopeAdmin) {
@@ -196,8 +185,6 @@ func downloadKind(kind string) store.StorageKind {
 	switch kind {
 	case "binary", "artifact", "source":
 		return store.StorageCache
-	case "log":
-		return store.StorageLogs
 	default:
 		return ""
 	}

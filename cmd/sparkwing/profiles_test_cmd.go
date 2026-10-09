@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	neturl "net/url"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type profileProbeResult struct {
@@ -137,87 +138,29 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 
 func probeLogs(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "logs", Target: profile.SpecString(prof.Logs)}
-	if prof.Logs == nil {
-		if prof.ControllerURL() != "" {
-			r.Status = "ok"
-			r.Detail = "logs route through the controller"
-			flagUnauthenticatedLogs(ctx, prof, &r)
-			return r
-		}
+	if prof.Logs != nil && prof.Logs.Type != backends.TypeController {
+		r.Status = "ok"
+		r.Detail = "logs backend: " + profile.SpecString(prof.Logs)
+		return r
+	}
+	if !prof.HasController() {
 		r.Status = "warn"
 		r.Detail = "no logs: backend configured"
 		return r
 	}
-	r.Status = "ok"
-	r.Detail = "logs backend: " + profile.SpecString(prof.Logs)
-	flagUnauthenticatedLogs(ctx, prof, &r)
-	return r
-}
-
-func flagUnauthenticatedLogs(ctx context.Context, prof *profile.Profile, r *profileProbeResult) {
-	if !prof.HasController() {
-		return
-	}
-	target := logsHealthTarget(ctx, prof)
-	if target == "" {
-		warnLogsAuthUnknown(r, "neither the controller nor the profile names a logs URL to probe")
-		return
-	}
-	resp, err := httpGetNoAuth(ctx, strings.TrimRight(target, "/")+"/api/v1/health")
-	if err != nil {
-		warnLogsAuthUnknown(r, err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	// safety: the logs service serves the health contract on 503 too, so its auth state is read before the status code.
-	body, err := health.Decode(resp.Body)
-	if err != nil {
-		warnLogsAuthUnknown(r, target+" health is not the JSON contract")
-		return
-	}
+	keeps, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).KeepsLogSegments(ctx)
 	switch {
-	case body.Auth == "disabled":
+	case err != nil:
 		r.Status = "warn"
-		r.Detail = "serving unauthenticated: " + target +
-			" lets anything that can reach it read, forge, and delete every run's logs"
-	case body.Auth == "":
-		warnLogsAuthUnknown(r, target+" reports no auth state; the image predates controller-backed auth")
-	case resp.StatusCode != http.StatusOK || body.Degraded():
+		r.Detail = "could not ask the controller whether it keeps node logs: " + err.Error()
+	case !keeps:
 		r.Status = "warn"
-		r.Detail = logsDegradedDetail(target, resp.Status, body)
+		r.Detail = "the controller keeps no node logs: it needs a cache bucket or an output directory"
+	default:
+		r.Status = "ok"
+		r.Detail = "node logs reach the controller as segments"
 	}
-}
-
-func logsHealthTarget(ctx context.Context, prof *profile.Profile) string {
-	if prof.Logs != nil && isHTTPURL(prof.Logs.URL) {
-		return prof.Logs.URL
-	}
-	services, err := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken())
-	if err != nil {
-		return ""
-	}
-	return services.Logs
-}
-
-func isHTTPURL(raw string) bool {
-	u, err := neturl.Parse(raw)
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
-}
-
-func warnLogsAuthUnknown(r *profileProbeResult, detail string) {
-	r.Status = "warn"
-	r.Detail = "logs service auth unknown: " + detail
-}
-
-func logsDegradedDetail(target, status string, body health.Response) string {
-	detail := strings.Join(body.Problems, "; ")
-	if detail == "" {
-		detail = "health returned " + status
-	}
-	return "logs service degraded: " + target + ": " + detail
+	return r
 }
 
 func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResult {

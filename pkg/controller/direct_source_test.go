@@ -103,7 +103,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.srv.WithSignedDownloads(cacheBucket, nil, s3Client, "", "", ""); err != nil {
+	if err := f.srv.WithSignedDownloads(cacheBucket, s3Client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(authwire.CacheGrantKeyEnv, "source-test-grant-key")

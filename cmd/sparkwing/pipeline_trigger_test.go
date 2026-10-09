@@ -515,32 +515,6 @@ func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	}
 }
 
-func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
-	spy := &triggerSpy{runStatuses: []string{"running", "failed"}, runError: "node build failed"}
-	srv := httptest.NewServer(spy.handler())
-	defer srv.Close()
-	writeTriggerProfiles(t, srv.URL)
-	enterGitCheckout(t, triggerTestOrigin)
-
-	var err error
-	var stdout string
-	stderr := captureStderr(t, func() {
-		stdout = captureStdout(t, func() {
-			err = runPipelineTrigger([]string{"release", "--profile", "prod"})
-		})
-	})
-
-	if code := exitCodeFor(err); code != 1 {
-		t.Fatalf("exit code = %d (err=%v), want 1", code, err)
-	}
-	if !strings.Contains(stdout, "status:    running") {
-		t.Fatalf("test no longer stages a stale frame; stdout:\n%s", stdout)
-	}
-	if !strings.Contains(stderr, "status:    failed") {
-		t.Errorf("terminal summary missing from stderr; got:\n%s", stderr)
-	}
-}
-
 func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")

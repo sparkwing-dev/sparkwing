@@ -4,17 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"maps"
-	"net/http"
-	"net/url"
-	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -39,16 +31,13 @@ type storagePass struct {
 	lastErr error
 }
 
-// WithStoragePass names the buckets the storage pass lists: the cache's
-// blob store, which it also expires, and the logs service's archive. A nil
+// WithStoragePass names the bucket the storage pass lists beside the node
+// log segments: the cache's blob store, which it also expires. A nil
 // store is not listed.
-func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server {
+func (s *Server) WithStoragePass(cache *teamblob.Store) *Server {
 	p := &storagePass{stores: map[store.StorageKind]*teamblob.Store{}}
 	if cache != nil {
 		p.stores[store.StorageCache] = cache
-	}
-	if logs != nil {
-		p.stores[store.StorageLogs] = logs
 	}
 	s.storagePass = p
 	return s
@@ -87,11 +76,9 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
 		bucket := p.stores[kind]
-		segments := s.logObjects()
-		// safety: a logs service with no archive keeps bytes on its volume that no listing sees, so its team
-		// counts are left to its writes rather than replaced by a listing of the segments alone.
-		if kind != store.StorageLogs || (bucket == nil && s.teamStorage.LogsURL != "") {
-			segments = nil
+		var segments logObjectStore
+		if kind == store.StorageLogs {
+			segments = s.logObjects()
 		}
 		if bucket == nil && segments == nil {
 			continue
@@ -150,7 +137,7 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			}
 		}
 		if kind == store.StorageLogs {
-			if err := s.pruneLogsOverShare(ctx, bucket, segments, now); err != nil {
+			if err := s.pruneLogsOverShare(ctx, segments, now); err != nil {
 				errs = append(errs, fmt.Errorf("prune logs over a free share: %w", err))
 			}
 		}
@@ -208,11 +195,10 @@ func (s *Server) storagePassHealth() (map[string]any, []string) {
 }
 
 // safety: a free team's log writes are granted past its share, so this pass is
-// what holds it there, about an hour behind: it deletes the team's least
-// recently written finished runs' logs, segments first and then those the
-// logs service archived, until the team is back under, and never a run
-// still going.
-func (s *Server) pruneLogsOverShare(ctx context.Context, bucket *teamblob.Store, segments logObjectStore, now time.Time) error {
+// what holds it there, about an hour behind: it deletes the segments of the
+// team's least recently written finished runs until the team is back under,
+// and never a run still going.
+func (s *Server) pruneLogsOverShare(ctx context.Context, segments logObjectStore, now time.Time) error {
 	over, err := s.store.TeamsOverFreeLogShare(ctx)
 	if err != nil || len(over) == 0 {
 		return err
@@ -221,17 +207,6 @@ func (s *Server) pruneLogsOverShare(ctx context.Context, bucket *teamblob.Store,
 	for _, t := range over {
 		freed, err := s.pruneTeamSegments(ctx, segments, t)
 		errs = append(errs, err)
-		if freed < t.OverBytes && bucket != nil {
-			if s.teamStorage.LogsURL == "" {
-				errs = append(errs, fmt.Errorf("team %s is past its log share and no logs service is configured to prune its archived logs", t.Team))
-			} else if err := s.checkLogsDeleteToken(now); err != nil {
-				errs = append(errs, err)
-			} else {
-				archived, err := s.pruneTeamLogs(ctx, bucket, store.TeamOverShare{Team: t.Team, OverBytes: t.OverBytes - freed})
-				freed += archived
-				errs = append(errs, err)
-			}
-		}
 		if freed > 0 {
 			errs = append(errs, s.store.CommitStorage(ctx, store.StorageCommit{
 				Team: t.Team, Kind: store.StorageLogs, Bytes: -freed, Now: now,
@@ -272,78 +247,4 @@ func (s *Server) pruneTeamSegments(ctx context.Context, segments logObjectStore,
 		}
 	}
 	return freed, nil
-}
-
-func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t store.TeamOverShare) (int64, error) {
-	objs, err := bucket.List(ctx, string(t.Team), "runs/")
-	if err != nil {
-		return 0, err
-	}
-	type archivedRun struct {
-		id   string
-		last time.Time
-	}
-	byID := map[string]*archivedRun{}
-	for _, o := range objs {
-		id, _, ok := strings.Cut(strings.TrimPrefix(o.Rel, "runs/"), "/")
-		if !ok {
-			continue
-		}
-		r := byID[id]
-		if r == nil {
-			r = &archivedRun{id: id}
-			byID[id] = r
-		}
-		if o.LastModified.After(r.last) {
-			r.last = o.LastModified
-		}
-	}
-	runs := slices.SortedFunc(maps.Values(byID), func(a, b *archivedRun) int { return a.last.Compare(b.last) })
-	base := strings.TrimRight(s.teamStorage.LogsURL, "/") + "/api/v1/logs/"
-	var freed int64
-	for _, r := range runs {
-		if freed >= t.OverBytes {
-			break
-		}
-		finished, err := s.store.RunFinished(ctx, t.Team, r.id)
-		if err != nil {
-			return freed, err
-		}
-		if !finished {
-			continue
-		}
-		deleted, err := deleteRunLogs(ctx, base+url.PathEscape(r.id), s.teamStorage.LogsToken)
-		if err != nil {
-			return freed, fmt.Errorf("delete logs of run %s: %w", r.id, err)
-		}
-		freed += deleted
-	}
-	return freed, nil
-}
-
-// safety: only what the logs service says it removed from the archive is
-// taken off the team's count; a refusal or an answer naming nothing frees
-// nothing, and the next pass's listing corrects any count left high.
-func deleteRunLogs(ctx context.Context, target, bearer string) (int64, error) {
-	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	// #nosec G704 -- the request keeps the operator-configured origin
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return 0, errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
-	}
-	deleted, err := strconv.ParseInt(resp.Header.Get(storagequota.ArchivedBytesDeletedHeader), 10, 64)
-	if err != nil || deleted < 0 {
-		return 0, nil
-	}
-	return deleted, nil
 }

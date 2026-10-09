@@ -20,18 +20,6 @@ type ServicesResponse struct {
 	// controller wasn't started with --cache-pod-url.
 	CachePod string `json:"cache_pod,omitempty"`
 
-	// Logs is the externally-reachable URL of the sparkwing-logs
-	// service. Runners post node log lines there.
-	//
-	// It is announced because a controller and a logs service are two
-	// binaries on two ports and only the second routes /api/v1/logs, so
-	// a runner that assumed the controller's own URL posted every line
-	// into a 404. Empty when the controller wasn't started with
-	// --logs-url; a co-located deployment (the laptop dashboard mounts
-	// both on one mux) needs no announcement, because there the
-	// controller URL is already the right answer.
-	Logs string `json:"logs,omitempty"`
-
 	// Dashboard is the externally-reachable URL a human opens to watch
 	// this controller's runs. `sparkwing cloud connect` prints it, so an
 	// operator who has just connected reaches the web view without being
@@ -53,7 +41,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if downloadViaIngress(r) && s.downloadCDN == nil {
 		downloadURL = ""
 	}
-	if s.cachePodURL == "" && s.logsURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
+	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
 		http.Error(w, "no services announced", http.StatusNotFound)
 		return
 	}
@@ -62,7 +50,6 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		DataDownloadURL: downloadURL,
 		DirectData:      s.directUploads != nil,
 		CachePod:        s.cachePodURL,
-		Logs:            s.logsURL,
 		Dashboard:       s.dashboardURL,
 		MultiTeam:       multiTeam,
 	})

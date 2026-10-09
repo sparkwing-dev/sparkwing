@@ -32,7 +32,6 @@ func TestServices_RequiresABearer(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).
 		EnableAuthFromStore().
 		WithCachePodURL("http://cache.internal:8080").
-		WithLogsURL("http://logs.internal:8081").
 		WithDashboardURL("https://dash.internal").
 		Handler())
 	t.Cleanup(srv.Close)
@@ -95,7 +94,7 @@ func TestServices_AnnouncesADashboardOnItsOwn(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Dashboard != "https://dash.internal" || body.CachePod != "" || body.Logs != "" {
+	if body.Dashboard != "https://dash.internal" || body.CachePod != "" {
 		t.Fatalf("services = %+v", body)
 	}
 }

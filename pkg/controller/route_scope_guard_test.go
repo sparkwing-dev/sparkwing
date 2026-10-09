@@ -29,8 +29,8 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		// safety: cloud providers fetch OIDC metadata and keys unauthenticated; both answer 404 without a key.
 		"GET /.well-known/openid-configuration": true,
 		"GET /.well-known/jwks.json":            true,
-		// safety: the cache proves itself with its operator token and the logs service
-		// with a forwarded credential, which the handlers check themselves.
+		// safety: the cache proves itself with its operator token, which the handlers
+		// check themselves.
 		"POST /internal/storage/reserve":  true,
 		"POST /internal/storage/commit":   true,
 		"POST /internal/storage/release":  true,

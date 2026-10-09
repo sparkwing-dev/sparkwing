@@ -24,7 +24,6 @@ func runLaunchCLI(args []string) error {
 	fs := flag.NewFlagSet("launch", flag.ContinueOnError)
 	var cfg launcher.Config
 	fs.StringVar(&cfg.ControllerURL, "controller", "", "controller URL the launcher and its Jobs reach")
-	fs.StringVar(&cfg.LogsURL, "logs", "", "logs service URL handed to each Job (optional; without one, node logs reach the controller as segments)")
 	fs.StringVar(&cfg.CacheURL, "cache", "", "cache service URL handed to each Job")
 	fs.StringVar(&cfg.GitcacheURL, "gitcache", "", "git cache URL handed to each Job")
 	fs.StringVar(&cfg.DependencyProxyURL, "dependency-proxy", "", "cache URL whose go, npm and pip proxies each Job uses")

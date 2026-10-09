@@ -19,16 +19,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the scope set docs/auth.md gives a runner; a wider one hands a workstation reads no claim loop needs.
-var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state", "secrets.read", "logs.write"}
+var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state", "secrets.read"}
 
 // safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"
@@ -66,7 +64,6 @@ func runRunnersAdd(args []string) error {
 	contribution := fs.String("contribution", "50%,50%", "CPU and memory this machine contributes")
 	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
 	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
-	logsURL := fs.String("logs", "", "logs service URL (default: the profile's logs surface, then the controller's announcement)")
 	configPath := fs.String("config", "", "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)")
 	force := fs.Bool("force", false, "replace an existing agent section")
 	noService := fs.Bool("no-service", false, "write the config without installing or starting the service")
@@ -100,20 +97,12 @@ func runRunnersAdd(args []string) error {
 	}
 	cfg := agentFileConfig{
 		Controller:     strings.TrimRight(prof.ControllerURL(), "/"),
-		Logs:           firstNonBlank(*logsURL, profileLogsURL(prof)),
 		MaxConcurrent:  *maxConcurrent,
 		HolderPrefix:   *name,
 		Labels:         splitCSV(*labels),
 		AllowRepos:     *allowRepos,
 		Contribution:   *contribution,
 		LocalAdmission: true,
-	}
-	if cfg.Logs == "" {
-		services, err := discovery.ServicesFor(context.Background(), prof.ControllerURL(), prof.ControllerToken())
-		if err != nil {
-			return fmt.Errorf("runners add: discover logs service: %w", err)
-		}
-		cfg.Logs = services.Logs
 	}
 	if err := validateAgentFileConfig(cfg); err != nil {
 		return err
@@ -287,7 +276,6 @@ func validateAgentFileConfig(cfg agentFileConfig) error {
 // safety: the claim-mode subset install/service-install.sh writes.
 type agentFileConfig struct {
 	Controller     string   `yaml:"controller"`
-	Logs           string   `yaml:"logs,omitempty"`
 	Token          string   `yaml:"token"`
 	MaxConcurrent  int      `yaml:"max_concurrent"`
 	HolderPrefix   string   `yaml:"holder_prefix"`
@@ -327,13 +315,6 @@ func writeAgentConfig(path string, cfg agentFileConfig, force bool) error {
 		section = yaml.Node{}
 		return section.Encode(cfg)
 	})
-}
-
-func profileLogsURL(p *profile.Profile) string {
-	if p == nil || p.Logs == nil {
-		return ""
-	}
-	return p.Logs.URL
 }
 
 func firstNonBlank(values ...string) string {

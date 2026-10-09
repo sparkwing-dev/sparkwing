@@ -22,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -67,12 +66,6 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	}))
 	t.Cleanup(ctrlHTTP.Close)
 	ctrl := client.New(ctrlHTTP.URL, nil).WithWatchObserver(orchestrator.NoteWatch)
-	logSrv, err := logs.New(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	logsHTTP := httptest.NewServer(logSrv.Handler())
-	t.Cleanup(logsHTTP.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := st.CreateTrigger(ctx, store.Trigger{ID: "r1", Pipeline: "p", CreatedAt: time.Now(), TriggerSource: "runs-submit"}); err != nil {
@@ -90,7 +83,7 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	done := make(chan struct{})
 	var agent *procgroup.Group
 	if terminateAgent {
-		config := fmt.Sprintf("agent:\n  controller: %s\n  logs: %s\n  token: test-token\n  local_admission: false\n  heartbeat: 200ms\n  poll: 20ms\n", ctrlHTTP.URL, logsHTTP.URL)
+		config := fmt.Sprintf("agent:\n  controller: %s\n  token: test-token\n  local_admission: false\n  heartbeat: 200ms\n  poll: 20ms\n", ctrlHTTP.URL)
 		configPath := filepath.Join(home, "config.yaml")
 		if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 			t.Fatal(err)
@@ -115,7 +108,7 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 		}
 		go func() {
 			defer close(done)
-			executePooledNode(ctx, ctrl, ctrlHTTP.URL, logsHTTP.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
+			executePooledNode(ctx, ctrl, ctrlHTTP.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
 				time.Minute, 200*time.Millisecond, "agent", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 		}()
 	}

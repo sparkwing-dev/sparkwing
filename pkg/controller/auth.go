@@ -65,7 +65,6 @@ const (
 	ScopeRunsControl  = store.ScopeRunsControl
 	ScopeNodesClaim   = "nodes.claim"
 	ScopeLogsRead     = store.ScopeLogsRead
-	ScopeLogsWrite    = "logs.write"
 	ScopeTriggersRead = store.ScopeTriggersRead
 	// ScopeTriggersClaim gates the trigger worker lifecycle: claim,
 	// heartbeat, and done. It carries no authority over run or node
@@ -92,10 +91,6 @@ const (
 	// ScopeAdmin is the deployment operator's scope. No team membership
 	// grants it.
 	ScopeAdmin = "admin"
-	// ScopeLogsDelete lets the controller delete any run's logs from the logs
-	// service when it deletes a team. It reads nothing, and no team's token
-	// may carry it.
-	ScopeLogsDelete = "logs.delete"
 	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
 	// paid grant for a verified payment, reverses a payment, holds or releases
 	// the team a payment funded, and reads the ledger's units, and reaches
@@ -115,7 +110,6 @@ var allScopes = []string{
 	ScopeRunsControl,
 	ScopeNodesClaim,
 	ScopeLogsRead,
-	ScopeLogsWrite,
 	ScopeTriggersRead,
 	ScopeTriggersClaim,
 	ScopeRunsState,
@@ -123,7 +117,6 @@ var allScopes = []string{
 	ScopeApprovalsWrite,
 	ScopeTeamAdmin,
 	ScopeAdmin,
-	ScopeLogsDelete,
 	ScopeCreditsGrant,
 	ScopeClaimsLaunch,
 }

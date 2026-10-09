@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"math"
 	"mime"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -1458,7 +1461,29 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if s.dashboard != nil && s.dashboard.Local && s.dashboard.Paths.Root != "" {
+		if err := removeLocalRunDir(s.dashboard.Paths.RunsDir(), id); err != nil {
+			s.writeInternalError(w, r, "remove the run's directory", err)
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// safety: a laptop dashboard's node logs live in the run's directory on its own disk; os.Root keeps a planted
+// symlink from turning the removal into one outside the runs tree.
+func removeLocalRunDir(runsDir, runID string) error {
+	if err := storage.SafeSegment(runID); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(runsDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.Join(root.RemoveAll(runID), root.Close())
 }
 
 type claimTriggerReq struct {
@@ -2207,62 +2232,6 @@ func validExecutionAttemptResult(outcome, reason string) bool {
 	default:
 		return false
 	}
-}
-
-// safety: an append is authorized by the claim the writer still holds, not by
-// its execution attempt still being open, because a node's closing lines land
-// after the executor closes the attempt.
-func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Request) {
-	hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
-	if hasNodeIdentity && hasTriggerIdentity {
-		writeError(w, http.StatusBadRequest, errors.New("node attempt and trigger identities cannot be combined"))
-		return
-	}
-	if p, ok := PrincipalFromContext(r.Context()); ok && p.HasScope(ScopeAdmin) {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	var held bool
-	var err error
-	if hasNodeIdentity {
-		fence, fenceErr := nodeClaimFenceFromRequest(r)
-		if fenceErr != nil {
-			writeError(w, http.StatusConflict, store.ErrLockHeld)
-			return
-		}
-		ordinal, parseErr := strconv.Atoi(r.Header.Get(store.AttemptOrdinalHeader))
-		if parseErr == nil && ordinal > 0 {
-			held, err = s.store.NodeExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
-		}
-	} else if hasTriggerIdentity {
-		generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
-		if parseErr != nil || generation < 1 {
-			writeError(w, http.StatusConflict, store.ErrLockHeld)
-			return
-		}
-		fence := store.TriggerClaimFence{Claimant: claimIdentity(r), ClaimGeneration: generation}
-		rawOrdinal := r.Header.Get(store.AttemptOrdinalHeader)
-		if rawOrdinal == "" && r.PathValue("nodeID") == store.CompileLogNode {
-			held, err = s.store.TriggerClaimFenceIsLive(r.Context(), r.PathValue("id"), claimIdentity(r), generation, time.Now())
-		} else {
-			ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
-			if ordinalErr == nil && ordinal > 0 {
-				held, err = s.store.TriggerExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
-			}
-		}
-	} else {
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if !held {
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) {

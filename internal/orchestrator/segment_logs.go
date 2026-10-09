@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -149,9 +148,10 @@ func serveLoopbackLogs(sink *nodeLogSink, bearer string, logger *slog.Logger) (s
 // perf: pushes go out every livePushEvery, or sooner at livePushBytes; past livePushHold the oldest bytes drop,
 // which a reader sees as a gap the segments fill.
 const (
-	livePushEvery = 250 * time.Millisecond
-	livePushBytes = 32 << 10
-	livePushHold  = 1 << 20
+	livePushEvery   = 250 * time.Millisecond
+	livePushBytes   = 32 << 10
+	livePushHold    = 1 << 20
+	livePushTimeout = 10 * time.Second
 )
 
 // safety: the live view is a convenience and the segments are the log, so a
@@ -228,7 +228,7 @@ func (p *livePusher) flush(ctx context.Context) {
 	if len(data) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), liveLogPostTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), livePushTimeout)
 	defer cancel()
 	err := p.ctrl.AppendNodeLiveLogAt(ctx, p.runID, p.nodeID, off, data)
 	p.mu.Lock()
@@ -334,12 +334,11 @@ func requestFence(ctx context.Context, r *http.Request) context.Context {
 }
 
 // EngineNodeLog writes the engine's own lines into one node of a run,
-// such as a trigger's compile output: as segments when the controller
-// keeps them, else to the logs service at logsURL, else nowhere. Close
-// seals it.
+// such as a trigger's compile output, as segments when the controller
+// keeps them and nowhere otherwise. Close seals it.
 type EngineNodeLog struct {
-	controllerURL, logsURL, token, runID, nodeID string
-	logger                                       *slog.Logger
+	controllerURL, token, runID, nodeID string
+	logger                              *slog.Logger
 
 	mu     sync.Mutex
 	opened bool
@@ -348,11 +347,8 @@ type EngineNodeLog struct {
 
 // NewEngineNodeLog returns a log for nodeID of runID that opens on the
 // first Append, under the claim fence that Append's context carries.
-func NewEngineNodeLog(controllerURL, logsURL, token, runID, nodeID string, logger *slog.Logger) *EngineNodeLog {
-	return &EngineNodeLog{
-		controllerURL: controllerURL, logsURL: logsURL, token: token,
-		runID: runID, nodeID: nodeID, logger: logger,
-	}
+func NewEngineNodeLog(controllerURL, token, runID, nodeID string, logger *slog.Logger) *EngineNodeLog {
+	return &EngineNodeLog{controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID, logger: logger}
 }
 
 // Append writes data, one or more lines, to the node's log. It outlives
@@ -363,21 +359,14 @@ func (l *EngineNodeLog) Append(ctx context.Context, data []byte) error {
 	if !l.opened {
 		l.opened = true
 		if l.controllerURL != "" {
-			l.sink, _ = openNodeLogSinkLive(ctx, client.NewWithToken(l.controllerURL, nil, l.token),
+			l.sink, _ = openNodeLogSinkLive(context.WithoutCancel(ctx), client.NewWithToken(l.controllerURL, nil, l.token),
 				l.runID, l.nodeID, false, l.logger)
 		}
 	}
-	if l.sink != nil {
-		return l.sink.sink.Append(data, "", 0, 0)
-	}
-	if l.logsURL == "" {
+	if l.sink == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	return logs.NewClientWithToken(l.logsURL, nil, l.token).
-		WithRunnerIdentity(logs.ProcessIdentity("trigger-loop")).
-		Append(ctx, l.runID, l.nodeID, data)
+	return l.sink.sink.Append(data, "", 0, 0)
 }
 
 // Close seals the log when it went to segments.

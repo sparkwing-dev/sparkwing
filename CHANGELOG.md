@@ -176,6 +176,24 @@ unlock.
 - **Runner images:** Include OpenBSD netcat for SOCKS proxy checks using `nc -X` and `-x`.
 
 ### Removed
+- **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `pkg/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
+  Run the previous release's `sparkwing-logs export` before upgrading, or the service's logs become unreadable. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **controller (Breaking):** `--logs-url`, `--logs-archive-store`, `SPARKWING_LOGS_DELETE_TOKEN`, the `logs.write` and `logs.delete` scopes, `GET /api/v1/runs/{id}/log-access`, `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate`, the `logs` field of `GET /api/v1/services` and signed `kind=log` downloads are removed
+  Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone, and `WithStoragePass` and `WithSignedDownloads` take the cache store alone; `client.ProcessIdentity` names a process for `Client.WithRunnerIdentity`. The storage pass counts and prunes logs from segments, team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **runner (Breaking):** `--logs` on `sparkwing-runner runner` and `launch`, `--trigger-runner-logs-url`, `handle-trigger --runner-logs-url`, the agent config's `logs:` key and `SPARKWING_LOGS_EGRESS_*` are removed
+  Runners upload node logs as segments through the controller and need no logs URL. An agent `config.yaml` with `logs:` fails to load with `field logs not found`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **cli (Breaking):** `sparkwing cluster runners add --logs` and the profile's `logs.url` are removed, and a `logs: {type: controller}` surface needs the profile's state on that controller
+  A url on a controller logs surface is refused. `sparkwing serve` runs no logs service and writes only `SPARKWING_CONTROLLER_URL` to `dev.env`; its dashboard reads node logs from the run directories, and deleting a run there removes its directory. `sparkwing pipeline trigger` always follows the run's logs through the controller. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **helm chart (Breaking):** `sparkwing-runner-bundle` (0.1.11) no longer deploys `sparkwing-logs`, and `sparkwing-full` drops `controller.logs.url` and `--logs-url`
+  The logs Deployment, Service, ServiceAccount and PVC template, the `logs:` values and the runner's `--logs` argument are gone; a values file that still sets `logs` or `controller.logs` fails to render. The logs PVC is kept by its resource policy until you delete it. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **release (Breaking):** Releases no longer build, sign or publish `ghcr.io/sparkwing-dev/sparkwing-logs` or the `sparkwing-logs` binaries
+  See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
 - **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
   Use `Tenant.ActiveExecutorActivity` for a team's executor activity, `Store.PrincipalHoldsProfileClaim` (which also accepts the trigger claim) or `Store.PrincipalHoldsRunClaim` for a claim check, and `Tenant.FailNodeForUnpricedClass` from the handle of the run's team. See [migration guide](docs/migrations/_unreleased.md#store-methods-removed-or-moved-to-tenant).
 
@@ -790,7 +808,7 @@ unlock.
   `DELETE /admin/teams/{team}` removes the team's namespace from the bucket. Every read
   goes through the service, so the egress meter and request
   budget cover it. See
-  [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
+  [Object storage for logs and the cache](https://github.com/sparkwing-dev/sparkwing/blob/f865c623615ec21b252dde1aef7c25c427412afa/docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
 - **logs:** `--archive-store s3://bucket/prefix` moves a run nobody has written
   for `--archive-idle` to S3 as one object per node log under
@@ -801,7 +819,7 @@ unlock.
   run restored and written since its archive. `DELETE
   /api/v1/teams/{team}/logs` (`admin`) deletes one team's logs, index entries
   included, and a run recorded for one team is refused to every other. See
-  [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
+  [Object storage for logs and the cache](https://github.com/sparkwing-dev/sparkwing/blob/f865c623615ec21b252dde1aef7c25c427412afa/docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
 - **cache, logs:** a `403` from the bucket on a write or listing pauses both
   for a minute, doubling to five, with one probe request as each pause ends;

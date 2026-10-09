@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 )
 
 type heartbeatCounter struct {
@@ -70,7 +69,7 @@ func TestFollowLogsRemote_StopsAtOnceOnADeadToken(t *testing.T) {
 	shortFollowTiming(t, time.Hour, time.Millisecond)
 
 	err := followLogsRemote(context.Background(), client.NewWithToken(srv.URL, nil, ""),
-		sparkwinglogs.New(srv.URL, nil, ""), runID, "", io.Discard)
+		client.NewWithToken(srv.URL, nil, "").NodeLogs(), runID, "", io.Discard)
 
 	if !client.IsTokenDead(err) || !strings.Contains(err.Error(), runID) {
 		t.Fatalf("follow = %v, want the dead token named with the run", err)

@@ -11,7 +11,6 @@ import (
 
 func TestConfig_RoundTripFromYAML(t *testing.T) {
 	path := writePrivateConfig(t, `controller: http://localhost:4344
-logs: http://localhost:4345
 gitcache: http://localhost:4344/api/v1/gitcache
 profile: dev
 token: tok-abc
@@ -53,6 +52,7 @@ func TestConfig_RejectsUnknownFieldsAndAdditionalDocuments(t *testing.T) {
 		name, body, want string
 	}{
 		{"unknown field", "agent:\n  controller: http://localhost:4344\n  admin: true\n", "field admin not found"},
+		{"removed logs key", "agent:\n  controller: http://localhost:4344\n  logs: http://localhost:4345\n", "field logs not found"},
 		{"second document", "agent:\n  controller: http://localhost:4344\n---\nagent:\n  token: hidden\n", "multiple YAML documents"},
 		{"no agent section", "profiles: {}\n", "has no agent section"},
 	} {
@@ -138,7 +138,6 @@ func TestLoad_RefusesTheRemovedEnrolledKeys(t *testing.T) {
 
 func TestLoad_KeepsEveryClaimModeSetting(t *testing.T) {
 	path := writePrivateConfig(t, `controller: http://localhost:4344
-logs: http://localhost:4345
 token: tok-abc
 holder_prefix: dev-laptop
 max_concurrent: 2
@@ -156,7 +155,7 @@ labels:
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if cfg.Controller != "http://localhost:4344" || cfg.Logs != "http://localhost:4345" ||
+	if cfg.Controller != "http://localhost:4344" ||
 		cfg.Token != "tok-abc" || cfg.HolderPrefix != "dev-laptop" || cfg.MaxConcurrent != 2 ||
 		cfg.Contribution != "4,8gb" || cfg.LocalReserve != "1,2gb" ||
 		cfg.LocalAdmission == nil || !*cfg.LocalAdmission || len(cfg.Labels) != 1 {

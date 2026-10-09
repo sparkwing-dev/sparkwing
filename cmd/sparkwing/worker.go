@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
 
 func runWorker(args []string) error {
@@ -65,14 +66,8 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 		prof.Name, prof.ControllerURL(), poll)
 
 	token := prof.ControllerToken()
-	logsURL := prof.ExplicitLogsURL()
-	if logsURL == "" {
-		if logsURL, err = orchestrator.DiscoverLogsURL(ctx, prof.ControllerURL(), token); err != nil {
-			return fmt.Errorf("worker: %w", err)
-		}
-	}
 	cli := client.NewWithToken(prof.ControllerURL(), nil, token).
-		WithRunnerIdentity(logs.ProcessIdentity("worker"))
+		WithRunnerIdentity(client.ProcessIdentity("worker"))
 	shed := client.NewShedLog(client.ShedWarnInterval)
 	pacer := client.NewPacer(poll)
 	for {
@@ -118,15 +113,17 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), logsURL, token, heartbeat)
+		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), token, heartbeat)
 	}
 }
 
-func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, logsURL, token string, heartbeat time.Duration) {
-	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(triggerID, controllerURL, logsURL, heartbeat)...)
+func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, token string, heartbeat time.Duration) {
+	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(triggerID, controllerURL, heartbeat)...)
 	cmd := exec.CommandContext(ctx, self, args...)
 	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
-	cmd.Env = os.Environ()
+	// safety: the child keeps its node logs through the controller; an inherited engine log endpoint would
+	// send them to whatever process last served one.
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "SPARKWING_LOGS_URL=") })
 	if token != "" {
 		cmd.Env = append(cmd.Env, "SPARKWING_AGENT_TOKEN="+token)
 	}

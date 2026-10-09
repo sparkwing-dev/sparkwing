@@ -19,7 +19,7 @@ const (
 	// StorageCache is the cache's binaries, dependency archives and
 	// artifacts.
 	StorageCache StorageKind = "cache"
-	// StorageLogs is the logs service's volume and archive.
+	// StorageLogs is the node log segments.
 	StorageLogs StorageKind = "logs"
 )
 
@@ -30,7 +30,7 @@ func (k StorageKind) Valid() bool { return k == StorageCache || k == StorageLogs
 // three quarters.
 func FreeCacheShare(allowance int64) int64 { return allowance / 4 * 3 }
 
-// FreeLogShare is the part of allowance the logs service holds a free team
+// FreeLogShare is the part of allowance a free team's node logs are held
 // to, three sixteenths.
 func FreeLogShare(allowance int64) int64 { return allowance / 16 * 3 }
 

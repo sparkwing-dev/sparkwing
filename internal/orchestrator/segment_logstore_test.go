@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -10,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 )
 
 // A run on this machine whose state lives on the controller writes each
@@ -18,15 +19,12 @@ import (
 // controller, with no logs service in between.
 func TestRemoteRunLogReachesTheControllerAsSegments(t *testing.T) {
 	ctrl, tok := newSegmentController(t)
-	seg := controllerSegmentLogs(t.Context(), client.NewWithToken(ctrl.url, nil, tok),
+	seg, err := controllerSegmentLogs(t.Context(), client.NewWithToken(ctrl.url, nil, tok),
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if seg == nil {
-		t.Fatal("the controller keeps segments, but no segment log store was opened")
+	if err != nil {
+		t.Fatal(err)
 	}
 	defer seg.Close(t.Context())
-	if !liveLogsRedundant(seg) {
-		t.Fatal("a segment store pushes its own live view, so the always-on mirror must stay off")
-	}
 
 	nodeLog, err := NewLogStoreBackend(seg, nil).OpenNodeLog(t.Context(), "run-s", "a", nil)
 	if err != nil {
@@ -52,22 +50,43 @@ func TestRemoteRunLogReachesTheControllerAsSegments(t *testing.T) {
 	}
 }
 
+func TestControllerSegmentLogsRefusesAControllerThatKeepsNone(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"no segments": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"logs":{"segments":false}}`))
+		},
+		"capabilities unreadable": func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(handler)
+			defer srv.Close()
+			if seg, err := controllerSegmentLogs(t.Context(), client.New(srv.URL, nil), nil); err == nil || seg != nil {
+				t.Fatalf("store = %v, err = %v; want an error", seg, err)
+			}
+		})
+	}
+}
+
 // A run whose state stays on this machine has no node rows on the
-// controller to grant segments against, so its logs keep the logs service.
-func TestLocalRunKeepsTheLogsServiceForControllerLogs(t *testing.T) {
+// controller to grant segments against, so a controller logs surface
+// refuses it rather than keeping its logs nowhere.
+func TestControllerLogsRequireTheRunsStateOnThatController(t *testing.T) {
 	ctrl, tok := newSegmentController(t)
 	lookup := func(string) (string, string, error) { return ctrl.url, tok, nil }
 	logs := backends.Spec{Type: backends.TypeController, Controller: "prod"}
 	local := &backends.Spec{Type: backends.TypeSQLite, Path: "state.db"}
-	got, err := openLogStoreFromSpec(t.Context(), logs, false, local, lookup)
-	if err != nil {
-		t.Fatal(err)
+	if got, err := openLogStoreFromSpec(t.Context(), logs, false, local, lookup); err == nil {
+		t.Fatalf("store = %T for a local run, want an error", got)
 	}
-	if _, ok := got.(*sparkwinglogs.Store); !ok {
-		t.Fatalf("store = %T, want the logs service client", got)
+	other := &backends.Spec{Type: backends.TypeController, Controller: "staging"}
+	if got, err := openLogStoreFromSpec(t.Context(), logs, true, other, lookup); err == nil {
+		t.Fatalf("store = %T for state on another controller, want an error", got)
 	}
 	remote := &backends.Spec{Type: backends.TypeController, Controller: "prod"}
-	got, err = openLogStoreFromSpec(t.Context(), logs, true, remote, lookup)
+	got, err := openLogStoreFromSpec(t.Context(), logs, true, remote, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}

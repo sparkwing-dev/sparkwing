@@ -10,8 +10,7 @@ import (
 )
 
 type Profile struct {
-	Name             string `yaml:"-"`
-	logsURLInherited bool
+	Name string `yaml:"-"`
 
 	Controller *ControllerSpec `yaml:"controller,omitempty"`
 
@@ -42,15 +41,6 @@ func (p *Profile) ControllerToken() string {
 	return p.Controller.Token
 }
 
-// ExplicitLogsURL returns the logs URL the profile supplied, excluding a
-// controller URL filled in by InheritControllerDefaults.
-func (p *Profile) ExplicitLogsURL() string {
-	if p == nil || p.Logs == nil || p.logsURLInherited {
-		return ""
-	}
-	return p.Logs.URL
-}
-
 func (p *Profile) HasController() bool {
 	return p.ControllerURL() != ""
 }
@@ -59,14 +49,13 @@ func (p *Profile) InheritControllerDefaults() {
 	if p == nil || p.Controller == nil {
 		return
 	}
-	if p.Logs != nil && p.Logs.Type == backends.TypeController && p.Logs.URL == "" {
-		p.logsURLInherited = true
-	}
 	for _, spec := range []*backends.Spec{p.Secrets, p.State, p.Cache, p.Logs} {
 		if spec == nil || spec.Type != backends.TypeController {
 			continue
 		}
-		if spec.URL == "" {
+		// safety: a controller logs surface names its controller and no URL, because the controller keeps the
+		// logs itself; a URL there is a leftover logs service address, which validation refuses.
+		if spec.URL == "" && spec != p.Logs {
 			spec.URL = p.Controller.URL
 		}
 		if spec.Token == "" && spec.TokenEnv == "" {
@@ -163,11 +152,6 @@ func Save(path string, cfg *Config) error {
 		}
 		cp := *p
 		cp.Name = ""
-		if cp.logsURLInherited && cp.Logs != nil {
-			logs := *cp.Logs
-			logs.URL = ""
-			cp.Logs = &logs
-		}
 		out[name] = &cp
 	}
 	return userconfig.Write(path, userconfig.Profiles, "profiles", out)

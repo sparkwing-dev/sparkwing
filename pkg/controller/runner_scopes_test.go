@@ -23,7 +23,6 @@ var runnerScopes = []string{
 	controller.ScopeTriggersClaim,
 	controller.ScopeRunsState,
 	controller.ScopeSecretsRead,
-	controller.ScopeLogsWrite,
 }
 
 type scopedFixture struct {

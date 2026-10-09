@@ -202,6 +202,12 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	logsBackend := local.Logs
 	if opts.LogsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, nil, opts.Token, opts.Logger)
+	} else if seg, err := controllerSegmentLogs(ctx, stateClient, opts.Logger); err != nil {
+		opts.Logger.Warn("node logs stay on this machine", "err", err)
+	} else {
+		defer seg.Close(ctx)
+		stateClient.WithWatchObserver(NoteWatch)
+		logsBackend = NewLogStoreBackend(seg, opts.Logger)
 	}
 	backends := RemoteBackends(stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
 

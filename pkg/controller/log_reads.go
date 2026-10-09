@@ -9,19 +9,16 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/web"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: a node with no segment record reads through fallback, the logs service, so logs written before
-// segments, or by a runner with a logs URL, stay readable.
+// safety: scoped to one team, so a read never lists another team's prefix.
 type segmentLogs struct {
-	s        *Server
-	team     store.Team
-	objs     logObjectStore
-	fallback storage.LogStore
+	s    *Server
+	team store.Team
+	objs logObjectStore
 }
 
 var _ storage.LogStore = segmentLogs{}
@@ -51,9 +48,6 @@ func (l segmentLogs) Read(ctx context.Context, runID, nodeID string, opts storag
 		return nil, err
 	}
 	if !ok {
-		if l.fallback != nil {
-			return l.fallback.Read(ctx, runID, nodeID, opts)
-		}
 		return nil, nil
 	}
 	log, err := logseg.Open(ctx, l.objs, rec.Prefix)
@@ -76,9 +70,6 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) 
 		for _, a := range found {
 			recs = append(recs, store.NodeLog{NodeID: a.NodeID, Prefix: a.Prefix})
 		}
-	}
-	if len(recs) == 0 && l.fallback != nil {
-		return l.fallback.ReadRun(ctx, runID)
 	}
 	latest := map[string]store.NodeLog{}
 	var order []string
@@ -106,18 +97,15 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) 
 
 // Stream serves a segment node's log as server-sent events: the
 // segments uploaded so far, then the live ring from where they end,
-// until the manifest lands. A node without segments streams through
-// fallback, or (nil, nil) so the reader uses the live ring alone.
+// until the manifest lands. A node without segments answers (nil, nil),
+// so the reader uses the live ring alone.
 func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {
 	rec, ok, err := l.record(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		if l.fallback == nil {
-			return nil, nil
-		}
-		return l.fallback.Stream(ctx, runID, nodeID)
+		return nil, nil
 	}
 	pr, pw := io.Pipe()
 	go func() {
@@ -126,8 +114,8 @@ func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadC
 	return pr, nil
 }
 
-// safety: one search reads at most this much log and runs at most this long, the bounds the logs service held its
-// own searches to, so a broad grep cannot hold the controller's memory or a request slot.
+// safety: one search reads at most this much log and runs at most this long, so a broad grep cannot hold the
+// controller's memory or a request slot.
 var controllerSearchBounds = web.SearchBounds{MaxBytes: 256 << 20, Timeout: 10 * time.Second}
 
 // perf: segments land every 10 s, so the stream lists the prefix about
@@ -214,26 +202,15 @@ func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error {
 }
 
 // NodeLogCompleteness reports the segment verdict for a node with a
-// segment record, and the logs service's verdict for one without when a
-// logs service is configured; false means neither knows. A finished node
-// whose writer never sealed its attempt past the grace is sealed here.
+// segment record; false means the node has none. A finished node whose
+// writer never sealed its attempt past the grace is sealed here.
 func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (logseg.Completeness, bool, error) {
 	rec, ok, err := l.record(ctx, runID, nodeID)
 	if err != nil {
 		return logseg.Completeness{}, false, err
 	}
 	if !ok {
-		seals, isSealer := l.fallback.(interface {
-			ReadSeals(ctx context.Context, runID, nodeID string) (logs.SealReport, error)
-		})
-		if !isSealer {
-			return logseg.Completeness{}, false, nil
-		}
-		report, err := seals.ReadSeals(ctx, runID, nodeID)
-		if err != nil {
-			return logseg.Completeness{}, false, err
-		}
-		return logseg.Completeness(report.Assess(logs.NodeProgress(node), now)), true, nil
+		return logseg.Completeness{}, false, nil
 	}
 	log, err := logseg.Open(ctx, l.objs, rec.Prefix)
 	if err != nil {

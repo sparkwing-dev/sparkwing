@@ -6,19 +6,17 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http/httptest"
+	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -28,15 +26,16 @@ const (
 )
 
 // TestLogSealRunnerChild is the runner half of the e2e below: a separate
-// process that writes a node's log to the logs service through the
-// runner's own log sink, then either finishes or waits to be killed.
+// process that writes a node's log to its engine's loopback endpoint
+// through the runner's own log sink, then either finishes or waits to be
+// killed.
 func TestLogSealRunnerChild(t *testing.T) {
 	mode := os.Getenv(sealChildEnv)
 	if mode == "" {
 		t.Skip("runs only as the e2e's child process")
 	}
-	nlog, err := NewHTTPLogs(os.Getenv("SEAL_LOGS_URL"), nil, nil).
-		OpenNodeLog(context.Background(), os.Getenv("SEAL_RUN"), "build", nil)
+	nlog, err := NewHTTPLogsWithToken(os.Getenv("SEAL_LOGS_URL"), nil, os.Getenv("SEAL_TOKEN"), nil).
+		OpenNodeLog(context.Background(), "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,35 +58,28 @@ func TestLogSeal_E2E_RunnerChildSealsOrIsCutOff(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns runner child processes")
 	}
-	logSrv, err := logs.New(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hs := httptest.NewServer(logSrv.Handler())
-	defer hs.Close()
-	client := logs.NewClient(hs.URL, nil)
-
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	b := backend.NewStoreBackend(st, PathsAt(dir), sparkwinglogs.New(hs.URL, nil, ""))
-
 	for _, tc := range []struct {
-		mode, run, wantState, wantLine string
+		mode, wantState string
 	}{
-		{mode: "clean", run: "run-clean", wantState: logs.StateComplete},
-		{
-			mode: "killed", run: "run-killed", wantState: logs.StateCutOff,
-			wantLine: "[logs cut off: the log stream ended without the runner's confirmation after line 5]",
-		},
+		{mode: "clean", wantState: logseg.StateComplete},
+		{mode: "killed", wantState: logseg.StateCutOff},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			ctx := context.Background()
+			ctrl, tok := newSegmentController(t)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			sink := openNodeLogSink(ctx, client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger)
+			if sink == nil {
+				t.Fatal("the controller issued no segment URLs")
+			}
+			url, stop, err := serveLoopbackLogs(sink, tok, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stop(ctx)
+
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLogSealRunnerChild$", "-test.count=1")
-			cmd.Env = append(os.Environ(), sealChildEnv+"="+tc.mode, "SEAL_LOGS_URL="+hs.URL, "SEAL_RUN="+tc.run)
+			cmd.Env = append(os.Environ(), sealChildEnv+"="+tc.mode, "SEAL_LOGS_URL="+url, "SEAL_TOKEN="+tok)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			stdout, err := cmd.StdoutPipe()
@@ -112,13 +104,29 @@ func TestLogSeal_E2E_RunnerChildSealsOrIsCutOff(t *testing.T) {
 			if err := cmd.Wait(); err != nil && tc.mode == "clean" {
 				t.Fatalf("runner child: %v\n%s", err, stderr.String())
 			}
-
-			seedFinishedNode(t, st, tc.run, "build", time.Now().Add(-2*logs.SealGrace))
-			nodes, err := b.ListNodes(ctx, tc.run)
-			if err != nil || len(nodes) != 1 {
-				t.Fatalf("nodes = %v, %v", nodes, err)
+			sink.close(ctx, false)
+			if err := ctrl.st.StartNode(ctx, "run-s", "a"); err != nil {
+				t.Fatal(err)
 			}
-			got, err := backend.NodeLogCompleteness(ctx, b, tc.run, nodes[0], time.Now())
+			if err := ctrl.st.FinishNode(ctx, "run-s", "a", "success", "", nil); err != nil {
+				t.Fatal(err)
+			}
+
+			b := backend.NewStoreBackend(ctrl.st, PathsAt(t.TempDir()), client.NewWithToken(ctrl.url, nil, tok).NodeLogs())
+			all, err := b.ListNodes(ctx, "run-s")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var nodes []*store.Node
+			for _, n := range all {
+				if n.NodeID == "a" {
+					nodes = append(nodes, n)
+				}
+			}
+			if len(nodes) != 1 {
+				t.Fatalf("nodes = %v, want node a", all)
+			}
+			got, err := backend.NodeLogCompleteness(ctx, b, "run-s", nodes[0], time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,48 +135,20 @@ func TestLogSeal_E2E_RunnerChildSealsOrIsCutOff(t *testing.T) {
 			}
 
 			var logsOut bytes.Buffer
-			if err := writeLogsViaBackend(ctx, b, tc.run, nodes, LogsOpts{}, &logsOut); err != nil {
+			if err := writeLogsViaBackend(ctx, b, "run-s", nodes, LogsOpts{}, &logsOut); err != nil {
 				t.Fatal(err)
 			}
 			text := logsOut.String()
 			if !strings.Contains(text, "step 5") {
 				t.Fatalf("runs logs lost the log itself:\n%s", text)
 			}
-			lastLine := strings.TrimSpace(text[strings.LastIndex(strings.TrimSuffix(text, "\n"), "\n")+1:])
-			if tc.wantLine == "" && strings.Contains(text, "[logs") {
+			if tc.mode == "clean" && strings.Contains(text, "[logs") {
 				t.Fatalf("a sealed log drew a completeness line:\n%s", text)
 			}
-			if tc.wantLine != "" && lastLine != tc.wantLine {
-				t.Fatalf("last line = %q, want %q\n%s", lastLine, tc.wantLine, text)
-			}
-			stored, err := client.Read(ctx, tc.run, "build")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bytes.Contains(stored, []byte("logs cut off")) {
-				t.Fatal("the synthetic line reached the stored log")
+			lastLine := strings.TrimSpace(text[strings.LastIndex(strings.TrimSuffix(text, "\n"), "\n")+1:])
+			if tc.mode == "killed" && (!strings.HasPrefix(lastLine, "[logs cut off") || lastLine != got.SyntheticLine()) {
+				t.Fatalf("last line = %q, want the cut-off line %q\n%s", lastLine, got.SyntheticLine(), text)
 			}
 		})
-	}
-}
-
-func seedFinishedNode(t *testing.T, st *store.Store, runID, nodeID string, finishedAt time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.StartNode(ctx, runID, nodeID); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.FinishNode(ctx, runID, nodeID, "success", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET finished_at = ? WHERE run_id = ? AND node_id = ?`,
-		finishedAt.UnixNano(), runID, nodeID); err != nil {
-		t.Fatal(err)
 	}
 }

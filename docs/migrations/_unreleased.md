@@ -1135,3 +1135,69 @@ step with the controller's own.
   segments advertised and writes to its logs URL, or locally without one,
   as before. Rolling the runners back returns their new logs to the logs
   service.
+
+## The logs service is removed
+
+This release ships no `sparkwing-logs`. Its steps replace the ones in
+[Node logs reach the controller as segments](#node-logs-reach-the-controller-as-segments)
+that keep the logs service running.
+
+- **Before:** `sparkwing-logs` held node logs that a runner without
+  segments, or a node from before segments, wrote; the controller read
+  through it and announced it as `logs` in `GET /api/v1/services`. The
+  runner-bundle chart deployed it, and runners, agents and profiles named
+  its URL.
+- **After:** the controller is the only place node logs go. It keeps them
+  as segments in its cache bucket (`--cache-blob-store`) or, without one,
+  its output directory; a controller with neither keeps no node logs, so a
+  runner keeps the log on its own disk and a laptop run against it fails
+  at start naming the controller. Pipeline binaries built against any SDK
+  keep logging unchanged: the runner serves their appends on loopback.
+- **Before you upgrade:** run `sparkwing-logs export` from the previous
+  release once against the service's root and archive and the
+  controller's cache bucket, as
+  [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments)
+  describes. Logs not exported become unreadable.
+- **Helm:** delete `sparkwing-runner-bundle.logs` (or `logs` for a
+  standalone runner bundle) and `controller.logs` from your values; a
+  values file that still sets them fails to render. The upgrade removes the
+  logs Deployment, Service and ServiceAccount; the logs PVC is kept by its
+  resource policy, so delete it once the export is done:
+
+  ```sh
+  kubectl -n <namespace> delete pvc <release>-sparkwing-runner-bundle-logs
+  ```
+
+- **Controller:** drop `--logs-url` (`SPARKWING_LOGS_URL`),
+  `--logs-archive-store` (`SPARKWING_LOGS_ARCHIVE_STORE`) and
+  `SPARKWING_LOGS_DELETE_TOKEN`. The storage pass counts and prunes logs
+  from the segments, and deleting a team deletes its segments.
+- **Runners and agents:** drop `--logs` from `sparkwing-runner runner` and
+  `launch`, `--trigger-runner-logs-url` from `runner`, and the `logs:` key
+  from an agent's `config.yaml`, which now fails to load with
+  `field logs not found`. `sparkwing cluster runners add` has no `--logs`.
+  Drop any `SPARKWING_LOGS_EGRESS_*` variables; nothing reads them.
+- **Profiles:** a `logs: {type: controller}` surface takes no `url`; remove
+  it. That surface now needs the profile's `state:` on the same
+  controller, because the controller keeps only the logs of runs it holds;
+  a profile that keeps state locally and sent logs to a logs service
+  chooses a `filesystem` or `s3` logs surface instead.
+- **Credentials and API:** the `logs.write` and `logs.delete` scopes are
+  gone, and minting a token with either is refused; runner tokens carry
+  `nodes.claim`, `triggers.claim`, `runs.state` and `secrets.read`.
+  Existing tokens that list them keep working with the rest of their
+  scopes. `GET /api/v1/runs/{id}/log-access`,
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate`, the `logs` field
+  of `GET /api/v1/services` and signed `kind=log` downloads are removed;
+  read logs through `GET /api/v1/runs/{id}/logs/{node}`. The storage
+  counter routes answer only the cache's operator token.
+- **Laptop:** `sparkwing serve` runs no logs service and writes only
+  `SPARKWING_CONTROLLER_URL` to `dev.env`; the dashboard reads node logs
+  from the run directories, and `sparkwing runs prune` removes them through
+  the dashboard.
+- **Go packages:** `pkg/logs` and `pkg/storage/sparkwinglogs` are removed.
+  Read node logs with `client.NodeLogs` from
+  `pkg/controller/client`, and their completeness with `pkg/storage/logseg`.
+- **Mixed versions:** upgrade the runners and the controller together. A
+  runner from before segments has nowhere to send its logs once the
+  service is gone, and keeps them on its own disk.

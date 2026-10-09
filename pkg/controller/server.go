@@ -96,7 +96,6 @@ type Server struct {
 	egressPrunedMonth string
 
 	cachePodURL  string
-	logsURL      string
 	dashboardURL string
 	externalURL  string
 	oidc         oidcState
@@ -152,9 +151,7 @@ type Server struct {
 	checkout  *billingCheckout
 	operators atomic.Pointer[map[string]bool]
 
-	dashboard         *Dashboard
-	forwardedLogsOnce sync.Once
-	forwardedLogs     storage.LogStore
+	dashboard *Dashboard
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -335,16 +332,6 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 // the announcement (clients fall back to "no cache pod").
 func (s *Server) WithCachePodURL(url string) *Server {
 	s.cachePodURL = url
-	return s
-}
-
-// WithLogsURL announces the externally-reachable sparkwing-logs URL
-// via GET /api/v1/services, so a runner posts node log lines to the
-// service that routes them instead of to the controller, which does
-// not. Empty disables the announcement, which is correct for a
-// co-located deployment where one mux serves both.
-func (s *Server) WithLogsURL(url string) *Server {
-	s.logsURL = url
 	return s
 }
 
@@ -969,7 +956,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/events/stream", requireScope(ScopeRunsRead, s.dashboardRead(web.EventsStreamHandler)))
 	mux.Handle("GET /api/v1/capacity/profiles", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityProfilesHandler)))
 	mux.Handle("GET /api/v1/capacity/profiles/explain", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityExplainHandler)))
-	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
@@ -1078,7 +1064,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input", newClaimSensitiveRoute(claimWorkKinds, pathClaimBinding, http.HandlerFunc(s.handleClaimInput)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleValidateClaimLog)).orElse(requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim))))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleUpdateNodeActivity)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity)))))

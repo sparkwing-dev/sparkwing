@@ -70,11 +70,6 @@ func run(args []string) error {
 		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
 			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
 			"hardcoding it in config.yaml. Empty disables the announcement.")
-	logsURL := fs.String("logs-url", os.Getenv("SPARKWING_LOGS_URL"),
-		"externally-reachable URL of the sparkwing-logs service. Announced via "+
-			"GET /api/v1/services so runners post node log lines to the service that "+
-			"routes them; the controller itself serves no /api/v1/logs. Empty disables "+
-			"the announcement, which is correct only when one process serves both.")
 	dashboardURL := fs.String("dashboard-url", os.Getenv("SPARKWING_DASHBOARD_URL"),
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
@@ -245,10 +240,6 @@ func run(args []string) error {
 		"teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 "+
 			"(without), as team=days[,team=days...]. Each distinct number is a retention class under "+
 			"<cache prefix>/logs/r<days>/ that needs its own lifecycle rule in the cache bucket")
-	logsArchiveStore := fs.String("logs-archive-store", os.Getenv("SPARKWING_LOGS_ARCHIVE_STORE"),
-		"the logs service's --archive-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile "+
-			"what each team's archived logs hold; the logs service keeps its own retention "+
-			"(env: SPARKWING_LOGS_ARCHIVE_STORE)")
 	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
 		"bytes one team without credits may download in a UTC day: binaries, artifacts, dependency archives "+
 			"and git fetches, through the cache or this controller. Log reads are not counted. Past it the "+
@@ -465,7 +456,6 @@ func run(args []string) error {
 		WithTrustedProxyAddr(*trustedProxyAddr).
 		WithCachePodURL(*cachePodURL).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
-		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
@@ -505,13 +495,7 @@ func run(args []string) error {
 	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 		return err
 	}
-	// safety: the log-deletion credential is a token carrying only
-	// logs.delete, which reads nothing; without one a team deletion with logs
-	// to remove waits and records why.
-	logsDeleteToken := strings.TrimSpace(os.Getenv("SPARKWING_LOGS_DELETE_TOKEN"))
-	clearEnv("SPARKWING_LOGS_DELETE_TOKEN")
 	srv.WithTeamStorage(controller.TeamStorage{
-		LogsURL: *logsURL, LogsToken: logsDeleteToken,
 		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: bincache.CacheToken(),
 	})
 	if err := configureGitHubApp(srv, githubAppFlags{
@@ -559,16 +543,12 @@ func run(args []string) error {
 		}
 		srv = srv.WithBucketUsage(bucketStore)
 	}
-	if *cacheBlobStore != "" || *logsArchiveStore != "" {
+	if *cacheBlobStore != "" {
 		cache, err := openTeamStore(ctx, *cacheBlobStore, controller.CacheObjectMaxAge)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: %w", err)
 		}
-		logsStore, err := openTeamStore(ctx, *logsArchiveStore, nil)
-		if err != nil {
-			return fmt.Errorf("--logs-archive-store: %w", err)
-		}
-		srv = srv.WithStoragePass(cache, logsStore)
+		srv = srv.WithStoragePass(cache)
 		privateKey := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY")
 		if keyFile := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE"); keyFile != "" {
 			if privateKey != "" {
@@ -583,12 +563,11 @@ func run(args []string) error {
 		}
 		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
 		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
-		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
-		client, _, _, err := s3store.Open(ctx, rawStore)
+		client, _, _, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("download signer S3: %w", err)
 		}
-		if err := srv.WithSignedDownloads(cache, logsStore, client, domain, keyPairID, privateKey); err != nil {
+		if err := srv.WithSignedDownloads(cache, client, domain, keyPairID, privateKey); err != nil {
 			return err
 		}
 	}
@@ -791,8 +770,8 @@ func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) er
 		return nil
 	}
 	return errors.New("the license allows more than one team, so an object store is required: set --bucket-store " +
-		"(or SPARKWING_OBJECT_STORE_URL) to the s3:// store the cache (--blob-store) and the logs service " +
-		"(--archive-store) keep their objects in, because free-tier allowances are enforced only there")
+		"(or SPARKWING_OBJECT_STORE_URL) to the s3:// store the cache (--blob-store) keeps its objects in, " +
+		"because free-tier allowances are enforced only there")
 }
 
 // safety: a multi-team controller holds other people's credentials, so it
@@ -965,7 +944,7 @@ func dashboard(p paths.Paths, hsts, insecureCookies bool) controller.Dashboard {
 		Paths:           p,
 		Capabilities: backend.Capabilities{
 			Mode:     "cluster",
-			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "sparkwinglogs", Runs: "controller"},
+			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "segments", Runs: "controller"},
 			Features: []string{"pipelines", "runs", "logs", "secrets", "approvals", "cross-pipeline-refs"},
 		},
 	}

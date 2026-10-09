@@ -20,14 +20,13 @@
 //   - [fs] -- filesystem (laptop / local dev)
 //   - [s3] -- any S3-compatible object store (ci-embedded, distributed)
 //   - [sparkwingcache] -- the sparkwing-cache HTTP service (distributed)
-//   - [sparkwinglogs] -- the sparkwing-logs HTTP service (distributed)
 //   - [stdoutlogs] -- write-only stream to process stdout (ephemeral CI)
 //
 // Default backend per execution mode:
 //
 //	local         filesystem            filesystem
 //	ci-embedded   S3 (or compatible)    S3 (or compatible)
-//	distributed   sparkwing-cache HTTP  sparkwing-logs HTTP
+//	distributed   sparkwing-cache HTTP  controller segments ([logseg])
 //
 // # Opening backends
 //

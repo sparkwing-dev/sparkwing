@@ -62,13 +62,16 @@ func TestApplyProfileBackendsWithMirror_ControllerSetsMirrorLocal(t *testing.T) 
 		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
 	}
 	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"}}
+	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: segmentKeepingController(t), Token: "swu_test"}}
 	paths := Paths{Root: t.TempDir()}
 	opts := Options{}
 	if err := ApplyProfileBackendsWithMirror(context.Background(), &opts, p, paths); err != nil {
 		t.Fatalf("apply(controller): %v", err)
 	}
 	defer opts.State.Close()
+	if seg, ok := opts.LogStore.(*segmentLogStore); ok {
+		defer seg.Close(context.Background())
+	}
 	if opts.MirrorLocal == nil {
 		t.Fatal("MirrorLocal not opened for controller (non-local) profile")
 	}

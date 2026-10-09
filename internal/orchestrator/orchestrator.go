@@ -829,24 +829,17 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 			}
 			backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
 		case *client.Client:
-			var logsBackend LogBackend
 			if opts.LogStore == nil {
-				if seg := controllerSegmentLogs(ctx, s, nil); seg != nil {
-					opts.LogStore = seg
+				seg, err := controllerSegmentLogs(ctx, s, nil)
+				if err != nil {
+					return nil, err
 				}
+				opts.LogStore = seg
 			}
 			if _, ok := opts.LogStore.(*segmentLogStore); ok {
 				s.WithWatchObserver(NoteWatch)
 			}
-			if opts.LogStore != nil {
-				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
-			} else {
-				logsURL, err := DiscoverLogsURL(ctx, s.BaseURL(), s.Token())
-				if err != nil {
-					return nil, err
-				}
-				logsBackend = NewHTTPLogsWithToken(logsURL, nil, s.Token(), nil)
-			}
+			logsBackend := NewLogStoreBackend(opts.LogStore, nil)
 			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
 		default:
 			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)

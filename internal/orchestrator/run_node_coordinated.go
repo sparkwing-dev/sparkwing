@@ -191,8 +191,7 @@ func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBacke
 	if prof == nil {
 		return nil, nil
 	}
-	// hack: the logs-service discovery this reaches without ctx goes when the logs service does.
-	state, logs, _ := profileSurfaceSpecs(prof, "") //nolint:contextcheck // see hack above
+	state, logs, _ := profileSurfaceSpecs(prof, "")
 	if logs == nil {
 		return nil, nil
 	}

@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -43,6 +45,16 @@ func (c *Client) recordPollAdvice(resp *http.Response) {
 func (c *Client) WithRunnerIdentity(id string) *Client {
 	c.runnerIdentity.Store(&id)
 	return c
+}
+
+// ProcessIdentity names this process for [Client.WithRunnerIdentity] as
+// "role:host:pid", for a caller with no stabler name of its own.
+func ProcessIdentity(role string) string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown-host"
+	}
+	return fmt.Sprintf("%s:%s:%d", role, host, os.Getpid())
 }
 
 // WithTriggerNodeRunner names how this client runs the nodes of the triggers

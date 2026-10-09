@@ -418,6 +418,7 @@ func (p *Pacer) Success() (resumed bool)
 type PollAdvisor interface {
 	PollAdvice() time.Duration
 }
+func ProcessIdentity(role string) string
 type RateLimitedError struct {
 	RetryAfter time.Duration
 

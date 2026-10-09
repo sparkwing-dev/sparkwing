@@ -92,7 +92,6 @@ if [ "$NON_INTERACTIVE" = false ]; then
 fi
 
 CONTROLLER_URL="${SPARKWING_CONTROLLER:-}"
-LOGS_URL="${SPARKWING_LOGS:-}"
 GITCACHE_URL="${SPARKWING_GITCACHE_URL:-}"
 API_TOKEN="${SPARKWING_API_TOKEN:-}"
 RUNNER_NAME="${RUNNER_NAME:-}"
@@ -102,9 +101,6 @@ LOCAL_RESERVE="${SPARKWING_LOCAL_RESERVE:-}"
 
 if [ -z "$CONTROLLER_URL" ]; then
   CONTROLLER_URL="$(ask 'Controller URL (e.g. https://controller.example.com)' '')"
-fi
-if [ -z "$LOGS_URL" ]; then
-  LOGS_URL="$(ask 'Logs service URL (e.g. https://logs.example.com)' '')"
 fi
 if [ -z "$API_TOKEN" ]; then
   API_TOKEN="$(ask_secret 'API token (will not be echoed)')"
@@ -128,7 +124,6 @@ if [ -z "$MAX_CONCURRENT" ]; then
 fi
 
 reject_unsafe_value "Controller URL" "$CONTROLLER_URL"
-reject_unsafe_value "Logs service URL" "$LOGS_URL"
 reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
 reject_unsafe_value "Runner name" "$RUNNER_NAME"
 reject_unsafe_value "Contribution ceiling" "$CONTRIBUTION"
@@ -138,7 +133,6 @@ log ""
 log "config summary:"
 log "  binary:         $BINARY_PATH"
 log "  controller:     $CONTROLLER_URL"
-log "  logs:           $LOGS_URL"
 log "  gitcache:       $GITCACHE_URL"
 log "  runner name:    $RUNNER_NAME"
 log "  max concurrent: $MAX_CONCURRENT"
@@ -165,7 +159,6 @@ chmod 700 "$CONFIG_DIR"
 AGENT_SECTION="$(cat <<YAML
 agent:
   controller: "${CONTROLLER_URL}"
-  logs: "${LOGS_URL}"
   gitcache: "${GITCACHE_URL}"
   token: "${API_TOKEN}"
   max_concurrent: ${MAX_CONCURRENT}

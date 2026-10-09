@@ -10,24 +10,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-func TestRunnerConnectArgsShipsLogsOnlyToAnAnnouncedLogsService(t *testing.T) {
+func TestRunnerConnectArgsNamesTheControllerAndRepos(t *testing.T) {
 	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := runnerConnectArgs("https://api.example", "https://logs.example/", "box", allow)
+	got := runnerConnectArgs("https://api.example", "box", allow)
 	want := `sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials"` +
-		" --controller https://api.example --logs https://logs.example" +
-		" --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix box"
-	if got != want {
-		t.Fatalf("runnerConnectArgs = %q\nwant %q", got, want)
-	}
-	got = runnerConnectArgs("https://api.example", "", "box", allow)
-	want = `sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials"` +
 		" --controller https://api.example" +
 		" --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix box"
 	if got != want {
-		t.Fatalf("runnerConnectArgs without a logs service = %q\nwant %q", got, want)
+		t.Fatalf("runnerConnectArgs = %q\nwant %q", got, want)
 	}
 }
 
@@ -89,7 +82,7 @@ func TestTheConnectCommandStopsWhenItCannotReplaceTheTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", "-c", runnerTokenSetup("swr_new")+" && "+runnerConnectArgs("https://api.example", "", "box", allow))
+	cmd := exec.Command("sh", "-c", runnerTokenSetup("swr_new")+" && "+runnerConnectArgs("https://api.example", "box", allow))
 	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("connect command succeeded although it could not remove the old token file:\n%s", out)

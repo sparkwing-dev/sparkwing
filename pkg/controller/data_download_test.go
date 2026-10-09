@@ -89,7 +89,7 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
 	srv := New(st, nil).WithTeamDownloadCaps(5, 5)
-	if err := srv.WithSignedDownloads(bucket, nil, client, "cdn.example.test", "KPAIR", string(pemKey)); err != nil {
+	if err := srv.WithSignedDownloads(bucket, client, "cdn.example.test", "KPAIR", string(pemKey)); err != nil {
 		t.Fatal(err)
 	}
 	return srv, grant, head
@@ -239,60 +239,6 @@ func TestSignedDataBudgetStopsStaleGrantBeforeClaimReads(t *testing.T) {
 		if got.Code == http.StatusTooManyRequests && got.Header().Get("Retry-After") == "" {
 			t.Fatalf("%s: 429 has no Retry-After", step.path)
 		}
-	}
-}
-
-func logDownloadFixture(t *testing.T) (*Server, string, *downloadHead) {
-	t.Helper()
-	s, grant, head := downloadFixture(t)
-	s.WithAuthenticator(NewAuthenticator(s.store, 0))
-	logs, err := teamblob.New(teamblob.Options{Bucket: "bucket", Prefix: "logs", Client: head})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.downloadStores[store.StorageLogs] = logs
-	return s, grant, head
-}
-
-func callLogDownload(t *testing.T, s *Server, bearer string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/data/download", strings.NewReader(`{"kind":"log","key":"runs/run-B/build.log"}`))
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
-	return rec
-}
-
-func TestDataDownloadRejectsLogSigningWithRunCacheGrant(t *testing.T) {
-	s, grant, head := logDownloadFixture(t)
-	response := callLogDownload(t, s, grant)
-	if response.Code != http.StatusForbidden || len(head.keys) != 0 {
-		t.Fatalf("cross-run log signing = %d, HEAD keys=%v", response.Code, head.keys)
-	}
-}
-
-func TestDataDownloadRequiresLogsReadForLogSigning(t *testing.T) {
-	s, _, head := logDownloadFixture(t)
-	team, err := s.store.ForTeam(t.Context(), "team-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runsOnly, _, err := team.CreateToken(t.Context(), "reader", store.TokenKindUser, []string{ScopeRunsRead}, time.Hour, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := callLogDownload(t, s, runsOnly)
-	if response.Code != http.StatusForbidden || len(head.keys) != 0 {
-		t.Fatalf("runs.read-only log signing = %d, HEAD keys=%v", response.Code, head.keys)
-	}
-	logsReader, _, err := team.CreateToken(t.Context(), "logs-reader", store.TokenKindUser, []string{ScopeLogsRead}, time.Hour, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	response = callLogDownload(t, s, logsReader)
-	if response.Code != http.StatusOK || len(head.keys) != 1 {
-		t.Fatalf("logs.read signing = %d, HEAD keys=%v", response.Code, head.keys)
 	}
 }
 
@@ -714,7 +660,7 @@ func TestIncompleteCloudFrontConfigDoesNotAnnounceSigning(t *testing.T) {
 	s, _, _ := downloadFixture(t)
 	other := New(s.store, nil)
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
-	if err := other.WithSignedDownloads(s.downloadStores[store.StorageCache], nil, client, "cdn.example.test", "", ""); err == nil {
+	if err := other.WithSignedDownloads(s.downloadStores[store.StorageCache], client, "cdn.example.test", "", ""); err == nil {
 		t.Fatal("incomplete signing configuration was accepted")
 	}
 	if got := other.dataDownloadURL(); got != "" {
@@ -722,22 +668,22 @@ func TestIncompleteCloudFrontConfigDoesNotAnnounceSigning(t *testing.T) {
 	}
 }
 
-func TestLogsOnlySignerDoesNotAnnounceBinaryDownloads(t *testing.T) {
+func TestSignerWithoutACacheBucketDoesNotAnnounceBinaryDownloads(t *testing.T) {
 	s, _, _ := downloadFixture(t)
 	other := New(s.store, nil)
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
-	if err := other.WithSignedDownloads(nil, s.downloadStores[store.StorageCache], client, "", "", ""); err != nil {
+	if err := other.WithSignedDownloads(nil, client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := other.dataDownloadURL(); got != "" {
-		t.Fatalf("logs-only signer announced binary route %q", got)
+		t.Fatalf("a signer with no cache bucket announced binary route %q", got)
 	}
 }
 
 func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 	s, _, _ := downloadFixture(t)
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
-	if err := s.WithSignedDownloads(s.downloadStores[store.StorageCache], nil, client, "", "", ""); err != nil {
+	if err := s.WithSignedDownloads(s.downloadStores[store.StorageCache], client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -760,34 +706,5 @@ func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 		if body.DataDownloadURL != tc.want {
 			t.Fatalf("ingress=%v route=%q want %q", tc.ingress, body.DataDownloadURL, tc.want)
 		}
-	}
-}
-
-// Log reads are never counted against the download cap: a team already at
-// its cap is refused a binary URL yet still gets log URLs, which add nothing.
-func TestATeamAtItsDownloadCapCanStillSignLogURLs(t *testing.T) {
-	s, grant, _ := logDownloadFixture(t)
-	team, err := s.store.ForTeam(t.Context(), "team-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	reader, _, err := team.CreateToken(t.Context(), "logs-reader", store.TokenKindUser, []string{ScopeLogsRead}, time.Hour, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.store.ChargeDownload(t.Context(), store.DownloadCharge{Team: "team-a", Bytes: 5, Now: time.Now(), FreeCapBytes: 5, FundedCapBytes: 5}); err != nil {
-		t.Fatal(err)
-	}
-	if capped, _ := callDownload(t, s, grant, "bins/abc", false); capped.Code != http.StatusTooManyRequests {
-		t.Fatalf("a binary URL at the cap = %d, want 429", capped.Code)
-	}
-	for i := range 3 {
-		if got := callLogDownload(t, s, reader); got.Code != http.StatusOK {
-			t.Fatalf("log URL %d at the cap = %d: %s", i, got.Code, got.Body.String())
-		}
-	}
-	day, err := s.store.ChargeDownload(t.Context(), store.DownloadCharge{Team: "team-a", Bytes: 0, Now: time.Now(), FreeCapBytes: 0, FundedCapBytes: 0})
-	if err != nil || day.DayBytes != 5 {
-		t.Fatalf("the team's day after log reads = %+v, %v; want the 5 bytes charged before them", day, err)
 	}
 }

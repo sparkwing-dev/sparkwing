@@ -101,7 +101,7 @@ type tenancyFixture struct {
 
 var everyScope = []string{
 	controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsControl,
-	controller.ScopeNodesClaim, controller.ScopeLogsRead, controller.ScopeLogsWrite,
+	controller.ScopeNodesClaim, controller.ScopeLogsRead,
 	controller.ScopeTriggersRead, controller.ScopeTriggersClaim, controller.ScopeRunsState,
 	controller.ScopeSecretsRead, controller.ScopeApprovalsWrite, controller.ScopeTeamAdmin,
 }
@@ -401,7 +401,7 @@ func runScoped(pattern string) bool {
 // Every route the controller registers under one run or trigger answers
 // another team with 404, including the ones that change state. The list is
 // read from server.go, so a route added later is checked without an edit
-// here; the only way out is teamBoundaryExempt, which carries a reason.
+// here.
 func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		routes := controller.MuxRouteScopes(t)
@@ -419,17 +419,9 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 				t.Errorf("route %q is not in the list read from server.go; the enumeration is broken", p)
 			}
 		}
-		for pattern, reason := range controller.TeamBoundaryExempt {
-			if _, ok := routes[pattern]; !ok || strings.TrimSpace(reason) == "" {
-				t.Errorf("exemption %q names no registered route or carries no reason", pattern)
-			}
-		}
 		checked := 0
 		for pattern := range routes {
 			if !runScoped(pattern) {
-				continue
-			}
-			if _, exempt := controller.TeamBoundaryExempt[pattern]; exempt {
 				continue
 			}
 			checked++
@@ -588,7 +580,7 @@ func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 		for _, s := range controller.ScopesForRole(role) {
 			switch s {
 			case controller.ScopeAdmin, controller.ScopeSecretsRead, controller.ScopeNodesClaim,
-				controller.ScopeTriggersClaim, controller.ScopeRunsState, controller.ScopeLogsWrite:
+				controller.ScopeTriggersClaim, controller.ScopeRunsState:
 				t.Errorf("role %s carries the %s scope", role, s)
 			}
 		}

@@ -20,7 +20,7 @@ func TestBrokerLogsOneLineForANodeSpeakingAnotherProtocol(t *testing.T) {
 	}))
 	defer upstream.Close()
 	var logged bytes.Buffer
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "node-a", store.NodeClaimFence{}, nil,
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "node-a", store.NodeClaimFence{}, nil,
 		slog.New(slog.NewTextHandler(&logged, nil)))
 	if err != nil {
 		t.Fatal(err)

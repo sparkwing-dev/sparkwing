@@ -146,7 +146,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	now := time.Now().UTC()
 	scopes := []string{
 		controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
-		controller.ScopeRunsState, controller.ScopeSecretsRead, controller.ScopeLogsWrite,
+		controller.ScopeRunsState, controller.ScopeSecretsRead,
 	}
 	team := func(slug string) *store.Tenant {
 		t.Helper()
@@ -217,7 +217,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 		if err != nil {
 			t.Fatalf("claim %s: %v", runID, err)
 		}
-		executePooledNode(ctx, ctrl, ctrlSrv.URL, "", ctrlSrv.URL+"/api/v1/gitcache", allow, token,
+		executePooledNode(ctx, ctrl, ctrlSrv.URL, ctrlSrv.URL+"/api/v1/gitcache", allow, token,
 			claimed, claimed.ClaimedBy, time.Minute, time.Hour, "pool runner", discardLogger(), nil, nil)
 		owner, err := st.AsOperator().RunTeam(ctx, runID)
 		if err != nil {

@@ -89,7 +89,7 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 	}
 	scopes := []string{
 		controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
-		controller.ScopeRunsState, controller.ScopeSecretsRead, controller.ScopeLogsWrite,
+		controller.ScopeRunsState, controller.ScopeSecretsRead,
 	}
 	mint := func(tenant *store.Tenant, name string) string {
 		t.Helper()

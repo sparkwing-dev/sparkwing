@@ -2,12 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -140,10 +140,7 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 	if surf.State == nil && surf.Logs == nil && surf.Cache == nil {
 		if p != nil && p.ControllerURL() != "" {
 			ctrl := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
-
-			logsSpec := ctrl()
-			logsSpec.URL = announcedLogsURL(p)
-			return ctrl(), logsSpec, ctrl()
+			return ctrl(), ctrl(), ctrl()
 		}
 		return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
 	}
@@ -160,31 +157,23 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 	return state, surf.Logs, surf.Cache
 }
 
-func announcedLogsURL(p *profile.Profile) string {
-	if p == nil || p.ControllerURL() == "" {
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), logsDiscoveryTimeout)
-	defer cancel()
-	svc, err := discovery.ServicesFor(ctx, p.ControllerURL(), p.ControllerToken())
-	if err != nil {
-		return ""
-	}
-	return svc.Logs
-}
-
-// safety: a controller that keeps segments takes the node logs of the runs it holds, ahead of any logs
-// service it still announces; a run whose state stays elsewhere has no node rows there to grant against.
+// safety: a controller logs surface keeps the node logs of the runs that controller holds; a run whose state
+// stays elsewhere has no node rows there to grant segments against, so it is refused rather than lost.
 func openLogStoreFromSpec(ctx context.Context, spec backends.Spec, remoteState bool, state *backends.Spec, lookup storeurl.ProfileLookup) (storage.LogStore, error) {
-	if remoteState && state != nil && state.Type == backends.TypeController && state.Controller == spec.Controller &&
-		spec.Type == backends.TypeController && lookup != nil {
-		if url, token, err := lookup(spec.Controller); err == nil && url != "" {
-			if seg := controllerSegmentLogs(ctx, client.NewWithToken(url, nil, token), nil); seg != nil {
-				return seg, nil
-			}
-		}
+	if spec.Type != backends.TypeController {
+		return storeurl.OpenLogStoreFromSpec(ctx, spec, lookup)
 	}
-	return storeurl.OpenLogStoreFromSpec(ctx, spec, lookup)
+	if !remoteState || state == nil || state.Type != backends.TypeController || state.Controller != spec.Controller {
+		return nil, fmt.Errorf("logs backend type=controller keeps the logs of runs whose state lives on controller %q; set the state surface to that controller too", spec.Controller)
+	}
+	if lookup == nil {
+		return nil, errors.New("logs backend type=controller needs a profile lookup; caller did not provide one")
+	}
+	url, token, err := lookup(spec.Controller)
+	if err != nil {
+		return nil, fmt.Errorf("logs backend profile %q: %w", spec.Controller, err)
+	}
+	return controllerSegmentLogs(ctx, client.NewWithToken(url, nil, token), nil)
 }
 
 func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {

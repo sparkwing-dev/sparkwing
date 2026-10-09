@@ -17,9 +17,8 @@ import (
 )
 
 // NodeLogs is a read-only [storage.LogStore] over the controller's log
-// routes. The controller serves a node's log from its segments, or from
-// the logs service for a node that wrote none, so a reader needs no
-// other address:
+// routes. The controller serves a node's log from its segments, so a
+// reader needs no other address:
 //
 //	data, err := c.NodeLogs().Read(ctx, runID, nodeID, storage.ReadOpts{Tail: 100})
 type NodeLogs struct{ c *Client }

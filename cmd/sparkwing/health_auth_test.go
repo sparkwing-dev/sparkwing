@@ -69,20 +69,3 @@ func logsProbeProfile(t *testing.T, logsAuth string) *profile.Profile {
 	t.Cleanup(discovery.ResetCache)
 	return healthProfile(controller.URL)
 }
-
-func TestProbeLogs_WarnsWhenTheLogsServiceServesUnauthenticated(t *testing.T) {
-	r := probeLogs(context.Background(), logsProbeProfile(t, "disabled"))
-	if r.Status != "warn" {
-		t.Fatalf("status=%q want warn (detail=%q)", r.Status, r.Detail)
-	}
-	if !strings.Contains(r.Detail, "unauthenticated") {
-		t.Fatalf("detail=%q want mention of unauthenticated", r.Detail)
-	}
-}
-
-func TestProbeLogs_OKWhenTheLogsServiceResolvesTokens(t *testing.T) {
-	r := probeLogs(context.Background(), logsProbeProfile(t, "enabled"))
-	if r.Status != "ok" {
-		t.Fatalf("status=%q want ok (detail=%q)", r.Status, r.Detail)
-	}
-}

@@ -32,7 +32,6 @@ import (
 
 type PoolLoopConfig struct {
 	ControllerURL string
-	LogsURL       string
 	GitcacheURL   string
 	// AllowRepos binds every claimed node the way TriggerLoopOptions.AllowRepos
 	// binds a trigger.
@@ -130,7 +129,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	ctrl.WithClaimResources(held.report)
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
 		defer held.hold(n)()
-		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.AllowRepos, cfg.Token,
+		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.GitcacheURL, cfg.AllowRepos, cfg.Token,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
@@ -221,7 +220,6 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	logger.Info(
 		cfg.SourceName+" started",
 		"controller", cfg.ControllerURL,
-		"logs", cfg.LogsURL,
 		"max_concurrent", cfg.MaxConcurrent,
 		"max_claims", cfg.MaxClaims,
 		"poll", cfg.PollInterval,
@@ -377,8 +375,6 @@ func runRunnerCLI(args []string, version string) error {
 	fs := flag.NewFlagSet("runner", flag.ExitOnError)
 	controllerURL := fs.String("controller", "",
 		"controller base URL (required)")
-	logsURL := fs.String("logs", "",
-		"logs service URL (optional; without one, node logs reach the controller as segments)")
 	poll := fs.Duration("poll", 500*time.Millisecond,
 		"poll interval when the claim queue is empty")
 	heartbeat := fs.Duration("heartbeat", 0,
@@ -432,8 +428,6 @@ func runRunnerCLI(args []string, version string) error {
 		"imagePullSecret for trigger-spawned runner Jobs (k8s or warm fallback)")
 	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", "",
 		"controller URL for trigger-spawned runner Jobs (defaults to --controller)")
-	triggerRunnerLogsURL := fs.String("trigger-runner-logs-url", "",
-		"logs-service URL for trigger-spawned runner Jobs (defaults to --logs)")
 	triggerRunnerKubeconfig := fs.String("trigger-runner-kubeconfig", os.Getenv("KUBECONFIG"),
 		"kubeconfig path for creating trigger-spawned Jobs (empty = in-cluster)")
 	triggerArtifactStore := fs.String("trigger-artifact-store", "",
@@ -634,7 +628,6 @@ func runRunnerCLI(args []string, version string) error {
 		go func() {
 			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
 				ControllerURL:   *controllerURL,
-				LogsURL:         *logsURL,
 				GitcacheURL:     *gitcacheURL,
 				AllowRepos:      allow,
 				Token:           *token,
@@ -644,7 +637,6 @@ func runRunnerCLI(args []string, version string) error {
 				K8sRunnerSA:     *triggerRunnerSA,
 				K8sPullSecret:   *triggerRunnerPullSecret,
 				K8sCtrlURL:      firstNonEmpty(*triggerRunnerCtrlURL, *controllerURL),
-				K8sLogsURL:      firstNonEmpty(*triggerRunnerLogsURL, *logsURL),
 				Kubeconfig:      *triggerRunnerKubeconfig,
 				ArtifactStore:   *triggerArtifactStore,
 				K8sLabels:       triggerRunnerLabels,
@@ -675,7 +667,6 @@ func runRunnerCLI(args []string, version string) error {
 
 	return RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL:     *controllerURL,
-		LogsURL:           *logsURL,
 		GitcacheURL:       *gitcacheURL,
 		AllowRepos:        allow,
 		Token:             *token,
@@ -715,7 +706,7 @@ func currentCapacity(ctx context.Context, provider headroomProvider) capacityRep
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
-	controllerURL, logsURL, gitcacheURL string,
+	controllerURL, gitcacheURL string,
 	allow sourceurl.RepoAllowlist,
 	token string,
 	n *store.Node,
@@ -757,7 +748,7 @@ func executePooledNode(
 		announced = services.CachePod
 	}
 	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
-	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
+	res, err := runPooledNodeOnce(execCtx, controllerURL, "", n.RunID, n.NodeID, holderID, token,
 		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
 	cancel()

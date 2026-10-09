@@ -29,9 +29,9 @@ func TestBindDefaultsToUnlimited(t *testing.T) {
 }
 
 func TestBindWithoutAnEnvironmentReadsOnlyFlags(t *testing.T) {
-	t.Setenv(egress.EnvName(egress.ServiceLogs, egress.EnvDailyAlarmBytes), "not a number")
+	t.Setenv(egress.EnvName(egress.ServiceController, egress.EnvDailyAlarmBytes), "not a number")
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs, nil, egress.ServiceLogs, egress.LogsSurfaces)
+	read := egress.Bind(fs, nil, egress.ServiceController, egress.ControllerSurfaces)
 	if err := fs.Parse([]string{"--egress-max-downloads=2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,12 +84,11 @@ func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 	}
 }
 
-// safety: one variable read by three processes on a shared ConfigMap is
-// one cap applied three times, so each service must read its own.
+// safety: one variable read by two processes on a shared ConfigMap is
+// one cap applied twice, so each service must read its own.
 func TestEachServiceReadsItsOwnVariables(t *testing.T) {
 	env := envOf(map[string]string{
 		egress.EnvName(egress.ServiceController, egress.EnvDailyAlarmBytes): "100",
-		egress.EnvName(egress.ServiceLogs, egress.EnvDailyAlarmBytes):       "200",
 		egress.EnvName(egress.ServiceCache, egress.EnvDailyAlarmBytes):      "300",
 	})
 	for _, tc := range []struct {
@@ -98,7 +97,6 @@ func TestEachServiceReadsItsOwnVariables(t *testing.T) {
 		want     int64
 	}{
 		{egress.ServiceController, egress.ControllerSurfaces, 100},
-		{egress.ServiceLogs, egress.LogsSurfaces, 200},
 		{egress.ServiceCache, egress.CacheSurfaces, 300},
 	} {
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
@@ -147,9 +145,9 @@ func TestACacheRegistersNoPerPrincipalBudget(t *testing.T) {
 }
 
 func TestBindRefusesAMalformedEnvironment(t *testing.T) {
-	name := egress.EnvName(egress.ServiceLogs, egress.EnvMaxDownloads)
+	name := egress.EnvName(egress.ServiceController, egress.EnvMaxDownloads)
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs, envOf(map[string]string{name: "a lot"}), egress.ServiceLogs, egress.LogsSurfaces)
+	read := egress.Bind(fs, envOf(map[string]string{name: "a lot"}), egress.ServiceController, egress.ControllerSurfaces)
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type triggerFlags struct {
@@ -128,21 +127,12 @@ func runPipelineTrigger(args []string) error {
 	fmt.Fprintf(os.Stderr, "triggered %s on %s as %s (status=%s); following...\n",
 		flags.pipeline, prof.Name, resp.RunID, resp.Status)
 
-	if prof.Logs != nil {
-		format, ferr := resolveTTYAwareOutput("", "pipeline trigger")
-		if ferr != nil {
-			return ferr
-		}
-		followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerToken(),
-			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
-		return remoteFollowExit(ctx, prof, resp.RunID, followErr)
+	format, ferr := resolveTTYAwareOutput("", "pipeline trigger")
+	if ferr != nil {
+		return ferr
 	}
-
-	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
-		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
-			"Add a logs: spec to the profile in config.yaml to see streaming output.", prof.Name)))
-	followErr := orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout)
+	followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerToken(),
+		resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
 	return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 }
 

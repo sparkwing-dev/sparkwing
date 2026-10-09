@@ -60,20 +60,6 @@ func TestTenantCacheEntriesExpire(t *testing.T) {
 	}
 }
 
-// The logs service validates any team's runner's log-write claim, so the
-// claim-validate route stays outside the run boundary.
-func TestTeamBoundaryLeavesClaimValidateToItsOwnGate(t *testing.T) {
-	const pattern = "POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate"
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-1/nodes/build/claim/validate", nil)
-	if id, scoped := teamBoundaryRunID(pattern, req); scoped {
-		t.Fatalf("claim validate is inside the boundary for run %q", id)
-	}
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-1/nodes", nil)
-	if id, scoped := teamBoundaryRunID("GET /api/v1/runs/{id}/nodes", req); !scoped || id != "run-1" {
-		t.Fatalf("a run route is outside the boundary: %q %v", id, scoped)
-	}
-}
-
 // runTeam feeds the cache grant, which opens a team's cache namespace, so it
 // repeats the boundary rather than trusting the middleware in front of it.
 func TestRunTeamRefusesAnotherTeamsRun(t *testing.T) {
@@ -160,9 +146,6 @@ func TestTeamBoundaryRunIDIsTheIDTheHandlerReads(t *testing.T) {
 					continue
 				}
 				served++
-				if _, exempt := teamBoundaryExempt[got.pattern]; exempt {
-					continue
-				}
 				if !scoped || boundaryID != got.id {
 					t.Errorf("%s %s: boundary checks %q (scoped=%v), handler %s reads %q",
 						method, target, boundaryID, scoped, got.pattern, got.id)

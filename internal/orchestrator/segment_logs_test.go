@@ -131,7 +131,7 @@ func TestLaunchedNodeLogReachesTheControllerAsSegments(t *testing.T) {
 func TestBrokeredChildLogIsSealedByTheBroker(t *testing.T) {
 	ctrl, tok := newSegmentController(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker, err := startRemoteExecutionBroker(ctrl.url, "", tok, "run-s", "a", store.NodeClaimFence{}, nil, logger)
+	broker, err := startRemoteExecutionBroker(ctrl.url, tok, "run-s", "a", store.NodeClaimFence{}, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +147,13 @@ func TestBrokeredChildLogIsSealedByTheBroker(t *testing.T) {
 		t.Fatalf("append through the broker: %v %v", resp, err)
 	}
 	_ = resp.Body.Close()
+	other, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, broker.URL()+"/api/v1/logs/run-s/b", strings.NewReader("x\n"))
+	other.Header.Set("Authorization", "Bearer "+broker.capability)
+	if resp, err := http.DefaultClient.Do(other); err != nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("append to another node through the broker: %v %v", resp, err)
+	} else {
+		_ = resp.Body.Close()
+	}
 	broker.sealChildLogs(t.Context(), assistedChildOutcome{}, errors.New("exec format error"), logger)
 
 	l := ctrl.log(t)
@@ -174,7 +181,7 @@ func TestNodeLogStaysLocalOnAControllerWithoutSegments(t *testing.T) {
 func TestTriggerBrokerKeepsEachNodeLogAsSegments(t *testing.T) {
 	ctrl, tok := newSegmentController(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker, err := StartTriggerBroker(ctrl.url, "", tok, &store.Trigger{ID: "run-s", Pipeline: "demo"}, logger)
+	broker, err := StartTriggerBroker(ctrl.url, tok, &store.Trigger{ID: "run-s", Pipeline: "demo"}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +286,7 @@ func newFakeSegmentController(t *testing.T) (*httptest.Server, chan livePush) {
 func TestTriggerBrokerTurnsOnWatchedNodesFromTheRunHeartbeat(t *testing.T) {
 	srv, pushes := newFakeSegmentController(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker, err := StartTriggerBroker(srv.URL, "", "runner-token", &store.Trigger{ID: "r", Pipeline: "demo"}, logger)
+	broker, err := StartTriggerBroker(srv.URL, "runner-token", &store.Trigger{ID: "r", Pipeline: "demo"}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -100,8 +100,8 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 			fmt.Fprintln(w, `{"value":"remote-token","masked":true}`)
 		case r.URL.Path == "/bin/probe":
 			w.WriteHeader(http.StatusNotFound)
-		case r.URL.Path == "/api/v1/logs/run/node", r.URL.Path == "/api/v1/logs/run/node/seal":
-			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/api/v1/capabilities":
+			fmt.Fprintln(w, `{"logs":{"segments":true}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -121,16 +121,11 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 	if found, err := art.Has(context.Background(), "probe"); err != nil || found {
 		t.Fatalf("remote cache probe = %v, %v; want missing", found, err)
 	}
-	nodeLog, err := logs.OpenNodeLog(context.Background(), "run", "node", nil)
-	if err != nil {
-		t.Fatalf("open remote log: %v", err)
+	if logs == nil {
+		t.Fatal("normal child opened no controller logs")
 	}
-	nodeLog.Log("info", "remote log")
-	if err := nodeLog.Close(); err != nil {
-		t.Fatalf("close remote log: %v", err)
-	}
-	if got := requests.Load(); got != 5 {
-		t.Fatalf("normal child made %d controller request(s), want secrets, cache, capabilities, a log line and its seal", got)
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("normal child made %d controller request(s), want secrets, cache and capabilities", got)
 	}
 }
 
@@ -141,15 +136,9 @@ func TestCoordinatedChildSurfaces_UnreachableProfileStillFailsWithoutLocalOnly(t
 	setCoordinatedControllerProfile(t, controllerURL)
 	t.Setenv("SPARKWING_LOCAL_ONLY", "")
 
-	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
-	if err != nil {
-		t.Fatalf("opening remote clients: %v", err)
-	}
-	if source == nil || art == nil || logs == nil {
-		t.Fatalf("normal child did not retain its profile: secrets=%T cache=%T logs=%T", source, art, logs)
-	}
-	if _, _, err := source.Read("TOKEN"); err == nil || !strings.Contains(err.Error(), controllerURL) {
-		t.Fatalf("unreachable secret error = %v", err)
+	_, _, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
+	if err == nil || logs != nil || !strings.Contains(err.Error(), controllerURL) {
+		t.Fatalf("unreachable profile: logs=%T err=%v; want an error naming %s", logs, err, controllerURL)
 	}
 }
 

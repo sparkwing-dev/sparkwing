@@ -36,7 +36,6 @@ run_install() {
     RUNNER_NAME=test-runner \
     MAX_CONCURRENT=2 \
     SPARKWING_CONTROLLER=https://ctrl.example.com \
-    SPARKWING_LOGS=https://logs.example.com \
     SPARKWING_API_TOKEN=swr_good \
     "$@" \
     bash "$SRC/install.sh" --yes

@@ -280,7 +280,7 @@ var cmdCloudStatus = Command{
 and scopes the controller reports for its token, the announced dashboard URL,
 and the controller, auth, logs and gitcache probes. A profile with no
 controller reports its storage probes alone. Exits non-zero when a probe
-fails; a missing optional logs service warns without failing, and a controller
+fails; a controller that keeps no node logs warns without failing, and a controller
 that announces no cache pod URL omits the gitcache probe.
 
 --cluster answers "is this cluster alive?" for an operator. It adds the probes
@@ -1146,9 +1146,8 @@ var cmdPipelineTrigger = Command{
 	Description: `Submits a trigger to the controller defined by --profile and
 follows the remote run until it reaches a terminal state.
 
-When the profile defines a logs URL, the follow streams full log
-output; otherwise it shows node-status updates from the
-controller. --detach skips the follow and prints the run id once
+The follow streams the run's node logs through the controller.
+--detach skips the follow and prints the run id once
 the trigger is registered (the trigger POST itself always
 completes before the command exits, so the run is guaranteed
 queued).
@@ -1784,7 +1783,7 @@ Add a profile with 'sparkwing cloud connect', check it with
 var cmdProfilesList = Command{
 	Path:     "sparkwing configure profiles list",
 	Synopsis: "Print every registered profile",
-	Description: `Prints a table of profile name, controller URL, logs URL, and
+	Description: `Prints a table of profile name, controller URL, logs surface, and
 token. JSON is one profile per line; the token is redacted in
 every mode.`,
 	Flags: []FlagSpec{
@@ -2235,8 +2234,7 @@ var cmdJobsLogs = Command{
 	Synopsis: "Print a run's logs",
 	Description: `Without --profile, reads logs from the local run directory. Pass --profile
 NAME to read through that profile's controller, which serves each node's
-log from its segments, or from the logs service for a node that wrote
-none. Line-selection filters (--tail/--head/--lines/--grep) apply
+log from its segments. Line-selection filters (--tail/--head/--lines/--grep) apply
 server-side in cluster mode so the CLI never tails giant logs over the
 wire.
 
@@ -2866,7 +2864,7 @@ var cmdRunnersAdd = Command{
 	Path:     "sparkwing cluster runners add",
 	Synopsis: "Mint a runner token, write the config, start the service",
 	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
-runs.state, secrets.read and logs.write against the profile's controller,
+runs.state and secrets.read against the profile's controller,
 writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
@@ -2894,7 +2892,6 @@ reaches only config.yaml.`,
 		{Name: "labels", Argument: "CSV", Desc: "Comma-separated self-asserted placement labels", Group: "Identity"},
 		{Name: "max-concurrent", Argument: "N", Desc: "Concurrent jobs this machine accepts", Default: "2", Group: "Limits"},
 		{Name: "contribution", Argument: "SPEC", Desc: "CPU and memory this machine contributes (4,8gb or 50%,50%)", Default: "50%,50%", Group: "Limits"},
-		{Name: "logs", Argument: "URL", Desc: "Logs service URL (default: the profile's logs surface, then the controller's announcement)", Group: "Input"},
 		{Name: "config", Argument: "PATH", Desc: "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)", Group: "Input"},
 		{Name: "force", Desc: "Replace an existing agent section", Group: "Input"},
 		{Name: "no-service", Desc: "Write the config without installing or starting the service", Group: "System"},

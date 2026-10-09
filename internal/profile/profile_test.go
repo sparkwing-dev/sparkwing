@@ -40,35 +40,19 @@ func TestInheritControllerDefaults(t *testing.T) {
 	if p.Logs.URL != "/var/sw.db"[:0]+"" || p.Logs.Path != "/var/sw.db" {
 		t.Errorf("Logs (non-controller type) must not be touched: %+v", p.Logs)
 	}
-	explicit := &profile.Profile{
-		Controller: &profile.ControllerSpec{URL: "https://ctrl.example"},
-		Logs:       &backends.Spec{Type: backends.TypeController, URL: "https://ctrl.example"},
-	}
-	explicit.InheritControllerDefaults()
-	if got := explicit.ExplicitLogsURL(); got != "https://ctrl.example" {
-		t.Errorf("explicit colocated logs URL = %q", got)
-	}
 }
 
-func TestSaveKeepsInheritedLogsURLDiscoverable(t *testing.T) {
-	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	if err := os.WriteFile(path, []byte("profiles:\n  prod:\n    controller: {url: https://ctrl.example}\n    logs: {type: controller}\n"), 0o600); err != nil {
-		t.Fatal(err)
+// TestInheritControllerDefaultsLeavesLogsURLEmpty covers a controller logs
+// surface: the controller keeps the logs itself, so it inherits the
+// controller's token but never its URL, which validation would refuse.
+func TestInheritControllerDefaultsLeavesLogsURLEmpty(t *testing.T) {
+	p := &profile.Profile{
+		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
+		Logs:       &backends.Spec{Type: backends.TypeController},
 	}
-	cfg, err := profile.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := profile.Save(path, cfg); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := profile.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prod := reloaded.Profiles["prod"]
-	if prod.Logs.URL != prod.ControllerURL() || prod.ExplicitLogsURL() != "" {
-		t.Fatalf("saved inherited logs URL became explicit: %+v", prod.Logs)
+	p.InheritControllerDefaults()
+	if p.Logs.URL != "" || p.Logs.Token != "tok-from-ctrl" {
+		t.Fatalf("controller logs spec = %+v, want no URL and the controller token", p.Logs)
 	}
 }
 

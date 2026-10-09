@@ -36,7 +36,6 @@ type TriggerBroker struct {
 	retryOf       string
 	pipeline      string
 	controller    *httputil.ReverseProxy
-	logs          *httputil.ReverseProxy
 	sinks         *nodeLogSinks
 	logger        *slog.Logger
 
@@ -45,10 +44,11 @@ type TriggerBroker struct {
 	refRuns  map[string]bool
 }
 
-// StartTriggerBroker serves the controller and logs routes trigger's handler
-// needs on a loopback port. Pass [TriggerBroker.URL] as the child's
-// controller and logs URL and [TriggerBroker.Capability] as its token.
-func StartTriggerBroker(controllerURL, logsURL, upstreamToken string, trigger *store.Trigger, logger *slog.Logger) (*TriggerBroker, error) {
+// StartTriggerBroker serves the controller routes trigger's handler needs,
+// and the node log appends it posts, on a loopback port. Pass
+// [TriggerBroker.URL] as the child's controller and logs URL and
+// [TriggerBroker.Capability] as its token.
+func StartTriggerBroker(controllerURL, upstreamToken string, trigger *store.Trigger, logger *slog.Logger) (*TriggerBroker, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -70,14 +70,6 @@ func StartTriggerBroker(controllerURL, logsURL, upstreamToken string, trigger *s
 		controller: brokerProxy(controllerTarget, logger), logger: logger,
 		sinks:    newNodeLogSinks(client.NewWithToken(controllerURL, nil, upstreamToken), trigger.ID, logger),
 		children: map[string]bool{}, refRuns: map[string]bool{},
-	}
-	b.logs = b.controller
-	if logsURL != "" {
-		logsTarget, err := executionBrokerTarget(logsURL)
-		if err != nil {
-			return nil, errors.Join(fmt.Errorf("logs target: %w", err), listener.Close())
-		}
-		b.logs = brokerProxy(logsTarget, logger)
 	}
 	b.controller.ModifyResponse = b.recordRuns
 	// safety: a trigger handler holds event streams and awaits child runs for
@@ -152,8 +144,7 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sink.ServeHTTP(w, r)
 			return
 		}
-		r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
-		b.logs.ServeHTTP(w, r)
+		http.Error(w, "the controller keeps no log for this node", http.StatusServiceUnavailable)
 		return
 	}
 	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)

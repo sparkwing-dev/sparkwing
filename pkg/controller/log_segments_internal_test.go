@@ -375,8 +375,8 @@ func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	}
 }
 
-// A log the run store does not record, as the logs service's export
-// writes, reads and deletes like one a runner wrote.
+// A log the run store does not record reads and deletes like one a runner
+// wrote.
 func TestUnrecordedLogsReadAndDelete(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
@@ -488,7 +488,7 @@ func TestStoragePassCountsLogSegments(t *testing.T) {
 	if counted[store.DefaultTeam] != want {
 		t.Fatalf("measured %d bytes for the team, want %d", counted[store.DefaultTeam], want)
 	}
-	f.srv.WithStoragePass(nil, nil)
+	f.srv.WithStoragePass(nil)
 	if ran, err := f.srv.RunStoragePass(ctx); err != nil || !ran {
 		t.Fatalf("storage pass = %v, %v", ran, err)
 	}

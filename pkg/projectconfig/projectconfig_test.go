@@ -37,7 +37,7 @@ profiles:
     secrets: { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
     state:   { type: sqlite, path: .sparkwing/state.db }
     cache:   { type: filesystem, path: .sparkwing/cache }
-    logs:    { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
+    logs:    { type: filesystem, path: .sparkwing/logs }
 
 pipelines:
   - name: release

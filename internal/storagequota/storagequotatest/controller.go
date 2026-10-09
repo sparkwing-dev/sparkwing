@@ -169,9 +169,6 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusPaymentRequired, "free storage is paused; buy credits or join the waitlist")
 			return
 		case storagequota.TierFree:
-			if req.Store == storagequota.KindLogs {
-				break
-			}
 			room := c.Share - c.used[k] - c.reserved[k]
 			if req.UpTo && (granted <= 0 || granted > room) {
 				granted = room

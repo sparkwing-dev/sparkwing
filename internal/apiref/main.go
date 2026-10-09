@@ -17,18 +17,16 @@ func main() {
 	root := os.Args[1]
 	controller := filepath.Join(root, "pkg", "controller", "server.go")
 	authsrc := filepath.Join(root, "pkg", "controller", "auth.go")
-	logs := filepath.Join(root, "pkg", "logs", "server.go")
-
-	scopes, err := apiroutes.Scopes(authsrc, logs, filepath.Join(root, "pkg", "store", "identity_scopes.go"))
+	scopes, err := apiroutes.Scopes(authsrc, filepath.Join(root, "pkg", "store", "identity_scopes.go"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apiref:", err)
 		os.Exit(2)
 	}
 
 	var b strings.Builder
-	b.WriteString("<!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->\n")
+	b.WriteString("<!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->\n")
 	b.WriteString("# HTTP API reference\n\n")
-	b.WriteString("Every route the controller and logs service register, with the " +
+	b.WriteString("Every route the controller registers, with the " +
 		"scope each requires, generated from the routing code. All paths are under " +
 		"the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and " +
 		"the token model are in [auth.md](auth.md); `admin` is the superset that " +
@@ -40,7 +38,6 @@ func main() {
 		"controller lists with --operator-accounts; no token reaches them.\n\n")
 
 	writeRoutes(&b, "Controller", scopes, controller)
-	writeRoutes(&b, "Logs service", scopes, logs)
 
 	fmt.Print(b.String())
 }

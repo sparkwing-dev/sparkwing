@@ -77,7 +77,7 @@ func TestRunNodeRemoteRefusesARepositoryOutsideTheAllowlistBeforeFetching(t *tes
 	}
 	allow := mustAllow(t, "github.com/acme/*")
 	_, err := runNodeRemote(context.Background(), trigger, &store.Run{ID: "run-1", Pipeline: "demo"},
-		"http://controller.invalid", "", "", "", "run-1", "node-1", "", &allow,
+		"http://controller.invalid", "", "", "run-1", "node-1", "", &allow,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if !errors.Is(err, ErrRepoNotAllowed) {
 		t.Fatalf("runNodeRemote = %v, want ErrRepoNotAllowed", err)
@@ -115,7 +115,7 @@ func TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", home)
 			t.Setenv("SPARKWING_CACHE_URL", "")
 			_, err := runNodeRemote(context.Background(), tc.trigger, &store.Run{ID: "run-1", Pipeline: "demo"},
-				"http://controller.invalid", "", "", "grant", "run-1", "node-1", "", &tc.allow,
+				"http://controller.invalid", "", "grant", "run-1", "node-1", "", &tc.allow,
 				slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if !errors.Is(err, ErrRepoNotAllowed) {
 				t.Fatalf("runNodeRemote = %v, want ErrRepoNotAllowed", err)

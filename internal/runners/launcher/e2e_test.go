@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -228,13 +224,6 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	}
 	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
 	l.Config.ControllerURL = f.url
-	logSrv, err := logs.New(t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	logTS := httptest.NewServer(logSrv.WithControllerAuth(f.url, time.Minute).Handler())
-	t.Cleanup(logTS.Close)
-	l.Config.LogsURL = logTS.URL
 	home := t.TempDir()
 
 	var wg sync.WaitGroup

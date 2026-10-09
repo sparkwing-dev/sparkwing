@@ -63,7 +63,6 @@ type Config struct {
 	Namespace     string
 	Image         string
 	ControllerURL string
-	LogsURL       string
 	CPUCeiling    float64
 	MemoryCeiling int64
 	Deadline      time.Duration
@@ -127,7 +126,6 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		{Name: "SPARKWING_SOURCE_DIR", Value: sourceDir},
 	}
 	for _, v := range []corev1.EnvVar{
-		{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL},
 		{Name: "SPARKWING_CACHE_URL", Value: cfg.CacheURL},
 		{Name: "SPARKWING_GITCACHE_URL", Value: cfg.GitcacheURL},
 	} {

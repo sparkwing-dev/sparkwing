@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -15,7 +14,7 @@ import (
 // tree until it expires, so the pass deletes the tree again once every such
 // grant has lapsed.
 func TestTeamDeletionDeletesTheCacheTreeAgainAfterGrantsLapse(t *testing.T) {
-	_, cache, ts := newStorageFakes(t)
+	cache, ts := newStorageFakes(t)
 	f := newDeletionFixture(t, ts)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
@@ -41,7 +40,7 @@ func TestTeamDeletionDeletesTheCacheTreeAgainAfterGrantsLapse(t *testing.T) {
 // Another replica may still accept a revoked token from its cache, so the
 // purge waits out at least twice that cache's lifetime.
 func TestTeamPurgeWaitsOutTheTokenCache(t *testing.T) {
-	logs, _, ts := newStorageFakes(t)
+	cache, ts := newStorageFakes(t)
 	f := newDeletionFixture(t, ts)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
@@ -50,35 +49,12 @@ func TestTeamPurgeWaitsOutTheTokenCache(t *testing.T) {
 		t.Fatalf("delete = %d", code)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), time.Now().Add(90*time.Second))
-	if got := logs.seen(); len(got) != 0 {
+	if got := cache.seen(); len(got) != 0 {
 		t.Fatalf("a pass 90s after the request purged: %v", got)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), time.Now().Add(3*time.Minute))
-	if got := logs.seen(); len(got) != 1 {
+	if got := cache.seen(); len(got) != 1 {
 		t.Fatalf("a pass 3 minutes after the request = %v, want the purge", got)
-	}
-}
-
-// The logs service honors an admin bearer for every team's logs, so the
-// controller refuses to spend one on a deletion and records why.
-func TestTeamDeletionRefusesAnAdminCredentialForLogs(t *testing.T) {
-	logs, _, ts := newStorageFakes(t)
-	f := newDeletionFixture(t, ts)
-	f.srv.WithTeamStorage(storageWithLogsToken(ts, f.admin))
-	owner := f.user("o", "olga@example.com")
-	f.createTeam(&owner, "acme")
-	f.seedRun("acme", "run-acme")
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, nil); code != http.StatusAccepted {
-		t.Fatalf("delete = %d", code)
-	}
-	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	if got := logs.seen(); len(got) != 0 {
-		t.Fatalf("the admin token was sent to the logs service: %v", got)
-	}
-	var mine []teamDeletionBody
-	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
-	if len(mine) != 1 || mine[0].State != store.TeamDeletionPending || mine[0].LastError == "" {
-		t.Fatalf("deletion = %+v, want pending with the credential problem recorded", mine)
 	}
 }
 
@@ -110,15 +86,10 @@ func TestDeleteAccountOwningTheDefaultTeamIsABadRequest(t *testing.T) {
 	}
 }
 
-func storageWithLogsToken(ts controller.TeamStorage, token string) controller.TeamStorage {
-	ts.LogsToken = token
-	return ts
-}
-
 // Deleting a team with money in flight answers 409 with the remedy, from the
 // owner's route and the operator's, and neither closes the team.
 func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
-	_, _, ts := newStorageFakes(t)
+	_, ts := newStorageFakes(t)
 	f := newDeletionFixture(t, ts)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")

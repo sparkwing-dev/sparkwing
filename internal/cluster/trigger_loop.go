@@ -41,7 +41,6 @@ type TriggerLoopOptions struct {
 	K8sRunnerSA     string
 	K8sPullSecret   string
 	K8sCtrlURL      string
-	K8sLogsURL      string
 	Kubeconfig      string
 	ArtifactStore   string
 	K8sLabels       []string
@@ -279,7 +278,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
-	compileLog := orchestrator.NewEngineNodeLog(opts.ControllerURL, opts.LogsURL, opts.Token, trigger.ID, store.CompileLogNode, logger)
+	compileLog := orchestrator.NewEngineNodeLog(opts.ControllerURL, opts.Token, trigger.ID, store.CompileLogNode, logger)
 	defer compileLog.Close(ctx)
 	if workspaceSource && repoURL != "" {
 		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, compileLog, logger)
@@ -342,21 +341,17 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	var broker *orchestrator.TriggerBroker
 	if opts.RunnerKind == "" || opts.RunnerKind == "inprocess" {
 		var err error
-		broker, err = orchestrator.StartTriggerBroker(opts.ControllerURL, opts.LogsURL, opts.Token, trigger, logger)
+		broker, err = orchestrator.StartTriggerBroker(opts.ControllerURL, opts.Token, trigger, logger)
 		if err != nil {
 			return fmt.Errorf("start trigger broker: %w", err)
 		}
 		defer broker.Close(ctx)
-		// safety: without a logs URL the child writes its logs on this machine unless the controller keeps
-		// segments, and a controller that does not would refuse every append the broker forwarded.
-		segments := opts.LogsURL != ""
-		if !segments {
-			keeps, err := client.NewWithToken(opts.ControllerURL, nil, opts.Token).KeepsLogSegments(ctx)
-			if err != nil {
-				logger.Warn("trigger loop: could not ask the controller whether it keeps log segments; logs stay local",
-					"run_id", trigger.ID, "err", err)
-			}
-			segments = keeps
+		// safety: the child writes its logs on this machine unless the controller keeps segments, because a
+		// controller that does not keeps nothing the broker could hand an append to.
+		segments, err := client.NewWithToken(opts.ControllerURL, nil, opts.Token).KeepsLogSegments(ctx)
+		if err != nil {
+			logger.Warn("trigger loop: could not ask the controller whether it keeps log segments; logs stay local",
+				"run_id", trigger.ID, "err", err)
 		}
 		opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
 		if segments {
@@ -411,9 +406,6 @@ func handleTriggerArgs(triggerID string, opts TriggerLoopOptions) []string {
 		"handle-trigger",
 		"--controller", opts.ControllerURL,
 	}
-	if opts.LogsURL != "" {
-		childArgs = append(childArgs, "--logs", opts.LogsURL)
-	}
 	childArgs = append(childArgs, triggerRunnerArgs(opts)...)
 	childArgs = append(childArgs, triggerID)
 	return childArgs
@@ -434,7 +426,6 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--runner-sa", opts.K8sRunnerSA)
 	appendFlag("--image-pull-secret", opts.K8sPullSecret)
 	appendFlag("--runner-controller-url", opts.K8sCtrlURL)
-	appendFlag("--runner-logs-url", opts.K8sLogsURL)
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
 	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)

@@ -3,19 +3,19 @@ package orchestrator
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-func TestProfileSurfaceSpecs_LogsCarryTheAnnouncedURL(t *testing.T) {
+// A controller profile's logs go to that controller as segments, so the
+// spec names the controller and nothing is asked of it to build the spec.
+func TestProfileSurfaceSpecs_LogsNameTheController(t *testing.T) {
+	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/services" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"logs":"http://logs.example.dev"}`))
-			return
-		}
+		requests.Add(1)
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
@@ -26,31 +26,14 @@ func TestProfileSurfaceSpecs_LogsCarryTheAnnouncedURL(t *testing.T) {
 	}
 	state, logs, cache := profileSurfaceSpecs(p, "/tmp/state.db")
 
-	if logs == nil || logs.Type != backends.TypeController {
-		t.Fatalf("logs spec = %#v, want a controller-typed spec", logs)
+	if logs == nil || logs.Type != backends.TypeController || logs.Controller != "prod" || logs.URL != "" {
+		t.Fatalf("logs spec = %#v, want the profile's controller with no URL of its own", logs)
 	}
-	if logs.URL != "http://logs.example.dev" {
-		t.Errorf("logs URL = %q, want the announced logs service", logs.URL)
-	}
-
 	if state.URL != "" || cache.URL != "" {
 		t.Errorf("state/cache URLs = %q/%q, want empty (they resolve through the controller)", state.URL, cache.URL)
 	}
-}
-
-func TestProfileSurfaceSpecs_NoAnnouncementLeavesTheFallback(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "no services announced", http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	p := &profile.Profile{
-		Name:       "prod",
-		Controller: &profile.ControllerSpec{URL: srv.URL},
-	}
-	_, logs, _ := profileSurfaceSpecs(p, "/tmp/state.db")
-	if logs == nil || logs.URL != "" {
-		t.Errorf("logs URL = %#v, want empty so the controller URL stays the fallback", logs)
+	if got := requests.Load(); got != 0 {
+		t.Errorf("building the specs sent %d request(s) to the controller", got)
 	}
 }
 

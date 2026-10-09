@@ -17,9 +17,6 @@ type Service string
 const (
 	// ServiceController budgets sparkwing-controller.
 	ServiceController Service = "CONTROLLER"
-	// ServiceLogs budgets sparkwing-logs, which resolves principals
-	// through the controller's whoami.
-	ServiceLogs Service = "LOGS"
 	// ServiceCache budgets sparkwing-cache, which authenticates one
 	// shared token and so holds no per-principal slot.
 	ServiceCache Service = "CACHE"
@@ -66,11 +63,10 @@ type Surfaces struct {
 	LogStreams bool
 }
 
-// ControllerSurfaces, LogsSurfaces and CacheSurfaces name what each
+// ControllerSurfaces and CacheSurfaces name what each
 // binary passes to [Bind].
 var (
 	ControllerSurfaces = Surfaces{PerPrincipal: true, LogStreams: true}
-	LogsSurfaces       = Surfaces{PerPrincipal: true, LogStreams: true}
 	CacheSurfaces      = Surfaces{}
 )
 

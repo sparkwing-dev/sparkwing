@@ -3,12 +3,18 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -28,19 +34,26 @@ func (httpLogsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
+// Each node's lines reach its own append path on the engine's log
+// endpoint, and each node seals what it sent.
+func TestHTTPLogs_PipelineLogsReachTheEndpoint(t *testing.T) {
 	register("httplogs-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return httpLogsPipe{} })
 
+	var mu sync.Mutex
+	got := map[string]*bytes.Buffer{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		if got[r.URL.Path] == nil {
+			got[r.URL.Path] = &bytes.Buffer{}
+		}
+		got[r.URL.Path].Write(body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
 	dir := t.TempDir()
-
-	logsRoot := filepath.Join(dir, "logs-root")
-	logsSrvObj, err := logs.New(logsRoot, nil)
-	if err != nil {
-		t.Fatalf("logs.New: %v", err)
-	}
-	logsSrv := httptest.NewServer(logsSrvObj.Handler())
-	defer logsSrv.Close()
-
 	st, err := teststore.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +67,7 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 	local := orchestrator.LocalBackends(paths, st, nil)
 	backends := orchestrator.Backends{
 		State:       local.State,
-		Logs:        orchestrator.NewHTTPLogs(logsSrv.URL, nil, nil),
+		Logs:        orchestrator.NewHTTPLogs(srv.URL, nil, nil),
 		Concurrency: local.Concurrency,
 	}
 
@@ -67,32 +80,25 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 		t.Fatalf("status=%q want success", res.Status)
 	}
 
-	client := logs.NewClient(logsSrv.URL, nil)
-
-	gotA, err := client.Read(context.Background(), res.RunID, "a")
-	if err != nil {
-		t.Fatalf("Read a: %v", err)
-	}
-	if !bytes.Contains(gotA, []byte("a: first line")) ||
-		!bytes.Contains(gotA, []byte("a: second line")) {
-		t.Errorf("a logs missing content:\n%s", gotA)
-	}
-
-	gotB, err := client.Read(context.Background(), res.RunID, "b")
-	if err != nil {
-		t.Fatalf("Read b: %v", err)
-	}
-	if !bytes.Contains(gotB, []byte("b: only line")) {
-		t.Errorf("b logs missing content:\n%s", gotB)
-	}
-
-	run, err := client.ReadRun(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("ReadRun: %v", err)
-	}
-	for _, want := range []string{"=== a ===", "=== b ===", "first line", "only line"} {
-		if !bytes.Contains(run, []byte(want)) {
-			t.Errorf("ReadRun missing %q:\n%s", want, run)
+	mu.Lock()
+	defer mu.Unlock()
+	base := "/api/v1/logs/" + res.RunID + "/"
+	for node, wants := range map[string][]string{
+		"a": {"a: first line", "a: second line"},
+		"b": {"b: only line"},
+	} {
+		body := got[base+node]
+		if body == nil {
+			t.Fatalf("node %s sent no log; endpoint received %v", node, slices.Collect(maps.Keys(got)))
+		}
+		for _, want := range wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("node %s log missing %q:\n%s", node, want, body)
+			}
+		}
+		seal := got[base+node+"/seal"]
+		if want := fmt.Sprintf(`"final_seq":%d,"dropped":0`, strings.Count(body.String(), "\n")); seal == nil || !strings.Contains(seal.String(), want) {
+			t.Errorf("node %s seal = %v, want %s", node, seal, want)
 		}
 	}
 }

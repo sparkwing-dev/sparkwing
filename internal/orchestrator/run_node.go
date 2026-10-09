@@ -80,9 +80,7 @@ func RunNodeOnce(
 		if err != nil {
 			return runner.Result{}, fmt.Errorf("pod log store: %w", err)
 		}
-		logsBackend = NewLogStoreBackend(fsLogs, logger).WithLiveSink(stateClient)
-	} else if cfg.claim != nil {
-		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger).WithLiveSink(stateClient)
+		logsBackend = NewLogStoreBackend(fsLogs, logger)
 	} else if logsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger)
 	} else {
@@ -110,10 +108,10 @@ func RunNodeOnce(
 					"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 					runID, nodeID)
 			}
-			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+			return runNodeRemote(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 				runID, nodeID, token, cfg.repoAllowlist, logger)
 		}
-		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
+		return runNodeIsolatedFn(ctx, controllerURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
 	}
 	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
 	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
@@ -122,7 +120,7 @@ func RunNodeOnce(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 				runID, nodeID)
 		}
-		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+		return runNodeRemote(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 			runID, nodeID, token, cfg.repoAllowlist, logger)
 	}
 
@@ -351,8 +349,8 @@ func runNodeCLI(args []string) error {
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
 		"controller base URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")
-	logsURL := fs.String("logs", ResolveDevEnvURL("SPARKWING_LOGS_URL"),
-		"logs-service URL (env: SPARKWING_LOGS_URL, falls back to $SPARKWING_HOME/dev.env)")
+	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"),
+		"node log endpoint of the engine process that started this one (env: SPARKWING_LOGS_URL); the engine sets it")
 	timeout := fs.Duration("timeout", 0,
 		"max wall-clock duration for the node (0 = none; job-level modifiers still apply)")
 	coordinated := fs.Bool("coordinated", false,

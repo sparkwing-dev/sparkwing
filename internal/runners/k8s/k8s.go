@@ -46,7 +46,6 @@ type Config struct {
 	ServiceAccountName string
 
 	ControllerURL string
-	LogsURL       string
 
 	ArtifactStoreURL string
 	// GitcacheURL is the cache the pod compiles a pipeline from when the
@@ -889,9 +888,6 @@ func (r *Runner) buildJob(
 	}
 	if len(r.cfg.Labels) > 0 {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_RUNNER_LABELS", Value: strings.Join(r.cfg.Labels, ",")})
-	}
-	if r.cfg.LogsURL != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: r.cfg.LogsURL})
 	}
 	if r.cfg.ArtifactStoreURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_URL", Value: r.cfg.ArtifactStoreURL})

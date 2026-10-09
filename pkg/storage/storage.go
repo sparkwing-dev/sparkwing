@@ -215,7 +215,7 @@ type ReadOpts struct {
 // LogStore persists per-node log streams keyed by (runID, nodeID).
 // Implementations store opaque bytes; callers control marshaling.
 // Open via [storeurl.OpenLogStore]; implementations live in the
-// [fs], [s3], [sparkwinglogs], and [stdoutlogs] subpackages. [ReadOpts]
+// [fs], [s3], [logseg], and [stdoutlogs] subpackages. [ReadOpts]
 // narrows the slice returned by Read.
 type LogStore interface {
 	// Append writes data verbatim to the (runID, nodeID) log.

@@ -42,7 +42,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	}
 	runner, runnerTok, err := st.CreateToken("pool", store.TokenKindRunner, []string{
 		controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
-		controller.ScopeRunsState, controller.ScopeLogsWrite,
+		controller.ScopeRunsState,
 	}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken runner: %v", err)

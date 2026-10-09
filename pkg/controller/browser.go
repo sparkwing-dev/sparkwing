@@ -41,13 +41,12 @@ type Dashboard struct {
 	// missing; the API and sign-in pages work either way.
 	Bundle fs.FS
 
-	// Logs reads durable node logs for the dashboard. Nil reads through the
-	// logs service [Server.WithLogsURL] names, forwarding each caller's own
-	// credential, or the node log files under Paths when that is empty.
+	// Logs reads durable node logs for the dashboard. Nil reads the node log
+	// segments, or for a [Dashboard.Local] dashboard the node log files under
+	// Paths.
 	Logs storage.LogStore
 
-	// Paths locates node log files when neither Logs nor a logs service is
-	// configured.
+	// Paths locates a local dashboard's run directories.
 	Paths paths.Paths
 
 	// Capabilities names the mode, storage and features GET

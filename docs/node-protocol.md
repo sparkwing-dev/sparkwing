@@ -64,7 +64,7 @@ Run options are not environment variables in this contract; [Run options](#run-o
 The Go in-process path reads more variables than the contract names. They exist because the orchestrator runs inside the customer's binary, and an SDK in another language never reads them:
 
 - `SPARKWING_API_SOCKET`: a unix socket the local Go child uses in place of URL plus bearer.
-- `SPARKWING_LOGS_URL`: where the node appends its log records. On a cluster runner it is a loopback address in the runner process, which keeps the log as segments; it names the logs service only when the controller keeps no segments. The hosted model reads log records from stdout.
+- `SPARKWING_LOGS_URL`: where the node appends its log records, a loopback address in the engine process that started it, which keeps the log as segments or, on a local run, in the run directory. The hosted model reads log records from stdout.
 - `SPARKWING_HOME`, `HOME`, `GOCACHE`, `GOMODCACHE`, `GOFLAGS`: Go toolchain and state locations.
 - `SPARKWING_NODE_CLAIM_HOLDER`, `SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`, `SPARKWING_NODE_CLAIM_RESERVATION`, `SPARKWING_NODE_CLAIM_LEASE_SECONDS`, `SPARKWING_NODE_SPEC_HASH`: the claim fence, which the engine-side executor holds.
 - `SPARKWING_EXECUTION_CAPABILITY_STDIN`, `SPARKWING_BROKERED_ARTIFACTS`, `SPARKWING_BROKERED_NODE_CLAIM`: broker-mode switches.
@@ -77,7 +77,7 @@ The Go in-process path reads more variables than the contract names. They exist 
 **Today.** A node reaches the routes below at `SPARKWING_CONTROLLER_URL` with `Authorization: Bearer <token>`. Three hosts answer them:
 
 - the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`;
-- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller; it keeps the node's log appends as segments itself, or forwards them to the logs service on a controller that keeps none;
+- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the runner's own credential, sets the claim-fence headers itself, and forwards to the controller; it keeps the node's log appends as segments itself;
 - the **controller** itself, for a Kubernetes or launcher Job that holds a claim token.
 
 The Go child on a local run may use the unix socket in `SPARKWING_API_SOCKET` instead of URL plus bearer. The socket stays as a Go-only optimization; it is not part of the contract.
@@ -95,7 +95,7 @@ The protocol version is a string, currently `1`.
 
 ## Node-facing routes
 
-Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a spawned child's hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
+Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a spawned child's hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's route registrations equal; the `/api/v1/logs/` routes are served by the broker's own log endpoint, not the controller.
 
 <!-- node-routes:start -->
 | Method | Path | Reach | Request | Response | Handler |
@@ -137,11 +137,8 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/api/v1/concurrency/{key}/heartbeat` | broker | `{holder_id, lease_secs?}` | 200 `{lease_expires_at, cancelled_by_newer}` | `pkg/controller/concurrency.go` `handleHeartbeatSlot` |
 | POST | `/api/v1/concurrency/{key}/release` | broker | `{holder_id, outcome, output_ref?, cache_key_hash?, cache_ttl_ns?}` | 204 | `pkg/controller/concurrency.go` `handleReleaseSlot` |
 | POST | `/api/v1/concurrency/{key}/cancel-waiter` | broker | `{run_id, node_id?}` naming the node itself | 200 `{cancelled}` | `pkg/controller/concurrency.go` `handleCancelWaiter` |
-| POST | `/api/v1/logs/{run}/{node}` | broker | NDJSON log records as `text/plain`, at most 4 MiB; optional `X-Sparkwing-Log-Stream`, `X-Sparkwing-Log-Seq`, `X-Sparkwing-Log-Seq-End` | 204 | `pkg/logs/server.go` `handleAppend` |
-| GET | `/api/v1/logs/{run}/{node}` | broker | read filters as query | 200 `text/plain` or `application/x-ndjson` | `pkg/logs/server.go` `handleRead` |
-| POST | `/api/v1/logs/{run}/{node}/seal` | broker | `{stream, final_seq, lines, bytes, dropped, sha256}` | 204 | `pkg/logs/seal.go` `handleSeal` |
-| GET | `/api/v1/logs/{run}/{node}/seal` | broker | none | 200 seal report | `pkg/logs/seal.go` `handleReadSeals` |
-| GET | `/api/v1/logs/{run}/{node}/stream` | broker | none | 200 event stream | `pkg/logs/server.go` `handleStream` |
+| POST | `/api/v1/logs/{run}/{node}` | broker | NDJSON log records as `text/plain`, at most 4 MiB; optional `X-Sparkwing-Log-Stream`, `X-Sparkwing-Log-Seq`, `X-Sparkwing-Log-Seq-End` | 204 | the broker's log endpoint, `pkg/storage/logseg/handler.go` `AppendHandler` |
+| POST | `/api/v1/logs/{run}/{node}/seal` | broker | `{stream, final_seq, dropped}` | 204 | the broker's log endpoint, `pkg/storage/logseg/handler.go` `AppendHandler` |
 | GET | `/bin/{key...}` | broker | key `artifacts/blobs/<sha256>` or `artifacts/manifests/<sha256>` | 200 `application/octet-stream`; 404 | the broker itself, `internal/orchestrator/remote_execution_broker.go` `serveArtifact` |
 | HEAD | `/bin/{key...}` | broker | as GET | 200 or 404 | as GET |
 | PUT | `/bin/{key...}` | broker | the blob; its sha256 must equal the key's digest | 201; 400 on a digest mismatch | as GET |

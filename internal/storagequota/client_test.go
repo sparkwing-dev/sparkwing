@@ -160,7 +160,7 @@ func TestAnUnreachableControllerFailsClosedUnlessTheTeamWasFundedRecently(t *tes
 
 func TestAControllerErrorIsUnavailable(t *testing.T) {
 	c, _, _ := newClient(t, &fakeController{down: true})
-	if _, err := c.Reserve(context.Background(), "Bearer tok", "team-a", storagequota.KindLogs, 10, false); !errors.Is(err, storagequota.ErrUnavailable) {
+	if _, err := c.Reserve(context.Background(), "Bearer tok", "team-a", storagequota.KindCache, 10, false); !errors.Is(err, storagequota.ErrUnavailable) {
 		t.Fatalf("a 500 from the controller = %v, want unavailable", err)
 	}
 }

@@ -27,50 +27,33 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server {
 	return s
 }
 
-type counterCaller struct {
-	service bool
-	team    store.Team
-}
-
 // safety: the counter routes sit outside the principal middleware because
-// the cache's operator token is not a principal; a forwarded credential is
-// authenticated here exactly as the middleware would.
-func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterCaller, bool) {
+// the cache's operator token, the only caller they answer, is not a principal.
+func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) bool {
 	scheme, raw, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	raw = strings.TrimSpace(raw)
 	if !strings.EqualFold(scheme, "bearer") || raw == "" {
 		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes need a bearer"))
-		return counterCaller{}, false
+		return false
 	}
 	token := s.cacheToken
 	if token == "" {
 		token = bincache.CacheToken()
 	}
-	if token != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(token)) == 1 {
-		return counterCaller{service: true}, true
+	if token == "" || subtle.ConstantTimeCompare([]byte(raw), []byte(token)) != 1 {
+		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer the cache's operator token"))
+		return false
 	}
-	p, err := s.authMiddleware().Authenticate(raw)
-	if err != nil || p == nil || !(p.HasScope(ScopeLogsWrite) || p.HasScope(ScopeAdmin)) {
-		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer the cache's operator token or a logs.write credential"))
-		return counterCaller{}, false
-	}
-	return counterCaller{team: store.NormalizeTeam(p.Team)}, true
+	return true
 }
 
-func (c counterCaller) may(w http.ResponseWriter, team string, kind store.StorageKind) bool {
+func counterMay(w http.ResponseWriter, team string, kind store.StorageKind) bool {
 	if !teamblob.ValidTeam(team) {
 		writeError(w, http.StatusBadRequest, errors.New("not a team slug"))
 		return false
 	}
 	if !kind.Valid() {
 		writeError(w, http.StatusBadRequest, errors.New("store names neither cache nor logs"))
-		return false
-	}
-	if c.service {
-		return true
-	}
-	if kind != store.StorageLogs || c.team != store.NormalizeTeam(store.Team(team)) {
-		writeError(w, http.StatusForbidden, errors.New("a forwarded credential counts only its own team's logs"))
 		return false
 	}
 	return true
@@ -84,8 +67,7 @@ type storageReserveReq struct {
 }
 
 func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.counterCaller(w, r)
-	if !ok {
+	if !s.counterCaller(w, r) {
 		return
 	}
 	var req storageReserveReq
@@ -93,7 +75,7 @@ func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !caller.may(w, req.Team, req.Store) {
+	if !counterMay(w, req.Team, req.Store) {
 		return
 	}
 	if !s.MultiTeam() {
@@ -115,8 +97,7 @@ type storageCommitReq struct {
 }
 
 func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.counterCaller(w, r)
-	if !ok {
+	if !s.counterCaller(w, r) {
 		return
 	}
 	var req storageCommitReq
@@ -124,11 +105,7 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !caller.may(w, req.Team, req.Store) {
-		return
-	}
-	if !caller.service && (strings.TrimSpace(req.Reservation) == "" || req.Bytes < 0) {
-		writeError(w, http.StatusBadRequest, errors.New("a logs writer needs a reservation and nonnegative committed bytes"))
+	if !counterMay(w, req.Team, req.Store) {
 		return
 	}
 	if !s.MultiTeam() {
@@ -184,8 +161,7 @@ type storageReleaseReq struct {
 }
 
 func (s *Server) handleStorageRelease(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.counterCaller(w, r)
-	if !ok {
+	if !s.counterCaller(w, r) {
 		return
 	}
 	var req storageReleaseReq
@@ -195,10 +171,6 @@ func (s *Server) handleStorageRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	if !teamblob.ValidTeam(req.Team) {
 		writeError(w, http.StatusBadRequest, errors.New("not a team slug"))
-		return
-	}
-	if !caller.service && caller.team != store.NormalizeTeam(store.Team(req.Team)) {
-		writeError(w, http.StatusForbidden, errors.New("a forwarded credential releases only its own team's reservations"))
 		return
 	}
 	if s.MultiTeam() {
@@ -217,12 +189,7 @@ type downloadChargeReq struct {
 }
 
 func (s *Server) handleDownloadCharge(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.counterCaller(w, r)
-	if !ok {
-		return
-	}
-	if !caller.service {
-		writeError(w, http.StatusForbidden, errors.New("only the cache charges downloads"))
+	if !s.counterCaller(w, r) {
 		return
 	}
 	var req downloadChargeReq
@@ -257,12 +224,7 @@ func (s *Server) handleDownloadCharge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEgressTotals(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.counterCaller(w, r)
-	if !ok {
-		return
-	}
-	if !caller.service {
-		writeError(w, http.StatusForbidden, errors.New("only the cache records egress totals"))
+	if !s.counterCaller(w, r) {
 		return
 	}
 	var req store.EgressTotals

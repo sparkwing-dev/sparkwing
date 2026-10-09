@@ -34,8 +34,8 @@ func TestRunsGrepReadsThroughTheControllerWithLineNumbers(t *testing.T) {
 		}
 	}))
 	t.Cleanup(controller.Close)
-	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller, url: %q}\n",
-		controller.URL, "http://logs.invalid"))
+	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller}\n",
+		controller.URL))
 	var grepErr error
 	output := captureStdout(t, func() {
 		grepErr = runJobs([]string{"logs", "--profile", "prod", "--grep", "fatal", "--status", "failed", "--branch", "release", "--sha", "abc", "-o", "json"})

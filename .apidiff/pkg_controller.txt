@@ -283,9 +283,7 @@ const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
 const ScopeCreditsGrant = "credits.grant"
-const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = store.ScopeLogsRead
-const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"
 const ScopeRunsControl = store.ScopeRunsControl
 const ScopeRunsRead = store.ScopeRunsRead
@@ -344,7 +342,6 @@ func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes 
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
 func (s *Server) WithLogRetention(days map[store.Team]int) *Server
-func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
@@ -359,8 +356,8 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
-func (s *Server) WithSignedDownloads(cache, logs *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
-func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server
+func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
+func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
@@ -369,8 +366,6 @@ type ServicesResponse struct {
 	DataDownloadURL string
 
 	CachePod string
-
-	Logs string
 
 	Dashboard string
 
@@ -391,9 +386,6 @@ const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
-	LogsURL   string
-	LogsToken string
-
 	CacheURL   string
 	CacheToken string
 }
@@ -427,7 +419,6 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
-func (t forwardCredential) RoundTrip(req *http.Request) (*http.Response, error)
 func (o fsLogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o fsLogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string

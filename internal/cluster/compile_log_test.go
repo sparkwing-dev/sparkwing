@@ -5,97 +5,100 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
+func compileLogController(t *testing.T, runID string) (string, *client.Client) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := t.Context()
+	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: store.CompileLogNode, Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, discardLogger()).Handler())
+	t.Cleanup(srv.Close)
+	return srv.URL, client.New(srv.URL, nil)
+}
+
+func readCompileLog(t *testing.T, ctrl *client.Client, runID string) string {
+	t.Helper()
+	got, err := ctrl.NodeLogs().Read(t.Context(), runID, store.CompileLogNode, storage.ReadOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(got)
+}
+
+func TestShipCompileOutput_ReachesTheControllerAsSegments(t *testing.T) {
 	const runID = "run-test-imp-001"
 	const want = "go: go.mod requires go >= 9.99.0\n./pipeline.go:7:2: undefined: Foo"
+	url, ctrl := compileLogController(t, runID)
 
-	var (
-		mu      sync.Mutex
-		gotPath string
-		gotBody []byte
-	)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		gotPath = r.URL.Path
-		gotBody = body
-		mu.Unlock()
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer ts.Close()
-
+	compileLog := orchestrator.NewEngineNodeLog(url, "", runID, store.CompileLogNode, discardLogger())
 	buildErr := &bincache.CompileError{Output: []byte(want), Err: errors.New("exit status 1")}
-	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", ts.URL, "ignored", runID, store.CompileLogNode, slog.Default()),
-		runID, buildErr, slog.Default())
+	shipCompileOutput(context.Background(), compileLog, runID, buildErr, discardLogger())
+	compileLog.Close(context.Background())
 
-	mu.Lock()
-	defer mu.Unlock()
-	wantPath := "/api/v1/logs/" + runID + "/" + store.CompileLogNode
-	if gotPath != wantPath {
-		t.Errorf("path: got %q, want %q", gotPath, wantPath)
-	}
-	if string(gotBody) != want {
-		t.Errorf("body: got %q, want %q", gotBody, want)
+	if got := readCompileLog(t, ctrl, runID); !strings.Contains(got, "undefined: Foo") {
+		t.Errorf("compile log = %q, want the compiler output %q", got, want)
 	}
 }
 
-func TestShipCompileOutput_NoLogsURLNoOp(t *testing.T) {
+func TestShipCompileOutput_NoControllerNoOp(t *testing.T) {
 	buildErr := &bincache.CompileError{Output: []byte("oops"), Err: errors.New("x")}
-	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", "", "", "run-x", store.CompileLogNode, slog.Default()),
+	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", "", "run-x", store.CompileLogNode, slog.Default()),
 		"run-x", buildErr, slog.Default())
 }
 
 func TestShipCompileOutput_NonCompileErrorIgnored(t *testing.T) {
-	posted := false
+	var posted atomic.Bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		posted = true
+		posted.Store(true)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer ts.Close()
 
-	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog("", ts.URL, "", "run-y", store.CompileLogNode, slog.Default()),
+	shipCompileOutput(context.Background(), orchestrator.NewEngineNodeLog(ts.URL, "", "run-y", store.CompileLogNode, slog.Default()),
 		"run-y", errors.New("hash failed"), slog.Default())
-	if posted {
-		t.Errorf("expected no POST for non-CompileError; server saw a request")
+	if posted.Load() {
+		t.Errorf("expected no request for non-CompileError; server saw one")
 	}
 }
 
-func TestShipCompileOutput_PostsEvenWhenCtxCancelled(t *testing.T) {
-	var posted sync.WaitGroup
-	posted.Add(1)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		posted.Done()
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer ts.Close()
-
+func TestShipCompileOutput_LandsEvenWhenCtxCancelled(t *testing.T) {
+	const runID = "run-z"
+	url, ctrl := compileLogController(t, runID)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
+	compileLog := orchestrator.NewEngineNodeLog(url, "", runID, store.CompileLogNode, discardLogger())
 	buildErr := &bincache.CompileError{Output: []byte("late but informative"), Err: errors.New("x")}
-	shipCompileOutput(ctx, orchestrator.NewEngineNodeLog("", ts.URL, "", "run-z", store.CompileLogNode, slog.Default()),
-		"run-z", buildErr, slog.Default())
+	shipCompileOutput(ctx, compileLog, runID, buildErr, discardLogger())
+	compileLog.Close(ctx)
 
-	done := make(chan struct{})
-	go func() { posted.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("ship never POSTed despite cancelled parent ctx")
+	if got := readCompileLog(t, ctrl, runID); !strings.Contains(got, "late but informative") {
+		t.Errorf("compile log = %q, want the output shipped under a cancelled context", got)
 	}
 }
 

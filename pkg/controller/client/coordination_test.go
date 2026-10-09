@@ -19,7 +19,6 @@ var coordinationRunnerScopes = []string{
 	controller.ScopeTriggersClaim,
 	controller.ScopeRunsState,
 	controller.ScopeSecretsRead,
-	controller.ScopeLogsWrite,
 }
 
 type coordinationFixture struct {

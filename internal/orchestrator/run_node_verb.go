@@ -38,7 +38,7 @@ func RunNodeCommand(args []string) error {
 	secrets.ShareRegisteredFromEnv()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"), "controller base URL")
-	logsURL := fs.String("logs", ResolveDevEnvURL("SPARKWING_LOGS_URL"), "logs-service URL")
+	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"), "node log endpoint of the engine process that started this one")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

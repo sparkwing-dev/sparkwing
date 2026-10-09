@@ -30,9 +30,6 @@ func TestTeamBoundary_EncodedPathSegmentsStillAnswerAnotherTeamWith404(t *testin
 			if !runScoped(pattern) {
 				continue
 			}
-			if _, exempt := controller.TeamBoundaryExempt[pattern]; exempt {
-				continue
-			}
 			method, path := runRoutePath(pattern, f.runA)
 			for _, sp := range spellings {
 				variant := strings.Replace(path, sp.from, sp.to, 1)

@@ -57,7 +57,7 @@ func TestTriggerBrokerCarriesAClaimedRunWithoutTheRunnerToken(t *testing.T) {
 	trig := rig.claim(t, store.Trigger{ID: "trg-brokered", Pipeline: "brokered-trigger-pipe", TriggerSource: "dashboard"})
 
 	var refusals lockedBuffer
-	broker, err := orchestrator.StartTriggerBroker(rig.client.BaseURL(), "", "runner-token", trig,
+	broker, err := orchestrator.StartTriggerBroker(rig.client.BaseURL(), "runner-token", trig,
 		slog.New(slog.NewTextHandler(&refusals, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 		_, _ = w.Write([]byte(`{"run_id":"child-run"}`))
 	}))
 	defer upstream.Close()
-	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "", "runner-token",
+	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "runner-token",
 		&store.Trigger{ID: "run-a", Pipeline: "build"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestTriggerBrokerFollowsRefsAndRetryChildrenOnly(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "", "runner-token",
+	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "runner-token",
 		&store.Trigger{ID: "run-a", Pipeline: "build", RetryOf: "run-prev"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

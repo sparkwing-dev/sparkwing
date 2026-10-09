@@ -41,7 +41,7 @@ func newStorageFixture(t *testing.T, quotas ...store.StorageQuota) storageFixtur
 	now := time.Now().UTC()
 	runnerScopes := []string{
 		controller.ScopeNodesClaim, controller.ScopeRunsState,
-		controller.ScopeRunsRead, controller.ScopeLogsWrite,
+		controller.ScopeRunsRead,
 	}
 	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
 	if err != nil {
@@ -404,7 +404,7 @@ func TestStorageChargesTheTeamNotAPrincipalNameAnotherTeamShares(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _, err := tenantB.CreateToken(ctx, "agent:eddie", store.TokenKindRunner, []string{
-		controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead, controller.ScopeLogsWrite,
+		controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead,
 	}, 0, now)
 	if err != nil {
 		t.Fatal(err)

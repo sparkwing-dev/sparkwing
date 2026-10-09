@@ -59,57 +59,6 @@ func (f *identityFixture) reserve(auth, team, kind string, bytes int64) (int, st
 	return code, out
 }
 
-func logsWriter(t *testing.T, st *store.Store, team store.Team) string {
-	t.Helper()
-	tenant, err := st.ForTeam(context.Background(), team)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _, err := tenant.CreateToken(context.Background(), "runner", store.TokenKindUser,
-		[]string{controller.ScopeLogsWrite}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return "Bearer " + raw
-}
-
-func TestLogsWriterCommitRequiresReservationAndNonnegativeBytes(t *testing.T) {
-	f := freeTierFixture(t, 1)
-	teamAuth := freeTeamToken(t, f.store, "first")
-	if code := f.trigger(teamAuth); code != http.StatusAccepted {
-		t.Fatalf("trigger = %d", code)
-	}
-	writer := logsWriter(t, f.store, "first")
-	code, reservation := f.reserve(writer, "first", "logs", 100)
-	if code != http.StatusOK {
-		t.Fatalf("reserve = %d", code)
-	}
-	for _, req := range []map[string]any{
-		{"team": "first", "store": "logs", "reservation": "", "bytes": -100},
-		{"team": "first", "store": "logs", "reservation": "", "bytes": 100},
-		{"team": "first", "store": "logs", "reservation": reservation.ID, "bytes": -1},
-		{"team": "first", "store": "logs", "reservation": reservation.ID, "bytes": -1, "next_bytes": 1},
-	} {
-		if code := f.call("POST", "/internal/storage/commit", writer, req, nil); code != http.StatusBadRequest {
-			t.Fatalf("invalid logs commit %+v = %d", req, code)
-		}
-	}
-	if code := f.call("POST", "/internal/storage/commit", writer, map[string]any{
-		"team": "first", "store": "logs", "reservation": reservation.ID, "bytes": 100,
-	}, nil); code != http.StatusNoContent {
-		t.Fatalf("valid logs commit = %d", code)
-	}
-	if usage, err := f.store.TeamStorage(context.Background(), "first"); err != nil || usage[store.StorageLogs].UsedBytes != 100 {
-		t.Fatalf("logs usage = %+v, err = %v", usage, err)
-	}
-	const cache = "Bearer cache-token"
-	if code := f.call("POST", "/internal/storage/commit", cache, map[string]any{
-		"team": "first", "store": "cache", "bytes": -1,
-	}, nil); code != http.StatusNoContent {
-		t.Fatalf("cache service negative delta = %d", code)
-	}
-}
-
 // The cache reserves, commits and releases a team's storage with its
 // operator token. Both teams start runs; the one whose write took the last
 // slot is held to its cache share, the next team's writes are refused as
@@ -186,38 +135,52 @@ func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	}
 }
 
-// A credential the logs service forwards counts only its own team's logs;
-// only the cache's token names any team, charges downloads or records
-// egress, and nothing else reaches the routes.
-func TestTheCounterRoutesAnswerOnlyTheirCallers(t *testing.T) {
+// Only the cache's operator token reaches the counter routes: a team's own
+// credential and an admin bearer are refused on every one, and the cache's
+// token names any team.
+func TestTheCounterRoutesAnswerOnlyTheCacheToken(t *testing.T) {
 	f := freeTierFixture(t, 5)
 	for _, team := range []store.Team{"first", "second"} {
 		if code := f.trigger(freeTeamToken(t, f.store, team)); code != http.StatusAccepted {
 			t.Fatalf("%s's run = %d", team, code)
 		}
 	}
-	writer := logsWriter(t, f.store, "first")
-	if code, _ := f.reserve(writer, "first", "logs", 10); code != http.StatusOK {
-		t.Fatalf("a logs writer reserving its own team's logs = %d", code)
+	admin, _, err := f.store.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range []struct{ team, kind string }{{"second", "logs"}, {"first", "cache"}} {
-		if code, _ := f.reserve(writer, c.team, c.kind, 10); code != http.StatusForbidden {
-			t.Errorf("a logs writer reserving %s's %s = %d, want 403", c.team, c.kind, code)
+	for name, auth := range map[string]string{
+		"a team's own token": freeTeamToken(t, f.store, "third"),
+		"an admin bearer":    "Bearer " + admin,
+		"no bearer":          "",
+	} {
+		for _, c := range []struct {
+			path string
+			body map[string]any
+		}{
+			{"/internal/storage/reserve", map[string]any{"team": "first", "store": "logs", "bytes": 10}},
+			{"/internal/storage/commit", map[string]any{"team": "first", "store": "logs", "reservation": "r", "bytes": 10}},
+			{"/internal/storage/release", map[string]any{"team": "first", "reservation": "r"}},
+			{"/internal/downloads/charge", map[string]any{"team": "first", "bytes": 1}},
+			{"/internal/egress/totals", map[string]any{"service": "cache", "day": "2026-09-23", "month": "2026-09"}},
+		} {
+			if code := f.call("POST", c.path, auth, c.body, nil); code != http.StatusUnauthorized {
+				t.Errorf("%s on %s = %d, want 401", name, c.path, code)
+			}
 		}
 	}
-	if code := f.call("POST", "/internal/downloads/charge", writer, map[string]any{"team": "first", "bytes": 1}, nil); code != http.StatusForbidden {
-		t.Errorf("a logs writer charging a download = %d, want 403", code)
+	const cache = "Bearer cache-token"
+	for _, team := range []string{"first", "second"} {
+		if code, _ := f.reserve(cache, team, "cache", 10); code != http.StatusOK {
+			t.Errorf("the cache reserving %s's cache = %d, want 200", team, code)
+		}
 	}
-	if code := f.call("POST", "/internal/egress/totals", writer, map[string]any{"service": "cache", "day": "2026-09-23", "month": "2026-09"}, nil); code != http.StatusForbidden {
-		t.Errorf("a logs writer recording egress = %d, want 403", code)
+	if code := f.call("POST", "/internal/storage/commit", cache, map[string]any{
+		"team": "first", "store": "cache", "bytes": -1,
+	}, nil); code != http.StatusNoContent {
+		t.Errorf("the cache's negative delta = %d, want 204", code)
 	}
-	if code, _ := f.reserve(freeTeamToken(t, f.store, "third"), "third", "logs", 10); code != http.StatusUnauthorized {
-		t.Errorf("a token without logs.write = %d, want 401", code)
-	}
-	if code, _ := f.reserve("", "first", "logs", 10); code != http.StatusUnauthorized {
-		t.Errorf("no bearer = %d, want 401", code)
-	}
-	if code, _ := f.reserve("Bearer cache-token", "Not A Team", "cache", 10); code != http.StatusBadRequest {
+	if code, _ := f.reserve(cache, "Not A Team", "cache", 10); code != http.StatusBadRequest {
 		t.Errorf("a team that is not a slug = %d, want 400", code)
 	}
 }

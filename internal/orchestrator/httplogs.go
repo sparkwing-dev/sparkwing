@@ -3,25 +3,19 @@ package orchestrator
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -29,7 +23,6 @@ import (
 type HTTPLogs struct {
 	client storage.LogStore
 	logger *slog.Logger
-	live   LiveLogSink
 }
 
 func NewHTTPLogsWithToken(baseURL string, httpClient *http.Client, token string, logger *slog.Logger) *HTTPLogs {
@@ -37,7 +30,7 @@ func NewHTTPLogsWithToken(baseURL string, httpClient *http.Client, token string,
 		logger = slog.Default()
 	}
 	return &HTTPLogs{
-		client: sparkwinglogs.New(baseURL, httpClient, token),
+		client: newLoopbackLogs(baseURL, httpClient, token),
 		logger: logger,
 	}
 }
@@ -47,16 +40,6 @@ func NewLogStoreBackend(s storage.LogStore, logger *slog.Logger) *HTTPLogs {
 		logger = slog.Default()
 	}
 	return &HTTPLogs{client: s, logger: logger}
-}
-
-// WithLiveSink mirrors every line to sink for the controller's live
-// view, on top of the durable write. A durable surface that already
-// serves a live read keeps sink unused.
-func (h *HTTPLogs) WithLiveSink(sink LiveLogSink) *HTTPLogs {
-	if sink != nil && !liveLogsRedundant(h.client) {
-		h.live = sink
-	}
-	return h
 }
 
 var _ LogBackend = (*HTTPLogs)(nil)
@@ -98,17 +81,8 @@ func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delega
 		requiresAttempt: requiresAttempt,
 		attempt:         attempt,
 		stream:          rand.Text(),
-		digest:          sha256.New(),
 	}
-	if h.live != nil {
-		l.live = logbatch.New(
-			&liveLogStore{sink: h.live, ctx: nodeCtx},
-			logbatch.WithFlushInterval(liveLogFlushInterval),
-			logbatch.WithBufferThreshold(liveLogFlushBytes),
-			logbatch.WithMaxObjects(math.MaxInt32),
-			logbatch.WithMaxBytes(math.MaxInt64),
-		)
-	}
+
 	return l, nil
 }
 
@@ -121,8 +95,6 @@ type httpNodeLog struct {
 	runID           string
 	nodeID          string
 	delegate        sparkwing.Logger
-	live            *logbatch.Store
-	liveFailed      bool
 	closed          bool
 	requiresAttempt bool
 	attempt         int
@@ -130,12 +102,10 @@ type httpNodeLog struct {
 	pendingBytes    int
 	flushTimer      *time.Timer
 
-	// safety: seq, sentBytes and digest count every numbered line, delivered or not,
-	// because the seal Close sends reports drops against them.
-	stream    string
-	seq       int64
-	sentBytes int64
-	digest    hash.Hash
+	// safety: seq counts every numbered line, delivered or not, because the seal Close sends reports drops
+	// against it.
+	stream string
+	seq    int64
 
 	fatal      error
 	dropCount  int
@@ -172,7 +142,7 @@ type numberedLine struct {
 }
 
 type logSealer interface {
-	Seal(ctx context.Context, runID, nodeID string, seal logs.Seal) error
+	Seal(ctx context.Context, runID, nodeID string, seal logseg.WriterSeal) error
 }
 
 func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS int) {
@@ -228,7 +198,7 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 		// safety: a record no encoder will take never reaches the store, the same
 		// loss as an append that never lands, so it still takes a number.
 		l.flushBuffered(l.ctx)
-		l.number(nil)
+		l.number()
 		l.mu.Lock()
 		l.dropCount++
 		if l.dropReason == "" {
@@ -244,39 +214,13 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 		return
 	}
 	payload = append(payload, '\n')
-	l.appendWithRetry(numberedLine{seq: l.number(payload), payload: payload})
-	l.appendLive(payload)
+	l.appendWithRetry(numberedLine{seq: l.number(), payload: payload})
 }
 
 // safety: the caller holds writeMu.
-func (l *httpNodeLog) number(payload []byte) int64 {
+func (l *httpNodeLog) number() int64 {
 	l.seq++
-	l.sentBytes += int64(len(payload))
-	_, _ = l.digest.Write(payload)
 	return l.seq
-}
-
-// safety: a live view that cannot be written is reported once and then
-// left alone. The durable copy is the record, so losing the live tail
-// must never fail the node.
-func (l *httpNodeLog) appendLive(payload []byte) {
-	if l.live == nil {
-		return
-	}
-	if err := l.live.Append(l.ctx, l.runID, l.nodeID, payload); err != nil {
-		l.mu.Lock()
-		first := !l.liveFailed
-		l.liveFailed = true
-		l.mu.Unlock()
-		if first {
-			l.logger.Warn(
-				"live log mirror unavailable; the durable copy is unaffected",
-				"run_id", l.runID,
-				"node_id", l.nodeID,
-				"err", err,
-			)
-		}
-	}
 }
 
 func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
@@ -407,7 +351,7 @@ func (l *httpNodeLog) appendBoundWithRetry(ctx context.Context, ordinal int, bat
 			backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
 			time.Sleep(backoff.Delay(retry - 1))
 		}
-		attemptCtx := logs.WithAppendSequenceRange(withAttempt(ctx, ordinal), l.stream, batch[0].seq, batch[len(batch)-1].seq)
+		attemptCtx := withAppendRange(withAttempt(ctx, ordinal), l.stream, batch[0].seq, batch[len(batch)-1].seq)
 		requestCtx, cancel := context.WithTimeout(attemptCtx, 5*time.Second)
 		err := l.client.Append(requestCtx, l.runID, l.nodeID, payload)
 		cancel()
@@ -415,8 +359,7 @@ func (l *httpNodeLog) appendBoundWithRetry(ctx context.Context, ordinal int, bat
 			return
 		}
 		lastErr = err
-		var authErr *logs.AuthError
-		if errors.As(err, &authErr) || errors.Is(err, logs.ErrClaimConflict) {
+		if errors.Is(err, errLogRefused) {
 			l.mu.Lock()
 			if l.fatal == nil {
 				l.fatal = err
@@ -468,9 +411,9 @@ func (l *httpNodeLog) dropSuppressed(lines int) bool {
 // Close hands the node's last lines to the store. A batching store
 // holds them until something asks for them, and the node finishing is
 // that something; a write-through store has nothing left to do. It
-// blocks for at most the live mirror's flush budget plus the durable
-// one, twenty seconds in all, and holds the node's write lock while it
-// does, so the node reports terminal only once its log is complete.
+// blocks for at most the flush budget, ten seconds, and holds the node's
+// write lock while it does, so the node reports terminal only once its
+// log is complete.
 func (l *httpNodeLog) Close() error {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
@@ -484,16 +427,7 @@ func (l *httpNodeLog) Close() error {
 	ctx, cancel := context.WithTimeout(l.ctx, httpNodeLogFinishTimeout)
 	defer cancel()
 	l.flushBuffered(ctx)
-	if l.live != nil {
-		if lerr := l.live.Close(); lerr != nil {
-			l.logger.Warn(
-				"live log mirror did not flush its last batch; the durable copy is unaffected",
-				"run_id", l.runID,
-				"node_id", l.nodeID,
-				"err", lerr,
-			)
-		}
-	}
+
 	err := storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
 	l.collectFlushLosses()
 	l.seal(ctx)
@@ -518,30 +452,21 @@ func (l *httpNodeLog) seal(ctx context.Context) {
 	ordinal, fatal, dropped := l.attempt, l.fatal, int64(l.dropCount)
 	l.mu.Unlock()
 	if fatal != nil {
-		skip(fmt.Sprintf("the logs service refused this node's appends (%v), so readers will see its log as cut off", fatal))
+		skip(fmt.Sprintf("the node log endpoint refused this node's appends (%v), so readers will see its log as cut off", fatal))
 		return
 	}
 	if l.requiresAttempt && ordinal == 0 {
 		skip("the node closed its log before learning its execution attempt, so its lines were never sent")
 		return
 	}
-	seal := logs.Seal{
-		Stream:   l.stream,
-		FinalSeq: l.seq,
-		Lines:    l.seq,
-		Bytes:    l.sentBytes,
-		Dropped:  dropped,
-		SHA256:   hex.EncodeToString(l.digest.Sum(nil)),
-	}
+	seal := logseg.WriterSeal{Stream: l.stream, FinalSeq: l.seq, Dropped: dropped}
 	backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
 	for retry := 0; ; retry++ {
 		err := sealer.Seal(withAttempt(ctx, ordinal), l.runID, l.nodeID, seal)
 		if err == nil {
 			return
 		}
-		var authErr *logs.AuthError
-		permanent := errors.As(err, &authErr) || errors.Is(err, logs.ErrClaimConflict) || errors.Is(err, logs.ErrSealRefused)
-		if permanent || ctx.Err() != nil {
+		if errors.Is(err, errLogRefused) || ctx.Err() != nil {
 			l.logger.Warn(
 				"log seal not recorded; readers will see this node's log as cut off",
 				"run_id", l.runID,

@@ -32,7 +32,7 @@ func LocalServeToken(url string) string {
 		return ""
 	}
 	env := devEnvFile()
-	if url != env["SPARKWING_CONTROLLER_URL"] && url != env["SPARKWING_LOGS_URL"] {
+	if url != env["SPARKWING_CONTROLLER_URL"] {
 		return ""
 	}
 	paths, err := DefaultPaths()

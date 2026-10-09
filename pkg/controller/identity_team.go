@@ -15,7 +15,7 @@ import (
 )
 
 // safety: the scope set docs/auth.md gives a runner; a runner token minted from team settings gets no more.
-var runnerTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRunsState, ScopeSecretsRead, ScopeLogsWrite}
+var runnerTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRunsState, ScopeSecretsRead}
 
 const runnerPrincipalPrefix = "agent:"
 
@@ -354,7 +354,7 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 	s.logger.Info("runner token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)
 	writeJSON(w, http.StatusCreated, runnerTokenResp{
 		Token: raw, Prefix: tok.Prefix,
-		Command: runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name, allow),
+		Command: runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), name, allow),
 	})
 }
 
@@ -370,13 +370,10 @@ func runnerTokenSetup(raw string) string {
 }
 
 // hack: --metrics-addr= because a second runner on a machine would collide on its port; no
-// --gitcache since the git cache is the operator's; --logs only when announced, since the
-// controller serves no logs route. Patterns are single-quoted because '*' is a shell glob.
-func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist) string {
+// --gitcache since the git cache is the operator's. Patterns are single-quoted because '*' is
+// a shell glob.
+func runnerConnectArgs(controllerURL, name string, allow sourceurl.RepoAllowlist) string {
 	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
-	if logsURL != "" {
-		cmd += " --logs " + strings.TrimRight(logsURL, "/")
-	}
 	for _, p := range allow.Patterns() {
 		cmd += " --allow-repo '" + p + "'"
 	}

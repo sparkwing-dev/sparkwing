@@ -39,7 +39,7 @@ func TestHTTPLogs_AfterHookAuthFailureStillFailsTheNode(t *testing.T) {
 	var appends atomic.Int64
 	logsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && !strings.HasSuffix(r.URL.Path, "/seal") && appends.Add(1) > 1 {
-			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
+			http.Error(w, "the node's own credential is required", http.StatusUnauthorized)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -78,7 +78,7 @@ func TestHTTPLogs_TerminalBatchAuthFailureStillFailsTheNode(t *testing.T) {
 	var appends atomic.Int64
 	logsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && !strings.HasSuffix(r.URL.Path, "/seal") && appends.Add(1) > 1 {
-			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
+			http.Error(w, "the node's own credential is required", http.StatusUnauthorized)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -112,14 +112,14 @@ func TestHTTPLogs_TerminalBatchAuthFailureStillFailsTheNode(t *testing.T) {
 	}
 }
 
-func TestHTTPLogs_403HardFailsRun(t *testing.T) {
+func TestHTTPLogs_RefusedAppendHardFailsRun(t *testing.T) {
 	register("authfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return authFailPipe{} })
 
 	var hits atomic.Int64
 	logsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			hits.Add(1)
-			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
+			http.Error(w, "the node's own credential is required", http.StatusUnauthorized)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -165,8 +165,8 @@ func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 		if !strings.Contains(n.Error, "logs append blocked") {
 			t.Errorf("Node.Error should mention auth block, got: %q", n.Error)
 		}
-		if !strings.Contains(n.Error, "logs.write") {
-			t.Errorf("Node.Error should name the missing scope, got: %q", n.Error)
+		if !strings.Contains(n.Error, "own credential is required") {
+			t.Errorf("Node.Error should carry the endpoint's reason, got: %q", n.Error)
 		}
 		if n.FailureReason != store.FailureLogsAuth {
 			t.Errorf("FailureReason: got %q, want %q", n.FailureReason, store.FailureLogsAuth)
