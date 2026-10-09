@@ -185,12 +185,11 @@ func (s *Server) runnerClaimCrossRun(r *http.Request, tok store.ClaimToken) (str
 	case len(parts) != 1 || r.URL.RawQuery != "":
 		return "", false, nil
 	}
-	run, err := url.PathUnescape(parts[0])
-	if err != nil {
-		return "", false, nil
+	child, err := false, error(nil)
+	if run, bad := url.PathUnescape(parts[0]); bad == nil {
+		child, err = s.runnerClaimChild(r.Context(), tok, run)
 	}
-	ok, err = s.runnerClaimChild(r.Context(), tok, run)
-	return ScopeRunsRead, ok, err
+	return ScopeRunsRead, child, err
 }
 
 func (s *Server) runnerClaimChild(ctx context.Context, tok store.ClaimToken, run string) (bool, error) {
