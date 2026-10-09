@@ -54,7 +54,7 @@ the logs.
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, and the runner that tried to take it reported nothing smaller, so no claim could be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The `credits_unpriced_class` event carries the request and the ceiling. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
-| `logs_auth` | The runner's log-append calls were rejected (401/403) by the controller, so the run's structured logs are unrecoverable. | Check the runner token's `logs.write` scope; the run fails loud rather than reporting success with no output. |
+| `logs_auth` | The runner's log-append calls were rejected (401/403), so the run's structured logs are unrecoverable. | Check the runner token's scopes (`nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`); the run fails loud rather than reporting success with no output. |
 | `credits_exhausted` | The credit balance stayed at zero past the grace period, so the controller cancelled the node. | A Sparkwing Cloud operator can grant credits with the private `sparkwing-ops` tool. Then rerun. The run's `credits_exhausted` event carries the balance and how long it had been spent. |
 | `source_unavailable` | A launcher Job's init container was refused the run's source credential. The refusal answers the same on every attempt, so the node is not retried. | Check the source credential the controller holds for the repository, then re-run. |
 | `source_fetch` | A launcher Job's init container could not check out the run's source for a reason a later attempt may not meet. The node is retried within its budget, a planning node included. | If every attempt fails, check that the repository and commit are reachable from the cluster. |
@@ -127,83 +127,44 @@ Logs are not part of this payload; fetch them separately with
 
 ## Log completeness
 
-A node's log can lose lines between the runner and the logs service: an
+A node's log can lose lines between the pipeline binary and the store: an
 append that fails past its retries, a runner killed mid-stream, and
-similar. The runner numbers every line it writes and, when the node
-finishes, sends one seal per stream naming how many it numbered and how
-many it failed to deliver. The seal sits beside the log, never in it, and
-moves to the object store with the run's logs when the run is archived.
-The writer batches up to 256 consecutive lines, targets 64 KiB per append,
-and keeps an oversized single line intact. It starts an idle-tail append
-after 100 ms, and flushes the final batch before sealing. Each
-append names its first and last sequence numbers; the logs service checks
-the line count before recording that range. A failed batch counts every
-line in it as dropped. Deploy the logs service before a writer that sends
-ranges so older services do not miscount batched lines.
-While a logs service keeps its in-memory range tracker, retrying an accepted
-batch writes no second copy and consumes no extra log quota. A service restart
-or tracker eviction can lose that deduplication knowledge. If the append
-landed but its acknowledgment did not, a later retry can store the body
-again; the seal still counts unique sequence numbers, so its completeness
-state does not certify exactly one physical copy across that window.
-
-Readers judge each finished node's newest execution attempt from its
-seals, so a clean retry reads `complete` even when the attempt it
-replaced was cut off:
-
-| State | Meaning | The reader shows |
-|---|---|---|
-| `complete` | Every stream was sealed, no numbers are missing, and the runner dropped nothing. | Nothing. |
-| `incomplete` | Sealed, but the service never received some numbered lines or the runner reported drops. | `- logs incomplete: N lines missing -` |
-| `cut_off` | A stream that numbered its lines sent no seal within 60 seconds of the node finishing: the runner died or lost its connection mid-stream. | `- logs cut off: the log stream ended without the runner's confirmation after line N -` |
-| `unconfirmed` | The runner never numbered its lines, which is how a runner released before seals writes. Nothing says whether the log is whole. | `- logs unconfirmed: this runner does not report whether its log is complete (N lines stored) -` |
-| `streaming` | The node is running, or finished less than 60 seconds ago and its seal has not arrived. | Nothing yet. |
-| `unknown` | The log store keeps no seals: a filesystem, S3 or stdout logs surface. | Nothing. |
-
-`sparkwing runs logs` prints the line after the node's log and the
-dashboard draws it below the log. Neither stores it, counts it, or puts it
-in a download. `N lines missing` counts, per stream, the larger of the
-numbers the service never received and the lines the runner reported
-dropping. The service tracks received numbers in memory, so a logs
-service that restarts mid-stream trusts every number the stream sent
-before the restart.
-
-A node's lines are written by the pipeline binary, which is built against
-the SDK version the pipeline's `go.mod` pins, not by the runner that
-claimed the node. When the controller keeps node logs as segments (below),
-the runner keeps every line the binary writes and seals the log itself, so
-a binary built against any SDK reads complete when it exits on its own. On
-a controller that keeps no segments, a pooled agent or Kubernetes Job
-numbers the lines of a binary that does not and seals them for it in the
-logs service; a binary killed by a signal or cancelled is left unsealed and
-reads `cut_off`, and a line the binary gives up on after the logs service
-refused it counts as dropped.
+similar. The process that supervises the pipeline binary serves the
+binary's log appends on 127.0.0.1 (`SPARKWING_LOGS_URL`), so a binary
+built against any SDK logs unchanged. The binary numbers every line it
+writes, batches up to 256 consecutive lines, targets 64 KiB per append,
+keeps an oversized single line intact, starts an idle-tail append after
+100 ms, and flushes the final batch before sealing. A failed batch counts
+every line in it as dropped. A binary that does not number its lines is
+numbered by the runner, which seals the log for it.
 
 ### Node logs kept as segments
 
 Every cluster runner keeps its nodes' logs as segments the controller
 stores when the controller advertises them (`logs.segments` in
-`GET /api/v1/capabilities`), whether or not it has a logs URL: a
-Kubernetes Job, warm runner, self-hosted agent, GitHub Actions runner,
-launcher Job, and the trigger runner's in-process nodes and compile
-output. A run started on a laptop whose state lives on that controller
-(a remote profile) uploads its nodes' segments from the laptop the same
-way, and turns its live view on from its run heartbeat; a laptop run
-whose state stays local keeps the logs service its profile names. The runner process that supervises the pipeline binary serves the
-binary's log appends on 127.0.0.1, so a binary built against any SDK logs
-unchanged. It appends
-every line to a spool file and uploads a gzip-compressed segment every
-10 seconds or 1 MiB, whichever comes first; an idle node uploads
-nothing. When the binary exits, the runner uploads the last segment and
-a manifest that lists every segment with its SHA-256 and seals the log.
-The controller issues the upload URLs in batches of 16
-(`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`), presigned into
-its cache bucket when it has `--cache-blob-store`, otherwise signed
-against its own output directory. Segments live under
-`logs/r90/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`.
-A runner whose controller predates segments, or has nowhere to keep
-them, writes to its logs URL, or keeps the log on local disk without one,
-as before.
+`GET /api/v1/capabilities`): a Kubernetes Job, warm runner, self-hosted
+agent, GitHub Actions runner, launcher Job, and the trigger runner's
+in-process nodes and compile output. A run started on a laptop whose
+profile keeps its state on that controller uploads its nodes' segments
+from the laptop the same way, and turns its live view on from its run
+heartbeat. The runner appends every line to a spool file and uploads a
+gzip-compressed segment every 10 seconds or 1 MiB, whichever comes first;
+an idle node uploads nothing. When the binary exits, the runner uploads
+the last segment and a manifest that lists every segment with its
+SHA-256 and seals the log. The controller issues the upload URLs in
+batches of 16 (`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`),
+presigned into its cache bucket when it has `--cache-blob-store`,
+otherwise signed against its own output directory. Segments live under
+`logs/<class>/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`,
+where `<class>` is the retention class (see
+[self-hosting.md](self-hosting.md#node-log-retention)).
+
+A controller with neither a cache bucket nor an output directory keeps no
+node logs: its runners keep each log on their own disk, and a laptop run
+against it fails at start naming the controller.
+`sparkwing cloud status` reports whether a profile's controller keeps
+node logs. A laptop run whose state stays local writes its node logs
+under `$SPARKWING_HOME/runs/`, where `sparkwing serve` reads them.
 
 A runner pushes a node's lines to the controller's live ring only while
 a viewer watches the node: the dashboard's log stream or `sparkwing runs
@@ -218,18 +179,21 @@ node sends nothing live, and a viewer sees its segments, up to 10
 seconds behind, until the runner joins.
 
 The dashboard and `sparkwing runs logs`, `--follow` and `--grep` read
-through the controller, which serves a node from its segments and verifies
-each one against the manifest's digest, and serves a node that wrote none
-from the logs service. A follow of a running node sends the segments
-uploaded so far, then the live ring from the byte where they end, so no
-line is sent twice; when the ring has already dropped bytes, it waits for
-the segment that covers them. A run's log search and the dashboard's
-cross-run grep read at most 256 MiB of logs and scan for at most 10
-seconds; one that stops at a bound says so in its reply (`truncated`,
-`stopped`). A runner
+through the controller's log routes (scope `logs.read`), which serve a
+node from its segments and verify each one against the manifest's
+digest. A follow of a running node sends the segments uploaded so far,
+then the live ring from the byte where they end, so no line is sent
+twice; when the ring has already dropped bytes, it waits for the segment
+that covers them. A run's log search and the dashboard's cross-run grep
+read at most 256 MiB of logs and scan for at most 10 seconds; one that
+stops at a bound says so in its reply (`truncated`, `stopped`). A runner
 lost mid-node loses at most the segment it was filling: once the node
 has been finished for 60 seconds with no manifest, the controller writes
-one listing the segments that landed, and the log reads incomplete:
+one listing the segments that landed, and the log reads incomplete.
+
+Readers judge each finished node's newest execution attempt from its
+manifest, so a clean retry reads `complete` even when the attempt it
+replaced was cut off:
 
 | State | Meaning | The reader shows |
 |---|---|---|
@@ -237,6 +201,11 @@ one listing the segments that landed, and the log reads incomplete:
 | `incomplete` | A segment failed to upload or verify, the binary skipped sequence numbers or reported drops, or the runner was lost and the controller sealed the attempt. | `- logs incomplete: ... -` naming the reason |
 | `cut_off` | The binary was killed or never started, sent no seal after numbering its lines, or reached the 64 MiB node cap. | `- logs cut off after line N: ... -` |
 | `streaming` | The node is running, or finished less than 60 seconds ago and its manifest has not landed. | Nothing yet. |
+| `unknown` | The log store keeps no manifests: a local run's filesystem, S3 or stdout logs surface. | Nothing. |
+
+`sparkwing runs logs` prints the line after the node's log and the
+dashboard draws it below the log. Neither stores it, counts it, or puts it
+in a download.
 
 Deleting a run deletes its segments, and so does deleting a team. Bucket
 lifecycle rules expire them by retention class; see
@@ -728,20 +697,19 @@ working, because deleting is how a store gets back under its ceiling.
 | Service | What it bounds | Refusal | State on |
 |--------|------|-------------|------|
 | `sparkwing-cache` | the dependency-archive, team and git mirror trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
-| `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
 | `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
 
-Each of the three reports `frozen`, `warning` and
+Each of the two reports `frozen`, `warning` and
 `measurement_incomplete` on its health route and raises a `problems`
 entry for each, so a frozen or warning store shows as degraded wherever
 health is read. Public health reports flags and measurement time without
 stored byte or object totals. Detailed totals remain in service metrics
 and the admin-scoped controller breaker route.
 
-The three are independent: each measures the store it owns and freezes
+The two are independent: each measures the store it owns and freezes
 only its own writes, so no service waits on another to decide. The
 controller's ceiling is the one that reaches an S3 bucket; the services'
-ceilings bound the volumes they write.
+ceiling bounds the volume it writes.
 
 ### The controller's bucket ceiling
 
@@ -837,20 +805,16 @@ while the bucket is still over the ceiling. Raise the ceiling on the
 controller to keep writes flowing, or delete objects until the
 measurement falls back under it.
 
-### The cache and logs service ceilings
+### The cache ceiling
 
-The hosted write path does not run through the controller: a runner
-uploads artifacts and dependency archives to `sparkwing-cache` and posts
-log lines to `sparkwing-logs`, and each service stores them itself. Each
-therefore carries its own ceiling and refuses its own writes with `507`
-and an error naming its own flags.
+Artifact and dependency-archive uploads do not run through the
+controller: a runner uploads them to `sparkwing-cache`, which stores them
+itself. The cache therefore carries its own ceiling and refuses its own
+writes with `507` and an error naming its own flags:
+`--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`,
+`--warn-store-objects` and `--store-reconcile`.
 
-| Service | Flags |
-|--------|------|
-| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` |
-| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` |
-
-Each service counts what it stores as it stores it and walks its own
+The cache counts what it stores as it stores it and walks its own
 trees on `--store-reconcile` (hourly by default, `0` measures once at
 startup). Git writes the cache's mirrors itself, so the cache re-measures
 its store whenever a mirror clone or fetch finishes instead. The walk is local file I/O rather than billed requests, it
@@ -859,18 +823,14 @@ rather than folding a short one in, and a
 measurement that finds the store back under its ceiling thaws it.
 `--warn-store-bytes` and `--warn-store-objects` mark the store as
 warning on health without refusing anything. The chart carries all of
-these as `cache.limits.*` and `logs.limits.*`.
+these as `cache.limits.*`.
 
-A service with a bucket behind it counts only its volume here: the
-cache's `--blob-store` and the logs service's `--archive-store` are the
-controller's to measure, and what each team holds in them is counted by
-the controller ([Tenant limits](limits.md)).
+The cache counts only its volume here: its `--blob-store` is the
+controller's to measure, and what each team holds in it, node log
+segments included, is counted by the controller
+([Tenant limits](limits.md)).
 
-Neither service waits out the interval to recover. Deleting a run with
-`DELETE /api/v1/logs/{runID}` (which takes `logs.delete` or `admin`), or letting the sweeper delete it under
-`--retention`, starts a fresh measurement of the log store, so appends
-resume shortly after the delete answers rather than at the end of the
-interval. The cache
+The cache does not wait out the interval to recover. It
 serves no delete of its own, so it carries two bearer-gated admin
 routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
 what turns freeing space on the volume into uploads flowing again, and
@@ -879,8 +839,7 @@ measurement. The measure route answers `202` with the state as it stands
 and walks off the request path, so the caller pays no latency for a
 large store and a disconnect cannot abandon the walk; one runs at a
 time. The thaw is refused with `409` when no measurement is scheduled,
-and the refusal points at the measure route. Deleting a run on the logs
-service triggers the same off-request walk. Neither service drops a
+and the refusal points at the measure route. The cache does not drop a
 request that arrives while a walk is running: it re-runs once when that
 walk finishes, so a delete the walk had already passed still lands.
 A reset clears every tripped class and both window counters; lifetime
@@ -896,19 +855,19 @@ fetches. Object-store egress is about nine cents per gigabyte, so a
 terabyte a month is ninety dollars nobody authorised, and a user can
 spend it without writing a single pipeline.
 
-The controller, the logs service, and the cache each count the response
+The controller and the cache each count the response
 bodies of those routes twice: once against the caller that asked for
 them, and once against the process total. The only byte limit is each
 team's daily download cap; the process total raises an alarm and refuses
 nothing. Every limit below is off until an operator sets one.
 
-| Flag | Controller | Logs | Cache | What it does |
-|------|-----------|------|-------|--------------|
-| `--team-daily-download-free-bytes` | yes | no | no | Bytes one team without credits may download in a UTC day, 5 GiB by default: artifacts and git fetches from the controller, and binaries, artifacts, dependency archives and git fetches from the cache. Log reads are not counted. Past it, the team's next download answers `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
-| `--team-daily-download-funded-bytes` | yes | no | no | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
-| `--egress-max-downloads` | yes | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
-| `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
-| `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
+| Flag | Controller | Cache | What it does |
+|------|-----------|-------|--------------|
+| `--team-daily-download-free-bytes` | yes | no | Bytes one team without credits may download in a UTC day, 5 GiB by default: artifacts and git fetches from the controller, and binaries, artifacts, dependency archives and git fetches from the cache. Log reads are not counted. Past it, the team's next download answers `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
+| `--team-daily-download-funded-bytes` | yes | no | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
+| `--egress-max-downloads` | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
+| `--egress-max-log-streams` | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
+| `--egress-daily-alarm-bytes` | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
 
 The controller's alarm and concurrency caps are also supplied as a set by
 `--limits-profile`, which a hosted controller runs with instead of naming
@@ -918,8 +877,8 @@ another.
 
 The controller also reads its budgets from environment variables:
 `SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
-`SPARKWING_CONTROLLER_EGRESS_<BUDGET>`. `sparkwing-logs` and
-`sparkwing-cache` read the flags alone.
+`SPARKWING_CONTROLLER_EGRESS_<BUDGET>`. `sparkwing-cache` reads the
+flags alone.
 
 ### A team's daily download cap
 
@@ -942,8 +901,7 @@ proceeds. The operator's own team and the operator token carry no cap,
 because every in-cluster runner shares them.
 
 Reading a run's logs, from the dashboard or the CLI, is never charged to
-the team, so a team past its cap can still read why its run failed. The
-logs service charges nothing.
+the team, so a team past its cap can still read why its run failed.
 
 A service running with auth off resolves every request to `anonymous`,
 the laptop-local shape, where no limit is set anyway.
@@ -970,7 +928,7 @@ service's `/api/v1/health` (the cache serves it on `/health`), as a line
 in `problems`, as a `warn`-level log line carrying `day_bytes`,
 `threshold_bytes` and the principal whose bytes crossed it, and as the
 `sparkwing_egress_daily_alarm` and `sparkwing_egress_day_bytes` gauges on
-the controller's and the logs service's `/metrics`
+the controller's `/metrics`
 (`sparkwing.cache.egress_daily_alarm` and `sparkwing.cache.egress_day_bytes`
 on the cache's). Point CloudWatch alarms on the bucket's `BytesDownloaded`
 metric and the instance's `NetworkOut` at the same page, so the bill has a
@@ -996,9 +954,9 @@ UTC day and the UTC month in the controller's database with
 `POST /internal/egress/totals`, written at most once a minute and at
 shutdown and read back at start, so a restart keeps the day's alarm
 and `global_month_bytes` counting. Each team's download day is the
-controller's own row and needs no saving. A cache without a controller and
-the logs service count in memory alone: their counters are per process and
-start over on a restart.
+controller's own row and needs no saving. A cache without a controller
+counts in memory alone: its counters are per process and start over on a
+restart.
 
 Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
 and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether

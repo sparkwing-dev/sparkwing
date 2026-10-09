@@ -445,7 +445,7 @@ Your laptop:
 Remote runner:
   3. Controller records the trigger; a polling runner claims it
   4. Runner clones the exact commit, compiles, and runs the pipeline
-  5. Runner streams logs through the logs service
+  5. Runner uploads node logs to the controller as segments
 ```
 
 The controller is the gatekeeper for prod-side execution: only the
@@ -455,8 +455,8 @@ cluster can push to ECR, update gitops, and dispatch warm runners.
 to the profile's controller for remote execution. The chosen profile must
 have a `controller:` set; passing a controller-less profile errors with a
 clear message. By default the command follows the remote run until it
-reaches a terminal state -- full log streaming when the profile defines a
-logs URL, node-status updates from the controller otherwise. Pass
+reaches a terminal state, streaming the run's node logs through the
+controller. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
 
@@ -532,7 +532,6 @@ An off-cluster machine can claim only these triggers and compile them locally:
 ```bash
 sparkwing-runner runner --credentials-dir="$HOME/.config/sparkwing/runner-credentials" \
   --controller=https://sparkwing.example.com \
-  --logs=https://sparkwing.example.com \
   --gitcache=https://sparkwing.example.com/api/v1/gitcache \
   --also-claim-triggers --claim-nodes=false \
   --trigger-sources=pipeline-working-tree@laptop-hostname \
@@ -572,7 +571,7 @@ which repositories the machine may build and prints this command:
   rm -f "$HOME/.config/sparkwing/runner-credentials/agent-token" &&
   printf '%s' swr_... > "$HOME/.config/sparkwing/runner-credentials/agent-token") &&
 sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials" \
-  --controller https://sparkwing.example.com --logs https://logs.example.com \
+  --controller https://sparkwing.example.com \
   --allow-repo 'github.com/acme/*' \
   --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= \
   --holder-prefix my-laptop

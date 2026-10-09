@@ -330,33 +330,25 @@ profiles with `sparkwing configure profiles`. See
 [Self-hosting](self-hosting.md) for the supported local and controller
 deployment paths.
 
-Logs are the exception. `sparkwing-controller` serves no `/api/v1/logs`
-route -- `sparkwing-logs` is a separate binary on its own port -- so a
-deployment that runs them as two processes must tell the controller
-where the logs service is:
+Node logs go through the controller too. A runner, or a laptop run whose
+profile keeps its state on the controller, uploads each node's log as gzip
+segments through URLs the controller issues, into the controller's cache
+bucket (`--cache-blob-store`) or, without one, its output directory. The
+dashboard, `sparkwing runs logs --profile` and `sparkwing pipeline trigger`
+read them back through the controller's log routes. A controller with
+neither a cache bucket nor an output directory keeps no node logs, and a
+laptop run against it fails at start naming the controller. See
+[observability.md](observability.md#node-logs-kept-as-segments).
 
-```sh
-sparkwing-controller --logs-url https://sparkwing-logs.example.dev
-```
+#### Watching a run live
 
-The controller announces that URL on `GET /api/v1/services`, and a
-runner with no `logs:` surface of its own posts there. The local
-dashboard, which mounts the controller and the logs service on one mux,
-announces its own URL. Without an announcement a run refuses to start,
-`sparkwing cluster worker` refuses to start, and `sparkwing pipeline
-trigger` and `sparkwing runs logs --grep` refuse to read logs, each with an error
-naming the controller and the missing logs service.
-
-#### Watching a run live without the logs service
-
-A deployment whose `logs:` surface is an object store has no live read:
-an object appears only once a batch is flushed, and the store serves no
-tail. The controller closes that gap. A node's runner mirrors its lines
-to the controller as it writes them, the controller holds the last
-512 KiB per running node in memory, and the dashboard and `sparkwing
-runs logs --follow` read that ring while the node runs. The durable
-copy still goes to the bucket, and a read after the node finishes comes
-from there.
+A node's segments land every 10 seconds or 1 MiB, so the controller
+closes the gap while someone watches. The dashboard's log stream and
+`sparkwing runs logs --follow` hold a 30-second watch on the node; while
+it is held, the node's runner pushes its lines to the controller, which
+holds the last 512 KiB per node in memory, and the reader follows that
+ring after the segments uploaded so far. An unwatched node sends nothing
+live. A read after the node finishes comes from the segments.
 
 The ring is memory, bounded per node (512 KiB), across all nodes
 together (64 MiB), and by ring count (1024 nodes holding one at once).
@@ -368,14 +360,13 @@ after ten minutes of silence from a node that never reported finishing.
 `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`, and
 refuses a non-positive value.
 
-A reader is told when it misses bytes: a stream whose buffer dropped
+A reader is told when it misses bytes: a stream of the ring alone
+(`GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream`) whose buffer dropped
 lines before the reader got to them emits one marker line naming the
 dropped byte count, and a reader still attached when the buffer is
-released gets a marker pointing it at the durable copy. Only a node the
-run actually has can write to a ring.
-
-A deployment that runs `sparkwing-logs` keeps its own live stream and
-mirrors nothing.
+released gets a marker pointing it at the durable copy. The merged read
+(`GET /api/v1/runs/{id}/logs/{node}/stream`) instead waits for the segment
+that covers dropped bytes. Only a node the run actually has can write to a ring.
 
 ### One of your own machines as the controller
 

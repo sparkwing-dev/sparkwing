@@ -83,8 +83,8 @@ object store refuses loses its whole batch; those lines are counted into
 the node's dropped-line total and reported as a `logs_drop` event.
 
 The keys are valid only on an object-store logs surface. A `filesystem`
-surface appends to an open file and a `controller` surface takes a
-streaming append, so neither reads them, and a profile that sets one
+surface appends to an open file and a `controller` surface uploads
+segments, so neither reads them, and a profile that sets one
 anywhere else is refused at load with the key named. A negative value is
 refused the same way.
 
@@ -130,7 +130,7 @@ Required fields per type:
 - `s3` -- `bucket` (plus optional `prefix`)
 - `postgres` -- exactly one of `url` or `url_source` (the
   latter names a secret in the resolved source)
-- `controller` requires `controller: <profile-name>` or `url:`. A profile with a sibling `controller:` block inherits that profile name.
+- `controller` requires `controller: <profile-name>` or `url:`. A profile with a sibling `controller:` block inherits that profile name. A `logs` surface of type `controller` takes no `url:`: its node logs reach the controller as segments, so the profile's state must be on the same controller, and a url there is refused at load.
 - `stdout`, `sqlite` -- no required fields
 
 Recognized backend types that aren't implemented in the current

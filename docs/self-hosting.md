@@ -30,7 +30,7 @@ pipeline.
 ## Shared controller and dashboard
 
 Use the [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) for a
-shared controller, dashboard, cache, logs service, and Kubernetes runner. The
+shared controller, dashboard, cache, and Kubernetes runner. The
 chart requires Kubernetes and an explicitly compatible image set; its README
 lists the required values and install command. The controller starts with
 `--require-auth` by default, so the render refuses unless
@@ -54,7 +54,7 @@ bucket's whole configuration. It reads them on its first log request and
 again every 5 minutes while one is missing, and issues no upload URLs into
 a class without an enabled rule that expires the class prefix after
 exactly its days, naming the rule in its log and refusal; the runner then
-keeps that node's log as it would against a controller without segments.
+keeps that node's log on its own disk.
 Grant the controller `s3:GetLifecycleConfiguration` on the bucket and add
 the rules, merged with any the bucket already has:
 
@@ -69,6 +69,11 @@ aws s3api put-bucket-lifecycle-configuration --bucket my-cache-bucket \
 
 A controller without a cache bucket keeps segments in its output
 directory and expires nothing; deleting a run or a team deletes its logs.
+A controller with neither a cache bucket nor an output directory keeps no
+node logs: its runners keep each log on
+their own disk, and a laptop run whose profile keeps its state there fails
+at start naming the controller. `sparkwing cloud status` reports whether a
+profile's controller keeps node logs.
 On a multi-team controller a segment's stored bytes count against the
 team's log storage, and the hourly storage pass lists the segments to
 correct the count and, for a team without credits past its log share,
@@ -76,9 +81,11 @@ deletes its least recently written finished runs' logs.
 
 ### Moving the logs service's logs to segments
 
-`sparkwing-logs export` converts every node log a logs service holds, on
-its volume and in its archive, into segments and manifests the controller
-reads, so they stay readable once the service is retired. Run it once
+This release ships no logs service. Logs a deployment's earlier
+`sparkwing-logs` holds stay readable only once converted: before upgrading,
+run `sparkwing-logs export` from the previous release's `sparkwing-logs`
+binary. It converts every node log the service holds, on its volume and in
+its archive, into segments and manifests the controller reads. Run it once
 with the service's own root and archive, against the controller's
 `--cache-blob-store`, or its state directory for a controller without one:
 
@@ -95,6 +102,8 @@ and `incomplete` with reason `migrated without seal` for a log no writer
 numbered. A run that names no team goes under `--default-team`
 (`default`). An attempt already exported is skipped, so the command may
 run again, and it exits non-zero naming every run it could not convert.
+See [the migration notes](migrations/_unreleased.md#node-logs-reach-the-controller-as-segments)
+for the upgrade order.
 
 ### Signed downloads through CloudFront
 
@@ -211,12 +220,11 @@ sparkwing cluster runners add --profile prod --name dev-laptop
 ```
 
 It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
-`runs.state`, `secrets.read` and `logs.write`, writes
+`runs.state` and `secrets.read`, writes
 the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
 keeping the file's other sections, installs the user service, and
-prints the token prefix with the command that revokes it. Logs use the profile's
-logs URL, or the logs service the controller announces when the profile supplies
-none. `--logs` chooses an explicit URL. The config and the machine are checked
+prints the token prefix with the command that revokes it. The runner uploads
+its nodes' logs to the controller as segments. The config and the machine are checked
 before the mint, so a host with no `sparkwing-runner` or no
 user service session fails before a credential exists; a failure after the mint
 prints the live token and its revoke command. `--max-concurrent`,
@@ -253,7 +261,7 @@ VCS provenance embedded by the Go build. The runner does not yet download or
 replace its own executable; update the service binary through the same installer
 or service manager you used to install it.
 
-The installer asks for the controller URL, logs URL, API token, runner name,
+The installer asks for the controller URL, API token, runner name,
 and maximum concurrent jobs. It writes the existing unenrolled agent format,
 which uses legacy FIFO claims with local admission enabled. Its default CPU
 and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
@@ -270,7 +278,6 @@ For unattended installation, supply the same values as environment variables:
 
 ```bash
 SPARKWING_CONTROLLER=https://api-sparkwing.example.com \
-SPARKWING_LOGS=https://logs-sparkwing.example.com \
 SPARKWING_API_TOKEN="$MY_TOKEN" \
 RUNNER_NAME=dev-laptop \
 MAX_CONCURRENT=2 \
@@ -352,21 +359,20 @@ reach the repository with its configured Git credentials.
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
 
-## Object storage for logs and the cache
+## Object storage for the cache
 
-`sparkwing-logs` and `sparkwing-cache` keep their data on a volume by default.
-Pointed at an S3 bucket, each keeps its durable data there instead, one
-namespace per team, and the volume shrinks to working space. Give each service
-its own prefix in the bucket; neither ever writes at the bucket root or lists
-outside its prefix, so a per-service IAM policy scoped to the prefix is enough.
-Region and credentials come from the AWS default chain (IRSA on EKS, with
-`AWS_REGION` set); no static keys are read. `SPARKWING_S3_ENDPOINT` points
-either service at an S3-compatible store.
+`sparkwing-cache` keeps its data on a volume by default. Pointed at an S3
+bucket with `--blob-store s3://bucket/cache`, it keeps its durable data there
+instead, one namespace per team, and the volume shrinks to working space. It
+never writes at the bucket root or lists outside its prefix, so an IAM policy
+scoped to the prefix is enough. Region and credentials come from the AWS
+default chain (IRSA on EKS, with `AWS_REGION` set); no static keys are read.
+`SPARKWING_S3_ENDPOINT` points it at an S3-compatible store.
 
 | Service | Flag | Keys |
 |---|---|---|
 | `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
-| `sparkwing-logs` | `--archive-store s3://bucket/logs` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
+| `sparkwing-controller` | `--cache-blob-store s3://bucket/cache` | node log segments under `cache/logs/<class>/teams/<team>/runs/...`; see [Node log retention](#node-log-retention) |
 
 **The cache** moves its binary, dependency-archive and artifact stores to the
 bucket. Git mirrors, workspace uploads and the registry proxy stay on
@@ -379,60 +385,39 @@ partial object is ever readable. Every read is served through the pod, never
 redirected to the bucket, so the egress meter and the request budget see every
 byte.
 
-**The logs service** keeps live runs on its volume and moves finished ones to
-the bucket. An append still lands in a file that grows in place and a follower
-still tails that file, so streaming is exactly what it is without a bucket and
-a running node costs the bucket nothing. A run nobody has written for
-`--archive-idle` (10 minutes by default) is uploaded as one object per node log
-plus two small index objects and leaves the volume; a read or an append of an
-archived run restores it first. `--retention` then deletes archived runs by the
-day of their last write: each pass is one listing of the day index while
-nothing has expired, and a restored run written since its archive waits for
-the archiver to upload it again with the new date. The volume must still outlive a pod restart to keep the
-logs of runs in flight, but it holds only live runs and restored copies.
-
-Neither service counts what each team holds in its bucket: the controller
-does, in its database, and each service asks it for room before a team's
+The cache does not count what each team holds in its bucket: the controller
+does, in its database, and the cache asks it for room before a team's
 write and charges each team's download to its day there
-([Tenant limits](limits.md)). The store ceiling on each service covers its
+([Tenant limits](limits.md)). The cache's store ceiling covers its
 volume alone; the controller's `--bucket-store` measurement covers the
 bucket. On a multi-team deployment give the cache `--controller` and its token, the
 file `cache-token` in its `--credentials-dir`, which the controller holds as
 `SPARKWING_CACHE_TOKEN`; a cache with a `cache-grant-key` and `--blob-store`
-refuses to start without them. The logs service reaches the
-same controller through its `--controller` with the appending caller's own
-credential. Give the controller `--cache-blob-store` and
-`--logs-archive-store` (or `SPARKWING_CACHE_BLOB_STORE` and
-`SPARKWING_LOGS_ARCHIVE_STORE`), the same URLs the services use, and its hourly
-storage pass lists both to reconcile the counts and expires a team's cache
-objects 30 days after their last write. The controller's role then needs
-`s3:ListBucket` and `s3:DeleteObject` on the cache's prefix and
-`s3:ListBucket` on the logs service's. `GET /api/v1/storage` shows a team
-what it holds.
+refuses to start without them. Give the controller `--cache-blob-store` (or
+`SPARKWING_CACHE_BLOB_STORE`), the same URL the cache uses, and its hourly
+storage pass lists it to reconcile the counts, cache objects and log segments
+alike, and expires a team's cache objects 30 days after their last write. The
+controller's role then needs `s3:ListBucket`, `s3:PutObject`, `s3:GetObject`,
+`s3:DeleteObject` and `s3:GetLifecycleConfiguration` on the cache's prefix.
+`GET /api/v1/storage` shows a team what it holds.
 
 Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
-cache and `DELETE /api/v1/teams/{team}/logs` on the logs service, which also
-removes the team's runs from the index, both idempotent. A team's credential never reaches another team's namespace: the
-cache takes the team from the controller-signed grant, and the logs service
-records a run's team from the first team credential that writes to it and
-refuses every other team the run even when the controller would answer.
+cache, and the controller deletes the team's log segments, both idempotent. A
+team's credential never reaches another team's namespace: the cache takes the
+team from the controller-signed grant.
 
-Neither service retries on its own. The SDK sends at most four attempts per
+The cache does not retry on its own. The SDK sends at most four attempts per
 request, and every attempt spends the process's object-store request budget.
 A `403` on a write or a listing, which is what a bucket-level deny returns,
-pauses both for a minute, doubling to five while the deny lasts, and one
-request probes when each pause ends; three other failures in a row pause them
+pauses it for a minute, doubling to five while the deny lasts, and one
+request probes when each pause ends; three other failures in a row pause it
 for five seconds, doubling to two minutes. Reads and deletes keep working
 through a pause. The cache answers a paused write with `503` and
-`Retry-After`, and the logs service leaves finished runs on the volume and
-reports the pause on `/api/v1/health` under `archive`.
+`Retry-After`.
 
 Moving an existing deployment: a volume's blobs are not read once
 `--blob-store` is set, so copy them first or accept the misses (dependency
-archives and binaries are caches and repopulate). For logs, the service
-archives whatever runs are on the volume when it starts with `--archive-store`,
-but a run whose directory predates this release has no recorded team and is
-stored under the operator's prefix.
+archives and binaries are caches and repopulate).
 
 ## Bound storage growth
 

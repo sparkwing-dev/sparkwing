@@ -379,7 +379,7 @@ sparkwing cluster runners remove --profile prod
 Mint a runner token, write the config, start the service
 
 Mints a runner token carrying nodes.claim, triggers.claim,
-runs.state, secrets.read and logs.write against the profile's controller,
+runs.state and secrets.read against the profile's controller,
 writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
@@ -411,7 +411,6 @@ reaches only config.yaml.
 | `--labels CSV` | Comma-separated self-asserted placement labels |
 | `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
 | `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
-| `--logs URL` | Logs service URL (default: the profile's logs surface, then the controller's announcement) |
 | `--config PATH` | config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml) |
 | `--force` | Replace an existing agent section |
 | `--no-service` | Write the config without installing or starting the service |

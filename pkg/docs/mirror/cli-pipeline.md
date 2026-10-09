@@ -780,9 +780,8 @@ Submit a pipeline to a profile's controller (remote execution)
 Submits a trigger to the controller defined by --profile and
 follows the remote run until it reaches a terminal state.
 
-When the profile defines a logs URL, the follow streams full log
-output; otherwise it shows node-status updates from the
-controller. --detach skips the follow and prints the run id once
+The follow streams the run's node logs through the controller.
+--detach skips the follow and prints the run id once
 the trigger is registered (the trigger POST itself always
 completes before the command exits, so the run is guaranteed
 queued).

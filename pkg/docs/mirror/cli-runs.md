@@ -503,8 +503,7 @@ Print a run's logs
 
 Without --profile, reads logs from the local run directory. Pass --profile
 NAME to read through that profile's controller, which serves each node's
-log from its segments, or from the logs service for a node that wrote
-none. Line-selection filters (--tail/--head/--lines/--grep) apply
+log from its segments. Line-selection filters (--tail/--head/--lines/--grep) apply
 server-side in cluster mode so the CLI never tails giant logs over the
 wire.
 

@@ -96,7 +96,7 @@ The Go module pipeline authors import:
   Job, Work, Step, modifiers, runtime helpers (`sparkwing.Bash`,
   `sparkwing.Path`, etc.), wire types. This is the package with
   stability guarantees.
-- **Other `pkg/` packages** -- `pkg/controller/client`, `pkg/logs`,
+- **Other `pkg/` packages** -- `pkg/controller/client`,
   `pkg/storage`, `pkg/runner`, `pkg/wingwire` and the rest. Exported
   and covered by the same stability promise as `sparkwing/` (see
   [VERSIONING.md](./VERSIONING.md)), but they are CLI and controller

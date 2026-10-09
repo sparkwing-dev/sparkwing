@@ -78,7 +78,7 @@ A node whose machine never started gets its reservation back: a pod that never
 came up, a claim reaped before its pod renewed it. A node the platform stops
 before its execution starts gets back everything its claim billed, setup
 included. That covers no machine of the class coming free (`queue_timeout`)
-and a log service that refused or dropped the node's writes (`logs_auth`,
+and a log store that refused or dropped the node's writes (`logs_auth`,
 `logs_dropped`). A runner that stops renewing its claim, before or after
 execution starts, ran until its lease ran out: when the reaper or agent-loss
 recovery clears the claim, the seconds since its last charge are billed to the
@@ -527,9 +527,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `runs.write`      | POST `/api/v1/triggers`: starting new work |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
-| `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
-| `logs.write`      | POST on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}/{nodeID}/seal`)      |
-| `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it, so only it and `admin` delete logs: a runner or team token with `logs.write` cannot |
+| `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
@@ -542,9 +540,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
 
-A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
-and `logs.write`. That set claims work, drives the run it claimed from plan to
-finish, reads the secrets its pipeline owns, and ships logs. It mints no token,
+A runner needs `nodes.claim`, `triggers.claim`, `runs.state` and
+`secrets.read`. That set claims work, drives the run it claimed from plan to
+finish, reads the secrets its pipeline owns, and uploads its nodes' log
+segments. The controller refuses to mint the removed `logs.write` and
+`logs.delete` scopes; see
+[the migration notes](migrations/_unreleased.md#node-logs-reach-the-controller-as-segments). It mints no token,
 reads no user, lists no secret, cannot start or retry a run of its own
 choosing, and cannot read cached source for an unclaimed run. A pool replica that executes
 already-created nodes still needs `runs.state`, because `start`, `finish`, and
@@ -739,8 +740,7 @@ you add a new route, annotate it with `requireScope`.
 
 `GET /api/v1/auth/whoami` is authenticated by the middleware like any
 other route but carries no scope check, so any valid token can read
-back its own principal, kind, scopes, and prefix. The logs service uses
-it to resolve tokens against the controller. It shows as `public` in
+back its own principal, kind, scopes, and prefix. It shows as `public` in
 [api-reference.md](api-reference.md) because that table is generated
 from `requireScope` wrappers -- there, `public` means no scope check,
 not no authentication.
@@ -864,7 +864,7 @@ token the team holds is revoked, open invitations are withdrawn, queued runs are
 cancelled and running ones asked to stop, and the team no longer resolves for
 any request. Another replica may accept a revoked token from its cache for up to
 a minute, so a background pass, once a minute and at least two minutes after the
-request, then deletes the team's logs through the logs service, its artifacts
+request, then deletes the team's log segments, its artifacts
 and build cache through the cache service, and its rows in every team-owned
 table, secrets and storage watermarks included. A cache grant minted before
 the deletion stays valid for up to six hours, so seven hours after the purge a
@@ -873,19 +873,9 @@ One replica works on a deletion at a time, under a five-minute lease it renews
 before each step. A pass that fails leaves the deletion where it was with the
 error recorded and the next pass starts that step again;
 `GET /api/v1/me/team-deletions` shows the requester its state. The slug is
-never registered again. The controller deletes logs with the token in
-`SPARKWING_LOGS_DELETE_TOKEN`, which must carry exactly the `logs.delete`
-scope; mint one as the operator with `sparkwing cluster tokens create --type service --principal controller-logs --scope logs.delete`. With a logs service
-configured and no such token, or one carrying any other scope, a deletion
-stays pending and records why. The purge deletes the team's logs with one
-`DELETE /api/v1/teams/{team}/logs`, which removes every run the logs service
-recorded for the team and its archived namespace; a logs service without an
-archive store answers that route 404, and the controller then deletes the
-team's runs one at a time. An owner cannot delete their only team;
-deleting their account does that. On a logs service without an archive store,
-logs of runs deleted before their team was, for instance by
-`DELETE /api/v1/runs/{id}`, are not tracked by any row the purge reads and
-stay until its retention removes them.
+never registered again. The purge deletes the team's segments under every
+retention class's `teams/<team>/` prefix. An owner cannot delete their only
+team; deleting their account does that.
 
 A user deletes their account with `DELETE /api/v1/me`, typing their email back
 as `confirm_email`, from a session signed in within the last 10 minutes; an
@@ -1075,8 +1065,7 @@ dashboard bundle's static assets need no session either. The controller's
 `/metrics` is not among them: its run counters name every team's
 pipelines, so on the API listener it needs an `admin` bearer, and
 `--metrics-addr` moves it to a listener of its own that serves it open.
-The logs service opens its health and metrics probes the same way as the
-controller's health probe. Every registered
+Every registered
 route is listed in
 [api-reference.md](api-reference.md).
 
@@ -1109,14 +1098,10 @@ multi-team license is loaded, it sends a browser without a session to `/login`
 for every page except the bundle's static assets. A controller with auth
 disabled serves its pages without sign-in.
 
-Log panes read through the logs service named by the controller's
-`--logs-url`. The controller forwards the caller's own credential: a cookie
-session as `Authorization: Session <id>`, or the caller's bearer as it
-arrived. The logs service asks the controller whose run it is, so a read
-answers only for the caller's team. A node whose runner kept its log as
-segments reads from them (see
-[observability.md](observability.md#node-logs-kept-as-segments)), within
-the caller's team, whether or not the controller has `--logs-url`.
+Log panes read through the controller's log routes, which need `logs.read`
+and answer only for the caller's team. The controller serves each node from
+its segments (see
+[observability.md](observability.md#node-logs-kept-as-segments)).
 
 Deleting a run from the dashboard needs `admin`, because the controller
 registers `DELETE /api/v1/runs/{id}` at `admin`, so the signed-in account must
@@ -1399,7 +1384,7 @@ than at the end of the cache window. An authentication that was already
 reading the row when the revoke landed does not install its entry, so it
 cannot put the revoked row back into the cache.
 
-Three windows remain:
+Two windows remain:
 
 - **Other controller replicas.** Invalidation is in-process. A replica
   that did not serve the revoke keeps its cached entry for up to 60
@@ -1408,10 +1393,6 @@ Three windows remain:
   admin API from the orchestrator process over the same tokens table,
   behind its own 60-second cache that a controller restart does not
   reach. It is bound to loopback and exits with the run.
-- **The logs service.** `sparkwing-logs` resolves callers through the
-  controller's `whoami` and caches the answer for its own TTL (60s by
-  default), on top of whatever the controller replica held. Its worst
-  case is the sum of the two.
 
 Sessions carry no cache: the controller reads the `sessions` row on
 every request and the dashboard resolves the session on every protected

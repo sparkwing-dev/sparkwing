@@ -30,7 +30,7 @@ before it writes:
 | Store | Share | Counted by | Checked |
 |---|---|---|---|
 | Cache: compiled binaries, dependency archives, artifacts, source bundles, job outputs | 3/4, 768 MiB | the controller's `team_storage` row for the cache | before the upload's body is read |
-| Logs: live runs on the volume and the archive | 3/16, 192 MiB | the controller's `team_storage` row for logs | after the node and run caps cut the append, before it is written |
+| Logs: node log segments | 3/16, 192 MiB | the controller's `team_storage` row for logs | when a runner reports the segments it stored |
 | Run events | 1/16, 64 MiB | the controller's per-team event bytes | in the transaction that appends the event |
 
 One share never reads another's count, so a team whose cache is full can
@@ -41,44 +41,29 @@ credits are never held to a share.
 A write reserves its size with `POST /internal/storage/reserve`, commits what
 it stored with `POST /internal/storage/commit`, and gives the room back with
 `POST /internal/storage/release` when it stored nothing. The reserve locks
-the team's row, so writers on any number of cache or logs replicas see each
+the team's row, so writers on any number of cache replicas see each
 other's reservations, and two writers racing for the last bytes of a share
 cannot both win. A reservation a crashed writer never settled expires after an
 hour. A commit with a reservation ID counts once for 24 hours; hourly
 storage maintenance prunes older receipts, after which a replay counts
 again. A renewal retry returns the same next reservation while it is
 active. The cache calls these routes with its operator token and makes one
-reserve and one commit or release per object. The logs service forwards the
-appending caller's credential, which counts only its own team's logs. A
-forwarded commit must name a reservation and a nonnegative byte count. The
-cache's operator token can commit a negative overwrite delta when an object
-shrinks. The logs service reserves a 1 MiB block per team and run, or the
-room left when that is smaller. Appends draw from the block without asking
-the controller. When a block runs out, the service commits what the run
-wrote and takes the next block in one call to the commit route
-(`next_bytes`); every minute it does
-the same for a run still appending, and it commits and gives the rest back
-for a run that wrote nothing that minute, and at shutdown. A run therefore
-costs about one controller call per MiB or per minute, and a team holds at
-most one uncommitted block per live run. A crashed logs service leaves its
-blocks reserved until they expire after an hour. It also confirms an
-append's claim with the controller at most once every 30 seconds per run,
-node, credential and claim; an append that names no claim generation is
-confirmed every time. A work node's claim token is confirmed at most once
-every 5 seconds per token, run and node, and the cached confirmation keeps
-the team the controller bound the claim to, so a revoked claim stops writing
-within 5 seconds and every write is counted to its team.
+reserve and one commit or release per object. The cache's operator token can
+commit a negative overwrite delta when an object shrinks.
+
+The controller charges node log segments itself. When a runner asks for a
+node's first upload URLs, the controller reads the team's standing, which
+picks the attempt's retention class, and each later request reports the bytes
+the runner has stored; the controller commits the growth once, so a retried
+request never charges twice.
 
 A log write is never refused for the log share, so a run always keeps its
 logs. The hourly storage pass holds a free team to the share instead: after it
-recounts the logs, it deletes the team's least recently written archived runs
-whose run has finished, through the logs service's
-`DELETE /api/v1/logs/{runID}` with the controller's `logs.delete` credential,
-which deletes any team's run as it deletes a whole team's logs, until the team
-is back under its share. It never prunes a run still going, or one no run row
-records; retention removes those. Only the archived bytes the logs service
-reports deleting, in `X-Sparkwing-Archived-Bytes-Deleted`, come off the
-team's count, so a refused or failed deletion frees nothing. A team with
+recounts the segments, it deletes the segments of the team's least recently
+written finished runs until the team is back under its share. It never prunes
+a run still going; bucket lifecycle rules remove the rest. Only the bytes
+charged for the deleted segments come off the team's count, so a failed
+deletion frees nothing. A team with
 neither credits nor a slot, and that never held credits, has a log share of
 zero, so the pass prunes the finished runs a refused commit left behind. A
 team whose credits lapsed keeps its logs until retention removes them. A team can therefore sit past
@@ -91,20 +76,18 @@ check. An upload of unknown length gets the room the team has left, up to the
 per-object cap, and is cut past it; the cut aborts the upload, so no partial
 object remains. An overwrite commits the difference from what it replaced.
 
-When the controller cannot answer, the cache and the logs service refuse a
+When the controller cannot answer, the cache refuses a
 free team's write with `503` and a `Retry-After`: an outage never lifts a
 limit. The operator's team never asks, and a team the controller answered
 funded within the last five minutes proceeds. A team that buys credits is
 unblocked by its next write.
 
 The hourly storage pass replaces each team's count with a listing of the
-cache's and the logs service's buckets plus whatever was committed while it
-listed, so a count that drifted, from a delete or a crash between a write and
-its commit, is corrected within the hour. It lists the buckets the controller
-names with `--cache-blob-store` and `--logs-archive-store`. The logs service
-commits a byte when it is appended and the pass counts only what the archive
-holds, so for up to an hour after a pass a team's live, unarchived log bytes
-are not counted against its share. One replica runs the pass an hour, under a lease
+cache bucket's objects and node log segments plus whatever was committed while
+it listed, so a count that drifted, from a delete or a crash between a write
+and its commit, is corrected within the hour. It lists the bucket the
+controller names with `--cache-blob-store`, or the segments in its output
+directory without one. One replica runs the pass an hour, under a lease
 in the database. A pass that cannot list a bucket leaves that store's counts
 as they were, and `GET /api/v1/health` reports `storage_pass.ok: false` with a
 `problems` entry until a pass succeeds.
@@ -147,8 +130,8 @@ its data directory and serves them through URLs it signs itself, which only
 that replica can honor.
 
 `GET /api/v1/storage` shows a signed-up caller its team's tier, allowance,
-the three shares, its event bytes, and what it holds in the cache and the
-logs service under `team`.
+the three shares, its event bytes, and what it holds in the cache and in log
+segments under `team`.
 
 ## Free-team slots
 
@@ -163,7 +146,7 @@ bytes before it commits them, so teams whose reservations raced for the last
 slot can each leave one write behind. A refused commit records nothing and
 leaves its bytes in place, because a retry of the same upload may still
 commit them; the storage pass's age expiry reclaims a direct upload's object, a
-refused output's object stays, and a cache object or a log block stays until
+refused output's object stays, and a cache object or a log segment stays until
 the hourly pass counts it and the team's next reservation is refused.
 The free bytes a deployment holds are therefore at most slots times the
 allowance, plus those in-flight writes. A team with a slot
@@ -181,11 +164,10 @@ tool. To oversubscribe, raise `--free-team-slots`. A sign-up gate reads the tier
 closed once every slot is taken.
 
 A multi-team controller refuses to start without `--bucket-store`, because the
-shares are held over the object store: the cache's `--blob-store` and the logs
-service's `--archive-store`. The volume-backed cache and log trees enforce no
-allowance. A cache that verifies grants and keeps a `--blob-store` refuses to
+shares are held over the object store: the cache's `--blob-store`, which also
+holds node log segments. The volume-backed cache tree enforces no allowance. A cache that verifies grants and keeps a `--blob-store` refuses to
 start without `--controller`, because only the controller can count its
-teams' bytes. Neither service keeps a count of its own, so a restart lists
+teams' bytes. The cache keeps no count of its own, so a restart lists
 nothing.
 
 ## What prunes automatically
@@ -197,7 +179,7 @@ second run over the same data removes nothing more.
 |---|---|---|---|
 | Run events, node metrics | finished runs past the retention window | controller, hourly storage pass | `event_retention_days`, `node_metric_retention_days`; a multi-team controller writes 30 days where the operator set none |
 | A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
-| Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive; a run the controller answered free when its logs were written keeps its archived logs 30 days at most, recorded with the run so a restart keeps the class | logs service | `--retention` on `sparkwing-logs`; 90 days with `--archive-store` unless set, off otherwise |
+| Node log segments | by retention class: `logs/r90/` 90 days for a funded or single-team controller, `logs/r30/` 30 days for a team the controller answered free when the attempt's log opened, `logs/r<days>/` for a team `--log-retention` names | the bucket's lifecycle rules, which the controller verifies before it issues URLs into a class; deleting a run or a team deletes its segments | `--log-retention team=days`; see [self-hosting.md](self-hosting.md#node-log-retention) |
 | Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
 | Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
 | Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (2 GiB) |
@@ -224,15 +206,15 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Teams per user | three created over the account's life, the personal team included | `pkg/store/identity.go` |
 | Free teams | `--free-team-slots`, 200 by default, released only when a team is deleted | `pkg/store/free_tier.go` |
 | Run events | the event share, 64 MiB by default | `pkg/store/free_tier.go` |
-| Logs, live and archived | the log share, 192 MiB by default; writes past it are kept, and the hourly storage pass deletes the team's least recently written finished runs' logs back under it | `pkg/store/team_storage.go`, `pkg/controller/storage_pass.go` |
+| Log segments | the log share, 192 MiB by default; writes past it are kept, and the hourly storage pass deletes the team's least recently written finished runs' logs back under it | `pkg/store/team_storage.go`, `pkg/controller/storage_pass.go` |
 | Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
 | Job outputs | the cache share, 64 MiB per output and 1 GiB per run, refused at reservation; 30 days after the run finished | `pkg/store/node_output.go` |
 | Events per run | 256 KiB per event, 64 MiB and 50,000 events per run | `pkg/store/event_limits.go` |
 | Annotations per run | 64 KiB per annotation, 1,000 per run, and 4 MiB per run JSON-encoded, node and step annotations together; past a bound the append answers `413` for size or `429` for count and stores nothing | `pkg/store/store.go` |
 | Metric samples per node | 10,000, about five and a half hours of two-second samples; a later sample answers `429`, and the runner stops sampling that node and records one `metrics_stopped` event on it. Reads come in pages of 1,000 by default and 10,000 at most | `pkg/store/metrics.go` |
 | Pending direct uploads | 100 uncommitted uploads per team, each at least one byte and pending for at most 24 hours; the next reservation answers `429` | `pkg/store/direct_upload.go` |
-| Logs per run | 64 MiB per node and 1 GiB per run on the logs service | `pkg/logs/limits.go` |
-| Log files | 30 days after the last write for a team without credits, and the logs service's `--retention`, 90 days with an archive, for a funded team | `cmd/sparkwing-logs/main.go`, `pkg/logs/archive.go` |
+| Logs per node | 64 MiB per node attempt; the runner truncates past it | `pkg/storage/logseg/sink.go` |
+| Log retention | 30 days for a team without credits (`logs/r30/`), 90 days for a funded team (`logs/r90/`), expired by the bucket's lifecycle rules | `pkg/storage/logseg/keys.go`, `pkg/controller/log_segments.go` |
 | Run events past retention | removed with their bytes 30 days after the run finished on a multi-team controller | `pkg/controller/team_storage.go`, `pkg/store/storage_retention.go` |
 | One cache object | 500 MiB per artifact or archive and 100 MiB per compiled binary, inside the share | `internal/cache/cache.go`, `internal/cache/blobstore.go` |
 | Team cache objects | 30 days after they were written | `pkg/controller/storage_pass.go` |

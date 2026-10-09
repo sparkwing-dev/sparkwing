@@ -456,7 +456,7 @@ database credential. See
 [Postgres and object storage](deployment-modes.md#postgres-and-object-storage-mode-3).
 
 **Self-hosted controller.** The `sparkwing-full` Helm chart deploys the
-controller, dashboard, cache, logs service, and Kubernetes runner into a
+controller, dashboard, cache, and Kubernetes runner into a
 cluster you operate. See [Self-hosting](self-hosting.md) and
 [hosted controller](deployment-modes.md#hosted-controller-mode-4).
 

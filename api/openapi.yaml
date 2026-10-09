@@ -2780,7 +2780,7 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the data download, cache, logs, and dashboard URLs a client should use.
+      summary: Announce the data download, cache, and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
@@ -2802,7 +2802,6 @@ paths:
                 properties:
                   data_download_url: {type: string, description: Controller endpoint for requesting signed team-object downloads.}
                   cache_pod: {type: string}
-                  logs: {type: string}
                   dashboard: {type: string}
                   multi_team: {type: boolean}
                   direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
@@ -3334,44 +3333,6 @@ paths:
         "404": {description: No finished output matches the reference.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/claim/validate:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-      - in: path
-        name: nodeID
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: claim or logs.write
-      tags: [nodes]
-      summary: Validate a log writer's exact execution attempt.
-      description: |
-        Internal controller-to-log-service fence check. The request must carry
-        either the four `X-Sparkwing-Claim-*` headers plus a positive
-        `X-Sparkwing-Attempt-Ordinal`, or a positive
-        `X-Sparkwing-Trigger-Generation` and, except for `_compile`, an attempt
-        ordinal. Mixing node and trigger identities is rejected. The identity
-        must still hold the claim that opened the named attempt; the attempt
-        itself may already have finished, because a node writes its closing
-        lines after closing the attempt. Trusted controller-internal calls
-        bypass claim validation. A controller-dispatched node's work claim
-        token is its own attempt and names none: it validates only its own
-        run and node while its claim has not ended, the answer names the
-        claim's team in `X-Sparkwing-Claim-Team` and the attempt its log is
-        written to in `X-Sparkwing-Claim-Generation` and
-        `X-Sparkwing-Attempt-Ordinal`, and a request carrying any
-        claim, trigger or attempt header is refused `403` `attempt_unbound`.
-      responses:
-        "204": {description: The claim that opened the attempt is live. Empty body.}
-        "400": {description: Node and trigger identities were combined.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: "A claim token named an attempt (`attempt_unbound`), or its claim is not live."}
-        "409": {description: "Missing, malformed, stale, or expired identity."}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/execution-finish:
     parameters:
       - in: path
@@ -3749,7 +3710,7 @@ paths:
       tags: [nodes]
       summary: Read the tail of a running node's log from a byte offset.
       description: >
-        Serves the controller's in-memory ring for one running node, which is the live view for a deployment whose durable logs surface has no live read of its own. Answers 404 once the node has finished and its ring has been released, which is the reader's signal to use the durable copy.
+        Serves the controller's in-memory ring for one running node, the live view a watched node's runner feeds. Answers 404 once the node has finished and its ring has been released, which is the reader's signal to use the durable copy.
 
       parameters:
         - in: query
@@ -3771,7 +3732,7 @@ paths:
       tags: [nodes]
       summary: Add one batch of a running node's log lines to the live ring.
       description: >
-        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the logs surface's job; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write. A runner that keeps the node's log as segments sends `X-Sparkwing-Log-Offset`, the byte offset in the whole log the batch begins at, so a reader can join the ring to the segments; bytes the ring already holds are skipped and an offset past its end starts the ring over there.
+        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the node's log segments; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write. A runner that keeps the node's log as segments sends `X-Sparkwing-Log-Offset`, the byte offset in the whole log the batch begins at, so a reader can join the ring to the segments; bytes the ring already holds are skipped and an offset past its end starts the ring over there.
 
       parameters:
         - in: header
@@ -4777,7 +4738,7 @@ paths:
                     description: Which surface holds artifacts, logs and runs. Absent from a controller serving no dashboard.
                     properties:
                       artifacts: {type: string}
-                      logs: {type: string}
+                      logs: {type: string, description: "The node log store: `segments` on a controller, `fs` or the profile's logs type on a laptop dashboard."}
                       runs: {type: string}
                   features: {type: array, items: {type: string}, description: The dashboard features this deployment serves.}
                   read_only: {type: boolean, description: True when the dashboard refuses writes.}
@@ -5029,19 +4990,6 @@ paths:
         schema: {type: string}
     post:
       x-sparkwing-scope: claim or nodes.claim or triggers.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
-  /api/v1/runs/{id}/log-access:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -6217,9 +6165,7 @@ paths:
       tags: [storage]
       summary: Reserve room in a team's cache or log store before a write.
       description: |
-        The cache calls it with its operator token for any team; the logs
-        service forwards the appending caller's credential, which must be
-        allowed to write logs and names only its own team's `logs` store. A free
+        Only the cache's operator token may call it, for any team. A free
         team is held to its share of the allowance, three quarters for the
         cache and three sixteenths for logs, counting what it stores and
         every reservation still held; a funded team is counted without a
@@ -6760,7 +6706,7 @@ paths:
       tags: [artifacts]
       summary: Sign a short-lived URL for one team object.
       description: >-
-        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. Log downloads require a bearer authorized for log reads; cache grants cannot sign logs. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
       requestBody:
         required: true
         content:
@@ -6770,7 +6716,7 @@ paths:
               type: object
               required: [kind, key]
               properties:
-                kind: {type: string, enum: [binary, artifact, source, log]}
+                kind: {type: string, enum: [binary, artifact, source]}
                 key: {type: string, description: Team-relative object key.}
       responses:
         "200":
@@ -7392,7 +7338,7 @@ paths:
       tags: [dashboard]
       summary: Read every node log of a run.
       description: >-
-        Renders each record as plain text, ANSI text or raw NDJSON by the `format` query value or the Accept header. Reads through the logs service with the caller's own credential when one is configured.
+        Renders each record as plain text, ANSI text or raw NDJSON by the `format` query value or the Accept header. Reads each node from its log segments.
       responses:
         default: {description: Undescribed.}
 
@@ -7426,7 +7372,7 @@ paths:
       tags: [dashboard]
       summary: Read one node's log.
       description: >-
-        Renders by the `format` query value or the Accept header, as the whole-run read does. Reads a node whose runner kept its log as segments from those segments, verifying each against the manifest, and any other node from the logs service. `tail`, `head`, `lines` and `grep` narrow the read on the controller. `line_numbers=1` with `grep` and no other filter answers NDJSON objects `{"line_no", "line"}` for the matching lines, at most `max_matches` of them.
+        Renders by the `format` query value or the Accept header, as the whole-run read does. Reads the node from its log segments, verifying each against the manifest. `tail`, `head`, `lines` and `grep` narrow the read on the controller. `line_numbers=1` with `grep` and no other filter answers NDJSON objects `{"line_no", "line"}` for the matching lines, at most `max_matches` of them.
       parameters:
         - {in: query, name: tail, required: false, schema: {type: integer}, description: The last N lines.}
         - {in: query, name: head, required: false, schema: {type: integer}, description: The first N lines.}
@@ -7452,7 +7398,7 @@ paths:
       tags: [dashboard]
       summary: Report whether a node's log is whole.
       description: >-
-        Answers the verdict the logs surface's seals support, or `unknown` when it keeps none.
+        Answers the verdict the node's segment manifest supports, or `unknown` when the log store keeps no manifests.
       responses:
         default: {description: Undescribed.}
 
@@ -7471,7 +7417,7 @@ paths:
       tags: [dashboard]
       summary: Stream one node's log as server-sent events.
       description: >-
-        Streams the durable log when the logs surface has a live read, and the controller's in-memory live buffer otherwise; with neither it answers 501.
+        Streams the node's log: the segments uploaded so far, then the controller's in-memory live buffer from the byte where they end, holding the node's 30-second live-view watch while open. A log store with no live read falls back to the live buffer alone; with neither it answers 501.
       responses:
         default: {description: Undescribed.}
 
@@ -8376,11 +8322,11 @@ components:
         tier: {type: string, enum: [funded, free, none], description: "funded stores without a byte limit; free holds a free-tier slot; none has neither credits nor a slot."}
         allowance_bytes: {type: integer, format: int64, description: "The whole free allowance the shares are cut from."}
         cache_share_bytes: {type: integer, format: int64, description: "Three quarters of the allowance, what the cache holds a free team to."}
-        log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the logs service holds a free team to."}
+        log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the storage pass holds a free team's log segments to."}
         event_share_bytes: {type: integer, format: int64, description: "One sixteenth of the allowance, what the team's run events are held to."}
         event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
         cache_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the cache, as the controller counts it."}
-        log_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the logs service, as the controller counts it."}
+        log_bytes: {type: integer, format: int64, description: "What the team stores in log segments and holds reserved, as the controller counts it."}
     EgressTotals:
       x-sparkwing-go-type: pkg/store.EgressTotals
       type: object

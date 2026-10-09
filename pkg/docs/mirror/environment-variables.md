@@ -49,8 +49,6 @@ Kinds:
 | `SPARKWING_GOOGLE_CLIENT_ID` | [auth](auth.md) |
 | `SPARKWING_GOOGLE_CLIENT_SECRET` | [auth](auth.md) |
 | `SPARKWING_LICENSE` | [auth](auth.md) |
-| `SPARKWING_LOGS_ARCHIVE_STORE` | [self-hosting](self-hosting.md) |
-| `SPARKWING_LOGS_DELETE_TOKEN` | [auth](auth.md) |
 | `SPARKWING_METRICS_ADDR` | [observability](observability.md) |
 | `SPARKWING_OAUTH_REDIRECT_URIS` | [auth](auth.md) |
 | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | [observability](observability.md) |
@@ -90,13 +88,12 @@ Kinds:
 
 Sparkwing sets these for a Job, a trigger's `handle-trigger` child or a node
 process; the runner itself reads its settings from flags. The `sparkwing` CLI
-also reads the URLs as a fallback for its own `--controller` and `--logs`.
+also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 
 | Variable | Described in |
 |---|---|
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_LOGS_URL` | [architecture](architecture.md) |
 | `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
@@ -198,6 +195,7 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_DEBUG_PAUSE_AFTER` | `sparkwing debug` sets it for the pipeline binary: pause after the named step. |
 | `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | `sparkwing debug` sets it for the pipeline binary: pause when a step fails. |
 | `SPARKWING_LOCAL_ONLY` | Carries `--sw-local-only` to the pipeline binary. |
+| `SPARKWING_LOGS_URL` | The loopback endpoint an engine process serves for node log appends, handed to the pipeline binary it starts (`run-node`, `handle-trigger`). |
 | `SPARKWING_LOG_LEVEL` | Carries `--sw-verbose` (`-v`) to the pipeline binary as `debug`. |
 | `SPARKWING_MASK_VALUES_FD` | The inherited pipe the pipeline binary writes registered secret values to, so the launcher masks them in the child's stdout and stderr. |
 | `SPARKWING_NO_CACHE` | Carries `--sw-no-cache` to the pipeline binary. |
