@@ -671,6 +671,9 @@ claim:
 - It holds `nodes.claim`, `runs.state` and `logs.write` where the runner
   holds them, and never `admin`, so the claim's fence binds it even when an
   operator token claimed.
+- The logs service forwards it to the storage counter routes
+  (`/internal/storage/reserve`, `commit` and `release`), where it counts
+  only its own claim's team's logs, as a forwarded `logs.write` token does.
 - It stops when the claim ends: the node finishes, the lease lapses, the node
   is claimed again, or the runner's own token is revoked or expires. A
   request after that answers `403 claim_ended`, or `401` for a dead runner

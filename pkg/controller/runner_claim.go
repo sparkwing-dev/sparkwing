@@ -27,16 +27,28 @@ func (s *Server) serveRunnerClaim(w http.ResponseWriter, r *http.Request, rc sto
 		})
 		return
 	}
-	now := time.Now()
-	tok, err := s.store.LookupTokenByPrefix(rc.Claimant.TokenPrefix)
-	if err != nil || tok == nil || tok.Team != rc.Token.Team || tok.Principal != rc.Claimant.Principal || !tok.IsValid(now) {
+	p := s.runnerClaimPrincipal(rc, time.Now())
+	if p == nil {
 		writeAuthError(w, http.StatusUnauthorized, authErrorBody{
 			Code:    "unauthenticated",
 			Message: "the credential that made this claim no longer authenticates",
 		})
 		return
 	}
-	p := &Principal{
+	bindRunnerClaimFence(r, rc.Fence)
+	observeRequestPrincipal(p.Kind)
+	ctx := context.WithValue(contextWithPrincipal(r.Context(), p), runnerClaimCtxKey{}, rc)
+	stampPrincipal(ctx, p)
+	noteAuditTarget(ctx, "claim_token", rc.Token.Prefix)
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func (s *Server) runnerClaimPrincipal(rc store.RunnerClaim, now time.Time) *Principal {
+	tok, err := s.store.LookupTokenByPrefix(rc.Claimant.TokenPrefix)
+	if err != nil || tok == nil || tok.Team != rc.Token.Team || tok.Principal != rc.Claimant.Principal || !tok.IsValid(now) {
+		return nil
+	}
+	return &Principal{
 		Name:        tok.Principal,
 		Kind:        store.ActingKind(tok.Kind, tok.Principal),
 		Scopes:      runnerClaimScopes(tok.Scopes),
@@ -45,12 +57,6 @@ func (s *Server) serveRunnerClaim(w http.ResponseWriter, r *http.Request, rc sto
 		Team:        tok.Team,
 		Expires:     credentialEnd(tok.ExpiresAt, tok.RevokedAt),
 	}
-	bindRunnerClaimFence(r, rc.Fence)
-	observeRequestPrincipal(p.Kind)
-	ctx := context.WithValue(contextWithPrincipal(r.Context(), p), runnerClaimCtxKey{}, rc)
-	stampPrincipal(ctx, p)
-	noteAuditTarget(ctx, "claim_token", rc.Token.Prefix)
-	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 type runnerClaimCtxKey struct{}

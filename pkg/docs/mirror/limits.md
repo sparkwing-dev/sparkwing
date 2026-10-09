@@ -49,7 +49,8 @@ storage maintenance prunes older receipts, after which a replay counts
 again. A renewal retry returns the same next reservation while it is
 active. The cache calls these routes with its `storage.count` service token and makes one
 reserve and one commit or release per object. The logs service forwards the
-appending caller's credential, which counts only its own team's logs. A
+appending caller's credential, a `logs.write` token or a node's claim token,
+which counts only its own team's logs. A
 forwarded commit must name a reservation and a nonnegative byte count. The
 cache's service token can commit a negative overwrite delta when an object
 shrinks. The logs service reserves a 1 MiB block per team and run, or the

@@ -40,7 +40,7 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterC
 		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes need a bearer"))
 		return counterCaller{}, false
 	}
-	p, err := s.authMiddleware().Authenticate(raw)
+	p, err := s.counterPrincipal(r, raw)
 	if err == nil && p != nil && p.HasScope(ScopeStorageCount) {
 		return counterCaller{service: true}, true
 	}
@@ -49,6 +49,23 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterC
 		return counterCaller{}, false
 	}
 	return counterCaller{team: store.NormalizeTeam(p.Team)}, true
+}
+
+// safety: the logs service forwards a node's claim token as it arrived, so
+// the token counts as the runner that made the claim, confined to the claim's
+// team, and stops counting when the claim ends.
+func (s *Server) counterPrincipal(r *http.Request, raw string) (*Principal, error) {
+	if !strings.HasPrefix(raw, store.ClaimTokenPrefix+"_") {
+		return s.authMiddleware().Authenticate(raw)
+	}
+	rc, err := s.store.AuthorizeRunnerClaim(r.Context(), raw, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if p := s.runnerClaimPrincipal(rc, time.Now()); p != nil {
+		return p, nil
+	}
+	return nil, errors.New("the credential that made this claim no longer authenticates")
 }
 
 func (c counterCaller) may(w http.ResponseWriter, team string, kind store.StorageKind) bool {
