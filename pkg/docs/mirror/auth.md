@@ -656,10 +656,20 @@ authenticates.
 A node claim token acts as the runner that made the claim, confined to that
 claim:
 
-- It reaches only routes under the claim's run (`/api/v1/runs/{run}`,
+- It reaches the routes under the claim's run (`/api/v1/runs/{run}`,
   `/api/v1/runs/{run}/...`, `GET /api/v1/triggers/{run}`), the run's
   secrets, the slot routes for its own `run/node` holder and
-  `GET /api/v1/services`. Anything else answers `403 claim_mismatch`.
+  `GET /api/v1/services`.
+- For `Ref.Get`, `TryGet` and `RunAndAwait` it also reaches, in its own
+  team: `GET /api/v1/pipelines/{name}/latest`, any run's
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/output`, `POST /api/v1/triggers`
+  naming its run and node as the parent (and as `retry_of` only a child that
+  node started), `GET /api/v1/runs/{id}` with no query for such a child, and
+  `GET /api/v1/triggers/spawned-child` for its node under its run or the run
+  that run retries. Each is served with the one scope its route needs for
+  that request alone, and another team's pipeline, run or output answers as
+  missing. The child is claimed like any other run and never holds the
+  parent's claim token. Anything else answers `403 claim_mismatch`.
 - It reads any node of its run but writes only to its own node. Of the
   run-level writes it makes only a node's own: events, the run heartbeat, the
   cache grant, the run's workload OIDC token, the run's source credential and

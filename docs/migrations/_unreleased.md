@@ -1385,7 +1385,10 @@ node's claim token instead.
   (`POST /api/v1/triggers/claim`, `POST /api/v1/triggers/{id}/claim`) add a
   `claim_token` field. A node's claim token acts as the runner that made the
   claim, confined to the claim's run and to writes on its own node, and stops
-  when the claim ends. A trigger's claim token reads the run's declared
+  when the claim ends. Beyond its run it reaches only what `Ref.Get`,
+  `TryGet` and `RunAndAwait` need in its own team: a pipeline's latest run,
+  run outputs, starting and polling its own node's child runs, and the
+  spawned-child lookup. A trigger's claim token reads the run's declared
   secrets. A Job's `SPARKWING_AGENT_TOKEN` holds its node's claim token, and
   every trigger child reaches the controller through a loopback broker that
   admits only its run's routes. Schema v98 adds the `trigger_claim_tokens`
@@ -1407,9 +1410,10 @@ To upgrade:
   controller, ignoring the `claim_token` field and running nodes on its
   bearer.
 - A node's claim token answers `403 claim_mismatch` for a route outside its
-  run or a write to another node, and `403 claim_ended` once its claim has
-  ended. A pipeline that reached another run through its runner's bearer
-  from inside a node no longer can.
+  run and those cross-pipeline calls, or a write to another node, and
+  `403 claim_ended` once its claim has ended. A pipeline that reached
+  another run through its runner's bearer from inside a node, beyond those
+  calls, no longer can.
 
 ## Node secret reads need the claim token
 

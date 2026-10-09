@@ -74,8 +74,8 @@ a claim and are never mintable from a bearer alone. There are four kinds:
 - **`node`**: a runner's claim on one node, returned as `claim_token` by
   `POST /api/v1/nodes/claim` and `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`.
   It authenticates as the runner that made the claim, confined to the claim:
-  it reaches only the claim's run, writes only to its own node, never acts
-  as the trigger claimant, and every request carries the claim's own fence
+  it reaches the claim's run and the cross-pipeline routes D-SEC-08 below
+  names, writes only to its own node, never acts as the trigger claimant, and every request carries the claim's own fence
   whatever headers it sent. It drops `admin`, keeping only `nodes.claim`,
   `runs.state` and `logs.write` of what the runner holds. It stops when the
   claim ends (finish, lapse, a later claim of the node) or when the runner's
@@ -98,6 +98,41 @@ token for an anonymous claim, the runner holds no bearer either, and the
 broker forwards the read with none, as the controller answers it directly. A trigger child that runs a node in its own
 process does so under the trigger claim, which is why a trigger claim reads
 secrets at all.
+
+### D-SEC-08: what a node claim token reaches beyond its run (landed)
+
+A node's `Ref.Get`, `TryGet` and `RunAndAwait` read and start runs other
+than the node's own, and a pooled or Kubernetes node makes those calls on
+its claim token, so the token reaches exactly these routes beyond its run:
+
+- `GET /api/v1/pipelines/{name}/latest` and
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/output` for any run of the claim's
+  team, which is what a pipeline reference reads.
+- `POST /api/v1/triggers` naming the claim's run and node as
+  `parent_run_id` and `parent_node_id`. A `retry_of` must name a child that
+  node started, in this attempt or in the attempt the run retries.
+- `GET /api/v1/runs/{id}`, with no query, for a child the node started, which
+  is how `RunAndAwait` polls it.
+- `GET /api/v1/triggers/spawned-child` with the claim's node as
+  `parent_node_id` and, as `parent_run_id`, the claim's run or the run it
+  retries.
+
+Each route is admitted with the one scope its handler asks (`runs.read`,
+`runs.write` or `triggers.read`) for that request alone, and the handlers
+take the team from the claim, so another team's pipeline, run or output
+answers as missing. The claim principal holds none of these scopes on any
+other route, so a node still cannot list runs, read another run's record,
+nodes or secret arguments, or start a run that is not its own child. A child
+records the node as its parent the way a bearer's `RunAndAwait` does, and
+it is claimed on its own like any other run; it never inherits the parent's
+claim token.
+
+The alternative was moving the SDK onto the claim-bound input and child
+routes a Cloud Job's work claim uses (`claim/input`, `children`), which
+changes the node protocol for every runner. Admitting the routes keeps each
+documented node capability working for pooled runners and Kubernetes Jobs,
+with the controller deciding each call. The decision awaits the owner's
+ratification and is reversed by moving the SDK onto those routes.
 
 ### Secret release is claim-bound (landed)
 

@@ -20,10 +20,19 @@ import (
 // every request, and it stops with the claim or the runner's credential. The
 // runner's bearer therefore never leaves the runner.
 func (s *Server) serveRunnerClaim(w http.ResponseWriter, r *http.Request, rc store.RunnerClaim, next http.Handler) {
-	if !runnerClaimReaches(r, rc.Token) {
+	grant, reaches := "", runnerClaimReaches(r, rc.Token)
+	if !reaches {
+		var err error
+		if grant, reaches, err = s.runnerClaimCrossRun(r, rc.Token); err != nil {
+			s.writeInternalError(w, r, "node claim token: resolve a cross-run route", err)
+			return
+		}
+	}
+	if !reaches {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code:    "claim_mismatch",
-			Message: "a node claim token reaches only its own run and writes only to its own node",
+			Code: "claim_mismatch",
+			Message: "a node claim token reaches only its own run, writes only to its own node, and beyond them " +
+				"reads its team's pipeline references and starts and awaits its own node's child runs",
 		})
 		return
 	}
@@ -34,6 +43,9 @@ func (s *Server) serveRunnerClaim(w http.ResponseWriter, r *http.Request, rc sto
 			Message: "the credential that made this claim no longer authenticates",
 		})
 		return
+	}
+	if grant != "" {
+		p.Scopes = append(p.Scopes, grant)
 	}
 	bindRunnerClaimFence(r, rc.Fence)
 	observeRequestPrincipal(p.Kind)
@@ -126,6 +138,101 @@ func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {
 	return runnerClaimRunWrites[rest] || strings.HasPrefix(rest, "/gitcache/")
 }
 
+// safety: D-SEC-08. A node's Ref.Get and RunAndAwait reach these routes and
+// no others beyond its run, each with the one scope the route asks, in the
+// claim's team, which the handlers take from the principal: a pipeline's latest
+// run, a run's node output, and its own node's child runs and their lookup.
+func (s *Server) runnerClaimCrossRun(r *http.Request, tok store.ClaimToken) (string, bool, error) {
+	path := r.URL.EscapedPath()
+	if r.Method == http.MethodPost {
+		var body struct {
+			ParentRunID  string `json:"parent_run_id"`
+			ParentNodeID string `json:"parent_node_id"`
+			RetryOf      string `json:"retry_of"`
+		}
+		if path != "/api/v1/triggers" || !peekClaimBody(r, &body) ||
+			body.ParentRunID != tok.RunID || body.ParentNodeID != tok.NodeID {
+			return "", false, nil
+		}
+		if body.RetryOf == "" {
+			return ScopeRunsWrite, true, nil
+		}
+		ok, err := s.runnerClaimChild(r.Context(), tok, body.RetryOf)
+		return ScopeRunsWrite, ok, err
+	}
+	if r.Method != http.MethodGet {
+		return "", false, nil
+	}
+	if path == "/api/v1/triggers/spawned-child" {
+		q := r.URL.Query()
+		if q.Get("parent_node_id") != tok.NodeID {
+			return "", false, nil
+		}
+		ok, err := s.runnerClaimParent(r.Context(), tok, q.Get("parent_run_id"))
+		return ScopeTriggersRead, ok, err
+	}
+	if rest, ok := strings.CutPrefix(path, "/api/v1/pipelines/"); ok {
+		name, latest := strings.CutSuffix(rest, "/latest")
+		return ScopeRunsRead, latest && name != "" && !strings.Contains(name, "/"), nil
+	}
+	rest, ok := strings.CutPrefix(path, "/api/v1/runs/")
+	parts := strings.Split(rest, "/")
+	switch {
+	case !ok || parts[0] == "":
+		return "", false, nil
+	case len(parts) == 4 && parts[1] == "nodes" && parts[2] != "" && parts[3] == "output":
+		return ScopeRunsRead, true, nil
+	case len(parts) != 1 || r.URL.RawQuery != "":
+		return "", false, nil
+	}
+	run, err := url.PathUnescape(parts[0])
+	if err != nil {
+		return "", false, nil
+	}
+	ok, err = s.runnerClaimChild(r.Context(), tok, run)
+	return ScopeRunsRead, ok, err
+}
+
+func (s *Server) runnerClaimChild(ctx context.Context, tok store.ClaimToken, run string) (bool, error) {
+	tn, err := s.store.ForTeam(ctx, tok.Team)
+	if err != nil {
+		return false, err
+	}
+	child, err := tn.GetTrigger(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil || child.ParentNodeID != tok.NodeID {
+		return false, err
+	}
+	return s.runnerClaimParent(ctx, tok, child.ParentRunID)
+}
+
+// safety: a retried node reaches the children its source attempt's node
+// started as well as its own, so a parent is the claim's run or the run that
+// run retries.
+func (s *Server) runnerClaimParent(ctx context.Context, tok store.ClaimToken, run string) (bool, error) {
+	if run == "" || run == tok.RunID {
+		return run != "", nil
+	}
+	tn, err := s.store.ForTeam(ctx, tok.Team)
+	if err != nil {
+		return false, err
+	}
+	own, err := tn.GetRun(ctx, tok.RunID)
+	if err != nil {
+		return false, err
+	}
+	return own.RetryOf != "" && run == own.RetryOf, nil
+}
+
+func peekClaimBody(r *http.Request, into any) bool {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	return err == nil && len(raw) <= 1<<20 && json.Unmarshal(raw, into) == nil
+}
+
 // safety: a slot names its run and holder in the query or the body, and a
 // holder id is run/node, so the claim reaches only its own node's slots.
 func runnerClaimSlot(r *http.Request, tok store.ClaimToken) bool {
@@ -138,19 +245,13 @@ func runnerClaimSlot(r *http.Request, tok store.ClaimToken) bool {
 	case "resolve":
 		return r.Method == http.MethodGet && q.Get("run_id") == tok.RunID && q.Get("node_id") == tok.NodeID
 	}
-	if r.Method != http.MethodPost {
-		return false
-	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
-	_ = r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(raw))
 	var slot struct {
 		HolderID          string `json:"holder_id"`
 		InheritedHolderID string `json:"inherited_holder_id"`
 		RunID             string `json:"run_id"`
 		NodeID            string `json:"node_id"`
 	}
-	if err != nil || len(raw) > 1<<20 || json.Unmarshal(raw, &slot) != nil {
+	if r.Method != http.MethodPost || !peekClaimBody(r, &slot) {
 		return false
 	}
 	switch action {
