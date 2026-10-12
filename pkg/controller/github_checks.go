@@ -306,22 +306,42 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 	if err != nil {
 		return err
 	}
-	id, err := tenant.GitHubCheckRun(ctx, u.runID)
+	// safety: the lock spans the read of the recorded id through recording a
+	// new one, so of two controllers reporting the same run one creates the
+	// check run and the other updates it.
+	return tenant.LockGitHubCheck(ctx, u.runID, func(ctx context.Context) error {
+		run := liftToRecordedRun(ctx, tenant, &u)
+		id, err := tenant.GitHubCheckRun(ctx, u.runID)
+		if err != nil {
+			return err
+		}
+		check := r.checkRun(ctx, tenant, u, run)
+		if id != 0 {
+			return r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
+		}
+		id, err = r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
+		if err != nil {
+			return err
+		}
+		if _, err := tenant.RecordGitHubCheckRun(context.WithoutCancel(ctx), u.runID, id); err != nil {
+			return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, id, err)
+		}
+		return nil
+	})
+}
+
+// safety: a run's status only moves forward, so lifting an update to it under
+// the report lock never sends less than an earlier holder sent; a controller
+// holding a stale update repeats the final state instead of moving GitHub back.
+func liftToRecordedRun(ctx context.Context, tenant *store.Tenant, u *githubCheckUpdate) *store.Run {
+	run, err := tenant.GetRun(ctx, u.runID)
 	if err != nil {
-		return err
+		return nil
 	}
-	check := r.checkRun(ctx, tenant, u)
-	if id != 0 {
-		return r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
+	if githubCheckPhaseFor(run.Status) > u.phase() {
+		u.runStatus = run.Status
 	}
-	id, err = r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
-	if err != nil {
-		return err
-	}
-	if _, err := tenant.RecordGitHubCheckRun(context.WithoutCancel(ctx), u.runID, id); err != nil {
-		return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, id, err)
-	}
-	return nil
+	return run
 }
 
 // safety: a check run GitHub created but the store did not record is not
@@ -333,26 +353,30 @@ func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubChe
 	if err != nil {
 		return err
 	}
-	status := "pending"
-	if u.phase() == githubCheckCompleted {
-		status = u.runStatus
+	tenant, err := r.store.ForTeam(ctx, u.team)
+	if err != nil {
+		return err
 	}
-	state, description := githubCommitState(status)
-	return r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
-		State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID),
-		Description: description, Context: "sparkwing/" + u.pipeline,
+	return tenant.LockGitHubCheck(ctx, u.runID, func(ctx context.Context) error {
+		liftToRecordedRun(ctx, tenant, &u)
+		status := "pending"
+		if u.phase() == githubCheckCompleted {
+			status = u.runStatus
+		}
+		state, description := githubCommitState(status)
+		return r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
+			State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID),
+			Description: description, Context: "sparkwing/" + u.pipeline,
+		})
 	})
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) githubapp.CheckRun {
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run) githubapp.CheckRun {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
 	}
-	run, err := tenant.GetRun(ctx, u.runID)
-	if err != nil {
-		run = nil
-	}
+	var err error
 	switch u.phase() {
 	case githubCheckQueued:
 		check.Status = "queued"

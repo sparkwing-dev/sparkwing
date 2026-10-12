@@ -655,6 +655,35 @@ func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRu
 	return t.GitHubCheckRun(ctx, runID)
 }
 
+// LockGitHubCheck runs fn while t holds runID's GitHub report lock, so one
+// controller at a time creates or moves the check run or commit status that
+// reports the run. fn's error is returned.
+//
+// safety: on Postgres the lock is a transaction-scoped advisory lock, which a
+// process that dies mid-write gives up with its session, so no claim row can
+// outlive its holder. A SQLite store serves one controller process, so a lock
+// in the Store covers every reporter that shares it.
+func (t *Tenant) LockGitHubCheck(ctx context.Context, runID string, fn func(context.Context) error) error {
+	if t.s.dialect != DialectPostgres {
+		t.s.githubCheckMu.Lock()
+		defer t.s.githubCheckMu.Unlock()
+		return fn(ctx)
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`,
+		"sparkwing/github-check/"+string(t.team)+"/"+runID); err != nil {
+		return err
+	}
+	if err := fn(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 const maxGitHubCommitTriggers = 100
 
 // GitHubCommitTriggers returns t's triggers for commit sha of the GitHub

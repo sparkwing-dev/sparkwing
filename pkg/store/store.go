@@ -107,6 +107,7 @@ type Store struct {
 	launchResume   *launchCursor
 	backupDir      string
 	outputDir      string
+	githubCheckMu  sync.Mutex
 }
 
 // Dialect reports the SQL dialect this Store was opened against.

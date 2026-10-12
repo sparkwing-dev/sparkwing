@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -639,5 +640,83 @@ func TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID(t *testing.T) {
 
 	if calls := f.app.CheckRunCalls(); len(calls) != 0 {
 		t.Fatalf("check run writes = %+v, want none for another team's trigger", calls)
+	}
+}
+
+// Two controllers reporting the same run while a deploy overlaps them create
+// one check run between them: the second waits for the first's create and
+// updates the check run it recorded.
+func TestGitHubAppOverlappingControllersCreateOneCheckRun(t *testing.T) {
+	f := newAppFixture(t)
+	other, _ := f.replica()
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+
+	arrived, minted, release := f.app.HoldCheckRunCreates()
+	t.Cleanup(release)
+	runID := f.pushRun(headSHA)
+	<-arrived
+	for len(minted) > 0 {
+		<-minted
+	}
+	controller.ReportGitHubRunState(context.Background(), other, runID, "pending")
+	<-minted
+	// safety: the yields let the second controller reach its read of the
+	// recorded id before the first records one, which is the interleaving
+	// that made two creates; they bias the race and decide nothing.
+	for range 1000 {
+		runtime.Gosched()
+	}
+	release()
+	f.drainChecks()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := controller.DrainGitHubChecks(ctx, other); err != nil {
+		t.Fatalf("drain the second controller: %v", err)
+	}
+
+	calls := f.app.CheckRunCalls()
+	if len(calls) != 2 || calls[0].Method != "create" || calls[1].Method != "update" || calls[1].ID != calls[0].ID {
+		t.Fatalf("check run writes = %+v, want one create and an update of it", calls)
+	}
+}
+
+// A controller holding an update older than the run's recorded state sends
+// the recorded state instead, so a finished check run or commit status never
+// goes back to running or pending.
+func TestGitHubAppStaleUpdateNeverReopensAFinishedRun(t *testing.T) {
+	for _, checks := range []bool{true, false} {
+		t.Run(map[bool]string{true: "check run", false: "commit status"}[checks], func(t *testing.T) {
+			f := newAppFixture(t)
+			other, _ := f.replica()
+			olga := f.ghUser(501, "olga")
+			f.connect(olga, 501, 7, acmeAdmin)
+			f.subscribe(olga, "acme/widgets", "build", nil)
+			f.app.SetChecksGranted(7, checks)
+
+			runID := f.pushRun(headSHA)
+			f.finishRun(f.startRun(olga, runID), runID, "failed", "")
+			f.drainChecks()
+			controller.ReportGitHubRunState(context.Background(), other, runID, "running")
+			controller.ReportGitHubRunState(context.Background(), other, runID, "pending")
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := controller.DrainGitHubChecks(ctx, other); err != nil {
+				t.Fatalf("drain the second controller: %v", err)
+			}
+
+			if checks {
+				calls := f.app.CheckRunCalls()
+				if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "failure" {
+					t.Fatalf("check run writes = %+v, want the last one to stay completed failure", calls)
+				}
+				return
+			}
+			statuses := f.app.Statuses()
+			if last := statuses[len(statuses)-1]; last.State != "failure" {
+				t.Fatalf("statuses = %+v, want the last one to stay failure", statuses)
+			}
+		})
 	}
 }

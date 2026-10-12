@@ -1462,106 +1462,129 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			s.sweepEgressUsage(ctx)
 			s.pruneOutputsWithoutStoragePass(ctx, time.Now())
-			concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
-				CacheCap: s.concurrencyCacheCap,
-			})
-			if err != nil {
-				s.logger.Error("concurrency maintenance failed", "err", err)
-			}
-			for _, h := range concurrency.StaleHolders {
-				s.logger.Warn("reaped stale concurrency holder",
-					"key", h.Key, "holder_id", h.HolderID,
-					"run_id", h.RunID, "node_id", h.NodeID)
-			}
-			for _, w := range concurrency.StaleWaiters {
-				s.logger.Warn("reaped stale concurrency waiter",
-					"key", w.Key, "run_id", w.RunID,
-					"node_id", w.NodeID, "policy", w.Policy,
-					"arrived_at", w.ArrivedAt.Format(time.RFC3339))
-			}
-			if concurrency.CacheExpired > 0 {
-				s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
-			}
-			if concurrency.CacheEvicted > 0 {
-				s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
-			}
-			if recoveries, err := store.Maintenance.RecoverExpiredNodeClaims(s.store, ctx); err != nil {
-				s.logger.Error("node agent-lost sweep failed", "err", err)
-			} else {
-				for _, recovery := range recoveries {
-					s.logger.Warn("terminated node as agent_lost",
-						"run_id", recovery.RunID, "node_id", recovery.NodeID,
-						"retry_run_id", recovery.RetryRunID,
-						"execution_started", recovery.Started,
-						"invocations", recovery.Invocations)
-				}
-			}
-			s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
-			s.sealAbandonedLogs(ctx, time.Now())
-			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
-				s.logger.Error("queue-timeout sweep failed", "err", err)
-			} else {
-				for _, p := range pairs {
-					s.logger.Warn("terminated node as unclaimable",
-						"run_id", p[0], "node_id", p[1])
-				}
-			}
-			reapCtx := ctx
-			if !s.Metering() {
-				reapCtx = store.WithoutCreditMetering(ctx)
-			}
-			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
-			if err != nil {
-				s.logger.Error("reap failed", "err", err)
-				continue
-			}
-			for _, id := range ids {
-				s.settleExpiredTriggerClaim(reapCtx, id)
-			}
-			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
-				5*store.DefaultLeaseDuration,
-				"reaped: trigger consumer finished without dispatching the pipeline"); err != nil {
-				s.logger.Error("stale pending sweep failed", "err", err)
-			} else {
-				for _, id := range ids {
-					s.logger.Warn("reaped stale pending run", "run_id", id)
-					s.reportGitHubRunState(ctx, id, "failed")
-				}
-			}
-
-			if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
-				runHeartbeatStaleAfter,
-				"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
-				s.logger.Error("stale running sweep failed", "err", err)
-			} else {
-				for _, id := range ids {
-					s.logger.Warn("reaped stale running run", "run_id", id)
-					s.reportGitHubRunState(ctx, id, "failed")
-				}
-			}
-
-			if ids, err := store.Maintenance.ReapQueueExpiredRuns(s.store, ctx,
-				s.queueTimeout, runHeartbeatStaleAfter,
-				"reaped: no runner claimed this run's trigger before the queue deadline"); err != nil {
-				s.logger.Error("queue-deadline sweep failed", "err", err)
-			} else {
-				for _, id := range ids {
-					s.logger.Warn("reaped run whose trigger outlived the queue deadline",
-						"run_id", id, "queue_timeout", s.queueTimeout)
-					s.reportGitHubRunState(ctx, id, "timed_out")
-				}
-			}
-
-			if pairs, err := store.Maintenance.ReapTimedOutApprovals(s.store, ctx); err != nil {
-				s.logger.Error("approval timeout sweep failed", "err", err)
-			} else {
-				for _, p := range pairs {
-					s.logger.Warn("reaped timed-out approval",
-						"run_id", p[0], "node_id", p[1])
-				}
-			}
-
+			s.reapLeased(ctx, interval)
 			s.sampleOperationalSeries(ctx)
+		}
+	}
+}
+
+// safety: a controller that dies mid-sweep keeps the others from sweeping for
+// at most this long.
+const reaperLeaseTTL = time.Minute
+
+// safety: controllers overlap on one store while a deploy rolls, so one at a
+// time sweeps: a stale run is reported to GitHub once and a waiting node is
+// judged from one view of the runners. A half-interval window keeps a long
+// sweep from handing the lease to the other process on the next tick.
+func (s *Server) reapLeased(ctx context.Context, interval time.Duration) bool {
+	ran, err := s.store.RunReaperLeased(ctx, s.measureHolder(), interval/2, reaperLeaseTTL,
+		func(ctx context.Context) error {
+			s.reap(ctx)
+			return nil
+		})
+	if err != nil {
+		s.logger.Error("maintenance sweep lease failed", "err", err)
+	}
+	return ran
+}
+
+func (s *Server) reap(ctx context.Context) {
+	concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
+		CacheCap: s.concurrencyCacheCap,
+	})
+	if err != nil {
+		s.logger.Error("concurrency maintenance failed", "err", err)
+	}
+	for _, h := range concurrency.StaleHolders {
+		s.logger.Warn("reaped stale concurrency holder",
+			"key", h.Key, "holder_id", h.HolderID,
+			"run_id", h.RunID, "node_id", h.NodeID)
+	}
+	for _, w := range concurrency.StaleWaiters {
+		s.logger.Warn("reaped stale concurrency waiter",
+			"key", w.Key, "run_id", w.RunID,
+			"node_id", w.NodeID, "policy", w.Policy,
+			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
+	}
+	if concurrency.CacheExpired > 0 {
+		s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
+	}
+	if concurrency.CacheEvicted > 0 {
+		s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
+	}
+	if recoveries, err := store.Maintenance.RecoverExpiredNodeClaims(s.store, ctx); err != nil {
+		s.logger.Error("node agent-lost sweep failed", "err", err)
+	} else {
+		for _, recovery := range recoveries {
+			s.logger.Warn("terminated node as agent_lost",
+				"run_id", recovery.RunID, "node_id", recovery.NodeID,
+				"retry_run_id", recovery.RetryRunID,
+				"execution_started", recovery.Started,
+				"invocations", recovery.Invocations)
+		}
+	}
+	s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
+	s.sealAbandonedLogs(ctx, time.Now())
+	if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
+		s.logger.Error("queue-timeout sweep failed", "err", err)
+	} else {
+		for _, p := range pairs {
+			s.logger.Warn("terminated node as unclaimable",
+				"run_id", p[0], "node_id", p[1])
+		}
+	}
+	reapCtx := ctx
+	if !s.Metering() {
+		reapCtx = store.WithoutCreditMetering(ctx)
+	}
+	ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
+	if err != nil {
+		s.logger.Error("reap failed", "err", err)
+		return
+	}
+	for _, id := range ids {
+		s.settleExpiredTriggerClaim(reapCtx, id)
+	}
+	if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
+		5*store.DefaultLeaseDuration,
+		"reaped: trigger consumer finished without dispatching the pipeline"); err != nil {
+		s.logger.Error("stale pending sweep failed", "err", err)
+	} else {
+		for _, id := range ids {
+			s.logger.Warn("reaped stale pending run", "run_id", id)
+			s.reportGitHubRunState(ctx, id, "failed")
+		}
+	}
+
+	if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
+		runHeartbeatStaleAfter,
+		"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
+		s.logger.Error("stale running sweep failed", "err", err)
+	} else {
+		for _, id := range ids {
+			s.logger.Warn("reaped stale running run", "run_id", id)
+			s.reportGitHubRunState(ctx, id, "failed")
+		}
+	}
+
+	if ids, err := store.Maintenance.ReapQueueExpiredRuns(s.store, ctx,
+		s.queueTimeout, runHeartbeatStaleAfter,
+		"reaped: no runner claimed this run's trigger before the queue deadline"); err != nil {
+		s.logger.Error("queue-deadline sweep failed", "err", err)
+	} else {
+		for _, id := range ids {
+			s.logger.Warn("reaped run whose trigger outlived the queue deadline",
+				"run_id", id, "queue_timeout", s.queueTimeout)
+			s.reportGitHubRunState(ctx, id, "timed_out")
+		}
+	}
+
+	if pairs, err := store.Maintenance.ReapTimedOutApprovals(s.store, ctx); err != nil {
+		s.logger.Error("approval timeout sweep failed", "err", err)
+	} else {
+		for _, p := range pairs {
+			s.logger.Warn("reaped timed-out approval",
+				"run_id", p[0], "node_id", p[1])
 		}
 	}
 }

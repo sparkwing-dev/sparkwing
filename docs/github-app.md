@@ -182,7 +182,7 @@ The check run is created `queued` when the run is dispatched, moves to `in_progr
 | `cancelled` | `cancelled` |
 | no runner claimed it before the queue deadline | `timed_out` |
 
-`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run.
+`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run. Each write holds a per-run lock in the state database, so two controllers sharing it during an upgrade create one check run between them, and a write never takes a run's check run or commit status back to a state the run has already left.
 
 The controller writes check runs in the background with an installation token restricted to the run's repository and `checks: write`. GitHub failing a write never fails or delays the run: a write GitHub answers with 429 or a 5xx, or does not answer, is tried up to four times with waits of 0.25, 0.5 and 1 seconds, each failure is logged at warn, and a write that still fails is dropped. The next state of the run is written as usual; when the check run was never created, that write creates it.
 

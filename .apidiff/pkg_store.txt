@@ -2483,6 +2483,7 @@ func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.D
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
+func (s *Store) RunReaperLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
@@ -2769,6 +2770,7 @@ func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (t *Tenant) ListSecrets() ([]Secret, error)
 func (t *Tenant) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error)
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
+func (t *Tenant) LockGitHubCheck(ctx context.Context, runID string, fn func(context.Context) error) error
 func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
