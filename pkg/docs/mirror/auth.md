@@ -864,8 +864,9 @@ a minute, so a background pass, once a minute and at least two minutes after the
 request, then deletes the team's log segments, its artifacts
 and build cache through the cache service, and its rows in every team-owned
 table, secrets and storage watermarks included. A cache grant minted before
-the deletion stays valid for up to six hours, so seven hours after the purge a
-second pass deletes the cache tree and sweeps the team-owned tables once more.
+the deletion stays valid for up to six hours, and a log upload URL for fifteen
+minutes, so seven hours after the purge a second pass deletes the log segments
+and the cache tree and sweeps the team-owned tables once more.
 One replica works on a deletion at a time, under a five-minute lease it renews
 before each step. A pass that fails leaves the deletion where it was with the
 error recorded and the next pass starts that step again;

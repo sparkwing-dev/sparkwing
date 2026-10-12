@@ -254,10 +254,11 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 // stale cache lands after the rows are gone.
 var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
 
-// safety: a cache grant minted before the deletion is verified by its
-// signature alone and writes into the team's cache tree until it expires, so
-// the tree is deleted once more after the longest-lived grant has lapsed.
-const teamRecheckDelay = authwire.CacheGrantTTL + time.Hour
+// safety: a cache grant or log upload URL issued before the deletion is
+// verified by its signature alone and writes into the team's storage until it
+// expires, so the cache tree and logs are deleted once more after the
+// longest-lived of them has lapsed.
+const teamRecheckDelay = max(authwire.CacheGrantTTL, logSegmentURLTTL) + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute
@@ -353,6 +354,12 @@ func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) 
 }
 
 func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time) error {
+	if err := s.holdDeletion(ctx, team, now); err != nil {
+		return err
+	}
+	if err := s.purgeTeamLogs(ctx, team); err != nil {
+		return err
+	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}

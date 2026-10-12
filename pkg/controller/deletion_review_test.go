@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -34,6 +36,34 @@ func TestTeamDeletionDeletesTheCacheTreeAgainAfterGrantsLapse(t *testing.T) {
 	f.srv.ProcessTeamDeletions(context.Background(), start.Add(9*time.Hour))
 	if got := cache.seen(); len(got) != 2 {
 		t.Fatalf("cache deletes after the second pass = %v, want no third", got)
+	}
+}
+
+// A log upload URL issued before the deletion stays valid after the purge
+// and can write the team's logs again, so the recheck deletes them too.
+func TestTeamDeletionDeletesLogsAgainAfterUploadURLsLapse(t *testing.T) {
+	_, ts := newStorageFakes(t)
+	f := newDeletionFixture(t, ts)
+	f.store.SetOutputDir(t.TempDir())
+	objs, err := fs.NewArtifactStore(f.store.OutputDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := f.user("o", "olga@example.com")
+	f.createTeam(&owner, "acme")
+	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, nil); code != http.StatusAccepted {
+		t.Fatalf("delete = %d", code)
+	}
+	ctx := context.Background()
+	start := time.Now()
+	f.srv.ProcessTeamDeletions(ctx, start.Add(5*time.Minute))
+	key := logseg.SegmentKey("logs/"+logseg.ClassStandard+"/teams/acme/runs/run-1/a/a1-g1/", 1)
+	if err := objs.Put(ctx, key, strings.NewReader("written through a URL issued before the purge")); err != nil {
+		t.Fatal(err)
+	}
+	f.srv.ProcessTeamDeletions(ctx, start.Add(8*time.Hour))
+	if ok, err := objs.Has(ctx, key); err != nil || ok {
+		t.Fatalf("a log written after the purge survives the recheck: %v, %v", ok, err)
 	}
 }
 
