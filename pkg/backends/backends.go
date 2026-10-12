@@ -91,7 +91,8 @@ func (s Surfaces) Validate(name string) error {
 		return fmt.Errorf("profile %q: %w", name, err)
 	}
 	if s.State == nil {
-		return fmt.Errorf("profile %q: state surface is required", name)
+		return fmt.Errorf("profile %q: state surface is required: a project profile declares state: {type: sqlite} "+
+			"for this machine or state: {type: controller} for its controller; or remove the profile", name)
 	}
 	if s.State.Type == TypeNone || s.State.Type == TypeEnv {
 		return fmt.Errorf("profile %q: state cannot be type=%s", name, s.State.Type)
@@ -171,7 +172,8 @@ func (s *Spec) refuseRemovedState(surface string) error {
 		return nil
 	}
 	return fmt.Errorf("state.type: %s is removed: S3 and Postgres state profiles are gone and sparkwing run records to this machine; "+
-		"delete the profile's state key, or run on a controller with sparkwing pipeline trigger <pipeline> --profile <name> "+
+		"in config.yaml delete the profile's state key or the profile, in .sparkwing/sparkwing.yaml set state to sqlite or controller or remove the profile, "+
+		"and run on a controller with sparkwing pipeline trigger <pipeline> --profile <name> "+
 		"(see \"S3 and Postgres state profiles are removed\" in %s)", s.Type, MigrationGuideURL)
 }
 
