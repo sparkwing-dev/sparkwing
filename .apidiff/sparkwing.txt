@@ -246,6 +246,11 @@ type HelpProvider interface {
 	Help() string
 }
 func Info(ctx context.Context, format string, args ...any)
+type InputError struct {
+	Err error
+}
+func (e *InputError) Error() string
+func (e *InputError) Unwrap() error
 type InputField struct {
 	Name        string
 	Short       string

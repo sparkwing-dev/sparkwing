@@ -273,8 +273,7 @@ type brokerRoute struct {
 // broker forwards it without the capability and without the runner's credential or fence.
 func (r brokerRoute) signed() bool { return strings.HasPrefix(r.pattern, "/api/v1/outputs/") }
 
-// safety: this is everything a brokered node reaches; docs/node-protocol.md lists the
-// same set, and a test holds the two equal.
+// safety: this is everything a brokered node reaches.
 var brokerRoutes = []brokerRoute{
 	{http.MethodGet, "/api/v1/runs/{anyrun}", secretsOfThisRunOnly},
 	{http.MethodGet, "/api/v1/triggers/{run}", nil},

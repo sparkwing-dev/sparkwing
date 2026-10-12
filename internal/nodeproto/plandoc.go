@@ -57,7 +57,10 @@ type PlanNode struct {
 
 	// safety: beside modifiers, not in them, because the controller decodes
 	// modifiers strictly and an older one would refuse the whole plan.
-	DirCaches []depcache.Spec `json:"dir_caches,omitempty"`
+	Caches []depcache.Spec `json:"caches,omitempty"`
+
+	MemoKey  *PlanMemoKey  `json:"memo_key,omitempty"`
+	Closures *PlanClosures `json:"closures,omitempty"`
 
 	Work *PlanWork `json:"work,omitempty"`
 
@@ -121,6 +124,7 @@ type PlanModifiers struct {
 	HasBeforeRun    bool    `json:"has_before_run,omitempty"`
 	HasAfterRun     bool    `json:"has_after_run,omitempty"`
 	HasSkipIf       bool    `json:"has_skip_if,omitempty"`
+	HasVerify       bool    `json:"has_verify,omitempty"`
 }
 
 type PlanWork struct {
@@ -143,4 +147,25 @@ type PlanStep struct {
 	Finally   bool     `json:"finally,omitempty"`
 
 	Risks []string `json:"risks,omitempty"`
+
+	ContinueOnError bool          `json:"continue_on_error,omitempty"`
+	Optional        bool          `json:"optional,omitempty"`
+	Closures        *PlanClosures `json:"closures,omitempty"`
+}
+
+// PlanMemoKey names the inputs the host hashes into a node's memo key.
+type PlanMemoKey struct {
+	// Closure is the id of the node's cache_key closure.
+	Closure string `json:"closure,omitempty"`
+}
+
+// PlanClosures lists a node's or a step's closure ids by kind. The host
+// treats each id as opaque and passes it back in an eval request.
+type PlanClosures struct {
+	SkipIf    []string `json:"skip_if,omitempty"`
+	BeforeRun []string `json:"before_run,omitempty"`
+	AfterRun  []string `json:"after_run,omitempty"`
+	Verify    string   `json:"verify,omitempty"`
+	CacheKey  string   `json:"cache_key,omitempty"`
+	Generator []string `json:"generator,omitempty"`
 }

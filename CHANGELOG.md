@@ -21,7 +21,11 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
+- **sdk:** `sparkwing.InputError` is the error a `Registration`'s `Invoke` returns when args fail the declared flags of the pipeline or of a job's `WithArgs`; find it with `errors.As`
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
+- **engine:** node routes for another node's output, OIDC tokens, child runs and their results, and a pipeline's latest run; the host forwards them to the controller with the node's claim token, which the node process never holds. A node has at most 4 of these requests open at once besides awaits, and at most 64 awaits, and gets 429 `too_many_requests` beyond either; every await of one child run shares one poll a second. A child run's request body is at most 64 KiB
+- **engine:** `POST /node/v1/cleanups` registers an argv the host runs, newest first and with no shell, in the node's environment when the node's process exits, each bounded to 2 minutes and ending every process it started; `DELETE /node/v1/cleanups/{id}` releases one. A node holds at most 16 cleanups of at most 64 arguments
 - **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
 - **controller + web:** The operator console sets a trusted team's daily cap, card rung and Cloud node cap, and releases a payment dispute's hold
@@ -45,8 +49,10 @@ unlock.
 - **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 - **sdk:** The plan document carries `protocol`, the node protocol version it was written for
+- **sdk:** The plan document lists each node's and step's closure ids under `closures`, and also carries `memo_key.closure`, `modifiers.has_verify` and step `continue_on_error` and `optional`
 
 ### Changed
+- **sdk (Breaking):** The plan document lists a node's dependency caches under `caches` instead of `dir_caches`
 - **orchestrator:** A pipeline whose `.sparkwing/sparkwing.yaml` does not parse fails instead of running without it
   Before, a run, a controller-dispatched trigger and each node process logged a warning and planned with the submitted arguments alone, dropping the project's default args, guards and runner requirements. Now the run fails with the parse error, which names the file and, for a removed key such as `mirror_local`, the key; a local `sparkwing run`, `plan` or `--describe` exits naming it.
 - **store + controller (Breaking):** `Store.ReleaseCreditFreezes` takes the actor and reason its business events record, and `Store.DisputeTeam` is removed
