@@ -2329,7 +2329,9 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 		if retryCfg.Auto {
 			dispatchCtx = store.WithExecutionAttemptOrdinal(dispatchCtx, autoConsumed+autoAttempt+1)
 		}
+		dispatched := false
 		res = s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
+			dispatched = true
 			return activeRunner.RunNode(dispatchCtx, runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
@@ -2341,6 +2343,12 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 				ReacquireWorkerSlot: slot.reacquire,
 			})
 		})
+		// safety: the reset left the node pending, so a retry cancelled before
+		// its runner was called records the cancel itself or the node stays pending.
+		if autoAttempt > 0 && !dispatched {
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
+			return
+		}
 
 		if res.Outcome != sparkwing.Failed || res.Err == nil {
 			break
