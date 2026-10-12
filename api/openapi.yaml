@@ -337,7 +337,11 @@ paths:
         planning node and releases the nodes with no dependencies, all in one
         commit. A run accepts one plan: the identical body replays 200 after
         the claim ends, and any other body is 409. A plan the controller will
-        not run is 422 and writes nothing. The claim route answers with a
+        not run is 422 and writes nothing, as is a plan declaring a required
+        secret that is neither set for the run's pipeline nor shared
+        team-wide; that refusal names only the declared secrets the run
+        cannot read, and records the reason for each as a
+        `secret_preflight_refused` run event. The claim route answers with a
         status only.
       requestBody:
         required: true
@@ -348,7 +352,7 @@ paths:
         "200": {description: "The claim's plan was accepted or replayed."}
         "204": {description: Plan stored.}
         "409": {description: "The run accepted a different plan, or the claim ended without submitting this one."}
-        "422": {description: "The plan was refused; the error names the first reason."}
+        "422": {description: "The plan was refused; the error names the first reason, or every required secret the run cannot read."}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/cancel:
