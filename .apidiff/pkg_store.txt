@@ -263,6 +263,7 @@ type ClaimInputRequest struct {
 	Node         string
 	MaxAgeMS     int64
 }
+const ClaimLogTail
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
 func ClaimMemoKey(repo, pipeline, node, hash string) string
 type ClaimPlacement struct {
@@ -294,6 +295,8 @@ type ClaimToken struct {
 	ExpiresAt  time.Time
 
 	Ended bool
+
+	Attempt int64
 }
 type ClaimTokenKind string
 const ClaimTokenPlan ClaimTokenKind = "plan"
@@ -824,6 +827,9 @@ var ErrNoOutputDir = errors.New("store: this store keeps no output bytes; upload
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 var ErrNoTeam = errors.New("store: team is required")
 var ErrNoTokenCandidates = errors.New("unknown token")
+var ErrNodeLogCap = errors.New("store: the node log reached its byte cap")
+var ErrNodeLogSealed = errors.New("store: the node log is sealed")
+var ErrNodeLogSegmentConflict = errors.New("store: the log segment was signed for other bytes")
 var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
@@ -1286,28 +1292,26 @@ func (o LegacyOutput) Ref() OutputRef
 func LiveLogAttempt(attempt, generation int64) string
 const LiveLogAttemptHeader = "X-Sparkwing-Log-Attempt"
 const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
-type LogSegmentURL struct {
-	N       int
-	URL     string
-	Headers map[string]string
-}
-type LogSegmentsGrant struct {
-	Attempt     int64
-	Generation  int64
-	Prefix      string
-	URLs        []LogSegmentURL
-	ManifestURL LogSegmentURL
-	ExpiresAt   time.Time
+type LogSegmentGrant struct {
+	Attempt    int64
+	Generation int64
+	Prefix     string
+	URL        string
+	Headers    map[string]string
+	ExpiresAt  time.Time
 
 	Watched bool
 }
-type LogSegmentsRequest struct {
-	Attempt         int64
-	Generation      int64
-	Next            int
-	Count           int
-	UploadedThrough int
-	StoredBytes     int64
+type LogSegmentRequest struct {
+	Attempt    int64
+	Generation int64
+	N          int
+
+	Size int64
+
+	MD5 string
+
+	SHA256 string
 }
 const LogWatchHeader = "X-Sparkwing-Log-Watch"
 func LooksLikeEmail(email string) bool
@@ -1538,20 +1542,31 @@ type NodeDispatch struct {
 	RedactedKeys     []byte
 }
 type NodeLog struct {
-	Team            Team
-	RunID           string
-	NodeID          string
-	Attempt         int64
-	Generation      int64
-	Prefix          string
+	Team       Team
+	RunID      string
+	NodeID     string
+	Attempt    int64
+	Generation int64
+	Prefix     string
+
 	UploadedThrough int64
-	StoredBytes     int64
+
+	StoredBytes int64
 
 	ChargedBytes int64
 
 	SealedAt  time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+const NodeLogSealGrace = 60 * time.Second
+type NodeLogSegment struct {
+	N           int
+	StoredBytes int64
+
+	MD5 string
+
+	SHA256 string
 }
 type NodeMetering int
 type NodeSettlement struct {
@@ -2249,7 +2264,6 @@ func (s *Store) CancelNodeForExhaustedCredits(
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
-func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64, now time.Time) (_ bool, err error)
 func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error)
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error
 func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error)
@@ -2473,6 +2487,7 @@ func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (prin
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
+func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegment, err error)
 func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID string) (settled, found bool, err error)
 func (s *Store) NodeOutputKey(ctx context.Context, runID, nodeID string) (string, error)
 func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error)
@@ -2518,7 +2533,6 @@ func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (er
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) RecordMigratedOutput(ctx context.Context, o LegacyOutput, provenance string, now time.Time) (err error)
-func (s *Store) RecordNodeLogProgress(ctx context.Context, l NodeLog, now time.Time) error
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
@@ -2607,6 +2621,7 @@ func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) erro
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SetTrustLocalBuilds(ctx context.Context, team Team, trust bool) error
 func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
+func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSegment, capBytes int64, charge bool, now time.Time) (err error)
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error

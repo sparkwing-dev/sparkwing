@@ -45,6 +45,11 @@ const (
 	// ClaimResult routes commit the claim's one result and answer with a
 	// status only; an ended claim still authorizes, to replay it.
 	ClaimResult
+	// ClaimLogTail routes upload and seal the node attempt's log: a live
+	// claim authorizes, and so does one whose attempt ended less than
+	// [NodeLogSealGrace] ago while no later claim holds the node, for that
+	// attempt alone.
+	ClaimLogTail
 )
 
 var (
@@ -69,9 +74,13 @@ type ClaimToken struct {
 	Generation int64
 	Kind       ClaimTokenKind
 	ExpiresAt  time.Time
-	// Ended is set only by a [ClaimResult] authorization, whose route then
-	// replays the committed result instead of committing one.
+	// Ended is set only by a [ClaimResult] or [ClaimLogTail]
+	// authorization: a result route then replays the committed result
+	// instead of committing one, and a log route writes only Attempt.
 	Ended bool
+	// Attempt is, for an ended [ClaimLogTail] claim, the attempt ordinal
+	// whose log it may still finish.
+	Attempt int64
 }
 
 const claimTokensTable = `CREATE TABLE IF NOT EXISTS claim_tokens (
@@ -226,6 +235,14 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 	case ClaimResult:
 		tok.Ended = !live
 		return tok, nil
+	case ClaimLogTail:
+		if live {
+			return tok, nil
+		}
+		if !nodeGen.Valid || nodeGen.Int64 != tok.Generation {
+			return ClaimToken{}, ErrClaimNotLive
+		}
+		return s.claimLogTail(ctx, tok, now)
 	case ClaimReporting, ClaimSensitive:
 		if !live {
 			return ClaimToken{}, ErrClaimNotLive
@@ -243,6 +260,24 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 	default:
 		return ClaimToken{}, fmt.Errorf("unknown claim route class %d", class)
 	}
+}
+
+// safety: the attempt row is the claim's own report, so only the attempt that claim ran, and only for the
+// grace after it ended, may still finish its log.
+func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
+	var finished sql.NullInt64
+	err := s.queryRow(ctx, `SELECT attempt_ordinal, finished_at FROM node_execution_attempts
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ?
+ ORDER BY attempt_ordinal DESC LIMIT 1`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&tok.Attempt, &finished)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (!finished.Valid || now.Sub(time.Unix(0, finished.Int64)) >= NodeLogSealGrace)) {
+		return ClaimToken{}, ErrClaimNotLive
+	}
+	if err != nil {
+		return ClaimToken{}, err
+	}
+	tok.Ended = true
+	return tok, nil
 }
 
 // safety: a sensitive route that writes calls this inside its writing transaction. The run row is locked

@@ -60,6 +60,11 @@ func newClaimSensitiveRoute(kinds []store.ClaimTokenKind, bind func(*http.Reques
 	return &claimTokenRoute{spec: claimRouteSpec{class: store.ClaimSensitive, kinds: kinds, bind: bind}, next: next}
 }
 
+// safety: the handler must hold an ended claim's request to the attempt the token names (ClaimToken.Attempt).
+func newClaimLogTailRoute(kinds []store.ClaimTokenKind, next http.Handler) *claimTokenRoute {
+	return &claimTokenRoute{spec: claimRouteSpec{class: store.ClaimLogTail, kinds: kinds}, next: next}
+}
+
 func newClaimReportingRoute(kinds []store.ClaimTokenKind, next http.Handler) *claimTokenRoute {
 	return newClaimReportingRouteBound(kinds, nil, next)
 }
@@ -113,7 +118,7 @@ func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bind = pathClaimBinding
 	}
 	runID, nodeID := bind(r)
-	ownNode := c.spec.class == store.ClaimReporting || c.spec.class == store.ClaimResult
+	ownNode := c.spec.class == store.ClaimReporting || c.spec.class == store.ClaimResult || c.spec.class == store.ClaimLogTail
 	if runID == "" || runID != tok.RunID || (ownNode && (nodeID == "" || nodeID != tok.NodeID)) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:    "claim_mismatch",

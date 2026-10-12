@@ -26,8 +26,6 @@ type nodeLogSink struct {
 	sink          *logseg.Sink
 	handler       http.Handler
 	live          *livePusher
-	stopFresh     context.CancelFunc
-	freshDone     chan struct{}
 	logger        *slog.Logger
 
 	closeOnce sync.Once
@@ -56,7 +54,7 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 		return nil, errors.Is(err, client.ErrLogSegmentsUnavailable)
 	}
 	nodeCtx := context.WithoutCancel(ctx)
-	n = &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger, freshDone: make(chan struct{})}
+	n = &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger}
 	opts := logseg.Options{Run: runID, Node: nodeID, Logger: logger}
 	if live {
 		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, up.LiveAttempt(), logger)
@@ -75,14 +73,6 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 		up.OnWatched(sink.SetWatched)
 		watchedSinks.Store(watchKey(runID, nodeID), n)
 	}
-	freshCtx, stop := context.WithCancel(nodeCtx)
-	n.stopFresh = stop
-	go func() {
-		defer close(n.freshDone)
-		up.KeepFresh(freshCtx, func(err error) {
-			logger.Warn("renew the node's log segment URLs", "run_id", runID, "node_id", nodeID, "err", err)
-		})
-	}()
 	return n, false
 }
 
@@ -91,14 +81,10 @@ func (n *nodeLogSink) ServeHTTP(w http.ResponseWriter, r *http.Request) { n.hand
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 	n.closeOnce.Do(func() {
 		watchedSinks.CompareAndDelete(watchKey(n.runID, n.nodeID), n)
-		// safety: a renewal in flight holds the uploader for up to its own minute, so it is cancelled before the seal;
-		// it is awaited only after, since it may queue behind an upload that only the seal's budget cancels.
-		n.stopFresh()
 		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), childLogSealBudget)
 		defer cancel()
 		m, err := n.sink.Close(sealCtx, logseg.End{Stopped: stopped})
 		n.live.close()
-		<-n.freshDone
 		switch {
 		case errors.Is(err, logseg.ErrSealed):
 			n.logger.Warn("node log sealed by the controller before this runner sealed it",

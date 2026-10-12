@@ -11,8 +11,9 @@
   logs service the profile or the controller named.
 - **After:** against a controller that keeps segments, every one of those
   runners, and `sparkwing run` on a laptop whose profile keeps the run's
-  state on that controller, uploads each node's log as gzip segments plus a sealing manifest
-  through URLs the controller issues, into the controller's cache bucket
+  state on that controller, uploads each node's log as gzip segments, each
+  through a URL the controller signs for its exact size and Content-MD5, plus
+  a sealing manifest it posts to the controller, into the controller's cache bucket
   (`--cache-blob-store`) or, without one, its output directory, whether or
   not it has a logs URL. The dashboard and the CLI read every node through
   the controller, which serves segments first and the logs service for a

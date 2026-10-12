@@ -298,6 +298,7 @@ var tenantTables = []string{
 	"node_claim_offers",
 	"node_dispatches",
 	"node_execution_attempts",
+	"node_log_segments",
 	"node_logs",
 	"node_metrics",
 	"node_outputs",
@@ -341,7 +342,7 @@ var keyedAtCreation = []string{
 	"repos",
 	"card_charges", "card_attempts", "card_refunds", "team_spend_days",
 	"node_outputs", "output_runs", "output_tombstones",
-	"node_logs",
+	"node_logs", "node_log_segments",
 }
 
 // safety: executors enroll with the deployment and take work from every team; sparkwing_meta is the

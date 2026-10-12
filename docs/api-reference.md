@@ -153,6 +153,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-manifest` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-segments` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `claim` or `runs.state` |

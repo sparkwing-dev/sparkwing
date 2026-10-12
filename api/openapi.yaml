@@ -4845,7 +4845,7 @@ paths:
                     type: object
                     required: [segments]
                     properties:
-                      segments: {type: boolean, description: "The controller keeps node logs as segments: POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments issues upload URLs."}
+                      segments: {type: boolean, description: "The controller keeps node logs as segments: POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments signs each segment's upload."}
                   github_app:
                     x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
                     type: object
@@ -7500,12 +7500,13 @@ paths:
         schema: {type: string}
     put:
       x-sparkwing-scope: public
-      summary: Upload one node log segment or manifest through a URL this controller signed.
+      summary: Upload one node log segment through a URL this controller signed.
       description: |
-        Served by a controller that keeps log segments on its own disk. A
-        segment may be written again with the same bytes; the manifest is
-        written once, and a second write is refused with 412. A segment is
-        at most 8 MiB and a manifest at most 4 MiB.
+        Served by a controller that keeps log segments on its own disk. The
+        URL signs the segment's size and MD5 (its `size` and `md5` query
+        parameters); a body of another length or digest is refused with
+        400, and a URL whose signed fields were edited with 403. A segment
+        may be written again with the same bytes.
       requestBody:
         required: true
         content:
@@ -7513,9 +7514,8 @@ paths:
             schema: {type: string, format: binary}
       responses:
         "200": {description: Stored.}
+        "400": {description: The body is not the size and MD5 the URL signed.}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "412": {description: The attempt already has a manifest.}
-        "413": {description: Past the object's size limit.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/log-segments:
     parameters:
@@ -7530,69 +7530,101 @@ paths:
     post:
       x-sparkwing-scope: claim or runs.state
       tags: [nodes]
-      summary: Get upload URLs for the running attempt's log segments.
+      summary: Sign the upload of one sealed log segment of the running attempt.
       description: |
-        Returns up to 16 presigned PUT URLs for the node attempt's log
-        segments, starting at `next`, and a manifest URL, all valid for
-        15 minutes. The first request records where the attempt's log
-        lives. `attempt` and `generation` echo the previous grant, so an
-        execution that retries in its own process keeps writing one log; a
-        writer of another claim generation is refused with 409. `count` 0
-        issues only the manifest URL and tells the controller the writer is
-        alive, which keeps it from sealing a silent node's attempt as
-        abandoned. A claim token asks only for its own node. A trigger claim
-        may write the `_compile` node, which has no node row. A controller
-        with no object store and no output directory answers 503.
+        The writer compresses and hashes a segment first, then asks for one
+        presigned PUT for segment `n` that accepts exactly `size` bytes
+        with that Content-MD5, valid for 15 minutes. The controller charges
+        the team's log storage `size` bytes when it signs. Asking again for
+        the same `n` with the same size and digests is free and returns a
+        fresh URL; other bytes under a signed `n` are refused with 409. An
+        attempt holds at most 65 MiB of stored segments; past that the
+        controller answers 413. `n` 0 signs nothing and names the attempt;
+        the first request records where the attempt's log lives.
+        `attempt` and `generation` echo that answer, so an execution that
+        retries in its own process keeps writing one log; a writer of
+        another claim generation is refused with 409. A claim token asks
+        only for its own node; for 60 seconds after its attempt ended, and
+        while no later claim holds the node, it may still ask for that
+        attempt alone. A trigger claim may write the `_compile` node, which
+        has no node row. A controller with no object store and no output
+        directory answers 503.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/store.LogSegmentsRequest
+              x-sparkwing-go-type: pkg/store.LogSegmentRequest
               type: object
-              required: [next, count, uploaded_through, stored_bytes]
+              required: [n]
               properties:
                 attempt: {type: integer, format: int64}
                 generation: {type: integer, format: int64}
-                next: {type: integer}
-                count: {type: integer}
-                uploaded_through: {type: integer}
-                stored_bytes: {type: integer, format: int64}
+                n: {type: integer, description: "Segment number from 1; 0 names the attempt without signing."}
+                size: {type: integer, format: int64, description: "Stored (compressed) bytes, at most 8 MiB."}
+                md5: {type: string, description: "Base64 MD5 of the stored bytes, as Content-MD5 carries it."}
+                sha256: {type: string, description: "Hex SHA-256 of the stored bytes, as the manifest lists it."}
       responses:
         "200":
-          description: The URL batch.
+          description: The attempt, and for a segment its signed URL.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/store.LogSegmentsGrant
+                x-sparkwing-go-type: pkg/store.LogSegmentGrant
                 type: object
                 properties:
                   attempt: {type: integer, format: int64}
                   generation: {type: integer, format: int64}
                   prefix: {type: string}
-                  urls:
-                    type: array
-                    items:
-                      x-sparkwing-go-type: pkg/store.LogSegmentURL
-                      type: object
-                      properties:
-                        n: {type: integer}
-                        url: {type: string}
-                        headers: {type: object, additionalProperties: {type: string}}
-                  manifest_url:
-                    x-sparkwing-go-type: pkg/store.LogSegmentURL
-                    type: object
-                    properties:
-                      n: {type: integer}
-                      url: {type: string}
-                      headers: {type: object, additionalProperties: {type: string}}
+                  url: {type: string}
+                  headers: {type: object, additionalProperties: {type: string}, description: "Headers the PUT must send, Content-MD5 among them."}
                   expires_at: {type: string, format: date-time}
                   watched: {type: boolean, description: "A viewer has the node's log open, so the writer pushes its lines to the live ring."}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "402": {description: The team's free storage is paused.}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: The attempt was superseded or already sealed.}
+        "409": {description: "The attempt was superseded or already sealed, or the segment was signed for other bytes."}
+        "413": {description: "The segment would take the attempt past its byte cap, or the team past its storage quota."}
         "503": {description: The controller has nowhere to keep log segments.}
         "507": {description: The object-store bucket ceiling has frozen writes.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/log-manifest:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim or runs.state
+      tags: [nodes]
+      summary: Seal a node attempt's log with its manifest.
+      description: |
+        The body is the manifest, at most 4 MiB, naming this run, node and
+        the writer's attempt and generation, sealed by `node`. The
+        controller checks every segment it lists against the size and
+        SHA-256 it signed and refuses a manifest that disagrees with 422,
+        then writes it once: a second manifest, or one after the
+        controller sealed the attempt as abandoned, is refused with 412.
+        The attempt rules and the 60-second window after an ended claim
+        are those of `log-segments`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "204": {description: Sealed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The attempt was superseded.}
+        "412": {description: The attempt already has a manifest.}
+        "413": {description: The manifest is larger than 4 MiB.}
+        "422": {description: The manifest lists a segment the controller did not sign for that size and digest.}
+        "503": {description: The controller has nowhere to keep log segments.}
 
 components:
   securitySchemes:

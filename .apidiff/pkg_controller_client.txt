@@ -168,7 +168,7 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTokens(ctx context.Context, kind string, includeRevoked bool) ([]TokenInfo, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) ListUsers(ctx context.Context) ([]User, error)
-func (c *Client) LogSegments(ctx context.Context, runID, nodeID string, req store.LogSegmentsRequest) (store.LogSegmentsGrant, error)
+func (c *Client) LogSegment(ctx context.Context, runID, nodeID string, req store.LogSegmentRequest) (store.LogSegmentGrant, error)
 func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader
@@ -203,6 +203,7 @@ func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error)
 func (c *Client) RotateToken(ctx context.Context, prefix string, grace, ttl time.Duration) (*RotatedToken, error)
 func (c *Client) RunCronNow(ctx context.Context, name string) (*api.RunEnvelope, error)
 func (c *Client) RunnerIdentity() string
+func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error
 func (c *Client) SetComputeLimits(ctx context.Context, limits map[string]int64) (json.RawMessage, error)
 func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*api.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
@@ -338,7 +339,6 @@ type LiveLogChunk struct {
 func LoadSignal(err error) (time.Duration, bool)
 type LogSegmentUploader struct {
 }
-func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
 func (u *LogSegmentUploader) LiveAttempt() string
 func (u *LogSegmentUploader) OnWatched(fn func(bool))
 func (u *LogSegmentUploader) Open(ctx context.Context) error
@@ -554,7 +554,3 @@ type WatchReport struct {
 	WholeRun bool
 	Nodes    []string
 }
-
-# methods on un-declared receiver types (likely a bug)
-func (e *putStatusError) Error() string
-func (e *putStatusError) Unwrap() error

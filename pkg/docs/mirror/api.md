@@ -117,10 +117,14 @@ On a node read, `grep=TEXT&line_numbers=1` returns NDJSON objects with
 case-sensitive. `max_matches=N` caps the response; omitting it returns all
 matches. Without `line_numbers=1`, the read returns plain text.
 
-A runner asks for upload URLs with
-`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`, under its node or
-trigger claim, and puts each gzip segment and the attempt's sealing
-manifest to the URLs it gets back. The routes and their scopes are in
+A runner compresses and hashes each log segment, asks
+`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments` under its node or
+trigger claim for one URL signed for that segment's exact size and
+Content-MD5, and puts the segment there. It seals the attempt by posting
+the manifest to `POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest`,
+which the controller checks against the segments it signed. A launcher
+pod's claim may finish both for 60 seconds after its node reports its
+outcome. The routes and their scopes are in
 [api-reference.md](api-reference.md).
 
 ## Run coordination
