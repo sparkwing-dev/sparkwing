@@ -82,6 +82,7 @@ type handler struct {
 var handlers = map[nodeproto.Op]handler{
 	nodeproto.OpDescribe: {run: describe},
 	nodeproto.OpPlan:     {run: plan},
+	nodeproto.OpRunStep:  {needsPlan: true, run: runStep},
 }
 
 // Serve answers each request read from in with a reply on out until in ends.

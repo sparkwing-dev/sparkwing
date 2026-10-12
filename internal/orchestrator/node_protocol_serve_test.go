@@ -268,7 +268,6 @@ func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 
 	for _, req := range []nodeproto.Request{
 		{Op: nodeproto.OpRunNode, Node: "build", Attempt: 1},
-		{Op: nodeproto.OpRunStep, Node: "build", Step: "build", Attempt: 1},
 		{Op: nodeproto.OpEval, Closure: "deploy/skip_if/0"},
 	} {
 		reply, _ := s.call(req)

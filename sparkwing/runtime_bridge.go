@@ -27,6 +27,7 @@ type runtimePlumbingFns struct {
 	JobGroupFinalize   func(g *JobGroup, members []*JobNode, err error)
 	WorkStepFn         func(s *WorkStep) func(ctx context.Context) (any, error)
 	WorkStepMarkDone   func(s *WorkStep, out any)
+	WorkRunStep        func(ctx context.Context, w *Work, s *WorkStep) (any, error)
 	NodeDirCaches      func(n *JobNode) []depcache.Spec
 }
 
@@ -63,6 +64,7 @@ var RuntimePlumbing = struct {
 		JobGroupFinalize:   (*JobGroup).finalize,
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
+		WorkRunStep:        runStep,
 		NodeDirCaches:      dirCacheSpecs,
 	},
 }

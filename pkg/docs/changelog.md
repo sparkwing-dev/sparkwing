@@ -22,6 +22,7 @@ unlock.
 
 ### Added
 - **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
+- **sdk:** under `--sw-node-protocol`, `run_step` runs one step body of a planned node, several at once, and keeps step outputs in the process for later `StepGet` calls; a generator closure's eval adds its nodes to the process's plan and answers their node documents
 - **sdk:** `sparkwing.InputError` is the error a `Registration`'s `Invoke` returns when args fail the declared flags of the pipeline or of a job's `WithArgs`; find it with `errors.As`
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
 - **engine:** node routes for another node's output, OIDC tokens, child runs and their results, and a pipeline's latest run; the host forwards them to the controller with the node's claim token, which the node process never holds. A node has at most 4 of these requests open at once besides awaits, and at most 64 awaits, and gets 429 `too_many_requests` beyond either; every await of one child run shares one poll a second. A child run's request body is at most 64 KiB

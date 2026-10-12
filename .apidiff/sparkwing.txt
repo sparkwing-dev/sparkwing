@@ -603,6 +603,7 @@ var RuntimePlumbing = struct {
 		JobGroupFinalize:   (*JobGroup).finalize,
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
+		WorkRunStep:        runStep,
 		NodeDirCaches:      dirCacheSpecs,
 	},
 }
