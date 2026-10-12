@@ -66,9 +66,13 @@ startup or access.
 ### Manual registration
 
 ```bash
-curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
-  "http://sparkwing-cache:8090/git/register?name=gitops&repo=git@github.com:user/repo.git"
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://sparkwing.example.com/api/v1/gitcache/git/register?name=gitops&repo=git@github.com:user/repo.git"
 ```
+
+An operator registers through the controller with an `admin` bearer; the
+controller forwards the request to the cache under its own operator grant.
+The cache itself takes no static token a person could hold.
 
 Registration restores the mirror's `origin` URL from the validated repository
 URL, including mirrors an earlier release seeded without an origin. A failed
@@ -293,32 +297,38 @@ authenticate the push. The PAT needs write access to the gitops repo.
 
 The cache is exposed externally via ingress at your dashboard host's
 `cache-` subdomain. Every route except `/health`, `/metrics`, `/stats`, and the
-package proxy under `/proxy/` requires a bearer token, on reads as well as
-writes: the git protocol and registration routes (`/git/...`), the blob routes
-(`/bin/...`, `/cache/...`), and the admin routes (`/admin/...`). The package proxy
+package proxy under `/proxy/` requires a cache grant as its bearer, on reads as
+well as writes: the git protocol and registration routes (`/git/...`), the blob
+routes (`/bin/...`, `/cache/...`), and the admin routes (`/admin/...`). The package proxy
 stays open because Go, npm, and pip fetch through it without a credential;
 it serves upstream registry bytes, not repository content. The controller's
 `/api/v1/gitcache/git/...` proxy requires admin scope and permits upload-pack
-reads only. Authenticated requests carry the token as:
+reads only. Authenticated requests carry a grant as:
 
 ```
-Authorization: Bearer <cache token>
+Authorization: Bearer <cache grant>
 ```
 
-The cache reads that token from the file `cache-token` in its
-`--credentials-dir`.
+The cache accepts two kinds of grant, both signed with the grant key it reads
+from the file `cache-grant-key` in its `--credentials-dir`: a run's grant,
+described below, and the operator grant the controller signs for its own
+calls. Nothing else authenticates; there is no static token.
 
-Every caller presents the token, in-cluster ones included. Reaching the
-cache through the k8s Service rather than the ingress proves nothing about
-the caller, so requests to those endpoints without a valid bearer get 401
-wherever they come from. The controller and an operator's own shell read the
-token from `SPARKWING_CACHE_TOKEN`; runners never hold it and present a cache
-grant instead.
+Every caller presents a grant, in-cluster ones included. Reaching the cache
+through the k8s Service rather than the ingress proves nothing about the
+caller, so requests to those endpoints without a valid grant get 401 wherever
+they come from. The controller signs an operator grant, valid for five
+minutes, for each request of its own: its `/api/v1/gitcache/...` proxy, the
+team purge when a team is deleted, and the store-ceiling routes it forwards.
+That grant names no team and reaches every route and tree, as the operator
+token of earlier releases did. Runners never hold the grant key and present a
+run's grant instead. A person reaches the cache only through the controller,
+with an `admin` bearer.
 
 `POST /git/register` accepts a `name` of 1-64 alphanumeric, dash, underscore,
 or dot characters, and refuses to repoint a name that is already registered to
-a different repository unless the request carries the token. Registering the
-same name to the same URL stays idempotent.
+a different repository unless the request carries the operator grant.
+Registering the same name to the same URL stays idempotent.
 
 ### Cache grants
 
@@ -337,13 +347,13 @@ without calling the controller and confines the request to that team and
 repository, and it refuses with 401 a grant that names no claim or no
 repository scope, which a controller from before scoped grants minted and
 which opened the team's whole tree. The
-grant key is a secret of its own: the cache refuses to start when it equals
-the cache's operator token, and it is never a runner's token, because pipeline
+grant key is a secret of its own and never a runner's token, because pipeline
 code can read that token. A multi-team controller configured with the internal
-cache (`--cache-url`) refuses to start without a grant key or
-with one equal to `SPARKWING_CACHE_TOKEN`. A single-team controller starts
-either way: without a key it answers the route with 404, and with the operator
-token as its key it answers 503. A cache without a grant key accepts no grants. A GitHub Actions runner credential gets 403: it is confined to one
+cache (`--cache-url`) refuses to start without a grant key. A single-team
+controller starts without one: it answers the route with 404 and calls the
+cache with no bearer, which only a cache started with
+`--allow-unauthenticated` serves. A cache without a grant key refuses to
+start unless `--allow-unauthenticated` is set. A GitHub Actions runner credential gets 403: it is confined to one
 repository, and a grant also reads what every repository of the team shares:
 content-addressed artifacts and the entries written before grants carried a
 scope.
@@ -365,7 +375,7 @@ scope.
   toward the store ceiling.
 - `/git/<name>/...` with a grant for the operator's own team (`default`, a
   slug no other team can take) reads any registered mirror, SSH origins
-  included: every mirror is the operator's, because only the operator token
+  included: every mirror is the operator's, because only the operator grant
   and such a grant register one. Any other team's grant reads only an `https`
   repository registered under the name `repo-<sha256 of the URL>`, the name
   runners already derive, and reads it from a separate public mirror under
@@ -378,17 +388,18 @@ scope.
   a second copy of a repository both the operator and other teams read.
   Private repositories of other teams reach their runners through the GitHub
   App's per-run tokens instead.
-- `/git/register` accepts the operator token and a grant for the operator's
+- `/git/register` accepts the operator grant and a grant for the operator's
   own team, which is how the operator's runners register a repository on its
-  first run as they did with the operator token. It refuses any other team's
+  first run. It refuses any other team's
   grant with 403, because a registration clones onto the cache volume with the
   cache's own credentials; such a runner asks anyway and fetches from a mirror
   already registered. The mirrors count toward the store ceiling.
-- The `/admin/...` routes refuse a grant with 401.
+- The `/admin/...` routes refuse a run's grant with 401 and take only the
+  operator grant.
 
-The operator token keeps its unscoped access, and a cache started with
-`--allow-unauthenticated` accepts no grants because it has no key to verify
-them with.
+The operator grant keeps the unscoped access the operator token had, and a
+cache started with `--allow-unauthenticated` and no grant key accepts no
+grants because it has no key to verify them with.
 
 Every response carries `X-Content-Type-Options: nosniff`, and blob
 downloads carry `Content-Type: application/octet-stream` or
@@ -403,7 +414,7 @@ ingress does not route to. The main listener then answers only `/health`
 and the credentialed routes. Without `--metrics-addr` an ingress rule is
 the only thing keeping `/metrics` private.
 
-The cache refuses to start without a token. A laptop or test setup that
+The cache refuses to start without a grant key. A laptop or test setup that
 wants the endpoints open passes `--allow-unauthenticated`; the pod logs a warning at
 startup so an unauthenticated deployment is visible.
 
@@ -420,9 +431,9 @@ controller pod. Override
 `app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
 other labels. Add peers through `networkPolicy.extraIngress` for an
 out-of-cluster runner pool. The chart refuses to render a non-`ClusterIP`
-`cache.service.type` unless `cache.tokenSecret.name` is set and
+`cache.service.type` unless `cache.grantKeySecret.name` is set and
 `cache.allowUnauthenticated` is false, so a published cache always demands a
-bearer.
+grant.
 
 ## API Endpoints
 
@@ -512,8 +523,8 @@ every one; these are the ones a deployment usually sets.
 
 | Flag | Description |
 |------|-------------|
-| `--credentials-dir` | Directory holding `cache-token`, the bearer for every route outside `/health`, `/metrics`, `/stats`, and `/proxy/`, and `cache-grant-key`, the key that verifies cache grants. An absent file turns its feature off; without `cache-token` the cache refuses to start unless `--allow-unauthenticated` is set |
-| `--allow-unauthenticated` | Start without a token, leaving those routes open |
+| `--credentials-dir` | Directory holding `cache-grant-key`, the key that verifies cache grants, the only bearer every route outside `/health`, `/metrics`, `/stats`, and `/proxy/` accepts, and `controller-token`, the `storage.count` service token the cache presents to `--controller`. Without `cache-grant-key` the cache refuses to start unless `--allow-unauthenticated` is set; with `--controller` and no `controller-token` it refuses to start |
+| `--allow-unauthenticated` | Start without a grant key, leaving those routes open |
 | `--auto-register-repos` | Comma-separated `name=url` pairs for auto-registration |
 | `--fetch-interval` | Cadence of the keep-warm pass over mirrors a request touched in the last hour (default: `0`, the pass is off) |
 | `--fetch-fresh-window` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
@@ -523,9 +534,9 @@ every one; these are the ones a deployment usually sets.
 | `--addr` | Listen address (default: `:8090`) |
 
 A malformed value stops the cache at startup with an error naming the flag.
-The controller reads the same token, and the same grant key, from the same
-file names in its own `--credentials-dir`, so one projected Secret volume
-serves both.
+The controller reads the same grant key from the same `cache-grant-key` file
+name in its own `--credentials-dir`, so one projected Secret volume serves
+both.
 
 On the client side, `SPARKWING_GITCACHE_URL` names a specific gitcache base
 URL for git clones: set it to a reachable cache server and sparkwing routes
@@ -534,9 +545,8 @@ chart stamps it on every runner pod, so a chart-deployed runner already names
 its cache. Unset, sparkwing auto-detects a cache on
 `localhost:18090` and falls back to a direct clone when none answers.
 
-A clone through a named cache carries the run's `SPARKWING_CACHE_GRANT`, or
-else `SPARKWING_CACHE_TOKEN`, as its bearer, so a cache that guards its git
-routes still serves it. The bearer
+A clone through a named cache carries the run's `SPARKWING_CACHE_GRANT` as
+its bearer, so a cache that guards its git routes still serves it. The bearer
 travels in the environment as a cache-scoped header, never on the command
 line, and never goes to the auto-detected cache: only an operator naming
 the cache in one of those two variables authorizes sending a credential to

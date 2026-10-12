@@ -8,7 +8,7 @@ Every `sparkwing cluster` command, flag, and argument, generated from the CLI's 
 
 Operate and inspect the sparkwing cluster
 
-Inspect and operate a controller's executors, triggers, admission, users and
+Inspect and operate a controller's executors, triggers, admission and
 tokens. Select the controller with --profile NAME; connect one with
 'sparkwing cloud connect' and check its health with 'sparkwing cloud status
 --cluster'.
@@ -22,7 +22,6 @@ tokens. Select the controller with --profile NAME; connect one with
 - `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
 - `triggers` -- List or inspect controller triggers
-- `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
 - `limits` -- Read and set the compute guards
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
@@ -43,13 +42,11 @@ sparkwing cluster agents list --profile prod
 Inspect the controller's fleet view
 
 Hits GET /api/v1/agents on the selected profile's controller.
-Prints persisted executor registrations, including idle and
-offline agents and gateways, plus recent legacy claim-only runners.
+Prints the runners that claimed work in the last hour.
 
 ### Subcommands
 
 - `list` -- Print the controller's known agents
-- `enroll` -- Enroll or update a trusted executor
 
 ### Examples
 
@@ -58,55 +55,13 @@ offline agents and gateways, plus recent legacy claim-only runners.
 sparkwing cluster agents list --profile prod
 ```
 
-## `sparkwing cluster agents enroll`
-
-Enroll or update a trusted executor
-
-Binds one exact runner or service token prefix to an
-operator-owned executor envelope. The token must be live and carry
-nodes.claim; its stored principal becomes audit metadata. Re-enrollment
-with the same credential updates trusted scheduling fields without changing
-live headroom. Changing the prefix requires a new heartbeat.
-
-Use a distinct revocable token for every coordinator membership. The
-prefix is accepted as input but is never returned by the agents API. A
-controller accepts at most 256 enrolled executors. Adding another returns `executor enrollment limit reached: maximum 256 per controller`.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Executor name (required) |
-| `--token-prefix PREFIX` | Exact runner or service token prefix (required) |
-| `--kind KIND` | Executor kind (agent\|gateway) (default: agent) |
-| `--location WHERE` | Trusted placement location (local\|cloud\|unknown) (default: unknown) |
-| `--capability LABEL` | Trusted capability (repeatable) |
-| `--base-priority N` | Base scheduling priority (0-100) (default: 0) |
-| `--priority-ceiling N` | Highest effective priority (0-100) (default: 100) |
-| `--max-concurrent N` | Trusted concurrent slot ceiling (default: 1) |
-| `--budget-cores N` | CPU contribution ceiling (0 = uncapped) (default: 0) |
-| `--budget-memory-bytes N` | Memory contribution ceiling in bytes (0 = uncapped) (default: 0) |
-| `--profile NAME` | Admin controller profile (required) |
-
-### Examples
-
-```sh
-# Enroll a workstation agent
-sparkwing cluster agents enroll --profile prod --name desk --token-prefix swr_01234567 --kind agent --location local --capability linux --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592
-
-# Enroll a capacity gateway
-sparkwing cluster agents enroll --profile prod --name build-gateway --token-prefix sws_01234567 --kind gateway --location cloud --capability linux-amd64 --max-concurrent 8
-```
-
 ## `sparkwing cluster agents list`
 
 Print the controller's known agents
 
-Fetches /api/v1/agents and renders a table of fleet members.
-Registered executors report their operator-assigned identity,
-kind, trusted placement location, capabilities, concurrency limit, and
-measured resource headroom. A stale registration remains visible
-as offline; recent legacy claim-only runners remain visible too.
+Fetches /api/v1/agents and renders a table of the runners that
+claimed work in the last hour, with the labels, concurrency limit and
+measured resource headroom each one last advertised.
 
 Use -q to print names, one per line, for shell piping
 (xargs and similar commands).
@@ -375,8 +330,8 @@ sparkwing cluster runners remove --profile prod
 
 Mint a runner token, write the config, start the service
 
-Mints a runner token carrying nodes.claim, triggers.claim,
-runs.state and secrets.read against the profile's controller,
+Mints a runner token carrying nodes.claim, triggers.claim and
+runs.state against the profile's controller,
 writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
@@ -688,99 +643,6 @@ sparkwing cluster triggers list --profile prod --status pending
 
 # Pipeline-specific, JSON
 sparkwing cluster triggers list --profile prod --pipeline fictional-build --limit 5 -o json
-```
-
-## `sparkwing cluster users`
-
-Manage dashboard login users
-
-Seeds admin credentials in the controller's users table, used
-by the dashboard's password sign-in. Connection info comes from the
-profile named by --profile.
-
-### Subcommands
-
-- `add` -- Create a dashboard user
-- `list` -- Print every user
-- `delete` -- Remove a dashboard user
-
-## `sparkwing cluster users add`
-
-Create a dashboard user
-
-Prompts for a password on stdin with echo disabled when stdin
-is a TTY (the password is not shown on-screen or recorded in
-shell history). Passing --password skips the prompt -- useful
-for CI seed flows but leaks via shell history if used
-interactively. --scope sets what the account's dashboard
-sessions may reach; omitting it grants admin. The first account
-on a controller must be an admin, so a --scope list that omits
-admin is refused until one exists.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Dashboard username (required) |
-| `--password PASSWORD` | Password (omit to prompt interactively) |
-| `--scope LIST` | Comma-separated scopes (omit to grant admin; the first account must include admin) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Interactive add of the first admin
-sparkwing cluster users add --name fictional-user --profile prod
-
-# Read-only account, once an admin exists
-sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod
-
-# Non-interactive add for CI
-sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod
-```
-
-## `sparkwing cluster users delete`
-
-Remove a dashboard user
-
-Deletes the user row, every session that user holds, and
-revokes every token minted under that principal name except the token
-this request authenticates with, in one transaction. The sessions and
-tokens are revoked and the auth cache on the serving replica is
-cleared; auth.md describes the windows that remain elsewhere.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Dashboard username to remove (required) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Delete a user
-sparkwing cluster users delete --name fictional-user --profile prod
-```
-
-## `sparkwing cluster users list`
-
-Print every user
-
-Prints name, scopes, created_at, and last_login_at for every
-user in the controller's users table.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# List users
-sparkwing cluster users list --profile prod
 ```
 
 ## `sparkwing cluster worker`

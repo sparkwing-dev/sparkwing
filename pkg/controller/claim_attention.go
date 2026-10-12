@@ -79,16 +79,13 @@ type agentSighting struct {
 	online bool
 }
 
-// safety: an enrolled executor is judged on its enrolled profile and its
-// heartbeat, as its offers are; any other agent on what it sends when online
-// and on what it last advertised when not.
+// safety: an agent is judged on what it sends when online and on what it last
+// advertised when not.
 func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPresence, now time.Time) []agentSighting {
 	out := make([]agentSighting, 0, len(registered))
 	for _, a := range registered {
 		sighting := agentSighting{RegisteredAgent: a}
-		if a.Enrolled {
-			sighting.online = now.Sub(a.LastSeen) <= store.ExecutorRegistrationActiveWindow
-		} else if p, ok := online[a.TokenPrefix]; ok {
+		if p, ok := online[a.TokenPrefix]; ok {
 			sighting.online = true
 			profile := p.profile
 			profile.Name, profile.Class, profile.Labels = a.Name, match.ClassAgent, match.SelfAsserted(p.Labels)

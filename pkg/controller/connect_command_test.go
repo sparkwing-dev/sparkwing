@@ -31,8 +31,8 @@ func TestTheConnectCommandSplitsAfterItsTokenSetup(t *testing.T) {
 		Token   string `json:"token"`
 		Command string `json:"command"`
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", a.auth,
-		map[string]any{"name": "a-box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", a.auth,
+		map[string]any{"scopes": machineScopes, "name": "a-box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint = %d", code)
 	}
 	setup, run, ok := splitConnectCommand(minted.Command)

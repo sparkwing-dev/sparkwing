@@ -314,43 +314,6 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 	return run, nil
 }
 
-// ClaimedRunsFor returns the distinct team and pipeline pairs of the runs
-// claimant currently holds work in, through node claims or trigger
-// claims. Empty when it holds none.
-func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now time.Time) (_ []ClaimedRun, err error) {
-	if !claimant.bound() {
-		return nil, nil
-	}
-	rows, err := s.query(ctx, `
-        SELECT DISTINCT runs.team, runs.pipeline
-          FROM runs
-         WHERE EXISTS (SELECT 1 FROM nodes
-                        WHERE nodes.run_id = runs.id
-                          AND nodes.claim_principal = ? AND nodes.claim_token_prefix = ?
-		                  AND `+nodeClaimLiveSQL("")+`)
-            OR EXISTS (SELECT 1 FROM triggers
-                        WHERE triggers.id = runs.id
-                          AND triggers.claim_principal = ? AND triggers.claim_token_prefix = ?
-		                  AND `+triggerClaimLiveSQL("")+`)`,
-		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
-		claimant.Principal, claimant.TokenPrefix, now.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []ClaimedRun
-	for rows.Next() {
-		var run ClaimedRun
-		var team string
-		if err := rows.Scan(&team, &run.Pipeline); err != nil {
-			return nil, err
-		}
-		run.Team = Team(team)
-		out = append(out, run)
-	}
-	return out, rows.Err()
-}
-
 // RotateSecretValues rewrites the stored value of every secret row with
 // whatever reseal returns for it, in one transaction, so a key change
 // either lands for the whole table or for none of it. Every other column

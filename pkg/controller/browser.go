@@ -92,7 +92,6 @@ func (s *Server) signInRoutes(mux *http.ServeMux) {
 	signIn := func(h http.Handler) http.Handler { return s.loginLimit.middleware(h) }
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.Handle("POST /login", signIn(s.formCSRF(s.handleLoginSubmit)))
-	mux.Handle("POST /login/bootstrap", signIn(s.formCSRF(s.handleBootstrapSubmit)))
 	mux.Handle("POST /logout", s.formCSRF(s.handleBrowserLogout))
 	mux.Handle("GET /auth/{provider}/start", signIn(http.HandlerFunc(s.handleOAuthStart)))
 	mux.Handle("GET /auth/{provider}/callback", signIn(http.HandlerFunc(s.handleOAuthCallback)))

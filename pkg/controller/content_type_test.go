@@ -17,9 +17,7 @@ func TestRoutes_RejectSimpleRequestContentTypes(t *testing.T) {
 		path string
 		body string
 	}{
-		{name: "login", path: "/api/v1/auth/login", body: `{"username":"a","password":"b"}`},
 		{name: "logout", path: "/api/v1/auth/logout", body: `{"session_id":"s"}`},
-		{name: "users", path: "/api/v1/users", body: `{"name":"pwn","password":"correct horse"}`},
 		{name: "tokens", path: "/api/v1/tokens", body: `{"principal":"p","kind":"user","scopes":["admin"]}`},
 		{name: "token rotate", path: "/api/v1/tokens/abcd1234/rotate", body: `{"grace_secs":1}`},
 		{name: "secrets", path: "/api/v1/secrets", body: `{"name":"pwned","value":"x"}`},

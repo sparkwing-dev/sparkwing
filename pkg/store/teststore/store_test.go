@@ -14,10 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestOpenKeepsStateAndIdentitySeparate(t *testing.T) {
+func TestOpenKeepsStateSeparate(t *testing.T) {
 	ctx := context.Background()
 	var fixtures [2]*store.Store
-	var authorities [2]string
 	for i := range fixtures {
 		path := filepath.Join(t.TempDir(), "state.db")
 		st, err := teststore.Open(path)
@@ -38,9 +37,6 @@ func TestOpenKeepsStateAndIdentitySeparate(t *testing.T) {
 		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&runs); err != nil || runs != 0 {
 			t.Fatalf("store %d starts with %d runs: %v", i, runs, err)
 		}
-		if err := st.DB().QueryRowContext(ctx, `SELECT value FROM sparkwing_meta WHERE key = 'controller_authority_id'`).Scan(&authorities[i]); err != nil {
-			t.Fatal(err)
-		}
 		info, err := os.Stat(path)
 		expectedMode := os.FileMode(0o600)
 		if runtime.GOOS == "windows" {
@@ -49,9 +45,6 @@ func TestOpenKeepsStateAndIdentitySeparate(t *testing.T) {
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != expectedMode {
 			t.Fatalf("fixture permissions: %v, %v", info, err)
 		}
-	}
-	if authorities[0] == authorities[1] {
-		t.Fatal("fixtures share a controller authority")
 	}
 	if err := fixtures[0].CreateRun(ctx, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)

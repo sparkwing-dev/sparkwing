@@ -56,7 +56,7 @@ type coordinator interface {
 	ListNodes(context.Context, string) ([]*store.Node, error)
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 	RevokeNodeReady(context.Context, string, string) (bool, error)
-	FinalizeNodeReady(context.Context, string, string) (store.ExecutorClaimRoundResult, error)
+	FinalizeNodeReady(context.Context, string, string) (store.ClaimRoundResult, error)
 }
 
 func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logger) *Runner {
@@ -124,7 +124,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			n, lost := wait.nodes[req.NodeID], wait.lost
 			r.mu.Unlock()
 			// safety: a dead token is a lost claim, so the node is neither
-			// revoked nor handed to the fallback; an executor that claimed it
+			// revoked nor handed to the fallback; a runner that claimed it
 			// finishes it under its own claim.
 			if lost != nil {
 				return runner.ClaimLost(lost)
@@ -171,7 +171,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					return runner.ClaimLost(rerr)
 				}
 				if rerr != nil {
-					r.logger.Warn("warmpool: offer finalization failed",
+					r.logger.Warn("warmpool: claim round finalization failed",
 						"run_id", req.RunID, "node_id", req.NodeID, "err", rerr)
 					continue
 				}
@@ -180,7 +180,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					continue
 				}
 				if !resolution.Revoked {
-					// safety: fallback must yield after the controller awards an offer
+					// safety: fallback must yield once a runner has claimed the node
 					stopHB()
 					claimedSeen = true
 					continue

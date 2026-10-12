@@ -47,8 +47,8 @@ cannot both win. A reservation a crashed writer never settled expires after an
 hour. A commit with a reservation ID counts once for 24 hours; hourly
 storage maintenance prunes older receipts, after which a replay counts
 again. A renewal retry returns the same next reservation while it is
-active. The cache calls these routes with its operator token and makes one
-reserve and one commit or release per object. The cache's operator token can
+active. The cache calls these routes with its `storage.count` service token and makes one
+reserve and one commit or release per object. The cache's service token can
 commit a negative overwrite delta when an object shrinks.
 
 The controller charges node log segments itself. When a runner asks for a
@@ -180,7 +180,7 @@ second run over the same data removes nothing more.
 | Run events, node metrics | finished runs past the retention window | controller, hourly storage pass | `event_retention_days`, `node_metric_retention_days`; a multi-team controller writes 30 days where the operator set none |
 | A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
 | Node log segments | by retention class: `logs/r90/` 90 days for a funded or single-team controller, `logs/r30/` 30 days for a team the controller answered free when the attempt's log opened, `logs/r<days>/` for a team `--log-retention` names | the bucket's lifecycle rules, which the controller verifies before it issues URLs into a class; deleting a run or a team deletes its segments | `--log-retention team=days`; see [self-hosting.md](self-hosting.md#node-log-retention) |
-| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
+| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and the operator grant's cache root | controller, hourly storage pass | `--cache-blob-store` |
 | Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
 | Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (2 GiB) |
 | Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |

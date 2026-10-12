@@ -2,47 +2,29 @@ package controller
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"math"
 	"net/http"
 	"sort"
-	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const runnerHeadroomStale = time.Hour
 
 type Agent struct {
-	Name            string            `json:"name"`
-	Type            string            `json:"type"` // "agent" | "gateway" | "pool" | "local"
-	Location        string            `json:"location"`
-	Labels          map[string]string `json:"labels"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
-	LastSeen        string            `json:"last_seen"`
-	Status          string            `json:"status"` // "busy" | "idle" | "offline"
-	ActiveJobs      []string          `json:"active_jobs"`
-	ActiveSlots     *int              `json:"active_slots,omitempty"`
-	MaxConcurrent   int               `json:"max_concurrent"`
-	BasePriority    int               `json:"base_priority"`
-	PriorityCeiling int               `json:"priority_ceiling"`
-	Budget          AgentResources    `json:"budget"`
+	Name          string            `json:"name"`
+	Type          string            `json:"type"` // "agent" | "pool" | "local"
+	Location      string            `json:"location"`
+	Labels        map[string]string `json:"labels"`
+	Capabilities  []string          `json:"capabilities,omitempty"`
+	LastSeen      string            `json:"last_seen"`
+	Status        string            `json:"status"` // "busy" | "idle" | "offline"
+	ActiveJobs    []string          `json:"active_jobs"`
+	MaxConcurrent int               `json:"max_concurrent"`
 	// Headroom is the runner's most recently advertised free capacity --
 	// the local admission daemon's grantable cores/memory after the
 	// operator's reserve, plus the daemon's queue depth. Nil for a runner
 	// that never advertised (it engages no local daemon, or predates the
 	// headroom protocol), or when its last report has gone stale.
 	Headroom *AgentHeadroom `json:"headroom,omitempty"`
-}
-
-// AgentResources is an executor's configured contribution ceiling.
-type AgentResources struct {
-	Cores       float64 `json:"cores"`
-	MemoryBytes int64   `json:"memory_bytes"`
 }
 
 // AgentHeadroom is a runner's advertised free capacity in the agents view.
@@ -55,175 +37,15 @@ type AgentHeadroom struct {
 	ObservedAt string `json:"observed_at"`
 }
 
-type enrollAgentReq struct {
-	TokenPrefix     string         `json:"token_prefix"`
-	Kind            string         `json:"kind"`
-	Location        string         `json:"location"`
-	Capabilities    []string       `json:"capabilities,omitempty"`
-	BasePriority    int            `json:"base_priority"`
-	PriorityCeiling int            `json:"priority_ceiling"`
-	MaxConcurrent   int            `json:"max_concurrent"`
-	Budget          AgentResources `json:"budget"`
-	// safety: absent takes every repository and an empty list takes none.
-	AcceptRepos []string `json:"accept_repos,omitempty"`
-}
-
-func normalizeEnrollment(name string, in enrollAgentReq) (store.Executor, error) {
-	name = strings.TrimSpace(name)
-	if name == "" || strings.Contains(name, ":") {
-		return store.Executor{}, errors.New("executor name is required and cannot contain ':'")
-	}
-	switch in.Kind {
-	case "agent", "gateway":
-	default:
-		return store.Executor{}, fmt.Errorf("executor kind %q: expected agent or gateway", in.Kind)
-	}
-	if in.Location == "" {
-		in.Location = "unknown"
-	}
-	switch in.Location {
-	case "local", "cloud", "unknown":
-	default:
-		return store.Executor{}, fmt.Errorf("executor location %q: expected local, cloud, or unknown", in.Location)
-	}
-	if in.BasePriority < 0 || in.BasePriority > 100 || in.PriorityCeiling < in.BasePriority || in.PriorityCeiling > 100 {
-		return store.Executor{}, errors.New("executor priority must satisfy 0 <= base_priority <= priority_ceiling <= 100")
-	}
-	if in.MaxConcurrent < 1 || in.Budget.Cores < 0 || math.IsNaN(in.Budget.Cores) || math.IsInf(in.Budget.Cores, 0) || in.Budget.MemoryBytes < 0 {
-		return store.Executor{}, errors.New("executor limits must be finite and non-negative with max_concurrent >= 1")
-	}
-	seen := map[string]bool{}
-	capabilities := make([]string, 0, len(in.Capabilities))
-	for _, capability := range in.Capabilities {
-		capability = strings.TrimSpace(capability)
-		for _, value := range strings.Split(capability, ",") {
-			value = strings.TrimSpace(value)
-			if value == "local" || strings.HasPrefix(value, "location=") {
-				return store.Executor{}, fmt.Errorf("executor capability %q uses reserved placement vocabulary", capability)
-			}
-		}
-		if capability != "" && !seen[capability] {
-			seen[capability] = true
-			capabilities = append(capabilities, capability)
-		}
-	}
-	sort.Strings(capabilities)
-	return store.Executor{
-		Name: name, Kind: in.Kind, Location: in.Location, Capabilities: capabilities,
-		BasePriority: in.BasePriority, PriorityCeiling: in.PriorityCeiling,
-		MaxConcurrent: in.MaxConcurrent, AcceptRepos: in.AcceptRepos,
-		Budget: store.ExecutorResource{Cores: in.Budget.Cores, MemoryBytes: in.Budget.MemoryBytes},
-	}, nil
-}
-
-func (s *Server) handleEnrollAgent(w http.ResponseWriter, r *http.Request) {
-	var body enrollAgentReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	executor, err := normalizeEnrollment(r.PathValue("name"), body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	now := time.Now()
-	token, err := s.store.LookupTokenByPrefix(strings.TrimSpace(body.TokenPrefix))
-	if err != nil || !token.IsValid(now) ||
-		(token.Kind != store.TokenKindRunner && token.Kind != store.TokenKindService) || !token.HasScope(ScopeNodesClaim) {
-		writeError(w, http.StatusBadRequest, errors.New("token_prefix must name a live runner or service token with nodes.claim"))
-		return
-	}
-	executor.Principal = token.Principal
-	if err := s.store.EnrollExecutor(r.Context(), token.Prefix, executor); err != nil {
-		if errors.Is(err, store.ErrInvalidInput) {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if errors.Is(err, store.ErrExecutorEnrollmentLimit) {
-			writeError(w, http.StatusConflict, store.ErrExecutorEnrollmentLimit)
-			return
-		}
-		// safety: PostgreSQL constraint errors can expose credential prefixes
-		writeError(w, http.StatusConflict, errors.New("executor enrollment conflicts with an existing name or credential"))
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type agentHeartbeatReq struct {
-	Headroom *claimHeadroom         `json:"headroom"`
-	Runtime  *agentRuntimeReportReq `json:"runtime,omitempty"`
-}
-
-type agentRuntimeReportReq struct {
-	BodyProtocolMinimum int                `json:"body_protocol_minimum"`
-	BodyProtocolMaximum int                `json:"body_protocol_maximum"`
-	Supervisor          []string           `json:"supervisor_requirements,omitempty"`
-	BodyHost            []string           `json:"body_host_requirements,omitempty"`
-	Build               buildinfo.Identity `json:"build_identity"`
-}
-
-func validateClaimHeadroom(headroom *claimHeadroom) error {
-	if headroom == nil || headroom.Cores < 0 || math.IsNaN(headroom.Cores) || math.IsInf(headroom.Cores, 0) ||
-		headroom.MemoryBytes < 0 || headroom.QueueDepth < 0 {
-		return errors.New("headroom must contain finite non-negative cores, memory_bytes, and queue_depth")
-	}
-	return nil
-}
-
-func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
-	var body agentHeartbeatReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := validateClaimHeadroom(body.Headroom); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	ctx := r.Context()
-	if body.Runtime != nil {
-		var err error
-		ctx, err = executionpolicy.WithRuntimeReport(ctx, executionpolicy.RuntimeReport{
-			BodyProtocolMinimum: body.Runtime.BodyProtocolMinimum,
-			BodyProtocolMaximum: body.Runtime.BodyProtocolMaximum,
-			Supervisor:          body.Runtime.Supervisor,
-			BodyHost:            body.Runtime.BodyHost,
-			Build:               body.Runtime.Build,
-		})
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-	}
-	if err := s.store.HeartbeatExecutor(ctx, claimIdentity(r), r.PathValue("name"),
-		store.ExecutorResource{Cores: body.Headroom.Cores, MemoryBytes: body.Headroom.MemoryBytes},
-		body.Headroom.QueueDepth, time.Now()); err != nil {
-		if errors.Is(err, store.ErrExecutorCredentialMismatch) {
-			writeError(w, http.StatusConflict, store.ErrExecutorCredentialMismatch)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
 		return
 	}
-	registered, err := s.registeredAgents(r.Context(), tenant, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "list registered agents", err)
-		return
-	}
 	windowStart := time.Now().Add(-1 * time.Hour)
-	claims, err := tenant.ListLegacyAgentClaims(r.Context(), windowStart)
+	claims, err := tenant.ListAgentClaims(r.Context(), windowStart)
 	if err != nil {
-		s.writeInternalError(w, r, "list legacy agent claims", err)
+		s.writeInternalError(w, r, "list agent claims", err)
 		return
 	}
 
@@ -278,7 +100,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out := append([]Agent(nil), registered...)
+	out := make([]Agent, 0, len(byHolder))
 	for _, h := range byHolder {
 		status := "idle"
 		if len(h.activeRuns) > 0 {

@@ -71,8 +71,8 @@ func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := hashPassword("correct horse battery staple"); err != nil {
-					t.Errorf("hashPassword: %v", err)
+				if _, err := argonKey("correct horse battery staple", make([]byte, argonSaltLen)); err != nil {
+					t.Errorf("argonKey: %v", err)
 				}
 			}()
 		}
@@ -124,7 +124,7 @@ func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
 	held := make(chan struct{})
 	go func() {
 		defer close(held)
-		_, _ = hashPassword("holder")
+		_, _ = argonKey("holder", make([]byte, argonSaltLen))
 	}()
 	<-entered
 	defer func() {
@@ -134,7 +134,7 @@ func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
 
 	shedBefore := Argon2Shed()
 	start := time.Now()
-	_, err := hashPassword("shed me")
+	_, err := argonKey("shed me", make([]byte, argonSaltLen))
 	elapsed := time.Since(start)
 	if !errors.Is(err, ErrHashingBusy) {
 		t.Fatalf("saturated hash returned %v, want ErrHashingBusy", err)
@@ -144,48 +144,6 @@ func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
 	}
 	if got := Argon2Shed(); got != shedBefore+1 {
 		t.Fatalf("Argon2Shed = %d, want %d: a shed hash is what the budget metric counts", got, shedBefore+1)
-	}
-}
-
-func TestVerifyUserShedsWhenHashingIsSaturated(t *testing.T) {
-	restore := argonIDFunc
-	prevWait := SetArgon2AcquireTimeout(20 * time.Millisecond)
-	t.Cleanup(func() {
-		argonIDFunc = restore
-		SetArgon2AcquireTimeout(prevWait)
-		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
-	})
-
-	st := newTestStore(t)
-	now := time.Now().UTC()
-	if _, err := st.CreateUser("alice", "correct horse battery", []string{"admin"}, now); err != nil {
-		t.Fatalf("create alice: %v", err)
-	}
-
-	release := make(chan struct{})
-	entered := make(chan struct{}, 1)
-	argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
-		entered <- struct{}{}
-		<-release
-		return make([]byte, keyLen)
-	}
-	SetArgon2MemoryBudget(Argon2HashBytes)
-
-	held := make(chan struct{})
-	go func() {
-		defer close(held)
-		_, _ = st.VerifyUser("alice", "correct horse battery", now)
-	}()
-	<-entered
-	defer func() {
-		close(release)
-		<-held
-	}()
-
-	for _, name := range []string{"alice", "nobody"} {
-		if _, err := st.VerifyUser(name, "whatever", now); !errors.Is(err, ErrHashingBusy) {
-			t.Fatalf("VerifyUser(%q) under saturation returned %v, want ErrHashingBusy", name, err)
-		}
 	}
 }
 

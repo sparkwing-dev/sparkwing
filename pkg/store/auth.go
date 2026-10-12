@@ -5,14 +5,12 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -22,40 +20,26 @@ type Session struct {
 	ID        string
 	Principal string
 	Scopes    []string
-	// Team is the team the session acts for. A password session keeps
-	// [DefaultTeam]; an account session moves when the account switches.
+	// Team is the team the session acts for: the token's team for a token
+	// session; an account session's moves when the account switches.
 	Team Team
 	// AccountID is set on a session opened by an identity-provider sign-in.
 	// Its scopes are not stored: they come from the account's membership in
 	// Team on every request.
-	AccountID  string
-	CSRFToken  string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	LastUsedAt *time.Time
-}
-
-// User is one row in the users table. Scopes is the authorization set a
-// browser session inherits when this user signs in.
-type User struct {
-	Name        string
-	PWHash      string
-	Scopes      []string
+	AccountID string
+	// TokenPrefix names the operator token a token session was opened with.
+	// Its scopes and team are read from that token's row on every lookup.
+	TokenPrefix string
+	CSRFToken   string
 	CreatedAt   time.Time
-	LastLoginAt *time.Time
+	ExpiresAt   time.Time
+	LastUsedAt  *time.Time
 }
 
 // SessionIDLen is the raw byte length before base64.
 const SessionIDLen = 32
 
-// ErrInvalidCredentials reports a username that does not exist or a
-// password that does not match. One error covers both so the response
-// is not a user-existence oracle.
-var ErrInvalidCredentials = errors.New("invalid username or password")
-
 const metaKeySessionCSRFKey = "session_csrf_key"
-
-const metaKeyBootstrapLatch = "bootstrap_latch"
 
 func sessionDigest(rawSession string) string {
 	sum := sha256.Sum256([]byte(rawSession))
@@ -169,43 +153,43 @@ func rehashSessions(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// CreateSession returns a raw session id and its CSRF token. The table stores
-// the session digest; the CSRF token is derived on demand and never stored.
-func (s *Store) CreateSession(ctx context.Context, principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error) {
-	if principal == "" {
-		return "", "", nil, errors.New("sessions: principal required")
+// CreateTokenSession opens a browser session for the holder of the token
+// whose prefix is tokenPrefix, acting as principal in team. It returns the raw
+// session id and its CSRF token. The row stores no scopes: every lookup reads
+// them from the token's row, so revoking or expiring the token ends the
+// session as well.
+func (s *Store) CreateTokenSession(ctx context.Context, tokenPrefix, principal string, team Team, ttl time.Duration, now time.Time) (rawSession string, sess *Session, err error) {
+	if tokenPrefix == "" || principal == "" {
+		return "", nil, errors.New("sessions: token prefix and principal required")
 	}
 	if ttl <= 0 {
-		return "", "", nil, errors.New("sessions: ttl must be positive")
+		return "", nil, errors.New("sessions: ttl must be positive")
 	}
 	rawSession, err = newSessionID()
 	if err != nil {
-		return "", "", nil, err
+		return "", nil, err
 	}
-
-	csrfToken, err = s.deriveCSRFToken(ctx, rawSession)
+	csrfToken, err := s.deriveCSRFToken(ctx, rawSession)
 	if err != nil {
-		return "", "", nil, err
+		return "", nil, err
 	}
-
 	expires := now.Add(ttl).UTC()
-	scopeStr := joinScopes(scopes)
-	_, err = s.exec(ctx, `
-        INSERT INTO sessions (hash, principal, scopes, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?)
-    `, sessionDigest(rawSession), principal, scopeStr, now.UTC().Unix(), expires.Unix())
-	if err != nil {
-		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	// safety: an empty scopes column leaves a binary that predates token sessions holding no scope for this row.
+	if _, err = s.exec(ctx, `
+        INSERT INTO sessions (hash, team, principal, scopes, token_prefix, created_at, expires_at)
+        VALUES (?, ?, ?, '', ?, ?, ?)
+    `, sessionDigest(rawSession), string(NormalizeTeam(team)), principal, tokenPrefix, now.UTC().Unix(), expires.Unix()); err != nil {
+		return "", nil, fmt.Errorf("sessions: insert: %w", err)
 	}
-	sess = &Session{
-		ID:        rawSession,
-		Principal: principal,
-		Scopes:    dedupeScopes(scopes),
-		CSRFToken: csrfToken,
-		CreatedAt: now.UTC(),
-		ExpiresAt: expires,
-	}
-	return rawSession, csrfToken, sess, nil
+	return rawSession, &Session{
+		ID:          rawSession,
+		Principal:   principal,
+		Team:        NormalizeTeam(team),
+		TokenPrefix: tokenPrefix,
+		CSRFToken:   csrfToken,
+		CreatedAt:   now.UTC(),
+		ExpiresAt:   expires,
+	}, nil
 }
 
 func newSessionID() (string, error) {
@@ -242,19 +226,23 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, now time.T
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	row := s.queryRow(ctx, `
-        SELECT principal, scopes, team, account_id,
-               created_at, expires_at, last_used_at
-          FROM sessions
-         WHERE hash = ?
+        SELECT s.principal, s.team, s.account_id, s.token_prefix,
+               s.created_at, s.expires_at, s.last_used_at,
+               t.prefix, t.team, t.scopes, t.expires_at, t.revoked_at
+          FROM sessions s
+          LEFT JOIN tokens t ON s.token_prefix <> '' AND t.prefix = s.token_prefix
+         WHERE s.hash = ?
     `, digest)
 
 	var sess Session
-	var scopes, team string
-	var lastUsed sql.NullInt64
+	var team string
+	var lastUsed, tokExpires, tokRevoked sql.NullInt64
+	var tokPrefix, tokTeam, tokScopes sql.NullString
 	var created, expires int64
 	if err := row.Scan(
-		&sess.Principal, &scopes, &team, &sess.AccountID,
+		&sess.Principal, &team, &sess.AccountID, &sess.TokenPrefix,
 		&created, &expires, &lastUsed,
+		&tokPrefix, &tokTeam, &tokScopes, &tokExpires, &tokRevoked,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("unknown session")
@@ -262,8 +250,19 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, now time.T
 		return nil, fmt.Errorf("%w: read session: %w", ErrSessionBackend, err)
 	}
 	sess.ID = rawSession
-	sess.Scopes = splitScopes(scopes)
 	sess.Team = Team(team)
+	if sess.AccountID == "" {
+		// safety: a session that names neither an account nor a live token carries no authority, so it fails
+		// rather than falling back to the scopes column a binary predating token sessions wrote.
+		if !tokPrefix.Valid {
+			return nil, errors.New("unknown session")
+		}
+		if err := TokenEnded(nullableUnix(tokRevoked), nullableUnix(tokExpires), now); err != nil {
+			return nil, fmt.Errorf("session token: %w", err)
+		}
+		sess.Scopes = splitScopes(tokScopes.String)
+		sess.Team = Team(tokTeam.String)
+	}
 	sess.CreatedAt = time.Unix(created, 0).UTC()
 	sess.ExpiresAt = time.Unix(expires, 0).UTC()
 	if lastUsed.Valid {
@@ -339,319 +338,10 @@ func (s *Store) ExpireSessions(now time.Time) (int64, error) {
 	return n, nil
 }
 
-// CreateUser inserts a user with an argon2id-hashed password. scopes is
-// the authorization set every session this user opens carries; the caller
-// owns the scope vocabulary and validates it.
-func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error) {
-	if name == "" {
-		return nil, errors.New("users: name required")
+func nullableUnix(v sql.NullInt64) *time.Time {
+	if !v.Valid {
+		return nil
 	}
-	if len(password) < 8 {
-		return nil, errors.New("users: password must be at least 8 characters")
-	}
-	pwHash, err := hashPassword(password)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := s.bootstrapTx(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("users: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := takeBootstrapLatch(tx, now); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(
-		`INSERT INTO users (name, pw_hash, created_at, scopes) VALUES (?, ?, ?, ?)`,
-		name, pwHash, now.UTC().Unix(), joinScopes(scopes),
-	); err != nil {
-		return nil, fmt.Errorf("users: insert: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("users: commit: %w", err)
-	}
-	return &User{
-		Name:      name,
-		PWHash:    pwHash,
-		Scopes:    dedupeScopes(scopes),
-		CreatedAt: now.UTC(),
-	}, nil
-}
-
-// safety: the latch argument relies on per-statement snapshots, so the transaction pins READ COMMITTED on Postgres.
-func (s *Store) bootstrapTx(ctx context.Context) (*storeTx, error) {
-	if s.dialect != DialectPostgres {
-		return s.beginTx(ctx)
-	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return nil, err
-	}
-	return &storeTx{tx: tx, dialect: s.dialect}, nil
-}
-
-// safety: locking one latch row serializes every user insert, so racing txns cannot both count zero users.
-func takeBootstrapLatch(tx *storeTx, now time.Time) error {
-	if _, err := tx.Exec(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		metaKeyBootstrapLatch, now.UTC().Format(time.RFC3339), now.UTC().UnixNano(),
-	); err != nil {
-		return fmt.Errorf("users: bootstrap latch: %w", err)
-	}
-	return nil
-}
-
-// ErrBootstrapClosed signals the users table is non-empty so first-admin
-// bootstrap is no longer permitted.
-var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
-
-// CreateFirstUser race-safely inserts the first admin in one txn. scopes
-// is the authorization set that account's sessions carry.
-func (s *Store) CreateFirstUser(name, password string, scopes []string, now time.Time) (*User, error) {
-	if name == "" {
-		return nil, errors.New("users: name required")
-	}
-	if len(password) < 8 {
-		return nil, errors.New("users: password must be at least 8 characters")
-	}
-	pwHash, err := hashPassword(password)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := s.bootstrapTx(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("users: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := takeBootstrapLatch(tx, now); err != nil {
-		return nil, err
-	}
-
-	var count int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		return nil, fmt.Errorf("users: count: %w", err)
-	}
-	if count > 0 {
-		return nil, ErrBootstrapClosed
-	}
-	if _, err := tx.Exec(
-		`INSERT INTO users (name, pw_hash, created_at, scopes) VALUES (?, ?, ?, ?)`,
-		name, pwHash, now.UTC().Unix(), joinScopes(scopes),
-	); err != nil {
-		return nil, fmt.Errorf("users: insert: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("users: commit: %w", err)
-	}
-	return &User{
-		Name:      name,
-		PWHash:    pwHash,
-		Scopes:    dedupeScopes(scopes),
-		CreatedAt: now.UTC(),
-	}, nil
-}
-
-// CountUsers returns the row count.
-func (s *Store) CountUsers() (int, error) {
-	var n int
-	if err := s.queryRowNoCtx(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
-// VerifyUser checks credentials in constant time.
-func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error) {
-	u, err := s.lookupUser(name)
-	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("users: lookup: %w", err)
-		}
-		// safety: the unknown-user path hashes too, so response time does not disclose which names exist.
-		if _, herr := hashPassword(password); errors.Is(herr, ErrHashingBusy) {
-			return nil, herr
-		}
-		return nil, ErrInvalidCredentials
-	}
-	ok, err := verifyPassword(password, u.PWHash)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	_, _ = s.execNoCtx(
-		`UPDATE users SET last_login_at = ? WHERE name = ?`,
-		now.UTC().Unix(), name,
-	)
-	ts := now.UTC()
-	u.LastLoginAt = &ts
-	return u, nil
-}
-
-// ListUsers returns every user (for audit).
-func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.queryNoCtx(`
-        SELECT name, pw_hash, created_at, last_login_at, scopes
-          FROM users
-         ORDER BY created_at DESC
-    `)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []User
-	for rows.Next() {
-		var u User
-		var lastLogin sql.NullInt64
-		var created int64
-		var scopes string
-		if err := rows.Scan(&u.Name, &u.PWHash, &created, &lastLogin, &scopes); err != nil {
-			return nil, err
-		}
-		u.Scopes = splitScopes(scopes)
-		u.CreatedAt = time.Unix(created, 0).UTC()
-		if lastLogin.Valid {
-			ts := time.Unix(lastLogin.Int64, 0).UTC()
-			u.LastLoginAt = &ts
-		}
-		out = append(out, u)
-	}
-	return out, nil
-}
-
-// ErrUserNotFound reports that the named user row does not exist, so a
-// caller can answer 404 for it and 500 for every other DeleteUser
-// failure.
-var ErrUserNotFound = errors.New("user not found")
-
-// DeleteUser removes the user, deletes every session it opened, and
-// revokes every token minted for it, in one transaction. keepPrefix
-// names one token prefix to leave alone, so a caller deleting a user
-// does not revoke the token it is authenticating with; pass "" to
-// revoke every one. It returns how many sessions it deleted and the
-// prefixes of the tokens it revoked, so the caller can drop them from
-// an authentication cache.
-func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error) {
-	tx, err := s.beginTx(context.Background())
-	if err != nil {
-		return 0, nil, fmt.Errorf("users: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	res, err := tx.Exec(`DELETE FROM users WHERE name = ?`, name)
-	if err != nil {
-		return 0, nil, fmt.Errorf("users: delete: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return 0, nil, ErrUserNotFound
-	}
-	sessRes, err := tx.Exec(`DELETE FROM sessions WHERE principal = ?`, name)
-	if err != nil {
-		return 0, nil, fmt.Errorf("users: delete sessions: %w", err)
-	}
-	sessions, _ := sessRes.RowsAffected()
-
-	ts := now.UTC().Unix()
-	prefixes, err := livePrefixesForPrincipal(tx, name, keepPrefix, ts)
-	if err != nil {
-		return 0, nil, err
-	}
-	if _, err := tx.Exec(
-		`UPDATE tokens SET revoked_at = ?
-          WHERE principal = ? AND prefix <> ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		ts, name, keepPrefix, ts,
-	); err != nil {
-		return 0, nil, fmt.Errorf("users: revoke tokens: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, nil, fmt.Errorf("users: commit: %w", err)
-	}
-	return int(sessions), prefixes, nil
-}
-
-func livePrefixesForPrincipal(tx *storeTx, name, keepPrefix string, ts int64) ([]string, error) {
-	rows, err := tx.Query(
-		`SELECT prefix FROM tokens
-          WHERE principal = ? AND prefix <> ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		name, keepPrefix, ts,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("users: select tokens: %w", err)
-	}
-	// safety: the cursor must close before the caller's UPDATE; a single pooled connection deadlocks otherwise.
-	defer func() { _ = rows.Close() }()
-
-	var out []string
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			return nil, err
-		}
-		out = append(out, prefix)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, rows.Close()
-}
-
-func (s *Store) lookupUser(name string) (*User, error) {
-	row := s.queryRowNoCtx(`
-        SELECT name, pw_hash, created_at, last_login_at, scopes
-          FROM users
-         WHERE name = ?
-    `, name)
-	var u User
-	var lastLogin sql.NullInt64
-	var created int64
-	var scopes string
-	if err := row.Scan(&u.Name, &u.PWHash, &created, &lastLogin, &scopes); err != nil {
-		return nil, err
-	}
-	u.Scopes = splitScopes(scopes)
-	u.CreatedAt = time.Unix(created, 0).UTC()
-	if lastLogin.Valid {
-		ts := time.Unix(lastLogin.Int64, 0).UTC()
-		u.LastLoginAt = &ts
-	}
-	return &u, nil
-}
-
-func joinScopes(s []string) string {
-	return strings.Join(dedupeScopes(s), ",")
-}
-
-func hashPassword(password string) (string, error) {
-	salt := make([]byte, argonSaltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	key, err := argonKey(password, salt)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
-}
-
-func verifyPassword(password, stored string) (bool, error) {
-	parts := strings.Split(stored, "$")
-	if len(parts) != 3 || parts[0] != "argon2id" {
-		return false, errors.New("malformed hash")
-	}
-	salt, err := hex.DecodeString(parts[1])
-	if err != nil {
-		return false, err
-	}
-	key, err := hex.DecodeString(parts[2])
-	if err != nil {
-		return false, err
-	}
-	cand, err := argonKey(password, salt)
-	if err != nil {
-		return false, err
-	}
-	return subtle.ConstantTimeCompare(cand, key) == 1, nil
+	t := time.Unix(v.Int64, 0).UTC()
+	return &t
 }

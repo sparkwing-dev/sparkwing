@@ -43,7 +43,7 @@ func TestAgentNameMintRaceLeavesOneLiveTokenSQLiteAndPostgres(t *testing.T) {
 						_, _, errs[i] = s.CreateTokenWith(ctx, "agent:race", store.TokenKindRunner, []string{"nodes.claim"}, 0, now, store.TokenOptions{})
 						return
 					}
-					_, _, errs[i] = tenant.CreateRunnerToken(ctx, "agent:race", []string{"nodes.claim"}, "owner", now)
+					_, _, errs[i] = tenant.CreateMachineToken(ctx, "race", []string{"nodes.claim"}, "owner", now)
 				}()
 			}
 			close(start)
@@ -156,7 +156,7 @@ func seedV81Duplicate(t *testing.T, principal string, expires any, now time.Time
 
 func liveAgentTokens(t *testing.T, s *store.Store, principal string, now time.Time) int {
 	t.Helper()
-	toks, err := s.ListTokens(store.TokenKindRunner, true)
+	toks, err := s.ListTokens("", true)
 	if err != nil {
 		t.Fatal(err)
 	}

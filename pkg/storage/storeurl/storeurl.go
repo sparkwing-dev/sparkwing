@@ -7,8 +7,8 @@
 //	s3://bucket/prefix       pkg/storage/s3 (any S3-compatible store)
 //	http(s)://host           pkg/storage/sparkwingcache
 //
-// An http(s) store authenticates with the run's $SPARKWING_CACHE_GRANT, or
-// else $SPARKWING_CACHE_TOKEN, the bearer the cache requires on its routes.
+// An http(s) store authenticates with the run's $SPARKWING_CACHE_GRANT, the
+// bearer the cache requires on its routes.
 //
 // S3 credentials + region come from the standard AWS credential
 // chain. AWS_ENDPOINT_URL_S3 points it at R2, MinIO and the like.

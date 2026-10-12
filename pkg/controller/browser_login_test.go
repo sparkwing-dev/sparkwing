@@ -2,15 +2,16 @@ package controller_test
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
@@ -55,7 +56,7 @@ func TestBrowserLoginSetsTheSessionCookies(t *testing.T) {
 		t.Fatalf("login form does not carry its CSRF cookie's token: %s", page)
 	}
 	rec := f.postForm("/login", url.Values{
-		"username": {"alice"}, "password": {"correct-horse-battery"}, "next": {"/runs?run=r1"}, "csrf_token": {csrf},
+		"token": {f.aliceToken}, "next": {"/runs?run=r1"}, "csrf_token": {csrf},
 	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/runs?run=r1" {
 		t.Fatalf("login = %d %q, want 303 to next", rec.Code, rec.Header().Get("Location"))
@@ -80,17 +81,17 @@ func TestBrowserLoginSetsTheSessionCookies(t *testing.T) {
 func TestBrowserLoginRefusesWithoutTheFormToken(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 	csrf, _ := f.loginPage("/")
-	creds := url.Values{"username": {"alice"}, "password": {"correct-horse-battery"}}
+	creds := url.Values{"token": {f.aliceToken}}
 	cases := map[string]func() *httptest.ResponseRecorder{
 		"no token": func() *httptest.ResponseRecorder {
 			return f.postForm("/login", creds, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
 		},
 		"a token that is not the cookie's": func() *httptest.ResponseRecorder {
-			form := url.Values{"username": creds["username"], "password": creds["password"], "csrf_token": {"forged"}}
+			form := url.Values{"token": creds["token"], "csrf_token": {"forged"}}
 			return f.postForm("/login", form, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
 		},
 		"another origin": func() *httptest.ResponseRecorder {
-			form := url.Values{"username": creds["username"], "password": creds["password"], "csrf_token": {csrf}}
+			form := url.Values{"token": creds["token"], "csrf_token": {csrf}}
 			req := httptest.NewRequest(http.MethodPost, dashOrigin+"/login", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req.Header.Set("Origin", "https://evil.example")
@@ -105,15 +106,17 @@ func TestBrowserLoginRefusesWithoutTheFormToken(t *testing.T) {
 	}
 }
 
-func TestBrowserLoginAnswersAWrongPasswordOnThePage(t *testing.T) {
+const wrongToken = "swu_notmintednotmintednotminted"
+
+func TestBrowserLoginAnswersAWrongTokenOnThePage(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 	csrf, _ := f.loginPage("/")
 	rec := f.postForm("/login", url.Values{
-		"username": {"alice"}, "password": {"wrong"}, "csrf_token": {csrf},
+		"token": {wrongToken}, "csrf_token": {csrf},
 	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "Invalid username or password.") ||
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "That token is not valid.") ||
 		setCookie(rec, "__Host-sw_session") != nil {
-		t.Fatalf("wrong password = %d %s", rec.Code, rec.Body)
+		t.Fatalf("wrong token = %d %s", rec.Code, rec.Body)
 	}
 	if !strings.Contains(rec.Body.String(), `value="`+csrf+`"`) {
 		t.Fatal("the re-rendered form lost the browser's CSRF token")
@@ -132,7 +135,7 @@ func TestBrowserLoginKeepsNextOnThisOrigin(t *testing.T) {
 		f := newBrowserFixture(t, &controller.Dashboard{})
 		csrf, _ := f.loginPage(next)
 		rec := f.postForm("/login", url.Values{
-			"username": {"alice"}, "password": {"correct-horse-battery"}, "next": {next}, "csrf_token": {csrf},
+			"token": {f.aliceToken}, "next": {next}, "csrf_token": {csrf},
 		}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
 		if got := rec.Header().Get("Location"); got != want {
 			t.Errorf("next %q redirected to %q, want %q", next, got, want)
@@ -159,7 +162,7 @@ func TestBrowserLoginEndsTheBrowsersEarlierSession(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 	csrf, _ := f.loginPage("/")
 	rec := f.postForm("/login", url.Values{
-		"username": {"alice"}, "password": {"correct-horse-battery"}, "csrf_token": {csrf},
+		"token": {f.aliceToken}, "csrf_token": {csrf},
 	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf}, &http.Cookie{Name: "__Host-sw_session", Value: f.sessID})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("login = %d", rec.Code)
@@ -195,60 +198,53 @@ func TestBrowserLogoutNeedsTheSessionsTokenAndEndsIt(t *testing.T) {
 	}
 }
 
-func TestBrowserBootstrapCreatesTheFirstAdminOnAnOpenController(t *testing.T) {
+func TestBrowserLoginRefusesATokenWithoutTheAdminScope(t *testing.T) {
+	f := newBrowserFixture(t, &controller.Dashboard{})
+	now := time.Now().UTC()
+	for name, mint := range map[string]func() (string, error){
+		"a read-only user token": func() (string, error) {
+			raw, _, err := f.st.CreateToken("viewer", store.TokenKindUser, []string{controller.ScopeRunsRead}, 0, now)
+			return raw, err
+		},
+		"a runner token holding admin": func() (string, error) {
+			raw, _, err := f.st.CreateToken("agent:box", store.TokenKindRunner, []string{controller.ScopeAdmin}, 0, now)
+			return raw, err
+		},
+	} {
+		raw, err := mint()
+		if err != nil {
+			t.Fatal(err)
+		}
+		csrf, _ := f.loginPage("/")
+		rec := f.postForm("/login", url.Values{"token": {raw}, "csrf_token": {csrf}},
+			&http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
+		if rec.Code != http.StatusForbidden || setCookie(rec, "__Host-sw_session") != nil {
+			t.Errorf("%s = %d, want 403 and no session", name, rec.Code)
+		}
+	}
+}
+
+func TestBrowserLoginPageOnAnOpenControllerGoesStraightToNext(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{})
+	srv := controller.New(st, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{})
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	f := &browserFixture{t: t, st: st, srv: srv, h: srv.Handler()}
-
-	csrf, page := f.loginPage("/runs")
-	if !strings.Contains(page, `action="/login/bootstrap"`) {
-		t.Fatalf("a fresh open controller offers no first-admin form: %s", page)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, dashOrigin+"/login?next=%2Fruns", nil))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/runs" {
+		t.Fatalf("login page on an open controller = %d %q, want 303 /runs", rec.Code, rec.Header().Get("Location"))
 	}
-	rec := f.postForm("/login/bootstrap", url.Values{
-		"username": {"admin"}, "password": {"correct-horse"}, "next": {"/runs"}, "csrf_token": {csrf},
-	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/runs" || setCookie(rec, "__Host-sw_session") == nil {
-		t.Fatalf("bootstrap = %d %q", rec.Code, rec.Header().Get("Location"))
-	}
-	users, err := st.ListUsers()
-	if err != nil || len(users) != 1 || users[0].Name != "admin" {
-		t.Fatalf("users = %+v (%v)", users, err)
-	}
-
-	again := f.postForm("/login/bootstrap", url.Values{
-		"username": {"second"}, "password": {"correct-horse"}, "csrf_token": {csrf},
-	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	if again.Code != http.StatusConflict {
-		t.Fatalf("a second bootstrap = %d, want 409", again.Code)
-	}
-	if users, _ := st.ListUsers(); len(users) != 1 {
-		t.Fatalf("a closed bootstrap created a user: %+v", users)
-	}
-}
-
-func TestBrowserBootstrapIsNotOfferedWhenAuthIsOn(t *testing.T) {
-	f := newBrowserFixture(t, &controller.Dashboard{})
-	if _, err := f.st.DB().Exec(`DELETE FROM users`); err != nil {
-		t.Fatal(err)
-	}
-	csrf, page := f.loginPage("/")
-	if strings.Contains(page, "Create first admin") {
-		t.Fatal("an authenticated controller offers the first-admin form")
-	}
-	rec := f.postForm("/login/bootstrap", url.Values{
-		"username": {"mallory"}, "password": {"correct-horse"}, "csrf_token": {csrf},
-	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("bootstrap on an authenticated controller = %d, want 409", rec.Code)
-	}
-	var n int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("users = %d (%v), want 0", n, err)
+	for _, removed := range []string{"/login/bootstrap", "/api/v1/auth/login"} {
+		req := httptest.NewRequest(http.MethodPost, dashOrigin+removed, strings.NewReader("{}"))
+		req.Header.Set("Origin", dashOrigin)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("POST %s = %d, want the route gone", removed, rec.Code)
+		}
 	}
 }
 
@@ -265,17 +261,17 @@ func TestBrowserRuntimeConfigCannotBreakOutOfItsScript(t *testing.T) {
 	}
 }
 
-// safety: a refused sign-in is the record an operator looks for after a password-guessing run, so the browser's
+// safety: a refused sign-in is the record an operator looks for after a token-guessing run, so the browser's
 // sign-in routes write the same audit line and request id the API does.
 func TestBrowserSignInRoutesAreAudited(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 	csrf, _ := f.loginPage("/")
 	rec := f.postForm("/login", url.Values{
-		"username": {"alice"}, "password": {"wrong"}, "csrf_token": {csrf},
+		"token": {wrongToken}, "csrf_token": {csrf},
 	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
 	id := rec.Header().Get("X-Request-Id")
 	if rec.Code != http.StatusUnauthorized || id == "" {
-		t.Fatalf("wrong password = %d with request id %q, want 401 and an id", rec.Code, id)
+		t.Fatalf("wrong token = %d with request id %q, want 401 and an id", rec.Code, id)
 	}
 	if line := auditLine(f.logs.String(), id); !strings.Contains(line, "route=/login") || !strings.Contains(line, "status=401") {
 		t.Fatalf("no audit record for the refused sign-in %s: %s", id, f.logs.String())
@@ -296,28 +292,4 @@ func auditLine(logs, requestID string) string {
 		}
 	}
 	return ""
-}
-
-func TestBrowserBootstrapAuditNamesTheFirstAdmin(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	logs := &syncBuffer{}
-	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).WithDashboard(controller.Dashboard{})
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	f := &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), logs: logs}
-
-	csrf, _ := f.loginPage("/")
-	rec := f.postForm("/login/bootstrap", url.Values{
-		"username": {"admin"}, "password": {"correct-horse"}, "csrf_token": {csrf},
-	}, &http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("bootstrap = %d", rec.Code)
-	}
-	line := auditLine(logs.String(), rec.Header().Get("X-Request-Id"))
-	if !strings.Contains(line, "route=/login/bootstrap") || !strings.Contains(line, "principal_id=admin") {
-		t.Fatalf("bootstrap audit record does not name the first admin: %q", line)
-	}
 }

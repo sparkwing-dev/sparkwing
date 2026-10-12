@@ -5,8 +5,7 @@ test("GitHub repository access update returns to the signed-in GitHub tab", asyn
   const dashboard = await startAuthenticatedDashboard();
   try {
     await page.goto(`${dashboard.origin}/login`);
-    await page.getByLabel("Username").fill("admin");
-    await page.getByLabel("Password").fill("correct-horse");
+    await page.getByLabel("Operator token").fill(dashboard.admin_token);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.route("**/api/v1/**", async (route) => {
       const path = new URL(route.request().url()).pathname;

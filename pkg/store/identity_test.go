@@ -195,13 +195,13 @@ func TestIdentityTeamScopedWritesMissAnotherTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ta.RevokeRunnerToken(ctx, tok.Prefix, time.Now()); !errors.Is(err, store.ErrNotFound) {
+	if err := ta.RevokeTeamToken(ctx, tok.Prefix, time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("team a revoking team b's token = %v, want ErrNotFound", err)
 	}
-	if toks, err := ta.RunnerTokens(ctx, time.Now()); err != nil || len(toks) != 0 {
+	if toks, err := ta.TeamTokens(ctx, a.Account.ID, true, time.Now()); err != nil || len(toks) != 0 {
 		t.Fatalf("team a lists %d runner tokens (%v), want 0", len(toks), err)
 	}
-	if toks, err := tb.RunnerTokens(ctx, time.Now()); err != nil || len(toks) != 1 || toks[0].CreatedBy != b.Account.ID {
+	if toks, err := tb.TeamTokens(ctx, b.Account.ID, true, time.Now()); err != nil || len(toks) != 1 || toks[0].CreatedBy != b.Account.ID {
 		t.Fatalf("team b lists %+v (%v)", toks, err)
 	}
 	if _, err := ta.SetMemberRole(ctx, a.Account.ID, b.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrNotMember) {
@@ -346,7 +346,7 @@ func TestIdentityRunnerTokenCapHoldsUnderConcurrentMints(t *testing.T) {
 	errs := make(chan error, tries)
 	for i := range tries {
 		go func() {
-			_, _, err := tn.CreateRunnerToken(ctx, fmt.Sprintf("agent:m%d", i), []string{"nodes.claim"}, u.Account.ID, time.Now())
+			_, _, err := tn.CreateMachineToken(ctx, fmt.Sprintf("m%d", i), []string{"nodes.claim"}, u.Account.ID, time.Now())
 			errs <- err
 		}()
 	}
@@ -362,14 +362,14 @@ func TestIdentityRunnerTokenCapHoldsUnderConcurrentMints(t *testing.T) {
 	if minted != store.MaxRunnerTokensPerTeam {
 		t.Fatalf("minted %d runner tokens, want exactly %d", minted, store.MaxRunnerTokensPerTeam)
 	}
-	toks, err := tn.RunnerTokens(ctx, time.Now())
+	toks, err := tn.TeamTokens(ctx, u.Account.ID, true, time.Now())
 	if err != nil || len(toks) != store.MaxRunnerTokensPerTeam {
 		t.Fatalf("team holds %d tokens (%v)", len(toks), err)
 	}
-	if err := tn.RevokeRunnerToken(ctx, toks[0].Prefix, time.Now()); err != nil {
+	if err := tn.RevokeTeamToken(ctx, toks[0].Prefix, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tn.CreateRunnerToken(ctx, "agent:again", []string{"nodes.claim"}, u.Account.ID, time.Now()); err != nil {
+	if _, _, err := tn.CreateMachineToken(ctx, "again", []string{"nodes.claim"}, u.Account.ID, time.Now()); err != nil {
 		t.Fatalf("mint after a revoke freed a slot: %v", err)
 	}
 }
@@ -386,21 +386,18 @@ func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
 	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindUser, []string{" admin "}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
 		t.Fatalf("team mint with padded admin = %v, want ErrAdminScopeOnTeamToken", err)
 	}
-	if _, _, err := tn.CreateRunnerToken(ctx, "agent:x", []string{"admin"}, u.Account.ID, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-		t.Fatalf("runner mint with admin = %v, want ErrAdminScopeOnTeamToken", err)
+	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
+		t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
 	}
-	for _, mint := range []func() error{
-		func() error {
-			_, _, err := tn.CreateToken(ctx, "ops", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now())
-			return err
-		},
-		func() error {
-			_, _, err := tn.CreateRunnerToken(ctx, "agent:l", []string{"nodes.claim", store.LaunchScope}, u.Account.ID, time.Now())
-			return err
-		},
-	} {
-		if err := mint(); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-			t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
+	if _, _, err := tn.CreateToken(ctx, "cache", store.TokenKindService, []string{store.StorageCountScope}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
+		t.Fatalf("team mint with storage.count = %v, want ErrAdminScopeOnTeamToken", err)
+	}
+	for _, scopes := range [][]string{{"admin"}, {"nodes.claim", store.LaunchScope}, {"runs.read", "admin"}} {
+		if _, _, err := tn.CreateMachineToken(ctx, "x", scopes, u.Account.ID, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+			t.Fatalf("machine mint with %v = %v, want ErrInvalidInput", scopes, err)
+		}
+		if _, _, err := tn.CreateMemberToken(ctx, "adm@example.com", scopes, u.Account.ID, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+			t.Fatalf("member mint with %v = %v, want ErrInvalidInput", scopes, err)
 		}
 	}
 }
@@ -481,7 +478,7 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 	}
 	mint := func(name, by string) string {
 		t.Helper()
-		_, tok, err := tn.CreateRunnerToken(ctx, name, []string{"nodes.claim"}, by, time.Now())
+		_, tok, err := tn.CreateMachineToken(ctx, name, []string{"nodes.claim"}, by, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -489,7 +486,7 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 	}
 	live := func() map[string]bool {
 		t.Helper()
-		toks, err := tn.RunnerTokens(ctx, time.Now())
+		toks, err := tn.TeamTokens(ctx, owner.Account.ID, true, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -499,8 +496,8 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 		}
 		return out
 	}
-	kept := mint("agent:owner", owner.Account.ID)
-	first := mint("agent:ed-1", ed.Account.ID)
+	kept := mint("owner", owner.Account.ID)
+	first := mint("ed-1", ed.Account.ID)
 
 	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleOwner, time.Now()); err != nil {
 		t.Fatal(err)
@@ -522,7 +519,7 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleEditor, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	second := mint("agent:ed-2", ed.Account.ID)
+	second := mint("ed-2", ed.Account.ID)
 	revoked, err = tn.RemoveMember(ctx, owner.Account.ID, ed.Account.ID, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -543,11 +540,11 @@ func TestRunnerTokenExpiryFollowsItsLastUse(t *testing.T) {
 	u := signIn(t, st, "s", "slide@example.com")
 	tn := tenant(t, st, u.PersonalTeam)
 	minted := time.Now().UTC().Truncate(time.Second)
-	raw, _, err := tn.CreateRunnerToken(ctx, "agent:box", []string{"nodes.claim"}, u.Account.ID, minted)
+	raw, _, err := tn.CreateMachineToken(ctx, "box", []string{"nodes.claim"}, u.Account.ID, minted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idle, _, err := tn.CreateRunnerToken(ctx, "agent:idle", []string{"nodes.claim"}, u.Account.ID, minted)
+	idle, _, err := tn.CreateMachineToken(ctx, "idle", []string{"nodes.claim"}, u.Account.ID, minted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +563,7 @@ func TestRunnerTokenExpiryFollowsItsLastUse(t *testing.T) {
 		t.Fatalf("a token idle for its whole lifetime = %v, want it expired", err)
 	}
 	prefix := raw[:store.PrefixLen]
-	if err := tn.RevokeRunnerToken(ctx, prefix, used.Add(2*time.Hour)); err != nil {
+	if err := tn.RevokeTeamToken(ctx, prefix, used.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.LookupToken(raw, used.Add(2*time.Hour)); !errors.Is(err, store.ErrTokenRevoked) {
@@ -582,7 +579,7 @@ func TestTokenUseIsWrittenAtMostHourly(t *testing.T) {
 	u := signIn(t, st, "s", "hourly@example.com")
 	tn := tenant(t, st, u.PersonalTeam)
 	start := time.Now().UTC().Truncate(time.Second)
-	raw, _, err := tn.CreateRunnerToken(ctx, "agent:box", []string{"nodes.claim"}, u.Account.ID, start)
+	raw, _, err := tn.CreateMachineToken(ctx, "box", []string{"nodes.claim"}, u.Account.ID, start)
 	if err != nil {
 		t.Fatal(err)
 	}

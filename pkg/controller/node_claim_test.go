@@ -1,12 +1,8 @@
 package controller_test
 
 import (
-	"bytes"
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -128,9 +124,7 @@ func TestNodeClaim_ExecutionStartAcknowledgement(t *testing.T) {
 	if err := c.MarkNodeReady(ctx, "run-start", "build"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := c.ClaimNodeAs(ctx, "gateway:edge-a:1", nil, time.Minute, nil, store.ExecutorIdentity{
-		Kind: "gateway", ID: "edge-a", ReservationID: "downstream-17",
-	})
+	n, err := c.ClaimNode(ctx, "gateway:edge-a:1", nil, time.Minute, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,94 +263,5 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	}
 	if n.ClaimedBy != "special-runner" {
 		t.Fatalf("claimed_by: %q", n.ClaimedBy)
-	}
-}
-
-func TestNodeClaimOffer_HTTPRejectsUnsealedSchema31Candidate(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	now := time.Now().UTC()
-	raw, token, err := st.CreateToken("registered-worker", store.TokenKindRunner, []string{controller.ScopeNodesClaim}, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.EnrollExecutor(context.Background(), token.Prefix, store.Executor{
-		Name: "desk", Kind: "gateway", Location: "local", BasePriority: 40, PriorityCeiling: 75,
-		MaxConcurrent: 1, Principal: token.Principal, Budget: store.ExecutorResource{Cores: 4},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	claimant := store.ClaimIdentity{Principal: token.Principal, TokenPrefix: token.Prefix}
-	if err := st.HeartbeatExecutor(context.Background(), claimant, "desk", store.ExecutorResource{Cores: 4}, 0, now); err != nil {
-		t.Fatal(err)
-	}
-	high := store.ClaimIdentity{Principal: "priority-target", TokenPrefix: "swr_priority_target"}
-	if err := st.EnrollExecutor(context.Background(), high.TokenPrefix, store.Executor{
-		Name: "priority-target", Kind: "agent", Location: "local", BasePriority: 75, PriorityCeiling: 75,
-		MaxConcurrent: 1, Principal: high.Principal, Budget: store.ExecutorResource{Cores: 4},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.HeartbeatExecutor(context.Background(), high, "priority-target", store.ExecutorResource{Cores: 4}, 0, now); err != nil {
-		t.Fatal(err)
-	}
-
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-	defer srv.Close()
-	c := client.NewWithToken(srv.URL, nil, raw)
-	ctx := context.Background()
-	seedRunNode(t, st, "run-1", "node-a")
-	if err := st.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatal(err)
-	}
-	preparation, err := c.PrepareExecutorClaim(ctx, "desk")
-	if err != nil || preparation != nil {
-		t.Fatalf("PrepareExecutorClaim = %+v, %v; want empty unsealed candidate", preparation, err)
-	}
-	untrusted, err := json.Marshal(map[string]any{
-		"executor_name": "desk", "holder_id": "holder", "run_id": "run-1", "node_id": "node-a",
-		"reservation_id": "reservation", "resource_digest": "sha256:forged",
-		"slot": 0, "claim_priority": 100,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/api/v1/nodes/claim", bytes.NewReader(untrusted))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+raw)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("self-reported priority status = %d, want 400", resp.StatusCode)
-	}
-	result, err := c.OfferExecutorClaim(ctx, client.ExecutorClaim{
-		ExecutorName: "desk", HolderID: "holder", ReservationID: "reservation",
-		ResourceDigest: "sha256:forged", Slot: 0, Lease: time.Minute,
-	}, "run-1", "node-a")
-	if err != nil || result.Node != nil || result.Pending {
-		t.Fatalf("direct unsealed offer = %+v, %v; want empty refusal", result, err)
-	}
-	var claimedBy sql.NullString
-	var offers int
-	if err := st.DB().QueryRow(`SELECT claimed_by FROM nodes WHERE run_id = ? AND node_id = ?`,
-		"run-1", "node-a").Scan(&claimedBy); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM node_claim_offers`).Scan(&offers); err != nil {
-		t.Fatal(err)
-	}
-	if claimedBy.Valid || offers != 0 {
-		t.Fatalf("unsealed offer mutated claim state: claimed=%v offers=%d", claimedBy, offers)
 	}
 }

@@ -234,7 +234,7 @@ export async function setMachineGitCredentials(
 ): Promise<boolean> {
   const res = await send(
     "PUT",
-    `/api/v1/team/runner-tokens/${seg(prefix)}/git-credentials`,
+    `/api/v1/team/tokens/${seg(prefix)}/git-credentials`,
     enabled ? "Send git credentials" : "Stop git credentials",
     { enabled },
   );

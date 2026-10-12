@@ -55,25 +55,6 @@ func (s *Store) soleTeamScope(ctx context.Context) (teamScope, error) {
 	return teamScope{}, ErrClaimantHasNoTeam
 }
 
-// safety: refuses a node of another team before any scheduling state is
-// written, so a caller that names a node it was never offered is turned away
-// with the same not-found a missing node returns and learns nothing about
-// whether the node exists.
-func (s *Store) assertClaimantOwnsNode(ctx context.Context, claimant ClaimIdentity, runID, nodeID string) error {
-	scope, err := s.claimScope(ctx, claimant)
-	if err != nil {
-		return err
-	}
-	var found string
-	err = s.queryRow(ctx,
-		`SELECT node_id FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(scope.team), runID, nodeID).Scan(&found)
-	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("node", runID+"/"+nodeID)
-	}
-	return err
-}
-
 // safety: a claim is always one team's. The all-teams scope is refused
 // rather than rendered as an empty predicate, so no claimant can be handed
 // the whole deployment's queue, and neither can the zero value.

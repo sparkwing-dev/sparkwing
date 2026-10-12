@@ -57,8 +57,8 @@ type claimedRun struct {
 func (f *appFixture) startRun(owner signedIn, runID string) claimedRun {
 	f.t.Helper()
 	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth,
-		map[string]any{"name": "s-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
+		map[string]any{"scopes": machineScopes, "name": "s-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
 	var claimed store.Trigger

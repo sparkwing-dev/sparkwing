@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -21,7 +24,7 @@ func sessionHashServer(t *testing.T) (*httptest.Server, *store.Store) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ts := httptest.NewServer(controller.New(st, nil).Handler())
+	ts := httptest.NewServer(operatorSignInServer(t, st, controller.New(st, nil)).Handler())
 	t.Cleanup(ts.Close)
 	return ts, st
 }
@@ -31,20 +34,56 @@ type sessionLoginJSON struct {
 	CSRFToken string `json:"csrf_token"`
 }
 
+// safety: signing in needs a token to exist before auth is enabled, the way a provisioned deployment starts.
+func operatorSignInServer(t *testing.T, st *store.Store, srv *controller.Server) *controller.Server {
+	t.Helper()
+	if _, err := controller.EnsureBootstrapAdminToken(st, bootstrapAdminRaw, time.Now().UTC()); err != nil {
+		t.Fatalf("bootstrap token: %v", err)
+	}
+	return srv.EnableAuthFromStore().WithDashboard(controller.Dashboard{})
+}
+
 func loginForSessionHash(t *testing.T, ts *httptest.Server) sessionLoginJSON {
 	t.Helper()
-	status, body := postUserJSON(t, ts.URL+"/api/v1/auth/login", map[string]string{
-		"username": "root", "password": "correct-horse",
-	})
-	if status != http.StatusOK {
-		t.Fatalf("login = %d: %s", status, body)
+	page, err := http.Get(ts.URL + "/login")
+	if err != nil {
+		t.Fatalf("login page: %v", err)
 	}
+	_ = page.Body.Close()
+	var formToken *http.Cookie
+	for _, c := range page.Cookies() {
+		if c.Name == "__Host-sw_csrf" {
+			formToken = c
+		}
+	}
+	if page.StatusCode != http.StatusOK || formToken == nil {
+		t.Fatalf("login page = %d with no CSRF cookie", page.StatusCode)
+	}
+	form := url.Values{"token": {bootstrapAdminRaw}, "csrf_token": {formToken.Value}}
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/login", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", ts.URL)
+	req.AddCookie(formToken)
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := noFollow.Do(req)
+	if err != nil {
+		t.Fatalf("sign in: %v", err)
+	}
+	_ = resp.Body.Close()
 	var login sessionLoginJSON
-	if err := json.Unmarshal(body, &login); err != nil {
-		t.Fatalf("decode login %s: %v", body, err)
+	for _, c := range resp.Cookies() {
+		switch c.Name {
+		case "__Host-sw_session":
+			login.SessionID = c.Value
+		case "__Host-sw_csrf":
+			login.CSRFToken = c.Value
+		}
 	}
-	if login.SessionID == "" || login.CSRFToken == "" {
-		t.Fatalf("login returned an incomplete session: %s", body)
+	if resp.StatusCode != http.StatusSeeOther || login.SessionID == "" || login.CSRFToken == "" {
+		t.Fatalf("sign in = %d with session %t and csrf %t", resp.StatusCode, login.SessionID != "", login.CSRFToken != "")
 	}
 	return login
 }
@@ -62,7 +101,6 @@ func sessionRowCount(t *testing.T, st *store.Store, column, value string) int {
 
 func TestLogin_StoresOnlyTheSessionDigest(t *testing.T) {
 	ts, st := sessionHashServer(t)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
 	if n := sessionRowCount(t, st, "hash", login.SessionID); n != 0 {
@@ -91,7 +129,6 @@ func TestLogin_StoresOnlyTheSessionDigest(t *testing.T) {
 
 func TestSessionRoute_ResolvesRawIDAndRepeatsTheCSRFToken(t *testing.T) {
 	ts, _ := sessionHashServer(t)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/auth/session", nil)
@@ -114,8 +151,8 @@ func TestSessionRoute_ResolvesRawIDAndRepeatsTheCSRFToken(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
 		t.Fatalf("decode session: %v", err)
 	}
-	if session.Principal != "root" {
-		t.Errorf("principal = %q, want root", session.Principal)
+	if session.Principal != controller.BootstrapAdminPrincipal {
+		t.Errorf("principal = %q, want %q", session.Principal, controller.BootstrapAdminPrincipal)
 	}
 	if session.CSRFToken != login.CSRFToken {
 		t.Errorf("resolved csrf token = %q, want the login token %q", session.CSRFToken, login.CSRFToken)
@@ -124,10 +161,9 @@ func TestSessionRoute_ResolvesRawIDAndRepeatsTheCSRFToken(t *testing.T) {
 
 func TestLogout_DeletesTheHashedRow(t *testing.T) {
 	ts, st := sessionHashServer(t)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
-	status, body := postUserJSON(t, ts.URL+"/api/v1/auth/logout", map[string]string{
+	status, body := postJSONWithStatus(t, ts.URL+"/api/v1/auth/logout", map[string]string{
 		"session_id": login.SessionID,
 	})
 	if status != http.StatusNoContent {

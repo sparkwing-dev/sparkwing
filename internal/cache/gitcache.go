@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -25,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -94,7 +94,6 @@ var (
 	binsDir  = "/data/bins"
 	cacheDir = "/data/cache"
 
-	apiToken              string
 	sshKeyDir             = "/etc/ssh-key"
 	autoRegisterReposSpec string
 
@@ -172,34 +171,27 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(rest)
 }
 
-// safety: repointing a name redirects every clone of it, so a tokened cache demands the token. An open
-// cache has one anonymous caller, and refusing there would make a squatted name permanent.
+// safety: repointing a name redirects every clone of it, so a cache that verifies grants demands the operator
+// grant. An open cache has one anonymous caller, and refusing there would make a squatted name permanent.
 func mayRepoint(r *http.Request) bool {
-	return apiToken == "" || authenticated(r)
+	return grantKey == "" || operatorRequest(r)
 }
 
-func authenticated(r *http.Request) bool {
-	if apiToken == "" {
-		return false
-	}
-	got := bearerToken(r)
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(apiToken)) == 1
+func operatorRequest(r *http.Request) bool {
+	g, err := authwire.VerifyCacheGrant(grantKey, bearerToken(r), time.Now())
+	return err == nil && g.Operator
 }
 
-func requireToken(next http.HandlerFunc) http.HandlerFunc {
-	token := apiToken
+// safety: these routes reach every team's trees, so only the controller's operator grant opens them.
+func requireOperator(next http.HandlerFunc) http.HandlerFunc {
+	open := grantKey == ""
 	return func(w http.ResponseWriter, r *http.Request) {
-		// safety: an empty token reaches here only when the operator asked for it at startup.
-		if token == "" {
+		// safety: an empty key reaches here only when the operator asked for it at startup.
+		if open || operatorRequest(r) {
 			next(w, r)
 			return
 		}
-		got := bearerToken(r)
-		if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
-			next(w, r)
-			return
-		}
-		http.Error(w, "unauthorized -- set Authorization: Bearer <token> header", http.StatusUnauthorized)
+		http.Error(w, "unauthorized -- this route takes the controller's operator grant", http.StatusUnauthorized)
 	}
 }
 
@@ -1207,7 +1199,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	// the cache's own credentials, so another team's grant that could register
 	// would fill it with mirrors and read the operator's private origins.
 	if !callerFrom(r).mayRegisterMirror() {
-		http.Error(w, "mirror registration takes the cache's operator token or a grant for the operator's team; this grant reads registered public mirrors only", http.StatusForbidden)
+		http.Error(w, "mirror registration takes the controller's operator grant or a grant for the operator's team; this grant reads registered public mirrors only", http.StatusForbidden)
 		return
 	}
 

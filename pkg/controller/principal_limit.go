@@ -25,12 +25,10 @@ const RecommendedHeartbeatsPerMinute = 1200
 // that class unlimited, which is what a controller starts with.
 //
 // The budget is keyed on the runner behind the request: the token prefix
-// together with the run, node or agent the route names, and on the two claim
+// together with the run or node the route names, and on the two claim
 // routes that name none, the identity the runner sends in
 // [store.RunnerIdentityHeader]. A fleet sharing one token is therefore
-// budgeted runner by runner rather than as one caller. The agent liveness
-// heartbeat is never budgeted: losing it takes an agent and every node it runs
-// down with it.
+// budgeted runner by runner rather than as one caller.
 //
 // On the claim routes the identity is the runner's own word, so each new name
 // buys a fresh budget. RunnersPerToken caps how many such names one caller may

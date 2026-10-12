@@ -11,21 +11,18 @@ import (
 )
 
 const (
-	loginClientBurst   = 30
-	loginClientWindow  = time.Minute
-	loginGlobalWindow  = time.Minute
-	loginFailureBurst  = 5
-	loginFailureWindow = 15 * time.Minute
-	loginGlobalKey     = "all-clients"
+	loginClientBurst  = 30
+	loginClientWindow = time.Minute
+	loginGlobalWindow = time.Minute
+	loginGlobalKey    = "all-clients"
 
 	// safety: sizing the listener bucket per argon2 slot bounds hashing work rather than a fleet's real logins.
 	loginGlobalPerHashSlot = 600
 )
 
 type loginLimiter struct {
-	clients  *ratelimit.Limiter
-	global   *ratelimit.Limiter
-	failures *ratelimit.Limiter
+	clients *ratelimit.Limiter
+	global  *ratelimit.Limiter
 
 	globalBurst int
 }
@@ -35,7 +32,6 @@ func newLoginLimiter() *loginLimiter {
 	return &loginLimiter{
 		clients:     ratelimit.New(loginClientBurst, loginClientWindow),
 		global:      ratelimit.New(globalBurst, loginGlobalWindow),
-		failures:    ratelimit.New(loginFailureBurst, loginFailureWindow),
 		globalBurst: globalBurst,
 	}
 }
@@ -59,17 +55,9 @@ func (l *loginLimiter) client(r *http.Request) string {
 	return ratelimit.ClientIP(r)
 }
 
-// safety: keying the failure budget on the account alone would let any stranger lock a named user out of the dashboard.
-func failureKey(account, client string) string {
-	return account + "|" + client
-}
-
-func (l *loginLimiter) accountAllowed(account, client string, now time.Time) bool {
-	return l.failures.Peek(failureKey(account, client), now)
-}
-
-func (l *loginLimiter) accountFailed(account, client string, now time.Time) {
-	l.failures.Penalize(failureKey(account, client), now)
+// safety: keying a failure budget on the public prefix alone would let any stranger lock that token out.
+func failureKey(prefix, client string) string {
+	return prefix + "|" + client
 }
 
 func writeRetryAfter(w http.ResponseWriter, after time.Duration, message string) {

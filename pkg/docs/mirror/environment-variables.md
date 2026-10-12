@@ -47,11 +47,11 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 | Variable | Described in |
 |---|---|
 | `SPARKWING_ADMISSION_CLASS` | [admission](admission.md) |
-| `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [cli-configure](cli-configure.md), [cli-fleet](cli-fleet.md) |
+| `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [cli-configure](cli-configure.md) |
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
-| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-fleet](cli-fleet.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
+| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
@@ -61,7 +61,6 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
 | `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |
-| `SPARKWING_CACHE_TOKEN` | [gitcache](gitcache.md), [local-execution](local-execution.md), [self-hosting](self-hosting.md) |
 
 ## Configuration: release tooling
 
@@ -96,17 +95,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NODE_CLAIM_MEMBERSHIP` | [local-execution](local-execution.md) |
 | `SPARKWING_NODE_CLAIM_RESERVATION` | [local-execution](local-execution.md) |
 | `SPARKWING_TOOLCHAIN_ACTIVE` | [versioning](versioning.md) |
-| `SPARKWING_FLEET` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_PARENT_GUARD` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_PARENT_TOKEN` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_BUNDLE` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_BUNDLE_BYTES` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_BYTES` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_FILES` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_MANIFEST_DIGEST` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_REPO_URL` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_ROOT` | [local-execution](local-execution.md) |
-| `SPARKWING_FLEET_SOURCE_SHA` | [local-execution](local-execution.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
 | `SPARKWING_ALLOW` | [cli](cli.md) |
 | `SPARKWING_START_AT` | [security](security.md) |

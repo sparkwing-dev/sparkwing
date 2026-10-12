@@ -26,12 +26,15 @@ import (
 // TriggerBroker stands between a claimed trigger's pipeline binary and the
 // controller. The binary is the team's own code, so it holds a capability
 // that this broker accepts only for the claimed run's routes, and the
-// runner's token stays in the runner process.
+// runner's token stays in the runner process. A secret read goes upstream
+// with the trigger's claim token, so the controller releases only what the
+// run's plan declares, and records each release.
 type TriggerBroker struct {
 	server        *http.Server
 	listener      net.Listener
 	capability    string
 	upstreamToken string
+	claimToken    string
 	runID         string
 	retryOf       string
 	pipeline      string
@@ -66,7 +69,7 @@ func StartTriggerBroker(controllerURL, upstreamToken string, trigger *store.Trig
 	}
 	b := &TriggerBroker{
 		listener: listener, capability: base64.RawURLEncoding.EncodeToString(raw),
-		upstreamToken: upstreamToken, runID: trigger.ID, retryOf: trigger.RetryOf, pipeline: trigger.Pipeline,
+		upstreamToken: upstreamToken, claimToken: trigger.ClaimToken, runID: trigger.ID, retryOf: trigger.RetryOf, pipeline: trigger.Pipeline,
 		controller: brokerProxy(controllerTarget, logger), logger: logger,
 		sinks:    newNodeLogSinks(client.NewWithToken(controllerURL, nil, upstreamToken), trigger.ID, logger),
 		children: map[string]bool{}, refRuns: map[string]bool{},
@@ -147,7 +150,20 @@ func (b *TriggerBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the controller keeps no log for this node", http.StatusServiceUnavailable)
 		return
 	}
-	r.Header.Set("Authorization", "Bearer "+b.upstreamToken)
+	upstream := b.upstreamToken
+	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") {
+		// safety: an open controller mints no claim token and the runner holds
+		// no bearer, so the read goes without one, as it would directly.
+		if b.claimToken == "" && b.upstreamToken != "" {
+			http.Error(w, "the trigger claim carried no claim token, which a secret read needs", http.StatusForbidden)
+			return
+		}
+		upstream = b.claimToken
+	}
+	r.Header.Del("Authorization")
+	if upstream != "" {
+		r.Header.Set("Authorization", "Bearer "+upstream)
+	}
 	if r.Method == http.MethodPost && r.URL.EscapedPath() == "/api/v1/runs/"+url.PathEscape(b.runID)+"/heartbeat" {
 		r = r.WithContext(context.WithValue(r.Context(), childAskedWatchKey{}, r.Header.Get(store.LogWatchHeader) == "1"))
 		r.Header.Set(store.LogWatchHeader, "1")

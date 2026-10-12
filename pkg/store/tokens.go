@@ -19,6 +19,9 @@ const (
 	TokenKindUser    = "user"
 	TokenKindRunner  = "runner"
 	TokenKindService = "service"
+	// TokenKindTeam is a credential a member mints from team settings. Its
+	// scopes place it in one [TokenFamily].
+	TokenKindTeam = "team"
 )
 
 // Token prefix markers; raw is `<prefix>_<entropy>`.
@@ -26,6 +29,7 @@ const (
 	TokenPrefixUser    = "swu"
 	TokenPrefixRunner  = "swr"
 	TokenPrefixService = "sws"
+	TokenPrefixTeam    = "swt"
 )
 
 const (
@@ -125,6 +129,8 @@ func TokenKindFromPrefix(raw string) string {
 		return TokenKindRunner
 	case TokenPrefixService:
 		return TokenKindService
+	case TokenPrefixTeam:
+		return TokenKindTeam
 	default:
 		return ""
 	}
@@ -271,7 +277,7 @@ const agentNameIndexName = "idx_tokens_agent_name"
 // safety: the index cannot read the clock, so it holds every unrevoked agent
 // token; a rotation predecessor carries its grace-end revoked_at and falls
 // outside it, while [refuseTakenAgentName] still counts it until that time.
-const agentNameIndexedRow = `kind = 'runner' AND revoked_at IS NULL AND substr(principal, 1, 6) = 'agent:'`
+const agentNameIndexedRow = `kind IN ('runner', 'team') AND revoked_at IS NULL AND substr(principal, 1, 6) = 'agent:'`
 
 const agentNameIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + agentNameIndexName +
 	` ON tokens(team, principal) WHERE ` + agentNameIndexedRow
@@ -280,7 +286,7 @@ const agentNameIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + agentNameIndexName
 // stamps its death as a revocation at the moment it expired, which leaves
 // [Token.IsValid] answering exactly as before.
 func retireExpiredAgentName(ctx context.Context, e tokenExecer, team Team, principal, kind string, now time.Time) error {
-	if kind != TokenKindRunner || !strings.HasPrefix(principal, agentPrincipalPrefix) {
+	if !isAgentToken(kind, principal) {
 		return nil
 	}
 	_, err := e.ExecContext(ctx, `UPDATE tokens SET revoked_at = expires_at
@@ -328,25 +334,34 @@ func applyAgentNameIndexMigration(ctx context.Context, q migrationQueryExecer, n
 		return err
 	}
 	if len(dupes) > 0 {
-		return fmt.Errorf("tokens: more than one live runner token carries the same agent name: %s; "+
+		return fmt.Errorf("tokens: more than one live agent token carries the same agent name: %s; "+
 			"revoke all but one token of each name, then upgrade", strings.Join(dupes, ", "))
 	}
 	_, err = q.ExecContext(ctx, agentNameIndex)
 	return err
 }
 
-// safety: every mint path passes through here, so a second live runner token
+// safety: an index built under the runner-only predicate survives CREATE ... IF
+// NOT EXISTS, so it is dropped first and rebuilt to hold machine team tokens too.
+func widenAgentNameIndex(ctx context.Context, q migrationQueryExecer, now time.Time) error {
+	if _, err := q.ExecContext(ctx, `DROP INDEX IF EXISTS `+agentNameIndexName); err != nil {
+		return err
+	}
+	return applyAgentNameIndexMigration(ctx, q, now)
+}
+
+// safety: every mint path passes through here, so a second live agent token
 // for one agent name cannot be minted by any of them. Two racing mints both
 // pass this read, and [agentNameIndex] refuses the second insert.
 func refuseTakenAgentName(ctx context.Context, q tokenExecer, team Team, principal, kind string, now time.Time, replaces string) (err error) {
-	if kind != TokenKindRunner || !strings.HasPrefix(principal, agentPrincipalPrefix) {
+	if !isAgentToken(kind, principal) {
 		return nil
 	}
 	at := now.UTC().Unix()
 	rows, err := q.QueryContext(ctx, `SELECT prefix FROM tokens
-		WHERE team = ? AND kind = ? AND principal = ? AND prefix <> ?
+		WHERE team = ? AND kind IN (?, ?) AND principal = ? AND prefix <> ?
 		  AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
-		string(team), TokenKindRunner, principal, replaces, at, at)
+		string(team), TokenKindRunner, TokenKindTeam, principal, replaces, at, at)
 	if err != nil {
 		return err
 	}
@@ -455,10 +470,10 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 // is all that is read.
 const tokenUseWriteEvery = time.Hour
 
-// safety: only the runner tokens a team mints for its machines slide, so an
+// safety: only the tokens a team mints for its machines slide, so an
 // operator's or GitHub runner's fixed lifetime is never extended by use.
 func slidesOnUse(t *Token) bool {
-	return t.Kind == TokenKindRunner && strings.HasPrefix(t.Principal, agentPrincipalPrefix) && t.ExpiresAt != nil
+	return isAgentToken(t.Kind, t.Principal) && t.ExpiresAt != nil
 }
 
 // safety: the write is conditional on the stored last use, so replicas that
@@ -716,6 +731,8 @@ func prefixForKind(kind string) (string, bool) {
 		return TokenPrefixRunner, true
 	case TokenKindService:
 		return TokenPrefixService, true
+	case TokenKindTeam:
+		return TokenPrefixTeam, true
 	default:
 		return "", false
 	}

@@ -1,7 +1,6 @@
 {{- if .Values.cache.enabled -}}
-{{- $token := .Values.cache.tokenSecret -}}
 {{- $grantKey := .Values.cache.grantKeySecret -}}
-{{- $credentials := or (and $token.name $token.key) (and $grantKey.name $grantKey.key) -}}
+{{- $credentials := and $grantKey.name $grantKey.key -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -127,20 +126,11 @@ spec:
           projected:
             defaultMode: 0400
             sources:
-              {{- if and $token.name $token.key }}
-              - secret:
-                  name: {{ $token.name | quote }}
-                  items:
-                    - key: {{ $token.key | quote }}
-                      path: cache-token
-              {{- end }}
-              {{- if and $grantKey.name $grantKey.key }}
               - secret:
                   name: {{ $grantKey.name | quote }}
                   items:
                     - key: {{ $grantKey.key | quote }}
                       path: cache-grant-key
-              {{- end }}
         {{- end }}
         {{- if .Values.cache.sshKeySecret.name }}
         - name: ssh-key

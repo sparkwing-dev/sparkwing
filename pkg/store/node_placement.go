@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// Placement reasons stamped on a node when a legacy claim wins it.
+// Placement reasons stamped on a node when a claim wins it.
 const (
 	// PlacementPreferred marks a node taken by a runner that advertised its
 	// preference.
@@ -21,7 +21,7 @@ const (
 	PlacementNone = "none"
 )
 
-// RunnerPresence is one legacy claim-mode runner a controller has heard from
+// RunnerPresence is one claim-mode runner a controller has heard from
 // recently.
 type RunnerPresence struct {
 	Name string
@@ -241,7 +241,7 @@ type nodePlacementEvent struct {
 
 type queueRunnersKey struct{}
 
-// WithQueueRunners carries every legacy claim-mode runner a controller has
+// WithQueueRunners carries every claim-mode runner a controller has
 // heard from inside its liveness window into [Store.MarkNodeReady], which may
 // then open a round already due when none of them could claim the node. The
 // controller attaches it only once its registry has listened for a whole

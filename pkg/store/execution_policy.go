@@ -66,14 +66,6 @@ func nodeHasExecutionPolicy(node *nodeRecord) bool {
 	return executionpolicy.IsSealed(node)
 }
 
-func policyForNodeExecution(node *nodeRecord) (nodeExecutionPolicy, bool, error) {
-	return executionpolicy.PolicyOf(node)
-}
-
-func claimBindingForNodeExecution(node *nodeRecord) (executionpolicy.ClaimBinding, error) {
-	return executionpolicy.ClaimBindingOf(node, node.RunID, node.NodeID)
-}
-
 func copyNodeExecutionPolicy(dst, src *nodeRecord) {
 	executionpolicy.CopyCarrier(dst, src)
 }

@@ -6,9 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -42,70 +40,6 @@ func TestSchemaV31UpgradesRealV30SQLiteShape(t *testing.T) {
 	assertExecutionPolicySchemaSQLite(t, up.DB())
 	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
 		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
-	}
-}
-
-func TestSchemaV31MigratedV30ReadyNodeCannotPrepareOrOfferAsAssistedWork(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v30-ready.db")
-	ctx := context.Background()
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateRun(ctx, store.Run{ID: "legacy", Pipeline: "release", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "legacy", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "legacy", "work"); err != nil {
-		t.Fatal(err)
-	}
-	downgradeExecutionPolicyToV30SQLite(t, st.DB())
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	up, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer up.Close()
-	claimant := store.ClaimIdentity{Principal: "helper-principal", TokenPrefix: "swr_helper"}
-	if err := up.EnrollExecutor(ctx, claimant.TokenPrefix, store.Executor{
-		Name: "helper", Kind: "agent", Location: "local", Principal: claimant.Principal,
-		BasePriority: 100, PriorityCeiling: 100, MaxConcurrent: 1, Budget: store.ExecutorResource{Cores: 2},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	reportCtx, err := executionpolicy.WithRuntimeReport(ctx, executionpolicy.CurrentRuntimeReport(buildinfo.Identity{
-		Binary: "sparkwing-runner", Version: "v0.41.0", GOOS: "linux", GOARCH: "amd64",
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := up.HeartbeatExecutor(reportCtx, claimant, "helper", store.ExecutorResource{Cores: 2}, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if preparation, err := up.PrepareNextExecutorClaim(reportCtx, claimant, "helper"); !errors.Is(err, store.ErrNotFound) || preparation != nil {
-		t.Fatalf("migrated unsealed prepare = (%+v, %v), want empty", preparation, err)
-	}
-	if _, err := up.OfferExecutorClaim(reportCtx, claimant, store.ExecutorClaimOffer{
-		ExecutorName: "helper", HolderID: "holder", RunID: "legacy", NodeID: "work",
-		ReservationID: "reservation", ResourceDigest: "sha256:forged", Slot: 0,
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("migrated unsealed direct offer = %v, want not found", err)
-	}
-	var offers int
-	var claimedBy sql.NullString
-	if err := up.DB().QueryRow(`SELECT COUNT(*) FROM node_claim_offers`).Scan(&offers); err != nil {
-		t.Fatal(err)
-	}
-	if err := up.DB().QueryRow(`SELECT claimed_by FROM nodes WHERE run_id = 'legacy' AND node_id = 'work'`).Scan(&claimedBy); err != nil {
-		t.Fatal(err)
-	}
-	if offers != 0 || claimedBy.Valid {
-		t.Fatalf("migrated unsealed path mutated helper state: offers=%d claimed=%v", offers, claimedBy)
 	}
 }
 
@@ -179,18 +113,6 @@ func downgradeExecutionPolicyToV30SQLite(t *testing.T, db *sql.DB) {
 	} {
 		statements = append(statements, `ALTER TABLE nodes DROP COLUMN `+column)
 	}
-	for _, column := range []string{
-		"supported_body_protocol_min", "supported_body_protocol_max", "supervisor_requirements_json",
-		"body_runtime_requirements_json", "runner_build_identity_json",
-	} {
-		statements = append(statements, `ALTER TABLE executors DROP COLUMN `+column)
-	}
-	for _, column := range []string{
-		"execution_policy_hash", "execution_policy_version", "execution_body_protocol",
-		"execution_supervisor_requirements_hash", "execution_body_requirements_hash",
-	} {
-		statements = append(statements, `ALTER TABLE node_claim_offers DROP COLUMN `+column)
-	}
 	statements = append(statements,
 		`DELETE FROM sparkwing_requirements WHERE name = 'assisted-execution-policy-v1'`,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 31`,
@@ -209,14 +131,6 @@ func assertExecutionPolicySchemaSQLite(t *testing.T, db *sql.DB) {
 			"execution_policy_json", "execution_policy_hash", "execution_policy_version", "execution_body_protocol",
 			"execution_supervisor_requirements_json", "execution_supervisor_requirements_hash",
 			"execution_body_requirements_json", "execution_body_requirements_hash",
-		},
-		"executors": {
-			"supported_body_protocol_min", "supported_body_protocol_max", "supervisor_requirements_json",
-			"body_runtime_requirements_json", "runner_build_identity_json",
-		},
-		"node_claim_offers": {
-			"execution_policy_hash", "execution_policy_version", "execution_body_protocol",
-			"execution_supervisor_requirements_hash", "execution_body_requirements_hash",
 		},
 		"agent_loss_retry_node_sources": {
 			"retry_run_id", "source_run_id", "node_id", "deps_json", "needs_labels_json", "prefers_labels_json",

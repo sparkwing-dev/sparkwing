@@ -277,7 +277,7 @@ func TestSaveLintCache_EmptyCacheDirIsNoop(t *testing.T) {
 	}
 }
 
-func TestRestoreLintCache_SendsCacheTokenAsBearer(t *testing.T) {
+func TestRestoreLintCache_SendsCacheGrantAsBearer(t *testing.T) {
 	useWorkDir(t, t.TempDir())
 
 	var authz string
@@ -287,7 +287,7 @@ func TestRestoreLintCache_SendsCacheTokenAsBearer(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	t.Setenv("SPARKWING_CACHE_TOKEN", "blob-token")
+	t.Setenv("SPARKWING_CACHE_GRANT", "blob-token")
 	if _, _, err := sparkwing.RestoreLintCache(context.Background(), srv.URL); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestRestoreLintCache_SendsCacheTokenAsBearer(t *testing.T) {
 	}
 
 	authz = ""
-	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+	t.Setenv("SPARKWING_CACHE_GRANT", "")
 	if _, _, err := sparkwing.RestoreLintCache(context.Background(), srv.URL); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

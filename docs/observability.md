@@ -16,25 +16,26 @@ observe execution rather than govern it. The warning does not repair the
 missing state. It uses the underlying log path, so loss of that log path can
 also prevent delivery of this diagnostic.
 
-## Assisted-offer lifecycle
+## Claim-round events
 
-Enrolled-executor arbitration writes transition events to the run stream. The
-events carry node requirements, the round priority target, safe executor
-display fields (`executor_name`, `executor_kind`, and `executor_location`), and
-effective scores. Events never carry a credential, token prefix, principal,
-holder, membership ID, internal controller or executor ID, or reservation ID.
-An execution-start request accepts at most 128 bytes for `executor_name`.
-Attempt display names strip terminal escapes and inline control characters.
+When a node becomes ready the controller opens a claim round of at most five
+seconds and writes its transitions to the run stream. The events carry the
+node's requirements, preferred labels, resources, slots and run priority.
+Events never carry a credential, token prefix, principal, holder, or internal
+controller ID. An execution-start request accepts at most 128 bytes for
+`executor_name`. Attempt display names strip terminal escapes and inline
+control characters.
 
 | Event | Meaning |
 |---|---|
-| `executor_offer_round_opened` | The controller opened a five-second round and recorded its exact highest attainable effective priority. |
-| `executor_offer_received` | An eligible executor supplied a new capacity-backed offer. Refreshing the same offer does not append another event. |
-| `executor_offer_expired` | The offer stopped refreshing for two seconds and was removed. |
-| `executor_offer_declined` | Current enrollment or claim validation rejected the offer, or a higher-ranked offer won. The safe `reason` field distinguishes those cases. |
-| `executor_offer_awarded` | The offer won at the recorded priority target or at the deadline. |
-| `executor_offer_round_empty` | The deadline had no live eligible offer, so the existing coordinator fallback took ownership. |
+| `executor_offer_round_opened` | The controller opened a five-second claim round for the node. |
+| `executor_offer_round_empty` | No runner claimed the node before the round ended, so the dispatcher's own fallback took it (`outcome: coordinator_fallback`). |
 | `credits_unpriced_class` | A claim was refused because the node's cpu request is above the largest class the credit rate table prices. Carries `cores` and `max_cores`. |
+
+Runs recorded before the assisted-offer protocol was removed may also hold
+`executor_offer_received`, `executor_offer_expired`,
+`executor_offer_declined`, `executor_offer_awarded` and `executor_selected`
+events; nothing emits them now.
 
 ## Failure reasons
 
@@ -48,9 +49,9 @@ the logs.
 | `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Raise the runner memory limit or reduce the pipeline's memory use; check the resource chart. |
 | `timeout` | Node exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
-| `agent_lost` | The agent or gateway stopped heartbeating. The source node is terminal; a fresh linked run may retry it within `.Retry(n)`. | Check the executor and `agent_loss_*` events. A post-start retry is at-least-once and spends each acknowledged invocation. |
+| `agent_lost` | The runner holding the node's claim stopped renewing it. The source node is terminal; a fresh linked run may retry it within `.Retry(n)`. | Check the runner and `agent_loss_*` events. A post-start retry is at-least-once and spends each acknowledged invocation. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
-| `credits_exhausted` | The controller's prepaid credit balance ran out and the node was cancelled after the grace period. Its claim is released and its offers are withdrawn. | Add credits, then re-run. A node cancelled this way held no slot afterwards, so nothing is left to reclaim. |
+| `credits_exhausted` | The controller's prepaid credit balance ran out and the node was cancelled after the grace period. Its claim is released. | Add credits, then re-run. A node cancelled this way held no slot afterwards, so nothing is left to reclaim. |
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, and the runner that tried to take it reported nothing smaller, so no claim could be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The `credits_unpriced_class` event carries the request and the ceiling. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
@@ -79,7 +80,7 @@ For nodes where the pod disappears entirely (node failure, eviction),
 the controller's heartbeat sweep catches the missed lease and marks the
 node `agent_lost`.
 
-An assisted executor records `execution_attempts` on the node, and so does the
+A runner records `execution_attempts` on the node, and so does the
 local orchestrator for a node it runs itself: those entries carry executor kind
 `local`, location `local`, and the host name as the executor. Each entry has
 the global attempt ordinal, source or retry run, executor
@@ -87,11 +88,10 @@ name and kind, controller-owned location, timestamps, outcome, failure reason,
 and retry link. Missing legacy attribution remains unknown. Node read responses
 omit claim generations and all coordinator,
 membership, holder, token, reservation, and internal executor identifiers.
-Public event reads also omit claim generations from executor-selection and
-attempt-lifecycle payloads.
+Public event reads also omit claim generations from attempt-lifecycle
+payloads.
 
-The ordered event stream records `executor_selected`,
-`execution_attempt_started`, `agent_lease_lost`, pre-start requeue or
+The ordered event stream records `execution_attempt_started`, `agent_lease_lost`, pre-start requeue or
 post-start scheduling with availability, and exhaustion or another explicit
 no-retry reason. These payloads carry attribution, not credentials.
 
@@ -396,15 +396,14 @@ It also shows what admission is doing with the machine:
   reserve, measured external applications, and total capacity. An external
   sensor gap remains a gap rather than becoming zero. Mirrors `sparkwing
   queue`.
-- **Fleet section**: the caller's team's registered executors with their configured policy, observed
-  liveness and headroom, and current slot and run activity in separate panels.
-  Legacy executors inferred from recent activity stay visible without invented
-  policy. A claim-mode agent with a plain `holder_prefix` keeps one stable
+- **Fleet section**: the caller's team's runners that claimed work in the last
+  hour, with the labels and slot ceiling each last advertised, observed
+  liveness and headroom, and current run activity. A claim-mode agent with a plain `holder_prefix` keeps one stable
   identity; idle polls from the credential that made its stored claim refresh
   liveness. Polls from another credential cannot keep that claim live. The
-  most recently started claim owns a shared legacy display name; unstarted
+  most recently started claim owns a shared display name; unstarted
   claims use stable credential order. Its active runs never mix with another
-  credential's. Legacy `last_seen` is the most recent node start, live poll, or
+  credential's. `last_seen` is the most recent node start, live poll, or
   accepted claim heartbeat from that credential, never the future lease
   deadline. A busy runner's heartbeat does not advertise a free slot. The
   headroom observation time stays separate. Home reads its recently failed
@@ -830,10 +829,12 @@ segments included, is counted by the controller
 ([Tenant limits](limits.md)).
 
 The cache does not wait out the interval to recover. It
-serves no delete of its own, so it carries two bearer-gated admin
-routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
-what turns freeing space on the volume into uploads flowing again, and
-`POST /admin/store-ceiling/thaw` accepts uploads until the next
+serves no delete of its own, so it carries two admin routes, which take
+only the controller's operator grant and which an operator reaches through
+the controller with an `admin` bearer: `POST
+/api/v1/cache/store-ceiling/measure` starts a walk now, which is what turns
+freeing space on the volume into uploads flowing again, and `POST
+/api/v1/cache/store-ceiling/thaw` accepts uploads until the next
 measurement. The measure route answers `202` with the state as it stands
 and walks off the request path, so the caller pays no latency for a
 large store and a disconnect cannot abandon the walk; one runs at a
@@ -893,8 +894,8 @@ download, not the one under way. A signed URL is charged the object's whole
 size when it is minted and expires after 60 seconds. While the
 controller cannot answer the cache, a free team's download is refused with
 `503`, and a team the controller answered funded within five minutes
-proceeds. The operator's own team and the operator token carry no cap,
-because every in-cluster runner shares them.
+proceeds. The operator's own team carries no cap, because every in-cluster
+runner shares it, and neither does the controller's operator grant.
 
 Reading a run's logs, from the dashboard or the CLI, is never charged to
 the team, so a team past its cap can still read why its run failed.

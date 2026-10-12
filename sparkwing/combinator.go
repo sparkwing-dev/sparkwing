@@ -226,8 +226,8 @@ func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
 	return g
 }
 
-// Prefers boosts matching enrolled-executor offers within their priority
-// ceiling for every member. See [JobNode.Prefers].
+// Prefers sets the same runner-label preference on every member: it holds the
+// node back from a runner that does not advertise it. See [JobNode.Prefers].
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Prefers(labels...)

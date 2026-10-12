@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
-	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -75,17 +74,6 @@ type Options struct {
 	NoCache bool
 
 	LocalOnly bool
-	Fleet     bool
-
-	FleetConfigPath           string
-	FleetSourceRoot           string
-	FleetSourceBundle         string
-	FleetSourceSHA            string
-	FleetSourceManifestDigest string
-	FleetSourceRepoURL        string
-	FleetSourceFiles          int
-	FleetSourceBytes          int64
-	FleetBundleBytes          int64
 
 	DryRun bool
 
@@ -151,14 +139,6 @@ type Result struct {
 }
 
 func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) {
-	var fleetRuntime *localFleetRuntime
-	if opts.Fleet {
-		var err error
-		fleetRuntime, err = prepareLocalFleetRuntime(backends, opts)
-		if err != nil {
-			return nil, fmt.Errorf("fleet coordinator: %w", err)
-		}
-	}
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
 		location := ""
@@ -237,10 +217,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
 	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
-	runGitSHA := gitOpt.SHA
-	if opts.Fleet {
-		runGitSHA = opts.FleetSourceSHA
-	}
 	if opts.RunHandlePath != "" {
 		release, err := ReserveRunHandle(opts.RunHandlePath)
 		if err != nil {
@@ -257,7 +233,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		RetrySource:   opts.RetrySource,
 		TriggerSource: trigger.Source,
 		GitBranch:     gitOpt.Branch,
-		GitSHA:        runGitSHA,
+		GitSHA:        gitOpt.SHA,
 		DeclaredRepo:  gitOpt.Repo,
 		RepoURL:       gitOpt.RepoURL,
 		GithubOwner:   owner,
@@ -267,15 +243,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		Invocation:    invocation,
 	}); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
-	}
-	if opts.Fleet {
-		payload := fleetSourceSnapshotPayload(opts)
-		if err := backends.State.AppendEvent(ctx, runID, "", "fleet_source_snapshot", payload); err != nil {
-			if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("record fleet source snapshot: %v", err)); err != nil {
-				noteLostStateWrite(ctx, "finish run", runID, err)
-			}
-			return &Result{RunID: runID, Status: "failed", Error: err}, nil
-		}
 	}
 	if opts.RunHandlePath != "" {
 		handle := NewRunHandle(runID, opts.Pipeline, localRunLogDir(backends.Logs, runID), "running")
@@ -530,21 +497,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	opts.standalone.announce()
 
-	var fleetAuthority *localFleetAuthority
-	if fleetRuntime != nil {
-		var err error
-		fleetAuthority, r, err = fleetRuntime.start(runID, &opts, r, nil)
-		if err != nil {
-			if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("start fleet coordinator: %v", err)); err != nil {
-				noteLostStateWrite(ctx, "finish run", runID, err)
-			}
-			return &Result{RunID: runID, Status: "failed", Error: err}, nil
-		}
-		// safety: foreground resources outlive dispatch, durable FinishRun, and
-		// final reporting. Close also revokes the process-only local credential.
-		defer fleetAuthority.Close()
-	}
-
 	execStart := time.Now()
 	var runErr error
 	if !skipDispatch {
@@ -553,11 +505,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			opts.Pipeline, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
 			dispatchWaitTimeout, opts.Admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 		)
-	}
-	if fleetAuthority != nil {
-		// safety: every dispatcher-owned runner call has returned, so freeze the
-		// offer loop before the durable run ending and final reports are written.
-		fleetAuthority.StopClaims()
 	}
 
 	if runErr == nil && context.Cause(runCtx) != nil {
@@ -700,7 +647,7 @@ func statusForRunError(err error) string {
 	var superseded *nodeSupersededError
 	var canceled *runDaemonCanceledError
 	if errors.As(err, &evicted) || errors.As(err, &interrupted) ||
-		errors.As(err, &superseded) || errors.As(err, &canceled) || errors.Is(err, fleet.ErrCoordinatorProcessGone) {
+		errors.As(err, &superseded) || errors.As(err, &canceled) {
 		return "cancelled"
 	}
 	return "failed"
@@ -1087,12 +1034,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if opts.standalone != nil && opts.standalone.reason != "" {
 		inv["standalone"] = true
 		inv["standalone_reason"] = opts.standalone.reason
-	}
-	if opts.Fleet {
-		inv["fleet_source"] = map[string]string{
-			"kind": "working_tree", "identity": opts.FleetSourceSHA,
-			"manifest_digest": opts.FleetSourceManifestDigest,
-		}
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{

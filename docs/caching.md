@@ -185,12 +185,14 @@ them are off until set, and the chart carries them as `cache.limits.*`.
 counted bytes and objects, and when it was last measured), and the same
 state is exported as `sparkwing.cache.store_*`.
 
-The cache serves no delete, so recovery runs through two bearer-gated
-admin routes. `POST /admin/store-ceiling/measure` walks the trees
-immediately, which is how freeing space on the volume turns into uploads
-flowing again rather than a wait for the interval, and `POST
-/admin/store-ceiling/thaw` accepts uploads until the next measurement (a
-`409` when none is scheduled). Both answer with the ceiling state.
+The cache serves no delete, so recovery runs through two admin routes,
+which take only the controller's operator grant. An operator calls them
+through the controller with an `admin` bearer: `POST
+/api/v1/cache/store-ceiling/measure` walks the trees immediately, which is
+how freeing space on the volume turns into uploads flowing again rather than
+a wait for the interval, and `POST /api/v1/cache/store-ceiling/thaw` accepts
+uploads until the next measurement (a `409` when none is scheduled). Both
+forward the cache's answer, which carries the ceiling state.
 
 ### Guarantees
 

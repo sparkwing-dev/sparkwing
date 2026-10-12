@@ -47,9 +47,9 @@ controller:
   metricsPort: 0
 
 
-  # Memory ceiling in MiB for concurrent argon2id password and token
-  # hashing. Each hash holds 64 MiB while it runs, so the default
-  # admits four at a time and keeps unauthenticated login traffic
+  # Memory ceiling in MiB for concurrent argon2id token hashing. Each
+  # hash holds 64 MiB while it runs, so the default admits four at a
+  # time and keeps unauthenticated sign-in traffic
   # inside resources.limits.memory below.
   argon2MemoryBudgetMB: 256
 
@@ -219,12 +219,12 @@ controller:
 
   # Start without bootstrapAdminToken. The chart then drops
   # --require-auth, so a controller whose tokens table is empty serves
-  # every route unauthenticated -- token minting and first-admin
-  # creation included -- to anything that reaches its Service, until a
-  # token exists and the controller restarts. A controller that already
-  # holds a live token stays authenticated, so an upgrade can set this
-  # instead of creating a bootstrap Secret, at the cost of that open
-  # window reopening if the tokens table is ever emptied. Bool only.
+  # every route unauthenticated -- token minting included -- to anything
+  # that reaches its Service, until a token exists and the controller
+  # restarts. A controller that already holds a live token stays
+  # authenticated, so an upgrade can set this instead of creating a
+  # bootstrap Secret, at the cost of that open window reopening if the
+  # tokens table is ever emptied. Bool only.
   allowOpenBootstrap: false
 
   # Optional Secret containing a PostgreSQL DSN. Empty keeps SQLite.

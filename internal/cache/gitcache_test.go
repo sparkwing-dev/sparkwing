@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
@@ -228,14 +229,14 @@ func TestHandleBinDigestForUnattestedBlob(t *testing.T) {
 	}
 }
 
-func TestRequireTokenBlocksAnUnauthenticatedBinPut(t *testing.T) {
-	oldDir, oldToken := binsDir, apiToken
-	binsDir, apiToken = t.TempDir(), "cache-token"
-	defer func() { binsDir, apiToken = oldDir, oldToken }()
+func TestRequireCallerBlocksAnUnauthenticatedBinPut(t *testing.T) {
+	oldDir, oldKey := binsDir, grantKey
+	binsDir, grantKey = t.TempDir(), "grant-key"
+	defer func() { binsDir, grantKey = oldDir, oldKey }()
 
 	const hash = "deadbeef-cafebabe"
 	w := httptest.NewRecorder()
-	requireToken(handleBin)(w, httptest.NewRequest(http.MethodPut, "/bin/"+hash, strings.NewReader("poisoned")))
+	requireCaller(handleBin)(w, httptest.NewRequest(http.MethodPut, "/bin/"+hash, strings.NewReader("poisoned")))
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
@@ -279,10 +280,21 @@ func TestHandleBinClientRejectsPoisonedBlob(t *testing.T) {
 	}
 }
 
-func TestRequireToken(t *testing.T) {
-	old := apiToken
-	apiToken = "s3cret"
-	defer func() { apiToken = old }()
+// The admin routes take the controller's operator grant alone: not a team's
+// grant, and not the static token earlier releases shared.
+func TestRequireOperator(t *testing.T) {
+	old := grantKey
+	grantKey = "grant-key"
+	defer func() { grantKey = old }()
+	op, err := authwire.MintOperatorCacheGrant("grant-key", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	team := mintGrant(t, "grant-key", "team-a", "run-1", time.Now(), testScope)
+	byOtherKey, err := authwire.MintOperatorCacheGrant("other-key", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		name      string
@@ -290,24 +302,26 @@ func TestRequireToken(t *testing.T) {
 		forwarded string
 		want      int
 	}{
-		{name: "correct bearer", authz: "Bearer s3cret", want: http.StatusOK},
-		{name: "wrong bearer", authz: "Bearer nope", want: http.StatusUnauthorized},
+		{name: "operator grant", authz: "Bearer " + op, want: http.StatusOK},
+		{name: "team grant", authz: "Bearer " + team, want: http.StatusUnauthorized},
+		{name: "operator grant under another key", authz: "Bearer " + byOtherKey, want: http.StatusUnauthorized},
+		{name: "static token", authz: "Bearer cache-token", want: http.StatusUnauthorized},
+		{name: "the grant key itself", authz: "Bearer grant-key", want: http.StatusUnauthorized},
 		{name: "no header", want: http.StatusUnauthorized},
 		{name: "no header, forwarded", forwarded: "203.0.113.7", want: http.StatusUnauthorized},
-		{name: "wrong bearer, forwarded", authz: "Bearer nope", forwarded: "203.0.113.7", want: http.StatusUnauthorized},
-		{name: "lowercase scheme", authz: "bearer s3cret", want: http.StatusOK},
-		{name: "padded scheme", authz: "Bearer  s3cret", want: http.StatusOK},
-		{name: "no scheme", authz: "s3cret", want: http.StatusUnauthorized},
-		{name: "other scheme", authz: "Basic s3cret", want: http.StatusUnauthorized},
+		{name: "lowercase scheme", authz: "bearer " + op, want: http.StatusOK},
+		{name: "padded scheme", authz: "Bearer  " + op, want: http.StatusOK},
+		{name: "no scheme", authz: op, want: http.StatusUnauthorized},
+		{name: "other scheme", authz: "Basic " + op, want: http.StatusUnauthorized},
 		{name: "empty credential", authz: "Bearer ", want: http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			served := false
-			h := requireToken(func(w http.ResponseWriter, _ *http.Request) {
+			h := requireOperator(func(w http.ResponseWriter, _ *http.Request) {
 				served = true
 				w.WriteHeader(http.StatusOK)
 			})
-			req := httptest.NewRequest(http.MethodPut, "/bin/abc", nil)
+			req := httptest.NewRequest(http.MethodPost, "/admin/teams/acme", nil)
 			if tc.authz != "" {
 				req.Header.Set("Authorization", tc.authz)
 			}
@@ -327,39 +341,41 @@ func TestRequireToken(t *testing.T) {
 	}
 }
 
-func TestRequireTokenServesEveryoneWhenUnauthenticated(t *testing.T) {
-	old := apiToken
-	apiToken = ""
-	defer func() { apiToken = old }()
+func TestRequireOperatorServesEveryoneWhenUnauthenticated(t *testing.T) {
+	old := grantKey
+	grantKey = ""
+	defer func() { grantKey = old }()
 
 	served := false
-	h := requireToken(func(w http.ResponseWriter, _ *http.Request) {
+	h := requireOperator(func(w http.ResponseWriter, _ *http.Request) {
 		served = true
 		w.WriteHeader(http.StatusOK)
 	})
 	w := httptest.NewRecorder()
-	h(w, httptest.NewRequest(http.MethodPut, "/bin/abc", nil))
+	h(w, httptest.NewRequest(http.MethodPost, "/admin/teams/acme", nil))
 
 	if !served || w.Code != http.StatusOK {
 		t.Errorf("served = %t, status = %d, want true and 200", served, w.Code)
 	}
 }
 
-func TestNewRejectsEmptyAPIToken(t *testing.T) {
+func TestNewRejectsAnEmptyGrantKey(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DataDir = t.TempDir()
 
 	if _, err := New(cfg); err == nil {
-		t.Fatal("New accepted an empty API token")
-	} else if !strings.Contains(err.Error(), "--allow-unauthenticated") {
-		t.Errorf("error %q does not name the opt-in flag", err)
+		t.Fatal("New accepted an empty grant key")
+	} else if !strings.Contains(err.Error(), "--allow-unauthenticated") || !strings.Contains(err.Error(), authwire.CacheGrantKeyCredential) {
+		t.Errorf("error %q does not name the grant key file and the opt-in flag", err)
 	}
 }
 
 func newTestServer(t *testing.T, token string) *httptest.Server {
 	t.Helper()
 	cfg := DefaultConfig()
-	cfg.APIToken = token
+	if token != "" {
+		cfg.GrantKey = testGrantKey(token)
+	}
 	cfg.AllowUnauthenticated = token == ""
 	return newTestServerConfig(t, cfg)
 }
@@ -371,14 +387,14 @@ func newTestServerConfig(t *testing.T, cfg Config) *httptest.Server {
 	t.Helper()
 	saved := struct {
 		dataRoot, repoDir, binsDir, cacheDir     string
-		namesFile, proxyDir, sshKeyDir, apiToken string
+		namesFile, proxyDir, sshKeyDir, grantKey string
 	}{
 		dataRoot, repoDir, binsDir, cacheDir,
-		namesFile, proxyDir, sshKeyDir, apiToken,
+		namesFile, proxyDir, sshKeyDir, grantKey,
 	}
 	t.Cleanup(func() {
 		dataRoot, repoDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.binsDir, saved.cacheDir
-		namesFile, proxyDir, sshKeyDir, apiToken = saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
+		namesFile, proxyDir, sshKeyDir, grantKey = saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.grantKey
 	})
 
 	root := t.TempDir()
@@ -440,18 +456,35 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 				if got := resp.StatusCode == http.StatusUnauthorized; got != tc.guarded {
 					t.Errorf("status = %d, guarded = %t, want guarded = %t", resp.StatusCode, got, tc.guarded)
 				}
+				if !tc.guarded {
+					return
+				}
+				// safety: the static token earlier releases accepted must open nothing now.
+				req, err = http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader(""))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Authorization", "Bearer s3cret")
+				resp, err = srv.Client().Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusUnauthorized {
+					t.Errorf("with the old static token: status = %d, want 401", resp.StatusCode)
+				}
 			})
 		}
 	})
 }
 
-func TestNewRejectsAWhitespaceOnlyAPIToken(t *testing.T) {
+func TestNewRejectsAWhitespaceOnlyGrantKey(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DataDir = t.TempDir()
-	cfg.APIToken = " \n"
+	cfg.GrantKey = " \n"
 
 	if _, err := New(cfg); err == nil {
-		t.Fatal("New accepted a whitespace-only API token")
+		t.Fatal("New accepted a whitespace-only grant key")
 	} else if !strings.Contains(err.Error(), "--allow-unauthenticated") {
 		t.Errorf("error %q does not name the opt-in flag", err)
 	}
@@ -562,7 +595,7 @@ func TestGitRegisterValidatesTheName(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Header.Set("Authorization", "Bearer s3cret")
+		req.Header.Set("Authorization", "Bearer "+operatorGrant(t, "s3cret"))
 		resp, err := srv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -585,7 +618,7 @@ func TestGitRegisterRepairsSeededMirrorOrigin(t *testing.T) {
 			if existing {
 				runGit(t, bareRepo, "remote", "add", "origin", repoURL)
 			}
-			if code := registerName(t, srv, sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL, "s3cret"); code != http.StatusOK {
+			if code := registerName(t, srv, sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL, operatorGrant(t, "s3cret")); code != http.StatusOK {
 				t.Fatalf("registration = %d, want 200", code)
 			}
 			if got := strings.TrimSpace(runGit(t, bareRepo, "config", "--get", "remote.origin.url")); got != repoURL {
@@ -604,7 +637,7 @@ func TestGitRegisterReportsOriginConfigFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bareRepo, "config.lock"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code := registerName(t, srv, sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL, "s3cret"); code != http.StatusInternalServerError {
+	if code := registerName(t, srv, sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL, operatorGrant(t, "s3cret")); code != http.StatusInternalServerError {
 		t.Fatalf("registration with locked config = %d, want 500", code)
 	}
 }
@@ -613,7 +646,7 @@ func TestGitRegisterAcceptsClaimScopedRepoName(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 	repoURL := "https://example.invalid/acme/widgets.git"
 	name := sourceurl.ClaimedRepoNameFromURL(repoURL)
-	if code := registerName(t, srv, name, repoURL, "s3cret"); code != http.StatusOK {
+	if code := registerName(t, srv, name, repoURL, operatorGrant(t, "s3cret")); code != http.StatusOK {
 		t.Fatalf("register claim-scoped name length %d = %d, want 200", len(name), code)
 	}
 }
@@ -659,7 +692,7 @@ func TestGitRegisterRefusesAnUnauthenticatedRepoint(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 	isolateRepoNames(t)
 
-	if code := registerName(t, srv, "app", "https://example.invalid/first.git", "s3cret"); code != http.StatusOK {
+	if code := registerName(t, srv, "app", "https://example.invalid/first.git", operatorGrant(t, "s3cret")); code != http.StatusOK {
 		t.Fatalf("first registration = %d, want 200", code)
 	}
 	if code := registerName(t, srv, "app", "https://example.invalid/second.git", ""); code != http.StatusUnauthorized {
@@ -668,7 +701,7 @@ func TestGitRegisterRefusesAnUnauthenticatedRepoint(t *testing.T) {
 	if got := registeredRepo("app"); got != "https://example.invalid/first.git" {
 		t.Errorf("registered repo = %q, want the original", got)
 	}
-	if code := registerName(t, srv, "app", "https://example.invalid/second.git", "s3cret"); code != http.StatusOK {
+	if code := registerName(t, srv, "app", "https://example.invalid/second.git", operatorGrant(t, "s3cret")); code != http.StatusOK {
 		t.Errorf("authenticated repoint = %d, want 200", code)
 	}
 	if got := registeredRepo("app"); got != "https://example.invalid/second.git" {

@@ -336,9 +336,6 @@ func finalizeSettledRunTx(ctx context.Context, tx *storeTx, team Team, runID str
 }
 
 func lockDispatchRunTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	found, err := lockTeamRunRowTx(ctx, tx, team, runID)
 	if err == nil && !found {
 		return notFound("run", runID)

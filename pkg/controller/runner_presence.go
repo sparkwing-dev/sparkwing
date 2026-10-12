@@ -18,7 +18,7 @@ type presenceKey struct {
 	name        string
 }
 
-// safety: a legacy runner polls for a claim only while it has a free slot, so a
+// safety: a runner polls for a claim only while it has a free slot, so a
 // recent poll is both its liveness signal and its offer of capacity.
 type runnerPresence struct {
 	Labels        []string

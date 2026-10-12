@@ -87,8 +87,8 @@ The ref resolves when you
 launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.
 
-A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---sw-fleet, and the other run-shaping --sw- flags)
+A flag a detached run cannot carry (--sw-index, --sw-dry-run
+and the other run-shaping --sw- flags)
 is refused with the reason instead of ignored; run those in
 the foreground.
 
@@ -132,10 +132,8 @@ is running and exits after five idle minutes; see
 | `--sw-no-bincache` | Build a temporary pipeline binary with debug symbols instead of using the binary cache |
 | `--sw-hash-all-files` | Hash files Git ignores into the binary cache key, for a build that embeds them |
 | `--sw-allow-unadmitted` | Run without the admission daemon even when the pipeline reserves host capacity |
-| `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
-| `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |

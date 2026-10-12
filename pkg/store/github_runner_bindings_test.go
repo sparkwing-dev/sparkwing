@@ -169,11 +169,11 @@ func TestRemovingABindingRevokesItsCredentials(t *testing.T) {
 	if err != nil || len(revoked) != 1 || revoked[0] != bound.Prefix {
 		t.Fatalf("remove revoked %v, %v; want only %s", revoked, err, bound.Prefix)
 	}
-	if got, err := acme.RunnerToken(ctx, bound.Prefix); err != nil || got.RevokedAt == nil {
+	if got, err := acme.TeamToken(ctx, bound.Prefix); err != nil || got.RevokedAt == nil {
 		t.Fatalf("bound credential = %+v, %v; want it revoked", got, err)
 	}
 	for _, tok := range []*store.Token{unrelated, laptop} {
-		if got, err := acme.RunnerToken(ctx, tok.Prefix); err != nil || got.RevokedAt != nil {
+		if got, err := acme.TeamToken(ctx, tok.Prefix); err != nil || got.RevokedAt != nil {
 			t.Fatalf("%s = %+v, %v; want untouched", tok.Principal, got, err)
 		}
 	}

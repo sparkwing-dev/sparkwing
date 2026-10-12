@@ -23,7 +23,7 @@ Three flags go before any verb:
 Without --profile, every verb acts on this machine's store. Neither the
 environment nor the project config selects a profile, so a command reaches a
 controller or a profile's remote backends only when --profile names it.`,
-	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "version", "update", "serve", "doctor", "cloud", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
+	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "version", "update", "serve", "doctor", "cloud", "cluster", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
@@ -186,14 +186,14 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Inspect and operate a controller's executors, triggers, admission, users and
+	Description: `Inspect and operate a controller's executors, triggers, admission and
 tokens. Select the controller with --profile NAME; connect one with
 'sparkwing cloud connect' and check its health with 'sparkwing cloud status
 --cluster'.
 
 'worker' executes queued triggers on this machine. Manage secrets with
 'sparkwing secrets' and the local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "users", "tokens", "limits", "concurrency", "object-store"},
+	SubcommandOrder: []string{"agents", "runners", "worker", "triggers", "tokens", "limits", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cloud status --profile prod --cluster"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -324,7 +324,7 @@ reports its contents. 'profiles' lists and edits controller connections;
 'sparkwing cloud' adds, checks and removes them. 'sparkwing repos'
 registers local repositories.
 
-Manage controller users and tokens with 'sparkwing cluster'.
+Manage controller tokens with 'sparkwing cluster'.
 Manage secrets with 'sparkwing secrets'.`,
 	SubcommandOrder: []string{"init", "profiles"},
 	Examples: []Example{
@@ -1499,8 +1499,8 @@ The ref resolves when you
 launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.
 
-A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---sw-fleet, and the other run-shaping --sw- flags)
+A flag a detached run cannot carry (--sw-index, --sw-dry-run
+and the other run-shaping --sw- flags)
 is refused with the reason instead of ignored; run those in
 the foreground.
 
@@ -1772,7 +1772,7 @@ one home. A write from a command running under a home of its own is
 refused rather than sent to the machine's profiles: set
 SPARKWING_CONFIG to a path inside that home to keep it there.
 
-Every human-driven client command (tokens, users, runs
+Every human-driven client command (tokens, runs
 retry/cancel/prune/logs) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.
@@ -2004,72 +2004,6 @@ window short.`,
 	},
 	Examples: []Example{
 		{"Rotate a token with a 48h grace window", "sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod"},
-	},
-}
-
-var cmdUsers = Command{
-	Path:     "sparkwing cluster users",
-	Synopsis: "Manage dashboard login users",
-	Description: `Seeds admin credentials in the controller's users table, used
-by the dashboard's password sign-in. Connection info comes from the
-profile named by --profile.`,
-	SubcommandOrder: []string{"add", "list", "delete"},
-}
-
-var cmdUsersAdd = Command{
-	Path:              "sparkwing cluster users add",
-	ReachesController: true,
-	Synopsis:          "Create a dashboard user",
-	Description: `Prompts for a password on stdin with echo disabled when stdin
-is a TTY (the password is not shown on-screen or recorded in
-shell history). Passing --password skips the prompt -- useful
-for CI seed flows but leaks via shell history if used
-interactively. --scope sets what the account's dashboard
-sessions may reach; omitting it grants admin. The first account
-on a controller must be an admin, so a --scope list that omits
-admin is refused until one exists.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
-		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
-		{Name: "scope", Argument: "LIST", Desc: "Comma-separated scopes (omit to grant admin; the first account must include admin)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Interactive add of the first admin", "sparkwing cluster users add --name fictional-user --profile prod"},
-		{"Read-only account, once an admin exists", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
-		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
-	},
-}
-
-var cmdUsersList = Command{
-	Path:              "sparkwing cluster users list",
-	ReachesController: true,
-	Synopsis:          "Print every user",
-	Description: `Prints name, scopes, created_at, and last_login_at for every
-user in the controller's users table.`,
-	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"List users", "sparkwing cluster users list --profile prod"},
-	},
-}
-
-var cmdUsersDelete = Command{
-	Path:              "sparkwing cluster users delete",
-	ReachesController: true,
-	Synopsis:          "Remove a dashboard user",
-	Description: `Deletes the user row, every session that user holds, and
-revokes every token minted under that principal name except the token
-this request authenticates with, in one transaction. The sessions and
-tokens are revoked and the auth cache on the serving replica is
-cleared; auth.md describes the windows that remain elsewhere.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Delete a user", "sparkwing cluster users delete --name fictional-user --profile prod"},
 	},
 }
 
@@ -2858,9 +2792,8 @@ var cmdAgents = Command{
 	Path:     "sparkwing cluster agents",
 	Synopsis: "Inspect the controller's fleet view",
 	Description: `Hits GET /api/v1/agents on the selected profile's controller.
-Prints persisted executor registrations, including idle and
-offline agents and gateways, plus recent legacy claim-only runners.`,
-	SubcommandOrder: []string{"list", "enroll"},
+Prints the runners that claimed work in the last hour.`,
+	SubcommandOrder: []string{"list"},
 	Examples: []Example{
 		{"List prod agents", "sparkwing cluster agents list --profile prod"},
 	},
@@ -2887,8 +2820,8 @@ var cmdRunnersAdd = Command{
 	Path:              "sparkwing cluster runners add",
 	ReachesController: true,
 	Synopsis:          "Mint a runner token, write the config, start the service",
-	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
-runs.state and secrets.read against the profile's controller,
+	Description: `Mints a runner token carrying nodes.claim, triggers.claim and
+runs.state against the profile's controller,
 writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
@@ -2955,48 +2888,13 @@ replaces it.`,
 	},
 }
 
-var cmdAgentsEnroll = Command{
-	Path:              "sparkwing cluster agents enroll",
-	ReachesController: true,
-	Synopsis:          "Enroll or update a trusted executor",
-	Description: `Binds one exact runner or service token prefix to an
-operator-owned executor envelope. The token must be live and carry
-nodes.claim; its stored principal becomes audit metadata. Re-enrollment
-with the same credential updates trusted scheduling fields without changing
-live headroom. Changing the prefix requires a new heartbeat.
-
-Use a distinct revocable token for every coordinator membership. The
-prefix is accepted as input but is never returned by the agents API. A
-controller accepts at most 256 enrolled executors. Adding another returns ` + "`executor enrollment limit reached: maximum 256 per controller`" + `.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
-		{Name: "token-prefix", Argument: "PREFIX", Desc: "Exact runner or service token prefix", Required: true, Group: "Identity"},
-		{Name: "kind", Argument: "KIND", Desc: "Executor kind (agent|gateway)", Default: "agent", Group: "Identity"},
-		{Name: "location", Argument: "WHERE", Desc: "Trusted placement location (local|cloud|unknown)", Default: "unknown", Group: "Identity"},
-		{Name: "capability", Argument: "LABEL", Desc: "Trusted capability (repeatable)", Group: "Trust"},
-		{Name: "base-priority", Argument: "N", Desc: "Base scheduling priority (0-100)", Default: "0", Group: "Trust"},
-		{Name: "priority-ceiling", Argument: "N", Desc: "Highest effective priority (0-100)", Default: "100", Group: "Trust"},
-		{Name: "max-concurrent", Argument: "N", Desc: "Trusted concurrent slot ceiling", Default: "1", Group: "Limits"},
-		{Name: "budget-cores", Argument: "N", Desc: "CPU contribution ceiling (0 = uncapped)", Default: "0", Group: "Limits"},
-		{Name: "budget-memory-bytes", Argument: "N", Desc: "Memory contribution ceiling in bytes (0 = uncapped)", Default: "0", Group: "Limits"},
-		{Name: "profile", Argument: "NAME", Desc: "Admin controller profile", Required: true, Group: "System"},
-	},
-	GroupOrder: []string{"Identity", "Trust", "Limits", "System", "Other"},
-	Examples: []Example{
-		{"Enroll a workstation agent", "sparkwing cluster agents enroll --profile prod --name desk --token-prefix swr_01234567 --kind agent --location local --capability linux --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592"},
-		{"Enroll a capacity gateway", "sparkwing cluster agents enroll --profile prod --name build-gateway --token-prefix sws_01234567 --kind gateway --location cloud --capability linux-amd64 --max-concurrent 8"},
-	},
-}
-
 var cmdAgentsList = Command{
 	Path:              "sparkwing cluster agents list",
 	ReachesController: true,
 	Synopsis:          "Print the controller's known agents",
-	Description: `Fetches /api/v1/agents and renders a table of fleet members.
-Registered executors report their operator-assigned identity,
-kind, trusted placement location, capabilities, concurrency limit, and
-measured resource headroom. A stale registration remains visible
-as offline; recent legacy claim-only runners remain visible too.
+	Description: `Fetches /api/v1/agents and renders a table of the runners that
+claimed work in the last hour, with the labels, concurrency limit and
+measured resource headroom each one last advertised.
 
 Use -q to print names, one per line, for shell piping
 (xargs and similar commands).`,
@@ -3009,53 +2907,6 @@ Use -q to print names, one per line, for shell piping
 	Examples: []Example{
 		{"List agents on prod", "sparkwing cluster agents list --profile prod"},
 		{"Just agent names for piping", "sparkwing cluster agents list --profile prod -q"},
-	},
-}
-
-var cmdFleet = Command{
-	Path:     "sparkwing fleet",
-	Synopsis: "Configure foreground assisted execution",
-	Description: `Local fleet configuration. Running a pipeline with assistance uses
-sparkwing run PIPELINE --sw-fleet, and the fleet section of config.yaml names
-the helpers it trusts.
-
-Fleet runs transmit an immutable snapshot containing every tracked file and
-every non-ignored untracked file to the executor that wins a node. Review
-'git status' and ignore local secret files before starting a fleet run. Normal
-output reports only the source digest, file count, and total bytes, never file
-names. The snapshot commit has no parent and does not transmit repository
-history.`,
-	SubcommandOrder: []string{"init"},
-}
-
-var cmdFleetInit = Command{
-	Path:     "sparkwing fleet init",
-	Synopsis: "Create an owner-only foreground fleet policy",
-	Description: `Writes the fleet section of config.yaml without replacing an existing
-policy or any other section. The listener is
-fixed for the life of each foreground run. HTTPS public URLs assume a local
-Tailscale Serve or reverse proxy and therefore require a literal loopback
-listener. Plain HTTP is accepted only at a literal IP that the local Tailscale
-client confirms belongs to this machine. Tailscale supplies transport, not
-Sparkwing authorization: only explicitly enrolled helpers receive credentials,
-and no peer discovery occurs.
-
-SPARKWING_HOME does not move config.yaml; it is the state, cache and
-logs root, and the fleet policy is machine-wide. A write from a
-command running under a home of its own is refused rather than sent
-to the machine's policy: set SPARKWING_CONFIG to a path inside
-that home to keep it there.`,
-	Flags: []FlagSpec{
-		{Name: "tailnet", Desc: "Use this machine's Tailscale IPv4 address on port 4346", Group: "Network"},
-		{Name: "listen", Argument: "HOST:PORT", Desc: "Fixed private listener address", Group: "Network"},
-		{Name: "public-url", Argument: "URL", Desc: "Helper-reachable coordinator origin", Group: "Network"},
-		{Name: "allow-tailnet-http", Desc: "Allow HTTP at a verified literal local Tailscale IP", Group: "Network"},
-	},
-	GroupOrder: []string{"Network", "Other"},
-	Examples: []Example{
-		{"Direct Tailscale transport", "sparkwing fleet init --tailnet"},
-		{"Tailscale Serve or a local proxy", "sparkwing fleet init --listen 127.0.0.1:4346 --public-url https://runner.example.com"},
-		{"Advanced direct Tailscale transport", "sparkwing fleet init --listen 100.64.1.2:4346 --public-url http://100.64.1.2:4346 --allow-tailnet-http"},
 	},
 }
 

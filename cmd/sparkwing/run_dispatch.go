@@ -72,7 +72,6 @@ type runFlags struct {
 	allow []string
 
 	localOnly bool
-	fleet     bool
 
 	allowSecretFiles []string
 
@@ -294,9 +293,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case argument == "--sw-local-only":
 			flags.localOnly = true
 			argumentIndex++
-		case argument == "--sw-fleet":
-			flags.fleet = true
-			argumentIndex++
 		case argument == "--sw-dry-run", argument == "--dry-run=true":
 			flags.dryRun = true
 			argumentIndex++
@@ -313,17 +309,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case strings.HasPrefix(argument, "--sw-allow="):
 			flags.allow = appendCSV(flags.allow, strings.TrimPrefix(argument, "--sw-allow="))
-			argumentIndex++
-		case argument == "--sw-allow-secret-file":
-			if argumentIndex+1 < len(args) {
-				flags.allowSecretFiles = append(flags.allowSecretFiles, args[argumentIndex+1])
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-allow-secret-file="):
-			flags.allowSecretFiles = append(flags.allowSecretFiles, strings.TrimPrefix(argument, "--sw-allow-secret-file="))
 			argumentIndex++
 		case argument == "--sw-index":
 			if argumentIndex+1 < len(args) {
