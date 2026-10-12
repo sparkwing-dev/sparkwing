@@ -214,7 +214,8 @@ func TestCleanupsAreConfinedToTheirNode(t *testing.T) {
 	bearerB, revokeB := cleanupNode(t, s)
 	dir := t.TempDir()
 	id := mustRegister(t, s, bearerA, "sh", "-c", "touch a-ran")
-	if got := send(t, s, http.MethodDelete, "/node/v1/cleanups/"+id, bearerB, nil); got.status != http.StatusNotFound || got.body["error"] != "unknown_cleanup" {
+	if got := send(t, s, http.MethodDelete, "/node/v1/cleanups/"+id, bearerB, nil); got.status != http.StatusNotFound || got.body["code"] != "unknown_cleanup" ||
+		!strings.Contains(got.body["error"].(string), "no cleanup with that id") {
 		t.Fatalf("node B released node A's cleanup: status %d body %v, want 404 unknown_cleanup", got.status, got.body)
 	}
 	mustRegister(t, s, bearerB, "sh", "-c", "touch b-ran")
@@ -266,7 +267,7 @@ func TestCleanupRegistrationLimits(t *testing.T) {
 		"body over 16 KiB":  []byte(`{"argv":["x","` + strings.Repeat("a", 16<<10) + `"]}`),
 		"argv not a string": []byte(`{"argv":[1]}`),
 	} {
-		if got := send(t, s, http.MethodPost, "/node/v1/cleanups", bearer, body); got.status != http.StatusBadRequest || got.body["error"] != "bad_request" {
+		if got := send(t, s, http.MethodPost, "/node/v1/cleanups", bearer, body); got.status != http.StatusBadRequest || got.body["code"] != "bad_request" {
 			t.Fatalf("%s: status %d body %v, want 400 bad_request", name, got.status, got.body)
 		}
 	}
