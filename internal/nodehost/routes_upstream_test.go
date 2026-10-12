@@ -96,7 +96,7 @@ func admitClaim(t *testing.T, s *nodehost.Server, node string, claim *nodehost.C
 	return admit(t, s, n), n.Masker
 }
 
-func send(t *testing.T, s *nodehost.Server, method, path, bearer, body string) reply {
+func ask(t *testing.T, s *nodehost.Server, method, path, bearer, body string) reply {
 	t.Helper()
 	var reader io.Reader
 	if body != "" {
@@ -158,7 +158,7 @@ func TestNewClaimRefusesAnythingButAClaimToken(t *testing.T) {
 func TestForwardRoutesWithoutAClaimAnswer502(t *testing.T) {
 	s, _ := start(t)
 	bearer, _ := admitClaim(t, s, "build", nil)
-	got := send(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"sts"}`)
+	got := ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"sts"}`)
 	wantRefusal(t, got, http.StatusBadGateway, "upstream_unavailable")
 }
 

@@ -317,7 +317,7 @@ func TestBrokeredNodeForceReleasesSupersededHolders(t *testing.T) {
 	}
 }
 
-func TestBrokeredNodeMovesOutputsThroughTheLoopbackShim(t *testing.T) {
+func TestBrokeredNodeMovesOutputsThroughTheLoopbackController(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsAt(home)
 	st, err := teststore.Open(paths.StateDB())
@@ -334,9 +334,8 @@ func TestBrokeredNodeMovesOutputsThroughTheLoopbackShim(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	backends := LocalBackends(paths, st, nil)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	shim, err := startLoopbackShim(backends.State, backends.Concurrency, "run-1", logger)
+	shim, err := startLoopbackController(ctx, st, nil, "run-1", logger)
 	if err != nil {
 		t.Fatal(err)
 	}

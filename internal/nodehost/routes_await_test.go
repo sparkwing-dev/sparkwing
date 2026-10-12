@@ -34,7 +34,7 @@ func TestTenAwaitsOnTenChildrenAllSucceed(t *testing.T) {
 	})
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 	for range 10 {
-		send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
+		ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 	}
 
 	done := make(chan int, 10)
@@ -70,7 +70,7 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 		}
 	})
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
-	send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
+	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 
 	const awaits = 64
 	done := make(chan int, awaits)
@@ -84,7 +84,7 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 	// made, so a 429 means all 64 awaits hold their places.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		got := send(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, "")
+		got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, "")
 		if got.status == http.StatusTooManyRequests && got.body["code"] == "too_many_requests" {
 			break
 		}
@@ -102,7 +102,7 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 	if n := polls.Load(); n != 2 {
 		t.Fatalf("%d awaits made %d polls, want 2: one poller a second", awaits, n)
 	}
-	got := send(t, s, http.MethodGet, path, bearer, "")
+	got := ask(t, s, http.MethodGet, path, bearer, "")
 	if got.status != http.StatusOK || got.body["status"] != "success" || polls.Load() != 3 {
 		t.Fatalf("an await after the child ended: status %d body %v, %d polls; the ended poller must not serve it",
 			got.status, got.body, polls.Load())
@@ -124,7 +124,7 @@ func TestAwaitPollerStopsOnRevokeAndClose(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
+			ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 			done := make(chan int, 1)
 			go openRequest(context.Background(), s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=60000", bearer, "", done)
 			<-polling

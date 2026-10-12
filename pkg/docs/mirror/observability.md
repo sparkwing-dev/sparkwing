@@ -86,7 +86,7 @@ local orchestrator for a node it runs itself: those entries carry executor kind
 the global attempt ordinal, source or retry run, executor
 name and kind, controller-owned location, timestamps, outcome, failure reason,
 and retry link. Missing legacy attribution remains unknown. Node read responses
-and `state.ndjson` node records omit claim generations and all coordinator,
+omit claim generations and all coordinator,
 membership, holder, token, reservation, and internal executor identifiers.
 Public event reads also omit claim generations from attempt-lifecycle
 payloads.
@@ -678,9 +678,7 @@ The controller reports its own budget on `GET /api/v1/health` under
 `object_store`, names every tripped class in `problems`, and exports the
 three `sparkwing_object_store_*` metrics above. The health summary names
 the classes and not their limits, because that route answers without a
-token. A state outbox that has given up replaying sets
-`object_store.stalled` and adds a generic problem. Public health omits
-the stalled path and error; controller logs retain the details.
+token.
 
 Read a controller's budget, and clear a tripped one, with:
 

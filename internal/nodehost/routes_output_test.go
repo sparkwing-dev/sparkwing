@@ -24,7 +24,7 @@ func TestOutputReadsANodeOfTheSameRun(t *testing.T) {
 	c.handle("GET /api/v1/runs/run-1/nodes/{node}/output", answer(http.StatusOK, grant))
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
 
-	got := send(t, s, http.MethodGet, "/node/v1/nodes/build%2Flinux/output", bearer, "")
+	got := ask(t, s, http.MethodGet, "/node/v1/nodes/build%2Flinux/output", bearer, "")
 	if got.status != http.StatusOK || got.body["output"].(map[string]any)["digest"] != "sha256:abc" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -88,7 +88,7 @@ func TestOutputRefusals(t *testing.T) {
 				c.handle("GET /api/v1/runs/run-1/nodes/{node}/output", tc.out)
 			}
 			bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-			wantRefusal(t, send(t, s, http.MethodGet, outputPath(tc.node), bearer, ""), tc.status, tc.code)
+			wantRefusal(t, ask(t, s, http.MethodGet, outputPath(tc.node), bearer, ""), tc.status, tc.code)
 			if reached := len(c.asked()) > 0; reached != tc.reachesControl {
 				t.Fatalf("controller asked %v", c.asked())
 			}
@@ -110,7 +110,7 @@ func TestPipelineLatestReadsADeclaredReference(t *testing.T) {
 	})
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
 
-	got := send(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?node=tag&max_age_ms=5000", bearer, "")
+	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?node=tag&max_age_ms=5000", bearer, "")
 	if got.status != http.StatusOK || got.body["run_id"] != "run-0" || got.body["output"] != "v1.2.3" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -146,7 +146,7 @@ func TestPipelineLatestRefusals(t *testing.T) {
 				c.handle("POST /api/v1/runs/run-1/nodes/deploy/claim/input", tc.input)
 			}
 			bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-			wantRefusal(t, send(t, s, http.MethodGet, "/node/v1/pipelines/release/latest"+tc.query, bearer, ""), tc.status, tc.code)
+			wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest"+tc.query, bearer, ""), tc.status, tc.code)
 			if tc.input == nil && len(c.asked()) > 0 {
 				t.Fatalf("a malformed request reached the controller: %v", c.asked())
 			}

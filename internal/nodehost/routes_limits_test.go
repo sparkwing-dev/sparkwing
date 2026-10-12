@@ -49,10 +49,10 @@ func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 	}
 	before := len(c.asked())
 	big := `{"pipeline":"build","args":{"a":"` + strings.Repeat("x", 1<<20) + `"}}`
-	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/children", bearer, big), http.StatusTooManyRequests, "too_many_requests")
-	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`), http.StatusTooManyRequests, "too_many_requests")
-	wantRefusal(t, send(t, s, http.MethodGet, "/node/v1/nodes/build/output", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
-	wantRefusal(t, send(t, s, http.MethodGet, "/node/v1/pipelines/p/latest?node=n", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, big), http.StatusTooManyRequests, "too_many_requests")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`), http.StatusTooManyRequests, "too_many_requests")
+	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/nodes/build/output", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
+	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/p/latest?node=n", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
 	if asked := c.asked()[before:]; len(asked) != 0 {
 		t.Fatalf("a refused request reached the controller: %v", asked)
 	}
@@ -69,7 +69,7 @@ func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		got := send(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`)
+		got := ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`)
 		if got.status == http.StatusNotFound {
 			break
 		}
@@ -84,7 +84,7 @@ func TestChildBodyOverTheLimitIsRefused(t *testing.T) {
 	c := newChildController(t)
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 	body := `{"pipeline":"build","args":{"a":"` + strings.Repeat("x", 64<<10) + `"}}`
-	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/children", bearer, body), http.StatusBadRequest, "bad_request")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, body), http.StatusBadRequest, "bad_request")
 	if len(c.asked()) != 0 {
 		t.Fatalf("an oversized body reached the controller: %v", c.asked())
 	}

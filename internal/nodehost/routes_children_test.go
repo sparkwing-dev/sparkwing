@@ -46,18 +46,18 @@ func TestChildStartsAndAwaitsItsOutput(t *testing.T) {
 	c.handle("GET /api/v1/runs/run-1/children/child-2", answer(http.StatusOK, map[string]string{"status": "running"}))
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 
-	got := send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build","args":{"tag":"1"}}`)
+	got := ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build","args":{"tag":"1"}}`)
 	if got.status != http.StatusCreated || got.body["run_id"] != "child-1" {
 		t.Fatalf("start: status %d body %v", got.status, got.body)
 	}
-	got = send(t, s, http.MethodGet, "/node/v1/children/child-1/await?node=build", bearer, "")
+	got = ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?node=build", bearer, "")
 	if got.status != http.StatusOK || got.body["status"] != "success" ||
 		got.body["output"].(map[string]any)["image"] != "app:1" {
 		t.Fatalf("await: status %d body %v", got.status, got.body)
 	}
 
-	send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
-	got = send(t, s, http.MethodGet, "/node/v1/children/child-2/await?node=build&wait_ms=0", bearer, "")
+	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
+	got = ask(t, s, http.MethodGet, "/node/v1/children/child-2/await?node=build&wait_ms=0", bearer, "")
 	if got.status != http.StatusOK || got.body["status"] != "running" || got.body["output"] != nil {
 		t.Fatalf("await running: status %d body %v", got.status, got.body)
 	}
@@ -72,12 +72,12 @@ func TestChildOrdinalSurvivesAFailedCall(t *testing.T) {
 	c := newChildController(t, leak, started("child-1"), answer(http.StatusConflict, map[string]string{"error": "cycle: build would re-enter itself"}), started("child-2"))
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 
-	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`), http.StatusBadGateway, "upstream_unavailable")
-	if got := send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`); got.status != http.StatusCreated {
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`), http.StatusBadGateway, "upstream_unavailable")
+	if got := ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`); got.status != http.StatusCreated {
 		t.Fatalf("retry: status %d body %v", got.status, got.body)
 	}
-	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"deploy"}`), http.StatusConflict, "cycle")
-	send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"deploy"}`), http.StatusConflict, "cycle")
+	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 	if want := []int64{0, 0, 1, 2}; len(c.ordinals) != 4 || c.ordinals[0] != want[0] || c.ordinals[1] != want[1] ||
 		c.ordinals[2] != want[2] || c.ordinals[3] != want[3] {
 		t.Fatalf("ordinals %v, want %v", c.ordinals, want)
@@ -116,7 +116,7 @@ func TestChildStartRefusals(t *testing.T) {
 			}
 			c := newChildController(t, replies...)
 			bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
-			wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/children", bearer, tc.body), tc.status, tc.code)
+			wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, tc.body), tc.status, tc.code)
 			if tc.reply == nil && len(c.asked()) > 0 {
 				t.Fatalf("a malformed request reached the controller: %v", c.asked())
 			}
@@ -132,7 +132,7 @@ func TestAwaitRefusesARunThisNodeDidNotStart(t *testing.T) {
 	c.handle("GET /api/v1/runs/run-1/children/{child}/nodes/{node}/output", answer(http.StatusOK, store.OutputReadGrant{}))
 	starter, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 	other, _ := admitClaim(t, s, "notify", claimFor(t, c.fakeController))
-	send(t, s, http.MethodPost, "/node/v1/children", starter, `{"pipeline":"build"}`)
+	ask(t, s, http.MethodPost, "/node/v1/children", starter, `{"pipeline":"build"}`)
 	before := len(c.asked())
 
 	for _, path := range []string{
@@ -140,7 +140,7 @@ func TestAwaitRefusesARunThisNodeDidNotStart(t *testing.T) {
 		"/node/v1/children/run-1/await",
 		"/node/v1/children/some-other-teams-run/await",
 	} {
-		wantRefusal(t, send(t, s, http.MethodGet, path, other, ""), http.StatusNotFound, "unknown_child")
+		wantRefusal(t, ask(t, s, http.MethodGet, path, other, ""), http.StatusNotFound, "unknown_child")
 	}
 	if asked := c.asked()[before:]; len(asked) != 0 {
 		t.Fatalf("an unknown child reached the controller: %v", asked)
@@ -150,9 +150,9 @@ func TestAwaitRefusesARunThisNodeDidNotStart(t *testing.T) {
 		"/node/v1/children/child-1/await?wait_ms=-1",
 		"/node/v1/children/child-1/await?node=..",
 	} {
-		wantRefusal(t, send(t, s, http.MethodGet, path, starter, ""), http.StatusBadRequest, "bad_request")
+		wantRefusal(t, ask(t, s, http.MethodGet, path, starter, ""), http.StatusBadRequest, "bad_request")
 	}
-	if got := send(t, s, http.MethodGet, "/node/v1/children/child-1/await?node=build", starter, ""); got.status != http.StatusOK {
+	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?node=build", starter, ""); got.status != http.StatusOK {
 		t.Fatalf("starter's own await: status %d body %v", got.status, got.body)
 	}
 	noLeak(t, logs)
@@ -173,7 +173,7 @@ func TestAwaitEndsWhenTheGrantIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
+	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 
 	done := make(chan int, 1)
 	go func() {

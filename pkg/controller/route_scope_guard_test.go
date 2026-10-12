@@ -100,25 +100,6 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 	})
 }
 
-func TestRouteGuard_LoopbackRoutesAreASubsetOfTheController(t *testing.T) {
-	server := muxRoutes(t, "server.go")
-	loopback := muxRoutes(t, "loopback.go")
-	if len(loopback) == 0 {
-		t.Fatal("no loopback routes parsed; the guard would pass vacuously")
-	}
-	for pattern, scope := range loopback {
-		want, ok := server[pattern]
-		if !ok {
-			t.Errorf("loopback serves %q, which server.go does not register", pattern)
-			continue
-		}
-		if want != scope {
-			t.Errorf("loopback serves %q at scope %s; server.go registers it at %s",
-				pattern, scope, want)
-		}
-	}
-}
-
 func routeScope(handler ast.Expr) (string, bool) {
 	call, ok := handler.(*ast.CallExpr)
 	if !ok || len(call.Args) == 0 {

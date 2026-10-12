@@ -12,7 +12,7 @@ import (
 type GuardToken struct {
 	Raw  string // original token string (for error messages)
 	Kind GuardKind
-	Arg  string // for KindProfileName / KindArg / KindGitBranch: the LHS / branch name
+	Arg  string // for KindArg / KindGitBranch: the LHS / branch name
 	Val  string // for KindArg: the RHS literal
 }
 
@@ -23,23 +23,18 @@ const (
 	KindUnknown GuardKind = iota
 	KindProfileLocal
 	KindProfileController
-	KindProfileName    // profile:name=NAME
 	KindGitBranch      // git:branch=NAME
 	KindGitBranchOnDef // git:branch=default
 	KindArg            // arg:FLAG=VALUE
 )
 
-// GuardContext is everything a guard token needs to evaluate: the
-// active profile shape + the resolved args by CLI flag name.
+// GuardContext is everything a guard token needs to evaluate: where the
+// run is dispatched, the resolved args by CLI flag name, and the branch.
 //
 // The evaluator never reaches back into orchestrator or profile
 // packages -- callers pack what they have into this context and
 // hand it off. Keeps guards/predicates testable in isolation.
 type GuardContext struct {
-	// ProfileName is the active profile's name. Empty when no
-	// profile is in scope (no --profile, no pipeline.profile).
-	ProfileName string
-
 	// ProfileIsLocal is true when this machine dispatches the run
 	// (every `sparkwing run`), false when a controller dispatched it.
 	ProfileIsLocal bool
@@ -66,9 +61,8 @@ type GuardContext struct {
 //
 // Vocabulary (case-sensitive):
 //
-//	profile:local            -- active profile has no controller
-//	profile:controller       -- active profile has a controller URL
-//	profile:name=NAME        -- active profile's name equals NAME
+//	profile:local            -- this machine dispatches the run
+//	profile:controller       -- a controller dispatched the run
 //	git:branch=default       -- dispatch on the supplied default branch
 //	git:branch=NAME          -- dispatch on the named branch
 //	arg:FLAG=VALUE           -- resolved arg equals the value
@@ -100,13 +94,11 @@ func parseProfileGuard(raw, rest string) (GuardToken, error) {
 		tok.Kind = KindProfileController
 		return tok, nil
 	}
-	key, val, ok := strings.Cut(rest, "=")
-	if !ok || key != "name" || val == "" {
-		return tok, fmt.Errorf("guard %q: profile: expects 'local', 'controller', or 'name=NAME'", raw)
+	if strings.HasPrefix(rest, "name=") {
+		return tok, fmt.Errorf("guard %q: profile:name= is removed because a run no longer takes a profile; "+
+			"guard on profile:local or profile:controller instead", raw)
 	}
-	tok.Kind = KindProfileName
-	tok.Arg = val
-	return tok, nil
+	return tok, fmt.Errorf("guard %q: profile: expects 'local' or 'controller'", raw)
 }
 
 func parseGitGuard(raw, rest string) (GuardToken, error) {
@@ -143,8 +135,6 @@ func (t GuardToken) Matches(ctx GuardContext) bool {
 		return ctx.ProfileIsLocal
 	case KindProfileController:
 		return !ctx.ProfileIsLocal
-	case KindProfileName:
-		return ctx.ProfileName == t.Arg
 	case KindGitBranch:
 		return ctx.GitBranch != "" && ctx.GitBranch == t.Arg
 	case KindGitBranchOnDef:

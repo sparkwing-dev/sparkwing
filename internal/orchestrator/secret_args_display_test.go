@@ -3,14 +3,12 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -173,35 +171,6 @@ func TestSecretArgs_StoredRowKeepsPlaintextForReExecution(t *testing.T) {
 
 	if run.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
 		t.Error("stored row does not redact through RedactedForDisplay")
-	}
-}
-
-func TestSecretArgs_StateDumpOmitsInputHash(t *testing.T) {
-	registerSecretArgsPipeline()
-	artifacts, err := fs.NewArtifactStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := newPathsWithStore(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:      secretArgPipeline,
-		Args:          map[string]string{"token": secretArgValue, "env": visibleArgValue},
-		ArtifactStore: artifacts,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := artifacts.Get(context.Background(), "runs/"+res.RunID+"/state.ndjson")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	body, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "inputs_hash") {
-		t.Errorf("state.ndjson exposes an input-hash oracle:\n%s", body)
 	}
 }
 

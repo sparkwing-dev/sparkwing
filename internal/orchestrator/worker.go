@@ -85,8 +85,11 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		Runner:   r,
 	}
 
-	applyCheckoutProjectConfig(&runOpts, logger)
-	res, err := Run(runCtx, backends, runOpts)
+	err := applyCheckoutProjectConfig(&runOpts)
+	var res *Result
+	if err == nil {
+		res, err = Run(runCtx, backends, runOpts)
+	}
 	cancelRun()
 	if err != nil {
 		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
@@ -134,7 +137,8 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
 	reason := cause.Error()
 	_, defined := sparkwing.Lookup(trigger.Pipeline)
-	if defined {
+	var configErr *projectConfigError
+	if defined && !errors.As(cause, &configErr) {
 		reason = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
 	}
 	run, err := state.GetRun(ctx, trigger.ID)

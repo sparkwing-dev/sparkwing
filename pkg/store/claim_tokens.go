@@ -315,10 +315,10 @@ func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, 
 	}
 }
 
-// safety: the claim's attempt rows name the attempts it ran, so only the first of them, which its writer keeps
-// across in-process retries, only for the grace after the later of its last attempt's end and its node's, and only while
-// no later claim holds the node, may still finish its log. A launcher's work claim and a runner's node claim end
-// when their node reports, before the process that holds the log seals it; no other kind does.
+// safety: the claim's attempt rows name the attempts it ran, so only the first of them, which its writer keeps across
+// in-process retries, only for the grace after the later of its last attempt's end and its node's, and only while no
+// later claim holds the node, may still finish its log. A launcher's work claim and a runner's node claim end when
+// their node reports, before the process that holds the log seals it; no other kind does.
 func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
 	if tok.Kind != ClaimTokenWork && tok.Kind != ClaimTokenNode {
 		return ClaimToken{}, ErrClaimNotLive

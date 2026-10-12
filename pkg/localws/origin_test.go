@@ -9,7 +9,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -128,11 +127,10 @@ func TestBuildHandler_GuardsTheServedChain(t *testing.T) {
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>stub dashboard</body></html>")},
 	}
 	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343"}, handlerParts{
-		paths:   paths,
-		backend: backend.NewStoreBackend(st, paths, nil),
-		store:   st,
-		ctrl:    controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle}),
-	}, bundle)
+		paths: paths,
+		store: st,
+		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle}),
+	})
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 

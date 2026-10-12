@@ -17,7 +17,7 @@ func TestOIDCTokenIsMaskedBeforeTheNodeGetsIt(t *testing.T) {
 	})
 	bearer, masker := admitClaim(t, s, "deploy", claimFor(t, c))
 
-	got := send(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"sts.amazonaws.com"}`)
+	got := ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"sts.amazonaws.com"}`)
 	if got.status != http.StatusOK || got.body["token"] != "eyJ.signed.jwt" || got.body["expires_at"] == nil {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -63,7 +63,7 @@ func TestOIDCTokenRefusals(t *testing.T) {
 				c.handle("POST /api/v1/runs/run-1/oidc-token", tc.upstream)
 			}
 			bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-			wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, tc.body), tc.status, tc.code)
+			wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, tc.body), tc.status, tc.code)
 			if tc.upstream == nil && len(c.asked()) > 0 {
 				t.Fatalf("a malformed request reached the controller: %v", c.asked())
 			}

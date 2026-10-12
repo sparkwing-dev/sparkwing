@@ -29,6 +29,8 @@ type Server struct {
 
 	mu     sync.RWMutex
 	grants map[[bearerHashSize]byte]*grant
+
+	cleanups cleanupLedger
 }
 
 // Start listens on an ephemeral 127.0.0.1 port and serves until Close. A nil
@@ -50,6 +52,8 @@ func Start(logger *slog.Logger) (*Server, error) {
 	s.handle(mux, "POST /node/v1/oidc-token", s.serveOIDCToken)
 	s.handle(mux, "POST /node/v1/children", s.serveStartChild)
 	s.handle(mux, "GET /node/v1/children/{run}/await", s.serveAwaitChild)
+	s.handle(mux, "POST /node/v1/cleanups", s.registerCleanup)
+	s.handle(mux, "DELETE /node/v1/cleanups/{id}", s.releaseCleanup)
 	s.http = &http.Server{
 		Handler:           s.requireProtocol(mux),
 		BaseContext:       func(net.Listener) context.Context { return s.ctx },
