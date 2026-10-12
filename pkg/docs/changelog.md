@@ -73,6 +73,8 @@ unlock.
 ### Fixed
 - **controller:** A node waiting for an agent no longer reports that no agent of its team can run it when the agent's token expires
   Claim attention listed only tokens that never expire, because it compared their expiry in seconds against the clock in nanoseconds, so every runner and machine token dropped out; it also read an offline agent's last use as a 1970 date. Both now read seconds.
+- **controller + store:** Two controllers sharing a PostgreSQL store while a deploy rolls no longer report a run twice or leave a second GitHub check run behind
+  The maintenance sweep, which fails runs, claims and approvals whose owners went silent and judges why waiting nodes have no agent, runs in one controller at a time under a store lease (`Store.RunReaperLeased`), so a reaped run gets one `failed` update and a node's reason no longer alternates between the two controllers' views of their runners. GitHub check runs and commit statuses are written under a per-run lock (`Tenant.ReportGitHubCheck`, a PostgreSQL advisory lock whose transaction also records a new check run's id), so the two controllers create one check run between them; before creating one, a controller looks up the commit's check run carrying the run's id as `external_id` and adopts it, so a create whose record was lost is not repeated. An update ranked below the run's stored status (queued, then running, then finished) is dropped, so a check run or commit status never moves back and a final one keeps its conclusion.
 
 ### Removed
 - **controller (Breaking):** Operator powers answer only the operator console; the admin token no longer reaches them

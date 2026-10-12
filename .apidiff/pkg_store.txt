@@ -2509,6 +2509,7 @@ func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.D
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
+func (s *Store) RunReaperLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
@@ -2836,6 +2837,7 @@ func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) 
 func (t *Tenant) RenameGitHubAppAutomation(ctx context.Context, installation, repository int64, name string) error
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error
 func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error
+func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
 func (t *Tenant) RequestCancel(ctx context.Context, id string) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
 func (t *Tenant) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)

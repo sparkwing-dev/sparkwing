@@ -1,0 +1,117 @@
+package store_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+)
+
+// Two controllers reporting one run take its GitHub report lock in turn: the
+// second waits while the first holds it, and enters seeing the check run the
+// first created. On Postgres the two hold separate connection pools, as two
+// processes do.
+func TestReportGitHubCheckAdmitsOneHolderAtATime(t *testing.T) {
+	target := storetest.New(t)
+	first := target.Open(t)
+	second := first
+	if first.Dialect() == store.DialectPostgres {
+		second = target.Open(t)
+	}
+	ctx := context.Background()
+	if err := first.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	a, err := first.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := second.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entered, release, secondIn := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	done := make(chan error, 2)
+	go func() {
+		done <- a.ReportGitHubCheck(ctx, "run-1", func(_ context.Context, id int64) (int64, error) {
+			if id != 0 {
+				t.Errorf("first holder saw check run %d, want none", id)
+			}
+			close(entered)
+			<-release
+			return 41, nil
+		})
+	}()
+	<-entered
+	go func() {
+		done <- b.ReportGitHubCheck(ctx, "run-1", func(_ context.Context, id int64) (int64, error) {
+			if id != 41 {
+				t.Errorf("second holder saw check run %d, want the first holder's 41", id)
+			}
+			close(secondIn)
+			return 0, nil
+		})
+	}()
+	if first.Dialect() == store.DialectPostgres {
+		waitForAdvisoryWaiter(t, first, "sparkwing/github-check/"+string(store.DefaultTeam)+"/run-1", secondIn)
+	}
+	select {
+	case <-secondIn:
+		t.Fatal("the second holder entered while the first held the lock")
+	default:
+	}
+	close(release)
+	<-secondIn
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("lock: %v", err)
+		}
+	}
+}
+
+func waitForAdvisoryWaiter(t *testing.T, st *store.Store, key string, entered <-chan struct{}) {
+	t.Helper()
+	for {
+		select {
+		case <-entered:
+			t.Fatal("the second holder entered while the first held the lock")
+		default:
+		}
+		var waiting int
+		if err := st.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND NOT granted
+			  AND objid::text::bigint = (hashtext($1)::bigint & 4294967295)`, key).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			return
+		}
+	}
+}
+
+// A holder whose context ends after it created a check run records nothing,
+// so the next holder sees no id rather than one recorded after it let go.
+func TestReportGitHubCheckRecordsNothingPastTheHoldersDeadline(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, cancel := context.WithCancel(ctx)
+	if err := tenant.ReportGitHubCheck(held, "run-1", func(context.Context, int64) (int64, error) {
+		cancel()
+		return 99, nil
+	}); err == nil {
+		t.Fatal("a holder past its deadline reported success")
+	}
+	if id, err := tenant.GitHubCheckRun(ctx, "run-1"); err != nil || id != 0 {
+		t.Fatalf("recorded check run = %d, %v; want none", id, err)
+	}
+}
