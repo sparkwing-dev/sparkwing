@@ -62,8 +62,8 @@ func TestFinishRunRetryReportsCommittedOutcomeWithoutRefolding(t *testing.T) {
 			github := attachAppChecks(t, s, "")
 			s.reportGitHubRunState(t.Context(), "run", "pending")
 			drainChecks(t, s)
-			if calls := github.CheckRunCalls(); len(calls) != 1 || calls[0].Status != "queued" {
-				t.Fatalf("check run writes = %+v, want one queued create", calls)
+			if calls := github.CheckRunCalls(); len(calls) != 0 {
+				t.Fatalf("check run writes = %+v, want the pending update for a finished run dropped", calls)
 			}
 			finish("failed", http.StatusBadRequest)
 			drainChecks(t, s)

@@ -28,7 +28,7 @@ const acme = {
   ],
 };
 
-async function mockOperator(page: Page) {
+async function mockOperator(page: Page, team: object = acme) {
   const posts: { path: string; body: unknown }[] = [];
   let reads = 0;
   await page.route("**/api/v1/**", async (route) => {
@@ -48,7 +48,7 @@ async function mockOperator(page: Page) {
       });
     } else if (path === "/api/v1/operator/teams/acme") {
       reads++;
-      await route.fulfill({ json: acme });
+      await route.fulfill({ json: team });
     } else if (path === "/api/v1/operator/waitlist") {
       await route.fulfill({ json: { accounts: [], total: 0 } });
     } else if (path.startsWith("/api/v1/operator/teams/acme/")) {
@@ -114,6 +114,55 @@ test("an action is sent only after its confirmation names the team and effect", 
   });
   expect((seen.posts[0].body as { key: string }).key).toMatch(/.{8,}/);
   await expect.poll(seen.reads).toBeGreaterThan(readsBefore);
+});
+
+test("the operator releases a dispute hold and sets a trusted team's overrides", async ({
+  page,
+}) => {
+  const held = {
+    ...acme,
+    billing: { ...acme.billing, trust: "granted", trusted: true, runner_cap: 120 },
+    frozen: true,
+    holds: ["dp_1"],
+  };
+  const seen = await mockOperator(page, held);
+  await page.goto("/operator?team=acme");
+  await expect(page.getByText("120 Cloud nodes")).toBeVisible();
+
+  await page.getByLabel("Action").selectOption({ label: "Release a dispute hold" });
+  await page.getByLabel("Reason").fill("dispute won");
+  const review = page.getByRole("button", { name: "Review" });
+  await expect(review).toBeDisabled();
+  await page.getByLabel("Dispute hold to release").selectOption("dp_1");
+  await review.click();
+  const dialog = page.getByRole("alertdialog", { name: "Confirm action" });
+  await expect(dialog).toContainText("The dispute hold dp_1 on Acme is released.");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect(dialog).toBeHidden();
+  expect(seen.posts[0]).toEqual({
+    path: "/api/v1/operator/teams/acme/unfreeze",
+    body: { reason: "dispute won", hold: "dp_1" },
+  });
+
+  await page.getByLabel("Action").selectOption({ label: "Set limit override" });
+  await page.getByLabel("Amount in US dollars").fill("2500");
+  await page.getByLabel("Daily cap in US dollars (optional)").fill("300");
+  await page.getByLabel("Cloud node cap (optional)").fill("250");
+  await page.getByLabel("Reason").fill("enterprise");
+  await review.click();
+  await expect(dialog).toContainText("holds up to 250 Cloud nodes at once");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect(dialog).toBeHidden();
+  expect(seen.posts[1]).toEqual({
+    path: "/api/v1/operator/teams/acme/trust",
+    body: {
+      trust: "granted",
+      reason: "enterprise",
+      limit_cents: 250_000,
+      daily_cap_cents: 30_000,
+      runner_cap: 250,
+    },
+  });
 });
 
 function waiting(n: number) {

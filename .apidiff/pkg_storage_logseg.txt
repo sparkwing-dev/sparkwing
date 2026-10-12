@@ -116,7 +116,7 @@ func RunPrefix(class, team, runID string) (string, error)
 func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
 	put func(ctx context.Context, key string, body []byte) error,
 ) (*Manifest, error)
-const SealGrace = 60 * time.Second
+const SealGrace = store.NodeLogSealGrace
 const SealedByController = "controller"
 const SealedByExport = "export"
 const SealedByNode = "node"

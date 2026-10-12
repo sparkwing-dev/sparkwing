@@ -130,6 +130,24 @@ numbered. A run that names no team goes under `--default-team`
 stopped and run again; a run converted after an interrupted pass picks up
 where it stopped.
 
+### Overlapping controllers during an upgrade
+
+Two controllers on one PostgreSQL store can overlap while a deployment
+replaces one pod with the next. The maintenance sweep, which fails runs and
+claims whose runners went silent, times out approvals and queued nodes, and
+records why waiting nodes have no agent, runs in one of them at a time under
+a store lease, as the cron tick and the storage pass do. A controller that
+dies mid-sweep holds the lease for at most a minute. A sweep that runs past
+that can overlap the next one; its writes are conditional on the state they
+read, and GitHub reports are guarded per run. The sweep judges a
+waiting node from the runners connected to the controller holding the lease,
+so a runner reporting only to the other one reads as offline until it
+reconnects. GitHub check runs and commit statuses are written under a
+per-run lock in the store, so the two create one check run per run between
+them. The overlap is meant to last a deploy: runner presence, the egress
+meter and the object-store budget still belong to each process, so run one
+controller otherwise. A SQLite store serves one controller process.
+
 ### Controller credentials
 
 `sparkwing-controller` reads every secret from one directory, named with
@@ -152,6 +170,7 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
+| `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files
@@ -182,7 +201,8 @@ grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
 no credit or team billing routes, and gives teams unlimited room in the
 controller's storage-tier checks. Operator-set storage quotas still apply.
 The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
-metering can contact Korey for help running sparkwing-ops. See
+metering can contact Korey for help running the operator console and
+sparkwing-ops. See
 [Credits](auth.md#credits) for the licensed behavior.
 
 ### Storage class

@@ -306,22 +306,48 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 	if err != nil {
 		return err
 	}
-	id, err := tenant.GitHubCheckRun(ctx, u.runID)
+	// safety: the lock spans the read of the recorded id through recording a
+	// new one, so of two controllers reporting the same run one creates the
+	// check run and the other updates it.
+	var created int64
+	err = tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, id int64) (int64, error) {
+		run, stale := staleForRun(ctx, tenant, u)
+		if stale {
+			return 0, nil
+		}
+		check := r.checkRun(ctx, tenant, u, run)
+		adopted := int64(0)
+		if id == 0 {
+			// safety: a create GitHub took whose record rolled back left a check
+			// run carrying this run's id, so it is adopted rather than doubled.
+			found, err := r.client.FindCheckRun(ctx, tok.Token, u.owner, u.repo, u.sha, check.Name, u.runID)
+			if err != nil {
+				return 0, err
+			}
+			id, adopted = found, found
+		}
+		if id != 0 {
+			return adopted, r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
+		}
+		id, err := r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
+		created = id
+		return id, err
+	})
+	if err != nil && created != 0 {
+		return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, created, err)
+	}
+	return err
+}
+
+// safety: a run's status only moves forward, so an update ranked below it is
+// one another controller already passed and is dropped under the report lock.
+// A final update is sent as it is, since the store keeps a timed_out run as failed.
+func staleForRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) (*store.Run, bool) {
+	run, err := tenant.GetRun(ctx, u.runID)
 	if err != nil {
-		return err
+		return nil, false
 	}
-	check := r.checkRun(ctx, tenant, u)
-	if id != 0 {
-		return r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
-	}
-	id, err = r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
-	if err != nil {
-		return err
-	}
-	if _, err := tenant.RecordGitHubCheckRun(context.WithoutCancel(ctx), u.runID, id); err != nil {
-		return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, id, err)
-	}
-	return nil
+	return run, u.phase() < githubCheckPhaseFor(run.Status)
 }
 
 // safety: a check run GitHub created but the store did not record is not
@@ -333,26 +359,32 @@ func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubChe
 	if err != nil {
 		return err
 	}
-	status := "pending"
-	if u.phase() == githubCheckCompleted {
-		status = u.runStatus
+	tenant, err := r.store.ForTeam(ctx, u.team)
+	if err != nil {
+		return err
 	}
-	state, description := githubCommitState(status)
-	return r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
-		State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID),
-		Description: description, Context: "sparkwing/" + u.pipeline,
+	return tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, _ int64) (int64, error) {
+		if _, stale := staleForRun(ctx, tenant, u); stale {
+			return 0, nil
+		}
+		status := "pending"
+		if u.phase() == githubCheckCompleted {
+			status = u.runStatus
+		}
+		state, description := githubCommitState(status)
+		return 0, r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
+			State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID),
+			Description: description, Context: "sparkwing/" + u.pipeline,
+		})
 	})
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) githubapp.CheckRun {
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run) githubapp.CheckRun {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
 	}
-	run, err := tenant.GetRun(ctx, u.runID)
-	if err != nil {
-		run = nil
-	}
+	var err error
 	switch u.phase() {
 	case githubCheckQueued:
 		check.Status = "queued"

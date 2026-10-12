@@ -121,6 +121,9 @@ type GitHub struct {
 	checks           []CheckRunCall
 	checkRuns        map[int64]CheckRunCall
 	failChecks       int
+	createHold       chan struct{}
+	createArrived    chan struct{}
+	mintArrived      chan struct{}
 }
 
 // New starts the fake and stops it when t ends.
@@ -154,6 +157,7 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{sha}/check-runs", g.handleListCheckRuns)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
 	mux.HandleFunc("PATCH /repos/{owner}/{repo}/check-runs/{id}", g.handleCheckRun)
 	srv := httptest.NewServer(mux)
@@ -307,6 +311,19 @@ func (g *GitHub) FailCheckRuns(n int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.failChecks = n
+}
+
+// HoldCheckRunCreates holds every check run create until release is called.
+// arrived receives as each held create reaches the fake, and minted as each
+// installation token is minted from now on, so a test can see a second writer
+// start before it lets the first one finish.
+func (g *GitHub) HoldCheckRunCreates() (arrived, minted <-chan struct{}, release func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.createHold, g.createArrived, g.mintArrived = make(chan struct{}), make(chan struct{}, 16), make(chan struct{}, 16)
+	hold := g.createHold
+	var once sync.Once
+	return g.createArrived, g.mintArrived, func() { once.Do(func() { close(hold) }) }
 }
 
 // CheckRunCalls lists the check run writes accepted so far.
@@ -596,6 +613,10 @@ func (g *GitHub) handleMint(w http.ResponseWriter, r *http.Request) {
 	g.minted = append(g.minted, MintedToken{
 		Installation: inst.ID, Repositories: req.Repositories, RepositoryIDs: req.RepositoryIDs, Permissions: req.Permissions,
 	})
+	select {
+	case g.mintArrived <- struct{}{}:
+	default:
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"token": raw, "expires_at": tok.expires.UTC().Format(time.RFC3339)})
 }
 
@@ -671,6 +692,24 @@ func (g *GitHub) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"state": req.State})
 }
 
+func (g *GitHub) handleListCheckRuns(w http.ResponseWriter, r *http.Request) {
+	tok := g.installationToken(r)
+	full := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	if tok == nil || !tok.repos[full] || tok.permissions["checks"] == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Resource not accessible by integration"})
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	runs := []map[string]any{}
+	for id, call := range g.checkRuns {
+		if call.Repo == full && call.HeadSHA == r.PathValue("sha") && call.Name == r.URL.Query().Get("check_name") {
+			runs = append(runs, map[string]any{"id": id, "name": call.Name, "external_id": call.ExternalID})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(runs), "check_runs": runs})
+}
+
 func (g *GitHub) handleCheckRun(w http.ResponseWriter, r *http.Request) {
 	tok := g.installationToken(r)
 	full := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
@@ -693,6 +732,13 @@ func (g *GitHub) handleCheckRun(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
 		return
+	}
+	g.mu.Lock()
+	hold, arrived := g.createHold, g.createArrived
+	g.mu.Unlock()
+	if hold != nil && r.Method == http.MethodPost {
+		arrived <- struct{}{}
+		<-hold
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()

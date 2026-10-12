@@ -242,3 +242,21 @@ SINGLE='value # literal' # explanation
 		t.Fatalf("comment-only value = %q, %v", value, err)
 	}
 }
+
+func TestFactory_ControllerSource_ErrorsOmitURLCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	withCreds := strings.Replace(srv.URL, "http://", "http://user-cred:pass-cred@", 1)
+	for _, raw := range []string{withCreds, withCreds + "/%zz"} {
+		r, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeController, URL: raw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = r.Resolve(context.Background(), "TOKEN")
+		if err == nil || strings.Contains(err.Error(), "-cred") {
+			t.Fatalf("%s: error %v, want a failure that names no credentials", raw, err)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	localrunner "github.com/sparkwing-dev/sparkwing/internal/runners/local"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -64,7 +65,7 @@ func runHosted(ctx context.Context, cfg hostedRun) (res hostedRunResult, err err
 		return hostedRunResult{}, fmt.Errorf("hosted run: create run: %w", err)
 	}
 	res = hostedRunResult{RunID: runID, Nodes: map[string]runner.Result{}}
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	// safety: registered before every later defer, so it runs after the heartbeat
 	// and controller stop, and no return after CreateRun leaves the row running.
 	defer func() {
@@ -145,8 +146,8 @@ func hostedDescribes(doc []byte, pipeline string) error {
 
 // safety: describe carries no nodes, so the binary evaluates the plan for the
 // run row the engine already wrote.
-func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token string) (planSnapshot, []byte, error) {
-	var snap planSnapshot
+func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token string) (nodeproto.PlanDoc, []byte, error) {
+	var snap nodeproto.PlanDoc
 	cmd := exec.CommandContext(ctx, cfg.Binary, "plan", "--json")
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(os.Environ(),
@@ -169,7 +170,7 @@ func hostedPlan(ctx context.Context, cfg hostedRun, runID, controllerURL, token 
 
 // safety: a node needing behavior the spike does not host is refused before
 // any row is written, so a plan never half-runs.
-func hostedAdmit(ctx context.Context, st *store.Store, runID string, snap planSnapshot) error {
+func hostedAdmit(ctx context.Context, st *store.Store, runID string, snap nodeproto.PlanDoc) error {
 	if err := hostedCheck(snap); err != nil {
 		return err
 	}
@@ -181,7 +182,7 @@ func hostedAdmit(ctx context.Context, st *store.Store, runID string, snap planSn
 	return nil
 }
 
-func hostedCheck(snap planSnapshot) error {
+func hostedCheck(snap nodeproto.PlanDoc) error {
 	if len(snap.Requires) > 0 {
 		return fmt.Errorf("hosted run: the pipeline requires runner labels %v, which the hosted spike does not place", snap.Requires)
 	}
@@ -235,7 +236,7 @@ func hostedCheck(snap planSnapshot) error {
 	return nil
 }
 
-func hostedUnsupported(n snapshotNode) string {
+func hostedUnsupported(n nodeproto.PlanNode) string {
 	switch {
 	case n.Dynamic:
 		return "is generated at run time"
@@ -278,7 +279,7 @@ type hostedDone struct {
 	res runner.Result
 }
 
-func hostedSchedule(ctx context.Context, st *store.Store, lr runner.Runner, cfg hostedRun, runID string, snap planSnapshot) ([]string, map[string]runner.Result) {
+func hostedSchedule(ctx context.Context, st *store.Store, lr runner.Runner, cfg hostedRun, runID string, snap nodeproto.PlanDoc) ([]string, map[string]runner.Result) {
 	results := make(map[string]runner.Result, len(snap.Nodes))
 	started := map[string]bool{}
 	var order []string
@@ -349,7 +350,7 @@ func hostedSchedule(ctx context.Context, st *store.Store, lr runner.Runner, cfg 
 
 // safety: the local runner leaves a cancelled node's row to dispatcher
 // teardown, and the spike is that dispatcher, so no row outlives the run unfinished.
-func hostedFinalize(ctx context.Context, st *store.Store, logger *slog.Logger, runID string, snap planSnapshot, results map[string]runner.Result) {
+func hostedFinalize(ctx context.Context, st *store.Store, logger *slog.Logger, runID string, snap nodeproto.PlanDoc, results map[string]runner.Result) {
 	outcome, reason := sparkwing.Failed, "the node ended without a terminal record"
 	if ctx.Err() != nil {
 		outcome, reason = sparkwing.Cancelled, "ctx-cancelled"
