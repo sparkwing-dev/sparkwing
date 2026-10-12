@@ -155,7 +155,7 @@ func TestUnhostedOutcome_APinnedRunDegradesLikeAnyOther(t *testing.T) {
 	}
 }
 
-func TestUnhostedOutcome_DegradesADaemonThatCannotReadItsOwnStore(t *testing.T) {
+func TestUnhostedOutcome_RefusesADaemonThatCannotReadItsOwnStore(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	refusal := fmt.Errorf("local admission: %w", &wingdclient.AdmissionError{
 		Policy: wingwire.PolicyFail,
@@ -163,16 +163,13 @@ func TestUnhostedOutcome_DegradesADaemonThatCannotReadItsOwnStore(t *testing.T) 
 		Reason: "daemon v0.38.2 could not read the runs store: this state database uses a-feature-from-the-future",
 	})
 	la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-	if !la.unhostedOutcome(refusal, unhosted{reason: standaloneDaemonOlder, skew: true}) {
-		t.Error("a run already standalone for the daemon's own store skew was failed by that same store")
-	}
 	if la.unhostedOutcome(refusal, unhosted{reason: standaloneDaemonOlder}) {
 		t.Error("a corrupt store on a daemon serving no api.sock degraded; that refusal is the one the design keeps")
 	}
 	if la.unhostedOutcome(refusal, unhosted{}) {
 		t.Error("a hosted run swallowed a terminal-check refusal")
 	}
-	if la.unhostedOutcome(refusal, unhosted{reason: standaloneNoDaemon, skew: true}) {
+	if la.unhostedOutcome(refusal, unhosted{reason: standaloneNoDaemon}) {
 		t.Error("a run standalone for a missing daemon swallowed a refusal no daemon could have sent")
 	}
 }

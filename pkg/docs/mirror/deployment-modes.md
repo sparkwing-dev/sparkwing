@@ -137,37 +137,23 @@ that covers dropped bytes. Only a node the run actually has can write to a ring.
 
 #### Schema versioning
 
-A controller's Postgres state database (see
-[PostgreSQL state](self-hosting.md#postgresql-state)) records two things: the migrations applied, one
-`sparkwing_schema_version` row each, and the features its schema relies
-on, one `sparkwing_requirements` row each. A binary opens the database
-when it knows every requirement listed, whatever version number the
-schema table holds. On startup:
+A state database, SQLite or Postgres (see
+[PostgreSQL state](self-hosting.md#postgresql-state)), records its schema
+version in `sparkwing_schema_version`. Until paid launch there is one
+baseline schema, version 1, and no upgrade path. On startup:
 
-- Database at a *lower* version than the binary: the binary runs the
-  missing migrations atomically inside one transaction and stamps the
-  requirements those versions declare. Concurrent controller instances
-  against a fresh database coordinate via a Postgres advisory lock;
-  exactly one runs the migration.
-- Database at the *same* version: nothing to do.
-- Database at a *higher* version than the binary, listing only
-  requirements the binary knows: the binary opens it read/write,
-  migrates nothing, and stamps nothing. Every additive migration lands
-  here, so it never freezes a rollout.
-- Database listing a requirement the binary does not know: the binary
-  refuses to start, naming the requirements and the release that
-  introduced them (`sparkwing: this state database uses
-  unique-token-prefix, which needs sparkwing >= v0.40.0; you have
-  v0.38.2. Run sparkwing update to upgrade.`). A database an older
-  binary migrated carries no requirement rows; the first
-  requirements-aware binary to open it stamps the ones its applied
-  versions declare.
+- Empty database: the binary creates the baseline in one transaction.
+  Concurrent controller instances against a fresh Postgres database
+  coordinate via an advisory lock; exactly one creates it.
+- Database at the binary's version: nothing to do.
+- Database at any other version, including every database a release
+  before the baseline wrote: the binary refuses to start with
+  `sparkwing: this store predates the baseline ...; delete <path> (or drop
+  the database) and start again`. Delete the SQLite file or drop the
+  Postgres database, then start the binary again.
 
-Only a breaking migration couples a binary's version to the schema
-version, and `sparkwing_requirements` names exactly which one. Stagger
-those upgrades: upgrade every binary that opens the database *before*
-you upgrade the database, or run mixed versions briefly during a
-rollout. Clients that reach the database through a controller never meet
+Every binary that opens one database must be built at the same schema
+version. Clients that reach the database through a controller never meet
 the schema.
 
 #### Testing against Postgres

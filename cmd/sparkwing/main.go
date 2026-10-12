@@ -24,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
 	// safety: a systemd or launchd job has no zoneinfo of its own on a slim
 	// host, and a schedule that declares tz: would fail to resolve its zone.
@@ -33,7 +32,6 @@ import (
 
 func init() {
 	docs.Version = installedVersion()
-	store.SetBinaryVersion(installedVersion())
 }
 
 func main() {

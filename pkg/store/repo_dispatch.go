@@ -22,35 +22,6 @@ const (
 	RepoDispatchController RepoDispatch = "controller"
 )
 
-const reposTable = `CREATE TABLE IF NOT EXISTS repos (
-    team       TEXT NOT NULL,
-    repo       TEXT NOT NULL,
-    dispatch   TEXT NOT NULL DEFAULT '',
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (team, repo)
-)`
-
-var repoDispatchRunCols = map[string]string{
-	"dispatch": "TEXT NOT NULL DEFAULT ''",
-}
-
-var launchNodeCols = map[string]string{
-	"timeout_ms": "INTEGER NOT NULL DEFAULT 0",
-}
-
-func applyRepoDispatchMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	ddl := reposTable
-	if postgres {
-		ddl = strings.ReplaceAll(ddl, "INTEGER", "BIGINT")
-	}
-	if _, err := tx.ExecContext(ctx, ddl); err != nil {
-		return err
-	}
-	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
-		"runs": repoDispatchRunCols, "nodes": launchNodeCols,
-	})
-}
-
 // RepoKey is the key a repository's settings are stored under: its GitHub
 // owner and name, lowercased because GitHub resolves both case-insensitively.
 func RepoKey(owner, name string) string {

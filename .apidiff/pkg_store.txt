@@ -1158,7 +1158,6 @@ const InvocationSecretArgsKey = "secret_args"
 func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
 func JoinProfileKey(repo, pipeline string) string
-func KnownRequirements() []string
 type LastOwnerError struct {
 	Teams []TeamInfo
 }
@@ -1202,16 +1201,6 @@ type LaunchJobResult struct {
 }
 type LaunchJobState string
 const LaunchScope = "claims.launch"
-type LegacyOutput struct {
-	Team   Team
-	RunID  string
-	NodeID string
-	Data   []byte
-
-	Recorded *OutputRef
-}
-func (o LegacyOutput) Moved() bool
-func (o LegacyOutput) Ref() OutputRef
 func LiveLogAttempt(attempt, generation int64) string
 const LiveLogAttemptHeader = "X-Sparkwing-Log-Attempt"
 const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
@@ -1326,17 +1315,11 @@ func (sample MetricSample) ValidateResourceValues() error
 const MetricUnknown MetricKind = ""
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 const MicroCreditsPerCredit = 100_000
-func MigratedOutputKey(runID, nodeID string) string
 const MinBillableSeconds = 60
 const MinCardChargeCents = 50
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinLaunchLifetime = 90 * time.Second
 const MinSuppliedTokenLen = 32
-func MissingRequirements(known, listed []string) []string
-type MoveStats struct {
-	Outputs int64
-	Bytes   int64
-}
 type NamedClaimOptions struct {
 	SizesToClass bool
 
@@ -1879,10 +1862,6 @@ type RunsBands struct {
 	TenToFortyNine int
 	FiftyPlus      int
 }
-type SchemaRequirement struct {
-	Name    string
-	AddedBy string
-}
 const ScopeApprovalsWrite = "approvals.write"
 const ScopeLogsRead = "logs.read"
 const ScopeNodesClaim = "nodes.claim"
@@ -1936,7 +1915,6 @@ type Session struct {
 }
 const SessionIDLen = 32
 func SetArgon2MemoryBudget(budget int64) int
-func SetBinaryVersion(v string)
 func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int)
 type SignInProfile struct {
 	Provider      string
@@ -1993,14 +1971,6 @@ type SignUpLimits struct {
 type SignUpMode string
 const SignUpOpen SignUpMode = "open"
 const SignUpWaitlist SignUpMode = "waitlist"
-type SkewError struct {
-	DBVersion        int
-	BinaryVersion    int
-	MinVersion       string
-	InstalledVersion string
-	Requirements     []string
-}
-func (e *SkewError) Error() string
 type SourceCredential struct {
 	Kind      string
 	Host      string
@@ -2365,7 +2335,6 @@ func (s *Store) ImportMark(ctx context.Context, key string) (string, bool, error
 func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, markKey, mark string, now time.Time) (err error)
 func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, parentNodeID, childID string) (bool, error)
 func (s *Store) LatestNodeLog(ctx context.Context, team Team, runID, nodeID string) (NodeLog, error)
-func (s *Store) LegacyOutputs(ctx context.Context, afterRun, afterNode string, limit int, retainedSince time.Time) (out []LegacyOutput, err error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
@@ -2406,13 +2375,9 @@ func (s *Store) MarkCardRefundMade(
 ) error
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
-func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
 	kind ClaimTokenKind, expiresAt, now time.Time,
 ) (string, error)
-func (s *Store) MoveLegacyOutputs(ctx context.Context, retainedSince time.Time, batch int, provenance string, verifyMoved bool,
-	write func(context.Context, LegacyOutput) error,
-) (MoveStats, error)
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
@@ -2461,7 +2426,6 @@ func (s *Store) RecordEgressTotals(ctx context.Context, t EgressTotals) (_ Egres
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
-func (s *Store) RecordMigratedOutput(ctx context.Context, o LegacyOutput, provenance string, now time.Time) (err error)
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
@@ -2480,10 +2444,6 @@ func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status stri
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
-func (s *Store) RequirementSkew(ctx context.Context) (*SkewError, error)
-func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error)
-func (s *Store) Requirements(ctx context.Context) ([]string, error)
-func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, error)
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
@@ -3005,7 +2965,6 @@ const TrustedDailyCapCents = 20_000
 const TrustedPurchaseLimitCents = 50_000
 const TrustedRungCents = 10_000
 const TrustedSpendCeilingCents = 50_000
-func UnknownRequirements(listed []string) []string
 type UnpricedCPUClassError struct {
 	RunID    string
 	NodeID   string

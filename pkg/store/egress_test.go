@@ -2,8 +2,6 @@ package store_test
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -115,95 +113,5 @@ func TestEgressUsageSkipsUnnamedRowsAndPrunesOldMonths(t *testing.T) {
 	}
 	if zero, err := st.PruneEgressUsage(ctx, ""); err != nil || zero != 0 {
 		t.Fatalf("PruneEgressUsage with no month = %d, %v; want 0 and no error", zero, err)
-	}
-}
-
-func assertEgressSchema(t *testing.T, db *sql.DB) {
-	t.Helper()
-	var n int
-	const q = `SELECT COUNT(*) FROM egress_usage`
-	if err := db.QueryRowContext(context.Background(), q).Scan(&n); err != nil {
-		t.Fatalf("%s: %v", q, err)
-	}
-}
-
-func TestSchemaV41FreshSQLiteEgressShape(t *testing.T) {
-	st, err := storetest.NewSQLite(t).TryOpen()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	assertEgressSchema(t, st.DB())
-	if got := readSchemaVersion(t, st.DB()); got != store.ExpectedSchemaVersion() {
-		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
-	}
-}
-
-// safety: dropping the table is what makes reopening the database run the
-// migration against the shape a v40 binary left behind.
-func downgradeEgressToV40(t *testing.T, db *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	for _, q := range []string{
-		`DROP TABLE egress_usage`,
-		`DELETE FROM sparkwing_schema_version WHERE version >= 41`,
-	} {
-		if _, err := db.ExecContext(ctx, q); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-	}
-}
-
-func TestSchemaV41UpgradesRealV40SQLiteShape(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v40.db")
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	downgradeEgressToV40(t, st.DB())
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	up, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("upgrade v40 to v41: %v", err)
-	}
-	defer func() { _ = up.Close() }()
-	assertEgressSchema(t, up.DB())
-	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
-		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
-	}
-}
-
-func TestSchemaV41UpgradesRealV40PostgresShape(t *testing.T) {
-	dsn := pgTestSchemaDSN(t)
-	ctx := context.Background()
-	st, err := store.OpenPostgres(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	downgradeEgressToV40(t, st.DB())
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	up, err := store.OpenPostgres(ctx, dsn)
-	if err != nil {
-		t.Fatalf("upgrade v40 to v41 on Postgres: %v", err)
-	}
-	defer func() { _ = up.Close() }()
-	assertEgressSchema(t, up.DB())
-	if err := up.RecordEgressUsage(ctx, []store.EgressUsage{
-		{Principal: "alice", Month: "2026-09", Bytes: 7},
-	}); err != nil {
-		t.Fatalf("record on the migrated Postgres store: %v", err)
-	}
-	rows, err := up.ListEgressUsage(ctx, "2026-09")
-	if err != nil {
-		t.Fatalf("list on the migrated Postgres store: %v", err)
-	}
-	if len(rows) != 1 || rows[0].Bytes != 7 {
-		t.Fatalf("rows = %+v, want alice at 7", rows)
 	}
 }

@@ -128,19 +128,17 @@ Report whether wingd is running and which build it serves
 Reports daemon reachability and source build identity. An absent daemon exits
 zero. An unreachable socket returns an error.
 
-running_revision identifies the build. missing_requirements lists store
-requirements the binary cannot interpret. Additive migrations permit older
-binaries to keep serving. Older daemons use daemon_schema_version and
-store_schema_version for comparison.
+running_revision identifies the build. daemon_schema_version and
+store_schema_version name the store schema the daemon understands and the one
+the store records; a store ahead of its daemon is reported as diverged.
 
 store_schema_error reports a store the CLI could not read. daemon_store_ready
 and daemon_store_error describe the daemon's own store handle. The daemon
 evicts runs whose terminal state it cannot check. store_path identifies the
 store it tried to open.
 
-daemon_store_skew identifies an incompatible store schema. Pipeline runs use
-standalone storage for that mismatch and fail for other store errors. Older
-daemons omit fields they cannot report.
+Pipeline runs fail while the daemon cannot open its store. Older daemons omit
+fields they cannot report.
 
 api_socket names the controller API socket. api_ready reports whether it is
 bound, and api_error explains a binding failure. A daemon that supports the

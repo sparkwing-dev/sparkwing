@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -112,4 +113,17 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("events = %q\nwant %q", got, want)
 	}
+}
+
+func openState(t *testing.T) *store.Store {
+	t.Helper()
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := openControllerStore(context.Background(), p.StateDB(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
 }

@@ -8,19 +8,6 @@ import (
 	"time"
 )
 
-// safety: a run token's extra repositories live here rather than in the repository, because code in
-// the repository must not widen its own token.
-const githubAppExtraReposTableSQLite = `CREATE TABLE IF NOT EXISTS github_app_extra_repos (
-    team        TEXT NOT NULL,
-    repository  TEXT NOT NULL,
-    extra_repo  TEXT NOT NULL,
-    created_by  TEXT NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL,
-    PRIMARY KEY (team, repository, extra_repo)
-);`
-
-var githubAppExtraReposTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubAppExtraReposTableSQLite)
-
 // MaxGitHubAppExtraRepos bounds one source repository's extra repositories.
 const MaxGitHubAppExtraRepos = 10
 

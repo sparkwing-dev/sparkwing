@@ -61,60 +61,6 @@ type GitHubAppTrigger struct {
 // installation another team already holds.
 var ErrInstallationBoundElsewhere = errors.New("store: this GitHub App installation is connected to another team")
 
-const githubAppTablesSQLite = `
-CREATE TABLE IF NOT EXISTS github_app_installations (
-    installation_id INTEGER PRIMARY KEY,
-    team            TEXT NOT NULL,
-    account_id      INTEGER NOT NULL,
-    account_login   TEXT NOT NULL,
-    account_type    TEXT NOT NULL,
-    suspended       INTEGER NOT NULL DEFAULT 0,
-    connected_by    TEXT NOT NULL DEFAULT '',
-    github_user_id  INTEGER NOT NULL DEFAULT 0,
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_github_app_installations_team ON github_app_installations(team);
-CREATE TABLE IF NOT EXISTS github_app_triggers (
-    team               TEXT NOT NULL,
-    repository_id      INTEGER NOT NULL,
-    pipeline           TEXT NOT NULL,
-    repository         TEXT NOT NULL,
-    installation_id    INTEGER NOT NULL,
-    on_push            INTEGER NOT NULL DEFAULT 0,
-    on_tags            INTEGER NOT NULL DEFAULT 0,
-    tag_patterns       TEXT NOT NULL DEFAULT '[]',
-    on_pull_request    INTEGER NOT NULL DEFAULT 0,
-    created_by         TEXT NOT NULL DEFAULT '',
-    created_at         INTEGER NOT NULL,
-    PRIMARY KEY (team, repository_id, pipeline)
-);
-CREATE INDEX IF NOT EXISTS idx_github_app_triggers_installation ON github_app_triggers(installation_id, repository_id);
-CREATE TABLE IF NOT EXISTS github_app_connect_states (
-    nonce      TEXT PRIMARY KEY,
-    expires_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS github_app_deliveries (
-    digest      TEXT PRIMARY KEY,
-    delivery_id TEXT NOT NULL,
-    received_at INTEGER NOT NULL,
-    event       TEXT NOT NULL DEFAULT ''
-)
-`
-
-var githubAppTablesPostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubAppTablesSQLite)
-
-var (
-	githubAppTriggerTagsCols     = map[string]string{"on_tags": "INTEGER NOT NULL DEFAULT 0"}
-	githubAppTriggerPatternsCols = map[string]string{"tag_patterns": "TEXT NOT NULL DEFAULT '[]'"}
-	githubAppDeliveryEventCols   = map[string]string{"event": "TEXT NOT NULL DEFAULT ''"}
-)
-
-// perf: every verified delivery expires old digests and bindings by age, so
-// the delete reads only the expired range.
-const githubAppDeliveriesReceivedIndex = `CREATE INDEX IF NOT EXISTS idx_github_app_deliveries_received
-    ON github_app_deliveries(received_at)`
-
 const (
 	maxGitHubTagPatterns      = 10
 	maxGitHubTagPatternLength = 128
@@ -131,29 +77,6 @@ func ValidateGitHubTagPatterns(patterns []string) error {
 		}
 		if _, err := path.Match(pattern, ""); err != nil {
 			return fmt.Errorf("%w: invalid tag pattern %q: %w", ErrInvalidInput, pattern, err)
-		}
-	}
-	return nil
-}
-
-var githubAppBranchFilterCols = map[string]string{
-	"branches":      "TEXT NOT NULL DEFAULT '[]'",
-	"base_branches": "TEXT NOT NULL DEFAULT '[]'",
-}
-
-func applyGitHubAppMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(githubAppTablesSQLite) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func applyGitHubAppMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(githubAppTablesPostgres) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -332,13 +255,6 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, tag_patterns, on_pull_request,
        branches, base_branches, created_by, created_at, on_pr_closed, on_pr_labeled, pr_labels, on_pr_ready_for_review,
        on_release_published, on_release_prereleased, on_branch_create, on_branch_delete`
-
-var githubAppTriggerOptionCols = map[string]string{
-	"on_pr_closed": "INTEGER NOT NULL DEFAULT 0", "on_pr_labeled": "INTEGER NOT NULL DEFAULT 0",
-	"pr_labels": "TEXT NOT NULL DEFAULT '[]'", "on_pr_ready_for_review": "INTEGER NOT NULL DEFAULT 0",
-	"on_release_published": "INTEGER NOT NULL DEFAULT 0", "on_release_prereleased": "INTEGER NOT NULL DEFAULT 0",
-	"on_branch_create": "INTEGER NOT NULL DEFAULT 0", "on_branch_delete": "INTEGER NOT NULL DEFAULT 0",
-}
 
 func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
@@ -621,14 +537,6 @@ func (s *Store) forgetExpiredGitHubAppDeliveries(ctx context.Context, now time.T
 		now.Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
-
-var triggerGitHubCheckRunCols = map[string]string{
-	"github_check_run_id": "INTEGER NOT NULL DEFAULT 0",
-	"github_repo_id":      "BIGINT NOT NULL DEFAULT 0",
-}
-
-const triggerGitHubCommitIndex = `CREATE INDEX IF NOT EXISTS idx_triggers_github_commit
-    ON triggers(github_repo_id, git_sha)`
 
 // GitHubCheckRun returns the GitHub check run recorded for t's run runID, or
 // 0 when none is. ErrNotFound when t has no trigger runID.

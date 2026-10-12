@@ -89,7 +89,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	}
 	st, err := openControllerStore(ctx, p.StateDB(), creds.PGURL)
 	if err != nil {
-		return mapStoreOpenError(err)
+		return fmt.Errorf("open state db: %w", err)
 	}
 	defer func() {
 		if cerr := st.Close(); cerr != nil {

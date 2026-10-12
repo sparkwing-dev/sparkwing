@@ -9,6 +9,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
+)
+
+const (
+	nodeExecutionPolicyVersion        = executionpolicy.NodeExecutionPolicyVersion
+	assistedBodyProtocolVersion       = executionpolicy.AssistedBodyProtocolVersion
+	fleetSupervisorRuntimeRequirement = "fleet-supervisor-v1"
+	fleetBodyRuntimeRequirement       = "fleet-body-v1"
 )
 
 func TestMarkNodeReadyWithExecutionPolicySealsAtomically(t *testing.T) {

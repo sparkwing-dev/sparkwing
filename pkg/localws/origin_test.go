@@ -121,12 +121,10 @@ func TestBuildHandler_GuardsTheServedChain(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	bundle := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>stub dashboard</body></html>")},
 	}
-	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343"}, handlerParts{
+	handler := buildHandler(Options{Addr: "127.0.0.1:4343"}, handlerParts{
 		paths: paths,
 		store: st,
 		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle}),

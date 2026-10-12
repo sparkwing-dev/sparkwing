@@ -107,7 +107,6 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		TypeSafeAPIKey:     typeSafeKey,
 		Runs:               runs,
 		StoreSchemaVersion: store.ExpectedSchemaVersion(),
-		StoreRequirements:  store.KnownRequirements(),
 		ServeAPI:           api.serve,
 		ArtifactStoreError: opts.ArtifactStoreError,
 		Logf:               logf,

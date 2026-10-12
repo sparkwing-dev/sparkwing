@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,32 +50,6 @@ var ErrOutputNotStored = errors.New("the node's output was not stored")
 // ErrOutputCorrupt refuses output bytes whose size or digest differs from
 // what their commit recorded.
 var ErrOutputCorrupt = errors.New("output bytes do not match their recorded sha256")
-
-const nodeOutputTablesSQL = `CREATE TABLE IF NOT EXISTS node_outputs (
-    team TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    node_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL,
-    key TEXT NOT NULL,
-    size BIGINT NOT NULL,
-    sha256 TEXT NOT NULL,
-    PRIMARY KEY (team, run_id, node_id)
-);
-CREATE TABLE IF NOT EXISTS output_runs (
-    team TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    PRIMARY KEY (team, run_id)
-);
-CREATE TABLE IF NOT EXISTS output_tombstones (
-    team TEXT NOT NULL,
-    key TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    PRIMARY KEY (team, key)
-);`
-
-func applyNodeOutputMigration(ctx context.Context, tx *storeTx) error {
-	return execStatements(ctx, tx, nodeOutputTablesSQL)
-}
 
 // OutputKeyPrefix is the key prefix under which every output object of one
 // node lives; the final segment tells attempts apart.
@@ -707,4 +682,62 @@ type OutputReadGrant struct {
 	Expires time.Time `json:"expires,omitzero"`
 	// SourceRunID names the run the output was read from.
 	SourceRunID string `json:"source_run_id,omitempty"`
+}
+
+// WriteOutputFileDurably leaves exactly data at path: an existing file that
+// already matches is synced and kept, and anything else is replaced through a
+// synced temporary file, so a crash leaves either the old file or the whole
+// new one.
+func WriteOutputFileDurably(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if matched, err := syncIfMatches(path, data); err != nil {
+		return err
+	} else if matched {
+		return syncDir(dir)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".output-*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = renameOutputFile(tmp.Name(), path)
+	}
+	if err != nil {
+		return errors.Join(err, os.Remove(tmp.Name()))
+	}
+	return syncDir(dir)
+}
+
+// safety: a file found from an earlier run may still sit only in the page
+// cache, so it is synced before anything records it done, and its digest is
+// read back from the synced file.
+func syncIfMatches(path string, data []byte) (bool, error) {
+	f, err := openOutputForSync(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Sync(); err != nil {
+		return false, err
+	}
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return false, err
+	}
+	want := sha256.Sum256(data)
+	return n == int64(len(data)) && string(h.Sum(nil)) == string(want[:]), nil
 }

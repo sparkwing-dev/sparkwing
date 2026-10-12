@@ -24,11 +24,6 @@ type DaemonInfo struct {
 	// understands, or 0 from a daemon that predates the field.
 	StoreSchemaVersion int
 
-	// StoreRequirements names the runs-store schema requirements the
-	// daemon's binary understands, or nil from a daemon that predates the
-	// field.
-	StoreRequirements []string
-
 	// StoreReady reports whether the daemon holds an open handle on the
 	// runs store file that is there now. Nil from a daemon that predates
 	// the field, where StoreError is empty too.
@@ -106,7 +101,6 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		ProtocolMajor:      native,
 		BinaryVersion:      ack.BinaryVersion,
 		StoreSchemaVersion: ack.StoreSchemaVersion,
-		StoreRequirements:  ack.StoreRequirements,
 		StoreReady:         ack.StoreReady,
 		StoreError:         ack.StoreError,
 		APIReady:           ack.APIReady,

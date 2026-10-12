@@ -31,8 +31,7 @@ func TestTriggerChildOpensItsOwnStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`INSERT INTO sparkwing_requirements (name, added_at, added_by_version)
-		VALUES ('future-schema-requirement', 1, 'v99.0.0')`); err != nil {
+	if _, err := st.DB().Exec(`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (100, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -83,7 +82,7 @@ func TestTriggerChildOpensItsOwnStore(t *testing.T) {
 	}
 	if st, err := store.Open(filepath.Join(hostHome, "state.db")); err == nil {
 		_ = st.Close()
-		t.Fatal("host store lost its unknown requirement")
+		t.Fatal("host store lost its foreign schema version")
 	}
 }
 

@@ -7,20 +7,6 @@ import (
 	"time"
 )
 
-const egressUsageTableSQLite = `CREATE TABLE IF NOT EXISTS egress_usage (
-    -- the principal the bytes were served to, or "anonymous"
-    principal  TEXT NOT NULL,
-    -- the UTC month the bytes fell in, as "2006-01"
-    month      TEXT NOT NULL,
-    bytes      INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (principal, month)
-);
-CREATE INDEX IF NOT EXISTS idx_egress_usage_month ON egress_usage(month);`
-
-var egressUsageTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").
-	Replace(egressUsageTableSQLite)
-
 // EgressUsage is one principal's download total for one UTC month. The
 // controller counts bytes in memory and writes these rows on a timer, so
 // a restart resumes the month instead of handing every principal a fresh

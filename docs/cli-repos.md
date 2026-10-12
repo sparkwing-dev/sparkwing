@@ -31,7 +31,7 @@ to keep it there.
 ### Subcommands
 
 - `list` -- List the machine's fleet of sparkwing repos
-- `info` -- Inspect repository versions, worktrees, store compatibility, and pipelines
+- `info` -- Inspect repository versions, worktrees, and pipelines
 - `update` -- Update repository SDK versions and compare pipeline plans
 - `add` -- Register a checkout
 - `remove` -- Remove a registered checkout
@@ -72,11 +72,10 @@ sparkwing repos add ../service
 
 ## `sparkwing repos info`
 
-Inspect repository versions, worktrees, store compatibility, and pipelines
+Inspect repository versions, worktrees, and pipelines
 
 Reports a repository's SDK version, intervening migration guides, linked
-worktrees, source revision, uncommitted changes, store compatibility, and
-pipeline outcomes. It suggests a next action when a check finds a problem.
+worktrees, source revision, uncommitted changes, and pipeline outcomes. It suggests a next action when a check finds a problem.
 
 Defaults to the enclosing repository. --repo selects another repository by
 name or checkout path. The command reads existing state.

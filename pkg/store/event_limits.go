@@ -163,16 +163,3 @@ func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, principal, runID 
 	}
 	return nil
 }
-
-var runEventUsageCols = map[string]string{
-	"event_bytes": "BIGINT NOT NULL DEFAULT 0",
-	"event_count": "BIGINT NOT NULL DEFAULT 0",
-}
-
-func backfillRunEventUsageTx(ctx context.Context, tx *storeTx) error {
-	_, err := tx.ExecContext(ctx, `
-UPDATE runs SET
-    event_bytes = (SELECT COALESCE(SUM(LENGTH(kind) + LENGTH(payload)), 0) FROM events WHERE events.run_id = runs.id),
-    event_count = (SELECT COUNT(*) FROM events WHERE events.run_id = runs.id)`)
-	return err
-}

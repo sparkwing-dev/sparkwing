@@ -3,90 +3,12 @@ package store_test
 import (
 	"context"
 	"errors"
-	"sort"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-// A row written before v51 has to survive the rebuild. Several lookups
-// on these tables answer a miss with a default rather than an error --
-// no pin, no floor -- so a rebuild that dropped the rows
-// would read as "nothing configured" and pass a suite that only ever
-// writes after migrating. The narrowing here is the widening helper run
-// backwards, so the test cannot pass against a migration that does not
-// rebuild.
-func TestSchemaV51CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-
-	seeds := map[string]string{
-		"secrets": `INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
-		            VALUES ('default', 'DEPLOY_KEY', 'v', 'admin', 1, 'ci', 0, 1, 1)`,
-		"pipeline_profiles": `INSERT INTO pipeline_profiles (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, pinned_cores, pinned_memory_bytes)
-		            VALUES ('default', 'ci', 'build', 10, 20, 2, 1024, 3, 1, 4, 2048)`,
-		"concurrency_entries": `INSERT INTO concurrency_entries (team, key, capacity, updated_at)
-		            VALUES ('default', 'deploy', 1, 1)`,
-		"concurrency_holders": `INSERT INTO concurrency_holders (team, key, holder_id, run_id, node_id, claimed_at, lease_expires_at)
-		            VALUES ('default', 'deploy', 'h1', 'r1', 'n1', 1, 9223372036854775807)`,
-		"concurrency_waiters": `INSERT INTO concurrency_waiters (team, key, run_id, node_id, arrived_at, policy)
-		            VALUES ('default', 'deploy', 'r2', 'n2', 1, 'queue')`,
-		"concurrency_cache": `INSERT INTO concurrency_cache (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-		            VALUES ('default', 'deploy', 'hash', 'r1/n1', 'r1', 'n1', 1, 9223372036854775807, 1)`,
-	}
-
-	narrow := store.UserKeyTablesForTest()
-	tables := make([]string, 0, len(narrow))
-	for table := range narrow {
-		tables = append(tables, table)
-	}
-	sort.Strings(tables)
-
-	for _, table := range tables {
-		if err := store.RekeyForTest(ctx, st, table, narrow[table]); err != nil {
-			t.Fatalf("narrow %s back to the v49 key: %v", table, err)
-		}
-		if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, seeds[table])); err != nil {
-			t.Fatalf("seed %s under the v49 key: %v", table, err)
-		}
-	}
-
-	if err := store.ApplyUserKeyMigrationForTest(ctx, st); err != nil {
-		t.Fatalf("apply v51: %v", err)
-	}
-
-	for _, table := range tables {
-		var rows int
-		q := storetest.Rebind(st, `SELECT COUNT(*) FROM `+table+` WHERE team = ?`)
-		if err := st.DB().QueryRowContext(ctx, q, string(store.DefaultTeam)).Scan(&rows); err != nil {
-			t.Fatalf("count %s after v51: %v", table, err)
-		}
-		if rows != 1 {
-			t.Errorf("%s has %d rows in the default team after v51, want the seeded 1", table, rows)
-		}
-	}
-
-	tn, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile, err := tn.GetPipelineProfile(ctx, "ci", "build")
-	if err != nil {
-		t.Fatalf("GetPipelineProfile after v51: %v", err)
-	}
-	if profile == nil || profile.PinnedCores != 4 {
-		t.Errorf("profile after v51 = %+v, want the pre-existing pin of 4 cores", profile)
-	}
-	secret, err := tn.GetSecretRow("DEPLOY_KEY", "ci")
-	if err != nil {
-		t.Fatalf("GetSecretRow after v51: %v", err)
-	}
-	if secret.Value != "v" {
-		t.Errorf("secret after v51 = %+v, want the pre-existing value", secret)
-	}
-}
 
 func TestSecretNameIsUniquePerTeam(t *testing.T) {
 	st := storetest.New(t).Open(t)

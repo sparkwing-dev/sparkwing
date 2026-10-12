@@ -40,11 +40,6 @@ const (
 // anywhere.
 const CronScheduleDefaultName = "default"
 
-// safety: a binary predating the widened schedule key would overwrite a named
-// or pushed row through the key it still believes in, and fire a pinned
-// schedule by compiling the checkout. Stamping this makes it refuse the store.
-const cronScheduleNameRequirement = "cron-schedule-names-v1"
-
 // safety: the store mints fire ids because neither dialect autoincrements a text primary key.
 const cronFireIDPrefix = "crf_"
 

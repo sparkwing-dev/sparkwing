@@ -165,7 +165,7 @@ func childStandalone(backends Backends, sel hostedSelection) *standaloneRun {
 	if path == "" && reason == "" {
 		return nil
 	}
-	return &standaloneRun{reason: reason, stateDB: path, skew: sel.storeSkew, announced: true}
+	return &standaloneRun{reason: reason, stateDB: path, announced: true}
 }
 
 func openLocalTriggerStore(paths Paths) (*store.Store, error) {

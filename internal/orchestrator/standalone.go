@@ -37,7 +37,6 @@ type standaloneRun struct {
 	reason    string
 	stateDB   string
 	warning   string
-	skew      bool
 	created   bool
 	refused   bool
 	announced bool
@@ -48,7 +47,7 @@ func (sa *standaloneRun) state(hosted bool) unhosted {
 	if sa == nil {
 		return unhosted{hosted: hosted}
 	}
-	return unhosted{reason: sa.reason, skew: sa.skew, hosted: hosted}
+	return unhosted{reason: sa.reason, hosted: hosted}
 }
 
 func (sa *standaloneRun) announce() {
@@ -144,8 +143,7 @@ func standaloneReasonFor(err error) string {
 		return standaloneFloor
 	case errors.Is(err, wingdclient.ErrDaemonTooOld),
 		errors.Is(err, wingdclient.ErrDaemonLacksOperation),
-		errors.Is(err, client.ErrControllerLacksRoute),
-		errors.Is(err, errHostedStoreSkew):
+		errors.Is(err, client.ErrControllerLacksRoute):
 		return standaloneDaemonOlder
 	case errors.Is(err, wingdclient.ErrNoDaemonHost),
 		errors.Is(err, wingdclient.ErrDaemonHostUnusable),
@@ -209,10 +207,6 @@ func bareVersion(v string) string {
 	return v
 }
 
-// safety: the shared standalone store is the one the design promises two pins
-// can share, so a binary falls back to its own only when that file records a
-// requirement it does not know; every other open error is the store's own and
-// is reported rather than routed around.
 func openStandaloneStore(paths Paths, dryRun bool) (*store.Store, *standaloneRun, func(), error) {
 	if dryRun {
 		return openThrowawayStandaloneStore()
@@ -229,26 +223,11 @@ func openStandaloneStore(paths Paths, dryRun bool) (*store.Store, *standaloneRun
 	shared := paths.StandaloneStateDB()
 	fresh := claimStoreFile(shared)
 	st, err := storeOpen(shared)
-	if err == nil {
-		return st, &standaloneRun{stateDB: shared, created: fresh, lock: lock}, release, nil
-	}
-	var skew *store.SkewError
-	if !errors.As(err, &skew) || len(skew.Requirements) == 0 {
+	if err != nil {
 		release()
 		return nil, nil, nil, fmt.Errorf("standalone store %s: %w", shared, err)
 	}
-	if err := paths.EnsureStandaloneSchemaDir(); err != nil {
-		release()
-		return nil, nil, nil, fmt.Errorf("standalone store: %w", err)
-	}
-	own := paths.StandaloneSchemaStateDB()
-	fresh = claimStoreFile(own)
-	st, err = storeOpen(own)
-	if err != nil {
-		release()
-		return nil, nil, nil, fmt.Errorf("standalone store %s: %w", own, err)
-	}
-	return st, &standaloneRun{stateDB: own, created: fresh, lock: lock}, release, nil
+	return st, &standaloneRun{stateDB: shared, created: fresh, lock: lock}, release, nil
 }
 
 // safety: creation is observed rather than guessed. Two runs starting together

@@ -272,12 +272,16 @@ func TestInspectDaemonNamesADaemonBehindTheStoreSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	newer := store.ExpectedSchemaVersion() + 1
+	if _, err := st.DB().Exec(`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, 1)`, newer); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	d, err := wingd.New(wingd.Config{Home: home, Version: "v0.38.2", StoreSchemaVersion: store.ExpectedSchemaVersion() - 1})
+	d, err := wingd.New(wingd.Config{Home: home, Version: "v0.38.2", StoreSchemaVersion: store.ExpectedSchemaVersion()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,62 +301,14 @@ func TestInspectDaemonNamesADaemonBehindTheStoreSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.StoreSchemaVersion != store.ExpectedSchemaVersion() {
-		t.Fatalf("store schema = %d, want %d", report.StoreSchemaVersion, store.ExpectedSchemaVersion())
+	if report.StoreSchemaVersion != newer {
+		t.Fatalf("store schema = %d, want %d", report.StoreSchemaVersion, newer)
 	}
-	if report.DaemonSchemaVersion != store.ExpectedSchemaVersion()-1 {
-		t.Fatalf("daemon schema = %d, want %d", report.DaemonSchemaVersion, store.ExpectedSchemaVersion()-1)
+	if report.DaemonSchemaVersion != store.ExpectedSchemaVersion() {
+		t.Fatalf("daemon schema = %d, want %d", report.DaemonSchemaVersion, store.ExpectedSchemaVersion())
 	}
 	if !report.SchemaDiverged || report.Healthy {
 		t.Fatalf("a daemon behind the store schema reported healthy: %+v", report)
-	}
-}
-
-func TestInspectDaemonAcceptsADaemonBehindByAdditiveMigrationsOnly(t *testing.T) {
-	home, err := os.MkdirTemp(nativeSocketTestParent(), "sparkwing-daemon-additive-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	st, err := store.Open(paths.PathsAt(home).StateDB())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	d, err := wingd.New(wingd.Config{
-		Home:               home,
-		Version:            "v0.38.2",
-		StoreSchemaVersion: store.ExpectedSchemaVersion() - 1,
-		StoreRequirements:  store.KnownRequirements(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- d.Run(ctx) }()
-	select {
-	case <-d.Ready():
-	case <-time.After(3 * time.Second):
-		t.Fatal("daemon did not become ready")
-	}
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
-
-	report, err := inspectDaemon(context.Background(), home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.SchemaDiverged || !report.Healthy {
-		t.Fatalf("a daemon that knows every store requirement reported diverged: %+v", report)
-	}
-	if len(report.MissingRequirements) != 0 {
-		t.Fatalf("missing requirements = %v, want none", report.MissingRequirements)
 	}
 }
 

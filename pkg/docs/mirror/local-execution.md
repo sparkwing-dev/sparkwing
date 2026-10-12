@@ -1202,17 +1202,13 @@ and then in each standalone store. The
 dashboard reads `state.db` alone and does not see the run.
 
 Some failures are still failures. A daemon whose runs store is unreadable
-for a reason that is not age -- a disk error, a file that is not a
-database, permissions -- fails the run, because the file is what the
-operator must fix and running standalone would hide it behind a run that
-looked like it worked. So does a daemon that is present but never
+-- a disk error, a file that is not a database, a store from another
+schema baseline -- fails the run, because the file is what the operator
+must fix and running standalone would hide it behind a run that looked
+like it worked. So does a daemon that is present but never
 answers, one whose build does not match this pipeline's, and a version
 conflict that repeated takeover could not settle: each is a machine to
-look at rather than a version gap to route around. A daemon merely too
-old for its store is not one of these: the daemon reports the two apart
-(`store: skew: ...` against `store: error: ...` on its health endpoint,
-`daemon_store_skew` in `sparkwing daemon status`), because a message an
-operator reads cannot be told apart by a program.
+look at rather than a version gap to route around.
 
 A degrade that happens after the store is already chosen -- a lease frame
 the daemon does not serve, on a run whose state is already with that
@@ -1234,18 +1230,16 @@ counts against it.
 
 #### Where standalone runs live
 
-`~/.sparkwing/standalone/state.db`. Binaries share that one file under the
-store's requirements rule: the newest one migrates it, and an older one
-keeps opening it as long as it understands every requirement the file
-records. A binary that file refuses -- because it records a requirement
-that binary does not know -- falls back to
-`~/.sparkwing/standalone/schema-<N>/state.db`, where `N` is its own
-expected schema. The shared `~/.sparkwing/state.db` is not opened by a
-pipeline binary at all.
+`~/.sparkwing/standalone/state.db`. Every pipeline binary shares that one
+file, and a binary built at another store schema refuses it and fails the
+run, naming the file to delete. Releases before the store baseline kept a
+refused binary's runs in `~/.sparkwing/standalone/schema-<N>/state.db`;
+nothing writes there now. The shared `~/.sparkwing/state.db` is not opened
+by a pipeline binary at all.
 
 Sharing one file is what keeps the block's "everything else works" true
 across repos: box- and run-scoped `.Concurrency()` groups are enforced
-through the store, so two standalone runs at neighboring pins still
+through the store, so two standalone runs from different repos still
 serialize against each other.
 
 A child run a standalone run dispatches, and a node replayed from one,
@@ -1273,10 +1267,8 @@ store, whatever the two copies say about when they started, which is the
 store the single-id verbs resolve first.
 
 A standalone store this build cannot read is named on stderr after the
-table instead of listed. One this sparkwing is too old to open -- it records a schema
-requirement this build does not know -- is named with the release that
-can open it. One written at an older store schema, which is what the
-`schema-<N>` directories hold, is named with its run count
+table instead of listed. One written at an older store schema, which is
+what the `schema-<N>` directories hold, is named with its run count
 (`standalone/schema-20/state.db holds 3 runs written by an older
 sparkwing; read them with that release`), because this build's queries
 ask for columns that store does not have. One that is busy is named as
@@ -1290,10 +1282,7 @@ simply missing.
 `sparkwing runs bounce`, `runs annotations add`, `runs approvals approve`,
 `runs approvals deny`, `debug rerun`, and `debug replay` write to the
 store that holds the run, so they act on a standalone run in its own
-store. They open that store read-write only when catching it up to this
-build's schema would stamp no requirement it does not already list; when
-it would, they refuse and name the requirement, because stamping it is
-what puts the file out of reach of the pipeline binary that owns it.
+store.
 
 `runs cancel` and `runs retry` cannot act on a standalone run at all, and
 say so rather than reporting it missing. Cancel needs something arbitrating the run,

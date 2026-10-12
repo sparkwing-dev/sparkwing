@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -57,31 +56,6 @@ type StorageStanding struct {
 	// EventBytes is what the team's retained run events hold, counted only
 	// while it holds a slot.
 	EventBytes int64
-}
-
-const freeSlotsTableSQL = `CREATE TABLE IF NOT EXISTS free_slots (
-    team        TEXT PRIMARY KEY,
-    taken_at    INTEGER NOT NULL,
-    event_bytes INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_triggers_team_created ON triggers(team, created_at);`
-
-func applyFreeSlotsMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(freeSlotsTableSQL) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func applyFreeSlotsMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(strings.ReplaceAll(freeSlotsTableSQL, "INTEGER", "BIGINT")) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // safety: the operator's team is the whole of a self-hosted install, which

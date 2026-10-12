@@ -146,8 +146,8 @@ type DoctorReport struct {
 type DoctorStandaloneStore struct {
 	Path string `json:"path"`
 
-	// Schema is 0 for the store binaries share under the requirements rule,
-	// and the schema version of the binaries that keep their own otherwise.
+	// Schema is 0 for the shared store, and the schema version a per-schema
+	// directory names otherwise.
 	Schema int `json:"schema"`
 
 	Runs int `json:"runs"`

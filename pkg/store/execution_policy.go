@@ -4,18 +4,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 )
 
-const (
-	assistedExecutionPolicyRequirement = "assisted-execution-policy-v1"
-	nodeExecutionPolicyVersion         = executionpolicy.NodeExecutionPolicyVersion
-	assistedBodyProtocolVersion        = executionpolicy.AssistedBodyProtocolVersion
-	fleetSupervisorRuntimeRequirement  = "fleet-supervisor-v1"
-	fleetBodyRuntimeRequirement        = "fleet-body-v1"
-)
-
 var (
-	errExecutionPolicyInvalid   = executionpolicy.ErrExecutionPolicyInvalid
-	errExecutionPolicyConflict  = executionpolicy.ErrExecutionPolicyConflict
-	errExecutionUpgradeRequired = executionpolicy.ErrExecutionUpgradeRequired
+	errExecutionPolicyInvalid  = executionpolicy.ErrExecutionPolicyInvalid
+	errExecutionPolicyConflict = executionpolicy.ErrExecutionPolicyConflict
 )
 
 type (

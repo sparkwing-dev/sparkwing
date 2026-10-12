@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -47,71 +46,7 @@ func (k StorageKind) limitName() string { return "free_" + string(k) + "_share" 
 // when the writer that took it never commits or releases it.
 const DefaultStorageReservationTTL = time.Hour
 
-const teamStorageTablesSQL = `CREATE TABLE IF NOT EXISTS team_storage (
-    team            TEXT NOT NULL,
-    store           TEXT NOT NULL,
-    used_bytes      INTEGER NOT NULL DEFAULT 0,
-    reserved_bytes  INTEGER NOT NULL DEFAULT 0,
-    committed_bytes INTEGER NOT NULL DEFAULT 0,
-    reconciled_at   INTEGER NOT NULL DEFAULT 0,
-    updated_at      INTEGER NOT NULL,
-    PRIMARY KEY (team, store)
-);
-CREATE TABLE IF NOT EXISTS storage_reservations (
-    id         TEXT PRIMARY KEY,
-    team       TEXT NOT NULL,
-    store      TEXT NOT NULL,
-    bytes      INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_storage_reservations_team ON storage_reservations(team, store, expires_at);
-CREATE INDEX IF NOT EXISTS idx_storage_reservations_expiry ON storage_reservations(expires_at);
-CREATE TABLE IF NOT EXISTS team_download_day (
-    team       TEXT NOT NULL,
-    day        TEXT NOT NULL,
-    bytes      INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (team, day)
-);
-CREATE TABLE IF NOT EXISTS egress_day (
-    service    TEXT NOT NULL,
-    period     TEXT NOT NULL,
-    bytes      INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (service, period)
-);`
-
-const storageCommitReceiptsSQL = `CREATE TABLE IF NOT EXISTS storage_commit_receipts (
-    team          TEXT NOT NULL,
-    store         TEXT NOT NULL,
-    id            TEXT NOT NULL,
-    bytes         BIGINT NOT NULL,
-    committed_at  BIGINT NOT NULL,
-    renew_request BLOB,
-    renew_status  TEXT NOT NULL DEFAULT '',
-    renew_result  BLOB,
-    PRIMARY KEY (team, store, id)
-);
-CREATE INDEX IF NOT EXISTS idx_storage_commit_receipts_age ON storage_commit_receipts(committed_at);`
-
 const storageCommitReceiptHorizon = 24 * time.Hour
-
-func applyStorageCommitReceiptsMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	ddl := storageCommitReceiptsSQL
-	if postgres {
-		ddl = strings.ReplaceAll(ddl, "BLOB", "BYTEA")
-	}
-	return execStatements(ctx, tx, ddl)
-}
-
-func applyTeamStorageMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	return execStatements(ctx, tx, teamStorageTablesSQL)
-}
-
-func applyTeamStorageMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	return execStatements(ctx, tx, strings.ReplaceAll(teamStorageTablesSQL, "INTEGER", "BIGINT"))
-}
 
 func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	for _, stmt := range splitStatements(script) {

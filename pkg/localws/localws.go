@@ -25,8 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const schemaPollInterval = 5 * time.Second
-
 // Options configures the local dev server. Addr defaults to
 // 127.0.0.1:4343; Home defaults to $SPARKWING_HOME or ~/.sparkwing.
 type Options struct {
@@ -172,10 +170,8 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
-	handler := buildHandler(ctx, cancel, opts, handlerParts{
+	handler := buildHandler(opts, handlerParts{
 		paths:      paths,
 		store:      st,
 		ctrl:       ctrl,
@@ -225,12 +221,7 @@ type handlerParts struct {
 	serveToken string
 }
 
-func buildHandler(
-	ctx context.Context,
-	cancel context.CancelFunc,
-	opts Options,
-	parts handlerParts,
-) http.Handler {
+func buildHandler(opts Options, parts handlerParts) http.Handler {
 	root := http.NewServeMux()
 	root.Handle("GET /api/v1/version", versionHandler(opts.Version, opts.Instance))
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
@@ -241,9 +232,7 @@ func buildHandler(
 	root.Handle("GET /api/v1/secrets/{name}", http.NotFoundHandler())
 	root.Handle("/", parts.ctrl.Handler())
 
-	guard := newSchemaGuard(parts.store, cancel)
-	var handler http.Handler = guard.middleware(root)
-	go guard.poll(ctx, schemaPollInterval)
+	var handler http.Handler = root
 	if opts.ReadOnly {
 		handler = readOnlyMiddleware(handler)
 	}

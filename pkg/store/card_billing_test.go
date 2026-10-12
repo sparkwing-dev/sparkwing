@@ -767,59 +767,6 @@ func TestAnAttemptPastTheKeyLifeIsReplaced(t *testing.T) {
 	}
 }
 
-// The v87 backfill counts a refund on the day of the reservation it refunds:
-// the node's latest reservation before it, not its first, as new writes do.
-func TestTheSpendBackfillCountsARefundOnItsReservationDay(t *testing.T) {
-	target := storetest.New(t)
-	st := target.Open(t)
-	day := int64(24 * time.Hour)
-	today := time.Now().UnixNano() / day
-	for _, row := range []struct {
-		id, kind string
-		amount   int64
-		day      int64
-	}{
-		{"c_first", "reservation", 700, today - 3},
-		{"c_second", "reservation", 500, today - 1},
-		{"c_ref", "refund", -400, today},
-	} {
-		if _, err := st.DB().Exec(storetest.Rebind(st, `INSERT INTO credit_charges (id, run_id, node_id, token_prefix,
-		    kind, seconds, amount_micro, charged_at, team) VALUES (?, 'run-b', 'build', 'pfx', ?, 60, ?, ?, 'default')`),
-			row.id, row.kind, row.amount, row.day*day+1); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, q := range []string{`DELETE FROM team_spend_days`, `DELETE FROM sparkwing_schema_version WHERE version >= 87`} {
-		if _, err := st.DB().Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	upgraded, err := target.TryOpen()
-	if err != nil {
-		t.Fatalf("rerun v87: %v", err)
-	}
-	defer func() { _ = upgraded.Close() }()
-	got := map[int64]int64{}
-	rows, err := upgraded.DB().Query(`SELECT day, amount_micro FROM team_spend_days WHERE team = 'default'`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var d, amount int64
-		if err := rows.Scan(&d, &amount); err != nil {
-			t.Fatal(err)
-		}
-		got[d] = amount
-	}
-	if len(got) != 2 || got[today-3] != 700 || got[today-1] != 100 {
-		t.Fatalf("buckets = %v; want the refund netted on the second reservation's day", got)
-	}
-}
-
 // safety: checkout, card saving, trust changes, the billing pass, settlement
 // and grants all touch the ledger and the team row; on Postgres any two that
 // took them in opposite orders deadlock, which this surfaces as an error.

@@ -208,23 +208,6 @@ func TestOpenStoreForRun_ReadsWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestOpenStandaloneStores_UnknownRequirementBecomesANote(t *testing.T) {
-	p := homeWithBothStores(t)
-	stampRequirement(t, p.StandaloneSchemaDir(99), "moon_phase_index", "v9.9.9")
-
-	stores := orchestrator.OpenStandaloneStores(context.Background(), p)
-	defer func() { _ = stores.Close() }()
-
-	notes := stores.Notes()
-	if len(notes) != 1 || !strings.Contains(notes[0], "sparkwing >= v9.9.9") {
-		t.Fatalf("expected one note naming the release, got %v", notes)
-	}
-	rows := stores.ListRuns(context.Background(), store.RunFilter{Limit: 10})
-	if len(rows) != 1 || rows[0].ID != "alone-mid" {
-		t.Fatalf("the readable standalone store stopped listing: %v", rows)
-	}
-}
-
 func TestStandaloneCancelRefusal_NamesTheStoreAndOffersNoCommand(t *testing.T) {
 	p := homeWithBothStores(t)
 	err := orchestrator.StandaloneCancelRefusal(context.Background(), p, "alone-mid", "runs cancel")
@@ -277,25 +260,6 @@ func TestOpenStoreForRunWrite_WritesInTheRunsOwnStore(t *testing.T) {
 	}
 	if len(node.Annotations) != 1 || node.Annotations[0] != "written here" {
 		t.Fatalf("the annotation did not land in the standalone store: %v", node.Annotations)
-	}
-}
-
-func TestOpenStoreForRunWrite_RefusesWhenWritingWouldAddARequirement(t *testing.T) {
-	p := homeWithBothStores(t)
-	rollBackSchema(t, p.StandaloneStateDB(), 20)
-
-	_, _, _, err := orchestrator.OpenStoreForRunWrite(
-		context.Background(), p, "alone-mid", "runs annotations add")
-	if err == nil {
-		t.Fatal("expected a refusal rather than a migrating write")
-	}
-	for _, want := range []string{"session-token-digest", "out of reach of the pipeline binary"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("refusal does not mention %q: %s", want, err)
-		}
-	}
-	if got := schemaVersionOf(t, p.StandaloneStateDB()); got != 20 {
-		t.Fatalf("the refused write migrated the store to schema %d", got)
 	}
 }
 
@@ -359,54 +323,6 @@ func TestMergeTaggedRuns_OrdersDistinctRunsNewestFirst(t *testing.T) {
 	}
 }
 
-func TestOpenStoreForRunWrite_RefusesWhenStampsLagTheSchema(t *testing.T) {
-	p := homeWithBothStores(t)
-	clearRequirementStamps(t, p.StandaloneStateDB())
-
-	_, _, _, err := orchestrator.OpenStoreForRunWrite(
-		context.Background(), p, "alone-mid", "runs annotations add")
-	if err == nil {
-		t.Fatal("a store whose stamps lag its version must refuse the write")
-	}
-	for _, want := range []string{"session-token-digest", "inherited-holder-marker"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("refusal does not name %q: %s", want, err)
-		}
-	}
-	if got := stampedRequirements(t, p.StandaloneStateDB()); len(got) != 0 {
-		t.Fatalf("the refused write stamped %v", got)
-	}
-}
-
-func clearRequirementStamps(t *testing.T, path string) {
-	t.Helper()
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	_, err = st.DB().Exec(`DELETE FROM sparkwing_requirements`)
-	if cerr := st.Close(); cerr != nil {
-		t.Fatalf("close %s: %v", path, cerr)
-	}
-	if err != nil {
-		t.Fatalf("clear stamps: %v", err)
-	}
-}
-
-func stampedRequirements(t *testing.T, path string) []string {
-	t.Helper()
-	st, err := store.OpenReadOnly(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	defer func() { _ = st.Close() }()
-	names, err := st.Requirements(context.Background())
-	if err != nil {
-		t.Fatalf("read stamps: %v", err)
-	}
-	return names
-}
-
 func TestOpenStandaloneStores_OlderSchemaBecomesACountedNote(t *testing.T) {
 	p := homeWithBothStores(t)
 	seedRuns(t, filepath.Join(p.StandaloneSchemaDir(20), "state.db"),
@@ -434,24 +350,6 @@ func TestOpenStandaloneStores_OlderSchemaBecomesACountedNote(t *testing.T) {
 	}
 }
 
-func rollBackSchema(t *testing.T, path string, to int) {
-	t.Helper()
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	_, err = st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version > ?`, to)
-	if err == nil {
-		_, err = st.DB().Exec(`DELETE FROM sparkwing_requirements`)
-	}
-	if cerr := st.Close(); cerr != nil {
-		t.Fatalf("close %s: %v", path, cerr)
-	}
-	if err != nil {
-		t.Fatalf("roll back %s: %v", path, err)
-	}
-}
-
 func dropColumn(t *testing.T, path, table, column string) {
 	t.Helper()
 	st, err := store.Open(path)
@@ -467,20 +365,6 @@ func dropColumn(t *testing.T, path, table, column string) {
 	}
 }
 
-func schemaVersionOf(t *testing.T, path string) int {
-	t.Helper()
-	st, err := store.OpenReadOnly(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	defer func() { _ = st.Close() }()
-	var v int
-	if err := st.DB().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&v); err != nil {
-		t.Fatalf("read schema version: %v", err)
-	}
-	return v
-}
-
 func TestRunStatus_ResolvesAStandaloneRun(t *testing.T) {
 	p := homeWithBothStores(t)
 	status, err := orchestrator.RunStatus(context.Background(), p, nil, "alone-mid")
@@ -492,27 +376,6 @@ func TestRunStatus_ResolvesAStandaloneRun(t *testing.T) {
 	}
 	if _, err := orchestrator.RunStatus(context.Background(), p, nil, "no-such-run"); err == nil {
 		t.Fatal("a run in no store must still be an error")
-	}
-}
-
-func stampRequirement(t *testing.T, dir, name, addedBy string) {
-	t.Helper()
-	path := filepath.Join(dir, "state.db")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("create %s: %v", dir, err)
-	}
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	_, err = st.DB().Exec(
-		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`,
-		name, time.Now().UnixNano(), addedBy)
-	if cerr := st.Close(); cerr != nil {
-		t.Fatalf("close %s: %v", path, cerr)
-	}
-	if err != nil {
-		t.Fatalf("stamp requirement: %v", err)
 	}
 }
 
