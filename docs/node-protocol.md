@@ -207,7 +207,7 @@ The in-process Go binary takes it as one argument, `--sw-options=<json>`, consum
 
 ## Closures
 
-`BeforeRun`, `AfterRun`, `Verify`, `SkipIf` and `CacheKeyFn` are code, so the SDK evaluates them. **Today** the plan document marks their presence with `has_before_run`, `has_after_run` and `has_skip_if`, and the Go orchestrator calls them in process. **Target:** the plan lists each closure's id under `closures` on the node or step, and the host asks for one with `eval`. An id is opaque to the host and unique within the plan; the Go SDK uses `<node>/<kind>/<index>` and `<node>/<step>/<kind>/<index>`. The host enforces each closure's budget: a `skip_if` that errors or exceeds its budget evaluates to don't-skip.
+`BeforeRun`, `AfterRun`, `Verify`, `SkipIf`, `CacheKeyFn` and `JobFanOutDynamic` generators are code, so the SDK evaluates them. **Today** the plan lists each closure's id under `closures` on the node or step, and the Go orchestrator still calls them in process. **Target:** the host asks for one with `eval`. An id is opaque to the host and unique within the plan; the Go SDK's encoding is described on `$defs/closures` in the schema, and keeps ids unique when node or step ids contain `/`. The host enforces each closure's budget: a `skip_if` that errors or exceeds its budget evaluates to don't-skip.
 
 ## Describe and plan documents
 
@@ -217,8 +217,9 @@ The in-process Go binary takes it as one argument, `--sw-options=<json>`, consum
 - each node's envelope under `modifiers`: `retry`, `retry_backoff_ms`, `retry_auto`, `timeout_ms`, `no_progress_timeout_ms`, `on_failure`, the required, preferred and `when_runner` placement labels, memo flag and `cache_ttl_ms`, the concurrency group (`conc_*`), resources (`res_cores`, `res_memory_bytes`), `inline`, `optional`, `continue_on_error`;
 - artifacts as `outputs` (globs the node publishes) and `consumes` (producers it stages from);
 - approvals, secrets, the source checkout and plan-level concurrency and resources;
-- steps under `work`, with `needs`, `finally`, `is_result` and `failure_policy`;
-- **target** fields: `caches` (dependency-cache directories the host restores and saves), `memo_key` (files, env and constants the host hashes, or a closure), `closures`, `tools`, and `protocol`.
+- steps under `work`, with `needs`, `finally`, `is_result`, `continue_on_error`, `optional`, `closures` and `failure_policy`;
+- dependency-cache directories under `caches`, closure ids under `closures`, and the memo key's `cache_key` closure under `memo_key.closure`;
+- **target** fields: `memo_key` files, env and constants the host hashes, `tools`, and `protocol`.
 
 A node's `spec_hash` covers the node's own fields, so a Job that plans again runs only a node whose hash the accepted plan holds.
 

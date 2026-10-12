@@ -153,10 +153,9 @@
         "work": { "$ref": "#/$defs/work" },
         "spec_hash": { "type": "string" },
         "pipeline_refs": { "type": "array", "items": { "$ref": "#/$defs/pipelineRef" } },
-        "dir_caches": { "type": "array", "items": { "$ref": "#/$defs/dirCache" }, "description": "Today: dependency-cache directories declared with CacheDir; the engine's node executor restores them before the node starts and saves them after it succeeds." },
-        "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Target: dependency-cache directories the host restores before the node starts and saves after it succeeds." },
-        "memo_key": { "$ref": "#/$defs/memoKey", "description": "Target: declarative memo key inputs the host hashes." },
-        "closures": { "$ref": "#/$defs/closures", "description": "Target: ids of the closures the host asks the SDK to evaluate." },
+        "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Dependency-cache directories the host restores before the node starts and saves after it succeeds." },
+        "memo_key": { "$ref": "#/$defs/memoKey", "description": "Memo key inputs the host hashes." },
+        "closures": { "$ref": "#/$defs/closures", "description": "Ids of the node's closures, which the host evaluates with eval." },
         "tools": { "type": "array", "items": { "type": "string" }, "description": "Target: tool names the node needs on PATH." }
       },
       "required": ["id", "deps"],
@@ -189,19 +188,6 @@
       "required": ["pipeline", "node"],
       "additionalProperties": false
     },
-    "dirCache": {
-      "type": "object",
-      "description": "One CacheDir declaration as the Go SDK serializes it today.",
-      "properties": {
-        "name": { "type": "string" },
-        "path": { "type": "string" },
-        "resolver": { "type": "string", "enum": ["gomod", "npm"] },
-        "key_scope": { "type": "string" },
-        "key_files": { "type": ["array", "null"], "items": { "type": "string" } }
-      },
-      "required": ["name", "key_files"],
-      "additionalProperties": false
-    },
     "modifiers": {
       "type": "object",
       "description": "The node's execution envelope. Durations are integer milliseconds; an absent field is the zero value.",
@@ -232,7 +218,7 @@
         "has_before_run": { "type": "boolean" },
         "has_after_run": { "type": "boolean" },
         "has_skip_if": { "type": "boolean" },
-        "has_verify": { "type": "boolean", "description": "Target: the node carries a Verify closure." }
+        "has_verify": { "type": "boolean", "description": "The node carries a Verify closure." }
       },
       "additionalProperties": false
     },
@@ -256,9 +242,9 @@
         "has_skip_if": { "type": "boolean" },
         "finally": { "type": "boolean" },
         "risks": { "type": "array", "items": { "type": "string" } },
-        "continue_on_error": { "type": "boolean", "description": "Target: a failure of this step does not fail the node." },
-        "optional": { "type": "boolean", "description": "Target: the step may be skipped without failing the node." },
-        "closures": { "$ref": "#/$defs/closures", "description": "Target: ids of the step's closures." }
+        "continue_on_error": { "type": "boolean", "description": "A failure of this step does not fail the node." },
+        "optional": { "type": "boolean", "description": "The step may be skipped without failing the node." },
+        "closures": { "$ref": "#/$defs/closures", "description": "Ids of the step's closures; a step has only skip_if." }
       },
       "required": ["id"],
       "additionalProperties": false
@@ -274,36 +260,38 @@
     },
     "cache": {
       "type": "object",
-      "description": "Target: one dependency-cache directory. Exactly one of path and resolver is set.",
+      "description": "One dependency-cache directory. Exactly one of path and resolver is set.",
       "properties": {
         "name": { "type": "string" },
         "path": { "type": "string" },
         "resolver": { "enum": ["gomod", "npm"], "description": "A cache location the host resolves with the toolchain, such as `go env GOMODCACHE`." },
-        "key_files": { "type": "array", "items": { "type": "string" } }
+        "key_scope": { "type": "string", "description": "Hashed ahead of the key file, so two directories keyed by the same lockfile get different keys." },
+        "key_files": { "type": "array", "items": { "type": "string" }, "description": "Candidate key files; the first that exists keys the cache." }
       },
       "required": ["name", "key_files"],
       "additionalProperties": false
     },
     "memoKey": {
       "type": "object",
-      "description": "Target: memo key inputs. The host hashes files, env and const together; closure names a CacheKeyFn whose string the host namespaces.",
+      "description": "Memo key inputs. The host hashes files, env and const together; closure names a cache_key closure whose string the host namespaces.",
       "properties": {
-        "files": { "type": "array", "items": { "type": "string" } },
-        "env": { "type": "array", "items": { "type": "string" } },
-        "const": { "type": "array", "items": { "type": "string" } },
-        "closure": { "type": "string" }
+        "files": { "type": "array", "items": { "type": "string" }, "description": "Target: files whose content the host hashes." },
+        "env": { "type": "array", "items": { "type": "string" }, "description": "Target: environment variable names whose values the host hashes." },
+        "const": { "type": "array", "items": { "type": "string" }, "description": "Target: constant strings the host hashes." },
+        "closure": { "type": "string", "description": "Id of the node's cache_key closure, the same id as closures.cache_key." }
       },
       "additionalProperties": false
     },
     "closures": {
       "type": "object",
-      "description": "Target: closure ids. Each id is opaque to the host and unique within the plan.",
+      "description": "Closure ids by kind. Each id is opaque to the host and unique within the plan and its generated nodes. The Go SDK writes `<node>/<kind>/<i>` for a node's closures and `<node>/step/<step>/<kind>/<i>` for a step's, where `<i>` counts that kind's closures from 0 in declaration order and `<node>` and `<step>` are the ids with `%` written as `%25` and `/` as `%2F`. The first segment is then always the whole node id and the second a kind or `step`, so the ids of two distinct nodes or steps cannot collide: node `a/b` gives `a%2Fb/skip_if/0`, and step `b` of node `a` gives `a/step/b/skip_if/0`.",
       "properties": {
         "skip_if": { "type": "array", "items": { "type": "string" } },
         "before_run": { "type": "array", "items": { "type": "string" } },
         "after_run": { "type": "array", "items": { "type": "string" } },
         "verify": { "type": "string" },
-        "cache_key": { "type": "string" }
+        "cache_key": { "type": "string" },
+        "generator": { "type": "array", "items": { "type": "string" }, "description": "Generators that add nodes after this node succeeds." }
       },
       "additionalProperties": false
     }

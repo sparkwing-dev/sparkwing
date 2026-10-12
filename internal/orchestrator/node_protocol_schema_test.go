@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -239,6 +240,9 @@ func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
 		"work":           reflect.TypeFor[nodeproto.PlanWork](),
 		"step":           reflect.TypeFor[nodeproto.PlanStep](),
 		"stepGroup":      reflect.TypeFor[nodeproto.PlanStepGroup](),
+		"cache":          reflect.TypeFor[depcache.Spec](),
+		"memoKey":        reflect.TypeFor[nodeproto.PlanMemoKey](),
+		"closures":       reflect.TypeFor[nodeproto.PlanClosures](),
 	} {
 		s.requireFieldsDeclared(t, def, typ)
 	}
@@ -274,8 +278,9 @@ func (protocolFixturePipeline) Plan(_ context.Context, plan *sparkwing.Plan, _ p
 type protocolStepsJob struct{}
 
 func (protocolStepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	build := sparkwing.Step(w, "build", func(context.Context) error { return nil })
-	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build)
+	build := sparkwing.Step(w, "build", func(context.Context) error { return nil }).
+		SkipIf(func(context.Context) bool { return false })
+	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build).Optional()
 	return nil, nil
 }
 
@@ -313,6 +318,10 @@ func TestDescribeAndPlanOutputMatchTheSchema(t *testing.T) {
 		Resources(sparkwing.Cores(2), sparkwing.MemoryGB(1)).
 		Env("MODE", "ci").
 		Outputs("dist/**").
+		CacheDir(sparkwing.GoModules()).
+		BeforeRun(func(context.Context) error { return nil }).
+		AfterRun(func(context.Context, error) {}).
+		Verify(func(context.Context) error { return nil }).
 		SkipIf(func(context.Context) bool { return false }).
 		Memoize(func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key("build"), nil }, sparkwing.TTL(time.Hour))
 	sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).

@@ -44,8 +44,10 @@ unlock.
 - **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 - **sdk:** The plan document carries `protocol`, the node protocol version it was written for
+- **sdk:** The plan document lists each node's and step's closure ids under `closures`, and also carries `memo_key.closure`, `modifiers.has_verify` and step `continue_on_error` and `optional`
 
 ### Changed
+- **sdk (Breaking):** The plan document lists a node's dependency caches under `caches` instead of `dir_caches`
 - **store + controller (Breaking):** `Store.ReleaseCreditFreezes` takes the actor and reason its business events record, and `Store.DisputeTeam` is removed
   `BillingStanding` reports `DailyCapOverrideCents`, `RungOverrideCents` and `RunnerCapOverride`, and `controller.OperatorReason` checks the reason the console and the break-glass command record; `Store.SeedToken` and `controller.EnsureCheckoutToken` seed the checkout service's token from the `credits-token` credential once, refusing a revoked value with `store.ErrSeededTokenRevoked`, and an empty hold id is refused by `Store.ReleaseCreditFreezes` rather than read as every hold. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
 - **controller + cli:** A run whose required secrets are missing fails before its first node, naming every one with the command that sets it
