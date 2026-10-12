@@ -156,3 +156,37 @@ func TestPipelineTrigger_ReadsThePinFromTheSubmittedRevision(t *testing.T) {
 		t.Fatalf("--working-tree uploads the unpinned working tree, yet the pin was enforced: %v", err)
 	}
 }
+
+// The pin lives in sparkwing.yaml, so a .sparkwing/ without main.go still pins
+// the pipeline, and a config that does not parse refuses the trigger.
+func TestPipelineTrigger_ReadsThePinWithoutMainGoAndFailsOnABadConfig(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	swDir := filepath.Join(root, ".sparkwing")
+	if err := os.MkdirAll(swDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(swDir, "sparkwing.yaml"), []byte(pinnedProject), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	gitIn(t, root, "init", "-q")
+	gitIn(t, root, "add", ".")
+	gitIn(t, root, "commit", "-q", "-m", "pinned, no main.go")
+	for _, workingTree := range []bool{false, true} {
+		if err := refuseOtherThanPinnedProfile("release", "staging", workingTree); err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
+			t.Fatalf("workingTree=%v: trigger --profile staging = %v, want the pin refusal", workingTree, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(swDir, "sparkwing.yaml"), []byte("pipelines: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "commit", "-q", "-am", "broken")
+	for _, workingTree := range []bool{false, true} {
+		if err := refuseOtherThanPinnedProfile("release", "staging", workingTree); err == nil {
+			t.Fatalf("workingTree=%v: an unparseable sparkwing.yaml read as no pin", workingTree)
+		}
+	}
+}
