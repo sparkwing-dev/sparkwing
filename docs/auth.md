@@ -840,7 +840,8 @@ name the same repository and it means nothing either way.
   node for a node's claim. The pipeline's code declares its secrets, as in GitHub
   Actions, so push access to the repository is the trust boundary; fork pull
   requests never run on this path. A plan is refused when a declared name
-  breaks the secret-name grammar or it declares more than 100 names, and a
+  breaks the secret-name grammar, it declares more than 100 names, or a
+  required name resolves to no row the run may read, and a
   read of an undeclared name is answered `403` `secret_undeclared` and logged
   as an `audit` record with `event=secret_undeclared` and the claim's token
   prefix. A team-shared secret is readable by any of the team's opted-in
