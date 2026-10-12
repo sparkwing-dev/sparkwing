@@ -129,7 +129,7 @@ func send(t *testing.T, s *nodehost.Server, method, path, bearer, body string) r
 
 func wantRefusal(t *testing.T, got reply, status int, code string) {
 	t.Helper()
-	if got.status != status || got.body["error"] != code {
+	if got.status != status || got.body["code"] != code {
 		t.Fatalf("status %d body %v, want %d %s", got.status, got.body, status, code)
 	}
 }
