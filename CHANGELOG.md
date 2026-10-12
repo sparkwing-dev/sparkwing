@@ -39,6 +39,7 @@ unlock.
 
 - **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
+- **sdk:** The plan document carries `protocol`, the node protocol version it was written for
 
 ### Changed
 - **controller + cli:** A run whose required secrets are missing fails before its first node, naming every one with the command that sets it

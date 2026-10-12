@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -69,7 +70,7 @@ func captureExplainStdout(t *testing.T, pipeline string, rest []string) []byte {
 
 func nodeIDsFromSnapshot(t *testing.T, raw []byte) []string {
 	t.Helper()
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(raw))), &snap); err != nil {
 		t.Fatalf("unmarshal snapshot: %v\nraw=%s", err, string(raw))
 	}

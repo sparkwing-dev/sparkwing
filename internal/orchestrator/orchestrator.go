@@ -21,7 +21,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
@@ -1577,7 +1578,7 @@ type dispatchState struct {
 	retryPriorRunID     string
 	retryRerun          map[string]bool
 	retrySourceNodes    map[string]*store.Node
-	retrySourceSnapshot map[string]snapshotNode
+	retrySourceSnapshot map[string]nodeproto.PlanNode
 
 	inlineRunner runner.Runner
 	debug        DebugDirectives
@@ -1725,7 +1726,7 @@ func (s *dispatchState) rehydrateFromRetry(ctx context.Context, priorRunID strin
 		if err != nil {
 			return fmt.Errorf("read source run: %w", err)
 		}
-		var sourceSnapshot planSnapshot
+		var sourceSnapshot nodeproto.PlanDoc
 		if err := json.Unmarshal(priorRun.PlanSnapshot, &sourceSnapshot); err != nil {
 			return fmt.Errorf("read source plan snapshot: %w", err)
 		}
@@ -1740,7 +1741,7 @@ func (s *dispatchState) rehydrateFromRetry(ctx context.Context, priorRunID strin
 		for _, sourceNode := range sourceRows {
 			s.retrySourceNodes[sourceNode.NodeID] = sourceNode
 		}
-		s.retrySourceSnapshot = make(map[string]snapshotNode, len(sourceSnapshot.Nodes))
+		s.retrySourceSnapshot = make(map[string]nodeproto.PlanNode, len(sourceSnapshot.Nodes))
 		for _, sourceNode := range sourceSnapshot.Nodes {
 			s.retrySourceSnapshot[sourceNode.ID] = sourceNode
 		}
@@ -2085,11 +2086,11 @@ func (s *dispatchState) validateRetryExpansion(exp sparkwing.Expansion, children
 	if err != nil {
 		return fmt.Errorf("snapshot regenerated expansion %s: %w", exp.Source.ID(), err)
 	}
-	var current planSnapshot
+	var current nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &current); err != nil {
 		return fmt.Errorf("read regenerated expansion %s: %w", exp.Source.ID(), err)
 	}
-	currentByID := make(map[string]snapshotNode, len(current.Nodes))
+	currentByID := make(map[string]nodeproto.PlanNode, len(current.Nodes))
 	for _, node := range current.Nodes {
 		currentByID[node.ID] = node
 	}
@@ -2959,143 +2960,12 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 	}
 }
 
-type planSnapshot struct {
-	Pipeline       string                   `json:"pipeline"`
-	RunID          string                   `json:"run_id"`
-	Priority       int                      `json:"priority,omitempty"`
-	ClaimWaitMS    int64                    `json:"claim_wait_ms,omitempty"`
-	AdmissionClass sparkwing.AdmissionClass `json:"admission_class,omitempty"`
-	Requires       []string                 `json:"requires,omitempty"`
-	Nodes          []snapshotNode           `json:"nodes"`
-	PlanConc       *snapshotConc            `json:"plan_concurrency,omitempty"`
-	PlanConcs      []snapshotConc           `json:"plan_concurrency_groups,omitempty"`
-
-	Resources *snapshotResources `json:"plan_resources,omitempty"`
-
-	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
-
-	Source *snapshotSource `json:"source,omitempty"`
-}
-
-type snapshotSource struct {
-	Depth      int  `json:"depth"`
-	Tags       bool `json:"tags,omitempty"`
-	Submodules bool `json:"submodules,omitempty"`
-	LFS        bool `json:"lfs,omitempty"`
-}
-
-type snapshotNode struct {
-	ID           string            `json:"id"`
-	Deps         []string          `json:"deps"`
-	OptionalDeps []string          `json:"optional_deps,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
-	Outputs      []string          `json:"outputs,omitempty"`
-	Consumes     []snapshotConsume `json:"consumes,omitempty"`
-
-	Groups   []string          `json:"groups,omitempty"`
-	Dynamic  bool              `json:"dynamic,omitempty"`
-	Approval *snapshotApproval `json:"approval,omitempty"`
-
-	OnFailureOf string `json:"on_failure_of,omitempty"`
-
-	Modifiers *snapshotModifiers `json:"modifiers,omitempty"`
-
-	// safety: beside modifiers, not in them, because the controller decodes
-	// modifiers strictly and an older one would refuse the whole plan.
-	DirCaches []depcache.Spec `json:"dir_caches,omitempty"`
-
-	Work *snapshotWork `json:"work,omitempty"`
-
-	SpecHash string `json:"spec_hash,omitempty"`
-
-	PipelineRefs []snapshotPipelineRef `json:"pipeline_refs,omitempty"`
-}
-
-type snapshotPipelineRef struct {
-	Pipeline string `json:"pipeline"`
-	Node     string `json:"node"`
-}
-
-func snapshotPipelineRefs(refs []sparkwing.RefTarget) []snapshotPipelineRef {
-	var out []snapshotPipelineRef
+func snapshotPipelineRefs(refs []sparkwing.RefTarget) []nodeproto.PlanPipelineRef {
+	var out []nodeproto.PlanPipelineRef
 	for _, r := range refs {
-		out = append(out, snapshotPipelineRef{Pipeline: r.Pipeline, Node: r.NodeID})
+		out = append(out, nodeproto.PlanPipelineRef{Pipeline: r.Pipeline, Node: r.NodeID})
 	}
 	return out
-}
-
-type snapshotConsume struct {
-	Producer string `json:"producer"`
-	Into     string `json:"into,omitempty"`
-}
-
-type snapshotConc struct {
-	Key string `json:"key,omitempty"`
-}
-
-type snapshotResources struct {
-	Cores       float64 `json:"cores,omitempty"`
-	MemoryBytes int64   `json:"memory_bytes,omitempty"`
-}
-
-type snapshotApproval struct {
-	Message   string `json:"message,omitempty"`
-	TimeoutMS int64  `json:"timeout_ms,omitempty"`
-	OnTimeout string `json:"on_timeout,omitempty"`
-}
-
-type snapshotModifiers struct {
-	Retry               int      `json:"retry,omitempty"`
-	RetryBackoffMS      int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto           bool     `json:"retry_auto,omitempty"`
-	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
-	NoProgressTimeoutMS int64    `json:"no_progress_timeout_ms,omitempty"`
-	RunsOn              []string `json:"runs_on,omitempty"`
-	Prefers             []string `json:"prefers,omitempty"`
-	WhenRunner          []string `json:"when_runner,omitempty"`
-
-	Cache      bool  `json:"cache,omitempty"`
-	CacheTTLMS int64 `json:"cache_ttl_ms,omitempty"`
-
-	ConcGroup           string `json:"conc_group,omitempty"`
-	ConcCapacity        int    `json:"conc_capacity,omitempty"`
-	ConcCost            int    `json:"conc_cost,omitempty"`
-	ConcScope           string `json:"conc_scope,omitempty"`
-	ConcOnLimit         string `json:"conc_on_limit,omitempty"`
-	ConcQueueTimeoutMS  int64  `json:"conc_queue_timeout_ms,omitempty"`
-	ConcCancelTimeoutMS int64  `json:"conc_cancel_timeout_ms,omitempty"`
-
-	ResCores        float64 `json:"res_cores,omitempty"`
-	ResMemoryBytes  int64   `json:"res_memory_bytes,omitempty"`
-	Inline          bool    `json:"inline,omitempty"`
-	Optional        bool    `json:"optional,omitempty"`
-	ContinueOnError bool    `json:"continue_on_error,omitempty"`
-	OnFailure       string  `json:"on_failure,omitempty"`
-	HasBeforeRun    bool    `json:"has_before_run,omitempty"`
-	HasAfterRun     bool    `json:"has_after_run,omitempty"`
-	HasSkipIf       bool    `json:"has_skip_if,omitempty"`
-}
-
-type snapshotWork struct {
-	Steps         []snapshotStep      `json:"steps,omitempty"`
-	StepGroups    []snapshotStepGroup `json:"step_groups,omitempty"`
-	ResultStep    string              `json:"result_step,omitempty"`
-	FailurePolicy string              `json:"failure_policy,omitempty"`
-}
-
-type snapshotStepGroup struct {
-	Name    string   `json:"name,omitempty"`
-	Members []string `json:"members"`
-}
-
-type snapshotStep struct {
-	ID        string   `json:"id"`
-	Needs     []string `json:"needs,omitempty"`
-	IsResult  bool     `json:"is_result,omitempty"`
-	HasSkipIf bool     `json:"has_skip_if,omitempty"`
-	Finally   bool     `json:"finally,omitempty"`
-
-	Risks []string `json:"risks,omitempty"`
 }
 
 type planSnapshotMeta struct {
@@ -3111,9 +2981,10 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 	return json.Marshal(snap)
 }
 
-func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) (planSnapshot, error) {
-	snap := planSnapshot{
-		AdmissionClass: p.AdmissionClassValue(),
+func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) (nodeproto.PlanDoc, error) {
+	snap := nodeproto.PlanDoc{
+		Protocol:       authwire.NodeProtocolVersion,
+		AdmissionClass: string(p.AdmissionClassValue()),
 		Pipeline:       rc.Pipeline,
 		RunID:          rc.RunID,
 		Priority:       p.PriorityValue(),
@@ -3121,10 +2992,10 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		Requires:       slices.Clone(meta.PipelineRequires),
 		Secrets:        meta.Secrets,
 		// safety: an empty plan still writes "nodes": [], the shape every SDK and reader expects.
-		Nodes: []snapshotNode{},
+		Nodes: []nodeproto.PlanNode{},
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
-		snap.PlanConc = &snapshotConc{
+		snap.PlanConc = &nodeproto.PlanConc{
 			Key: scopedGroupKey(group, rc.RunID),
 		}
 	}
@@ -3132,19 +3003,19 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		if membership.Group == nil {
 			continue
 		}
-		snap.PlanConcs = append(snap.PlanConcs, snapshotConc{
+		snap.PlanConcs = append(snap.PlanConcs, nodeproto.PlanConc{
 			Key: scopedGroupKey(membership.Group, rc.RunID),
 		})
 	}
 	if rh := p.ResourceHints(); rh != nil {
-		snap.Resources = &snapshotResources{
+		snap.Resources = &nodeproto.PlanResources{
 			Cores:       rh.Cores,
 			MemoryBytes: rh.MemoryBytes,
 		}
 	}
 	seen := make(map[string]bool)
 	for _, n := range p.Nodes() {
-		sn := snapshotNode{
+		sn := nodeproto.PlanNode{
 			ID:           n.ID(),
 			Deps:         n.DepIDs(),
 			OptionalDeps: n.OptionalDepIDs(),
@@ -3156,7 +3027,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			PipelineRefs: snapshotPipelineRefs(n.PipelineRefs()),
 		}
 		if cfg := n.ApprovalConfig(); cfg != nil {
-			sn.Approval = &snapshotApproval{
+			sn.Approval = &nodeproto.PlanApproval{
 				Message:   cfg.Message,
 				TimeoutMS: cfg.Timeout.Milliseconds(),
 				OnTimeout: string(cfg.OnExpiry),
@@ -3175,7 +3046,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		if rec == nil || seen[rec.ID()] {
 			continue
 		}
-		recSnap := snapshotNode{
+		recSnap := nodeproto.PlanNode{
 			ID:           rec.ID(),
 			Deps:         rec.DepIDs(),
 			OptionalDeps: rec.OptionalDepIDs(),
@@ -3197,10 +3068,10 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 	return snap, nil
 }
 
-func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []snapshotConsume {
-	out := make([]snapshotConsume, len(edges))
+func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []nodeproto.PlanConsume {
+	out := make([]nodeproto.PlanConsume, len(edges))
 	for i, edge := range edges {
-		out[i] = snapshotConsume{Producer: edge.Producer, Into: edge.Into}
+		out[i] = nodeproto.PlanConsume{Producer: edge.Producer, Into: edge.Into}
 	}
 	return out
 }
@@ -3282,9 +3153,9 @@ func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []str
 	return out
 }
 
-func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
+func nodeModifiersSnapshot(n *sparkwing.JobNode) *nodeproto.PlanModifiers {
 	rc := n.RetryConfig()
-	m := snapshotModifiers{
+	m := nodeproto.PlanModifiers{
 		Retry:               rc.Attempts,
 		RetryBackoffMS:      rc.Backoff.Milliseconds(),
 		RetryAuto:           rc.Auto,
@@ -3327,7 +3198,7 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	return &m
 }
 
-func isZeroModifiers(m snapshotModifiers) bool {
+func isZeroModifiers(m nodeproto.PlanModifiers) bool {
 	return m.Retry == 0 &&
 		m.RetryBackoffMS == 0 &&
 		!m.RetryAuto &&
@@ -3356,13 +3227,13 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		!m.HasSkipIf
 }
 
-func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *snapshotWork {
-	out := &snapshotWork{FailurePolicy: string(work.ParallelFailurePolicy())}
+func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *nodeproto.PlanWork {
+	out := &nodeproto.PlanWork{FailurePolicy: string(work.ParallelFailurePolicy())}
 	if resultStep != nil {
 		out.ResultStep = resultStep.ID()
 	}
 	for _, s := range work.Steps() {
-		out.Steps = append(out.Steps, snapshotStep{
+		out.Steps = append(out.Steps, nodeproto.PlanStep{
 			ID:        s.ID(),
 			Needs:     s.DepIDs(),
 			IsResult:  s == resultStep,
@@ -3377,7 +3248,7 @@ func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *snaps
 		for i, m := range members {
 			ids[i] = m.ID()
 		}
-		out.StepGroups = append(out.StepGroups, snapshotStepGroup{
+		out.StepGroups = append(out.StepGroups, nodeproto.PlanStepGroup{
 			Name:    g.Name(),
 			Members: ids,
 		})

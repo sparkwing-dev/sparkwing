@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -36,7 +37,7 @@ func TestClaimPlanSnapshot_HashesEachNodeStably(t *testing.T) {
 	if unchanged, _ := claimNodeSpecHash(claimTestPlan(t, "xy"), rc, nil, "a"); unchanged != first.Nodes[0].SpecHash {
 		t.Fatalf("an unchanged node's hash moved: %q", unchanged)
 	}
-	if first.Source == nil || *first.Source != (snapshotSource{Depth: 3, LFS: true}) {
+	if first.Source == nil || *first.Source != (nodeproto.PlanSource{Depth: 3, LFS: true}) {
 		t.Fatalf("source = %+v", first.Source)
 	}
 	if _, err := claimNodeSpecHash(claimTestPlan(t, "x"), rc, nil, "missing"); err == nil {
