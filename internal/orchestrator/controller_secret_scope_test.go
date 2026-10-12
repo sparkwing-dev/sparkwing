@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -18,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestForegroundControllerSecretsSelectRunPipeline(t *testing.T) {
+func TestControllerSecretResolverWithoutARunReadsOnlyUnscopedSecrets(t *testing.T) {
 	isolateProfiles(t)
 	p := newPathsWithStore(t)
 	st, err := store.Open(p.StateDB())
@@ -64,31 +61,5 @@ func TestForegroundControllerSecretsSelectRunPipeline(t *testing.T) {
 	}
 	if _, _, err := standalone.Resolve(ctx, "DEPLOY_TOKEN"); !errors.Is(err, sparkwing.ErrSecretMissing) {
 		t.Fatalf("no-context scoped lookup=%v", err)
-	}
-	capturedSecrets = nil
-	result, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "orch-sec-reader", Profile: &profile.Profile{Secrets: &spec}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Status != "success" {
-		t.Fatalf("foreground scoped secret: status=%s error=%v", result.Status, result.Error)
-	}
-	if capturedSecrets == nil || capturedSecrets.Token != "own-pipeline" || capturedSecrets.Flag != "" {
-		t.Fatalf("resolved wrong secret scope: %+v", capturedSecrets)
-	}
-
-	reader, _, err := st.CreateToken("unclaimed-reader", store.TokenKindRunner, []string{controller.ScopeSecretsRead}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	refusedSpec := spec
-	refusedSpec.Token = reader
-	capturedSecrets = nil
-	refused, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "orch-sec-reader", Profile: &profile.Profile{Secrets: &refusedSpec}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if refused.Status != "failed" || refused.Error == nil || !strings.Contains(refused.Error.Error(), "403") || capturedSecrets != nil {
-		t.Fatalf("unclaimed reader: status=%s error=%v body=%v", refused.Status, refused.Error, capturedSecrets != nil)
 	}
 }

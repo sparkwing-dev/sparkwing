@@ -11,8 +11,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -41,29 +39,6 @@ func (envReadingPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 
 func init() {
 	register("env-reading-pipe", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &envReadingPipe{} })
-}
-
-func TestRun_ProfileSecretsBackend_EnvType(t *testing.T) {
-	t.Setenv("SWTEST_TOKEN", "from-env")
-
-	capturedEnvSecret = ""
-	p := newPathsWithStore(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "env-reading-pipe",
-		Profile: &profile.Profile{
-			Name:    "test",
-			Secrets: &backends.Spec{Type: backends.TypeEnv, Prefix: "SWTEST_"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
-	}
-	if capturedEnvSecret != "from-env" {
-		t.Errorf("step body saw Token = %q, want from-env", capturedEnvSecret)
-	}
 }
 
 func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
@@ -106,8 +81,6 @@ func TestRun_LocalOnlyReplacesOptionsSecretSourceWithTheLocalStore(t *testing.T)
 }
 
 func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
-	t.Setenv("SWTEST_TOKEN", "x")
-
 	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "env-reading-pipe",
@@ -115,10 +88,7 @@ func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
 			Name:       "env-reading-pipe",
 			Entrypoint: "EnvReading",
 		},
-		Profile: &profile.Profile{
-			Name:    "test",
-			Secrets: &backends.Spec{Type: backends.TypeEnv, Prefix: "SWTEST_"},
-		},
+		SecretSource: staticSource{"TOKEN": "x"},
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

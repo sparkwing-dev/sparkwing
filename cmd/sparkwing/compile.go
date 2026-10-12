@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
 func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
@@ -76,7 +75,7 @@ func (r *pipelineRun) materialize(env []string) error {
 		return nil
 	}
 
-	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, r.opts.Profile, r.opts.DigestBackfill)
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env)
 	if err != nil {
 		return err
 	}
@@ -85,7 +84,7 @@ func (r *pipelineRun) materialize(env []string) error {
 }
 
 func (r *pipelineRun) exec(args, env []string) error {
-	env = withWingdHost(handoffProfiles(env, r.opts.Profile))
+	env = withWingdHost(dropProfileEnv(env))
 	if r.uncachedBinary != "" {
 		r.stopSignals()
 		execDir := r.opts.ExecutionDir
@@ -153,8 +152,6 @@ func pipelineBinary(
 	sparkwingDir, key string,
 	keyParts []bincache.KeyPart,
 	env []string,
-	profileName string,
-	digestBackfill bool,
 ) (*bincache.Lease, string, error) {
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -162,18 +159,6 @@ func pipelineBinary(
 	}
 	source := "cached"
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if cache, lookup := resolveBinaryCacheSpec(profileName); cache != nil {
-			if store, openErr := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup); openErr == nil {
-				if fetchErr := bincache.FetchFromArtifactStore(ctx, store, key, tempPath, digestBackfill); fetchErr == nil {
-					source = "artifact-store"
-					return nil
-				} else if !bincache.IsNotFound(fetchErr) {
-					slog.Default().Warn("artifact-store fetch failed", "err", fetchErr, "hash", key)
-				}
-			} else {
-				slog.Default().Warn("artifact-store open failed", "err", openErr, "type", cache.Type)
-			}
-		}
 		if gcURL := bincache.CacheURL(); gcURL != "" {
 			if fetchErr := bincache.TryBinary(ctx, gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
 				source = "gitcache"
@@ -271,14 +256,9 @@ func fleetExecutionEnv(env []string) bool {
 }
 
 type compileOptions struct {
-	ExecutionDir   string
-	NoUpdate       bool
-	NoBincache     bool
-	DigestBackfill bool
-
-	// safety: the pipeline process selects its profile from this alone, never
-	// from a value the caller's environment carried in.
-	Profile string
+	ExecutionDir string
+	NoUpdate     bool
+	NoBincache   bool
 
 	// safety: every exec path ends in os.Exit to carry the pipeline's status,
 	// which skips defers, so teardown has to travel with the call and run once

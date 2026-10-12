@@ -88,30 +88,6 @@ func startLoopbackController(
 	}, nil
 }
 
-func startLoopbackShim(
-	state StateBackend,
-	concurrency ConcurrencyBackend,
-	runID string,
-	logger *slog.Logger,
-) (*loopbackController, error) {
-	if logger == nil {
-		logger = loopbackLogger()
-	}
-	token, err := newLoopbackToken()
-	if err != nil {
-		return nil, fmt.Errorf("loopback shim: mint run token: %w", err)
-	}
-
-	shim := controller.NewLoopback(state, runID, token, logger).
-		WithConcurrency(concurrency)
-
-	url, srv, err := serveLoopback(shim.Handler(), runID, logger)
-	if err != nil {
-		return nil, err
-	}
-	return &loopbackController{url: url, token: token, srv: srv, logger: logger}, nil
-}
-
 func newLoopbackToken() (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {

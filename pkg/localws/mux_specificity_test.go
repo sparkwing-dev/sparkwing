@@ -9,7 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -163,10 +163,10 @@ func TestMuxSpecificity_DocsReachesTheDocsHandler(t *testing.T) {
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>" + shellMarker + "</body></html>")},
 	}
 	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
-		paths:   paths,
-		backend: backend.NewStoreBackend(st, paths, nil),
-		store:   st,
-	}, bundle)
+		paths: paths,
+		store: st,
+		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle, Version: "v1.2.3"}),
+	})
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 

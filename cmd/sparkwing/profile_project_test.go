@@ -41,7 +41,7 @@ pipelines:
 profiles:
   bucket:
     secrets: { type: none }
-    state: { type: s3, bucket: example-bucket, prefix: state }
+    state: { type: sqlite, path: /tmp/example-project.db }
     logs: { type: s3, bucket: example-bucket, prefix: logs }
     cache: { type: s3, bucket: example-bucket, prefix: cache }
 `
@@ -55,8 +55,8 @@ func TestResolveProfileFlag_FindsProjectProfile(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	state, _, _ := p.SurfaceStrings()
-	if !strings.Contains(state, "example-bucket") {
-		t.Errorf("state surface: got %q, want the project profile's bucket", state)
+	if !strings.Contains(state, "example-project.db") {
+		t.Errorf("state surface: got %q, want the project profile's database", state)
 	}
 }
 
@@ -100,5 +100,21 @@ func TestResolveProfileChain_NoFlagSelectsNothingAProjectDeclares(t *testing.T) 
 	}
 	if _, err := resolveProfile(""); !errors.Is(err, profile.ErrNoProfile) {
 		t.Errorf("resolveProfile with no flag = %v, want ErrNoProfile", err)
+	}
+}
+
+func TestResolveProfileFlag_ProjectS3StateFailsToLoad(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
+	projectAt(t, `
+profiles:
+  bucket:
+    secrets: { type: none }
+    state: { type: s3, bucket: example-bucket, prefix: state }
+    logs: { type: s3, bucket: example-bucket, prefix: logs }
+    cache: { type: s3, bucket: example-bucket, prefix: cache }
+`)
+	_, err := resolveProfileFlag("bucket")
+	if err == nil || !strings.Contains(err.Error(), "state.type: s3 is removed") {
+		t.Fatalf("resolve = %v, want the removed state type named", err)
 	}
 }

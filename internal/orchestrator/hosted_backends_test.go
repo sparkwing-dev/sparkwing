@@ -21,11 +21,8 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -86,16 +83,12 @@ func (l *storeOpenLog) opened(path string) int {
 func countStoreOpens(t *testing.T) *storeOpenLog {
 	t.Helper()
 	log := &storeOpenLog{}
-	previousSpec, previousOpen := openStateStoreFromSpec, storeOpen
-	openStateStoreFromSpec = func(ctx context.Context, spec backends.Spec, lookup storeurl.ProfileLookup) (storage.StateStore, error) {
-		log.record(spec.Path)
-		return previousSpec(ctx, spec, lookup)
-	}
+	previousOpen := storeOpen
 	storeOpen = func(path string) (*store.Store, error) {
 		log.record(path)
 		return previousOpen(path)
 	}
-	t.Cleanup(func() { openStateStoreFromSpec, storeOpen = previousSpec, previousOpen })
+	t.Cleanup(func() { storeOpen = previousOpen })
 	return log
 }
 
@@ -581,7 +574,7 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths, "")
+	backends, _, release, err := localTriggerBackends(ctx, paths)
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}
@@ -592,25 +585,6 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 	}
 	if _, err := os.Stat(paths.StateDB()); err == nil {
 		t.Fatalf("a child run created %s, which the daemon owns", paths.StateDB())
-	}
-}
-
-func TestLocalTriggerBackends_ANamedProfileKeepsItsOwnStore(t *testing.T) {
-	home := wingdTestHome(t)
-	// safety: a child run resolves the daemon from the environment, as the
-	// process that spawns it does.
-	t.Setenv("SPARKWING_HOME", home)
-	startAPIDaemon(t, home, nil)
-	paths := PathsAt(home)
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatalf("ensure root: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-	if _, _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
-		release()
-		t.Fatal("a named profile resolved to the daemon's socket")
 	}
 }
 

@@ -32,8 +32,8 @@ func TestRun_TerminalStateThatNeverPersistedFailsTheRun(t *testing.T) {
 	}
 
 	fakes := newFakeBackends()
-	outboxErr := errors.New("s3state: runs/r/state.ndjson is queued in the local outbox, not in the object store")
-	state := &finishFailingState{fakeState: fakes.state, err: outboxErr}
+	persistErr := errors.New("store: the terminal state was not written")
+	state := &finishFailingState{fakeState: fakes.state, err: persistErr}
 	res, err = orchestrator.Run(context.Background(),
 		orchestrator.Backends{State: state, Logs: fakes.logs, Concurrency: fakes.concurrency},
 		orchestrator.Options{Pipeline: "persist-fail-pipe"})
@@ -46,7 +46,7 @@ func TestRun_TerminalStateThatNeverPersistedFailsTheRun(t *testing.T) {
 	if res.Error == nil || !strings.HasPrefix(res.Error.Error(), "persist run state:") {
 		t.Fatalf("result error = %v, want it to lead with \"persist run state:\"", res.Error)
 	}
-	if !errors.Is(res.Error, outboxErr) {
+	if !errors.Is(res.Error, persistErr) {
 		t.Errorf("result error = %v, want it to wrap the backend's error", res.Error)
 	}
 }

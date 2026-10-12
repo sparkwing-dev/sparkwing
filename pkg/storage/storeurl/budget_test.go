@@ -8,13 +8,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func s3Env(t *testing.T, endpoint string) {
@@ -116,62 +113,6 @@ func TestTrippedBudgetSurfacesAReadableStoreError(t *testing.T) {
 	}
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("%d requests reached the bucket, want the single one inside the budget", got)
-	}
-}
-
-// TestTrippedBudgetFailsARunsStateWriteClosed is the failure a run's exit
-// code comes from: FinishRun is what tells the orchestrator a run's
-// terminal state reached the object store, and a spent budget makes it
-// say no, in words, rather than queueing the write behind the outbox.
-func TestTrippedBudgetFailsARunsStateWriteClosed(t *testing.T) {
-	endpoint, _ := countingBucket(t, http.StatusOK)
-	s3Env(t, endpoint)
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-
-	tight := objectguard.Config{Enabled: true, Reset: objectguard.TripResetDay, Limits: map[objectguard.Class]objectguard.Limit{
-		objectguard.ClassPut: {PerMinute: 1},
-	}}
-	useLimiter(t, objectguard.New(tight))
-
-	ctx := context.Background()
-	art, err := OpenArtifactStore(ctx, "s3://bucket/prefix")
-	if err != nil {
-		t.Fatalf("open artifact store: %v", err)
-	}
-	if err := art.Put(ctx, "warm", strings.NewReader("payload")); err != nil {
-		t.Fatalf("the put inside the budget failed: %v", err)
-	}
-
-	state, err := OpenStateStoreFromSpec(ctx, backends.Spec{
-		Type:   backends.TypeS3,
-		Bucket: "bucket",
-		Prefix: "state",
-	}, nil)
-	if err != nil {
-		t.Fatalf("open state store: %v", err)
-	}
-	defer func() { _ = state.Close() }()
-
-	if err := state.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "p", StartedAt: time.Now().UTC()}); err != nil {
-		if !errors.Is(err, objectguard.ErrBudgetExceeded) {
-			t.Fatalf("CreateRun: %v", err)
-		}
-		return
-	}
-	err = state.FinishRun(ctx, "run-1", "success", "")
-	if err == nil {
-		t.Fatal("a run finished successfully with its terminal state refused by the budget")
-	}
-	if !errors.Is(err, objectguard.ErrBudgetExceeded) {
-		t.Fatalf("the run's failure does not match ErrBudgetExceeded, so it queued instead of failing closed: %v", err)
-	}
-	if strings.Contains(err.Error(), "queued in the local outbox") {
-		t.Fatalf("a refused write was staged to the outbox instead of failing closed: %v", err)
-	}
-	for _, want := range []string{"object-store put budget exceeded", "--object-store-budget"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the run's failure does not mention %q:\n%v", want, err)
-		}
 	}
 }
 

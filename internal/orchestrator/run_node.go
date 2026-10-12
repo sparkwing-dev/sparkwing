@@ -129,13 +129,9 @@ func RunNodeOnce(
 	if cfg.coordinated {
 		// safety: rebuild local surfaces; a laptop run's secrets and artifact
 		// store do not belong to the pod's controller-backed profile.
-		var profileLogs LogBackend
-		localSecrets, art, profileLogs, err = coordinatedChildSurfaces(ctx, runID, run.Pipeline)
+		localSecrets, art, err = coordinatedChildSurfaces(ctx, runID, run.Pipeline)
 		if err != nil {
 			return runner.Result{}, err
-		}
-		if profileLogs != nil {
-			logsBackend = profileLogs
 		}
 	} else if cfg.brokeredChild && cfg.brokerArtifact {
 		art = sparkwingcache.New(controllerURL, token, httpClient)

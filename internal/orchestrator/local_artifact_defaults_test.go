@@ -3,12 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"io"
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 func TestLocalArtifactDefaultsReachNode(t *testing.T) {
@@ -25,16 +20,17 @@ func TestLocalArtifactDefaultsReachNode(t *testing.T) {
 				t.Setenv("SPARKWING_LOCAL_ONLY", "")
 			}
 			opts := Options{LocalOnly: localOnly, DefaultStateDB: paths.StateDB()}
-			if err := applyProfileBackendsWithMirror(t.Context(), &opts, nil, paths, true); err != nil {
+			if err := resolveLocalBackends(&opts, paths, false); err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = opts.State.Close() })
 			if opts.ArtifactStore == nil {
 				t.Fatal("local dispatcher has no artifact store")
 			}
 			if err := opts.ArtifactStore.Put(t.Context(), "probe", bytes.NewBufferString("exact artifact bytes")); err != nil {
 				t.Fatal(err)
 			}
-			_, nodeStore, _, err := coordinatedChildSurfaces(t.Context(), "fixture", "fixture")
+			_, nodeStore, err := coordinatedChildSurfaces(t.Context(), "fixture", "fixture")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,23 +50,5 @@ func TestLocalArtifactDefaultsReachNode(t *testing.T) {
 				t.Fatalf("artifact = %q", got)
 			}
 		})
-	}
-}
-
-func TestLocalOnlyArtifactSetupNeverContactsController(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(http.StatusNotFound) }))
-	defer server.Close()
-	paths := Paths{Root: t.TempDir()}
-	prof := &profile.Profile{Name: "remote", Controller: &profile.ControllerSpec{URL: server.URL, Token: "test-token"}}
-	opts := Options{LocalOnly: true, DefaultStateDB: paths.StateDB()}
-	if err := applyProfileBackendsWithMirror(t.Context(), &opts, prof, paths, true); err != nil {
-		t.Fatal(err)
-	}
-	if requests.Load() != 0 {
-		t.Fatalf("local-only backend setup sent %d controller requests", requests.Load())
-	}
-	if opts.ArtifactStore == nil {
-		t.Fatal("local-only run has no artifact cache")
 	}
 }

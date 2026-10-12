@@ -16,8 +16,6 @@ type Options struct {
 
 	ReadOnly bool
 
-	NoLocalStore bool
-
 	AllowRemote bool
 
 	AllowOrigins []string

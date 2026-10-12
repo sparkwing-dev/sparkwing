@@ -22,7 +22,7 @@ func TestProfileCmd_NoFlagYieldsNoProfile(t *testing.T) {
 	setProfileCmdFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
-  team: { state: { type: s3, bucket: team, prefix: state } }
+  team: { state: { type: sqlite, path: /tmp/team.db } }
 `)
 	out := captureStdout(t, func() {
 		if err := runProfilesShow(nil); err != nil {
@@ -38,7 +38,7 @@ func TestProfileCmd_FlagSelectsHypothetical(t *testing.T) {
 	setProfileCmdFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
-  team: { state: { type: s3, bucket: team, prefix: state } }
+  team: { state: { type: sqlite, path: /tmp/team.db } }
 `)
 	out := captureStdout(t, func() {
 		if err := runProfilesShow([]string{"--profile", "team", "--output", "pretty"}); err != nil {

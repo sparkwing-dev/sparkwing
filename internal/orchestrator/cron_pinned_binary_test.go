@@ -49,7 +49,7 @@ func TestDispatchLocalTrigger_RunsThePinnedBinaryInsteadOfCompiling(t *testing.T
 		ID:         "run-pinned",
 		Pipeline:   "nightly",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
-	}, "", repoDir, cache, logger, nil)
+	}, repoDir, cache, logger, nil)
 	if err != nil {
 		t.Fatalf("dispatch the pinned binary: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDispatchLocalTrigger_FailsWhenThePinnedBinaryIsGone(t *testing.T) {
 		ID:         "run-missing",
 		Pipeline:   "nightly",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: missing},
-	}, "", repoDir, cache, logger, nil)
+	}, repoDir, cache, logger, nil)
 	if err == nil {
 		t.Fatal("a pin whose binary is gone dispatched anyway")
 	}
@@ -99,7 +99,7 @@ func TestDispatchLocalTrigger_RefusesAPinThatIsNotExecutable(t *testing.T) {
 		ID:         "run-not-executable",
 		Pipeline:   "nightly",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
-	}, "", repoDir, cache, logger, nil)
+	}, repoDir, cache, logger, nil)
 	if err == nil {
 		t.Fatal("a pin that is not executable dispatched anyway")
 	}
@@ -131,7 +131,7 @@ func TestDispatchLocalTrigger_RefusesAPinReplacedSinceItWasArmed(t *testing.T) {
 	// proves nothing.
 	if derr := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID: "run-intact", Pipeline: "nightly", TriggerEnv: env,
-	}, "", repoDir, cache, logger, nil); derr != nil {
+	}, repoDir, cache, logger, nil); derr != nil {
 		t.Fatalf("an untouched pin was refused: %v", derr)
 	}
 
@@ -140,7 +140,7 @@ func TestDispatchLocalTrigger_RefusesAPinReplacedSinceItWasArmed(t *testing.T) {
 	}
 	derr := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID: "run-swapped", Pipeline: "nightly", TriggerEnv: env,
-	}, "", repoDir, cache, logger, nil)
+	}, repoDir, cache, logger, nil)
 	if derr == nil {
 		t.Fatal("a pinned binary replaced since arming ran anyway")
 	}
@@ -176,7 +176,7 @@ func TestDispatchLocalTrigger_RefusesAPinnedPipelineBeforeStartingTheBinary(t *t
 				ID:         "run-" + name,
 				Pipeline:   "nightly",
 				TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: binary},
-			}, "", repoDir, cache, logger, nil)
+			}, repoDir, cache, logger, nil)
 			if err == nil || (name == "pinned" && !strings.Contains(err.Error(), "pinned to profile prod")) {
 				t.Fatalf("dispatch = %v, want a refusal", err)
 			}

@@ -15,8 +15,6 @@ const DefaultScheduleName = "default"
 const DefaultScheduleOverlap = ScheduleOverlapSkip
 const DefaultScheduleTZ = "UTC"
 type GuardContext struct {
-	ProfileName string
-
 	ProfileIsLocal bool
 
 	Args map[string]string
@@ -46,7 +44,6 @@ const KindGitBranch
 const KindGitBranchOnDef
 const KindProfileController
 const KindProfileLocal
-const KindProfileName
 const KindUnknown GuardKind = iota
 const MaxScheduleNameLen = 40
 func Parse(r io.Reader) (*Config, error)

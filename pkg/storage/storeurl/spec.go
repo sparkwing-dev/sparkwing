@@ -3,21 +3,15 @@ package storeurl
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/stdoutlogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -27,9 +21,6 @@ import (
 // controller URL and bearer token. The factory invokes it for
 // type=controller specs; other types ignore it. Pass nil when no
 // controller-typed spec can appear.
-//
-// Shape matches sparkwing.ProfileLookup so the orchestrator's existing
-// callback in profileLookupCallback() can be reused as-is.
 type ProfileLookup func(name string) (controllerURL, token string, err error)
 
 // OpenArtifactStoreFromSpec constructs an ArtifactStore from a
@@ -144,88 +135,15 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 			return nil, fmt.Errorf("state sqlite: %w", err)
 		}
 		return store.Open(path)
-	case backends.TypeS3:
-		s3client, err := newS3Client(ctx, true)
-		if err != nil {
-			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
-		}
-		art := s3store.NewArtifactStore(spec.Bucket, spec.Prefix, s3client)
-		return s3state.New(art, s3StateOutboxOptions(art)...), nil
 	case backends.TypeController:
 		url, token, err := resolveControllerProfile("state", spec.Controller, lookup)
 		if err != nil {
 			return nil, err
 		}
 		return client.NewWithToken(url, nil, token), nil
-	case backends.TypePostgres:
-		dsn, err := resolveStateDSN("postgres", spec.URL, spec.URLSource)
-		if err != nil {
-			return nil, err
-		}
-		return store.OpenPostgres(ctx, dsn)
 	default:
-		return nil, fmt.Errorf("state backend type %q is not supported (use sqlite, postgres, s3 or controller)", spec.Type)
+		return nil, fmt.Errorf("state backend type %q is not supported (use sqlite or controller)", spec.Type)
 	}
-}
-
-var outboxWarnOnce sync.Once
-
-func s3StateOutboxOptions(art storage.ArtifactStore) []s3state.Option {
-	opts, err := openStateOutbox(art)
-	if err != nil {
-		outboxWarnOnce.Do(func() { logOutboxUnavailable(slog.Default(), err) })
-		return nil
-	}
-	return opts
-}
-
-func openStateOutbox(art storage.ArtifactStore) ([]s3state.Option, error) {
-	path, err := outboxDBPath()
-	if err != nil {
-		return nil, fmt.Errorf("resolve outbox path: %w", err)
-	}
-	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
-		return nil, fmt.Errorf("create outbox dir %s: %w", filepath.Dir(path), err)
-	}
-	ob, err := s3state.OpenOutbox(path, art, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open outbox %s: %w", path, err)
-	}
-	return []s3state.Option{s3state.WithOutbox(ob)}, nil
-}
-
-func logOutboxUnavailable(log *slog.Logger, err error) {
-	log.Warn("s3 state durability outbox unavailable; object-store outage resilience is not in effect", "error", err)
-}
-
-func outboxDBPath() (string, error) {
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(p.Root, "outbox.db"), nil
-}
-
-func resolveStateDSN(surface, url, urlSource string) (string, error) {
-	if url != "" {
-		return url, nil
-	}
-	if urlSource == "" {
-		return "", fmt.Errorf("state backend type=%s requires url or url_source: env:VAR", surface)
-	}
-	const prefix = "env:"
-	if !strings.HasPrefix(urlSource, prefix) {
-		return "", fmt.Errorf("state backend url_source must use the form %sVAR_NAME (got %q)", prefix, urlSource)
-	}
-	name := urlSource[len(prefix):]
-	if name == "" {
-		return "", fmt.Errorf("state backend url_source: %s name is empty", prefix)
-	}
-	val := os.Getenv(name)
-	if val == "" {
-		return "", fmt.Errorf("state backend url_source: env %s is empty or unset", name)
-	}
-	return val, nil
 }
 
 func expandPath(p string) (string, error) {

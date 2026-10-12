@@ -21,37 +21,23 @@ type Surfaces struct {
 	State   *Spec `yaml:"state,omitempty"`
 }
 
-// BinaryCache returns the backend that serves compiled pipeline binaries
-// (bin/<hash>). That is the cache surface itself unless the surface
-// declares a binaries sub-spec, which isolates binaries to their own
-// destination -- a shared s3 bucket while the rest of the cache stays on
-// local disk, say.
-//
-// Only one level is read. Binaries lives on Spec, so it recurses
-// structurally, but a binaries block inside a binaries block is ignored
-// rather than rejected: refusing it would fail a config that loads today.
-func (s Surfaces) BinaryCache() *Spec {
-	if s.Cache == nil {
-		return nil
-	}
-	if s.Cache.Binaries != nil {
-		return s.Cache.Binaries
-	}
-	return s.Cache
-}
-
 // Spec is one backend declaration. Type is the discriminator; the
 // remaining fields are interpreted per-type by the storeurl factories
 // (state/cache/logs) and the secrets resolver (secrets).
 type Spec struct {
 	Type string `yaml:"type"`
 
-	Bucket    string `yaml:"bucket,omitempty"`
-	Prefix    string `yaml:"prefix,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	URL       string `yaml:"url,omitempty"`
+	Bucket string `yaml:"bucket,omitempty"`
+	Prefix string `yaml:"prefix,omitempty"`
+	Path   string `yaml:"path,omitempty"`
+	URL    string `yaml:"url,omitempty"`
+	Token  string `yaml:"token,omitempty"`
+
+	// URLSource named the environment variable holding a Postgres state
+	// DSN. Postgres state is removed; the key is still decoded so a
+	// profile carrying it fails validation with the migration pointer
+	// rather than a bare unknown-field error.
 	URLSource string `yaml:"url_source,omitempty"`
-	Token     string `yaml:"token,omitempty"`
 
 	// TokenEnv names an env var the runtime reads to populate Token
 	// at use time. Set TokenEnv on checked-in config so the token
@@ -65,12 +51,6 @@ type Spec struct {
 	// and bearer token via the same profile-lookup callback used by
 	// profile secret sources.
 	Controller string `yaml:"controller,omitempty"`
-
-	// Binaries is an optional nested override on Cache that isolates
-	// compiled pipeline binaries to a separate destination (e.g.
-	// shared s3 bucket while the rest of cache stays on disk). Only
-	// valid on the cache surface, and read through Surfaces.BinaryCache.
-	Binaries *Spec `yaml:"binaries,omitempty"`
 
 	// BatchInterval bounds how long a log line waits in the per-node
 	// buffer before the logs surface writes it as an object. Object
@@ -101,7 +81,6 @@ const (
 	TypeController = "controller"
 	TypeStdout     = "stdout"
 	TypeSQLite     = "sqlite"
-	TypePostgres   = "postgres"
 	TypeEnv        = "env"  // env vars; valid only on the secrets surface
 	TypeNone       = "none" // explicit "no backend"; valid only on the secrets surface
 )
@@ -135,11 +114,6 @@ func (s Surfaces) Validate(name string) error {
 	if err := s.Cache.ValidateFields("cache"); err != nil {
 		return fmt.Errorf("profile %q: %w", name, err)
 	}
-	if s.Cache.Binaries != nil {
-		if err := s.Cache.Binaries.ValidateFields("cache.binaries"); err != nil {
-			return fmt.Errorf("profile %q: %w", name, err)
-		}
-	}
 	if s.Logs == nil {
 		return fmt.Errorf("profile %q: logs surface is required", name)
 	}
@@ -167,6 +141,9 @@ func (s *Spec) ValidateFields(surface string) error {
 	if s == nil {
 		return nil
 	}
+	if err := s.refuseRemovedState(surface); err != nil {
+		return err
+	}
 	switch s.Type {
 	case "":
 		return fmt.Errorf("%s backend: type is required", surface)
@@ -178,10 +155,6 @@ func (s *Spec) ValidateFields(surface string) error {
 		if s.Path == "" {
 			return fmt.Errorf("%s backend type=filesystem requires path", surface)
 		}
-	case TypePostgres:
-		if s.URL == "" && s.URLSource == "" {
-			return fmt.Errorf("%s backend type=%s requires url or url_source", surface, s.Type)
-		}
 	case TypeController:
 		if surface == "logs" && s.URL != "" {
 			return errors.New("logs backend type=controller takes no url: the controller keeps node logs itself; name its profile with controller: <profile-name>")
@@ -191,6 +164,27 @@ func (s *Spec) ValidateFields(surface string) error {
 		}
 	}
 	return s.validateLogBatching(surface)
+}
+
+// MigrationGuideURL is where the removal of S3 and Postgres state is
+// explained, under "S3 and Postgres state profiles are removed".
+const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"
+
+// safety: a removed state type that loaded would leave the profile's runs
+// recording nowhere it names, so the config fails to load instead.
+func (s *Spec) refuseRemovedState(surface string) error {
+	var key string
+	switch {
+	case surface == "state" && (s.Type == TypeS3 || s.Type == "postgres"):
+		key = "state.type: " + s.Type
+	case s.URLSource != "":
+		key = surface + ".url_source"
+	default:
+		return nil
+	}
+	return fmt.Errorf("%s is removed: S3 and Postgres state profiles are gone and sparkwing run records to this machine; "+
+		"delete the profile's state key, or run on a controller with sparkwing pipeline trigger <pipeline> --profile <name> "+
+		"(see \"S3 and Postgres state profiles are removed\" in %s)", key, MigrationGuideURL)
 }
 
 // safety: these are the logs surfaces that write one object per append,
