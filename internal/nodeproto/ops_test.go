@@ -13,12 +13,21 @@ func TestRequestValidate(t *testing.T) {
 		code ErrorCode
 	}{
 		{Request{ID: "1", Op: OpDescribe}, ""},
-		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Run: &RunContext{RunID: "r"}}, ""},
-		{Request{ID: "1", Op: OpPlan, Pipeline: "ci"}, CodeBadRequest},
+		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Args: map[string]string{}, Run: &RunContext{RunID: "r"}}, ""},
+		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Run: &RunContext{RunID: "r"}}, CodeBadRequest},
+		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Args: map[string]string{}}, CodeBadRequest},
+		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Args: map[string]string{}, Run: &RunContext{RunID: "r", Trigger: &Trigger{Source: "cron"}}}, CodeBadRequest},
 		{Request{ID: "1", Op: OpRunNode, Node: "build", Attempt: 1}, ""},
+		{Request{ID: "1", Op: OpRunNode, Node: "build", Step: "test", Attempt: 1}, CodeBadRequest},
 		{Request{ID: "1", Op: OpRunNode, Node: "build"}, CodeBadRequest},
+		{Request{ID: "1", Op: OpRunNode, Node: "fix", Attempt: 1, Failure: &Failure{Node: "build", Stage: "verify"}}, ""},
+		{Request{ID: "1", Op: OpRunNode, Node: "fix", Attempt: 1, Failure: &Failure{Node: "build", Stage: "body"}}, CodeBadRequest},
+		{Request{ID: "1", Op: OpRunStep, Node: "build", Step: "test", Attempt: 2}, ""},
+		{Request{ID: "1", Op: OpRunStep, Node: "build", Step: "test"}, CodeBadRequest},
 		{Request{ID: "1", Op: OpRunStep, Node: "build"}, CodeBadRequest},
 		{Request{ID: "1", Op: OpEval, Closure: "build/skip_if/0"}, ""},
+		{Request{ID: "1", Op: OpEval, Closure: "c", Input: json.RawMessage(`{"outcome":"failed"}`)}, ""},
+		{Request{ID: "1", Op: OpEval, Closure: "c", Input: json.RawMessage(`[1]`)}, CodeBadRequest},
 		{Request{ID: "1", Op: OpEval}, CodeBadRequest},
 		{Request{Op: OpDescribe}, CodeBadRequest},
 		{Request{ID: "1", Op: "nope"}, CodeUnknownOp},
@@ -35,9 +44,10 @@ func TestRequestValidate(t *testing.T) {
 func FuzzParseRequest(f *testing.F) {
 	for _, s := range []string{
 		`{"id":"1","op":"describe"}`,
-		`{"id":"2","op":"plan","pipeline":"ci","args":{"env":"prod"},"run":{"run_id":"r1","git":{"sha":"abc","branch":"main"},"trigger":{"source":"push"},"started_at":"2026-01-02T03:04:05Z","dry_run":true}}`,
-		`{"id":"3","op":"run_node","node":"build","attempt":2,"spec_hash":"h","options":{"dry_run":true}}`,
-		`{"id":"4","op":"run_step","node":"build","step":"test"}`,
+		`{"id":"2","op":"plan","pipeline":"ci","args":{"env":"prod"},"run":{"run_id":"r1","git":{"sha":"abc","branch":"main"},"trigger":{"source":"webhook","user":"u","pull_request":{"number":7,"head_sha":"def"}},"started_at":"2026-01-02T03:04:05Z","dry_run":true}}`,
+		`{"id":"3","op":"run_node","node":"fix","attempt":2,"failure":{"node":"build","stage":"action","message":"exit 1"}}`,
+		`{"id":"4","op":"run_step","node":"build","step":"test","attempt":1}`,
+		`{"id":"7","op":"plan","pipeline":"ci","args":{},"run":{"run_id":"r"}}`,
 		`{"id":"5","op":"eval","closure":"build/verify/0","input":{"x":1}}`,
 		`{"id":5}`, `[]`, `{"id":"6","op":"eval","closure":"c","input":null}`,
 	} {

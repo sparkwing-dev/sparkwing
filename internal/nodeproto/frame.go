@@ -16,8 +16,8 @@ var (
 	// has already skipped the rest of the line, so the next read continues
 	// with the following one.
 	ErrLineTooLong = errors.New("nodeproto: line exceeds the maximum size")
-	// ErrMalformed reports a request, or a line claiming to be a reply, that
-	// does not have the protocol's shape.
+	// ErrMalformed reports a request or frame that does not have the
+	// protocol's shape.
 	ErrMalformed = errors.New("nodeproto: malformed line")
 	// ErrUnknownReply reports a reply to an id the host never sent.
 	ErrUnknownReply = errors.New("nodeproto: reply to an unknown request")
@@ -57,9 +57,6 @@ func (r Reply) Decode(v any) error {
 		}
 		return r.Error
 	}
-	if r.Result == nil {
-		return fmt.Errorf("%w: reply %s has no result", ErrMalformed, r.ID)
-	}
 	if err := json.Unmarshal(r.Result, v); err != nil {
 		return fmt.Errorf("%w: reply %s result: %w", ErrMalformed, r.ID, err)
 	}
@@ -81,39 +78,32 @@ type LogRecord struct {
 	Attrs json.RawMessage `json:"attrs,omitempty"`
 }
 
-// Kind says what a stdout line is.
+// Kind says what a frame is.
 type Kind int
 
-// The kinds of stdout line.
+// The kinds of frame.
 const (
-	KindText Kind = iota
-	KindReply
+	KindReply Kind = iota + 1
 	KindLog
 )
 
-// Frame is one classified stdout line; the field named by Kind is set.
+// Frame is one line of the frame pipe; the field named by Kind is set.
 type Frame struct {
 	Kind  Kind
 	Reply Reply
 	Log   LogRecord
-	Text  string
 }
 
-// Classify sorts one stdout line, without its newline, into a reply, a log
-// record or text. A JSON object with a "reply" key is a reply and must have a
-// reply's shape, or Classify fails with [ErrMalformed]. A JSON object with a
-// string "ts" whose other known fields have the schema's types is a log
-// record. Anything else is text, kept byte for byte. Keys match exactly, and
-// unknown keys are ignored so a later SDK may add optional fields.
-func Classify(line []byte) (Frame, error) {
-	text := Frame{Kind: KindText, Text: string(line)}
-	trimmed := bytes.TrimLeft(line, " \t")
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return text, nil
-	}
-	obj, ok := jsonObject(line)
-	if !ok {
-		return text, nil
+// ParseFrame decodes one frame-pipe line, without its newline. A JSON object
+// with a "reply" key is a reply; any other line must be a log record, a JSON
+// object with a string "ts" whose other known fields have the schema's types.
+// Everything else fails with [ErrMalformed], because only the SDK writes to
+// the frame pipe. Keys match exactly, and unknown keys are ignored so a later
+// SDK may add optional fields.
+func ParseFrame(line []byte) (Frame, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(line, &obj); err != nil || obj == nil {
+		return Frame{}, fmt.Errorf("%w: frame is not a JSON object", ErrMalformed)
 	}
 	if _, ok := obj["reply"]; ok {
 		r, err := replyFrom(obj)
@@ -122,19 +112,20 @@ func Classify(line []byte) (Frame, error) {
 		}
 		return Frame{Kind: KindReply, Reply: r}, nil
 	}
-	if rec, ok := logFrom(obj); ok {
-		return Frame{Kind: KindLog, Log: rec}, nil
+	rec, err := logFrom(obj)
+	if err != nil {
+		return Frame{}, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
-	return text, nil
-}
-
-func jsonObject(line []byte) (map[string]json.RawMessage, bool) {
-	var obj map[string]json.RawMessage
-	return obj, json.Unmarshal(line, &obj) == nil && obj != nil
+	return Frame{Kind: KindLog, Log: rec}, nil
 }
 
 func isNull(raw json.RawMessage) bool {
 	return raw == nil || string(raw) == "null"
+}
+
+func isObject(raw json.RawMessage) bool {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func stringField(obj map[string]json.RawMessage, key string, dst *string) bool {
@@ -154,6 +145,9 @@ func replyFrom(obj map[string]json.RawMessage) (Reply, error) {
 		return r, fmt.Errorf("reply %s: ok is not a boolean", r.ID)
 	}
 	if raw := obj["result"]; !isNull(raw) {
+		if !isObject(raw) {
+			return r, fmt.Errorf("reply %s: result is not an object", r.ID)
+		}
 		r.Result = raw
 	}
 	if raw := obj["error"]; !isNull(raw) {
@@ -169,6 +163,8 @@ func replyFrom(obj map[string]json.RawMessage) (Reply, error) {
 	switch {
 	case r.OK && r.Error != nil:
 		return r, fmt.Errorf("reply %s: ok with an error", r.ID)
+	case r.OK && r.Result == nil:
+		return r, fmt.Errorf("reply %s: ok without a result", r.ID)
 	case !r.OK && (r.Error == nil || r.Error.Message == ""):
 		return r, fmt.Errorf("reply %s: failed without an error message", r.ID)
 	case !r.OK && r.Result != nil:
@@ -177,32 +173,30 @@ func replyFrom(obj map[string]json.RawMessage) (Reply, error) {
 	return r, nil
 }
 
-func logFrom(obj map[string]json.RawMessage) (LogRecord, bool) {
+func logFrom(obj map[string]json.RawMessage) (LogRecord, error) {
 	var rec LogRecord
 	if raw := obj["ts"]; isNull(raw) || json.Unmarshal(raw, &rec.TS) != nil {
-		return rec, false
+		return rec, errors.New("log record has no string ts")
 	}
 	for key, dst := range map[string]*string{
 		"level": &rec.Level, "node": &rec.Node, "step": &rec.Step,
 		"event": &rec.Event, "msg": &rec.Msg,
 	} {
 		if !stringField(obj, key, dst) {
-			return rec, false
+			return rec, fmt.Errorf("log record %s is not a string", key)
 		}
 	}
 	if raw := obj["attrs"]; !isNull(raw) {
-		var attrs map[string]json.RawMessage
-		if json.Unmarshal(raw, &attrs) != nil {
-			return rec, false
+		if !isObject(raw) {
+			return rec, errors.New("log record attrs is not an object")
 		}
 		rec.Attrs = raw
 	}
-	return rec, true
+	return rec, nil
 }
 
-// Reader splits a stream into lines of at most [MaxLineBytes]. The host reads
-// a process's stdout with [Reader.Next]; the SDK reads its stdin with
-// [Reader.NextRequest].
+// Reader splits a pipe into lines. The host reads the frame pipe with
+// [Reader.Next]; the SDK reads the request pipe with [Reader.NextRequest].
 type Reader struct {
 	br  *bufio.Reader
 	buf []byte
@@ -215,7 +209,8 @@ func NewReader(r io.Reader) *Reader {
 }
 
 // ReadLine returns the next line without its newline or a trailing carriage
-// return. The slice is valid until the next read. A final line without a
+// return. A line of more than [MaxLineBytes], newline included, fails with
+// [ErrLineTooLong]. The slice is valid until the next read. A final line without a
 // newline is still returned; io.EOF follows it.
 func (r *Reader) ReadLine() ([]byte, error) {
 	r.buf = r.buf[:0]
@@ -223,7 +218,7 @@ func (r *Reader) ReadLine() ([]byte, error) {
 	for {
 		chunk, err := r.br.ReadSlice('\n')
 		if !tooLong {
-			if len(r.buf)+len(chunk) > r.max+2 {
+			if len(r.buf)+len(chunk) > r.max+1 {
 				// perf: drop what was buffered so an over-long line costs at
 				// most the bound in memory, never its full length.
 				tooLong, r.buf = true, r.buf[:0]
@@ -241,25 +236,25 @@ func (r *Reader) ReadLine() ([]byte, error) {
 		case err != nil && len(r.buf) == 0:
 			return nil, io.EOF
 		}
-		line := bytes.TrimSuffix(bytes.TrimSuffix(r.buf, []byte("\n")), []byte("\r"))
-		if len(line) > r.max {
+		line := bytes.TrimSuffix(r.buf, []byte("\n"))
+		if len(line)+1 > r.max {
 			return nil, ErrLineTooLong
 		}
-		return line, nil
+		return bytes.TrimSuffix(line, []byte("\r")), nil
 	}
 }
 
-// Next reads and classifies the next stdout line. [ErrLineTooLong] and
+// Next reads and parses the next frame-pipe line with [ParseFrame]. [ErrLineTooLong] and
 // [ErrMalformed] leave the reader at the following line.
 func (r *Reader) Next() (Frame, error) {
 	line, err := r.ReadLine()
 	if err != nil {
 		return Frame{}, err
 	}
-	return Classify(line)
+	return ParseFrame(line)
 }
 
-// NextRequest reads and parses the next stdin line with [ParseRequest].
+// NextRequest reads and parses the next request-pipe line with [ParseRequest].
 func (r *Reader) NextRequest() (Request, error) {
 	line, err := r.ReadLine()
 	if err != nil {
@@ -268,8 +263,9 @@ func (r *Reader) NextRequest() (Request, error) {
 	return ParseRequest(line)
 }
 
-// Writer writes one JSON value per line. It is safe for concurrent use, so a
-// reply and the log records of a running node never interleave within a line.
+// Writer writes one JSON value per line. It is safe for concurrent use, so the
+// replies of parallel run_step and eval requests and the log records written
+// meanwhile never interleave within a line.
 type Writer struct {
 	mu  sync.Mutex
 	w   io.Writer
@@ -281,24 +277,28 @@ func NewWriter(w io.Writer) *Writer {
 	return &Writer{w: w, max: MaxLineBytes}
 }
 
-// Send writes v as one line. A value whose encoding exceeds [MaxLineBytes] is
-// refused with [ErrLineTooLong] and nothing is written.
+// Send writes v as one line. A value whose line, newline included, exceeds
+// [MaxLineBytes] is refused with [ErrLineTooLong] and nothing is written.
 func (w *Writer) Send(v any) error {
+	// perf: encode under the lock, so senders queued behind a slow reader
+	// hold their values but never a second, encoded copy of each.
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	if len(b) > w.max {
+	if len(b)+1 > w.max {
 		return ErrLineTooLong
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	_, err = w.w.Write(append(b, '\n'))
 	return err
 }
 
-// Tracker assigns request ids and matches replies to them. The zero value is
-// ready to use and safe for concurrent use.
+// Tracker assigns request ids and matches replies to them. Any number of
+// requests may be pending, since run_step and eval requests run in parallel;
+// which ops may overlap is the session's rule, not the tracker's. The zero
+// value is ready to use and safe for concurrent use.
 type Tracker struct {
 	mu       sync.Mutex
 	last     uint64
