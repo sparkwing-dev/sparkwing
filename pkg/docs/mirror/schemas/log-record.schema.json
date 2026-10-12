@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Sparkwing node protocol: log record",
-  "description": "One line of the NDJSON log stream a node process writes to stdout. Each line is one JSON object terminated by a newline.",
+  "description": "One log record frame a node process writes on its frame pipe. Each line is one JSON object terminated by a newline.",
   "type": "object",
   "properties": {
     "ts": { "type": "string", "description": "RFC 3339 timestamp with fractional seconds. The host may replace it with its own receive time." },

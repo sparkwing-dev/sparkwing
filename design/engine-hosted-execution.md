@@ -10,7 +10,7 @@ flowchart LR
   subgraph HOST[engine node host]
     ORCH[scheduler, DAG, retries, timeouts, memo, admission, caches, artifacts, secrets, logs, cleanups, usage]
   end
-  HOST <-->|stdio: requests, replies, log records| SDK[SDK process: plan function, bodies, steps, closures]
+  HOST <-->|protocol pipes: requests, replies, log records| SDK[SDK process: plan function, bodies, steps, closures]
   SDK -->|HTTP /node/v1/: secrets, outputs, OIDC, cleanups, child runs| HOST
 ```
 
@@ -36,7 +36,7 @@ Moving the envelope into the engine fixes both. The SDK shrinks to what only it 
 | Dependency caches | restore before the node's first process, save after success, keyed from declared key files | declares the cache directories |
 | Tools | puts the declared tools on `PATH` | declares the tool names |
 | Secrets | resolves through the profile, registers values with the masker, answers the secrets route | asks the route by name |
-| Logs | reads stdout and stderr, masks, timestamps, attributes records to node and step, stores | writes log records to stdout |
+| Logs | reads log records from the frame pipe and stdout and stderr as plain text, masks, timestamps, attributes records to node and step, stores | writes log records to the frame pipe |
 | Steps | orders steps, applies fail-fast, finally, continue-on-error, optional, step windows and dry-run | runs one step body when asked |
 | Closures | decides when to call SkipIf, BeforeRun, Verify, AfterRun, cache-key and generator closures | evaluates a closure by id |
 | Cleanup and git cache | owns the cleanup ledger and puts the git mirror rewrite into the environment | registers cleanups through a route |
@@ -50,7 +50,7 @@ The engine starts the SDK entry with the single argument `--sw-node-protocol` fo
 - **eval**, for closures the host evaluates outside an attempt, bound to one node;
 - **attempt**, one process for each node attempt.
 
-An attempt process answers `plan`, then `eval` and either `run_node` or a series of `run_step` requests for that node. Then the host closes stdin.
+An attempt process answers `plan`, then `eval` and either `run_node` or a series of `run_step` requests for that node. Then the host closes the request pipe.
 
 One process per attempt is the choice because:
 
@@ -73,7 +73,7 @@ These choices go beyond the protocol's shape. Each needs Korey's ratification.
 2. **The host computes `spec_hash`.** It hashes the canonical JSON of each node document with one function on both sides of the comparison. SDKs in different languages never have to produce byte-identical JSON.
 3. **`--sw-node-protocol` is the only entry, and describe is a stdio request.** The `--describe` argument, `run-node`, `plan --json`, `handle-trigger`, `replay-node`, `ops`, `config`, `--plan` and `--explain` go away.
 4. **The environment variables are renamed to `SPARKWING_NODE_URL` and `SPARKWING_NODE_TOKEN`.** The old `SPARKWING_CONTROLLER_URL` and `SPARKWING_AGENT_TOKEN` names said the SDK talks to a controller, which it no longer does. A stale binary that reads the old names finds nothing and fails loudly instead of calling `/api/v1/` paths on the node host.
-5. **End of stdin replaces the liveness descriptor.** The mask-values descriptor goes too, because the host knows every secret it served.
+5. **Protocol frames never share a stream with customer code.** Requests travel on one dedicated pipe and replies and log records on another (descriptors 3 and 4 on Unix, named handles on Windows), and stdin is the null device. If replies shared stdout, a customer's print of a reply-shaped line could spoof a reply and swallow the real one, and no shape check can tell who wrote a line. stdout and stderr are customer text, stored verbatim. End of the request pipe replaces the liveness descriptor. The mask-values descriptor goes too, because the host knows every secret it served.
 6. **Outputs come back as JSON in the route response.** The host fetches and verifies the stored output, so an SDK never follows a signed URL.
 7. **Awaiting a child run is a long poll that holds for at most 60 seconds.** The SDK repeats the call until the child finishes. While a call is open and the child waits in plan admission, the host pauses the parent node's timeout.
 8. **One protocol version, matched exactly, with 426 on the routes.** The header costs little, and a later protocol bump needs it.
@@ -99,7 +99,7 @@ This repository's own CI builds `.sparkwing` against the SDK in the same commit,
 |---|---|---|
 | CLI `run` | builds the SDK entry and runs the host, either in-process or through the admission daemon. Step windows, dry-run, `only` and `no-cache` are host state | executing the binary with run options as `SPARKWING_*` variables |
 | CLI help, `plan`, `explain` | renders describe and the plan document | asking the binary for its own help and plan text |
-| Local runner | starts `<entry> --sw-node-protocol`, sends requests and reads results from stdout | `run-node --coordinated` and re-reading the node row |
+| Local runner | starts `<entry> --sw-node-protocol`, sends requests and reads results on the protocol pipes | `run-node --coordinated` and re-reading the node row |
 | Runner and trigger loop | schedules the run from the plan document and dispatches nodes through the Kubernetes and launcher runners | executing `handle-trigger` and letting the binary dispatch |
 | Pod side | `sparkwing-runner run-node` holds the claim, serves the node routes, starts the entry, and reports the attempt | executing the binary's `run-node` with the claim fence in its environment |
 | Admission daemon | leases taken by the host per node | leases taken by the binary's dispatcher |
@@ -109,15 +109,15 @@ This repository's own CI builds `.sparkwing` against the SDK in the same commit,
 
 | Failure | Host behavior |
 |---|---|
-| The SDK process exits without answering | the attempt fails with `sdk_exited` and the exit status or signal; the retry policy applies; records already read are kept |
+| The SDK process exits, or closes its frame pipe, without answering | the attempt fails with `sdk_exited` and the exit status or signal, or with `frames_closed`; the retry policy applies; records already read are kept |
 | The SDK process hangs | the wall or no-progress timeout kills the session; no-progress counts log silence |
 | A reply to an id the host never sent, a second reply, or a malformed reply | the attempt fails with `protocol_error`; the host never guesses which answer counts |
-| A stdout line that is not JSON | stored as a text record, never parsed as a reply |
+| Customer code prints a reply-shaped line | stored as text from stdout; stdout is never parsed |
 | A process plans a different node | the attempt fails with `plan_drift` |
 | A plan with a cycle, an unknown dependency or duplicate ids | the run fails with `plan_invalid` before any node starts |
 | A protocol version other than the host's | the CLI refuses the entry at describe; a plan with another version fails the run with `protocol_mismatch` |
 | An unknown op, node, step or closure | the attempt fails with the SDK's code, and the reason names the SDK and its version |
-| The host restarts mid-node | the process sees end of stdin and exits; the run's recovery marks the attempt lost and the retry policy decides |
+| The host restarts mid-node | the process sees the request pipe close and exits; the run's recovery marks the attempt lost and the retry policy decides |
 | A route call fails | the SDK raises inside the body, so the node fails with that error |
 
 ## What the spike proved
@@ -125,7 +125,7 @@ This repository's own CI builds `.sparkwing` against the SDK in the same commit,
 An internal spike, reachable only from tests, ran a two-node plan with the engine owning the run row, the node rows and the DAG order:
 
 - Each node ran in its own process. The dependent started only after its dependency succeeded, and a failed dependency skipped its dependent without starting it.
-- A node read its dependency's typed output through the engine, and its log records reached the host through stdout unchanged.
+- A node read its dependency's typed output through the engine, and its log records reached the host unchanged.
 - Plan evaluation coupled to a controller does not fit the model. The spike's `plan --json` read the run row through a controller, and its `run-node` re-read the run row and wrote its own terminal row. That is why `plan` takes its run context in the request and `run_node` answers with a result.
 
 ## Open questions

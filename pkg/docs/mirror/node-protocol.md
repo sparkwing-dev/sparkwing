@@ -8,11 +8,11 @@ Status: specification. Until a release note says the engine hosts runs this way,
 
 - **The host runs everything that is not customer code.** It handles DAG order, retries, timeouts, memo, dependency caches, artifacts, admission, approvals, secrets, masking, logs, process cleanup and usage measurement.
 - **The SDK process runs customer code only:** the plan function, node and step bodies, and closures such as `SkipIf` and `Verify`. It runs each one only when the host asks.
-- **One entry point:** `<entry> --sw-node-protocol`. The host writes requests to stdin. The SDK writes replies and log records to stdout, one JSON object per line. There are five operations: `describe`, `plan`, `run_node`, `run_step` and `eval`.
+- **One entry point:** `<entry> --sw-node-protocol`. The host writes requests on a dedicated request pipe, and the SDK writes replies and log records on a dedicated frame pipe, one JSON object per line. stdout and stderr carry only the customer's text, which the host never parses. There are five operations: `describe`, `plan`, `run_node`, `run_step` and `eval`.
 - **One process per node attempt.** Each node process answers `plan` first. If the node's entry differs from the plan the run accepted, the host fails the node with `plan_drift`.
 - **Closures by id.** The plan lists every closure under an id. The host decides when each one runs and sends `eval`. A generator closure returns the nodes of a dynamic fan-out.
 - **Eight HTTP routes under `/node/v1/`** on a loopback URL, with a bearer scoped to one node process. They cover secrets, other nodes' outputs, OIDC tokens, cleanups, child runs and their results, and the latest run of another pipeline.
-- **Seven environment variables** name the run, the node, the routes and the runner. A process that is not bound to a node gets none of them.
+- **Seven environment variables** name the run, the node, the routes and the runner. A process that is not bound to a node gets none of them. On Windows one more names the protocol pipes.
 - **One protocol version, `1`, matched exactly.** A route request with another version gets HTTP 426. A describe or plan document with another version is refused before any node starts.
 - **Hard cut.** A pipeline binary built before this protocol does not run on an engine that speaks it. Rebuilding `.sparkwing` against a matching SDK is the only migration.
 
@@ -26,10 +26,10 @@ sequenceDiagram
   Note over H: compare the node with the accepted plan, stage artifacts, restore caches
   H->>P: eval before_run, run_step per step, eval verify
   P->>H: GET /node/v1/secrets/NAME, GET /node/v1/nodes/build/output
-  P-->>H: log records on stdout
+  P-->>H: log records on the frame pipe
   P-->>H: replies {outcome, output}
   Note over H: save caches, publish artifacts, record output and usage
-  H->>P: close stdin
+  H->>P: close the request pipe
 ```
 
 ## Processes
@@ -58,22 +58,24 @@ For one node attempt the host sends requests in this order:
 4. One `run_node` for a node without steps, or one `run_step` per step for a node with steps (see [Steps](#steps)).
 5. After a successful body, `eval` of the `verify` closure.
 6. On the last attempt, whether it succeeded or ran out of retries, `eval` for each `after_run` closure.
-7. Close stdin.
+7. Close the request pipe.
 
 The host evaluates `skip_if` and `cache_key` closures before the first attempt starts, so a skipped or memoized node never gets an attempt. It evaluates a `generator` after its source node succeeds. It may use a separate eval process on the run's host for these, or an attempt process, and the SDK answers the same way in both.
 
 ## Framing
 
-- **Requests.** The host writes one JSON object per line to stdin, in the form `{"id": "<id>", "op": "<op>", ...fields}`. The host assigns ids as decimal strings counting from `"1"`, unique within the process.
-- **Lines.** Every line on stdout is at most 16 MiB, newline included. The host strips a trailing `\r`. It drops a longer line and writes a warning record in its place, so a reply lost that way leaves its request unanswered.
-- **Replies.** A stdout line that is a JSON object with a `reply` key is a reply, and it must be well formed. A successful reply is `{"reply": "<id>", "ok": true, "result": {...}}` and carries no `error`. A failed reply is `{"reply": "<id>", "ok": false, "error": {"code": "<code>", "message": "..."}}` and carries no `result`. `ok` is a JSON boolean, `error.message` is required and `error.code` is optional.
-- **Log records.** A stdout line that is a JSON object with a string `ts` and correctly typed known fields is a log record (see [Log records](#log-records)). The host ignores keys it does not know.
-- **Text.** The host stores any other stdout line verbatim as an `info` text record, and each stderr line as a `warn` text record.
-- **Protocol errors.** The host fails the attempt with `protocol_error` for a reply that is not well formed, a reply to an id the host never sent, or a second reply to the same id.
+- **Streams.** The SDK reads requests from the request pipe and writes replies and log records to the frame pipe. On Unix these are descriptors 3 and 4. On Windows they are inherited pipe handles, and `SPARKWING_PROTOCOL_HANDLES` holds their values as `<request>,<frame>` in decimal. stdin is the null device (`/dev/null`, or `NUL` on Windows).
+- **Close-on-exec.** At startup the SDK marks both protocol descriptors close-on-exec, or makes both handles non-inheritable, and removes `SPARKWING_PROTOCOL_HANDLES` from its environment. A command the SDK starts therefore never holds them.
+- **User text.** stdout and stderr belong to customer code and the commands it starts. The host stores each stdout line verbatim as an `info` text record and each stderr line as a `warn` text record, and never parses either stream. Nothing a customer prints can forge a reply or a record.
+- **Requests.** The host writes one JSON object per line to the request pipe, in the form `{"id": "<id>", "op": "<op>", ...fields}`. The host assigns ids as decimal strings counting from `"1"`, unique within the process.
+- **Lines.** Every line on the frame pipe is at most 16 MiB, newline included. The host strips a trailing `\r`.
+- **Replies.** A frame that is a JSON object with a `reply` key is a reply, and it must be well formed. A successful reply is `{"reply": "<id>", "ok": true, "result": {...}}` and carries no `error`. A failed reply is `{"reply": "<id>", "ok": false, "error": {"code": "<code>", "message": "..."}}` and carries no `result`. `ok` is a JSON boolean, `error.message` is required and `error.code` is optional.
+- **Log records.** Every other frame is a log record: a JSON object with a string `ts` and correctly typed known fields (see [Log records](#log-records)). The host ignores keys it does not know.
+- **Protocol errors.** The host fails the attempt with `protocol_error` for a frame that is neither a well-formed reply nor a log record, a frame over 16 MiB, a reply to an id the host never sent, or a second reply to the same id.
 - **Concurrency.** The host may have several `eval` and `run_step` requests in flight in one process, and the SDK may answer them in any order. At most one `run_node` is in flight. `run_node` and `run_step` are never in flight together, and `describe` and `plan` are always sent alone.
-- **End of input.** End of file on stdin means the host is done with the process. The SDK cancels any request still running, writes nothing further, and exits with status 0. The host closes stdin only after every reply arrives, so stdin closing mid-request means the host stopped the attempt or is itself gone.
+- **End of input.** End of file on the request pipe means the host is done with the process. The SDK cancels any request still running, writes nothing further, and exits with status 0. The host closes the pipe only after every reply arrives, so a close mid-request means the host stopped the attempt or is itself gone.
+- **Early end of output.** If the SDK exits, or closes the frame pipe, with a request still unanswered, the attempt fails with `sdk_exited` or `frames_closed`.
 - **Stopping.** For a timeout or a cancel, the host sends SIGTERM to the process session and SIGKILL after its termination grace.
-- **Child commands.** A command the SDK starts must never inherit its stdin or stdout. The SDK reads the command's output and writes it as `exec_line` records, or passes it to stderr. A child that wrote to the protocol stream could forge a reply.
 
 ## Requests
 
@@ -85,7 +87,7 @@ The host evaluates `skip_if` and `cache_key` closures before the first attempt s
 | `run_step` | `node`, `step`, `attempt`, `failure?` | `{outcome, error?, output?}` |
 | `eval` | `closure`, `input?` | `{value?, error?}` |
 
-[schemas/node-protocol.schema.json](schemas/node-protocol.schema.json) is the JSON Schema for requests, replies and results: `$defs/request`, `$defs/reply`, `$defs/runResult` and `$defs/evalResult`. [schemas/describe.schema.json](schemas/describe.schema.json) covers the describe and plan documents.
+[schemas/node-protocol.schema.json](schemas/node-protocol.schema.json) is the JSON Schema for requests, replies and results: `$defs/request`, `$defs/reply`, `$defs/runResult` and `$defs/evalResult`. [schemas/describe.schema.json](schemas/describe.schema.json) covers the describe and plan documents. In the transcripts below, `->` lines travel on the request pipe and `<-` lines on the frame pipe.
 
 ### describe
 
@@ -114,7 +116,7 @@ The run context has these fields, and only `run_id` is required. The pipeline is
 
 Plan code must be deterministic for a given request, because every eval and attempt process plans again and the host compares the result.
 
-The SDK sends plan code's own stdout to stderr while it plans. A plan function that returns an error or throws gives the error code `plan_failed`. Args that fail the pipeline's declared types give `invalid_args`. An unregistered pipeline gives `unknown_pipeline`.
+A plan function that returns an error or throws gives the error code `plan_failed`. Args that fail the pipeline's declared types give `invalid_args`. An unregistered pipeline gives `unknown_pipeline`.
 
 ```text
 -> {"id":"1","op":"plan","pipeline":"ship","args":{"env":"prod"},"run":{"run_id":"run-1","trigger":{"source":"push"},"git":{"sha":"4f2c1e0","branch":"main","repo":"acme/app"},"dry_run":false}}
@@ -170,6 +172,7 @@ A failed reply means the SDK could not do what the request asked, as distinct fr
 | `protocol_mismatch` | host | The describe or plan document names a protocol version other than the host's. |
 | `protocol_error` | host | The framing rules above were broken. |
 | `sdk_exited` | host | The process exited with a request still unanswered. The reason includes the exit status or signal. |
+| `frames_closed` | host | The process closed its frame pipe with a request still unanswered. |
 
 The host treats a missing code, or one it does not know, as `sdk_error` and keeps the SDK's message.
 
@@ -260,6 +263,7 @@ The host builds a node-bound process's environment from scratch. It removes ever
 | `SPARKWING_RUNNER_TYPE` | eval and attempt processes | `local` or `kubernetes`; unset for a runner that does not classify itself. |
 | `SPARKWING_RUNNER_LABELS` | eval and attempt processes | The runner's labels, comma-separated. |
 | `TRACEPARENT` | every process | The W3C trace context of the run, or of the node for a node-bound process. |
+| `SPARKWING_PROTOCOL_HANDLES` | every process, Windows only | The request and frame pipe handles, as `<request>,<frame>` in decimal. |
 
 The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer.
 
@@ -337,7 +341,7 @@ Content-Type: application/json
 
 - It sets `node` to the process's node, whatever the SDK wrote.
 - It keeps `step` only when that step has a `run_step` in flight, so the SDK must set `step` on every record it writes during a step.
-- It masks secret values in `msg` and `attrs`, and may restamp `ts`. The masked values are every masked secret the routes served, every OIDC token, every arg declared `secret`, and the bearer.
+- It masks secret values in `msg` and `attrs`, and in stdout and stderr text, and may restamp `ts`. The masked values are every masked secret the routes served, every OIDC token, every arg declared `secret`, and the bearer.
 
 Events the SDK writes:
 

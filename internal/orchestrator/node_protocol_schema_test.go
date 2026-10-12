@@ -411,7 +411,7 @@ func TestLogRecordsMatchTheSchema(t *testing.T) {
 }
 
 // safety: SDK authors copy the transcripts in docs/node-protocol.md, so every
-// request, reply and record in them has to match the schemas.
+// request-pipe line and frame-pipe line in them has to match the schemas.
 func TestNodeProtocolTranscriptsMatchTheSchemas(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-protocol.md"))
 	if err != nil {
@@ -444,7 +444,7 @@ func TestNodeProtocolTranscriptsMatchTheSchemas(t *testing.T) {
 			dir, msg := line[:min(3, len(line))], line[min(3, len(line)):]
 			var v any
 			if err := json.Unmarshal([]byte(msg), &v); err != nil || (dir != "-> " && dir != "<- ") {
-				t.Errorf("docs/node-protocol.md: transcript line %q is not \"-> \" or \"<- \" and one JSON object", line)
+				t.Errorf("docs/node-protocol.md: transcript line %q is not a request (\"-> \") or a frame (\"<- \") holding one JSON object", line)
 				continue
 			}
 			obj, _ := v.(map[string]any)

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Sparkwing node protocol: requests and replies",
-  "description": "The stdio messages of docs/node-protocol.md. The host writes a request per line to the SDK process's stdin; the SDK writes a reply per line to stdout. The result of describe and plan is defined in describe.schema.json; run_node and run_step answer a runResult, eval an evalResult.",
+  "description": "The stdio messages of docs/node-protocol.md. The host writes a request per line on the request pipe (descriptor 3 on Unix); the SDK writes replies and log records, a frame per line, on the frame pipe (descriptor 4 on Unix). stdout and stderr carry customer text only. The result of describe and plan is defined in describe.schema.json; run_node and run_step answer a runResult, eval an evalResult.",
   "$defs": {
     "request": {
       "type": "object",
@@ -265,7 +265,7 @@
     },
     "reply": {
       "type": "object",
-      "description": "A stdout line that is a JSON object with a reply key. A successful reply carries no error; a failed one carries no result.",
+      "description": "A frame that is a JSON object with a reply key. A successful reply carries no error; a failed one carries no result.",
       "properties": {
         "reply": {
           "type": "string",
