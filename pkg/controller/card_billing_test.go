@@ -85,7 +85,7 @@ func TestCardBilling_ATrustedOwnerAddsACardAndIsCharged(t *testing.T) {
 	if code := f.call("POST", "/api/v1/credits/cards", owner.auth, card, nil); code != http.StatusForbidden {
 		t.Fatalf("an owner saving a card directly = %d, want 403", code)
 	}
-	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, card, nil); code != http.StatusNoContent {
+	if code := f.call("POST", "/api/v1/credits/cards", f.creditsGrantToken(), card, nil); code != http.StatusNoContent {
 		t.Fatalf("the service saving the card = %d", code)
 	}
 	b := f.billing(owner)
@@ -111,9 +111,14 @@ func TestCardBilling_ATrustedOwnerAddsACardAndIsCharged(t *testing.T) {
 	if n := len(fc.internalCalls("/internal/charge")); n != 1 {
 		t.Fatalf("a settled debt was charged again: %d charges", n)
 	}
-	if code := f.call("POST", "/api/v1/teams/"+owner.team+"/trust", "Bearer "+f.admin,
-		map[string]any{"trust": "revoked", "reason": "test"}, nil); code != http.StatusOK {
-		t.Fatalf("revoke = %d", code)
+	held, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := held.SetBillingTrust(context.Background(), store.BillingTrustChange{
+		Trust: store.BillingTrustRevoked, Actor: "test", Reason: "test",
+	}, time.Now()); err != nil {
+		t.Fatalf("revoke: %v", err)
 	}
 	// safety: the $150 card payment counts toward the New team's 30-day
 	// purchase limit, so the refusal is that limit and not the card.
@@ -132,7 +137,7 @@ func TestCardBilling_ADeclineIsPaidByHand(t *testing.T) {
 	f, fc := billingFixture(t)
 	owner, _, reader := teamOf(f)
 	f.trust(owner.team, 0)
-	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/cards", f.creditsGrantToken(), map[string]any{
 		"team":     owner.team,
 		"customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1", "last4": "4242",
 	}, nil); code != http.StatusNoContent {
@@ -174,7 +179,7 @@ func TestCardBilling_ADeclineIsPaidByHand(t *testing.T) {
 	if code := f.call("POST", "/api/v1/credits/card-payments", owner.auth, paid, nil); code != http.StatusForbidden {
 		t.Fatalf("an owner reporting a payment = %d, want 403", code)
 	}
-	if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, paid, nil); code != http.StatusNoContent {
+	if code := f.call("POST", "/api/v1/credits/card-payments", f.creditsGrantToken(), paid, nil); code != http.StatusNoContent {
 		t.Fatalf("the webhook's payment = %d", code)
 	}
 	if b := f.billing(owner); b.OpenCharge != nil || b.BalanceMicro != 0 || b.Limits.CreditLimitCents == 0 {
@@ -194,7 +199,7 @@ func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
 	})
 	owner, _, _ := teamOf(f)
 	f.trust(owner.team, 0)
-	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/cards", f.creditsGrantToken(), map[string]any{
 		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1", "last4": "4242",
 	}, nil); code != http.StatusNoContent {
 		t.Fatalf("save card = %d", code)
@@ -204,7 +209,7 @@ func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
 	fc.mu.Unlock()
 	f.owe(owner.team, 15_000)
 	f.srv.CardBillingPass(context.Background())
-	if code := f.call("POST", "/api/v1/credits/warnings", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/warnings", f.creditsGrantToken(), map[string]any{
 		"payment_intent": "pi_elsewhere", "warning_id": "issfr_1", "fingerprint": "fp_flagged", "actionable": true,
 	}, nil); code >= 300 {
 		t.Fatalf("warning = %d", code)
@@ -218,7 +223,7 @@ func TestCardBilling_AWarnedCardRepaysTheDebtAndAlerts(t *testing.T) {
 		"payment_intent": "pi_recovered", "amount_cents": 15_000, "status": "succeeded", "fingerprint": "fp_flagged",
 	}
 	for range 2 {
-		if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, paid, nil); code != http.StatusNoContent {
+		if code := f.call("POST", "/api/v1/credits/card-payments", f.creditsGrantToken(), paid, nil); code != http.StatusNoContent {
 			t.Fatalf("the webhook's payment = %d", code)
 		}
 	}
@@ -242,7 +247,7 @@ func TestCardBilling_AnOlderSetupDoesNotReplaceANewerCard(t *testing.T) {
 		var refused struct {
 			Code string `json:"code"`
 		}
-		code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+		code := f.call("POST", "/api/v1/credits/cards", f.creditsGrantToken(), map[string]any{
 			"team": owner.team, "customer": "cus_1", "payment_method": pm, "fingerprint": "fp_" + pm,
 			"last4": last4, "completed_at": completed,
 		}, &refused)
@@ -294,7 +299,7 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 	fc.twoStep = true
 	owner, _, _ := teamOf(f)
 	f.trust(owner.team, 0)
-	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/cards", f.creditsGrantToken(), map[string]any{
 		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1",
 	}, nil); code != http.StatusNoContent {
 		t.Fatalf("save card = %d", code)
@@ -313,7 +318,7 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 		"team": owner.team, "charge_id": charges[0].Body["charge_id"], "attempt_id": charges[0].Body["attempt_id"],
 		"payment_intent": "pi_second", "amount_cents": 15_000, "status": "succeeded",
 	}
-	if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, second, nil); code != http.StatusNoContent {
+	if code := f.call("POST", "/api/v1/credits/card-payments", f.creditsGrantToken(), second, nil); code != http.StatusNoContent {
 		t.Fatalf("second payment = %d", code)
 	}
 	f.srv.CardBillingPass(context.Background())
@@ -335,13 +340,13 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 		t.Fatal(err)
 	}
 	second["payment_intent"] = "pi_other_team"
-	if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, second, nil); code != http.StatusConflict {
+	if code := f.call("POST", "/api/v1/credits/card-payments", f.creditsGrantToken(), second, nil); code != http.StatusConflict {
 		t.Fatalf("another team's payment reference = %d, want 409", code)
 	}
 	var units struct {
 		Capabilities []string `json:"capabilities"`
 	}
-	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+f.admin, nil, &units); code != http.StatusOK ||
+	if code := f.call("GET", "/api/v1/credits/units", f.creditsGrantToken(), nil, &units); code != http.StatusOK ||
 		strings.Join(units.Capabilities, ",") != "card-billing-v1,paid-grant-lookup-v1,card-setup-order-v1" {
 		t.Fatalf("units = %d %+v", code, units)
 	}
@@ -355,7 +360,7 @@ func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
 	fc.twoStep, fc.fingerprint = true, "fp_warned"
 	owner, _, _ := teamOf(f)
 	f.trust(owner.team, 0)
-	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/cards", f.creditsGrantToken(), map[string]any{
 		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1",
 	}, nil); code != http.StatusNoContent {
 		t.Fatalf("save card = %d", code)
@@ -363,7 +368,7 @@ func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
 	var warned struct {
 		Held bool `json:"held"`
 	}
-	if code := f.call("POST", "/api/v1/credits/warnings", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/warnings", f.creditsGrantToken(), map[string]any{
 		"payment_intent": "pi_elsewhere", "warning_id": "issfr_1", "fingerprint": "fp_warned", "actionable": true,
 	}, &warned); code != http.StatusOK || warned.Held {
 		t.Fatalf("warning = %d %+v", code, warned)
@@ -378,7 +383,7 @@ func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
 	gc.twoStep = true
 	other, _, _ := teamOf(g)
 	g.trust(other.team, 0)
-	if code := g.call("POST", "/api/v1/credits/cards", "Bearer "+g.admin, map[string]any{
+	if code := g.call("POST", "/api/v1/credits/cards", g.creditsGrantToken(), map[string]any{
 		"team": other.team, "customer": "cus_2", "payment_method": "pm_2", "fingerprint": "fp_2",
 	}, nil); code != http.StatusNoContent {
 		t.Fatalf("save card = %d", code)
@@ -386,7 +391,7 @@ func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
 	g.owe(other.team, 15_000)
 	g.srv.CardBillingPass(context.Background())
 	charges := gc.internalCalls("/internal/charge")
-	if code := g.call("POST", "/api/v1/credits/card-payments", "Bearer "+g.admin, map[string]any{
+	if code := g.call("POST", "/api/v1/credits/card-payments", g.creditsGrantToken(), map[string]any{
 		"team": other.team, "charge_id": charges[0].Body["charge_id"], "attempt_id": charges[0].Body["attempt_id"],
 		"payment_intent": "pi_second", "amount_cents": 15_000, "status": "succeeded",
 	}, nil); code != http.StatusNoContent {
@@ -396,12 +401,12 @@ func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
 	var report struct {
 		Queued bool `json:"queued"`
 	}
-	if code := g.call("POST", "/api/v1/credits/card-refunds", "Bearer "+g.admin, map[string]any{
+	if code := g.call("POST", "/api/v1/credits/card-refunds", g.creditsGrantToken(), map[string]any{
 		"payment_intent": "pi_second", "refund_id": "re_pi_second", "queue": "pi_second-0", "status": "failed",
 	}, &report); code != http.StatusOK || !report.Queued {
 		t.Fatalf("failed refund report = %d %+v; want it queued again", code, report)
 	}
-	if code := g.call("POST", "/api/v1/credits/card-refunds", "Bearer "+g.admin, map[string]any{
+	if code := g.call("POST", "/api/v1/credits/card-refunds", g.creditsGrantToken(), map[string]any{
 		"payment_intent": "pi_other", "refund_id": "re_other", "queue": "pi_other-0", "status": "failed",
 	}, &report); code != http.StatusOK || report.Queued {
 		t.Fatalf("an unqueued refund's report = %d %+v; want not queued", code, report)

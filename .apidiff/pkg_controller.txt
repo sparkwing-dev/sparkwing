@@ -48,6 +48,7 @@ const CardNotTrustedCode = "card_not_trusted"
 const CardOnFileCode = "card_on_file"
 const CardSetupOrderCapability = "card-setup-order-v1"
 const CheckoutAmountCode = "amount_out_of_range"
+const CheckoutServicePrincipal = "checkout-service"
 const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
 	Seal(plain string) (string, error)
@@ -105,6 +106,7 @@ const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
+func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
@@ -213,6 +215,7 @@ type ObjectStoreBreakerResponse struct {
 	Thawed bool
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
+func OperatorReason(reason string) (string, error)
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 const PaymentWarnedCode = "payment_warned"
 type Principal struct {

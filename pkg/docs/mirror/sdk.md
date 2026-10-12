@@ -718,6 +718,32 @@ CacheKey functions also run at dispatch time, so they may call
 Register a custom resolver for tests:
 `WithSecretResolver(ctx, SecretResolverFunc(...))`.
 
+### Declaring secrets
+
+A pipeline declares the secrets it reads with a `Secrets()` method that
+returns a pointer to a struct. Each field's `sw` tag names one secret. A
+field is required unless its tag ends in `,optional`; use `,optional` for a
+secret only some runs need, such as a deploy key read only on `main`.
+
+```go
+type ReleaseSecrets struct {
+    DeployToken string `sw:"DEPLOY_TOKEN"`
+    DeployKey   string `sw:"DEPLOY_KEY,optional"`
+}
+
+func (Release) Secrets() any { return &ReleaseSecrets{} }
+```
+
+Step bodies read the resolved struct with
+`sw.PipelineSecrets[ReleaseSecrets](ctx)`, or one value with `Secret`.
+Before the first node runs, every required secret is checked against the
+store the run reads from, and a run missing any of them fails with one
+message naming each and the `sparkwing secrets set` command that sets it; a
+missing optional secret leaves its field empty. On a controller a node may
+read only a secret its pipeline declares, and reading any other name fails
+with an error naming the tag to add. See
+[Pipelines: Secrets](pipelines.md#secrets) for the checks.
+
 ## Trigger inputs from step bodies
 
 The pipeline's `Plan(ctx, plan, in T, rc)` method receives the typed

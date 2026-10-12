@@ -152,6 +152,7 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
+| `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files
@@ -182,7 +183,8 @@ grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
 no credit or team billing routes, and gives teams unlimited room in the
 controller's storage-tier checks. Operator-set storage quotas still apply.
 The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
-metering can contact Korey for help running sparkwing-ops. See
+metering can contact Korey for help running the operator console and
+sparkwing-ops. See
 [Credits](auth.md#credits) for the licensed behavior.
 
 ### Storage class

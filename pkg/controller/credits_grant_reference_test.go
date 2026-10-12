@@ -14,7 +14,6 @@ type grantWire struct {
 	Kind        string `json:"kind"`
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference"`
-	Reverses    string `json:"reverses"`
 }
 
 type stateWire struct {
@@ -29,7 +28,7 @@ type historyWire struct {
 
 func postGrant(t *testing.T, f creditsFixture, body map[string]any) (int, grantWire) {
 	t.Helper()
-	status, raw := creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin, body)
+	status, raw := creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service, body)
 	var out grantWire
 	if status == http.StatusOK || status == http.StatusCreated {
 		if err := json.Unmarshal(raw, &out); err != nil {
@@ -74,45 +73,9 @@ func TestCreditsGrantRouteIsIdempotentByReference(t *testing.T) {
 	}
 }
 
-func TestCreditsGrantRouteReversesAPaidGrant(t *testing.T) {
-	f := newCreditsFixture(t, false)
-	if status, _ := postGrant(t, f, map[string]any{
-		"kind":         store.CreditGrantPaid,
-		"amount_micro": 1000 * store.MicroCreditsPerCent,
-		"reference":    "pi_refunded",
-	}); status != http.StatusCreated {
-		t.Fatalf("paid grant status = %d, want 201", status)
-	}
-	status, reversal := postGrant(t, f, map[string]any{
-		"kind":         store.CreditGrantReversal,
-		"amount_micro": -400 * store.MicroCreditsPerCent,
-		"reference":    "re_refunded",
-		"reverses":     "pi_refunded",
-	})
-	if status != http.StatusCreated {
-		t.Fatalf("reversal status = %d, want 201", status)
-	}
-	if reversal.Reverses != "pi_refunded" {
-		t.Fatalf("reversal row = %+v, want it to name the payment", reversal)
-	}
-
-	_, raw := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.admin, nil)
-	var state stateWire
-	if err := json.Unmarshal(raw, &state); err != nil {
-		t.Fatalf("decode state: %v", err)
-	}
-	if want := int64(600 * store.MicroCreditsPerCent); state.BalanceMicro != want {
-		t.Errorf("balance = %d, want %d", state.BalanceMicro, want)
-	}
-	if want := int64(400 * store.MicroCreditsPerCent); state.ReversedMicro != want {
-		t.Errorf("reversed = %d, want %d", state.ReversedMicro, want)
-	}
-	if want := int64(1000 * store.MicroCreditsPerCent); state.GrantedMicro != want {
-		t.Errorf("granted = %d, want the payment %d", state.GrantedMicro, want)
-	}
-}
-
-func TestCreditsGrantRouteRefusesAnUnbackedOrPositiveReversal(t *testing.T) {
+// The route records a verified payment and nothing else: a free grant or a
+// reversal is refused before the ledger sees it.
+func TestCreditsGrantRouteRecordsOnlyPaidGrants(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	if status, _ := postGrant(t, f, map[string]any{
 		"kind":         store.CreditGrantPaid,
@@ -122,21 +85,23 @@ func TestCreditsGrantRouteRefusesAnUnbackedOrPositiveReversal(t *testing.T) {
 		t.Fatalf("paid grant status = %d, want 201", status)
 	}
 	for name, body := range map[string]map[string]any{
-		"a reversal of a payment the ledger never saw": {
+		"a free grant": {"kind": store.CreditGrantFree, "amount_micro": 5, "reference": "gift"},
+		"a reversal": {
 			"kind": store.CreditGrantReversal, "amount_micro": -5,
-			"reference": "re_x", "reverses": "pi_unknown",
-		},
-		"a reversal with a positive amount": {
-			"kind": store.CreditGrantReversal, "amount_micro": 5,
 			"reference": "re_y", "reverses": "pi_known",
-		},
-		"a reversal that names no payment": {
-			"kind": store.CreditGrantReversal, "amount_micro": -5, "reference": "re_z",
 		},
 	} {
 		if status, _ := postGrant(t, f, body); status != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", name, status)
 		}
+	}
+	_, raw := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.admin, nil)
+	var state stateWire
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if want := int64(100 * store.MicroCreditsPerCent); state.BalanceMicro != want {
+		t.Errorf("balance = %d, want only the payment's %d", state.BalanceMicro, want)
 	}
 }
 
@@ -189,7 +154,7 @@ func TestCreditsGrantRouteRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 		"amount_micro": 999 * store.MicroCreditsPerCent,
 		"reference":    "pi_terms",
 	}
-	status, _ := creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin, changed)
+	status, _ := creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service, changed)
 	if status != http.StatusConflict {
 		t.Fatalf("a different amount under one reference = %d, want 409", status)
 	}

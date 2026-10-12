@@ -10,8 +10,9 @@
   `sparkwing runs logs --profile` and `runs logs --grep --profile` read the
   logs service the profile or the controller named.
 - **After:** against a controller that keeps segments, every one of those
-  runners uploads each node's log as gzip segments plus a sealing manifest
-  through URLs the controller issues, into the controller's cache bucket
+  runners uploads each node's log as gzip segments, each through a URL the
+  controller signs for its exact size and Content-MD5, plus a sealing
+  manifest it posts to the controller, into the controller's cache bucket
   (`--cache-blob-store`) or, without one, its output directory, whether or
   not it has a logs URL. The dashboard and the CLI read every node through
   the controller, which serves segments first and the logs service for a
@@ -107,6 +108,60 @@ that keep the logs service running.
 - **Mixed versions:** upgrade the runners and the controller together. A
   runner from before segments has nowhere to send its logs once the
   service is gone, and keeps them on its own disk.
+
+## Operator powers need the operator console
+
+- **Before:** an admin token reached a team's billing standing and the
+  sign-up waitlist through `GET`/`POST /api/v1/teams/{team}/trust`,
+  `GET /api/v1/signups/waitlist`, `POST /api/v1/signups/waitlist/approve`,
+  `free` and `reversal` grants on `POST /api/v1/credits/grants`, holds
+  naming a team and every release on `POST /api/v1/credits/freezes`, and
+  refunds on `POST /api/v1/credits/reversals`. It also passed every other
+  `credits.grant` route.
+- **After:** those powers answer only a listed operator's own signed-in
+  console session (`--operator-accounts`). The four admin routes above are
+  removed. `POST /api/v1/credits/grants` records `paid` grants only and
+  `POST /api/v1/credits/freezes` holds by `payment_id` and `dispute_id`
+  only; the `reverses`, `team` and `release` fields are gone and are
+  refused as unknown. Every `credits.grant` route answers `403` to an
+  admin token. The console's trust action sets the daily cap, card rung and
+  Cloud node cap alongside the purchase limit, and its unfreeze releases a
+  payment dispute's hold named by `hold`. The new
+  `sparkwing-controller admin freeze|unfreeze` holds or releases a team
+  from inside the controller pod when console sign-in is down.
+- **Migrate:** list the operators' account ids in `--operator-accounts`
+  (Helm: `controller.operatorAccounts`) and have each sign in with Google
+  or GitHub before the upgrade; an operator token's session does not reach
+  the console. Move each call:
+
+  | Before (admin token) | After |
+  |---|---|
+  | `GET /api/v1/teams/{team}/trust` | `GET /api/v1/operator/teams/{team}`, field `billing` |
+  | `POST /api/v1/teams/{team}/trust` | `POST /api/v1/operator/teams/{team}/trust`, same body |
+  | `GET /api/v1/signups/waitlist` | `GET /api/v1/operator/waitlist`, newest first, with `offset` |
+  | `POST /api/v1/signups/waitlist/approve` | `POST /api/v1/operator/waitlist/approve`, same body |
+  | `free` grant on `POST /api/v1/credits/grants` | `POST /api/v1/operator/teams/{team}/grants` with `amount_cents`, `reason` and `key` |
+  | `reversal` grant, or a refund on `POST /api/v1/credits/reversals` | refund in the Stripe dashboard; the checkout service reverses it |
+  | hold naming `team` on `POST /api/v1/credits/freezes` | `POST /api/v1/operator/teams/{team}/freeze` |
+  | `release` on `POST /api/v1/credits/freezes` | `POST /api/v1/operator/teams/{team}/unfreeze`, with `hold` for one dispute's hold |
+
+  A script that used the admin token for any row above now gets `404` or
+  `403`.
+- **The checkout service's token:** `POST /api/v1/tokens` and
+  `POST /api/v1/tokens/{prefix}/rotate` refuse `credits.grant` with `403`,
+  and its routes answer only a service token, never an anonymous caller.
+  `POST /api/v1/tokens` trims each scope and refuses any that is not
+  exactly a known scope, so a padded spelling is checked as the plain one.
+  The token the checkout service already holds keeps working. Before the
+  next rotation, put its value in the controller's `credits-token`
+  credential so the controller adopts it; to rotate, write a new
+  `sws_` value there and in the checkout service, restart, and revoke the
+  old prefix. A value whose token was revoked is never seeded again; the
+  controller logs an error at start until the file holds a new value.
+- **Go:** pass the actor, the reason and the one hold's id to
+  `Store.ReleaseCreditFreezes`, which refuses an empty id; a
+  caller of the removed `Store.DisputeTeam` reads the team from the hold it
+  holds, or from `Tenant.CreditFreeze`.
 
 ## Password users are removed
 

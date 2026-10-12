@@ -96,6 +96,34 @@ func TestResolvePipelineSecrets_RequiredMissingFails(t *testing.T) {
 	}
 }
 
+type twoRequiredSec struct {
+	DeployToken string `sw:"DEPLOY_TOKEN"`
+	SlackHook   string `sw:"SLACK_HOOK,optional"`
+	DeployKey   string `sw:"DEPLOY_KEY,required"`
+}
+
+type twoRequiredPipe struct{ sparkwing.Base }
+
+func (twoRequiredPipe) Plan(_ context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	return nil
+}
+func (twoRequiredPipe) Secrets() any { return &twoRequiredSec{} }
+
+func TestResolvePipelineSecrets_ReportsEveryMissingRequiredSecret(t *testing.T) {
+	reg := ensureRegistered(t, "two-required-pipe-rt", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &twoRequiredPipe{}
+	})
+	ctx := sparkwing.WithSecretResolver(context.Background(), &fakeResolver{values: map[string]string{}})
+	_, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, nil)
+	var missing *sparkwingruntime.MissingSecretsError
+	if !errors.As(err, &missing) || strings.Join(missing.Names, ",") != "DEPLOY_TOKEN,DEPLOY_KEY" {
+		t.Fatalf("err = %v, want both required secrets in declaration order and not the optional one", err)
+	}
+	if !errors.Is(err, sparkwing.ErrSecretMissing) {
+		t.Fatalf("err = %v, want it to match ErrSecretMissing", err)
+	}
+}
+
 func TestResolvePipelineSecrets_TransportErrorPropagates(t *testing.T) {
 	bumpy := errors.New("vault unreachable")
 	reg := registerSecretsOnlyPipe(t)

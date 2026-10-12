@@ -78,7 +78,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_acme", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ReleaseCreditFreezes(ctx, "acme", "", now); err != nil {
+	if _, err := st.ReleaseCreditFreezes(ctx, "acme", "dp_acme", "", "", now); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"credit_checkouts", "credit_freezes"} {

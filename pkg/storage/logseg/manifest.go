@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ManifestVersion is the manifest format this package writes and reads.
@@ -137,8 +139,9 @@ const (
 )
 
 // SealGrace is how long after a node finishes a reader waits for its
-// manifest before the controller seals the attempt as abandoned.
-const SealGrace = 60 * time.Second
+// manifest before the controller seals the attempt as abandoned. A
+// writer whose claim ended may upload and seal for as long.
+const SealGrace = store.NodeLogSealGrace
 
 // Completeness is a reader's verdict on one node's log. Message is the
 // synthetic line a reader renders after the log; it is empty when there

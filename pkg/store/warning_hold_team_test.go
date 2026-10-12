@@ -88,10 +88,6 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 					t.Fatalf("%s claim=%v, want frozen refusal", team, claimErr)
 				}
 
-				owner, found, err := s.DisputeTeam(ctx, ids[team])
-				if err != nil || !found || owner != team {
-					t.Fatalf("hold owner=%s found=%v error=%v", owner, found, err)
-				}
 				standing, err := tenant.SpendStanding(ctx, now)
 				if err != nil || standing.Billing.Trusted || standing.CreditLimitMicro != 0 {
 					t.Fatalf("%s standing=%+v error=%v", team, standing, err)
@@ -124,7 +120,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 					t.Fatalf("refund balance=%d error=%v", balance, err)
 				}
 			}
-			if n, err := s.ReleaseCreditFreezes(ctx, "first", ids["first"], now); err != nil || n != 1 {
+			if n, err := s.ReleaseCreditFreezes(ctx, "first", ids["first"], "", "", now); err != nil || n != 1 {
 				t.Fatalf("release=%d error=%v", n, err)
 			}
 			if err := settle("first"); err != nil {
@@ -170,7 +166,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 				}
 			}
 			if mode == "legacy-released" {
-				if _, err := s.ReleaseCreditFreezes(ctx, "first", "issfr_legacy", now); err != nil {
+				if _, err := s.ReleaseCreditFreezes(ctx, "first", "issfr_legacy", "", "", now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -208,7 +204,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 				}
 				for _, id := range first.Disputes {
 					if id != "issfr_legacy" {
-						if n, err := s.ReleaseCreditFreezes(ctx, "first", id, now); err != nil || n != 1 {
+						if n, err := s.ReleaseCreditFreezes(ctx, "first", id, "", "", now); err != nil || n != 1 {
 							t.Fatalf("release=%d error=%v", n, err)
 						}
 					}

@@ -106,6 +106,10 @@ type Options struct {
 	// own Options cannot claim a run reached the standalone store.
 	standalone *standaloneRun
 
+	// safety: set where the local store is chosen as the secret source, so a
+	// preflight failure names that store's fix and never a caller's source.
+	localSecrets bool
+
 	priority    priorityRequest
 	prioritySet bool
 
@@ -378,6 +382,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
 	}
 	pipelineSecrets, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, opts.PipelineYAML)
+	if missing := (*sparkwingruntime.MissingSecretsError)(nil); errors.As(err, &missing) {
+		err = secretPreflightError(missing, opts)
+	}
 	if err != nil {
 		if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
 			noteLostStateWrite(ctx, "finish run", runID, err)
@@ -715,6 +722,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	}
 	if opts.LocalOnly || opts.SecretSource == nil {
 		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
+		opts.localSecrets = true
 	}
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
 		return nil, fmt.Errorf("ensure run dir: %w", err)
