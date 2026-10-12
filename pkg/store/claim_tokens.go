@@ -316,7 +316,7 @@ func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, 
 }
 
 // safety: the claim's attempt rows name the attempts it ran, so only the first of them, which its writer keeps
-// across in-process retries, only for the grace after the claim's last attempt or its node ended, and only while
+// across in-process retries, only for the grace after the later of its last attempt's end and its node's, and only while
 // no later claim holds the node, may still finish its log. A launcher's work claim and a runner's node claim end
 // when their node reports, before the process that holds the log seals it; no other kind does.
 func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
@@ -341,8 +341,10 @@ func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time)
 	if err != nil {
 		return ClaimToken{}, err
 	}
+	// safety: after-run hooks, cache saves and artifact publication follow the attempt's end and still log, so the
+	// grace runs from whichever ended later.
 	ended := attemptEnd
-	if !ended.Valid && status == nodeStatusDone {
+	if status == nodeStatusDone && nodeEnd.Valid && (!ended.Valid || nodeEnd.Int64 > ended.Int64) {
 		ended = nodeEnd
 	}
 	if !ended.Valid || now.Sub(time.Unix(0, ended.Int64)) >= NodeLogSealGrace {

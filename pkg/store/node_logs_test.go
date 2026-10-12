@@ -200,4 +200,16 @@ func TestAnEndedClaimKeepsItsLogTailForTheGrace(t *testing.T) {
 	if _, err := s.AuthorizeClaimToken(ctx, raw, store.ClaimLogTail, time.Now().Add(store.NodeLogSealGrace)); !errors.Is(err, store.ErrClaimNotLive) {
 		t.Fatalf("the tail past the grace = %v, want ErrClaimNotLive", err)
 	}
+
+	backdate := func(q string, at time.Time) {
+		t.Helper()
+		if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, q), at.UnixNano(), f.run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(`UPDATE node_execution_attempts SET finished_at = ? WHERE run_id = ?`, time.Now().Add(-2*store.NodeLogSealGrace))
+	backdate(`UPDATE nodes SET finished_at = ? WHERE run_id = ? AND node_id = 'a'`, time.Now())
+	if tail, err := s.AuthorizeClaimToken(ctx, raw, store.ClaimLogTail, time.Now()); err != nil || !tail.Ended {
+		t.Fatalf("a tail within the grace of the node's later end = %+v, %v", tail, err)
+	}
 }
