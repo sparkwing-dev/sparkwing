@@ -497,6 +497,32 @@ anything. Cache pure builds, test runs against content-addressed
 sources, and artifact packaging; gate external side effects with
 `.Needs` on the cached Job.
 
+## Secrets
+
+A pipeline declares its secrets with a `Secrets()` struct, each field
+required unless its `sw` tag ends in `,optional` (see
+[Declaring secrets](sdk.md#declaring-secrets)). The declaration is checked
+before the first node runs, so a run never fails halfway through a deploy
+for a secret it could have named at the start.
+
+- **On a controller,** the run's plan is refused when a required secret is
+  neither set for the run's pipeline nor set team-wide and shared with
+  runs. The run fails before any of its nodes runs, with one message that lists
+  every such secret, says which scope it is missing from, and gives the
+  command that fixes it: `sparkwing secrets set --name NAME --file <path>
+  --pipeline PIPELINE --profile PROFILE` for this pipeline only, or
+  `--shared` instead of `--pipeline` for a team-wide secret every pipeline
+  may read.
+- **On a laptop,** `sparkwing run` checks the same declarations against the
+  store the run reads from, which is this machine's local store unless the
+  profile names a secrets backend, and reports every missing secret at once
+  with the command or setting that supplies it.
+
+A missing optional secret never stops a run; its field stays empty and
+`Secret` returns `sparkwing.ErrSecretMissing` for it. On a controller a
+node may read only the secrets its pipeline declares, and reading any other
+name fails with an error naming the `sw` tag to add.
+
 ## Approval gates
 
 Pause a run and wait for a human decision by registering a gate via

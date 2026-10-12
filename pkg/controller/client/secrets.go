@@ -2,6 +2,7 @@
 package client
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -82,9 +83,25 @@ func (c *Client) getSecret(ctx context.Context, name, query string) (*Secret, er
 		return &sec, nil
 	case http.StatusNotFound:
 		return nil, notFound(resp)
+	case http.StatusForbidden:
+		return nil, secretRefusal(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
+}
+
+// safety: a refused read carries its reason in the message, such as the
+// declaration an undeclared secret is missing, and the code alone would hide
+// it from the step that asked.
+func secretRefusal(resp *http.Response) error {
+	var body struct {
+		Code    string `json:"error"`
+		Message string `json:"message"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&body) != nil || body.Message == "" {
+		return fmt.Errorf("controller %d: %s", resp.StatusCode, cmp.Or(body.Code, resp.Status))
+	}
+	return fmt.Errorf("controller %d (%s): %s", resp.StatusCode, body.Code, body.Message)
 }
 
 // ListSecrets fetches every secret row with Value blanked by the

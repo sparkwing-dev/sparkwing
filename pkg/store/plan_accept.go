@@ -199,8 +199,11 @@ func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body [
 	if cancelled {
 		return false, ErrClaimCancelRequested
 	}
-	planned, err := validatePlan(body)
+	planned, required, err := validatePlan(body)
 	if err != nil {
+		return false, err
+	}
+	if err := secretPreflightTx(ctx, tx, tok.Team, tok.RunID, required); err != nil {
 		return false, err
 	}
 	table, err := creditRateTableTx(ctx, tx)
@@ -276,45 +279,48 @@ func labelsJSON(labels []string) ([]byte, error) {
 	return json.Marshal(labels)
 }
 
-func validatePlan(body []byte) ([]plannedNode, error) {
+func validatePlan(body []byte) (_ []plannedNode, requiredSecrets []string, err error) {
 	if len(body) > MaxPlanBytes {
-		return nil, planRefused("the plan is %d bytes; the limit is %d", len(body), MaxPlanBytes)
+		return nil, nil, planRefused("the plan is %d bytes; the limit is %d", len(body), MaxPlanBytes)
 	}
 	var plan submittedPlan
 	dec := json.NewDecoder(bytes.NewReader(body))
 	if err := dec.Decode(&plan); err != nil {
-		return nil, planRefused("the plan is not a JSON document: %v", err)
+		return nil, nil, planRefused("the plan is not a JSON document: %v", err)
 	}
 	if dec.More() {
-		return nil, planRefused("the plan holds more than one JSON document")
+		return nil, nil, planRefused("the plan holds more than one JSON document")
 	}
 	if err := validPlannedSource(plan.Source); err != nil {
-		return nil, planRefused("%v", err)
+		return nil, nil, planRefused("%v", err)
 	}
 	if plan.PlanConc != nil || len(plan.PlanConcs) > 0 {
-		return nil, planRefused("plan-level concurrency groups are not supported; declare concurrency on nodes")
+		return nil, nil, planRefused("plan-level concurrency groups are not supported; declare concurrency on nodes")
 	}
 	// safety: the plan's secrets are the names its work claims may read, so
 	// they are held to the storage name grammar and to no more than a team
 	// can hold.
 	if len(plan.Secrets) > MaxSecretsPerTeam {
-		return nil, planRefused("the plan declares %d secrets; the limit is %d", len(plan.Secrets), MaxSecretsPerTeam)
+		return nil, nil, planRefused("the plan declares %d secrets; the limit is %d", len(plan.Secrets), MaxSecretsPerTeam)
 	}
 	for _, sec := range plan.Secrets {
 		if err := secretname.Validate(sec.Name); err != nil {
-			return nil, planRefused("%v", err)
+			return nil, nil, planRefused("%v", err)
+		}
+		if !sec.Optional && !slices.Contains(requiredSecrets, sec.Name) {
+			requiredSecrets = append(requiredSecrets, sec.Name)
 		}
 	}
 	if len(plan.Nodes) > MaxPlanNodes {
-		return nil, planRefused("the plan has %d nodes; the limit is %d", len(plan.Nodes), MaxPlanNodes)
+		return nil, nil, planRefused("the plan has %d nodes; the limit is %d", len(plan.Nodes), MaxPlanNodes)
 	}
 	known := make(map[string]bool, len(plan.Nodes))
 	for _, n := range plan.Nodes {
 		if err := validNodeID(n.ID); err != nil {
-			return nil, planRefused("node %q: %v", n.ID, err)
+			return nil, nil, planRefused("node %q: %v", n.ID, err)
 		}
 		if known[n.ID] {
-			return nil, planRefused("node %q appears twice", n.ID)
+			return nil, nil, planRefused("node %q appears twice", n.ID)
 		}
 		known[n.ID] = true
 	}
@@ -322,14 +328,14 @@ func validatePlan(body []byte) ([]plannedNode, error) {
 	for _, n := range plan.Nodes {
 		p, err := planNode(n, known, plan.Requires)
 		if err != nil {
-			return nil, planRefused("node %q: %v", n.ID, err)
+			return nil, nil, planRefused("node %q: %v", n.ID, err)
 		}
 		out = append(out, p)
 	}
 	if cycle := planCycle(out); cycle != "" {
-		return nil, planRefused("the dependency graph has a cycle through %q", cycle)
+		return nil, nil, planRefused("the dependency graph has a cycle through %q", cycle)
 	}
-	return out, nil
+	return out, requiredSecrets, nil
 }
 
 // safety: the node ID lands in URL paths and file names, so this is the SDK's

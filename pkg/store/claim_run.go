@@ -110,6 +110,19 @@ func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.D
 // not declare.
 var ErrSecretUndeclared = errors.New("store: the run's pipeline does not declare this secret")
 
+// safety: the claim's own pipeline and the name it asked for, so the
+// refusal points the author at the declaration without naming anything the
+// claim could not already see.
+type secretUndeclaredError struct{ pipeline, name string }
+
+func (e secretUndeclaredError) Error() string {
+	return fmt.Sprintf("pipeline %q read secret %q, which it does not declare. A run on a controller reads only the secrets "+
+		"its pipeline declares: add a field tagged `sw:\"%s\"` to the struct its Secrets() method returns, "+
+		"or `sw:\"%s,optional\"` if the run can do without it.", e.pipeline, e.name, e.name, e.name)
+}
+
+func (e secretUndeclaredError) Is(target error) bool { return target == ErrSecretUndeclared }
+
 // ReleaseClaimSecret returns the secret name to tok's live work claim, looked
 // up for the run's pipeline, when the run's accepted plan declares it. It
 // records the release as a secret_released event on the node under the
@@ -140,7 +153,7 @@ func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name st
 		declared = declared || d.Name == name
 	}
 	if !declared {
-		return nil, ErrSecretUndeclared
+		return nil, secretUndeclaredError{pipeline: pipeline, name: name}
 	}
 	sec, err := t.GetSecretForRun(name, pipeline)
 	if err != nil {

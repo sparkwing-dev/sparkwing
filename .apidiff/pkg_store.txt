@@ -3202,6 +3202,10 @@ func WithoutCreditMetering(ctx context.Context) context.Context
 func WriteOutputFileDurably(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
+func (e *secretPreflightError) Error() string
+func (e *secretPreflightError) Unwrap() error
+func (e secretUndeclaredError) Error() string
+func (e secretUndeclaredError) Is(target error) bool
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row

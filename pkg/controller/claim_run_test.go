@@ -171,6 +171,40 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	}
 }
 
+// A plan whose required secret the run cannot read is refused with 422 and
+// the message naming it, so the planning pod's report fails the run before any
+// node is created.
+func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	plan := "Bearer " + f.launchedRun(olga, "run-missing", "acme", "widgets")
+	doc := map[string]any{
+		"nodes":   []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}},
+		"secrets": []map[string]any{{"name": "DEPLOY_TOKEN", "required": true}, {"name": "SLACK_HOOK", "optional": true}},
+	}
+	var refused map[string]any
+	if code := f.call("POST", "/api/v1/runs/run-missing/plan", plan, doc, &refused); code != http.StatusUnprocessableEntity {
+		t.Fatalf("accept plan = %d %v, want 422", code, refused)
+	}
+	msg := fmt.Sprint(refused["error"])
+	if !strings.Contains(msg, `pipeline "build" did not start: it declares 1 required secret this run cannot read.`) ||
+		!strings.Contains(msg, "sparkwing secrets set --name DEPLOY_TOKEN --file <path> --profile <profile> --pipeline build") ||
+		strings.Contains(msg, "SLACK_HOOK") {
+		t.Fatalf("refusal = %q, want DEPLOY_TOKEN named with its fix and the optional SLACK_HOOK left out", msg)
+	}
+	tn, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tn.GetNode(context.Background(), "run-missing", store.PlanNodeID); err != nil {
+		t.Fatalf("the run's own planning node: %v", err)
+	}
+	if _, err := tn.GetNode(context.Background(), "run-missing", "a"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("node of the refused plan: err = %v, want not found", err)
+	}
+}
+
 // A work claim reads a secret its run's plan declares, and each read is
 // recorded on its node; an undeclared name, a planning claim, another run
 // and a cancelled run are all refused.
@@ -212,6 +246,10 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	var refused map[string]any
 	if code := f.call("GET", "/api/v1/secrets/UNDECLARED?run=run-sec", work, nil, &refused); code != http.StatusForbidden || refused["error"] != "secret_undeclared" {
 		t.Fatalf("undeclared secret = %d %v, want 403 secret_undeclared", code, refused)
+	}
+	if msg := fmt.Sprint(refused["message"]); !strings.Contains(msg, `pipeline "build" read secret "UNDECLARED", which it does not declare.`) ||
+		!strings.Contains(msg, "add a field tagged `sw:\"UNDECLARED\"` to the struct its Secrets() method returns") {
+		t.Fatalf("the undeclared refusal does not point at the declaration: %q", msg)
 	}
 	var probes []string
 	for _, line := range strings.Split(f.logs.String(), "\n") {

@@ -39,6 +39,9 @@ unlock.
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 
 ### Changed
+- **controller + cli:** A run whose required secrets are missing fails before its first node, naming every one with the command that sets it
+  A field of a pipeline's `Secrets()` struct is required unless its tag ends in `,optional`. On a controller, the plan is refused when a required secret is neither set for the run's pipeline nor shared team-wide, and the run fails with one message listing each such secret, which scope it is missing from, and the `sparkwing secrets set` command that fixes it; before, the run started and failed at the first node that read it. A laptop run checks the same declarations against the store it reads from (the local store, or the profile's) and reports every missing one at once instead of the first. A missing optional secret still lets the run start. A node that reads a secret its pipeline does not declare is refused as before, and the error now names the pipeline and the `sw:"NAME"` tag to add.
+
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
 
