@@ -36,7 +36,7 @@ func TestFinalizeClaimRoundSurvivesConcurrentRunEvents(t *testing.T) {
 		for i := range nodes {
 			nodeID := fmt.Sprintf("n%d", i)
 			wg.Go(func() {
-				if _, err := st.FinalizeExecutorClaimRound(ctx, runID, nodeID); err != nil {
+				if _, err := st.FinalizeClaimRound(ctx, runID, nodeID); err != nil {
 					errs <- fmt.Errorf("round %d finalize %s: %w", round, nodeID, err)
 				}
 			})

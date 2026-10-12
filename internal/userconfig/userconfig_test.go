@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
-type fleetish struct {
+type sectionish struct {
 	Listen string   `yaml:"listen"`
 	Names  []string `yaml:"names,omitempty"`
 	Max    int      `yaml:"max"`
@@ -30,9 +30,9 @@ func writeFile(t *testing.T, body string) string {
 }
 
 func TestReadDecodesOneSectionAndKeepsSeededDefaults(t *testing.T) {
-	path := writeFile(t, "profiles:\n  laptop: {}\nfleet:\n  listen: 127.0.0.1:7443\n")
-	got := fleetish{Max: 3}
-	found, err := Read(path, Fleet, &got)
+	path := writeFile(t, "profiles:\n  laptop: {}\nrepos:\n  listen: 127.0.0.1:7443\n")
+	got := sectionish{Max: 3}
+	found, err := Read(path, Repos, &got)
 	if err != nil || !found {
 		t.Fatalf("Read = %v, %v", found, err)
 	}
@@ -42,31 +42,31 @@ func TestReadDecodesOneSectionAndKeepsSeededDefaults(t *testing.T) {
 }
 
 func TestReadReportsAnAbsentFileOrSection(t *testing.T) {
-	var got fleetish
-	if found, err := Read(filepath.Join(t.TempDir(), Filename), Fleet, &got); err != nil || found {
+	var got sectionish
+	if found, err := Read(filepath.Join(t.TempDir(), Filename), Repos, &got); err != nil || found {
 		t.Fatalf("absent file: Read = %v, %v", found, err)
 	}
 	path := writeFile(t, "# nothing yet\n")
-	if found, err := Read(path, Fleet, &got); err != nil || found {
+	if found, err := Read(path, Repos, &got); err != nil || found {
 		t.Fatalf("empty file: Read = %v, %v", found, err)
 	}
-	path = writeFile(t, "profiles: {}\nfleet:\n")
-	if found, err := Read(path, Fleet, &got); err != nil || found {
+	path = writeFile(t, "profiles: {}\nrepos:\n")
+	if found, err := Read(path, Repos, &got); err != nil || found {
 		t.Fatalf("null section: Read = %v, %v", found, err)
 	}
 }
 
 func TestReadRejectsWhatItDoesNotKnow(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
-		{"unknown key in the section", "fleet:\n  listen: x\n  token: nope\n", "line 3: field token not found"},
-		{"unknown section", "fleet:\n  listen: x\nbudget: 6\n", `unknown section "budget"`},
-		{"repeated section", "fleet: {}\nfleet: {}\n", "appears twice"},
-		{"second document", "fleet: {}\n---\nfleet: {}\n", "multiple YAML documents"},
-		{"not a mapping", "- fleet\n", "must be a mapping"},
+		{"unknown key in the section", "repos:\n  listen: x\n  token: nope\n", "line 3: field token not found"},
+		{"unknown section", "repos:\n  listen: x\nbudget: 6\n", `unknown section "budget"`},
+		{"repeated section", "repos: {}\nrepos: {}\n", "appears twice"},
+		{"second document", "repos: {}\n---\nrepos: {}\n", "multiple YAML documents"},
+		{"not a mapping", "- repos\n", "must be a mapping"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var got fleetish
-			_, err := Read(writeFile(t, tc.body), Fleet, &got)
+			var got sectionish
+			_, err := Read(writeFile(t, tc.body), Repos, &got)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Read error = %v, want %q", err, tc.want)
 			}
@@ -77,21 +77,21 @@ func TestReadRejectsWhatItDoesNotKnow(t *testing.T) {
 func TestReadRefusesAFileOthersCanRead(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		path := filepath.Join(t.TempDir(), Filename)
-		if err := os.WriteFile(path, []byte("fleet: {}\n"), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte("repos: {}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		var got fleetish
-		if _, err := Read(path, Fleet, &got); err == nil || !strings.Contains(err.Error(), "owner-only") {
+		var got sectionish
+		if _, err := Read(path, Repos, &got); err == nil || !strings.Contains(err.Error(), "owner-only") {
 			t.Fatalf("Read error = %v, want inherited ACL refusal", err)
 		}
 		return
 	}
-	path := writeFile(t, "fleet: {}\n")
+	path := writeFile(t, "repos: {}\n")
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var got fleetish
-	if _, err := Read(path, Fleet, &got); err == nil || !strings.Contains(err.Error(), "owner-only") {
+	var got sectionish
+	if _, err := Read(path, Repos, &got); err == nil || !strings.Contains(err.Error(), "owner-only") {
 		t.Fatalf("Read error = %v, want an owner-only refusal", err)
 	}
 }
@@ -105,11 +105,11 @@ profiles:
       url: http://127.0.0.1:4344 # local
 admission:
   budget: 50%,8gb
-fleet:
+repos:
   listen: 127.0.0.1:1
 `)
-	var got fleetish
-	err := Update(path, Fleet, "the fleet config", &got, func(found bool) error {
+	var got sectionish
+	err := Update(path, Repos, "the repos config", &got, func(found bool) error {
 		if !found || got.Listen != "127.0.0.1:1" {
 			return fmt.Errorf("current section = %v %+v", found, got)
 		}
@@ -134,11 +134,11 @@ fleet:
 }
 
 func TestUpdateLeavesTheFileAloneWhenTheChangeFails(t *testing.T) {
-	path := writeFile(t, "fleet:\n  listen: a\n")
+	path := writeFile(t, "repos:\n  listen: a\n")
 	before, _ := os.ReadFile(path)
-	var got fleetish
+	var got sectionish
 	refused := errors.New("already there")
-	if err := Update(path, Fleet, "the fleet config", &got, func(bool) error { return refused }); !errors.Is(err, refused) {
+	if err := Update(path, Repos, "the repos config", &got, func(bool) error { return refused }); !errors.Is(err, refused) {
 		t.Fatalf("Update error = %v", err)
 	}
 	after, _ := os.ReadFile(path)
@@ -153,7 +153,7 @@ func TestWriteCreatesTheFileAndDropsAnEmptySection(t *testing.T) {
 	if err := Write(path, Repos, "the repo registry", map[string]any{"fallback_paths": []string{"~/code"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(path, Fleet, "the fleet config", fleetish{Listen: "x"}); err != nil {
+	if err := Write(path, Profiles, "the profiles config", sectionish{Listen: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Write(path, Repos, "the repo registry", map[string]any{}); err != nil {
@@ -161,7 +161,7 @@ func TestWriteCreatesTheFileAndDropsAnEmptySection(t *testing.T) {
 	}
 	body, _ := os.ReadFile(path)
 	if strings.Contains(string(body), "repos") || !strings.Contains(string(body), "listen: x") {
-		t.Fatalf("file = %q, want only the fleet section", body)
+		t.Fatalf("file = %q, want only the profiles section", body)
 	}
 }
 
@@ -174,7 +174,7 @@ func TestConcurrentWritersOfDifferentSectionsKeepBoth(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			section := []string{Fleet, Agent, Admission}[i%3]
+			section := []string{Profiles, Agent, Admission}[i%3]
 			own := map[string]int{}
 			errs <- Update(path, section, section, &own, func(bool) error { own[fmt.Sprint(i)] = i; return nil })
 			var n []int
@@ -195,7 +195,7 @@ func TestConcurrentWritersOfDifferentSectionsKeepBoth(t *testing.T) {
 	if len(got) != writers {
 		t.Fatalf("repos = %v, want one entry from each of %d writers", got, writers)
 	}
-	for _, section := range []string{Fleet, Agent, Admission} {
+	for _, section := range []string{Profiles, Agent, Admission} {
 		own := map[string]int{}
 		if _, err := Read(path, section, &own); err != nil || len(own) != 2 {
 			t.Fatalf("%s = %v, %v; want the entries of both of its writers", section, own, err)
@@ -226,9 +226,9 @@ func TestPathHonorsTheOverrideAndStaysInTheSandboxUnderTest(t *testing.T) {
 }
 
 func TestWriteRefusesToDropAnAnchorAnAliasElsewhereUses(t *testing.T) {
-	body := "fleet: &shared\n  listen: a\nagent: *shared\n"
+	body := "repos: &shared\n  listen: a\nagent: *shared\n"
 	path := writeFile(t, body)
-	err := Write(path, Fleet, "the fleet config", map[string]string{"listen": "b"})
+	err := Write(path, Repos, "the repos config", map[string]string{"listen": "b"})
 	if err != nil {
 		t.Fatalf("an update that keeps the anchored node failed: %v", err)
 	}
@@ -237,9 +237,9 @@ func TestWriteRefusesToDropAnAnchorAnAliasElsewhereUses(t *testing.T) {
 		t.Fatalf("agent = %v, %v; want the alias still resolving", agent, err)
 	}
 
-	path = writeFile(t, "fleet:\n  inner: &shared\n    listen: a\nagent: *shared\n")
+	path = writeFile(t, "repos:\n  inner: &shared\n    listen: a\nagent: *shared\n")
 	before := readBack(t, path)
-	err = Write(path, Fleet, "the fleet config", map[string]string{"listen": "b"})
+	err = Write(path, Repos, "the repos config", map[string]string{"listen": "b"})
 	if err == nil || !strings.Contains(err.Error(), "&shared") {
 		t.Fatalf("Write error = %v, want a refusal naming the anchor", err)
 	}
@@ -267,7 +267,7 @@ func TestWriteKeepsCommentsInsideTheRewrittenSection(t *testing.T) {
 
 func TestWriteToACommentOnlyFileKeepsTheComment(t *testing.T) {
 	path := writeFile(t, "# this machine's settings\n")
-	if err := Write(path, Fleet, "the fleet config", fleetish{Listen: "x"}); err != nil {
+	if err := Write(path, Repos, "the repos config", sectionish{Listen: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if body := readBack(t, path); !strings.Contains(body, "# this machine's settings") || !strings.Contains(body, "listen: x") {

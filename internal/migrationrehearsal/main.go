@@ -37,7 +37,6 @@ import (
 
 const (
 	canaryPrincipal = "rehearsal-canary"
-	canaryUser      = "rehearsal-canary"
 	tokenPrefixLen  = 12
 )
 
@@ -161,7 +160,7 @@ func runSnapshot(args []string) error {
 	return nil
 }
 
-// safety: tokens and passwords are stored only as argon2id hashes, so the one
+// safety: tokens are stored only as argon2id hashes, so the one
 // way to prove a pre-upgrade credential still authenticates afterwards is to
 // plant one whose raw value is known. The parameters match pkg/store.
 func argonHash(secret string) (string, error) {
@@ -181,11 +180,29 @@ func randomText(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// safety: a migration that retires a credential or a protocol removes its rows by
+// design, so these tables may lose rows without the rehearsal calling it data loss.
+var retiredRows = map[string]string{
+	"users":             "password sign-in was removed",
+	"sessions":          "password sessions end; each person signs in again",
+	"executors":         "the assisted-offer claim protocol was removed",
+	"node_claim_offers": "the assisted-offer claim protocol was removed",
+}
+
+// safety: named key by key, so any other metadata row a migration loses still
+// fails the comparison.
+var retiredKeys = map[string]map[string]string{
+	"sparkwing_meta": {
+		"bootstrap_latch":         "password sign-in was removed",
+		"controller_authority_id": "the assisted-offer claim protocol was removed",
+	},
+}
+
 func runCanary(args []string) error {
 	fs := flag.NewFlagSet("canary", flag.ExitOnError)
 	dialect := fs.String("dialect", "", "sqlite or postgres")
 	dsn := fs.String("dsn", "", "store to plant the canaries in")
-	out := fs.String("out", "", "directory for the canary token and password")
+	out := fs.String("out", "", "directory for the canary token and secrets key")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -199,15 +216,7 @@ func runCanary(args []string) error {
 		return err
 	}
 	raw := "swu_" + body
-	password, err := randomText(18)
-	if err != nil {
-		return err
-	}
 	tokHash, err := argonHash(raw)
-	if err != nil {
-		return err
-	}
-	pwHash, err := argonHash(password)
 	if err != nil {
 		return err
 	}
@@ -215,11 +224,6 @@ func runCanary(args []string) error {
 	if err := d.insertKnown("tokens", map[string]any{
 		"hash": tokHash, "prefix": raw[:tokenPrefixLen], "principal": canaryPrincipal,
 		"kind": "user", "scopes": "admin", "created_at": now,
-	}); err != nil {
-		return err
-	}
-	if err := d.insertKnown("users", map[string]any{
-		"name": canaryUser, "pw_hash": pwHash, "created_at": now, "scopes": "admin",
 	}); err != nil {
 		return err
 	}
@@ -239,7 +243,7 @@ func runCanary(args []string) error {
 		return err
 	}
 	for name, v := range map[string]string{
-		"canary-token": raw, "canary-user": canaryUser, "canary-password": password,
+		"canary-token":        raw,
 		"secrets-key":         base64.StdEncoding.EncodeToString(key),
 		"canary-secrets.json": string(digestJSON),
 	} {
@@ -247,8 +251,8 @@ func runCanary(args []string) error {
 			return err
 		}
 	}
-	fmt.Printf("canary token %s, password user %s and %d secrets (plaintext, enc:v1, enc:v2) planted\n",
-		raw[:tokenPrefixLen], canaryUser, len(digests))
+	fmt.Printf("canary token %s and %d secrets (plaintext, enc:v1, enc:v2) planted\n",
+		raw[:tokenPrefixLen], len(digests))
 	return nil
 }
 
@@ -420,7 +424,6 @@ type inventory struct {
 	Nodes          int64                       `json:"nodes"`
 	Tokens         int64                       `json:"tokens"`
 	Secrets        int64                       `json:"secrets"`
-	Users          int64                       `json:"users"`
 	LastRun        *lastRun                    `json:"last_run,omitempty"`
 	TokenPrefixes  []string                    `json:"token_prefixes"`
 	SecretRows     []secretRow                 `json:"secret_rows"`
@@ -514,7 +517,7 @@ func takeInventory(d *db) (*inventory, error) {
 			inv.Teams[t] = byTeam
 		}
 	}
-	inv.Runs, inv.Nodes, inv.Tokens, inv.Secrets, inv.Users = inv.Tables["runs"], inv.Tables["nodes"], inv.Tables["tokens"], inv.Tables["secrets"], inv.Tables["users"]
+	inv.Runs, inv.Nodes, inv.Tokens, inv.Secrets = inv.Tables["runs"], inv.Tables["nodes"], inv.Tables["tokens"], inv.Tables["secrets"]
 	rows, err := d.Query(`SELECT version, applied_at FROM sparkwing_schema_version ORDER BY version`)
 	if err != nil {
 		return nil, err
@@ -669,6 +672,10 @@ func runCompare(args []string) error {
 		return fmt.Errorf("open migrated: %w", err)
 	}
 	defer closeLogged("migrated store", after)
+	return compareStores(before, after, *want)
+}
+
+func compareStores(before, after *db, want int) error {
 	bi, err := takeInventory(before)
 	if err != nil {
 		return err
@@ -678,10 +685,10 @@ func runCompare(args []string) error {
 		return err
 	}
 	var c checker
-	if ai.SchemaVersion == *want {
+	if ai.SchemaVersion == want {
 		c.pass("schema version %d -> %d", bi.SchemaVersion, ai.SchemaVersion)
 	} else {
-		c.fail("schema version is %d, want %d", ai.SchemaVersion, *want)
+		c.fail("schema version is %d, want %d", ai.SchemaVersion, want)
 	}
 	for _, v := range ai.Versions {
 		if v.Version > bi.SchemaVersion {
@@ -698,7 +705,12 @@ func runCompare(args []string) error {
 	for _, t := range tables {
 		bn := bi.Tables[t]
 		an, ok := ai.Tables[t]
+		why, retired := retiredRows[t]
 		if !ok {
+			if retired {
+				c.note("%s: dropped by the migration with %d rows (%s)", t, bn, why)
+				continue
+			}
 			if bn == 0 {
 				c.note("%s: dropped by the migration, was empty", t)
 			} else {
@@ -739,11 +751,18 @@ func runCompare(args []string) error {
 		}
 		missing := 0
 		for k := range bk {
-			if _, ok := ak[k]; !ok {
-				missing++
+			if _, ok := ak[k]; ok {
+				continue
 			}
+			if keyWhy, ok := retiredKeys[t][k]; ok {
+				c.note("%s: %s retired by the migration (%s)", t, k, keyWhy)
+				continue
+			}
+			missing++
 		}
 		switch {
+		case missing > 0 && retired:
+			c.note("%s: %d of %d rows (by %s) retired by the migration (%s)", t, missing, len(bk), strings.Join(pk, ","), why)
 		case missing > 0:
 			c.fail("%s: %d of %d rows (by %s) missing after migration", t, missing, len(bk), strings.Join(pk, ","))
 		case an != bn:
@@ -857,8 +876,8 @@ func readCred(dir, name string) (string, error) {
 	return strings.TrimSpace(string(b)), err
 }
 
-// safety: reads only, apart from the one session the password login creates,
-// so the check can run against any copy without changing what it verifies.
+// safety: reads only, so the check can run against any copy without changing
+// what it verifies.
 func runAPICheck(args []string) error {
 	fs := flag.NewFlagSet("api-check", flag.ExitOnError)
 	base := fs.String("url", "", "controller started on the migrated copy")
@@ -877,14 +896,6 @@ func runAPICheck(args []string) error {
 		return err
 	}
 	token, err := readCred(*creds, "canary-token")
-	if err != nil {
-		return err
-	}
-	user, err := readCred(*creds, "canary-user")
-	if err != nil {
-		return err
-	}
-	password, err := readCred(*creds, "canary-password")
 	if err != nil {
 		return err
 	}
@@ -1017,32 +1028,23 @@ func runAPICheck(args []string) error {
 	}
 	checkSecretValues(&c, bearer, inv.SecretRows, canaryDigests, *keyed)
 
-	var login struct {
-		SessionID string `json:"session_id"`
-	}
-	if _, err := anon.do("POST", "/api/v1/auth/login", map[string]string{"username": user, "password": password}, &login); err != nil {
-		c.fail("password login for %s (planted before the upgrade): %v", user, err)
-	} else {
-		session := client{base: *base, auth: "Session " + login.SessionID}
-		var sess map[string]any
-		if _, err := session.do("GET", "/api/v1/auth/session", nil, &sess); err != nil {
-			c.fail("session lookup after password login: %v", err)
-		} else {
-			c.pass("password login works; session principal %v team %v", sess["principal"], sess["team"])
-		}
-		if _, err := session.do("GET", "/api/v1/runs?limit=1", nil, nil); err != nil {
-			c.fail("runs list under the password session: %v", err)
-		} else {
-			c.pass("runs list under the password session")
-		}
-	}
-	var wrong struct{}
-	if code, err := anon.do("POST", "/api/v1/auth/login", map[string]string{"username": user, "password": password + "x"}, &wrong); err == nil || code != http.StatusUnauthorized {
-		c.fail("a wrong password answered %d, want 401", code)
-	} else {
-		c.pass("a wrong password is refused (401)")
-	}
+	probeRetiredLogin(&c, bearer)
 	return c.err()
+}
+
+// safety: the probe authenticates, so only the router's own 404 proves the route
+// is gone; a refusal, a throttle or an outage proves nothing and fails.
+func probeRetiredLogin(c *checker, cl client) {
+	code, err := cl.do("POST", "/api/v1/auth/login", map[string]string{}, nil)
+	if code == http.StatusNotFound {
+		c.pass("the retired password login route is gone (404)")
+		return
+	}
+	if code == 0 {
+		c.fail("the retired password login route: %v", err)
+		return
+	}
+	c.fail("the retired password login route answered %d, want 404", code)
 }
 
 // safety: values are compared by digest and never printed, because the copy

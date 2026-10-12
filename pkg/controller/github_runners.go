@@ -1,10 +1,7 @@
 package controller
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -159,7 +156,7 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 	now := time.Now().UTC()
 	principal := store.GitHubRunnerPrincipalPrefix + strconv.FormatInt(claims.RepositoryID, 10) + ":" + repo.Slug()
 	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), binding, principal,
-		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA, RunID: claims.RunID}, runnerTokenScopes, githubRunnerCredentialTTL, now)
+		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA, RunID: claims.RunID}, store.MachineTokenScopes(), githubRunnerCredentialTTL, now)
 	if errors.Is(err, store.ErrNotFound) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: errNoGitHubBinding.Error()})
 		return
@@ -235,7 +232,7 @@ func (s *Server) githubFenceMux(next http.Handler) *http.ServeMux {
 	pass := next
 	byRun := s.githubFenceRun(next)
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/nodes/claim", s.githubFenceQueueClaim(next))
+	mux.Handle("POST /api/v1/nodes/claim", pass)
 	mux.Handle("POST /api/v1/triggers/claim", pass)
 	// safety: a non-admin run create is bound to the caller's live claim
 	// on the run's trigger, which the scoped trigger claim already confines.
@@ -251,7 +248,6 @@ func (s *Server) githubFenceMux(next http.Handler) *http.ServeMux {
 	mux.Handle("/api/v1/pipelines/{name}/profile", pass)
 	mux.Handle("/api/v1/pipelines/{name}/profile/{rest...}", pass)
 	mux.Handle("GET /api/v1/secrets/{name}", pass)
-	mux.Handle("POST /api/v1/agents/{name}/heartbeat", pass)
 	mux.Handle("GET /api/v1/auth/whoami", pass)
 	mux.Handle("GET /api/v1/services", pass)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -274,36 +270,6 @@ func (s *Server) githubFenceRun(next http.Handler) http.Handler {
 			writeGitHubFenceRefusal(w, p, "run "+r.PathValue("id")+" is not work of "+scope.Repo.Slug())
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// safety: an executor offer names its run in the body and is placed by the
-// offer round rather than the scoped queue scan, so this credential may only
-// take the queue's next node.
-func (s *Server) githubFenceQueueClaim(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxJSONBody+1))
-		_ = r.Body.Close()
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		var probe struct {
-			ExecutorName string `json:"executor_name"`
-		}
-		if len(body) > 0 {
-			if err := json.Unmarshal(body, &probe); err != nil {
-				writeError(w, http.StatusBadRequest, err)
-				return
-			}
-		}
-		if probe.ExecutorName != "" {
-			p, _ := PrincipalFromContext(r.Context())
-			writeGitHubFenceRefusal(w, p, "a GitHub Actions runner credential cannot answer an executor offer")
-			return
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
 		next.ServeHTTP(w, r)
 	})
 }

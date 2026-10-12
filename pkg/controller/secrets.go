@@ -113,7 +113,7 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "write_only",
 			Principal: p.label(),
-			Message:   "a masked secret's value is returned only to the operator's bearer token or to a runner's claimed run",
+			Message:   "a masked secret's value is returned only to the operator's bearer token or to a claim that declares it",
 		})
 		return
 	}
@@ -135,18 +135,10 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// safety: a masked value leaves the controller only for the operator's admin bearer or a runner's claim-bound read;
-// a session holds no run and would only display it. An editor can still read one through a runner token it mints and a
-// run it claims, which is accepted: that editor already chooses the code a run executes, and that code reads the value.
+// safety: a masked value leaves the controller only for the operator's admin bearer or a claim's declared read;
+// a session holds no run and would only display it, and a team owner manages the row without reading it.
 func maskedValueReadable(p *Principal) bool {
-	if p.session != "" {
-		return false
-	}
-	if p.HasScope(ScopeAdmin) {
-		return true
-	}
-	// safety: readSecretForCaller resolves every other caller through its claimed run.
-	return !p.HasScope(ScopeTeamAdmin)
+	return p.session == "" && p.HasScope(ScopeAdmin)
 }
 
 // safety: responses carry credentials or tenant data that browser disk caches
@@ -172,49 +164,32 @@ func (s *Server) openStoredSecret(team store.Team, sec *store.Secret) (string, e
 	return opened, nil
 }
 
-// safety: a non-admin reader's standing is the pipeline of a run it holds live
-// work in, because a run's repository is a string its submitter typed and
-// naming one proves nothing about owning it.
-//
-// safety: a claimant's read resolves in the claimed run's team, so a runner
-// holding one team's run reads that team's rows and never the default team's.
+// safety: a node reads its run's secrets with its claim token, under the plan's
+// declaration and with an audit event, so a bearer reads by name only as the
+// operator or a team's owner, in its own team; any other bearer is refused
+// rather than resolved through a run it holds a claim in.
 func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, name string) (*store.Secret, *store.Tenant, bool) {
 	q := r.URL.Query()
-	runID := q.Get("run")
 	p, authed := PrincipalFromContext(r.Context())
-	// safety: the operator and a team's owner read by name in their own team;
-	// a run they name is looked up there too, so another team's run names no
-	// pipeline and its secrets stay unread.
-	if !authed || p.HasScope(ScopeAdmin) || p.HasScope(ScopeTeamAdmin) {
-		tn, ok := s.requestTenant(w, r)
-		if !ok {
-			return nil, nil, false
-		}
-		pipeline := q.Get("pipeline")
-		if pipeline == "" && runID != "" {
-			if run, rerr := tn.GetRun(r.Context(), runID); rerr == nil && run != nil {
-				pipeline = run.Pipeline
-			}
-		}
-		sec, err := tn.GetSecretForPipeline(name, pipeline)
-		return sec, tn, reportSecretRead(w, sec, err)
-	}
-	claimed, refused := s.claimedRunForReader(r, runID)
-	if refused != "" {
+	if authed && !p.HasScope(ScopeAdmin) && !p.HasScope(ScopeTeamAdmin) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "claim_required",
 			Principal: p.label(),
-			Message:   refused,
+			Message:   "a node reads secrets with its claim token; a read by name needs an operator or team-admin credential",
 		})
 		return nil, nil, false
 	}
-	tn, err := s.store.ForTeam(r.Context(), claimed.Team)
-	if err != nil {
-		s.logger.Error("secret read: resolve the claimed run's team", "team", claimed.Team, "err", err)
-		writeError(w, http.StatusInternalServerError, errors.New("resolve the claimed run's team"))
+	tn, ok := s.requestTenant(w, r)
+	if !ok {
 		return nil, nil, false
 	}
-	sec, err := tn.GetSecretForRun(name, claimed.Pipeline)
+	pipeline := q.Get("pipeline")
+	if runID := q.Get("run"); pipeline == "" && runID != "" {
+		if run, rerr := tn.GetRun(r.Context(), runID); rerr == nil && run != nil {
+			pipeline = run.Pipeline
+		}
+	}
+	sec, err := tn.GetSecretForPipeline(name, pipeline)
 	return sec, tn, reportSecretRead(w, sec, err)
 }
 
@@ -231,35 +206,6 @@ func reportSecretRead(w http.ResponseWriter, sec *store.Secret, err error) bool 
 		return false
 	}
 	return true
-}
-
-func (s *Server) claimedRunForReader(r *http.Request, runID string) (claimed store.ClaimedRun, refused string) {
-	claimant := claimIdentity(r)
-	now := time.Now()
-	if runID != "" {
-		claimed, err := s.store.ClaimedRunFor(r.Context(), runID, claimant, now)
-		if errors.Is(err, store.ErrNotFound) {
-			return store.ClaimedRun{}, "run " + runID + " is not claimed by this principal"
-		}
-		if err != nil {
-			s.logger.Error("secret read: resolve claimed run", "run_id", runID, "err", err)
-			return store.ClaimedRun{}, "resolve the caller's claimed pipeline"
-		}
-		return claimed, ""
-	}
-	runs, err := s.store.ClaimedRunsFor(r.Context(), claimant, now)
-	if err != nil {
-		s.logger.Error("secret read: resolve claim pipeline", "err", err)
-		return store.ClaimedRun{}, "resolve the caller's claimed pipeline"
-	}
-	switch len(runs) {
-	case 0:
-		return store.ClaimedRun{}, "this principal holds no live claim, so no pipeline names its secrets"
-	case 1:
-		return runs[0], ""
-	default:
-		return store.ClaimedRun{}, "this principal holds claims in more than one pipeline; name the run with ?run=<id>"
-	}
 }
 
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {

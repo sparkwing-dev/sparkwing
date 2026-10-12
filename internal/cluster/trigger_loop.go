@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -267,7 +268,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 			trigger.ID, trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], sha, repoURL, workDir)
 	case direct:
 		sparkwingDir, fetchErr = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
-			ControllerURL: opts.ControllerURL, RunnerToken: opts.Token, RunID: trigger.ID,
+			ControllerURL: opts.ControllerURL, ClaimToken: trigger.ClaimToken, RunID: trigger.ID,
 			RepoURL: repoURL, Branch: branch, SHA: sha, WorkDir: workDir,
 			OwnerCredentials: !opts.AllowRepos.Empty(),
 		}, logger)
@@ -336,27 +337,25 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) error {
 	// safety: the child is the team's own code, so it reaches the controller
 	// through a broker that admits only its run's routes, and the runner's
-	// token stays here. A Kubernetes or warm runner hands the token to the
-	// Jobs it creates, which cannot reach this loopback broker.
-	var broker *orchestrator.TriggerBroker
-	if opts.RunnerKind == "" || opts.RunnerKind == "inprocess" {
-		var err error
-		broker, err = orchestrator.StartTriggerBroker(opts.ControllerURL, opts.Token, trigger, logger)
-		if err != nil {
-			return fmt.Errorf("start trigger broker: %w", err)
-		}
-		defer broker.Close(ctx)
-		// safety: the child writes its logs on this machine unless the controller keeps segments, because a
-		// controller that does not keeps nothing the broker could hand an append to.
-		segments, err := client.NewWithToken(opts.ControllerURL, nil, opts.Token).KeepsLogSegments(ctx)
-		if err != nil {
-			logger.Warn("trigger loop: could not ask the controller whether it keeps log segments; logs stay local",
-				"run_id", trigger.ID, "err", err)
-		}
-		opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
-		if segments {
-			opts.LogsURL = broker.URL()
-		}
+	// token stays here. The Jobs a Kubernetes or warm child creates cannot
+	// reach this loopback broker, so they carry their nodes' claim tokens and
+	// the controller's own address.
+	opts.K8sCtrlURL = cmp.Or(opts.K8sCtrlURL, opts.ControllerURL)
+	broker, err := orchestrator.StartTriggerBroker(opts.ControllerURL, opts.Token, trigger, logger)
+	if err != nil {
+		return fmt.Errorf("start trigger broker: %w", err)
+	}
+	defer broker.Close(ctx)
+	// safety: the child writes its logs on this machine unless the controller keeps segments, because a
+	// controller that does not keeps nothing the broker could hand an append to.
+	segments, err := client.NewWithToken(opts.ControllerURL, nil, opts.Token).KeepsLogSegments(ctx)
+	if err != nil {
+		logger.Warn("trigger loop: could not ask the controller whether it keeps log segments; logs stay local",
+			"run_id", trigger.ID, "err", err)
+	}
+	opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
+	if segments {
+		opts.LogsURL = broker.URL()
 	}
 	childArgs := handleTriggerArgs(trigger.ID, opts)
 	homeScratch := filepath.Join(bincache.SparkwingHome(), "tmp")
@@ -390,10 +389,8 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	logger.Info("trigger loop: exec child",
 		"trigger_id", trigger.ID, "bin", binPath, "dir", workDir)
 	runErr := cmd.Run()
-	if broker != nil {
-		var exitErr *exec.ExitError
-		broker.SealLogs(ctx, runErr != nil && (!errors.As(runErr, &exitErr) || !exitErr.Exited()))
-	}
+	var exitErr *exec.ExitError
+	broker.SealLogs(ctx, runErr != nil && (!errors.As(runErr, &exitErr) || !exitErr.Exited()))
 	if runErr != nil {
 		return fmt.Errorf("child pipeline binary: %w", runErr)
 	}

@@ -135,8 +135,8 @@ that keep the logs service running.
   from inside the controller pod when console sign-in is down.
 - **Migrate:** list the operators' account ids in `--operator-accounts`
   (Helm: `controller.operatorAccounts`) and have each sign in with Google
-  or GitHub before the upgrade; a password session does not reach the
-  console. Move each call:
+  or GitHub before the upgrade; an operator token's session does not reach
+  the console. Move each call:
 
   | Before (admin token) | After |
   |---|---|
@@ -155,3 +155,405 @@ that keep the logs service running.
 - **Go:** pass the actor and reason to `Store.ReleaseCreditFreezes`; a
   caller of the removed `Store.DisputeTeam` reads the team from the hold it
   holds, or from `Tenant.CreditFreeze`.
+
+## Password users are removed
+
+- **Before:** the controller kept dashboard users with argon2id passwords.
+  `POST /api/v1/auth/login` and the `/login` form exchanged a username and
+  password for a session, `GET`, `POST` and `DELETE /api/v1/users` and
+  `sparkwing cluster users add|list|delete` managed the accounts, and an open
+  single-team controller offered a "Create first admin" form at
+  `/login/bootstrap`.
+- **After:** dashboard sign-in is Google or GitHub, where a multi-team license
+  and an OAuth client offer them, or an operator token: a user token holding
+  `admin`, such as the bootstrap admin token, pasted into the `/login` form.
+  The routes, the form, the CLI commands and the client's `CreateUser`,
+  `ListUsers` and `DeleteUser` are gone; each route answers `404`, or `401` to
+  a request with no credential. Schema v96 drops the users table and ends
+  every password session, so each person signs in again. A token session
+  follows its token: revoking or expiring the token ends it.
+
+Before upgrading:
+
+1. Choose how each person signs in. On a controller with a multi-team license,
+   configure Google or GitHub sign-in (`--google-client-id`,
+   `--github-client-id`, their secrets and `--oauth-redirect-uris`, as
+   [auth.md](../auth.md#google-and-github-sign-in) lists) and invite each
+   former password user to their team. Without a license the controller offers
+   no identity provider, so the operator token is the dashboard's only sign-in.
+2. Make sure the operator holds an admin token. A controller provisioned with
+   `--bootstrap-admin-token-file` (chart: `controller.bootstrapAdminToken.name`)
+   already has one. Otherwise mint one while a password admin can still act:
+
+   ```bash
+   sparkwing cluster tokens create --type user --principal operator \
+       --scope admin --profile prod
+   ```
+
+3. Remove `sparkwing cluster users` from scripts. A script that used
+   `POST /api/v1/auth/login` for a session calls the API with a bearer token
+   instead.
+
+**Edge cases:**
+
+- A password user with a narrower scope set has no direct replacement: an
+  operator token carries `admin`. Give that person an account on a licensed
+  controller with the matching role, or a bearer token of the narrower scopes
+  for the CLI.
+- An open controller (empty tokens table) serves the dashboard without
+  sign-in, as before, and its `/login` redirects to the page asked for.
+- Rollback: schema v96 declares the `token-sessions-v1` requirement, so an
+  older controller or CLI refuses to open the upgraded store and names the
+  release it needs. Roll back by restoring the SQLite copy the upgrade wrote
+  under `backups/`, or a PostgreSQL backup taken before the upgrade.
+
+## Team CLI and runner tokens become team tokens
+
+Scripts that mint team CLI or runner tokens through the API move to one route.
+Tokens already minted keep working.
+
+- **Before:** a team member minted a personal CLI token with
+  `POST /api/v1/team/cli-tokens` and an editor minted a runner token with
+  `POST /api/v1/team/runner-tokens`. Each kind had its own `GET` list and
+  `DELETE /{prefix}` revoke, and an owner released git credentials to a
+  machine with `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials`.
+- **After:** those routes are gone with no alias.
+  `POST /api/v1/team/tokens` mints a team token (`swt_`) whose `scopes` come
+  from exactly one family. Member scopes (`runs.read`, `logs.read`,
+  `triggers.read`, and for an editor or owner `runs.write`, `runs.control`,
+  `approvals.write`) make a CLI token: any member mints one, with no `name` or
+  `repos`, and it lasts 90 days. Machine scopes (`nodes.claim`,
+  `triggers.claim` and `runs.state`, including `nodes.claim` or
+  `triggers.claim`) make a runner token: an editor mints one
+  with `name` and `repos`, and it lasts 90 days past its last use. A request
+  that mixes families, names an unknown scope or sends none answers `400`.
+  `GET /api/v1/team/tokens`, `DELETE /api/v1/team/tokens/{prefix}` and
+  `PUT /api/v1/team/tokens/{prefix}/git-credentials` replace the list, revoke
+  and git-credential routes for both kinds. Schema v97 makes an agent name
+  unique across live runner and machine tokens; it needs no operator action.
+
+To upgrade:
+
+1. Leave existing tokens alone. A `swu_` CLI token or `swr_` runner token
+   minted from team settings keeps authenticating as before until it expires
+   or is revoked, and `GET /api/v1/team/tokens` lists it with the new ones.
+2. Point scripts at the new route and name the scopes. The route still needs
+   a signed-in session, as the old ones did. A runner token becomes this body:
+
+   ```json
+   {"scopes": ["nodes.claim", "triggers.claim", "runs.state"],
+    "name": "build-box", "repos": ["github.com/acme/*"]}
+   ```
+
+   A CLI token sends the scopes of the caller's role, for an editor
+   `["runs.read", "logs.read", "triggers.read", "runs.write", "runs.control", "approvals.write"]`,
+   and no `name` or `repos`.
+3. Move list, revoke and git-credential calls to `/api/v1/team/tokens` and
+   `/api/v1/team/tokens/{prefix}`. Read each row's `family` to tell a member
+   token from a machine token.
+
+**Edge cases:**
+
+- Minting a machine token whose `name` a live runner or machine token already
+  holds answers `409`, as it did for runner tokens. Revoke the old token
+  first, or pick another name.
+- The 10 live member tokens per member and 100 live machine tokens per team
+  count the old CLI and runner tokens too.
+- Operator tokens (`POST /api/v1/tokens`, `sparkwing cluster tokens`), the
+  bootstrap token and GitHub Actions exchange credentials are unchanged. The dashboard's **Team > Machines** page uses the new routes
+  and works as before.
+
+## Assisted offers, enrollment and the foreground fleet are removed
+
+The assisted-offer claim protocol had no shipped helper client, so nothing
+but tests reached it. Machines that helped a run go back to being ordinary
+runners, which claim nodes the way warm trigger runners always have.
+
+- **Before:** an operator enrolled an executor with
+  `sparkwing cluster agents enroll` (`PUT /api/v1/agents/{name}`), binding a
+  runner token to a name, priority, budget and placement. An enrolled
+  executor kept itself live with `POST /api/v1/agents/{name}/heartbeat`,
+  previewed work with `POST /api/v1/nodes/claim/prepare` and offered for a
+  node by sending `executor_name` and a reservation to
+  `POST /api/v1/nodes/claim`; its token could no longer make an ordinary
+  claim. `sparkwing fleet init` wrote a `fleet` section into `config.yaml`,
+  and `sparkwing run PIPELINE --sw-fleet` ran a foreground coordinator that
+  offered nodes to the helpers that section named.
+- **After:** those routes answer `404`, and `POST /api/v1/nodes/claim`
+  refuses the offer fields as unknown. `sparkwing fleet`, `--sw-fleet` and
+  `sparkwing cluster agents enroll` are gone. Any runner or machine token
+  with `nodes.claim` claims through `POST /api/v1/nodes/claim`, including one
+  that was enrolled. `GET /api/v1/agents` and `sparkwing cluster agents list`
+  show the runners that claimed in the last hour with the labels, slot limit
+  and headroom they advertised; `active_slots`, `base_priority`,
+  `priority_ceiling`, `budget` and the `gateway` type are gone. Schema v98
+  drops the executor and offer tables. An older controller refuses the
+  upgraded database through the requirement v96 declares.
+
+To upgrade:
+
+1. Delete the `fleet:` section from `config.yaml`. Until it is gone every
+   command that reads the file stops with
+   `unknown section "fleet"`.
+2. For each machine that was an enrolled helper, run it as an ordinary
+   runner: `sparkwing cluster runners add --profile PROFILE --name MACHINE`
+   on it mints its runner token and starts the service, or deploy the runner
+   bundle in Kubernetes. Give it the capabilities its enrollment listed with
+   `--labels`, and its `max_concurrent` with `--max-concurrent`. Revoke the
+   token the enrollment named once nothing uses it.
+3. Run pipelines without `--sw-fleet` or `--sw-allow-secret-file`; the
+   latter only fed the fleet's source snapshot, and
+   `sparkwing pipeline trigger --working-tree --allow-secret-file` keeps it. A foreground `sparkwing run` executes
+   on the machine you run it on; to spread a run across machines, trigger it
+   on a controller with runners attached.
+4. Code embedding `pkg/controller/client` drops `PrepareExecutorClaim`,
+   `OfferExecutorClaim` and `HeartbeatExecutor`, and calls `ClaimNode` where
+   it called `ClaimNodeAs`. Code embedding `pkg/store` renames
+   `Tenant.ListLegacyAgentClaims` to `ListAgentClaims`, `LegacyAgentClaim` to
+   `AgentClaim`, `FinalizeExecutorClaimRound` to `FinalizeClaimRound` and
+   `ExecutorClaimRoundResult` to `ClaimRoundResult`, and drops the executor,
+   offer and scheduling-summary methods.
+
+**Edge cases:**
+
+- The enrolled executors' priorities, budgets and trusted locations have no
+  runner equivalent. A runner advertises its own labels and capacity, and
+  the controller places work by those.
+- Runs record no `executor_offer_received`, `executor_offer_expired`,
+  `executor_offer_declined`, `executor_offer_awarded` or `executor_selected`
+  events from now on; runs already stored keep theirs.
+
+## Runner claims answer with claim tokens
+
+A runner's credential stays in the runner. The process that runs a node's
+code, and every Kubernetes Job a runner creates, authenticates with the
+node's claim token instead.
+
+- **Before:** a self-hosted runner, a Kubernetes or warm trigger runner and
+  `sparkwing cluster worker` handed their bearer to the code they ran. A
+  Kubernetes or warm runner passed it to the `handle-trigger` child, and the
+  Kubernetes node runner wrote it into every Job's `SPARKWING_AGENT_TOKEN` as
+  a literal value, readable by anyone who can `get` Jobs in the namespace.
+- **After:** the node claim routes (`POST /api/v1/nodes/claim`,
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`) and the trigger claim routes
+  (`POST /api/v1/triggers/claim`, `POST /api/v1/triggers/{id}/claim`) add a
+  `claim_token` field. A node's claim token acts as the runner that made the
+  claim, confined to the claim's run and to writes on its own node, and stops
+  when the claim ends. Beyond its run it reaches only what `Ref.Get`,
+  `TryGet` and `RunAndAwait` need in its own team: a pipeline's latest run,
+  run outputs, starting and polling its own node's child runs, and the
+  spawned-child lookup. A trigger's claim token reads the run's declared
+  secrets. A Job's `SPARKWING_AGENT_TOKEN` holds its node's claim token, and
+  every trigger child reaches the controller through a loopback broker that
+  admits only its run's routes. Schema v99 adds the `trigger_claim_tokens`
+  table; it needs no operator action.
+
+To upgrade:
+
+1. Upgrade the controller and every runner together: the runner bundle, the
+   `sparkwing-runner runner` service, GitHub Actions runners and
+   `sparkwing cluster worker`. A runner from this release gets no claim token
+   from an older controller, and its nodes fail with `401`.
+2. Leave runner tokens as they are. They keep claiming, heartbeating and
+   making the runner's own calls; only the work they claim moves to claim
+   tokens.
+
+**Edge cases:**
+
+- A runner older than this release keeps working against the upgraded
+  controller, ignoring the `claim_token` field and running nodes on its
+  bearer.
+- A node's claim token answers `403 claim_mismatch` for a route outside its
+  run and those cross-pipeline calls, or a write to another node, and
+  `403 claim_ended` once its claim has ended. A pipeline that reached
+  another run through its runner's bearer from inside a node, beyond those
+  calls, no longer can.
+
+## Node secret reads need the claim token
+
+A node reads its run's secrets only through its claim, so every read is one
+the run's plan declares and every release is recorded.
+
+- **Before:** `GET /api/v1/secrets/{name}?run=<id>` answered any bearer
+  holding `secrets.read` and a live claim on the run with any secret of the
+  run's pipeline, with no declaration check and no event. A runner token,
+  and scripts given one, read secrets this way.
+- **After:** that bearer gets `403 claim_required`. A claim token reads a
+  name its run's plan declares and leaves a `secret_released` event; an
+  undeclared name answers `403 secret_undeclared`. The operator (`admin`)
+  and a team's owner (`team.admin`) still read a row by name; a masked row
+  still answers a team owner `403 write_only`. `secrets.read` is no longer a
+  machine team token scope: `POST /api/v1/team/tokens` refuses it with
+  `400`, and `sparkwing cluster runners add`, the dashboard and the GitHub
+  Actions exchange stop granting it. Existing tokens that carry it keep
+  authenticating; the scope releases nothing.
+
+To upgrade:
+
+1. Upgrade every runner together with the controller (see
+   [Runner claims answer with claim tokens](#runner-claims-answer-with-claim-tokens)).
+   A runner older than this release reads no secret from the upgraded
+   controller, so its nodes fail at their first secret.
+2. Declare every secret a pipeline reads in its `Secrets()` struct. A node
+   that calls `sparkwing.Secret(ctx, name)` for a name the struct does not
+   declare now gets `secret_undeclared` on a runner, as it already did on a
+   controller-dispatched run.
+3. Move scripts that read secrets with a runner or machine token to an
+   operator token (`sparkwing cluster tokens create`) or a team owner's
+   credential.
+4. Drop `secrets.read` from scripts that mint machine tokens through
+   `POST /api/v1/team/tokens`, and from code that calls
+   `store.Store.ClaimedRunsFor`, which is removed; `ClaimedRunFor` stays.
+
+**Edge cases:**
+
+- A local run whose profile reads secrets from a controller does so with
+  the profile's token, which reads by name only when it is an operator or
+  team-admin credential, as before.
+- A node that runs inside its trigger's process, under the in-process node
+  runner, reads through the trigger's claim token; its release event names
+  the run and no node.
+
+## The cache's static operator token is removed
+
+- **Before:** one static secret had two names. The cache read it as the file
+  `cache-token` under `--credentials-dir` (the runner-bundle chart's
+  `cache.tokenSecret`) and accepted it on every route; the controller read it
+  as `SPARKWING_CACHE_TOKEN`, sent it on its git-cache proxy and team purges,
+  and accepted it on the storage counter routes
+  (`/internal/storage/reserve`, `commit`, `release`,
+  `/internal/downloads/charge` and `/internal/egress/totals`), where the cache
+  sent it back. An operator could also send it to the cache from a shell, and
+  the CLI, git clones, `.CacheDir` and the artifact store fell back to
+  `SPARKWING_CACHE_TOKEN` when no `SPARKWING_CACHE_GRANT` was set.
+- **After:** the cache accepts cache grants only, signed with
+  `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
+  the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
+  controller signs a five-minute operator grant with its own
+  `cache-grant-key` credential. The cache authenticates to the controller's
+  counter routes with a `service` token holding only the new operator-only
+  `storage.count` scope, read from the file `controller-token` under
+  `--credentials-dir`; a cache with `--controller` refuses to start without
+  it. A cache refuses to start without `cache-grant-key` unless
+  `--allow-unauthenticated` is set. The controller ignores
+  `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
+  drops `cache.tokenSecret`, refuses to render while it is set, and requires
+  `cache.grantKeySecret` for a cache-enabled install unless
+  `cache.allowUnauthenticated=true`. A person reaches the cache only through
+  the controller with an `admin` bearer.
+- **Operator steps:**
+  1. If the cache runs with `--controller`, mint its counter token as the
+     operator and store it in a Secret:
+
+     ```bash
+     sparkwing cluster tokens create --type service --principal cache \
+       --scope storage.count --profile prod
+     kubectl -n sparkwing create secret generic sparkwing-cache-controller-token \
+       --from-literal=token=<the sws_ token>
+     ```
+
+     Mount it as the file `controller-token` in the cache's
+     `--credentials-dir`, beside `cache-grant-key`. The charts do not start
+     the cache with `--controller`, so a chart install skips this step.
+  2. Make sure the cache and the controller hold the same grant key:
+     `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
+     it into the controller's credentials directory too), or the
+     `cache-grant-key` file in both services' `--credentials-dir` in your own
+     manifests.
+     An install that had only the cache token creates one:
+
+     ```bash
+     kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
+       --from-literal=key="$(openssl rand -hex 32)"
+     ```
+
+  3. Unset `cache.tokenSecret` (or
+     `sparkwing-runner-bundle.cache.tokenSecret` in the full chart), set
+     `cache.grantKeySecret.name`, and upgrade the cache and controller
+     together, since an older controller sends the cache a token it no longer
+     takes.
+  4. Remove `SPARKWING_CACHE_TOKEN` from the controller's environment and from
+     operators' shells, remove the `cache-token` file from the cache's
+     credentials, and delete the old Secret:
+     `kubectl -n sparkwing delete secret sparkwing-cache-token`.
+  5. Replace any `curl` against the cache with the controller's routes and an
+     `admin` bearer: `POST /api/v1/gitcache/git/register` to register a
+     mirror, and `POST /api/v1/cache/store-ceiling/measure` or `thaw` for the
+     store ceiling.
+- **Edge cases:** rotating the counter token is minting a new one, swapping
+  the Secret and revoking the old prefix with
+  `sparkwing cluster tokens revoke`. A single-team controller without a grant
+  key calls the cache with no bearer, which only a cache started with
+  `--allow-unauthenticated` serves. `sparkwing spark` and a laptop's compile
+  no longer upload binaries to a cache with an operator's token; only a run's
+  grant writes there. Every authenticated cache now has a grant key, so two
+  rules that applied only to a cache with one now apply to all: a cache with
+  `--blob-store` needs `--controller` and its `controller-token`, and the
+  daily egress alarm defaults to 200 GiB unless `--egress-daily-alarm-bytes`
+  is set (the alarm reports in `/health` and the metrics and refuses nothing).
+
+## The source-token route is removed
+
+- **Before:** `POST /api/v1/runs/{id}/source-token` minted a read-only GitHub
+  App token for a runner holding a claim on the run, and
+  `GET /api/v1/capabilities` advertised it as `github_app.source_tokens`. A
+  runner asked it when the git-credential route answered a plain 404, as a
+  controller older than v0.66 does.
+- **After:** the route answers 404 and the capabilities answer has no
+  `source_tokens` field. A runner asks only the controller's source credential
+  route and reports an error when the controller lacks it. A runner or
+  controller older than v0.66 fetches no source from a controller of this
+  release, and a runner of this release fetches no source from a controller
+  older than v0.66.
+
+To upgrade:
+
+1. Upgrade every runner and the controller to this release together. The
+   release ships after 2026-10-15, two weeks after v0.66, so a fleet that
+   kept current already runs v0.66 or later.
+2. Drop `github_app.source_tokens` from code that reads
+   `GET /api/v1/capabilities`; `github_app` still names the App's `slug`.
+
+## Source credentials go to claim tokens only
+
+- **Before:** a runner without the git cache asked
+  `POST /api/v1/runs/{id}/git-credential` with its own token while it held a
+  claim on the run. The controller minted a GitHub App token for whatever
+  github.com repository the run named, if an installation of the team covered
+  it, kept it for reuse, and otherwise released the team's stored git
+  credential for the host. The answer carried `repository` and
+  `extra_repositories`.
+- **After:** `POST /api/v1/runs/{id}/source-credential` is the only route,
+  and it answers only a claim token of the run: a node claim's or trigger
+  claim's, which every runner claim returns, or a Cloud Job's. A bearer gets
+  `403 claim_token_required` and `git-credential` answers 404. The App token
+  reads the repository the App's webhook recorded on the run's trigger, or a
+  repository the run names by hand only when one of the team's App trigger
+  subscriptions names it. The team's stored host credential is unchanged in
+  who receives it. A node's claim gets at most three credentials and none
+  once its attempt starts; every App token issued appears in
+  `GET /api/v1/team/git-credentials/releases`. The answer names the run's
+  repository and the owner's extra repositories in `repositories`, the run's
+  first.
+
+To upgrade:
+
+1. Upgrade every runner together with the controller. A runner older than
+   this release asks the removed route and fails to fetch source straight
+   from the controller; a runner using the operator's git cache is
+   unaffected.
+2. For a repository your team starts runs of by hand (`sparkwing run` against
+   the controller, the API or the dashboard) rather than through the GitHub
+   App, subscribe it under **Team > GitHub**, or store a git credential for
+   github.com under **Team > Git credentials**. Until then those runs fail at
+   the fetch with `no_source_credential` and a message naming the
+   subscription. A public repository needs the same, since a runner presents
+   no credential of its own.
+3. If an owner listed extra repositories before their GitHub IDs were
+   recorded, save the list again; such a list now answers 409 rather than
+   minting by name.
+4. Code that calls `store.Tenant.SpendSourceCredential` or
+   `ReleaseGitCredential` passes the claim token and a
+   `store.GitCredentialRelease`; code that decoded
+   `controller.GitCredentialResponse` or `controller.SourceTokenResponse`
+   decodes `store.SourceCredential`.

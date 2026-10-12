@@ -60,8 +60,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
 		"a scope that is not exactly one team is refused there",
-	"(*Store).bumpMismatchedNodes":  "shares the claim scan's runtime predicate and its refusal",
-	"executorPrepareCandidateQuery": "shares the claim scan's runtime predicate and its refusal",
+	"(*Store).bumpMismatchedNodes": "shares the claim scan's runtime predicate and its refusal",
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
@@ -107,7 +106,10 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).UnlinkIdentity":                "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
-	"(*Store).lookupSession":                 "resolves the globally unique digest of the presented session before its team is known, and renews only that session",
+	"(*Store).lookupSession":                 "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
+	"(*Store).claimantLive":                  "checks the credential that made a claim by its prefix, which is unique across teams",
+	"(*Store).DeleteSession":                 "ends the one session whose globally unique digest the caller presented, before its team is known",
+	"(*Store).mintCSRFKey":                   "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"(*Store).approveOneOnce":                "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
@@ -157,6 +159,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"gatherRunAnnotations": "reads one run's node and step annotations for the open-time rollup backfill, which names the " +
 		"run from its own scan and predates the team column",
 	"scrubSecretInputHashes": "a schema step that strips secret input hashes from every team's run invocations",
+	"dropPasswordUsers":      "a schema step that ends every team's password sessions along with the table that opened them",
 	"rehashSessions": "a schema step that drops every team's sessions minted under the retired digest, so each signs in " +
 		"again",
 	"duplicateGrantReferences": "a migration check that finds grant references repeated anywhere, because the index it " +
@@ -208,43 +211,10 @@ var reviewedUnscopedSQL = map[string]string{
 		"with their teams, and frees each in that team",
 	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
 		"team's runs",
-	"(*Store).prepareNextExecutorClaim": "reads the candidate nodes the claim scan's runtime predicate already scoped to " +
-		"the claimant's one team",
-	"(*Store).loadExecutorPreparePlans": "reads the run rows of candidates the claim scan already scoped to the claimant's " +
-		"team, and returns each run's team",
-	"(*Store).loadExecutorPrepareProfiles": "the team predicate is built at run time, one per profile identity, from the " +
-		"team each candidate's run row carries",
-	"(*Store).rejectUnattestedExecutorOffer": "reads the node an offer names after assertClaimantOwnsNode proved it in the " +
-		"claimant's team",
-	"(*Store).recordExecutorOfferAt": "records an offer on a node assertClaimantOwnsNode proved in the claimant's team; " +
-		"the offer row takes the run's team, and the conflict checks span teams because an executor's slots and " +
-		"reservations are the deployment's",
-	"claimedExecutorOffer":     "reads the node an offer names after assertClaimantOwnsNode proved it in the claimant's team",
-	"nodeExecutorOfferCountTx": "counts the offers on one node the offer path already proved in the claimant's team",
-	"(*Store).awardBestExecutorOffer": "awards a node the offer path or a team-bounded finalize route named by global id; " +
-		"every offer on it was recorded after assertClaimantOwnsNode, and the winner's other offers are keyed by its " +
-		"own credential",
-	"(*Store).expireNodeExecutorOffersTx": "expires lapsed offers on the one node an award names by global id",
-	"(*Store).expireConflictingExecutorOffersTx": "expires lapsed offers that hold the same executor slot or reservation, " +
-		"which are the deployment's and shared by every team's offers",
-	"(*Store).finalizeExecutorClaimRoundAt": "closes the offer round of a node named by global id under the team boundary " +
-		"of the finalize route or by the local fleet's own coordinator",
-	"(*Store).claimReadyNodeForExecutorTx": "claims a node the claim scan's runtime predicate selected in the claimant's " +
-		"team; the slot and budget counts span teams because an executor's capacity is the deployment's",
-	"(*Store).executorEligibility": "counts an executor's live claims in every team, because its capacity is the " +
-		"deployment's and every team's claims use it",
-	"(*Store).executorEligibilityTx": "counts an executor's live claims in every team, because its capacity is the " +
-		"deployment's and every team's claims use it",
-	"(*Store).loadExecutorUsage": "loads every executor's live claim usage across teams, because executor capacity is the " +
-		"deployment's",
-	"loadExecutorUsageTx": "loads every executor's live claim usage across teams, because executor capacity is the " +
-		"deployment's",
-	"(*Store).schedulingSummaryTx": "reads the node and run a claim, offer or award names by global id, and returns the " +
-		"run's team for the checks that follow",
-	"(*Store).ValidateExecutorClaimReservation": "matches the node's live claim against the exact claimant credential and " +
-		"reservation, and a token prefix is unique across teams",
-	"(*Store).buildNodeExecutionPolicyTx": "builds the execution policy of the node a scoped claim just awarded, from that " +
-		"node's own run and plan",
+	"(*Store).finalizeClaimRoundAt": "closes the claim round of a node named by global id under the team boundary " +
+		"of the finalize route",
+	"claimRoundSummaryTx": "reads the node and run a claim round names by global id, under the team boundary its " +
+		"caller already proved",
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
 	"(*Store).TriggerClaimFenceIsLive": "matches the trigger's live claim against the exact claimant credential and " +
@@ -269,8 +239,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"or triggers; a token prefix is unique across teams and a claim only reaches its own team's work",
 	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +
 		"answer scoped to the asker is no answer; a token prefix is unique across teams",
-	"(*Store).ClaimedRunsFor": "asks which teams' runs the exact claimant credential holds live work in, so an answer " +
-		"scoped to the asker is no answer; a token prefix is unique across teams",
 	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
 		"selected, in the order the claim path names, and read nothing back",
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
@@ -348,27 +316,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"and its node read follows",
 }
 
-// safety: this list shrinks and never grows; porting a family deletes
-// its entries and lowers unportedSQLSize in the same commit, so an entry
-// cannot be added without a reviewer seeing the number move.
-var unportedSQL = []string{
-	"(*Store).CountUsers",
-	"(*Store).CreateFirstUser",
-	"(*Store).CreateSession",
-	"(*Store).CreateUser",
-	"(*Store).DeleteSession",
-	"(*Store).DeleteUser",
-	"(*Store).ListLegacyAgentClaims",
-	"(*Store).ListUsers",
-	"(*Store).VerifyUser",
-	"(*Store).lookupUser",
-	"(*Store).mintCSRFKey",
-	"livePrefixesForPrincipal",
-}
-
-// safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 12
-
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
 // or a write of that table.
@@ -394,18 +341,14 @@ var onConflictRe = regexp.MustCompile(`(?is)ON\s+CONFLICT\s*(?:\(([^)]*)\))?`)
 // interfaces structurally, so nothing but this test refuses an unscoped
 // statement.
 //
-// There are two exemption lists. reviewedUnscopedSQL holds statements
-// that cross teams on purpose -- a reaper, a sweep, the dispatch and
-// claim path -- each with its reason. unportedSQL is the backlog of
-// families that predate the tenant key and have not moved yet; it
-// shrinks and never grows, and porting a family deletes its entries and
-// lowers unportedSQLSize in the same commit.
+// reviewedUnscopedSQL holds the statements that cross teams on purpose --
+// a reaper, a sweep, the dispatch and claim path -- each with its reason.
 //
-// Both are keyed by receiver and function name, so a method moving from
+// It is keyed by receiver and function name, so a method moving from
 // *Store to *Tenant changes its key and stops being exempt. A function
 // that already holds a team cannot be exempt at all; the next test
 // enforces that. New unscoped work belongs in reviewedUnscopedSQL with
-// its reason, never in the backlog.
+// its reason.
 func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	seen := map[string]bool{}
 	for _, stmt := range tenantSQLStatements(t) {
@@ -439,39 +382,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			t.Errorf("reviewedUnscopedSQL exempts %q, which no longer has an unscoped statement; delete the entry", key)
 		}
 	}
-	for _, key := range unportedSQL {
-		if !seen[key] {
-			t.Errorf("unportedSQL still carries %q, which no longer has an unscoped statement; "+
-				"delete the line and lower unportedSQLSize", key)
-		}
-	}
-}
-
-// The backlog shrinks and never grows, so adding to it costs an edit a
-// reviewer can see: the list and the pinned size have to move together,
-// and a name cannot be on both lists.
-func TestTenantSQLScope_BacklogOnlyShrinks(t *testing.T) {
-	if len(unportedSQL) != unportedSQLSize {
-		t.Fatalf("unportedSQL has %d entries and unportedSQLSize says %d; "+
-			"porting lowers both, and nothing raises them", len(unportedSQL), unportedSQLSize)
-	}
-	seen := map[string]bool{}
-	for _, key := range unportedSQL {
-		if seen[key] {
-			t.Errorf("unportedSQL names %q twice", key)
-		}
-		seen[key] = true
-		if _, ok := reviewedUnscopedSQL[key]; ok {
-			t.Errorf("%q is on both lists; it is either reviewed or un-ported, not both", key)
-		}
-	}
 }
 
 func exemptFromScope(key string) bool {
-	if _, ok := reviewedUnscopedSQL[key]; ok {
-		return true
-	}
-	return slices.Contains(unportedSQL, key)
+	_, ok := reviewedUnscopedSQL[key]
+	return ok
 }
 
 // An exemption is only honest while the function has no team to use. A

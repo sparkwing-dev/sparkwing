@@ -72,7 +72,7 @@ func TestMonitoringHTTPRoutesUseTheStoreDialect(t *testing.T) {
 	}
 }
 
-func TestLegacyAgentClaimsUseTheStoreDialect(t *testing.T) {
+func TestAgentClaimsUseTheStoreDialect(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
@@ -90,12 +90,16 @@ func TestLegacyAgentClaimsUseTheStoreDialect(t *testing.T) {
 		"runner:laptop:1", time.Minute, nil); err != nil {
 		t.Fatal(err)
 	}
-	claims, err := st.ListLegacyAgentClaims(ctx, now.Add(-time.Hour))
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := tenant.ListAgentClaims(ctx, now.Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" || claims[0].TokenPrefix != "swr_runner" {
-		t.Fatalf("legacy claims = %+v", claims)
+		t.Fatalf("agent claims = %+v", claims)
 	}
 }
 

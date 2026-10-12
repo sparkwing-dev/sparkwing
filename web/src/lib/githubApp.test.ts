@@ -71,14 +71,14 @@ describe("githubAppEnabled", () => {
     assert.equal(
       lib.githubAppEnabled({
         mode: "cluster",
-        github_app: { slug: "", source_tokens: true },
+        github_app: { slug: "" },
       }),
       false,
     );
     assert.equal(
       lib.githubAppEnabled({
         mode: "cluster",
-        github_app: { slug: "sparkwing", source_tokens: true },
+        github_app: { slug: "sparkwing" },
       }),
       true,
     );

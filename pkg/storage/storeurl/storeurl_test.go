@@ -143,8 +143,8 @@ func TestOpen_BadScheme(t *testing.T) {
 	_ = errors.New
 }
 
-func TestOpenArtifactStore_HTTPSendsTheCacheToken(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
+func TestOpenArtifactStore_HTTPSendsTheCacheGrant(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_GRANT", "s3cret")
 	seen := map[string]string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen[r.Method] = r.Header.Get("Authorization")

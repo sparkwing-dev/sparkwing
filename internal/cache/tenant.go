@@ -2,7 +2,6 @@ package cache
 
 import (
 	"context"
-	"crypto/subtle"
 	"log"
 	"net/http"
 	"net/url"
@@ -40,23 +39,21 @@ func callerFrom(r *http.Request) cacheCaller {
 
 var grantKey string
 
-// safety: the repository listing and admin routes stay behind requireToken, because they reach
-// every team's trees and the operator's mirrors.
+// safety: the admin routes stay behind requireOperator, because they reach every team's trees.
 func requireCaller(next http.HandlerFunc) http.HandlerFunc {
-	token, key := apiToken, grantKey
+	key := grantKey
 	return func(w http.ResponseWriter, r *http.Request) {
-		if token == "" {
+		if key == "" {
 			next(w, r)
 			return
 		}
-		got := bearerToken(r)
-		if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
-			next(w, r)
-			return
-		}
-		g, err := authwire.VerifyCacheGrant(key, got, time.Now())
+		g, err := authwire.VerifyCacheGrant(key, bearerToken(r), time.Now())
 		if err != nil {
-			http.Error(w, "unauthorized -- set Authorization: Bearer <token or cache grant> header", http.StatusUnauthorized)
+			http.Error(w, "unauthorized -- set Authorization: Bearer <cache grant> header", http.StatusUnauthorized)
+			return
+		}
+		if g.Operator {
+			next(w, r)
 			return
 		}
 		ctx := context.WithValue(r.Context(), cacheCallerKey{}, cacheCaller{team: g.Team, run: g.Run, scopes: g.ScopePrefixes()})
@@ -128,12 +125,12 @@ func withBlobDirs(next func(http.ResponseWriter, *http.Request, blobDirs)) http.
 	}
 }
 
-// safety: every mirror is the operator's, since only its token or its team's grant registers one, so a mirror
+// safety: every mirror is the operator's, since only its grants register one, so a mirror
 // registered before grants existed counts too; the store reserves the operator's slug for it alone.
 func (c cacheCaller) operatorGrant() bool { return c.team == authwire.OperatorTeam }
 
-// safety: the operator's own runs register on first fetch as its token did; any other team would clone with the
-// cache's credentials.
+// safety: the operator's own runs register on first fetch as the operator grant does;
+// any other team would clone with the cache's credentials.
 func (c cacheCaller) mayRegisterMirror() bool { return c.operator() }
 
 // safety: anonymous git reaches only https, and the name a runner derives is the

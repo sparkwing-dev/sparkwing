@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -33,7 +34,7 @@ func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	srv := httptest.NewServer(controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").Handler())
 	defer srv.Close()
 	for name, request := range map[string]*http.Request{
 		"register": mustRequest(t, http.MethodPost,
@@ -66,14 +67,75 @@ func mustRequest(t *testing.T, method, url string, body io.Reader) *http.Request
 	return req
 }
 
+func operatorGrantHeader(header string) bool {
+	raw, ok := strings.CutPrefix(header, "Bearer ")
+	if !ok {
+		return false
+	}
+	g, err := authwire.VerifyCacheGrant("grant-key", raw, time.Now())
+	return err == nil && g.Operator
+}
+
+// An operator reaches the cache's store-ceiling admin routes through the
+// controller with its admin bearer; the controller forwards them under an
+// operator grant, and no other credential reaches them.
+func TestCacheStoreCeilingRoutesForwardUnderTheOperatorGrant(t *testing.T) {
+	var seen []string
+	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !operatorGrantHeader(r.Header.Get("Authorization")) {
+			t.Errorf("cache Authorization = %q, want an operator grant", r.Header.Get("Authorization"))
+		}
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer cache.Close()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Now().UTC()
+	admin, _, err := st.CreateToken("admin", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, _, err := st.CreateToken("writer", store.TokenKindUser, []string{controller.ScopeRunsWrite}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").EnableAuthFromStore().Handler())
+	defer srv.Close()
+	post := func(path, bearer string) int {
+		req := mustRequest(t, http.MethodPost, srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, action := range []string{"measure", "thaw"} {
+		if code := post("/api/v1/cache/store-ceiling/"+action, writer); code != http.StatusForbidden {
+			t.Errorf("%s without admin = %d, want 403", action, code)
+		}
+		if code := post("/api/v1/cache/store-ceiling/"+action, admin); code != http.StatusAccepted {
+			t.Errorf("%s as admin = %d, want the cache's 202", action, code)
+		}
+	}
+	if want := []string{"POST /admin/store-ceiling/measure", "POST /admin/store-ceiling/thaw"}; strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Fatalf("cache saw %v, want %v", seen, want)
+	}
+}
+
 func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
-			t.Fatalf("cache Authorization = %q, want the cache token and never the caller's", got)
+		if got := r.Header.Get("Authorization"); !operatorGrantHeader(got) {
+			t.Fatalf("cache Authorization = %q, want an operator grant and never the caller's", got)
 		}
 		cacheRequests = append(cacheRequests, r.Method+" "+r.URL.RequestURI())
 		switch r.URL.Path {
@@ -109,7 +171,7 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctrl := controller.New(st, nil).
-		WithCacheCredentials(cache.URL, "cache-secret").
+		WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").
 		WithAuthenticator(controller.NewAuthenticator(st, time.Minute))
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
@@ -170,8 +232,8 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
-			t.Fatalf("cache Authorization = %q, want cache token", got)
+		if got := r.Header.Get("Authorization"); !operatorGrantHeader(got) {
+			t.Fatalf("cache Authorization = %q, want an operator grant", got)
 		}
 		cacheRequests = append(cacheRequests, r.Method+" "+r.URL.RequestURI())
 		switch r.URL.Path {
@@ -241,7 +303,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctrl := controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").EnableAuthFromStore()
+	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
 	for range 2 {
@@ -333,7 +395,7 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").Handler())
+	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").Handler())
 	server.Config.WriteTimeout = 20 * time.Millisecond
 	server.Start()
 	defer server.Close()
@@ -399,7 +461,7 @@ func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctrl := controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").EnableAuthFromStore()
+	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).WithCacheGrantKey("grant-key").EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
 	claimed, err := client.NewWithToken(srv.URL, nil, runner).

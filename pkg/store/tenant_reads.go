@@ -32,15 +32,14 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	return out, rows.Err()
 }
 
-// ListLegacyAgentClaims returns the live legacy claims on t's runs since the
-// given instant.
-func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error) {
+// ListAgentClaims returns the live node claims on t's runs since the given
+// instant.
+func (t *Tenant) ListAgentClaims(ctx context.Context, since time.Time) (_ []AgentClaim, err error) {
 	rows, err := t.s.query(ctx, `
 SELECT run_id, status, claimed_by, claim_token_prefix,
        COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
   FROM nodes
  WHERE claimed_by IS NOT NULL AND claimed_by != ''
-   AND claim_executor = ''
    AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
    AND run_id IN (SELECT id FROM runs WHERE team = ?)
 `, since.UnixNano(), string(t.team))
@@ -48,9 +47,9 @@ SELECT run_id, status, claimed_by, claim_token_prefix,
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	var out []LegacyAgentClaim
+	var out []AgentClaim
 	for rows.Next() {
-		var claim LegacyAgentClaim
+		var claim AgentClaim
 		var started, expires int64
 		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &claim.TokenPrefix, &started, &expires); err != nil {
 			return nil, err

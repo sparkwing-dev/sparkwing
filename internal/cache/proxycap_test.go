@@ -74,7 +74,7 @@ func TestTheRegistryProxyIsOpenPastTheEgressAlarm(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 150})
 	seedCacheEntry(t, "job1", 100)
 	for range 2 {
-		if got := get(t, srv, cacheDownloadPath, "s3cret"); got.status != http.StatusOK {
+		if got := get(t, srv, cacheDownloadPath, operatorGrant(t, "s3cret")); got.status != http.StatusOK {
 			t.Fatalf("download = %d", got.status)
 		}
 	}

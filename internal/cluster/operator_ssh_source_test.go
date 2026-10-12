@@ -37,7 +37,6 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(authwire.CacheTokenEnv, "")
 	t.Setenv(authwire.CacheGrantEnv, "")
 
 	origins := t.TempDir()
@@ -61,7 +60,7 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ctrlSrv := httptest.NewServer(controller.New(st, nil).WithCacheCredentials(cacheSrv.URL, operatorCacheToken).WithCacheGrantKey(cacheGrantKey).Handler())
+	ctrlSrv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cacheSrv.URL).WithCacheGrantKey(cacheGrantKey).Handler())
 	t.Cleanup(ctrlSrv.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -207,7 +206,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	for _, name := range []string{
 		wingwire.APISocketEnv, "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL",
 		"SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_CACHE_URL",
-		authwire.CacheTokenEnv, authwire.CacheGrantEnv,
+		authwire.CacheGrantEnv,
 	} {
 		t.Setenv(name, "")
 	}
@@ -226,7 +225,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctrlSrv := httptest.NewServer(controller.New(st, discardLogger()).
-		WithCacheCredentials(cacheSrv.URL, operatorCacheToken).WithCacheGrantKey(cacheGrantKey).EnableAuthFromStore().Handler())
+		WithCacheURL(cacheSrv.URL).WithCacheGrantKey(cacheGrantKey).EnableAuthFromStore().Handler())
 	t.Cleanup(ctrlSrv.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

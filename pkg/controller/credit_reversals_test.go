@@ -157,10 +157,10 @@ func TestPaidGrantLookupAnswersThePayingTeam(t *testing.T) {
 func TestCreditsGrantScopeIsTheOperatorsToMint(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth, map[string]any{
 		"name": "sneaky", "scopes": []string{controller.ScopeCreditsGrant},
 	}, nil); code < 400 {
-		t.Errorf("a team runner token carrying credits.grant = %d, want a refusal", code)
+		t.Errorf("a team token carrying credits.grant = %d, want a refusal", code)
 	}
 	if code := f.call("POST", "/api/v1/tokens", owner.auth, map[string]any{
 		"principal": "x", "kind": "service", "scopes": []string{controller.ScopeCreditsGrant},

@@ -20,7 +20,6 @@ Each top-level key is a section with one owner:
 | `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths`; `auto_register` (default `true`) and `include_worktrees` (default `false`) govern automatic registration | `sparkwing run` (auto-registration), `sparkwing repos add` |
 | `admission` | the admission policy (`mode`, `custom`, `jev`) and the machine `budget` | you |
 | `agent` | what `sparkwing-runner agent` runs: controller, token, capacity | `sparkwing cluster runners add` |
-| `fleet` | the foreground fleet coordinator's listener and trusted `executors` | `sparkwing fleet init` |
 | `cache` | the pipeline binary cache ceilings `max_bytes` (default `2GiB`) and `max_entries` (default `20`); `0` disables one | you |
 | `machine` | `box_id`, the host identity a box-scoped concurrency group keys on (default: the hostname) | you |
 | `logs` | `drop_policy`: `warn` keeps a run green when log lines are lost; anything else fails the node | you |
@@ -28,7 +27,9 @@ Each top-level key is a section with one owner:
 | `run` | `submit_env_allow`, the extra names and `NAME_*` prefixes a detached run's environment snapshot carries; `dispatch_wait`, how long a run waits for a dispatch before it is classed as wedged (a duration, or `off` to wait forever; default: the plan's own bound) | you |
 
 Any other top-level key, and any key a section does not define, fails the read
-with the file, line and key named.
+with the file, line and key named. That includes a `fleet` section left from
+the removed foreground fleet coordinator, which fails with
+`unknown section "fleet"`; delete the section.
 
 A profile in this file is used only by a command that names it with
 `--profile`; no setting here or in the environment makes one the default.
@@ -57,9 +58,6 @@ agent:
   holder_prefix: desk
   contribution: 50%,50%
   local_admission: true
-fleet:
-  listen: 127.0.0.1:4346
-  public_url: https://desk.tailnet.example
 cache:
   max_bytes: 4GiB
 machine:
@@ -73,7 +71,7 @@ The sections are documented where their behavior is:
 [Local admission policy](admission.md) and
 [Local execution](local-execution.md#where-to-set-it) for admission and the
 budget, [Self-hosting](self-hosting.md) for the agent,
-[Local execution](local-execution.md) for the fleet and `run`,
+[Local execution](local-execution.md) for `run`,
 [Caching](caching.md) for `cache`, [SDK](sdk.md) for `machine`,
 [Observability](observability.md) for `logs`, and
 [`sparkwing debug`](cli-debug.md) for `debug`.
@@ -137,9 +135,7 @@ secrets from code running as your account: a pipeline step can read the key
 file, and the daemon answers every process of your account.
 
 A run the daemon hosts reads its secrets through the daemon. A run with no
-daemon reads `state.db` directly and opens values with the same key. A fleet
-worker reads its own machine's store, so a worker that keeps none has no local
-secrets.
+daemon reads `state.db` directly and opens values with the same key.
 
 A local run reads every local secret, including an unscoped one that is not
 shared, because the daemon answers this machine's own account as its
@@ -183,7 +179,6 @@ automatic copy will be removed in a later release; the migration guide
 | `admission.yaml` | `admission` (same keys) |
 | `budget` | `admission.budget` (the file's one setting line) |
 | `agent.yaml` | `agent` |
-| `fleet.yaml` | `fleet` |
 | `profiles.yaml` | `profiles` (the file's `profiles:` map) |
 | `repos.yaml` | `repos` (same keys) |
 

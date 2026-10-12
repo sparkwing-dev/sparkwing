@@ -21,6 +21,9 @@ func TestVerifyCacheGrantRefusesSignedButInvalidGrants(t *testing.T) {
 	if _, err := VerifyCacheGrant("k", signCacheGrant("k", CacheGrantPrefix, valid), now); err != nil {
 		t.Fatalf("control grant refused: %v", err)
 	}
+	if _, err := VerifyCacheGrant("k", signCacheGrant("k", CacheGrantPrefix, `{"o":true,"t":"","r":"","e":1800003600}`), now); err != nil {
+		t.Fatalf("control operator grant refused: %v", err)
+	}
 	cases := map[string]string{
 		"empty key":     signCacheGrant("", CacheGrantPrefix, valid),
 		"no prefix":     signCacheGrant("k", "", valid),
@@ -32,6 +35,9 @@ func TestVerifyCacheGrantRefusesSignedButInvalidGrants(t *testing.T) {
 			`{"t":"team-a","r":"run-1","e":1800003600,"s":{"p":"github.com/acme/app","f":["refs/heads/main"]}}`),
 		"no scope": signCacheGrant("k", CacheGrantPrefix,
 			`{"t":"team-a","r":"run-1","e":1800003600,"c":{"k":"claim","g":1,"p":"agent:a","t":"swc_abc"}}`),
+		"operator naming a team": signCacheGrant("k", CacheGrantPrefix, `{"o":true,"t":"team-a","r":"","e":1800003600}`),
+		"operator naming a claim": signCacheGrant("k", CacheGrantPrefix,
+			`{"o":true,"t":"","r":"","e":1800003600,"c":{"k":"claim","g":1,"p":"agent:a","t":"swc_abc"}}`),
 	}
 	for name, raw := range cases {
 		key := "k"

@@ -218,7 +218,7 @@ func TestAuditNamesReadersTargetsAndDeniedSubjects(t *testing.T) {
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_KEY", owner.auth, nil, nil); code != http.StatusOK {
 		t.Fatalf("read secret = %d", code)
 	}
-	f.call("GET", "/api/v1/team/cli-tokens", owner.auth, nil, nil)
+	f.call("GET", "/api/v1/team/tokens", owner.auth, nil, nil)
 	if code := f.call("PATCH", "/api/v1/team/members/"+member.id, owner.auth, map[string]string{"role": "editor"}, nil); code != http.StatusNoContent {
 		t.Fatalf("set role = %d", code)
 	}
@@ -227,7 +227,7 @@ func TestAuditNamesReadersTargetsAndDeniedSubjects(t *testing.T) {
 		t.Fatalf("withdraw invitation = %d", code)
 	}
 	runner := mintRunner(f, owner.auth, "pool")
-	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+runner.Prefix, owner.auth, nil, nil); code != http.StatusNoContent {
+	if code := f.call("DELETE", "/api/v1/team/tokens/"+runner.Prefix, owner.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("revoke runner token = %d", code)
 	}
 	forged := runner.Token[:len(runner.Token)-4] + "zzzz"
@@ -244,11 +244,11 @@ func TestAuditNamesReadersTargetsAndDeniedSubjects(t *testing.T) {
 	}{
 		{"GET", "/api/v1/secrets/{name}", map[string]any{"principal_id": owner.id, "team": owner.team, "secret_name": "DEPLOY_KEY"}},
 		{"POST", "/api/v1/secrets", map[string]any{"principal_id": owner.id, "secret_name": "DEPLOY_KEY"}},
-		{"GET", "/api/v1/team/cli-tokens", map[string]any{"principal_id": owner.id, "team": owner.team}},
+		{"GET", "/api/v1/team/tokens", map[string]any{"principal_id": owner.id, "team": owner.team}},
 		{"PATCH", "/api/v1/team/members/{user_id}", map[string]any{"principal_id": owner.id, "member_id": member.id, "role": "editor"}},
 		{"POST", "/api/v1/team/invitations", map[string]any{"invitation_id": invitation, "role": "reader"}},
 		{"DELETE", "/api/v1/team/invitations/{id}", map[string]any{"invitation_id": invitation}},
-		{"DELETE", "/api/v1/team/runner-tokens/{prefix}", map[string]any{"token_prefix": runner.Prefix}},
+		{"DELETE", "/api/v1/team/tokens/{prefix}", map[string]any{"token_prefix": runner.Prefix}},
 		{"GET", "/api/v1/runs", map[string]any{"status": float64(http.StatusUnauthorized), "attempted_prefix": runner.Prefix}},
 		{"GET", "/api/v1/team/invitations", map[string]any{"status": float64(http.StatusForbidden), "principal_id": member.id}},
 	} {

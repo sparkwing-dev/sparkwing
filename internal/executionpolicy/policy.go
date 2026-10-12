@@ -22,8 +22,8 @@ const (
 	assistedExecutionPolicyRequirement = "assisted-execution-policy-v1"
 	NodeExecutionPolicyVersion         = 1
 	AssistedBodyProtocolVersion        = 1
-	fleetSupervisorRuntimeRequirement  = FleetSupervisorRequirement
-	fleetBodyRuntimeRequirement        = FleetBodyRequirement
+	fleetSupervisorRuntimeRequirement  = "fleet-supervisor-v1"
+	fleetBodyRuntimeRequirement        = "fleet-body-v1"
 	executorLocationCoordinator        = "coordinator"
 	executorLocationLocal              = "local"
 	executorLocationCloud              = "cloud"

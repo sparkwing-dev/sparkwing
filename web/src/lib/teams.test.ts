@@ -264,13 +264,13 @@ describe("team administration calls", () => {
   });
 
   it("escapes path segments so an id cannot reach another route", async () => {
-    await teams.revokeRunnerToken("swr_a/../../tokens");
+    await teams.revokeTeamToken("swr_a/../../tokens");
     await teams.removeMember("u 1");
     await teams.acceptInvitation("inv?x=1");
     assert.deepEqual(
       calls.map((c) => `${c.method} ${c.url}`),
       [
-        "DELETE /api/v1/team/runner-tokens/swr_a%2F..%2F..%2Ftokens",
+        "DELETE /api/v1/team/tokens/swr_a%2F..%2F..%2Ftokens",
         "DELETE /api/v1/team/members/u%201",
         "POST /api/v1/invitations/inv%3Fx%3D1/accept",
       ],
@@ -304,20 +304,29 @@ describe("team administration calls", () => {
   });
 });
 
-describe("mintRunnerToken", () => {
-  it("sends the name and repo patterns", async () => {
+describe("mintMachineToken", () => {
+  it("sends the machine scopes, name and repo patterns", async () => {
     respond = () =>
       new Response(
-        JSON.stringify({ token: "swr_x", prefix: "swr_x", command: "" }),
+        JSON.stringify({
+          token: "swr_x",
+          prefix: "swr_x",
+          family: "machine",
+          name: "build-box",
+          scopes: [],
+          expires_at: 1,
+          command: "",
+        }),
         { status: 201 },
       );
-    await teams.mintRunnerToken("build-box", [
+    await teams.mintMachineToken("build-box", [
       "github.com/acme/*",
       "github.com/acme/app",
     ]);
-    assert.equal(calls[0].url, "/api/v1/team/runner-tokens");
+    assert.equal(calls[0].url, "/api/v1/team/tokens");
     assert.equal(calls[0].method, "POST");
     assert.deepEqual(JSON.parse(calls[0].body), {
+      scopes: ["nodes.claim", "triggers.claim", "runs.state"],
       name: "build-box",
       repos: ["github.com/acme/*", "github.com/acme/app"],
     });
@@ -329,12 +338,45 @@ describe("mintRunnerToken", () => {
         status: 400,
       });
     await assert.rejects(
-      teams.mintRunnerToken("build-box", ["not a pattern"]),
+      teams.mintMachineToken("build-box", ["not a pattern"]),
       (err: Error) => {
         assert.match(err.message, /bad repo pattern/);
         return true;
       },
     );
+  });
+});
+
+describe("listTeamTokens", () => {
+  it("reads member and machine rows from one route", async () => {
+    const rows = [
+      {
+        prefix: "swu_a",
+        family: "member",
+        name: "",
+        scopes: ["runs.read"],
+        created_by: "acct-1",
+        created_at: 1,
+        expires_at: 2,
+        last_used_at: null,
+        git_credentials: false,
+      },
+      {
+        prefix: "swr_b",
+        family: "machine",
+        name: "build-box",
+        scopes: ["nodes.claim"],
+        created_by: "acct-1",
+        created_at: 1,
+        expires_at: null,
+        last_used_at: 3,
+        git_credentials: true,
+      },
+    ];
+    respond = () => new Response(JSON.stringify(rows), { status: 200 });
+    assert.deepEqual(await teams.listTeamTokens(), rows);
+    assert.equal(calls[0].method, "GET");
+    assert.equal(calls[0].url, "/api/v1/team/tokens");
   });
 });
 
@@ -372,7 +414,7 @@ describe("parseRepoPatterns", () => {
 });
 
 describe("runnerConnectCommand", () => {
-  const minted = { token: "swr_secret", prefix: "swr_sec", command: "" };
+  const minted = { token: "swr_secret", command: "" };
 
   it("prefers the command the controller composed", () => {
     assert.equal(
@@ -413,11 +455,12 @@ describe("unixSecondsISO", () => {
   });
 });
 
-describe("CLI tokens", () => {
-  it("mints with the session's CSRF token and returns the setup commands", async () => {
+describe("member tokens", () => {
+  it("mints the given scopes with the session's CSRF token and returns the setup commands", async () => {
     const minted = {
       token: "swu_x",
       prefix: "swu_x",
+      family: "member",
       scopes: ["runs.read", "runs.write"],
       expires_at: 1,
       profile: "acme",
@@ -426,16 +469,30 @@ describe("CLI tokens", () => {
       run: "sparkwing pipeline trigger <pipeline> --profile acme",
     };
     respond = () => new Response(JSON.stringify(minted), { status: 201 });
-    assert.deepEqual(await teams.mintCLIToken(), minted);
-    assert.equal(calls[0].url, "/api/v1/team/cli-tokens");
+    assert.deepEqual(
+      await teams.mintMemberToken(["runs.read", "runs.write"]),
+      minted,
+    );
+    assert.equal(calls[0].url, "/api/v1/team/tokens");
     assert.equal(calls[0].method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      scopes: ["runs.read", "runs.write"],
+    });
     assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
   });
 
+  it("gives each role its full member scope set without team.admin", () => {
+    const read = ["runs.read", "logs.read", "triggers.read"];
+    const write = [...read, "runs.write", "runs.control", "approvals.write"];
+    assert.deepEqual(teams.memberScopesForRole("reader"), read);
+    assert.deepEqual(teams.memberScopesForRole("editor"), write);
+    assert.deepEqual(teams.memberScopesForRole("owner"), write);
+  });
+
   it("revokes by escaped prefix", async () => {
-    await teams.revokeCLIToken("swu_a/../tokens");
+    await teams.revokeTeamToken("swu_a/../tokens");
     assert.equal(calls[0].method, "DELETE");
-    assert.equal(calls[0].url, "/api/v1/team/cli-tokens/swu_a%2F..%2Ftokens");
+    assert.equal(calls[0].url, "/api/v1/team/tokens/swu_a%2F..%2Ftokens");
   });
 
   it("tells a read-only token from one that starts runs", () => {

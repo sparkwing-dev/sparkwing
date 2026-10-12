@@ -25,22 +25,28 @@ func TestRunRefusesAMalformedFlagValue(t *testing.T) {
 	}
 }
 
-func TestRunReadsTheTokenAndGrantKeyFromTheCredentialsDir(t *testing.T) {
+func TestRunReadsTheGrantKeyAndControllerTokenFromTheCredentialsDir(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{authwire.CacheTokenCredential, authwire.CacheGrantKeyCredential} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("same-secret\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, authwire.CacheGrantKeyCredential), []byte("grant-key\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	err := run([]string{"--credentials-dir", dir, "--data-dir", t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "operator token") {
-		t.Fatalf("run = %v, want the refusal of a grant key equal to the token, which only reading both files reaches", err)
+	args := []string{"--credentials-dir", dir, "--data-dir", t.TempDir(), "--controller", "http://controller.invalid", "--max-store-bytes", "-1"}
+	err := run(args)
+	if err == nil || !strings.Contains(err.Error(), authwire.CacheControllerTokenCredential) {
+		t.Fatalf("run = %v, want a refusal naming %s, which only reading the grant key reaches", err, authwire.CacheControllerTokenCredential)
+	}
+	if err := os.WriteFile(filepath.Join(dir, authwire.CacheControllerTokenCredential), []byte("sws_token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = run(args)
+	if err == nil || !strings.Contains(err.Error(), "must not be negative") {
+		t.Fatalf("run = %v, want the negative ceiling refusal, which only reading the controller token reaches", err)
 	}
 }
 
-func TestRunWithoutATokenRefusesToServeOpen(t *testing.T) {
+func TestRunWithoutAGrantKeyRefusesToServeOpen(t *testing.T) {
 	err := run([]string{"--credentials-dir", t.TempDir(), "--data-dir", t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), authwire.CacheTokenCredential) {
-		t.Fatalf("run = %v, want a refusal naming the %s credential", err, authwire.CacheTokenCredential)
+	if err == nil || !strings.Contains(err.Error(), authwire.CacheGrantKeyCredential) {
+		t.Fatalf("run = %v, want a refusal naming the %s credential", err, authwire.CacheGrantKeyCredential)
 	}
 }

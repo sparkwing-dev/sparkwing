@@ -300,9 +300,6 @@ func TestClaimedRunFor_NamesThePipelineOfTheRunTheCallerIsExecuting(t *testing.T
 	if _, err := st.ClaimedRunFor(ctx, "run-web", runner, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("ClaimedRunFor with no claim err = %v, want ErrNotFound", err)
 	}
-	if pipelines, err := st.ClaimedRunsFor(ctx, runner, now); err != nil || len(pipelines) != 0 {
-		t.Fatalf("ClaimedRunsFor with no claim = (%v, %v), want none", pipelines, err)
-	}
 
 	for range 2 {
 		if _, err := st.ClaimNextReadyNode(ctx, runner, "holder-a", time.Minute, nil); err != nil {
@@ -321,13 +318,6 @@ func TestClaimedRunFor_NamesThePipelineOfTheRunTheCallerIsExecuting(t *testing.T
 		if pipeline.Pipeline != tc.want || pipeline.Team != store.DefaultTeam {
 			t.Errorf("ClaimedRunFor(%s) = %+v, want %q in the default team", tc.run, pipeline, tc.want)
 		}
-	}
-	pipelines, err := st.ClaimedRunsFor(ctx, runner, now)
-	if err != nil {
-		t.Fatalf("ClaimedRunsFor: %v", err)
-	}
-	if len(pipelines) != 2 {
-		t.Errorf("ClaimedRunsFor = %v, want both pipelines so the caller must name its run", pipelines)
 	}
 	if _, err := st.ClaimedRunFor(ctx, "run-web", stranger, now); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a principal holding nothing resolved run-web (err %v)", err)
@@ -398,13 +388,6 @@ func TestClaimedRunForNamesTheRunsTeam(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("ClaimedRunFor = %+v, want %+v", got, want)
-	}
-	all, err := st.ClaimedRunsFor(ctx, runner, time.Now())
-	if err != nil {
-		t.Fatalf("ClaimedRunsFor: %v", err)
-	}
-	if len(all) != 1 || all[0] != want {
-		t.Errorf("ClaimedRunsFor = %+v, want [%+v]", all, want)
 	}
 }
 

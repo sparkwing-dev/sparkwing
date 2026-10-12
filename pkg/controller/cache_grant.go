@@ -51,11 +51,6 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			writeError(w, http.StatusNotFound, errors.New("this controller holds no cache grant key, so it mints no cache grants"))
 			return
 		}
-		if key == s.cacheToken {
-			writeError(w, http.StatusServiceUnavailable, errors.New(
-				"the cache grant key is the cache's operator token; give "+authwire.CacheGrantKeyCredential+" a secret of its own"))
-			return
-		}
 		team, err := teamOf(r)
 		if err != nil || team == "" {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{

@@ -239,12 +239,15 @@ func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
 
 func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
 	f := newTenancyFixture(t, openSQLiteStore(t))
-	for _, req := range []struct{ method, path string }{
-		{"POST", "/api/v1/team/cli-tokens"},
-		{"GET", "/api/v1/runs/" + f.runA},
-		{"GET", "/api/v1/runs/" + f.runA + "/nodes"},
+	for _, req := range []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/api/v1/team/tokens", map[string]any{"scopes": []string{"runs.read"}}},
+		{"GET", "/api/v1/runs/" + f.runA, nil},
+		{"GET", "/api/v1/runs/" + f.runA + "/nodes", nil},
 	} {
-		code, _, h := secretsRequest(t, f, req.method, req.path, f.ownerA, nil)
+		code, _, h := secretsRequest(t, f, req.method, req.path, f.ownerA, req.body)
 		if code >= 300 || h.Get("Cache-Control") != "no-store" {
 			t.Errorf("%s %s = %d with Cache-Control %q", req.method, req.path, code, h.Get("Cache-Control"))
 		}

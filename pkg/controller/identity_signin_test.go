@@ -300,28 +300,26 @@ func TestAnUnknownSessionIsRefused(t *testing.T) {
 	}
 }
 
-// A password session keeps working through the Session header, in the
-// default team, with the scopes its user was created with.
-func TestPasswordSessionAuthenticatesInTheDefaultTeam(t *testing.T) {
+// A token session acts with its token's scopes in its token's team, through the
+// Session header the same as through the cookie.
+func TestTokenSessionAuthenticatesWithItsTokensScopes(t *testing.T) {
 	f := newIdentityFixture(t)
-	if _, err := f.store.CreateUser("ops", "correct-horse", []string{controller.ScopeRunsRead}, time.Now().UTC()); err != nil {
+	_, tok, err := f.store.CreateToken("ops", store.TokenKindUser, []string{controller.ScopeRunsRead}, 0, time.Now().UTC())
+	if err != nil {
 		t.Fatal(err)
 	}
-	var login struct {
-		SessionID string `json:"session_id"`
+	session, _, err := f.store.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, time.Hour, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code := f.call("POST", "/api/v1/auth/login", "",
-		map[string]string{"username": "ops", "password": "correct-horse"}, &login); code != http.StatusOK {
-		t.Fatalf("login = %d", code)
-	}
-	w := f.whoami(sessionAuth(login.SessionID))
+	w := f.whoami(sessionAuth(session))
 	if w.Team != string(store.DefaultTeam) || !slices.Equal(w.Scopes, []string{controller.ScopeRunsRead}) {
 		t.Fatalf("whoami = %+v", w)
 	}
-	if code := f.call("GET", "/api/v1/runs", sessionAuth(login.SessionID), nil, nil); code != http.StatusOK {
+	if code := f.call("GET", "/api/v1/runs", sessionAuth(session), nil, nil); code != http.StatusOK {
 		t.Fatalf("GET /runs with a runs.read session = %d", code)
 	}
-	if code := f.call("GET", "/api/v1/tokens", sessionAuth(login.SessionID), nil, nil); code != http.StatusForbidden {
+	if code := f.call("GET", "/api/v1/tokens", sessionAuth(session), nil, nil); code != http.StatusForbidden {
 		t.Fatalf("GET /tokens with a runs.read session = %d, want 403", code)
 	}
 }

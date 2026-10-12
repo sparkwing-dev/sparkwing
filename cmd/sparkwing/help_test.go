@@ -96,10 +96,6 @@ func TestTokenCommandHelpRequiresProfile(t *testing.T) {
 	testCommandFamilyRequiresProfile(t, cmdTokens)
 }
 
-func TestUserCommandHelpRequiresProfile(t *testing.T) {
-	testCommandFamilyRequiresProfile(t, cmdUsers)
-}
-
 func testCommandFamilyRequiresProfile(t *testing.T, parent Command) {
 	t.Helper()
 	for _, command := range childCommands(parent.Path) {

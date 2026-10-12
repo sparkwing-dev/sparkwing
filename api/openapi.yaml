@@ -69,10 +69,8 @@ tags:
     description: Operator-induced pauses for live debugging.
   - name: tokens
     description: Bearer-token CRUD (admin).
-  - name: users
-    description: Local-account CRUD + bootstrap.
   - name: auth
-    description: Login / logout / session + introspection.
+    description: Logout / session + introspection.
   - name: teams
     description: Signed-in users, their teams, memberships, invitations and runner tokens.
   - name: operator
@@ -1879,11 +1877,7 @@ paths:
         the lease is unexpired; another runner token gets `403` with
         `"error": "claim_required"`, even one carrying the same principal
         name. `lease_secs` is clamped to the server cap of 10 minutes.
-        A request carrying `executor_name` is a sealed assisted offer:
-        it validates the private binding and returns `409
-        body_attestation_required` before reservation or award. The `200`
-        response remains active only for the ordinary legacy claim shape that
-        omits `executor_name`; sealed nodes are excluded from that path.
+        A node sealed under an execution policy is never claimed here.
       requestBody:
         required: true
         content:
@@ -1894,15 +1888,7 @@ paths:
               required: [holder_id]
               properties:
                 holder_id: {type: string}
-                run_id: {type: string}
-                node_id: {type: string}
-                executor_name: {type: string}
-                reservation_id: {type: string}
-                resource_digest: {type: string}
-                slot: {type: integer}
                 lease_secs: {type: integer}
-                execution_binding:
-                  $ref: "#/components/schemas/ExecutionClaimBinding"
                 labels:
                   type: array
                   items: {type: string}
@@ -1940,6 +1926,10 @@ paths:
                       claim_generation: {type: integer, format: int64}
                       claim_membership_id: {type: string}
                       reservation_id: {type: string}
+                      claim_token:
+                        type: string
+                        description: >-
+                          The claim's token, returned once. The node's process authenticates with it in place of the claiming credential; it reaches only the claim's run, writes only to this node, and stops working when the claim ends.
         "204": {description: Nothing to claim.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "402":
@@ -1948,12 +1938,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditsRefused"}
-        "409":
-          description: >-
-            Assisted offer refusal. The controller does not reserve, record, or award the offer.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
 
   /api/v1/tokens:
     post:
@@ -2302,104 +2286,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/users:
-    get:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: List local-account users.
-      responses:
-        "200":
-          description: Users.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [users]
-                properties:
-                  users:
-                    type: array
-                    items: {$ref: "#/components/schemas/User"}
-    post:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: Create a user, or bootstrap the first administrator.
-      description: |
-        Answers without a credential while the users table is empty, and
-        goes back to demanding the route's scope once any user exists.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.createUserReq
-              type: object
-              required: [name, password]
-              properties:
-                name: {type: string}
-                password: {type: string}
-                scopes:
-                  type: array
-                  description: >-
-                    Scopes this account's dashboard sessions carry. Omit to grant admin. The bootstrap path honours the set it is given but rejects one that omits admin, so the first account can always reach the rest of the API.
-                  items: {type: string}
-      responses:
-        "201":
-          description: User created.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/User"}
-        "409": {description: Bootstrap race lost.}
-
-  /api/v1/users/{name}:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: {type: string}
-    delete:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: Delete a user.
-      responses:
-        "204": {description: Deleted.}
-
-  /api/v1/auth/login:
-    post:
-      x-sparkwing-scope: public
-      tags: [auth]
-      summary: Exchange username + password for a session id + CSRF token.
-      description: Unauthenticated.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.loginReq
-              type: object
-              required: [username, password]
-              properties:
-                username: {type: string}
-                password: {type: string}
-      responses:
-        "200":
-          description: Session created.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.loginResp
-                type: object
-                required: [session_id, csrf_token, principal, scopes, expires_at]
-                properties:
-                  session_id: {type: string}
-                  csrf_token: {type: string}
-                  principal: {type: string}
-                  scopes:
-                    type: array
-                    items: {type: string}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-
   /api/v1/auth/logout:
     post:
       x-sparkwing-scope: public
@@ -2546,14 +2432,18 @@ paths:
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
-        A masked row's value goes only to the operator's bearer token and to
-        a runner reading through the run it has claimed. Every other caller,
-        a dashboard session or a team owner's token included, gets `403`
-        with error `write_only`; it may still read an unmasked variable.
-        A controller-dispatched node's work claim token reads with `?run=` set
-        to its own run, and only a secret its run's accepted plan declares
-        (`403 secret_undeclared` otherwise); each read is recorded as a
-        `secret_released` event on the node. A planning claim reads none.
+        A bearer reads by name only as the operator or a team's owner; any
+        other bearer, a runner's token included, gets `403` with error
+        `claim_required`. A masked row's value goes
+        only to the operator's bearer token and to a claim that declares
+        it; a dashboard session or a team owner's token gets `403` with
+        error `write_only`, and may still read an unmasked variable.
+        A claim token (a controller-dispatched work node's, a runner's node
+        claim or a runner's trigger claim) reads with `?run=` set to its own
+        run, and only a secret its run's plan declares (`403
+        secret_undeclared` otherwise); each read is recorded as a
+        `secret_released` event on the run, naming the node for a node's
+        claim. A planning claim reads none.
         Every secrets response carries `Cache-Control: no-store`.
       responses:
         "200":
@@ -3133,156 +3023,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/agents/{name}:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: {type: string}
-    put:
-      x-sparkwing-scope: admin
-      tags: [agents]
-      summary: Enroll an executor under an exact runner credential.
-      description: |
-        Creates or updates the named executor. `token_prefix` must resolve to
-        a live runner or service credential authorized to claim nodes; the raw bearer is
-        never accepted here. Location is a trusted operator declaration, while
-        capabilities describe placement features and cannot impersonate a
-        location. Rebinding a name to another credential clears its liveness.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.enrollAgentReq
-              type: object
-              required: [token_prefix, kind, max_concurrent]
-              properties:
-                token_prefix: {type: string, description: Non-secret prefix of the credential bound to this enrollment.}
-                kind: {type: string, enum: [agent, gateway]}
-                location: {type: string, enum: [local, cloud, unknown], default: unknown}
-                capabilities:
-                  type: array
-                  items: {type: string}
-                base_priority: {type: integer, minimum: 0, maximum: 100}
-                priority_ceiling: {type: integer, minimum: 0, maximum: 100}
-                max_concurrent: {type: integer, minimum: 1}
-                budget:
-                  x-sparkwing-go-type: pkg/controller.AgentResources
-                  type: object
-                  required: [cores, memory_bytes]
-                  properties:
-                    cores: {type: number, minimum: 0}
-                    memory_bytes: {type: integer, format: int64, minimum: 0}
-                accept_repos:
-                  type: array
-                  items: {type: string}
-                  description: Repositories the executor takes, as host/path patterns. Absent takes every repository; an empty list takes none.
-      responses:
-        "204": {description: Executor enrolled. Empty body.}
-        "400": {description: Invalid enrollment or credential prefix.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {description: Enrollment limit or name/credential conflict.}
-
-  /api/v1/agents/{name}/heartbeat:
-    parameters:
-      - in: path
-        name: name
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [agents]
-      summary: Report an enrolled executor's available capacity.
-      description: |
-        The exact credential bound by enrollment must authenticate this call.
-        The controller timestamps the observation itself; the runner cannot
-        supply a clock value. Negative or non-finite capacity is rejected.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.agentHeartbeatReq
-              type: object
-              required: [headroom]
-              properties:
-                headroom:
-                  x-sparkwing-go-type: pkg/controller.claimHeadroom
-                  type: object
-                  required: [cores, memory_bytes, queue_depth]
-                  properties:
-                    cores: {type: number, minimum: 0}
-                    memory_bytes: {type: integer, format: int64, minimum: 0}
-                    queue_depth: {type: integer, minimum: 0}
-                runtime:
-                  x-sparkwing-go-type: pkg/controller.agentRuntimeReportReq
-                  type: object
-                  description: >-
-                    Supervisor host capabilities and observational build identity. This report does not attest any compiled workload.
-                  required: [body_protocol_minimum, body_protocol_maximum, build_identity]
-                  properties:
-                    body_protocol_minimum: {type: integer, minimum: 0}
-                    body_protocol_maximum: {type: integer, minimum: 0}
-                    supervisor_requirements:
-                      type: array
-                      items: {type: string}
-                    body_host_requirements:
-                      type: array
-                      items: {type: string}
-                    build_identity:
-                      x-sparkwing-go-type: internal/buildinfo.Identity
-                      type: object
-                      description: Observational runner identity; never compared for exact admission equality.
-                      properties:
-                        binary: {type: string}
-                        version: {type: string}
-                        commit: {type: string}
-                        revision_time: {type: string}
-                        modified: {type: boolean}
-                        goos: {type: string}
-                        goarch: {type: string}
-      responses:
-        "204": {description: Heartbeat recorded. Empty body.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {description: Credential does not match this enrollment.}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/nodes/claim/prepare:
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Preview the next node eligible for an enrolled executor.
-      description: |
-        Evaluates the controller-owned resource digest and current membership
-        snapshot without claiming the node or reserving capacity. A foreground
-        Fleet authority restricts this lookup to its own run. A sealed
-        compatible candidate returns `409 body_attestation_required` with its
-        protected binding. No capacity is reserved.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-partial: pkg/controller.claimNodeReq
-              type: object
-              required: [executor_name]
-              properties:
-                executor_name: {type: string}
-      responses:
-        "204": {description: No eligible node. Empty body.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Credential does not match this enrollment.}
-        "409":
-          description: >-
-            Typed upgrade, protocol-incompatibility, or compiled-body-attestation refusal. No capacity has been reserved.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset:
     parameters:
       - in: path
@@ -3474,12 +3214,11 @@ paths:
     post:
       x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Resolve an executor offer round or release coordinator fallback.
+      summary: Close a claim round and release the node to the dispatcher's fallback.
       description: |
-        After the five-second offer window, atomically awards the best still
-        eligible offer. If no live offer remains and placement permits the
-        coordinator, clears readiness so the coordinator can execute locally.
-        A still-open round or hard placement requirement reports `pending`.
+        After the five-second claim window, clears the readiness of a node no
+        runner claimed so the dispatcher can execute it itself. A still-open
+        round or hard placement requirement reports `pending`.
       responses:
         "200":
           description: Resolution state.
@@ -4700,6 +4439,10 @@ paths:
                       claim_generation: {type: integer, format: int64}
                       claim_membership_id: {type: string}
                       reservation_id: {type: string}
+                      claim_token:
+                        type: string
+                        description: >-
+                          The claim's token, returned once. The node's process authenticates with it in place of the claiming credential; it reaches only the claim's run, writes only to this node, and stops working when the claim ends.
         "400": {$ref: "#/components/responses/BadRequest"}
         "402":
           description: >-
@@ -4784,10 +4527,9 @@ paths:
                     x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
                     type: object
                     description: Present only when the controller has a GitHub App configured.
-                    required: [slug, source_tokens]
+                    required: [slug]
                     properties:
                       slug: {type: string, description: "The App's name in https://github.com/apps/<slug>."}
-                      source_tokens: {type: boolean, description: "A runner holding a claim may ask POST /api/v1/runs/{id}/source-token for a fetch credential."}
 
   /api/v1/me:
     get:
@@ -5204,144 +4946,90 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/team/cli-tokens:
+  /api/v1/team/tokens:
     get:
       x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: List the caller's live CLI tokens in the active team.
-      description: Any member lists the CLI tokens they minted; nobody sees another member's.
-      responses:
-        "200":
-          description: CLI tokens.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  x-sparkwing-go-type: pkg/controller.cliTokenJSON
-                  type: object
-                  required: [prefix, scopes, created_at, expires_at, last_used_at]
-                  properties:
-                    prefix: {type: string}
-                    scopes: {type: array, items: {type: string}}
-                    created_at: {type: integer, format: int64, description: Unix seconds.}
-                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a CLI token lapses after 90 days."}
-                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-    post:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Mint a CLI token that acts for the caller in the active team.
+      summary: List the team tokens the caller may manage in the active team.
       description: >-
-        Needs a signed-in session; a bearer token cannot mint one. The token carries the scopes of the caller's role except team administration, so a reader's token only reads, and it lapses after 90 days. Removing the member, or demoting them to reader, revokes it. The plaintext is returned once, with the `sparkwing cloud connect` command that stores it in a profile named for the team and the `sparkwing pipeline trigger` command that starts a run with it.
-      responses:
-        "201":
-          description: Minted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.cliTokenResp
-                type: object
-                required: [token, prefix, scopes, expires_at, profile, setup, run]
-                properties:
-                  token: {type: string}
-                  prefix: {type: string}
-                  scopes: {type: array, items: {type: string}}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-                  profile: {type: string, description: "The profile name the setup command writes, which is the team slug."}
-                  setup: {type: string, description: A command that reads the token from a no-echo prompt and writes the profile.}
-                  run: {type: string, description: "The command that starts a run from a pushed checkout, with a pipeline placeholder."}
-        "409": {description: The caller already holds 10 live CLI tokens in this team.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/team/cli-tokens/{prefix}:
-    delete:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Revoke one of the caller's CLI tokens.
-      description: A member revokes only the CLI tokens they minted; another member's prefix answers 404.
-      parameters:
-        - {name: prefix, in: path, required: true, schema: {type: string}}
-      responses:
-        "204": {description: Revoked.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/team/runner-tokens:
-    get:
-      x-sparkwing-scope: runs.write
-      tags: [teams]
-      summary: List the active team's live runner tokens.
-      description: Needs the editor role.
+        Any member lists the live tokens they minted, of either family, CLI and runner tokens minted before the team token included. An editor or owner also lists every live machine token of the team, whoever minted it. Nobody lists another member's member tokens.
       responses:
         "200":
-          description: Runner tokens.
+          description: Team tokens, oldest first.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  x-sparkwing-go-type: pkg/controller.runnerTokenJSON
+                  x-sparkwing-go-type: pkg/controller.teamTokenJSON
                   type: object
-                  required: [prefix, name, created_by, created_at, expires_at, last_used_at, git_credentials]
+                  required: [prefix, name, family, scopes, created_by, created_at, expires_at, last_used_at, git_credentials]
                   properties:
                     prefix: {type: string}
-                    name: {type: string}
-                    created_by: {type: string, description: User id of the minter; empty for an operator-minted token.}
+                    name: {type: string, description: "The machine's agent name; empty for a member token."}
+                    family: {type: string, enum: [member, machine]}
+                    scopes: {type: array, items: {type: string}}
+                    created_by: {type: string, description: User id of the minter.}
                     created_at: {type: integer, format: int64, description: Unix seconds.}
-                    expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds; a runner token minted here lapses after 90 days.}
+                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a member token lapses 90 days after minting, a machine token 90 days after its last use."}
                     last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
                     git_credentials: {type: boolean, description: "A team owner opted this machine in to receiving the team's git credentials."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: Mint a runner token for the active team.
+      summary: Mint a team token in the active team.
       description: >-
-        Needs the editor role. The token carries the runner scope set the CLI's `runners add` mints and belongs to the active team. The plaintext is returned once, with a `sparkwing-runner` command that connects a machine.
+        Needs a signed-in session; a bearer token cannot mint one. The scopes pick the family, and must all come from one of two disjoint sets; an empty list, an unknown scope or a mix answers 400. A member token carries a subset of the scopes the caller's role grants, without team administration, acts as the caller, lapses after 90 days and goes when the member leaves or is demoted to reader; a scope above the caller's role answers 403, and a member holds at most 10. docs/auth.md lists both scope sets. A machine token carries a subset of the runner scopes that claims nodes or triggers, needs the editor role, a name and repos, authenticates as agent:<name> and lapses 90 days after its last use; a team holds at most 100 runner and machine tokens and one live token per agent name. The plaintext is returned once: with the `sparkwing cloud connect` and `sparkwing pipeline trigger` commands for a member token, or with a `sparkwing-runner` command that connects the machine for a machine token.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.runnerTokenReq
+              x-sparkwing-go-type: pkg/controller.teamTokenReq
               type: object
-              required: [name]
+              required: [scopes]
               properties:
-                name: {type: string, description: "1 to 63 letters, digits, '-', '_' or '.'."}
+                scopes: {type: array, items: {type: string}}
+                name: {type: string, description: "A machine token's agent name: 1 to 63 letters, digits, '-', '_' or '.'. Absent for a member token."}
                 repos:
                   type: array
                   items: {type: string}
                   description: >-
-                    Repositories the machine may build, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32.
+                    A machine token's repositories, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32. Absent for a member token.
       responses:
         "201":
           description: Minted.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.runnerTokenResp
+                x-sparkwing-go-type: pkg/controller.teamTokenResp
                 type: object
-                required: [token, prefix, command]
+                required: [token, prefix, family, scopes, expires_at]
                 properties:
                   token: {type: string}
                   prefix: {type: string}
-                  command: {type: string}
+                  family: {type: string, enum: [member, machine]}
+                  name: {type: string, description: The machine token's agent name.}
+                  scopes: {type: array, items: {type: string}}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  profile: {type: string, description: "A member token's profile name, which is the team slug."}
+                  setup: {type: string, description: A member token's command that reads the token from a no-echo prompt and writes the profile.}
+                  run: {type: string, description: "A member token's command that starts a run from a pushed checkout, with a pipeline placeholder."}
+                  command: {type: string, description: A machine token's command that stores the token and starts sparkwing-runner.}
         "400": {$ref: "#/components/responses/BadRequest"}
-        "409": {description: The team already holds 10 live runner tokens.}
+        "409": {description: "The member or team holds as many tokens of this family as it may, or another live machine token carries the name."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/team/runner-tokens/{prefix}:
+  /api/v1/team/tokens/{prefix}:
     delete:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: Revoke one of the active team's runner tokens.
-      description: An owner revokes any of the team's runner tokens; an editor revokes only the ones they minted.
+      summary: Revoke one team token.
+      description: >-
+        The minter revokes their own token of either family, and an owner revokes any machine token of the team. A token the caller cannot list answers 404; a machine token an editor lists but did not mint answers 403.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
       responses:
@@ -5350,12 +5038,12 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/team/runner-tokens/{prefix}/git-credentials:
+  /api/v1/team/tokens/{prefix}/git-credentials:
     put:
       x-sparkwing-scope: team.admin
       tags: [teams]
       summary: Opt one of the team's machines in to, or out of, receiving the team's git credentials.
-      description: An owner. A cloud runner receives the team's git credentials without this; any other runner token of the team receives them only once opted in. Answers 404 for a prefix that is no live runner token of the team.
+      description: An owner. A cloud runner receives the team's git credentials without this; any other machine or runner token of the team receives them only once opted in. Answers 404 for a prefix that is no unrevoked machine or runner token of the team.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
       requestBody:
@@ -5565,80 +5253,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/source-token:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
-      tags: [runs]
-      summary: Mint a short-lived GitHub token that reads the run's repository.
-      description: >-
-        For a runner holding a live node or trigger claim on the run. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with contents:read. A claim gets one live token: asking again returns the same token until five minutes before it expires, and a claim that asks more than ten times a minute answers 429 with Retry-After. A runner hands the token to git through a credential helper reading an inherited pipe. Answers 403 without a claim on the run, 404 when the run names no GitHub repository or no installation the team holds covers it, and 502 when GitHub cannot be reached.
-      responses:
-        "200":
-          description: Token minted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.SourceTokenResponse
-                type: object
-                required: [token, expires_at, repository]
-                properties:
-                  token: {type: string}
-                  expires_at: {type: integer, format: int64, description: Unix seconds; at most an hour away.}
-                  repository: {type: string, description: owner/name.}
-                  extra_repositories:
-                    type: array
-                    items: {type: string}
-                    description: Never set on this route; the git-credential route fills it from the team owner's list.
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/git-credential:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
-      tags: [runs]
-      summary: Release the one credential a runner fetches the run's source with.
-      description: >-
-        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. The App token also reads the extra repositories a team owner listed for the run's repository (PUT /api/v1/team/github-app/extra-repos), each checked again to be covered by the installation that covers the run's repository (403 otherwise); the route reads no request body, so nothing a runner sends widens it. A team credential is released only while the claim is still live inside the transaction that records the release. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
-      responses:
-        "200":
-          description: Credential released.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.GitCredentialResponse
-                type: object
-                required: [kind, host]
-                properties:
-                  kind: {type: string, enum: [github_app, ssh, https]}
-                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
-                  token: {type: string, description: "The App token, for kind github_app."}
-                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
-                  repository: {type: string, description: owner/name the App token reads.}
-                  extra_repositories:
-                    type: array
-                    items: {type: string}
-                    description: The owner/name repositories a team owner listed for the run's repository. An App token reads them too; the runner checks out submodules only when this names any.
-                  username: {type: string, description: "The https username, for kind https."}
-                  secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
-                  known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "429": {description: This claim asked for App tokens more than ten times in a minute; Retry-After says when to ask again.}
-        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
 
   /api/v1/team/github-app:
     get:
@@ -6091,11 +5705,11 @@ paths:
       tags: [storage]
       summary: Reserve room in a team's cache or log store before a write.
       description: |
-        Only the cache's operator token may call it, for any team. A free
-        team is held to its share of the allowance, three quarters for the
-        cache and three sixteenths for logs, counting what it stores and
-        every reservation still held; a funded team is counted without a
-        limit. `up_to` grants as much of `bytes` as the team has room for,
+        Only the cache's `storage.count` service token may call it, for any
+        team. A free team is held to its share of the allowance, three
+        quarters for the cache and three sixteenths for logs, counting what
+        it stores and every reservation still held; a funded team is counted
+        without a limit. `up_to` grants as much of `bytes` as the team has room for,
         zero or less asking for all of it. A reservation expires after an
         hour unless it is committed or released.
       requestBody:
@@ -6210,8 +5824,8 @@ paths:
       tags: [storage]
       summary: Charge a download to its team's UTC day.
       description: |
-        Only the cache's operator token reaches it. A download whose size is
-        known is charged whole before its first byte and refused when it
+        Only the cache's `storage.count` service token reaches it. A
+        download whose size is known is charged whole before its first byte and refused when it
         would pass the team's daily cap, `--team-daily-download-free-bytes`
         or `--team-daily-download-funded-bytes` by whether the team pays.
         Zero `bytes` checks that room is left. `record` charges a finished
@@ -6251,8 +5865,8 @@ paths:
       tags: [storage]
       summary: Keep a service's day and month egress totals.
       description: |
-        Only the cache's operator token reaches it. Each stored total keeps
-        the larger of itself and what the call reports, and the answer is
+        Only the cache's `storage.count` service token reaches it. Each
+        stored total keeps the larger of itself and what the call reports, and the answer is
         the stored totals, so a restarted cache reports zeros to read back
         where its day and month stood.
       requestBody:
@@ -7018,9 +6632,9 @@ paths:
     post:
       x-sparkwing-scope: claim
       tags: [runs]
-      summary: Issue a claim's one source credential to its Job's init container.
+      summary: Issue the one credential a claim fetches its run's source with.
       description: >-
-        Answers only a live, uncancelled plan or work claim token. Mints a read-only GitHub App installation token (`contents: read`, about an hour) for exactly the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches, and answers it with the run's clone URL, commit, branch, those repositories and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim gets at most three, so a failed or lost mint can be asked for again, and none once its attempt has started, so the pipeline's container, which holds the same claim token, cannot mint one; each issue is recorded as a git credential release. Sparkwing Cloud fetches source only through the GitHub App; stored git credentials serve self-hosted runners.
+        The only route that releases a source credential. It answers only a live, uncancelled claim token of the run: a launcher's plan or work claim, or a runner's node or trigger claim; any other bearer gets 403 claim_token_required. When the run's repository is on github.com and an installation bound to the team covers it, the answer is a read-only GitHub App installation token (`contents: read`, about an hour) for the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches. The run's repository qualifies by the ID the App's webhook recorded on its trigger; a repository the run names by hand qualifies only when one of the team's App trigger subscriptions names it, under the ID that subscription recorded. Otherwise a runner's claim gets the git credential the team stored for the host of the run's repository, when the claim's machine is a cloud runner or a machine a team owner opted in; a launcher's claim never does, since Sparkwing Cloud fetches source only through the App. With neither the answer is 404 no_source_credential with a message naming the remedies. The answer carries the run's commit and branch, and for a launcher's claim the clone URL and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim with a node of its own gets at most three credentials, so a failed or lost mint can be asked for again, and none once its attempt has started, since the node's own process holds the same claim token. Every claim asks at most ten times a minute. Each issue and release is recorded as a git credential release. The route reads no request body.
       responses:
         "200":
           description: The credential and what to check out.
@@ -7029,13 +6643,19 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/store.SourceCredential
                 type: object
+                required: [kind, host, repositories, source]
                 properties:
-                  token: {type: string}
-                  expires_at: {type: integer, format: int64}
-                  repo_url: {type: string}
+                  kind: {type: string, enum: [github_app, ssh, https]}
+                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
+                  token: {type: string, description: "The App token, for kind github_app."}
+                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
+                  repo_url: {type: string, description: "The run's https clone URL, for kind github_app."}
                   sha: {type: string}
                   branch: {type: string}
-                  repositories: {type: array, items: {type: string}}
+                  repositories:
+                    type: array
+                    items: {type: string}
+                    description: "owner/name, the run's own first, then the ones a team owner listed for it; an App token reads them all. Empty for a run on a host other than github.com."
                   source:
                     x-sparkwing-go-type: pkg/store.SourceSpec
                     type: object
@@ -7044,9 +6664,15 @@ paths:
                       tags: {type: boolean}
                       submodules: {type: boolean}
                       lfs: {type: boolean}
+                  username: {type: string, description: "The https username, for kind https."}
+                  secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
+                  known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: The run records no commit.}
+        "409": {description: "The run records no commit for a launcher's claim, an extra repository is no longer covered, or the team's ssh credential awaits its host key's confirmation."}
+        "429": {description: This claim asked more than ten times in a minute; Retry-After says when to ask again.}
+        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
 
   /api/v1/outputs/objects/{key}:
     parameters:
@@ -7347,6 +6973,41 @@ paths:
         Streams the node's log in this run across all of its attempts, in the order they began: each attempt's segments, then the controller's in-memory live buffer from the byte where they end until that attempt's log is sealed, holding the node's 30-second live-view watch while open. Attempts of the run this one retries are not included. Each line carries as its event id the cursor just past it; send the last one back as Last-Event-ID, or as the cursor query parameter, to resume after it. Last-Event-ID wins when both are sent, and a cursor the controller did not issue for this run and node answers 400. The stream ends with a stream_end event once the node will write no more -- it is done with an outcome other than failed, or its run is over, since only a failure can be retried -- and its last attempt is sealed. A node the run neither records nor holds logs for falls back to the live buffer alone; with neither it answers 501.
       responses:
         default: {description: Undescribed.}
+
+  /api/v1/cache/store-ceiling/measure:
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Walk the cache's stored trees now and replace its store-ceiling count.
+      description: |
+        Forwards to the cache's own store-ceiling measure route under the
+        operator grant the controller signs with its cache grant key, the only
+        bearer those cache routes take. The cache answers `202` and walks
+        off the request; freeing space on its volume and measuring is what
+        lifts a store-ceiling freeze.
+      responses:
+        "202": {description: "The cache's answer, forwarded verbatim."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No cache is configured on this controller.}
+        "502": {description: The cache is unreachable.}
+
+  /api/v1/cache/store-ceiling/thaw:
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Accept cache uploads until the next store-ceiling measurement.
+      description: |
+        Forwards to the cache's own store-ceiling thaw route under the
+        operator grant the controller signs with its cache grant key. The
+        cache answers `409` when no measurement is scheduled.
+      responses:
+        "200": {description: "The cache's answer, forwarded verbatim."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No cache is configured on this controller.}
+        "409": {description: The cache has no measurement scheduled to end the thaw.}
+        "502": {description: The cache is unreachable.}
 
   /api/v1/log-segments/{key}:
     parameters:
@@ -7998,6 +7659,10 @@ components:
           format: int64
           description: >-
             How many times this trigger has been claimed. A terminal write presenting a stale value is refused, so a re-claim invalidates the previous dispatch.
+        claim_token:
+          type: string
+          description: >-
+            Set only on the answer to a trigger claim: the claim's token, which reads the run's declared secrets while the trigger claim lives.
         webhook_delivery:
           type: string
           description: >-
@@ -8514,34 +8179,16 @@ components:
         bound: {type: boolean, description: Whether the secret is bound to its row.}
         created_at: {type: integer, format: int64, description: Unix seconds.}
         updated_at: {type: integer, format: int64, description: Unix seconds.}
-    User:
-      x-sparkwing-go-type: pkg/controller.userJSON
-      type: object
-      required: [name, created_at]
-      properties:
-        name: {type: string}
-        scopes:
-          type: array
-          description: Scopes this account's dashboard sessions carry.
-          items: {type: string}
-        created_at:
-          type: integer
-          format: int64
-          description: Unix seconds.
-        last_login_at:
-          type: integer
-          format: int64
-          nullable: true
     Agent:
       x-sparkwing-go-type: pkg/controller.Agent
       type: object
       description: >-
-        One runner known to the controller through enrollment, heartbeats, or recent node claims.
+        One runner known to the controller through its recent node claims.
       properties:
         name: {type: string}
         type:
           type: string
-          enum: [agent, gateway, pool, local]
+          enum: [agent, pool, local]
         location:
           type: string
           enum: [local, cloud, unknown]
@@ -8562,19 +8209,6 @@ components:
         max_concurrent:
           type: integer
           description: Configured concurrent-node ceiling.
-        active_slots:
-          type: integer
-          nullable: true
-          description: Slots occupied now; absent when the controller cannot calculate it.
-        base_priority: {type: integer}
-        priority_ceiling: {type: integer}
-        budget:
-          x-sparkwing-go-type: pkg/controller.AgentResources
-          type: object
-          required: [cores, memory_bytes]
-          properties:
-            cores: {type: number}
-            memory_bytes: {type: integer, format: int64}
         headroom:
           allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
           nullable: true
@@ -8596,55 +8230,6 @@ components:
       properties:
         max_concurrent: {type: integer}
         active_claims: {type: integer}
-    ExecutionClaimBinding:
-      x-sparkwing-go-type: none
-      type: object
-      description: >-
-        Protected prepare-to-offer binding for one exact immutable policy tuple. It is never present in public run or node projections.
-      required:
-        - run_id
-        - node_id
-        - policy_hash
-        - policy_version
-        - body_protocol
-        - supervisor_requirements_hash
-        - body_requirements_hash
-      properties:
-        run_id: {type: string}
-        node_id: {type: string}
-        policy_hash: {type: string}
-        policy_version: {type: integer, minimum: 1}
-        body_protocol: {type: integer, minimum: 1}
-        supervisor_requirements_hash: {type: string}
-        body_requirements_hash: {type: string}
-    ExecutionAdmissionError:
-      x-sparkwing-go-type: none
-      type: object
-      description: Stable assisted-admission refusal returned before reservation or award.
-      required: [error, code]
-      properties:
-        error: {type: string}
-        code:
-          type: string
-          enum: [upgrade_required, protocol_incompatible, body_attestation_required]
-        run_id: {type: string}
-        node_id: {type: string}
-        scope:
-          type: string
-          enum: [supervisor, body_host]
-        missing:
-          type: array
-          items: {type: string}
-        minimum_release: {type: string}
-        safe_hold:
-          type: boolean
-          description: >-
-            True when no trusted stable release floor resolves every missing capability; automated updating must not guess a target.
-        policy_protocol: {type: integer}
-        helper_minimum: {type: integer}
-        helper_maximum: {type: integer}
-        execution_binding:
-          $ref: "#/components/schemas/ExecutionClaimBinding"
     ClaimPlatform:
       x-sparkwing-go-type: pkg/controller.claimPlatform
       type: object

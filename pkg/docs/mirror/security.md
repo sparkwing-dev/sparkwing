@@ -25,8 +25,8 @@ writes: a run's cache and binary entries are written under its own repository
 and ref, as [Cache service](#cache-service) describes.
 
 **Operators and service credentials have separate authority.** `admin` is
-deployment authority. Service scopes such as `credits.grant` and
-`claims.launch` cross teams for their documented operations. Team membership
+deployment authority. Service scopes such as `credits.grant`, `claims.launch`
+and `storage.count` cross teams for their documented operations. Team membership
 does not grant them, and `admin` does not stand in for `credits.grant`.
 Operator powers over a team's billing standing and the sign-up waitlist answer
 only a listed operator's own console session, never a bearer token; see
@@ -43,17 +43,17 @@ dedicated OS user that holds nothing else, or in a container or VM, and list
 only repositories whose every committer may act as that user.
 
 **Pipeline authors run code on runners.** A pipeline is Go that the runner
-compiles and executes. Enrolling a workstation or gateway authorizes that
-code to execute as the agent service's OS user. Assisted execution keeps the
-enrollment bearer and claim identity in the supervisor; the job-body child
-gets a process-lifetime loopback capability limited to its exact run and node,
+compiles and executes. Running a runner on a workstation authorizes that
+code to execute as the runner service's OS user. The runner keeps its token
+and claim identity in the supervisor; the job-body child gets a
+process-lifetime loopback capability limited to its exact run and node,
 including reserving and committing its own typed output upload,
 with execution start, finish, and logs additionally bound to its acknowledged
 attempt ordinal. The child does not inherit arbitrary agent service credentials,
-and its capability cannot claim or renew work, manage the fleet, or call
+and its capability cannot claim or renew work, manage runners, or call
 administrative routes. A claimed trigger's pipeline binary, which plans the
 run, gets the same kind of loopback capability, limited to its own run and
-the child runs it spawns, from a runner using the in-process node runner.
+the child runs it spawns, whichever node runner the runner uses.
 The broker names the run on every route it forwards, so a runner holding two
 runs never lets one read the other. Two lookups reach beyond it, both scoped
 to the team by the controller: a cross-pipeline `Ref` reads another
@@ -61,10 +61,13 @@ pipeline's latest run and then only that run's node outputs, and a retry
 asks which child its source attempt spawned so it reuses that child. The latest-run lookup
 admits any pipeline in the team, not only a declared `Ref`; that is the trust
 the pipeline's own code already has, since it can reference any team
-pipeline's latest run. A runner using the Kubernetes or
-warm node runner still hands its token to the trigger's binary, because the
-Jobs that binary creates need it; controller dispatch (`sparkwing-runner
-launch`) instead gives each Job a claim token for its assigned work.
+pipeline's latest run. Every claim returns a claim token bound to the claim,
+and the work the claim runs uses it in place of the runner's token: a pooled
+node's supervisor, a Kubernetes Job the trigger's binary creates, and a Job
+controller dispatch (`sparkwing-runner launch`) creates. A Job spec therefore
+carries one node's claim token, which reaches only that claim's run and node
+and stops working when the claim ends; see
+[auth.md](auth.md#claim-tokens).
 
 **Hosted execution also depends on the cluster configuration.** The launcher
 keeps its service credential outside the Job. Its Job builder disables
@@ -96,7 +99,7 @@ still hold objects an earlier release seeded. Assess those separately from
 controller API permissions. This guide makes no tenant-isolation guarantee
 for those shared mirrors.
 
-Assisted execution on a self-hosted machine keeps the agent OS user's file,
+Execution on a self-hosted machine keeps the agent OS user's file,
 network, and process permissions. It can read the agent's
 `config.yaml`, which holds the runner token, and every other credential in
 that user's home, such as ssh keys and cloud profiles. GitHub gives the same
@@ -106,32 +109,24 @@ whose every committer may act as that user. Sparkwing does not
 join a tailnet or configure host networking.
 [threat-model.md](threat-model.md) states what that boundary isolates, what it
 does not, and what an operator does about the rest when a teammate's branch
-runs on an enrolled desktop.
+runs on a teammate's desktop runner.
 
-Native Windows helpers start the body suspended, assign it to a kill-on-close
+Native Windows runners start the body suspended, assign it to a kill-on-close
 Job Object, and then resume it, so nothing the body spawns exists outside the
 job. The supervisor waits for the Job to report zero active processes after
-the body exits or is cancelled. Linux, macOS, and WSL helpers instead create a
+the body exits or is cancelled. Linux, macOS, and WSL runners instead create a
 dedicated process session, send TERM and then KILL to its remaining members,
 and wait for that session to empty. Unix code can call `setsid` to leave that
 accounting boundary. Pipeline bodies must not daemonize out of their session;
 Sparkwing does not try to contain intentional evasion by code already trusted
 to run as the agent OS user.
 
-Schema 30 supplies authenticated foreground enrollment, offer, award, source
-handoff, and coordinator fallback as an internal release dependency. It does
-not expose remote helper body completion. The containment boundary above must
-ship with schema 31, which adds the current-attempt fence and durable grants
-required by `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline
-references, and dynamic `SpawnNode`. Schema 30 is not a complete assisted-node
-compatibility boundary on its own.
-
-**A warm pool shares one OS account across repositories.** Assisted job bodies
+**A warm pool shares one OS account across repositories.** Job bodies
 run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
 `sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
-separate Job pods, while its planning process still has the runner-token
+separate Job pods, while its planning process still has the run-wide broker
 authority described above.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`
@@ -144,10 +139,19 @@ Give this scope to someone who may read the team's history. An operator's
 
 **Accepted trust facts.** Each of these follows from the model above and is
 not a defect. A team editor can read masked secret values: it can mint a
-runner token, start a run, claim it and read the run's secrets, because it
-already chooses the code that run executes. The operator's launcher token
+runner token, start a run, claim it and read, through the claim's token, the
+secrets the run's plan declares, because it already chooses the code that run
+executes. A runner's own token reads no secret, and every node read is
+recorded as a `secret_released` event. The same editor reaches the source of
+the repositories it can already trigger, and no more: a run's GitHub App token
+reads the repository the App's webhook recorded, or a repository the run names
+by hand only when one of the team's App trigger subscriptions names it, so
+typing a private repository of the installation into a run yields no token for
+it. Only a claim token of the run receives a source credential, through
+`POST /api/v1/runs/{id}/source-credential`, and each issue is recorded with
+the team's git credential releases. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
-every team's run secrets, source tokens and cache grants; keep it
+every team's run secrets, source credentials and cache grants; keep it
 operator-only. Which secrets a run may read through a claim token is declared
 by that run's own plan, so the boundary is the secret's pipeline or shared
 scope, not the declaration. The masker covers step output that goes through
@@ -182,7 +186,7 @@ single-user tool on a single-user machine.
 ## Authentication and authorization
 
 Controller requests carry a bearer token; each route declares
-the scope it needs. Tokens are typed (`swu_`/`swr_`/`sws_`), stored as
+the scope it needs. Tokens are typed (`swu_`/`swr_`/`swt_`/`sws_`), stored as
 argon2id hashes, and never logged in full. The complete model -- token
 kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
@@ -199,7 +203,7 @@ is an `audit` record that adds `ts`, `client_ip`, `client_class`,
 email or a token) and `team`. These also get an `audit` record:
 
 - reads of secrets, tokens and operator routes (`/api/v1/secrets`,
-  `/api/v1/tokens`, `/api/v1/team/runner-tokens`, `/api/v1/team/cli-tokens`,
+  `/api/v1/tokens`, `/api/v1/team/tokens`,
   `/api/v1/operator/...`);
 - the dashboard's own sign-in and logout routes, and the redirect that finishes
   a browser flow: a completed OAuth sign-in, identity link or GitHub App
@@ -218,27 +222,19 @@ credential.
 
 ## Login and hashing budgets
 
-`POST /api/v1/auth/login` is the controller's only unauthenticated route
-that hashes a password, so it carries its own budgets. One client gets 30
-attempts a minute; the listener as a whole gets 600 per concurrent argon2
-slot, which bounds hashing work without throttling a fleet's real logins.
-Both answer `429` with `Retry-After` once drained.
-
-A failed login also charges a budget keyed on the account **and** the
-client address: 5 failures, refilling one every three minutes. Keying it
-on both is deliberate. An account-only budget would let any stranger lock
-a named user out of the dashboard with 20 requests an hour, so a wrong
-guesser only ever slows itself down; the per-client and listener buckets
-remain the outer bound on how much guessing one source can do. The budget
-charges failures only, so a busy account is never locked out by its
-successes.
+The sign-in routes (`POST /login` and the Google and GitHub flows) are the
+controller's unauthenticated routes that can reach argon2, so they carry
+their own budgets. One client gets 30 attempts a minute; the listener as a
+whole gets 600 per concurrent argon2 slot, which bounds hashing work without
+throttling a fleet's real sign-ins. Both answer `429` with `Retry-After` once
+drained. An operator token posted to `POST /login` is then verified the way a
+bearer is, under the budget below.
 
 Bearer verification carries the same protection, keyed on the client
 address and the 12-character token prefix, which is public
 (`sparkwing cluster tokens list` prints it). Ten failed verifications for one
 prefix from one client in a minute and further attempts answer `429`
-without hashing. Keying on the pair matters for the same reason it does
-for login: a prefix-only budget would let a stranger who reads a prefix
+without hashing. Keying on the pair matters: a prefix-only budget would let a stranger who reads a prefix
 deny that runner its own token on any cold cache. Only a genuine hash
 mismatch spends the budget, so a prefix that matches no stored row costs
 an indexed `SELECT` and nothing more, and a valid token served from the
@@ -247,7 +243,7 @@ rejected raw token for five seconds, so a client replaying one wrong
 guess pays for a single hash; that cache evicts its coldest entries when
 full rather than closing to new ones.
 
-Every argon2id verification, login and bearer-token lookup alike, passes
+Every argon2id token verification, from a bearer or the sign-in form, passes
 through a semaphore sized by `--argon2-memory-budget-mb` (chart:
 `controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
 while it runs, so the default admits four at a time. A hash waits at most
@@ -256,7 +252,7 @@ while it runs, so the default admits four at a time. A hash waits at most
 backlog behind legitimate callers. Raise the budget only alongside the
 pod's memory limit. A runner whose token is in the 60-second principal
 cache never reaches the store or the semaphore at all, so heartbeats are
-unaffected by a login flood.
+unaffected by a sign-in flood.
 
 An unauthenticated caller never sees a store error verbatim. Anything
 that is not an authentication rejection answers `503` with a generic
@@ -400,14 +396,13 @@ an active run.
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
 path names -- and falls back to the `X-Sparkwing-Runner` header only on
-`POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
-`POST /api/v1/triggers/claim`, which name nothing. A runner sends one
-identity for the life of its process (a pool runner its holder prefix and
-process id, an enrolled agent its name), not one per poll: a value that
+`POST /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`, which name
+nothing. A runner sends one identity for the life of its process (a pool
+runner its holder prefix and process id), not one per poll: a value that
 changed per request would buy a fresh budget on every claim and grow the
 controller's bucket table at the fleet's poll rate.
 
-On those three claim routes the identity is the runner's own word, so a
+On those two claim routes the identity is the runner's own word, so a
 holder of a valid token that varies it gets a fresh budget each time.
 `--runners-per-token` (default 64) caps how many such names one caller --
 its team for a signed-up team, its token in the operator's team -- may hold
@@ -430,10 +425,8 @@ the rollout finishes.
 carries one setting rather than one per guard. It is described under
 [Limits profiles](#limits-profiles) below.
 
-The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`,
-is never shed. Run and trigger heartbeats and node touch requests are
-unbudgeted when the caller owns the claim. Losing those updates can
-tear down an active run or executor.
+Run and trigger heartbeats and node touch requests are unbudgeted when the
+caller owns the claim. Losing those updates can tear down an active run.
 
 Past a budget the route answers `429` with a `Retry-After` naming the
 real refill delay, and `sparkwing_principal_throttled_total{route_class}`
@@ -448,8 +441,8 @@ because their callers are unauthenticated and would share one bucket.
 keyed by signed-up team or by token prefix in the operator's team. It binds
 a caller varying the runner it says it is: on the two claim routes the runner name
 is the caller's own word, so the per-runner budgets above bound a runaway
-loop rather than a holder of a valid token who means harm. The agent
-liveness routes above are spared here too. Past the budget a request answers
+loop rather than a holder of a valid token who means harm. The claim-owned
+heartbeats and node touch requests above are spared here too. Past the budget a request answers
 `429` with a `Retry-After`, counted under
 `sparkwing_principal_throttled_total{route_class="token"}`.
 
@@ -477,9 +470,7 @@ daemon, enforces nothing.
 
 The gate guards the two routes that carry the suggestion, `POST
 /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`. A route that
-names the trigger or the node it wants is no idle poll, and the
-preparation half of an offer round would charge the round twice. It is
-keyed the way the per-runner budgets are, on the token prefix together
+names the trigger or the node it wants is no idle poll. It is keyed the way the per-runner budgets are, on the token prefix together
 with the runner, and the runner a pool names itself carries its process
 id, so two runner processes on one host are two runners rather than one
 polling twice.
@@ -698,12 +689,18 @@ the published images are known bad.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token (the file `cache-token` in its
-`--credentials-dir`) on every route that touches repository content: git
-clone and registration, the binary and dependency-archive blob routes, and
-the admin routes. The cache serves no source archives, single
+`sparkwing-cache` requires a cache grant, signed with the grant key in the file
+`cache-grant-key` in its `--credentials-dir`, on every route that touches
+repository content: git clone and registration, the binary and
+dependency-archive blob routes, and the admin routes. A run's grant is
+confined to its team and repository; the operator grant the controller signs
+for its own proxy, team purge and store-ceiling calls lasts five minutes and
+reaches every route. The cache accepts no static token, so no person holds a
+credential for it: an operator reaches it through the controller's
+`admin`-scoped `/api/v1/gitcache/...` and `/api/v1/cache/store-ceiling/...`
+routes. The cache serves no source archives, single
 files, uploads or seeds: it fills a mirror only from origin. It
-refuses to start without one unless the operator passes
+refuses to start without a grant key unless the operator passes
 `--allow-unauthenticated`, which
 logs a startup warning. The guard has no network-location exemption: an
 in-cluster caller, a port-forward, and an ingress request are all rejected
@@ -715,6 +712,14 @@ rather than repository content. A cache published outside the cluster starts
 with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
 `--metrics-addr`, which moves `/metrics` to a listener the ingress does not
 route to.
+
+In the other direction the cache counts each team's storage and downloads on
+the controller's `/internal/storage/...`, `/internal/downloads/charge` and
+`/internal/egress/totals` routes with a `service` token holding only the
+`storage.count` scope, the file `controller-token` in its `--credentials-dir`.
+It is an ordinary hashed row in the tokens table: `sparkwing cluster tokens
+list --type service` shows it, and rotating it is minting a new one and
+revoking the old.
 
 Registering a repository name validates it against
 `^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a

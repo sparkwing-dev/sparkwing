@@ -15,13 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
-// BearerPrincipal labels bytes this cache served to a caller holding its
-// operator token, and AnonymousPrincipal labels the open dependency proxy's.
+// BearerPrincipal labels bytes this cache served to the controller's operator
+// grant, and AnonymousPrincipal labels the open dependency proxy's.
 // A grant's bytes are labeled with its team, under teamPrincipal.
 //
-// The per-team daily cap is counted by the controller, and the operator
-// token and the operator's team stay uncapped, because every in-cluster
-// runner shares them. The process-wide daily alarm tells the operator when
+// The per-team daily cap is counted by the controller. The operator grant
+// stays uncapped because it is the controller's own traffic, and the
+// operator's team because every in-cluster runner shares it. The process-wide daily alarm tells the operator when
 // this pod's bill runs ahead of plan, whoever the callers are.
 const BearerPrincipal = "bearer"
 

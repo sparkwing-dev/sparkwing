@@ -2636,9 +2636,6 @@ func (s *Store) cancelMeteredNode(
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return err
-	}
 	settlement, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, true)
 	if err != nil {
 		return err
@@ -2657,10 +2654,6 @@ func (s *Store) cancelMeteredNode(
        credit_charged_through = 0
  WHERE team = ? AND run_id = ? AND node_id = ? AND `+nodeNotDone,
 		message, reason, stoppedAt, string(team), runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_claim_offers WHERE team = ? AND run_id = ? AND node_id = ?`, string(team), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts

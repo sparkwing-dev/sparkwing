@@ -36,7 +36,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	if _, err := tn.CreateInvitation(ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
 		t.Fatalf("seed invitation: %v", err)
 	}
-	_, tok, err := tn.CreateRunnerToken(ctx, "agent:"+runID, []string{"nodes.claim"}, ownerID, now)
+	_, tok, err := tn.CreateMachineToken(ctx, runID, []string{"nodes.claim"}, ownerID, now)
 	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cliTok, err := shared.CreateCLIToken(ctx, "leaver@example.com", []string{"runs.read"}, leaver.Account.ID, now)
+	_, cliTok, err := shared.CreateMemberToken(ctx, "leaver@example.com", []string{"runs.read"}, leaver.Account.ID, now)
 	if err != nil {
 		t.Fatal(err)
 	}

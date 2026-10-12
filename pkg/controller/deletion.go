@@ -25,10 +25,10 @@ const TeamDeletionInterval = time.Minute
 // data, and the operator credentials the controller deletes it with. A
 // service left empty holds nothing for this controller to delete.
 type TeamStorage struct {
-	// CacheURL and CacheToken reach the cache service, which keeps each
-	// team's artifacts, binaries and build cache in a tree of its own.
-	CacheURL   string
-	CacheToken string
+	// CacheURL reaches the cache service, which keeps each team's artifacts,
+	// binaries and build cache in a tree of its own. The controller deletes a
+	// tree with an operator grant signed by its cache grant key.
+	CacheURL string
 }
 
 // WithTeamStorage tells the controller where a team's stored objects live,
@@ -432,7 +432,11 @@ func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
 		return nil
 	}
 	target := strings.TrimRight(ts.CacheURL, "/") + "/admin/teams/" + url.PathEscape(string(team))
-	if err := deleteRemote(ctx, target, ts.CacheToken); err != nil {
+	bearer, err := s.cacheOperatorBearer(time.Now())
+	if err != nil {
+		return fmt.Errorf("sign the cache deletion: %w", err)
+	}
+	if err := deleteRemote(ctx, target, bearer); err != nil {
 		return fmt.Errorf("delete cache tree: %w", err)
 	}
 	return nil

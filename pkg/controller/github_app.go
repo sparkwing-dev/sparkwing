@@ -43,7 +43,6 @@ type githubAppState struct {
 	// for each time.
 	mu       sync.Mutex
 	covering map[string]coveringEntry
-	sources  map[string]*sourceTokenEntry
 }
 
 type coveringEntry struct {
@@ -63,7 +62,7 @@ func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	s.githubApp = &githubAppState{
 		client: client, stateKey: client.StateKey(),
 		checks:   newGitHubCheckReporter(client, s.store, s.dashboardURL),
-		covering: map[string]coveringEntry{}, sources: map[string]*sourceTokenEntry{},
+		covering: map[string]coveringEntry{},
 	}
 	return s
 }

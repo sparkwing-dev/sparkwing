@@ -45,8 +45,6 @@ func assertSQLiteWave2AndFleetV30(t *testing.T, db *sql.DB) {
 	}
 	for table, columns := range map[string][]string{
 		"nodes":                   {"seq", "claim_executor", "offer_started_at", "claim_generation"},
-		"executors":               {"executor_id"},
-		"node_claim_offers":       {"reservation_id"},
 		"agent_loss_retries":      {"deadline_at"},
 		"node_execution_attempts": {"attempt_ordinal"},
 		"run_definition_plans":    {"plan_hash"},
@@ -132,8 +130,6 @@ SELECT
 		t.Errorf("wave2 invariants: run-fk=%d exact-cascade=%d origin-index=%d node-seq=%d", totalRunFK, exactCascade, originIndex, nodeSeq)
 	}
 	for table, column := range map[string]string{
-		"executors":               "executor_id",
-		"node_claim_offers":       "reservation_id",
 		"agent_loss_retries":      "deadline_at",
 		"node_execution_attempts": "attempt_ordinal",
 		"run_definition_plans":    "plan_hash",

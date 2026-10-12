@@ -162,11 +162,12 @@ func claimRouteFor(mux *http.ServeMux, r *http.Request) (string, *claimTokenRout
 		return "", nil
 	}
 	h, _ := mux.Handler(r)
-	route, ok := h.(*claimTokenRoute)
-	if !ok {
-		return "", nil
-	}
+	route, _ := h.(*claimTokenRoute)
 	return raw, route
+}
+
+func (c *claimTokenRoute) accepts(kind store.ClaimTokenKind) bool {
+	return slices.Contains(c.spec.kinds, kind)
 }
 
 // safety: this never consults the token cache; every request reads the claim

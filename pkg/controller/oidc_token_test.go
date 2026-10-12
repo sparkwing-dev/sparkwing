@@ -606,3 +606,35 @@ func TestOIDCTokenTagPushNamesTagRef(t *testing.T) {
 		t.Fatalf("tag sub/ref = %q/%q", claims.Sub, claims.Ref)
 	}
 }
+
+// A pooled runner or Kubernetes Job runs its node on the node's claim token,
+// which mints a workload token for its own run and for no other.
+func TestOIDCTokenAnswersANodeClaimTokenForItsOwnRunOnly(t *testing.T) {
+	ctx := context.Background()
+	f := newOIDCFixture(t)
+	for _, id := range []string{"run-own", "run-other"} {
+		f.run(t, f.acme, store.Trigger{ID: id, Pipeline: "deploy", TriggerSource: "github", GitBranch: "main"})
+		if err := f.st.CreateNode(ctx, store.Node{RunID: id, NodeID: "ship", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.acme.MarkNodeReady(ctx, "run-own", "ship"); err != nil {
+		t.Fatal(err)
+	}
+	raw := f.runner(t, f.acme, "agent:acme")
+	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
+	n, err := client.NewWithToken(srv.URL, nil, raw).ClaimNode(ctx, "pool:1", nil, time.Minute, nil)
+	if err != nil || n == nil || n.RunID != "run-own" || n.ClaimToken == "" {
+		t.Fatalf("claim node: %+v, %v", n, err)
+	}
+	tok, err := client.NewWithToken(srv.URL, nil, n.ClaimToken).OIDCToken(ctx, "run-own", "sts.amazonaws.com")
+	if err != nil {
+		t.Fatalf("a node claim token's own run: %v", err)
+	}
+	if claims, err := verifyAgainst(t, srv, tok.Token); err != nil || claims.RunID != "run-own" {
+		t.Fatalf("claims = %+v, %v; want a verified token for run-own", claims, err)
+	}
+	if got, _ := postOIDCToken(t, srv, n.ClaimToken, "run-other", `{"audience":"sts.amazonaws.com"}`); got != http.StatusForbidden {
+		t.Fatalf("a node claim token naming another run = %d, want 403", got)
+	}
+}

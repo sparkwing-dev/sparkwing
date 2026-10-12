@@ -47,9 +47,9 @@ func TestRunnerReadsItsTokenFromTheCredentialsDir(t *testing.T) {
 	}
 }
 
-// Team code runs beside the runner's token, so neither the cache's operator
-// token nor the key grants are signed with may be that token: either would
-// let one team's pipeline mint a grant for any team, or act as the operator.
+// Team code runs beside the runner's token, so the key grants are signed with
+// may not be that token: it would let one team's pipeline mint a grant for any
+// team, or the operator grant the controller signs for itself.
 func TestCacheSecretsAreNeverTheRunnersToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1s of real work; the fast class runs under -short")
@@ -62,9 +62,7 @@ func TestCacheSecretsAreNeverTheRunnersToken(t *testing.T) {
 		t.Fatal("the runner projects no agent-token credential")
 	}
 	for name, ref := range map[string]*renderedSecretKeyRef{
-		"cache cache-token":          credentialRef(t, cache, "cache-token"),
 		"cache cache-grant-key":      credentialRef(t, cache, "cache-grant-key"),
-		"controller cache-token":     credentialRef(t, controller, "cache-token"),
 		"controller cache-grant-key": credentialRef(t, controller, "cache-grant-key"),
 	} {
 		if ref == nil {
@@ -75,9 +73,6 @@ func TestCacheSecretsAreNeverTheRunnersToken(t *testing.T) {
 			t.Errorf("%s reads %s/%s, the runner's own token", name, ref.Name, ref.Key)
 		}
 	}
-	if !sameSecret(credentialRef(t, cache, "cache-token"), credentialRef(t, controller, "cache-token")) {
-		t.Error("the controller's cache token is not the cache's operator token")
-	}
 	if !sameSecret(credentialRef(t, cache, "cache-grant-key"), credentialRef(t, controller, "cache-grant-key")) {
 		t.Error("the controller signs grants with a key the cache does not verify with")
 	}
@@ -86,21 +81,15 @@ func TestCacheSecretsAreNeverTheRunnersToken(t *testing.T) {
 	}
 }
 
-// Pointing two of the three secrets at one Secret key fails the render
-// rather than handing team code the cache.
+// Pointing the grant key at the runner's token fails the render rather than
+// handing team code the cache.
 func TestSharedCacheSecretsFailAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1s of real work; the fast class runs under -short")
 	}
 	for name, sets := range map[string][]string{
-		"operator token is the runner token": {
-			"cache.tokenSecret.name=sparkwing-token", "cache.tokenSecret.key=token",
-		},
 		"grant key is the runner token": {
 			"cache.grantKeySecret.name=sparkwing-token", "cache.grantKeySecret.key=token",
-		},
-		"grant key is the operator token": {
-			"cache.grantKeySecret.name=sparkwing-cache-token", "cache.grantKeySecret.key=token",
 		},
 	} {
 		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", sets...)

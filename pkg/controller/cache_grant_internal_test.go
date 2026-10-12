@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func cacheGrantServer(t *testing.T, cacheToken, grantKey string) *Server {
+func cacheGrantServer(t *testing.T, grantKey string) *Server {
 	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -35,10 +35,10 @@ func cacheGrantServer(t *testing.T, cacheToken, grantKey string) *Server {
 		poolRunner.Name, poolRunner.TokenPrefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, nil).WithCacheCredentials("http://cache.invalid", cacheToken).WithCacheGrantKey(grantKey)
+	return New(st, nil).WithCacheURL("http://cache.invalid").WithCacheGrantKey(grantKey)
 }
 
-var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes}
+var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: store.MachineTokenScopes()}
 
 func teamA(*http.Request) (store.Team, error) { return "team-a", nil }
 
@@ -75,7 +75,7 @@ func decodeGrant(t *testing.T, rec *httptest.ResponseRecorder) CacheGrantRespons
 }
 
 func TestCacheGrantNamesTheTeamTheResolverAnswers(t *testing.T) {
-	s := cacheGrantServer(t, "operator-token", "grant-key")
+	s := cacheGrantServer(t, "grant-key")
 	body := decodeGrant(t, mintFor(t, s, teamA))
 	g, err := authwire.VerifyCacheGrant("grant-key", body.Grant, time.Now())
 	if err != nil || g.Team != "team-a" || g.Run != "run-1" {
@@ -83,18 +83,8 @@ func TestCacheGrantNamesTheTeamTheResolverAnswers(t *testing.T) {
 	}
 }
 
-// The grant key is the only thing that signs: a grant the controller mints
-// does not verify under the cache's operator token.
-func TestCacheGrantIsSignedWithTheGrantKeyNotTheCacheToken(t *testing.T) {
-	s := cacheGrantServer(t, "operator-token", "grant-key")
-	body := decodeGrant(t, mintFor(t, s, teamA))
-	if _, err := authwire.VerifyCacheGrant("operator-token", body.Grant, time.Now()); err == nil {
-		t.Fatal("a minted grant verified under the cache's operator token")
-	}
-}
-
 func TestCacheGrantRefusesACallerWithNoTeam(t *testing.T) {
-	s := cacheGrantServer(t, "operator-token", "grant-key")
+	s := cacheGrantServer(t, "grant-key")
 	rec := mintFor(t, s, func(*http.Request) (store.Team, error) { return "", errors.New("no team") })
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("mint with no team = %d, want 403: %s", rec.Code, rec.Body.String())
@@ -102,27 +92,20 @@ func TestCacheGrantRefusesACallerWithNoTeam(t *testing.T) {
 }
 
 func TestCacheGrantNeedsAGrantKeyToSignWith(t *testing.T) {
-	s := cacheGrantServer(t, "operator-token", "")
+	s := cacheGrantServer(t, "")
 	rec := mintFor(t, s, teamA)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("mint with no grant key = %d, want 404: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestCacheGrantRefusesAGrantKeyThatIsTheCacheToken(t *testing.T) {
-	s := cacheGrantServer(t, "same-secret", "same-secret")
-	if rec := mintFor(t, s, teamA); rec.Code/100 == 2 {
-		t.Fatalf("mint with the grant key equal to the cache token = %d, want a refusal", rec.Code)
-	}
-}
-
 // A GitHub Actions job's credential is confined to one repository, and a
 // grant opens its whole team's cache tree, so it gets none.
 func TestCacheGrantRefusesAGitHubRunnerCredential(t *testing.T) {
-	s := cacheGrantServer(t, "operator-token", "grant-key")
+	s := cacheGrantServer(t, "grant-key")
 	p := &Principal{
 		Name: store.GitHubRunnerPrincipalPrefix + "42:acme/app", Kind: store.TokenKindRunner,
-		Team: "team-a", Scopes: runnerTokenScopes, Expires: time.Now().Add(time.Hour),
+		Team: "team-a", Scopes: store.MachineTokenScopes(), Expires: time.Now().Add(time.Hour),
 	}
 	if rec := mintAs(t, s, p, teamA); rec.Code != http.StatusForbidden {
 		t.Fatalf("mint for a GitHub Actions credential = %d, want 403: %s", rec.Code, rec.Body.String())
@@ -131,7 +114,7 @@ func TestCacheGrantRefusesAGitHubRunnerCredential(t *testing.T) {
 
 // A grant cannot outlive the credential that asked for it.
 func TestCacheGrantEndsWhenTheCredentialDoes(t *testing.T) {
-	s := cacheGrantServer(t, "operator-token", "grant-key")
+	s := cacheGrantServer(t, "grant-key")
 	expires := time.Now().Add(10 * time.Minute)
 	pool := poolRunner
 	pool.Expires = expires

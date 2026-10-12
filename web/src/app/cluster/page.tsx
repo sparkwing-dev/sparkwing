@@ -12,9 +12,6 @@ import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import {
   fleetHeadroomState,
   fleetLocation,
-  fleetRegistration,
-  fleetSlotTotals,
-  fleetSlots,
   formatFleetResources,
   sortFleetAgents,
 } from "@/lib/fleet";
@@ -35,8 +32,6 @@ function typeBadge(kind: string): { label: string; cls: string } {
   switch (kind) {
     case "agent":
       return { label: "agent", cls: "bg-indigo-400/15 text-indigo-300" };
-    case "gateway":
-      return { label: "gateway", cls: "bg-cyan-400/15 text-cyan-300" };
     case "pool":
       return { label: "pool", cls: "bg-emerald-400/15 text-emerald-300" };
     case "local":
@@ -87,12 +82,7 @@ export default function ClusterPage() {
       byType[a.type] = (byType[a.type] || 0) + 1;
       if (a.status === "busy") busy++;
     }
-    return {
-      total: agents.length,
-      byType,
-      busy,
-      activeSlots: fleetSlotTotals(agents).active,
-    };
+    return { total: agents.length, byType, busy };
   }, [agents]);
 
   return (
@@ -157,15 +147,13 @@ function FleetCards({
     total: number;
     byType: Record<string, number>;
     busy: number;
-    activeSlots: number | null;
   };
 }) {
   const cards: Array<{ label: string; value: number | null }> = [
     { label: "total", value: totals.total },
     { label: "busy", value: totals.busy },
-    { label: "active slots", value: totals.activeSlots },
   ];
-  const typeOrder = ["agent", "gateway", "pool", "local"];
+  const typeOrder = ["agent", "pool", "local"];
   for (const k of typeOrder) {
     if (totals.byType[k]) cards.push({ label: k, value: totals.byType[k] });
   }
@@ -192,8 +180,7 @@ function FleetEmpty() {
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 text-xs text-[var(--muted)] space-y-2">
       <p>
-        No executors are registered and no legacy runners have claimed a node in
-        the last hour.
+        No runners have claimed a node in the last hour.
       </p>
       <p>
         Start a laptop agent:{" "}
@@ -221,7 +208,6 @@ function AgentRow({
 }) {
   const badge = typeBadge(agent.type);
   const activeRuns = agent.active_jobs?.length || 0;
-  const registration = fleetRegistration(agent);
   const headroomState = fleetHeadroomState(agent);
   const labels = Object.entries(agent.labels || {});
 
@@ -246,18 +232,6 @@ function AgentRow({
         <span className="font-mono text-sm font-medium truncate flex-1">
           {agent.name || "(anonymous)"}
         </span>
-        <span className="hidden md:flex flex-col items-end gap-0.5">
-          <span className="text-[9px] uppercase tracking-wider text-[var(--muted)]">
-            Policy
-          </span>
-          {registration === "registered" ? (
-            <LocationPill location={fleetLocation(agent)} configured />
-          ) : (
-            <span className="text-[10px] font-mono text-[var(--muted)]">
-              legacy activity
-            </span>
-          )}
-        </span>
         <span className="hidden lg:flex flex-col items-end gap-0.5">
           <span className="text-[9px] uppercase tracking-wider text-[var(--muted)]">
             Liveness
@@ -269,7 +243,8 @@ function AgentRow({
             Activity
           </span>
           <span>
-            {fleetSlots(agent)} slots · {activeRuns} runs
+            {agent.max_concurrent > 0 ? agent.max_concurrent : "-"} slots ·{" "}
+            {activeRuns} runs
           </span>
         </span>
         <span className="hidden 2xl:inline">
@@ -279,59 +254,41 @@ function AgentRow({
 
       {expanded && (
         <div className="border-t border-[var(--border)] px-3 py-3 grid gap-3 lg:grid-cols-3 text-xs">
-          <FleetDetailSection title="Configured policy">
-            {registration === "legacy" ? (
-              <p className="text-[var(--muted)]">
-                Configuration unavailable. This executor was inferred from
-                recent activity.
-              </p>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <KV label="type" value={agent.type || "unknown"} />
-                  <KV label="location" value={fleetLocation(agent)} />
-                  <KV
-                    label="priority"
-                    value={
-                      agent.base_priority == null
-                        ? "unknown"
-                        : `${agent.base_priority} (ceiling ${agent.priority_ceiling ?? "unknown"})`
-                    }
-                  />
-                  <KV label="slot limit" value={agent.max_concurrent} />
-                  <KV
-                    label="contribution budget"
-                    value={formatFleetResources(agent.budget, true)}
-                  />
+          <FleetDetailSection title="Executor">
+            <div className="grid grid-cols-2 gap-3">
+              <KV label="type" value={agent.type || "unknown"} />
+              <KV label="location" value={fleetLocation(agent)} />
+              <KV
+                label="slot limit"
+                value={agent.max_concurrent > 0 ? agent.max_concurrent : "unknown"}
+              />
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                capabilities
+              </div>
+              {labels.length === 0 ? (
+                <span className="text-[var(--muted)]">None advertised</span>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {labels.map(([k, v]) => (
+                    <span
+                      key={k}
+                      className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--background)] border border-[var(--border)] rounded"
+                    >
+                      {v ? `${k}=${v}` : k}
+                    </span>
+                  ))}
                 </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                    capabilities
-                  </div>
-                  {labels.length === 0 ? (
-                    <span className="text-[var(--muted)]">None configured</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1">
-                      {labels.map(([k, v]) => (
-                        <span
-                          key={k}
-                          className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--background)] border border-[var(--border)] rounded"
-                        >
-                          {v ? `${k}=${v}` : k}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+              )}
+            </div>
           </FleetDetailSection>
 
           <FleetDetailSection title="Observed liveness">
             <div className="grid grid-cols-2 gap-3">
               <KV label="status" value={agent.status || "unknown"} />
               <KV
-                label={registration === "legacy" ? "last observed" : "last heartbeat"}
+                label="last observed"
                 value={relativeTime(agent.last_seen)}
               />
               <KV
@@ -368,7 +325,6 @@ function AgentRow({
 
           <FleetDetailSection title="Current activity">
             <div className="grid grid-cols-2 gap-3">
-              <KV label="active slots" value={agent.active_slots ?? "unknown"} />
               <KV
                 label="slot capacity"
                 value={agent.max_concurrent > 0 ? agent.max_concurrent : "unknown"}
@@ -416,29 +372,6 @@ function AgentStatusPill({ status }: { status: string }) {
     >
       <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${dot}`} />
       {status || "idle"}
-    </span>
-  );
-}
-
-function LocationPill({
-  location,
-  configured = false,
-}: {
-  location: string;
-  configured?: boolean;
-}) {
-  const cls =
-    location === "local"
-      ? "bg-emerald-400/15 text-emerald-300"
-      : location === "cloud"
-        ? "bg-sky-400/15 text-sky-300"
-        : "bg-slate-400/15 text-slate-300";
-  return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[10px] font-mono font-bold ${cls}`}
-      aria-label={`${configured ? "Configured" : "Observed"} location: ${location}`}
-    >
-      {location}
     </span>
   );
 }

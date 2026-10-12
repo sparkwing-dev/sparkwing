@@ -820,7 +820,6 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 		{"debug_pauses", "released_by"},
 		{"credit_grants", "created_by"},
 		{"nodes", "claim_principal"},
-		{"node_claim_offers", "claim_principal"},
 		{"secrets", "principal"},
 	} {
 		if _, err := tx.ExecContext(ctx,

@@ -626,9 +626,7 @@ func principalMetered(ctx context.Context, q rowQuerier, team Team, principal st
 }
 
 // safety: the create-side guards count runs and nodes, which no claim reads, so
-// they serialize on a key of their own rather than the ledger's. A caller that
-// also takes the executor eligibility lock takes that one first, which is the
-// store's one lock order: executor, then a guard or ledger key.
+// they serialize on a key of their own rather than the ledger's.
 func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 	if tx.dialect != DialectPostgres {
 		return nil

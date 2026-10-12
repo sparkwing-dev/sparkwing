@@ -65,7 +65,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCacheToken, credCacheGrantKey,
+				credBillingToken, credCacheGrantKey,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	cachePodURL := fs.String("cache-pod-url", "",
@@ -165,16 +165,13 @@ func run(args []string) error {
 			controller.CompliantClaimPollsPerMinute()*8))
 	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
-			"rolling minute, charged whatever the answer. The agent liveness "+
-			"heartbeat is never budgeted. Zero is unlimited; %d suits the "+
+			"rolling minute, charged whatever the answer. Zero is unlimited; %d suits the "+
 			"cadence the shipped runners heartbeat at.",
 			controller.RecommendedHeartbeatsPerMinute))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
 		"request budget on every route one token can reach, per rolling minute, "+
 			"keyed on the token prefix. It bounds a caller that varies the runner "+
-			"it says it is, which the per-runner budgets above cannot. A liveness "+
-			"heartbeat for the agent this token enrolled is never the request "+
-			"that is shed; one naming any other agent is budgeted like the rest. "+
+			"it says it is, which the per-runner budgets above cannot. "+
 			"Past the budget a request is answered 429 with a Retry-After naming "+
 			"the refill delay. Zero is unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
@@ -454,7 +451,7 @@ func run(args []string) error {
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
-		WithCacheCredentials(*cacheURL, creds.CacheToken).
+		WithCacheURL(*cacheURL).
 		WithCacheGrantKey(creds.CacheGrantKey).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
@@ -492,7 +489,7 @@ func run(args []string) error {
 		return err
 	}
 	srv.WithTeamStorage(controller.TeamStorage{
-		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: creds.CacheToken,
+		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL),
 	})
 	if err := configureGitHubApp(srv, githubAppFlags{
 		AppID:         *githubAppID,
@@ -509,7 +506,7 @@ func run(args []string) error {
 		return fmt.Errorf("oidc issuer: %w", oerr)
 	}
 	srv = srv.WithOIDCIssuer(oidcIssuer)
-	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL, creds.CacheGrantKey, creds.CacheToken); err != nil {
+	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL, creds.CacheGrantKey); err != nil {
 		return err
 	}
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
@@ -722,7 +719,7 @@ func checkRequireAuth(st *store.Store, requireAuth bool) error {
 
 // safety: the grant is the only boundary between teams inside the cache; without a key
 // every run's grant request would fail at request time instead of at deploy.
-func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey, cacheToken string) error {
+func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey string) error {
 	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
 		return nil
 	}
@@ -730,11 +727,6 @@ func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey,
 		return errors.New("the license allows more than one team and a cache is configured, so " +
 			"the " + credCacheGrantKey + " credential must hold the key the controller signs cache grants with " +
 			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
-	}
-	if grantKey == cacheToken {
-		return errors.New("the " + credCacheGrantKey + " credential equals the cache's operator token " +
-			"(" + credCacheToken + "); give the grant key a secret of its own, since any holder of " +
-			"the operator token could otherwise mint a grant for any team")
 	}
 	return nil
 }
