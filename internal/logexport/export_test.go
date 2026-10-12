@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -20,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const threeLines = "line 1\nline 2\nline 3\n"
@@ -66,6 +69,40 @@ func newArchive(t *testing.T) *teamblob.Store {
 	return store
 }
 
+type fakeRun struct {
+	at    time.Time
+	nodes []string
+}
+
+type fakeRuns struct {
+	runs     map[string]fakeRun
+	recorded map[string]store.NodeLog
+	at       map[string]time.Time
+}
+
+func newFakeRuns() *fakeRuns {
+	return &fakeRuns{runs: map[string]fakeRun{}, recorded: map[string]store.NodeLog{}, at: map[string]time.Time{}}
+}
+
+func (f *fakeRuns) add(team, runID string, at time.Time, nodes ...string) {
+	f.runs[team+"/"+runID] = fakeRun{at: at, nodes: nodes}
+}
+
+func (f *fakeRuns) RunNodes(_ context.Context, team, runID string) (time.Time, []string, error) {
+	r, ok := f.runs[team+"/"+runID]
+	if !ok {
+		return time.Time{}, nil, fmt.Errorf("run %s: %w", runID, store.ErrNotFound)
+	}
+	return r.at, r.nodes, nil
+}
+
+func (f *fakeRuns) RecordLog(_ context.Context, l store.NodeLog, at time.Time) error {
+	f.recorded[l.Prefix], f.at[l.Prefix] = l, at
+	return nil
+}
+
+var runAt = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
 // hack: hand-built rather than written by a running service, which no longer exists: run-b and run-c on the
 // volume, run-d there with no team and no credits, run-a only in the archive.
 func fixture(t *testing.T) ExportOptions {
@@ -97,7 +134,12 @@ func fixture(t *testing.T) ExportOptions {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ExportOptions{Root: root, Archive: archive, To: to, DefaultTeam: "default"}
+	recorded := newFakeRuns()
+	recorded.add("team-a", "run-a", runAt, "build")
+	recorded.add("team-a", "run-b", runAt, "build")
+	recorded.add("team-a", "run-c", runAt, "test")
+	recorded.add("default", "run-d", runAt, "deploy")
+	return ExportOptions{Root: root, Archive: archive, To: to, DefaultTeam: "default", Runs: recorded}
 }
 
 // The export converts every node log the service held, archived or on its
@@ -135,9 +177,134 @@ func TestExportWritesSegmentsTheControllerReads(t *testing.T) {
 		}
 	}
 
+	runs := opts.Runs.(*fakeRuns)
+	if len(runs.recorded) != 4 {
+		t.Fatalf("recorded %d attempts, want 4: %+v", len(runs.recorded), runs.recorded)
+	}
+	for prefix, rec := range runs.recorded {
+		if rec.StoredBytes <= 0 || rec.UploadedThrough != 1 || !runs.at[prefix].Equal(runAt) {
+			t.Fatalf("record of %s = %+v at %v; want its stored bytes, one segment, the run's time", prefix, rec, runs.at[prefix])
+		}
+	}
+
+	clear(runs.recorded)
 	again, err := Export(ctx, opts)
-	if err != nil || again.Attempts != 0 || again.Skipped != 4 {
-		t.Fatalf("second export = %+v, %v", again, err)
+	if err != nil || again.Attempts != 0 || again.Skipped != 4 || len(runs.recorded) != 4 {
+		t.Fatalf("second export = %+v, %v, recorded %d; want every attempt skipped and recorded", again, err, len(runs.recorded))
+	}
+}
+
+func exportOne(t *testing.T, opts ExportOptions, run string) (ExportReport, error) {
+	t.Helper()
+	report, err := Export(t.Context(), opts)
+	if err == nil {
+		return report, nil
+	}
+	if report.Failed[run] == nil {
+		t.Fatalf("export failed for %v, not %s", report.Failed, run)
+	}
+	return report, report.Failed[run]
+}
+
+func readBack(t *testing.T, opts ExportOptions, team, run, node string) string {
+	t.Helper()
+	ctx := t.Context()
+	found, err := logseg.FindAttempts(ctx, opts.To, []string{logseg.ClassStandard, logseg.ClassFree}, team, run, node)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("%s/%s attempts = %+v, %v; want one", run, node, found, err)
+	}
+	log, err := logseg.Open(ctx, opts.To, found[0].Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := log.Read(ctx, opts.To, storage.ReadOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// A run the service archived and then only partly removed from its volume
+// converts whole: each file the volume lost comes from the archive.
+func TestExportTakesFilesTheVolumeLostFromTheArchive(t *testing.T) {
+	ctx := t.Context()
+	opts := fixture(t)
+	writeFile(t, filepath.Join(opts.Root, "runs", "run-a", "deploy.log"), "volume line\n")
+	if _, err := opts.Archive.Put(ctx, "", indexRunRel("run-a"),
+		strings.NewReader(`{"team":"team-a","files":[{"rel":"build.log"},{"rel":".seals/build.log"},{"rel":"deploy.log"}]}`),
+		teamblob.PutOptions{Size: -1}); err != nil {
+		t.Fatal(err)
+	}
+	opts.Runs.(*fakeRuns).add("team-a", "run-a", runAt, "build", "deploy")
+	if _, err := exportOne(t, opts, "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readBack(t, opts, "team-a", "run-a", "build"); got != threeLines {
+		t.Fatalf("build, only in the archive = %q", got)
+	}
+	if got := readBack(t, opts, "team-a", "run-a", "deploy"); got != "volume line\n" {
+		t.Fatalf("deploy, on the volume = %q", got)
+	}
+}
+
+// Each way a run cannot be converted under the team and node it belongs to
+// fails that run, naming it, rather than converting part of it.
+func TestExportRefusesARunItCannotConvertWhole(t *testing.T) {
+	for name, tc := range map[string]struct {
+		run, want string
+		setup     func(t *testing.T, opts ExportOptions)
+	}{
+		"indexed file missing from the archive": {"run-a", "build.log", func(t *testing.T, opts ExportOptions) {
+			if err := opts.Archive.Delete(t.Context(), "team-a", runObjectRel("run-a", "build.log")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		"corrupt metadata": {"run-b", "metadata", func(t *testing.T, opts ExportOptions) {
+			writeFile(t, filepath.Join(opts.Root, "runs", "run-b", runMetaFile), `{"team":`)
+		}},
+		"volume and archive disagree on the team": {"run-a", "team", func(t *testing.T, opts ExportOptions) {
+			writeFile(t, filepath.Join(opts.Root, "runs", "run-a", runMetaFile), `{"team":"team-b"}`)
+		}},
+		"run the controller does not hold": {"run-c", "run-c", func(t *testing.T, opts ExportOptions) {
+			delete(opts.Runs.(*fakeRuns).runs, "team-a/run-c")
+		}},
+		"node file no node of the run fits": {"run-c", "unit__test", func(t *testing.T, opts ExportOptions) {
+			writeFile(t, filepath.Join(opts.Root, "runs", "run-c", "unit__test.log"), "line\n")
+		}},
+		"node file two nodes of the run fit": {"run-c", "unit__test", func(t *testing.T, opts ExportOptions) {
+			writeFile(t, filepath.Join(opts.Root, "runs", "run-c", "unit__test.log"), "line\n")
+			opts.Runs.(*fakeRuns).add("team-a", "run-c", runAt, "test", "unit/test", "unit__test")
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts := fixture(t)
+			tc.setup(t, opts)
+			report, err := exportOne(t, opts, tc.run)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("export of %s = %v; want a failure naming %q", tc.run, err, tc.want)
+			}
+			if report.Runs != 3 {
+				t.Fatalf("export reported %d runs converted, want the 3 others", report.Runs)
+			}
+		})
+	}
+}
+
+// A node file name with "__" is filed under the run's one node it can
+// name, whether that ID holds "__" or "/".
+func TestExportFilesANodeUnderTheIDTheRunRecords(t *testing.T) {
+	for _, node := range []string{"unit__test", "unit/test"} {
+		t.Run(node, func(t *testing.T) {
+			opts := fixture(t)
+			writeFile(t, filepath.Join(opts.Root, "runs", "run-c", "unit__test.log"), "line\n")
+			opts.Runs.(*fakeRuns).add("team-a", "run-c", runAt, "test", node)
+			if _, err := exportOne(t, opts, "run-c"); err != nil {
+				t.Fatal(err)
+			}
+			if got := readBack(t, opts, "team-a", "run-c", node); got != "line\n" {
+				t.Fatalf("%s = %q", node, got)
+			}
+		})
 	}
 }
 

@@ -83,15 +83,23 @@ func readDirAt(root *os.Root, path string) ([]fs.DirEntry, error) {
 	return entries, nil
 }
 
-// safety: a torn metadata file records no team, which the export treats as the default team's run; it never
-// names another team.
-func readRunMeta(root *os.Root, runID string) runMeta {
-	var m runMeta
+// safety: a run with no metadata file is one the service recorded no team for, which the export files under the
+// default team; one it cannot read or parse names an owner the export cannot know, so the run is refused.
+func readRunMeta(root *os.Root, runID string) (m runMeta, found bool, err error) {
 	data, err := readLogFile(root, filepath.Join(runID, runMetaFile))
-	if err != nil || json.Unmarshal(data, &m) != nil || (m.Team != "" && !teamblob.ValidTeam(m.Team)) {
-		return runMeta{}
+	if errors.Is(err, os.ErrNotExist) {
+		return runMeta{}, false, nil
 	}
-	return m
+	if err != nil {
+		return runMeta{}, false, fmt.Errorf("read the run's metadata: %w", err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return runMeta{}, false, fmt.Errorf("the run's metadata file: %w", err)
+	}
+	if m.Team != "" && !teamblob.ValidTeam(m.Team) {
+		return runMeta{}, false, fmt.Errorf("the run's metadata names %q, which is not a team", m.Team)
+	}
+	return m, true, nil
 }
 
 func parseRunIndex(runID string, data []byte) (runIndex, error) {

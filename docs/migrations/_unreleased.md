@@ -1625,7 +1625,7 @@ step with the controller's own.
   storage.
 - **Logs the service already holds:** run `sparkwing-controller migrate-logs`
   once against the service's root and archive and the controller's cache
-  bucket (see [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments))
+  bucket and state database (see [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments))
   before you retire the service; logs not converted become unreadable.
 - **Mixed versions:** upgrade the controller first. A runner that predates
   segments keeps writing to its logs URL, which the controller still reads
@@ -1651,13 +1651,16 @@ that keep the logs service running.
   runner keeps the log on its own disk and a laptop run against it fails
   at start naming the controller. Pipeline binaries built against any SDK
   keep logging unchanged: the runner serves their appends on loopback.
-- **Before you upgrade:** scale the logs service to zero and run this
-  release's `sparkwing-controller migrate-logs` once, `--dry-run` first, as
-  a Job that mounts the logs PVC with the controller's credentials, as
+- **Before you upgrade:** scale the logs service and the controller to
+  zero and run this release's `sparkwing-controller migrate-logs` once,
+  `--dry-run` first, as a Job that mounts the logs PVC and the controller's
+  data volume with the controller's credentials, as
   [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments)
   describes in order. It reads the service's volume and archive directly,
-  skips what it already converted, and can run again. Logs not converted
-  become unreadable.
+  records each converted log in the controller's state database, skips
+  what it already converted, and can run again. It names and leaves
+  unconverted any run it cannot convert whole, such as one the controller's
+  database does not hold. Logs not converted become unreadable.
 - **Helm:** delete `sparkwing-runner-bundle.logs` (or `logs` for a
   standalone runner bundle) and `controller.logs` from your values; a
   values file that still sets them fails to render. The upgrade removes the
