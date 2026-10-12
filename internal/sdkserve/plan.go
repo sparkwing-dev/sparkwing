@@ -2,8 +2,8 @@ package sdkserve
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -53,9 +53,8 @@ func plan(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 	built, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, frameLogger{s}), req.Args, rc)
 	if err != nil {
 		code := nodeproto.CodePlanFailed
-		// hack: Invoke reports args that fail the declared inputs under this
-		// prefix, and the SDK has no typed error to tell them from plan code's.
-		if strings.HasPrefix(err.Error(), fmt.Sprintf("inputs for pipeline %q: ", req.Pipeline)) {
+		var inErr *sparkwing.InputError
+		if errors.As(err, &inErr) {
 			code = nodeproto.CodeInvalidArgs
 		}
 		return nil, &nodeproto.Error{Code: code, Message: err.Error()}

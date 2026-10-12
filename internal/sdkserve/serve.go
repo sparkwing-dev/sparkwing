@@ -17,12 +17,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-// ProtocolHandlesEnv names the inherited request and frame pipe handles on
-// Windows, as "<request>,<frame>" in decimal. Unix uses descriptors 3 and 4.
-const ProtocolHandlesEnv = "SPARKWING_PROTOCOL_HANDLES"
 
 // Config is what the serving loop needs from the engine packages that link
 // it, which sdkserve cannot import without a cycle.
@@ -38,7 +35,12 @@ type Config struct {
 // Main serves the protocol on the inherited pipes until the host closes the
 // request pipe, and returns the process exit status.
 func Main(cfg Config) int {
-	req, frames, err := openPipes()
+	req, frames, err := protofd.Pipes()
+	if err == nil {
+		// safety: no command this process starts may read a handle list that
+		// names handles it does not hold.
+		err = os.Unsetenv(protofd.HandlesEnv)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
 		return 2
@@ -115,9 +117,24 @@ func (s *server) dispatch(ctx context.Context, req nodeproto.Request) {
 	case h.needsPlan && s.plan() == nil:
 		s.reply(req.ID, nil, &nodeproto.Error{Code: nodeproto.CodeNoPlan, Message: fmt.Sprintf("%s needs a plan earlier in this process", req.Op)})
 	default:
-		result, err := h.run(ctx, s, req)
+		result, err := run(ctx, s, h, req)
 		s.reply(req.ID, result, err)
 	}
+}
+
+// safety: a panic in pipeline code fails its request and leaves the process
+// serving, so the host reads a reply rather than sdk_exited.
+func run(ctx context.Context, s *server, h handler, req nodeproto.Request) (result any, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			perr := &nodeproto.Error{Message: fmt.Sprintf("%s panicked: %v", req.Op, p)}
+			if req.Op == nodeproto.OpPlan {
+				perr.Code = nodeproto.CodePlanFailed
+			}
+			result, err = nil, perr
+		}
+	}()
+	return h.run(ctx, s, req)
 }
 
 func (s *server) plan() *Planned {
