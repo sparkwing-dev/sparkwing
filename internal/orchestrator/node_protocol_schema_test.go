@@ -192,7 +192,6 @@ func (s protocolSchema) mustValidate(t *testing.T, def string, v any) {
 // safety: schema properties the Go SDK does not emit yet, per $defs entry; the
 // check fails once a listed one is emitted, so the list cannot go stale.
 var notYetEmitted = map[string][]string{
-	"plan":      {"protocol"},
 	"node":      {"caches", "closures", "memo_key", "needs_generated", "tools"},
 	"modifiers": {"has_verify", "skip_if_budget_ms"},
 	"step":      {"closures", "continue_on_error", "has_dry_run", "optional", "safe_without_dry_run"},
