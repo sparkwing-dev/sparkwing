@@ -655,13 +655,11 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 	declared := g.Declared
 	switch {
 	case pinnedBinary != "":
-		raw, err := runDescribeBinary(context.Background(), sparkwingDir, pinnedBinary)
+		doc, err := describeBinary(context.Background(), sparkwingDir, pinnedBinary)
 		if err != nil {
 			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
 		}
-		if err := json.Unmarshal(raw, &declared); err != nil {
-			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
-		}
+		declared = doc.Pipelines
 	case declared == nil || execDir != g.SubmitDir:
 		var err error
 		declared, err = repos.DescribeRepo(execDir)

@@ -191,10 +191,17 @@ func TestDispatchRun_ConsumesSeparatorBeforeExecutingPipeline(t *testing.T) {
 		"go.mod": "module example.com/fictional\n\ngo 1.26\n",
 		"main.go": `package main
 import (
+ "bufio"
  "encoding/json"
+ "fmt"
  "os"
 )
 func main() {
+ if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+  _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
+  fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fictional\",\"extra\":true}]}}")
+  return
+ }
  data, err := json.Marshal(os.Args[1:])
  if err != nil { panic(err) }
  if err := os.WriteFile(os.Getenv("FICTIONAL_ARGUMENTS_FILE"), data, 0600); err != nil { panic(err) }
@@ -249,12 +256,19 @@ func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
 		"go.mod": "module example.com/fictional\n\ngo 1.26\n",
 		"main.go": `package main
 import (
+ "bufio"
  "encoding/json"
+ "fmt"
  "os"
  "sort"
  "strings"
 )
 func main() {
+ if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+  _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
+  fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fictional\"}]}}")
+  return
+ }
  carried := []string{}
  for _, entry := range os.Environ() {
   if strings.HasPrefix(entry, "SPARKWING_WORKERS=") || strings.HasPrefix(entry, "SPARKWING_MODE=") { carried = append(carried, entry) }

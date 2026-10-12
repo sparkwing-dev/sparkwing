@@ -197,7 +197,7 @@ func pipelineBinary(
 }
 
 func ensureDescribeCache(ctx context.Context, sparkwingDir, key, binPath string) {
-	if _, err := os.Stat(describeCachePath(key)); err == nil {
+	if readDescribeFile(describeCachePath(key)) != nil {
 		return
 	}
 	if err := writeDescribeCache(ctx, sparkwingDir, binPath); err != nil {

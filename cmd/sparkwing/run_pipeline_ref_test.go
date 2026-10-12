@@ -212,8 +212,8 @@ func TestPipelineRefSubmissionValidatesSelectedName(t *testing.T) {
 	files := map[string]string{
 		"go.mod": "module selectedfixture\n\ngo 1.22\n",
 		"main.go": `package main
-import "fmt"
-func main() { fmt.Print("[{\"name\":\"selected\"}]") }
+import ("bufio";"fmt";"os")
+func main() { _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n'); fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"selected\"}]}}") }
 `,
 	}
 	for name, body := range files {
