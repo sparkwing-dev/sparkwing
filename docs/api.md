@@ -102,8 +102,8 @@ The controller serves node logs, which runners upload as segments (see
 - `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node over SSE
   through every attempt of it in this run, in order, holding the node's
   live-view watch while open, and ends with a `stream_end` event once the
-  node is done with no automatic retry still to come, or its run is over,
-  and its last attempt is sealed. Each line carries the cursor just past
+  node is done with an outcome other than failed, or its run is over (only
+  a failure can be retried), and its last attempt is sealed. Each line carries the cursor just past
   it as its event id; sending the last one back as `Last-Event-ID` (or
   `cursor=`, which the header overrides) resumes after it.
 - `GET /api/v1/runs/{id}/logs/{node}/completeness` returns the node's

@@ -816,9 +816,11 @@ func TestNodeLogStreamFollowsEveryAttemptAndResumes(t *testing.T) {
 	}
 }
 
-// A failed node that sits done during a dispatcher's retry backoff, with
-// retry budget left, still has a log to come; its log settles once the
-// budget is spent or the run is over.
+// A failed node may be retried until its run ends, whatever its recorded
+// budget says: one that sits done during a dispatcher's retry backoff with
+// no budget recorded, or one that failed inline with nothing consumed,
+// keeps its log open until the run is over. A node done any other way
+// settles at once.
 func TestNodeLogSettlesOnlyWithNoRetryToCome(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
@@ -836,17 +838,24 @@ func TestNodeLogSettlesOnlyWithNoRetryToCome(t *testing.T) {
 		}
 		return got
 	}
-	set(`UPDATE nodes SET status = 'done', outcome = 'failed', attempts_consumed = 1, retry_budget = 2 WHERE run_id = 'run-d' AND node_id = 'a'`)
-	if settled() {
-		t.Fatal("a failed node with retries left reads as settled")
+	for name, q := range map[string]string{
+		"retry backoff with no budget recorded": `UPDATE nodes SET status = 'done', outcome = 'failed', attempts_consumed = 1, retry_budget = 0 WHERE run_id = 'run-d' AND node_id = 'a'`,
+		"inline failure":                        `UPDATE nodes SET status = 'done', outcome = 'failed', attempts_consumed = 0, retry_budget = 0 WHERE run_id = 'run-d' AND node_id = 'a'`,
+	} {
+		set(q)
+		if settled() {
+			t.Fatalf("%s: a failed node of a running run reads as settled", name)
+		}
 	}
-	set(`UPDATE nodes SET attempts_consumed = 3 WHERE run_id = 'run-d' AND node_id = 'a'`)
-	if !settled() {
-		t.Fatal("a failed node that spent its retries reads as unsettled")
-	}
-	set(`UPDATE nodes SET attempts_consumed = 1 WHERE run_id = 'run-d' AND node_id = 'a'`)
 	set(`UPDATE runs SET status = 'failed' WHERE id = 'run-d'`)
 	if !settled() {
-		t.Fatal("a node of a finished run reads as unsettled")
+		t.Fatal("a failed node of a finished run reads as unsettled")
+	}
+	set(`UPDATE runs SET status = 'running' WHERE id = 'run-d'`)
+	for _, outcome := range []string{"success", "skipped", "cancelled"} {
+		set(`UPDATE nodes SET outcome = '` + outcome + `' WHERE run_id = 'run-d' AND node_id = 'a'`)
+		if !settled() {
+			t.Fatalf("a node done with outcome %s reads as unsettled", outcome)
+		}
 	}
 }

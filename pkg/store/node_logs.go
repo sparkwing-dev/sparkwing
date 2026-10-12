@@ -63,17 +63,15 @@ func (s *Store) CurrentNodeAttempt(ctx context.Context, team Team, runID, nodeID
 }
 
 // NodeLogSettled reports whether a node of the run will write no more
-// log: its run is over, or the node is done with no automatic retry still
-// to come, as during a dispatcher's retry backoff, when a failed node
-// whose retry budget is not spent sits done until it is reset. found is
-// false when the run has no such node.
+// log: its run is over, or the node is done with an outcome other than
+// failed. Only a failure can be retried, so a failed node's log stays
+// open until the run ends. found is false when the run has no such node.
 func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID string) (settled, found bool, err error) {
 	var status, outcome, runStatus string
-	var consumed, budget int64
-	err = s.queryRow(ctx, `SELECT n.status, n.outcome, n.attempts_consumed, n.retry_budget, r.status
+	err = s.queryRow(ctx, `SELECT n.status, n.outcome, r.status
   FROM nodes n JOIN runs r ON r.team = n.team AND r.id = n.run_id
  WHERE n.team = ? AND n.run_id = ? AND n.node_id = ?`,
-		string(team), runID, nodeID).Scan(&status, &outcome, &consumed, &budget, &runStatus)
+		string(team), runID, nodeID).Scan(&status, &outcome, &runStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, nil
 	}
@@ -84,8 +82,7 @@ func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID str
 	case "success", runStatusFailed, runStatusCancelled:
 		return true, true, nil
 	}
-	retrying := outcome == outcomeFailed && consumed <= budget
-	return status == nodeStatusDone && !retrying, true, nil
+	return status == nodeStatusDone && outcome != outcomeFailed, true, nil
 }
 
 // OpenNodeLog records prefix as the attempt's log location unless the
