@@ -131,9 +131,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := st.CreateUser(fixtureUser, fixturePassword, []string{controller.ScopeAdmin}, now); err != nil {
-		log.Fatal(err)
-	}
 	srv := controller.New(st, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{
 		Bundle:  os.DirFS(config.webOut),
 		Version: "auth-browser-fixture",
@@ -176,8 +173,3 @@ func main() {
 		}
 	}
 }
-
-const (
-	fixtureUser     = "admin"
-	fixturePassword = "correct-horse"
-)

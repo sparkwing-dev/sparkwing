@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1044,4 +1046,12 @@ func closeRowsInto(rows *sql.Rows, err *error) {
 	if cerr := rows.Close(); cerr != nil && *err == nil {
 		*err = cerr
 	}
+}
+
+func newOpaqueIdentity(prefix string) (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return prefix + hex.EncodeToString(raw[:]), nil
 }

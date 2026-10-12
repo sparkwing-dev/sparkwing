@@ -48,17 +48,16 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	return c.getSecret(ctx, name, "")
 }
 
-// GetSecretForRun fetches the row owned by the pipeline of runID. The
-// controller checks the caller's claim on that run, so this is how a
-// runner working several runs names which one the read is for.
+// GetSecretForRun fetches the row owned by the pipeline of runID. A claim
+// token reads only its own run's secrets that the run's plan declares; an
+// operator or team-admin credential reads the row by name.
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error) {
 	return c.getSecret(ctx, name, queryParam("run", runID))
 }
 
 // GetSecretForPipeline fetches the row a pipeline owns, falling back to
-// the unscoped row. The pipeline hint is honored only for an admin
-// caller; a narrower principal reads the pipeline of the run it holds a
-// claim in.
+// the unscoped row. Only an operator or team-admin credential reads by
+// name; any other bearer is refused with claim_required.
 func (c *Client) GetSecretForPipeline(ctx context.Context, name, pipeline string) (*Secret, error) {
 	return c.getSecret(ctx, name, queryParam("pipeline", pipeline))
 }

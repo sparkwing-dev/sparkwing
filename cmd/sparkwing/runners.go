@@ -26,7 +26,7 @@ import (
 )
 
 // safety: the scope set docs/auth.md gives a runner; a wider one hands a workstation reads no claim loop needs.
-var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state", "secrets.read"}
+var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state"}
 
 // safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"
@@ -248,7 +248,7 @@ func requireRunnerToken(controller, adminToken, prefix, configPath string) error
 	if err := json.Unmarshal(resp, &found); err != nil {
 		return fmt.Errorf("decode the token %s: %w", prefix, err)
 	}
-	if found.Kind != store.TokenKindRunner {
+	if store.ActingKind(found.Kind, found.Principal) != store.TokenKindRunner {
 		return fmt.Errorf("%s names the token %s, which is a %s token held by %q, not a runner token; "+
 			"revoke it with `sparkwing cluster tokens revoke` if that is what you meant",
 			configPath, prefix, found.Kind, found.Principal)

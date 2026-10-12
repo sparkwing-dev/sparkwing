@@ -41,11 +41,7 @@ SQLite under `~/.sparkwing/state.db`, with per-run logs under
 `~/.sparkwing/runs/<runID>/`. Zero shared
 infrastructure. Every `sparkwing run` without `--profile` records here.
 
-For: a developer working on pipelines on their own laptop, and the other
-machines that developer owns. `sparkwing run <pipeline> --sw-fleet` hands
-nodes of one foreground run to helpers provisioned with
-[`sparkwing fleet`](cli-fleet.md), which keeps the run local to your own
-hardware and needs no controller.
+For: a developer working on pipelines on their own laptop.
 
 Tradeoff: nobody else can see what you ran.
 
@@ -448,8 +444,7 @@ A CI job names its profile on its own command line (see
 
 A practical decision order:
 
-1. **One person, on the machines they own?** Local, plus `--sw-fleet`
-   when a run should spread across them.
+1. **One person on their own machine?** Local.
 2. **A team that wants one dashboard and one run history?**
    [Sparkwing Cloud](#sparkwing-cloud), and `sparkwing pipeline trigger`
    from laptops and CI.

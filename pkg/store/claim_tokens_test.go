@@ -21,7 +21,9 @@ type claimedFixture struct {
 func claimForToken(t *testing.T, runID string) claimedFixture {
 	t.Helper()
 	s := storetest.Open(t)
-	identity := store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"}
+	// safety: an unbound claim stands in for the launcher's, which mints its own token; a
+	// bound one is a runner's, which the award already gave a token.
+	identity := store.ClaimIdentity{}
 	readyNode(t, s, runID, "build")
 	node, err := s.ClaimNextReadyNode(context.Background(), identity, "holder-1", time.Minute, nil)
 	if err != nil || node == nil {

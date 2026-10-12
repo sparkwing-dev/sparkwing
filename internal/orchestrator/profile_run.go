@@ -92,35 +92,6 @@ func refusePinnedCheckoutRun(entry *pipelines.Pipeline) error {
 	return RefusePinnedLocalRun(entry)
 }
 
-func fleetProfileUsesRemoteAuthority(p *profile.Profile) bool {
-	if p == nil {
-		return false
-	}
-	if p.HasController() {
-		return true
-	}
-	surfaces := p.Surfaces()
-	if !fleetSurfaceLocal(surfaces.Secrets, backends.TypeEnv, backends.TypeFilesystem, backends.TypeNone) ||
-		!fleetSurfaceLocal(surfaces.State, backends.TypeSQLite) ||
-		!fleetSurfaceLocal(surfaces.Cache, backends.TypeFilesystem) ||
-		!fleetSurfaceLocal(surfaces.Logs, backends.TypeFilesystem, backends.TypeStdout) {
-		return true
-	}
-	return !fleetSurfaceLocal(surfaces.BinaryCache(), backends.TypeFilesystem)
-}
-
-func fleetSurfaceLocal(spec *backends.Spec, allowed ...string) bool {
-	if spec == nil {
-		return true
-	}
-	for _, typ := range allowed {
-		if spec.Type == typ {
-			return true
-		}
-	}
-	return false
-}
-
 func resolveNamedProfile(name string, projectCfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
 	p, chain, userErr := resolveUserProfile(name)
 	if userErr == nil {

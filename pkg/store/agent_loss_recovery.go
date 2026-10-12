@@ -157,9 +157,6 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return nil, err
-	}
 
 	// safety: the runs are locked before their nodes, in the order
 	// lockTeamRunRowTx names; a claim that expires between the two reads, or
@@ -247,9 +244,6 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 				FailureAgentLost, now.UnixNano(), item.coordinatorID, item.executorKind,
 				item.executorID, avoidUntil, runID, item.nodeID); err != nil {
-				return nil, err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, item.nodeID); err != nil {
 				return nil, err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts

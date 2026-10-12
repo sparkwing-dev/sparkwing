@@ -54,14 +54,11 @@ var enumGroups = map[string]struct {
 		},
 	},
 	"store.executorLocation": {
-		file: "pkg/store/executors.go",
-		values: []string{
-			"executorLocationLocal", "executorLocationCloud",
-			"executorLocationUnknown", "executorLocationCoordinator",
-		},
+		file:   "pkg/store/execution_attempts.go",
+		values: []string{"executorLocationLocal", "executorLocationCloud"},
 	},
 	"store.ExecutorKind": {
-		file:   "pkg/store/executors.go",
+		file:   "pkg/store/execution_attempts.go",
 		values: []string{"ExecutorKindLocal"},
 	},
 	"store.OnLimit": {

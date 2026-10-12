@@ -244,6 +244,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"storage-commit-receipts-v1",
 		"team-credit-exhaustion-v1",
 		"team-scoped-user-keys",
+		"token-sessions-v1",
 		"trigger-credit-cursor-v1",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
@@ -304,6 +305,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		"storage-commit-receipts-v1",
 		"team-credit-exhaustion-v1",
 		"team-scoped-user-keys",
+		"token-sessions-v1",
 		"trigger-credit-cursor-v1",
 		"unique-token-prefix",
 	}

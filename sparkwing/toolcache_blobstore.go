@@ -118,8 +118,7 @@ func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error) {
 // silently expanding paths from another tree.
 //
 // The blob store authenticates reads as well as writes, so the request
-// carries the run's $SPARKWING_CACHE_GRANT, or else $SPARKWING_CACHE_TOKEN,
-// as its bearer.
+// carries the run's $SPARKWING_CACHE_GRANT as its bearer.
 func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 	if gcURL == "" {
 		return false, 0, nil

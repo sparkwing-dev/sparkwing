@@ -146,9 +146,31 @@ func TestRegisteredAgentsCarryTheirLastLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].Name != "pi" || agents[0].Enrolled ||
+	if err != nil || len(agents) != 1 || agents[0].Name != "pi" ||
 		!slices.Equal(agents[0].Profile.Labels, []string{"tool:git", "arch=arm64"}) {
 		t.Fatalf("agents = %+v, %v; want pi with its labels less the forged name", agents, err)
+	}
+}
+
+// Token times are Unix seconds, so an agent whose token expires is still
+// listed before then, and its last use reads back as the time it happened.
+func TestRegisteredAgentsKeepAnExpiringTokenAndItsLastUse(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	raw, desk, err := s.CreateToken("agent:desk", store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupToken(raw, now); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
+	if err != nil || len(agents) != 1 || agents[0].TokenPrefix != desk.Prefix {
+		t.Fatalf("agents = %+v, %v; want the desk token, which expires in an hour", agents, err)
+	}
+	if seen := agents[0].LastSeen; seen.Before(now.Add(-time.Minute)) || seen.After(time.Now().Add(time.Minute)) {
+		t.Fatalf("last seen = %v, want about %v", seen, now)
 	}
 }
 

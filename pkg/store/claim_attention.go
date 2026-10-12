@@ -128,23 +128,19 @@ func (s *Store) RecordAgentLabels(ctx context.Context, tokenPrefix string, label
 // RegisteredAgent is a live agent credential of a team, online or not.
 type RegisteredAgent struct {
 	Name, TokenPrefix string
-	// Profile is what an enrollment grants, or else what the agent advertised
-	// on its latest claim.
-	Profile match.Profile
-	// Enrolled marks an enrolled executor, whose LastSeen is its heartbeat.
-	Enrolled bool
+	// Profile is what the agent advertised on its latest claim.
+	Profile  match.Profile
 	LastSeen time.Time
 }
 
 // ListRegisteredAgents lists team's unrevoked, unexpired agent credentials:
-// runner tokens and enrolled executors.
+// runner tokens and machine-family team tokens.
 func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]RegisteredAgent, error) {
-	rows, err := s.query(ctx, `SELECT t.prefix, t.principal, t.advertised_labels_json, t.last_used_at,
-       e.name, e.location, e.capabilities_json, e.accept_repos_json, e.budget_cores, e.budget_memory_bytes, e.last_seen
-  FROM tokens t LEFT JOIN executors e ON e.token_prefix = t.prefix
+	rows, err := s.query(ctx, `SELECT t.prefix, t.principal, t.advertised_labels_json, t.last_used_at
+  FROM tokens t
  WHERE t.team = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)
-   AND (t.kind = 'runner' OR e.name IS NOT NULL)
- ORDER BY t.prefix`, string(team), time.Now().UnixNano())
+   AND (t.kind = 'runner' OR (t.kind = 'team' AND substr(t.principal, 1, 6) = 'agent:'))
+ ORDER BY t.prefix`, string(team), time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -153,33 +149,18 @@ func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]Register
 	for rows.Next() {
 		var a RegisteredAgent
 		var principal string
-		var advertised, caps, accept []byte
-		var usedNS, seenNS sql.NullInt64
-		var name, location sql.NullString
-		var cores sql.NullFloat64
-		var memory sql.NullInt64
-		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &usedNS,
-			&name, &location, &caps, &accept, &cores, &memory, &seenNS); err != nil {
+		var advertised []byte
+		var used sql.NullInt64
+		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &used); err != nil {
 			return nil, err
-		}
-		if name.Valid {
-			e := Executor{
-				Name: name.String, Location: location.String,
-				Budget: ExecutorResource{Cores: cores.Float64, MemoryBytes: memory.Int64},
-			}
-			e.decodeGrants(caps, accept)
-			a.Name, a.Profile, a.Enrolled = e.Name, e.profile(), true
-			a.LastSeen = time.Unix(0, seenNS.Int64)
-			out = append(out, a)
-			continue
 		}
 		a.Name = strings.TrimPrefix(principal, agentPrincipalPrefix)
 		a.Profile = match.Profile{Name: a.Name, Class: match.ClassAgent}
 		if len(advertised) > 0 && json.Unmarshal(advertised, &a.Profile.Labels) == nil {
 			a.Profile.Labels = match.SelfAsserted(a.Profile.Labels)
 		}
-		if usedNS.Int64 > 0 {
-			a.LastSeen = time.Unix(0, usedNS.Int64)
+		if used.Int64 > 0 {
+			a.LastSeen = time.Unix(used.Int64, 0)
 		}
 		out = append(out, a)
 	}

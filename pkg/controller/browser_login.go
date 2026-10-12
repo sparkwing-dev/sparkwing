@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -39,24 +40,11 @@ const loginHTML = `<!doctype html>
     .gh:hover { background: #2f363d; }
     .or { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; font-size: 0.75rem; color: #6e7681; }
     .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid #30363d; }
+    summary.or { cursor: pointer; list-style: none; }
+    summary.or::-webkit-details-marker { display: none; }
   </style>
 </head>
 <body>
-  {{if .Bootstrap}}
-  <form class="card" method="POST" action="/login/bootstrap">
-    <h1>Create first admin</h1>
-    <div class="note">This is a fresh Sparkwing cluster. The first account you create here becomes the administrator. After that, additional users must be added by an admin.</div>
-    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
-    <label for="username">Username</label>
-    <input id="username" name="username" type="text" autocomplete="username" autofocus required>
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
-    <input type="hidden" name="next" value="{{.Next}}">
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button type="submit">Create admin and sign in</button>
-    <div class="footer">First-visit signup</div>
-  </form>
-  {{else}}
   <form class="card" method="POST" action="/login">
     <h1>Sparkwing</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
@@ -72,19 +60,24 @@ const loginHTML = `<!doctype html>
       <span>Sign in with GitHub</span>
     </a>
     {{end}}
-    {{if or .Google .GitHub}}<div class="or">or use a password</div>{{end}}
-    <label for="username">Username</label>
-    <input id="username" name="username" type="text" autocomplete="username" {{if not (or .Google .GitHub)}}autofocus {{end}}required>
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    {{if or .Google .GitHub}}
+    <details>
+      <summary class="or">or use an operator token</summary>
+      {{template "token" .}}
+    </details>
+    {{else}}
+    {{template "token" .}}
+    {{end}}
+  </form>
+</body>
+</html>
+{{define "token"}}
+    <label for="token">Operator token</label>
+    <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" {{if not (or .Google .GitHub)}}autofocus {{end}}required>
     <input type="hidden" name="next" value="{{.Next}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <button type="submit">Sign in</button>
-  </form>
-  {{end}}
-</body>
-</html>
-`
+{{end}}`
 
 var loginTmpl = template.Must(template.New("login").Parse(loginHTML))
 
@@ -92,7 +85,6 @@ type loginPageData struct {
 	Error     string
 	Next      string
 	CSRFToken string
-	Bootstrap bool
 	Google    bool
 	GitHub    bool
 }
@@ -108,7 +100,7 @@ func safeNext(next string) string {
 	return next
 }
 
-// safety: a single-team controller offers no provider, so its sign-in page stays password-only.
+// safety: a single-team controller offers no provider, so its sign-in page offers the operator token alone.
 func (s *Server) withSignInProviders(data loginPageData) loginPageData {
 	providers := s.signInProviders()
 	data.Google = slices.Contains(providers, store.ProviderGoogle)
@@ -138,6 +130,10 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data lo
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
+	if !s.AuthEnabled() {
+		http.Redirect(w, r, data.Next, http.StatusSeeOther)
+		return
+	}
 	if raw := sessionCookie(r, s.cookiesSecure()); raw != "" {
 		_, err := s.resolveBrowserSession(r.Context(), raw)
 		switch {
@@ -150,22 +146,50 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		}
 		clearSessionCookies(w, s.cookiesSecure())
 	}
-	data.Bootstrap = s.bootstrapOffered()
 	s.renderLoginPage(w, r, s.withSignInProviders(data), http.StatusOK)
+}
+
+var errNotOperatorToken = errors.New("only a token holding the admin scope opens a dashboard session")
+
+// safety: the session holds no copy of the token's scopes; every lookup reads them from the token's row, so revoking
+// the token signs its browsers out within one request.
+func (s *Server) tokenSignIn(r *http.Request, raw string) (string, *store.Session, error) {
+	if s.auth == nil || s.auth.AuthDisabled() {
+		return "", nil, errors.New("this controller does not authenticate, so there is nothing to sign in to")
+	}
+	p, err := s.auth.authenticate(raw, ratelimit.ClientIP(r))
+	if err != nil {
+		return "", nil, err
+	}
+	if p.Kind != store.TokenKindUser || !p.HasScope(ScopeAdmin) {
+		return "", nil, errNotOperatorToken
+	}
+	rawSession, sess, err := s.store.CreateTokenSession(r.Context(), p.TokenPrefix, p.Name, p.Team, s.sessionInitialTTL(), time.Now().UTC())
+	if err != nil {
+		return "", nil, err
+	}
+	s.logger.Info("signed in", "principal", p.Name, "token_prefix", p.TokenPrefix, "expires_at", sess.ExpiresAt.Unix())
+	noteAuditPrincipal(r.Context(), &Principal{Name: p.Name, Kind: store.TokenKindUser, Team: p.Team})
+	return rawSession, sess, nil
 }
 
 func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	next := safeNext(r.PostForm.Get("next"))
-	raw, sess, u, err := s.passwordLogin(r, r.PostForm.Get("username"), r.PostForm.Get("password"))
+	raw, sess, err := s.tokenSignIn(r, strings.TrimSpace(r.PostForm.Get("token")))
 	if err != nil {
 		data := s.withSignInProviders(loginPageData{Next: next})
 		status := http.StatusUnauthorized
 		switch {
-		case errors.Is(err, errLoginThrottled):
-			setRetryAfter(w, loginFailureWindow)
-			status, data.Error = http.StatusTooManyRequests, "Too many failed sign-ins for this account. Wait a few minutes and try again."
-		case errors.Is(err, store.ErrInvalidCredentials):
-			data.Error = "Invalid username or password."
+		case errors.Is(err, errAuthThrottled):
+			setRetryAfter(w, authPrefixFailureWindow)
+			status, data.Error = http.StatusTooManyRequests, "Too many failed sign-ins with this token. Wait a minute and try again."
+		case errors.Is(err, store.ErrHashingBusy):
+			setRetryAfter(w, authBusyRetryAfter)
+			status, data.Error = http.StatusServiceUnavailable, "Sign-in is busy right now. Try again shortly."
+		case errors.Is(err, errNotOperatorToken):
+			status, data.Error = http.StatusForbidden, "That token cannot open a dashboard session. Sign in with an operator token or your identity provider."
+		case authRejection(err):
+			data.Error = "That token is not valid."
 		default:
 			s.logger.Error("login.unavailable", "error", err.Error())
 			status, data.Error = http.StatusServiceUnavailable, "Sign-in is unavailable right now. Try again shortly."
@@ -173,41 +197,6 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginPage(w, r, data, status)
 		return
 	}
-	noteAuditPrincipal(r.Context(), &Principal{Name: u.Name, Kind: store.TokenKindUser, Team: sess.Team})
-	s.endPriorSession(r, raw)
-	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
-	http.Redirect(w, r, next, http.StatusSeeOther)
-}
-
-func (s *Server) handleBootstrapSubmit(w http.ResponseWriter, r *http.Request) {
-	next := safeNext(r.PostForm.Get("next"))
-	user := strings.TrimSpace(r.PostForm.Get("username"))
-	pass := r.PostForm.Get("password")
-	if !s.bootstrapOffered() {
-		s.renderLoginPage(w, r, s.withSignInProviders(loginPageData{
-			Next: next, Error: "Bootstrap closed -- sign in with the existing admin credentials.",
-		}), http.StatusConflict)
-		return
-	}
-	if _, err := s.createFirstUser(r, user, pass, []string{ScopeAdmin}); err != nil {
-		data := loginPageData{Next: next, Bootstrap: true, Error: err.Error()}
-		status := http.StatusBadRequest
-		if errors.Is(err, store.ErrBootstrapClosed) {
-			data = s.withSignInProviders(loginPageData{Next: next, Error: "Bootstrap closed -- sign in with the existing admin credentials."})
-			status = http.StatusConflict
-		}
-		s.renderLoginPage(w, r, data, status)
-		return
-	}
-	raw, sess, u, err := s.passwordLogin(r, user, pass)
-	if err != nil {
-		s.renderLoginPage(w, r, loginPageData{
-			Next:  next,
-			Error: "Admin created, but signing in failed. Sign in with the credentials you just set.",
-		}, http.StatusOK)
-		return
-	}
-	noteAuditPrincipal(r.Context(), &Principal{Name: u.Name, Kind: store.TokenKindUser, Team: sess.Team})
 	s.endPriorSession(r, raw)
 	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
 	http.Redirect(w, r, next, http.StatusSeeOther)

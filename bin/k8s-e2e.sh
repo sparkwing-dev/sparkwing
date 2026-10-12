@@ -463,8 +463,6 @@ sparkwing-runner-bundle:
   cache:
     grantKeySecret:
       name: sparkwing-cache-grant-key
-    tokenSecret:
-      name: sparkwing-cache-token
     allowUnauthenticated: false
 EOF
 
@@ -553,14 +551,8 @@ token_response="$(curl --fail --silent --show-error --max-time 10 \
 admin_token="$(jq -er '.token' <<<"$token_response")"
 [[ "$admin_token" == sw* ]] || die "controller returned an invalid bootstrap token"
 
-web_password="$(openssl rand -base64 32)"
-api_post_json "/api/v1/users" "$(jq -nc --arg password "$web_password" \
-  '{name:"k8s-e2e-web",password:$password,scopes:["admin"]}')" >/dev/null
-
 create_owned_secret sparkwing-token \
   --from-literal="token=$admin_token"
-create_owned_secret sparkwing-cache-token \
-  --from-literal="token=$(openssl rand -base64 32)"
 create_owned_secret sparkwing-cache-grant-key \
   --from-literal="key=$(openssl rand -base64 32)"
 helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
@@ -578,9 +570,22 @@ unauthenticated_status="$(curl --silent --show-error --max-time 5 \
   "http://127.0.0.1:${controller_port}/api/v1/runs")"
 [[ "$unauthenticated_status" == "401" ]] || die "protected controller read returned $unauthenticated_status without a token"
 api_get "/api/v1/runs?limit=1" >/dev/null
-web_session="$(api_post_json "/api/v1/auth/login" "$(jq -nc --arg password "$web_password" \
-  '{username:"k8s-e2e-web",password:$password}')" | jq -er '.session_id')"
-unset web_password
+# The dashboard signs its operator in with the admin token through the same
+# form a browser posts, which wants the CSRF cookie the sign-in page sets.
+login_headers="$(mktemp)"
+set_cookie() { sed -n "s/^[Ss]et-[Cc]ookie: \([^=]*$2\)=\([^;]*\).*/\1=\2/p" "$1" | tail -1; }
+curl --fail --silent --show-error --max-time 10 -D "$login_headers" -o /dev/null \
+  "http://127.0.0.1:${controller_port}/login"
+login_csrf="$(set_cookie "$login_headers" sw_csrf)"
+[[ -n "$login_csrf" ]] || die "the sign-in page set no CSRF cookie"
+curl --silent --show-error --max-time 10 -D "$login_headers" -o /dev/null \
+  -H "Origin: http://127.0.0.1:${controller_port}" --cookie "$login_csrf" \
+  --data-urlencode "token=$admin_token" --data-urlencode "csrf_token=${login_csrf#*=}" \
+  "http://127.0.0.1:${controller_port}/login"
+web_session="$(set_cookie "$login_headers" sw_session)"
+web_session="${web_session#*=}"
+rm -f "$login_headers"
+[[ -n "$web_session" ]] || die "signing in with the admin token opened no session"
 
 for repository_source in \
   "https://github.com/sparkwing-k8s/" \

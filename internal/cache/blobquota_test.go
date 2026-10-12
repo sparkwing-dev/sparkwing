@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 )
@@ -142,7 +143,7 @@ func TestTheCacheShareBindsOnlyFreeTeams(t *testing.T) {
 	if code, body := send(t, srv, http.MethodPut, "/cache/big", grantFor(t, token, "paying"), big); code != http.StatusCreated {
 		t.Fatalf("a funded team past the share = %d: %s", code, body)
 	}
-	if code, body := send(t, srv, http.MethodPut, "/cache/big", token, big); code != http.StatusCreated {
+	if code, body := send(t, srv, http.MethodPut, "/cache/big", operatorGrant(t, token), big); code != http.StatusCreated {
 		t.Fatalf("the operator past the share = %d: %s", code, body)
 	}
 	if code, body := send(t, srv, http.MethodPut, "/cache/small", grantFor(t, token, "none"), "x"); code != http.StatusPaymentRequired ||
@@ -169,7 +170,7 @@ func TestWritesFailClosedWhileTheControllerCannotCount(t *testing.T) {
 			t.Fatalf("a refused write left %s", k)
 		}
 	}
-	if code, body := send(t, srv, http.MethodPut, "/cache/down", token, "o"); code != http.StatusCreated {
+	if code, body := send(t, srv, http.MethodPut, "/cache/down", operatorGrant(t, token), "o"); code != http.StatusCreated {
 		t.Fatalf("the operator's write with the controller down = %d: %s", code, body)
 	}
 	if code, body := send(t, srv, http.MethodPut, "/cache/down", paying, "p"); code != http.StatusCreated {
@@ -188,8 +189,21 @@ func TestACacheWithGrantsAndABucketNeedsAController(t *testing.T) {
 	saveCounter(t)
 	c := DefaultConfig()
 	c.DataDir, c.ProxyDir, c.SSHKeyDir = root, root+"/proxy", root+"/no-ssh-key"
-	c.APIToken, c.GrantKey, c.BlobStore = "t", testGrantKey("t"), "s3://"+blobTestBucket+"/cache"
+	c.GrantKey, c.BlobStore = testGrantKey("t"), "s3://"+blobTestBucket+"/cache"
 	if _, err := New(c); err == nil || !strings.Contains(err.Error(), "--controller") {
 		t.Fatalf("New without a controller = %v, want a refusal naming --controller", err)
+	}
+}
+
+// The cache counts with its storage.count service token, so a cache told to
+// ask a controller without one refuses to start rather than ask unauthenticated.
+func TestACacheWithAControllerNeedsItsServiceToken(t *testing.T) {
+	root := t.TempDir()
+	saveCounter(t)
+	c := DefaultConfig()
+	c.DataDir, c.ProxyDir, c.SSHKeyDir = root, root+"/proxy", root+"/no-ssh-key"
+	c.GrantKey, c.ControllerURL = testGrantKey("t"), "http://controller.invalid"
+	if _, err := New(c); err == nil || !strings.Contains(err.Error(), authwire.CacheControllerTokenCredential) {
+		t.Fatalf("New without a controller token = %v, want a refusal naming %s", err, authwire.CacheControllerTokenCredential)
 	}
 }

@@ -15,11 +15,10 @@ import (
 )
 
 // The pipeline binary a trigger runs is the team's own code. It starts with
-// the run's own credentials and none of the launcher's: no operator cache
-// token, no ambient cloud or database secret, no stale grant from another run.
+// the run's own credentials and none of the launcher's: no ambient cloud or
+// database secret, no stale grant from another run.
 func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 	launcher := map[string]string{
-		"SPARKWING_CACHE_TOKEN":  operatorCacheToken,
 		"SPARKWING_CACHE_GRANT":  "swcg1.another-runs-grant",
 		"SPARKWING_API_TOKEN":    "operator-api-token",
 		"AWS_SECRET_ACCESS_KEY":  "operator-aws-secret",
@@ -46,11 +45,8 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 	}
 	child := triggerChildEnvOf(t, opts)
 
-	if got, ok := child["SPARKWING_CACHE_TOKEN"]; ok {
-		t.Errorf("SPARKWING_CACHE_TOKEN=%q reached the team's code", got)
-	}
 	secrets := []string{
-		operatorCacheToken, "operator-api-token", "operator-aws-secret",
+		"operator-api-token", "operator-aws-secret",
 		"operator-github-token", "operator-db-password", "launcher-only-value", "another-runs-grant",
 		"runner-a-agent-token",
 	}

@@ -326,7 +326,7 @@ describe("API helpers", () => {
     assert.equal(calls[0].method, "PUT");
     assert.equal(
       calls[0].url,
-      "/api/v1/team/runner-tokens/swr_ab%2Fc/git-credentials",
+      "/api/v1/team/tokens/swr_ab%2Fc/git-credentials",
     );
     assert.deepEqual(JSON.parse(calls[0].body), { enabled: true });
   });

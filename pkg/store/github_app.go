@@ -510,6 +510,35 @@ func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, reposit
 	return t.scanGitHubAppTriggers(rows)
 }
 
+// GitHubAppSubscribedRepository returns the GitHub ID of repository, as
+// owner/name in any case, when t's App trigger subscriptions name it under
+// exactly one ID, and ErrNotFound otherwise.
+func (t *Tenant) GitHubAppSubscribedRepository(ctx context.Context, repository string) (_ int64, err error) {
+	rows, err := t.s.query(ctx, `SELECT DISTINCT repository_id FROM github_app_triggers
+		WHERE team = ? AND LOWER(repository) = LOWER(?) LIMIT 2`, string(t.team), repository)
+	if err != nil {
+		return 0, err
+	}
+	defer closeRowsInto(rows, &err)
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	// safety: two IDs under one name are a rename GitHub has not reported yet,
+	// so neither is trusted to be the repository the run names.
+	if len(ids) != 1 || ids[0] <= 0 {
+		return 0, notFound("GitHub App subscription", repository)
+	}
+	return ids[0], nil
+}
+
 // RenameGitHubAppTriggerRepository updates subscriptions under the repository's
 // stable GitHub id when its name or installation changes.
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error {

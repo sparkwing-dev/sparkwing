@@ -37,8 +37,7 @@ type Capabilities struct {
 }
 
 type CapabilitiesGitHubApp struct {
-	Slug         string `json:"slug"`
-	SourceTokens bool   `json:"source_tokens"`
+	Slug string `json:"slug"`
 }
 
 type CapabilitiesTeams struct {

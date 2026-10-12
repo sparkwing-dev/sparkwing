@@ -190,7 +190,6 @@ the controller reads. Empty when no credential is configured.
       (dict "ref" $c.bootstrapAdminToken "path" "bootstrap-admin-token") -}}
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
 {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") -}}
-{{- $items = append $items (dict "ref" (index $bundle "cache" "tokenSecret" | default dict) "path" "cache-token") -}}
 {{- $items = append $items (dict "ref" (index $bundle "cache" "grantKeySecret" | default dict) "path" "cache-grant-key") -}}
 {{- end -}}
 {{- with include "sparkwing-full.controller.credentialsBundle" . }}

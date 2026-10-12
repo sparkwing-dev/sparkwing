@@ -710,7 +710,7 @@ type JobGroup struct {
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
 - `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
-- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers boosts matching enrolled-executor offers within their priority ceiling for every member.
+- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers sets the same runner-label preference on every member: it holds the node back from a runner that does not advertise it.
 - `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes, including on failure.
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires constrains runner claims for every non-inline dispatched member.
 - `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources pins the same peak on every member of the group.
@@ -770,7 +770,7 @@ type JobNode struct {
 - `func (n *JobNode) OutputType() reflect.Type` -- OutputType returns the concrete Go type of the job's Run output, or nil if the job's Run returns no value beyond error.
 - `func (n *JobNode) Outputs(globs ...string) *JobNode` -- Outputs declares the files this node emits as artifacts, by glob, relative to its working directory.
 - `func (n *JobNode) PipelineRefs() []RefTarget` -- PipelineRefs returns the other pipelines' nodes this node's job holds a RefToLastRun field for, in field order.
-- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.
+- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers holds the node back, for the controller's placement hold, from a claim-mode runner that does not advertise the labels while a live runner that does advertise them has a free slot.
 - `func (n *JobNode) PrefersLabels() []string`
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
 - `func (n *JobNode) RequiresLabels() []string` -- RequiresLabels is the job's selector: its Requires terms, then a tool:<name> term for each tool NeedsTools named.

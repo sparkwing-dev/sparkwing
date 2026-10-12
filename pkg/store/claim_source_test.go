@@ -26,7 +26,9 @@ func TestSpendSourceCredential_IssuesAFewPerClaimBeforeItsAttempt(t *testing.T) 
 		t.Fatal(err)
 	}
 	spend := func(tok store.ClaimToken) (store.SourceSpec, error) {
-		out, err := team.SpendSourceCredential(ctx, tok, "github_app", "github.com", "claim:"+tok.NodeID, time.Now())
+		out, err := team.SpendSourceCredential(ctx, tok, store.GitCredentialRelease{
+			CredentialID: "github_app", Host: "github.com", Runner: "claim:" + tok.NodeID, TokenPrefix: tok.Prefix,
+		}, time.Now())
 		return out.Spec, err
 	}
 	for i := range store.MaxSourceMints {

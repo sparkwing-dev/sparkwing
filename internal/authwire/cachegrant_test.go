@@ -102,14 +102,37 @@ func TestCacheGrantMintRefusesAGrantWithoutClaimOrScope(t *testing.T) {
 	}
 }
 
-func TestCacheBearerPrefersTheRunGrant(t *testing.T) {
+// The static operator token is gone, so a leftover variable from an older
+// release is never sent to the cache.
+func TestCacheBearerIsTheRunGrantAlone(t *testing.T) {
 	t.Setenv(authwire.CacheGrantEnv, "grant")
-	t.Setenv(authwire.CacheTokenEnv, "token")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "token")
 	if got := authwire.CacheBearerFromEnv(); got != "grant" {
 		t.Errorf("bearer = %q, want the grant", got)
 	}
 	t.Setenv(authwire.CacheGrantEnv, "")
-	if got := authwire.CacheBearerFromEnv(); got != "token" {
-		t.Errorf("bearer = %q, want the operator token", got)
+	if got := authwire.CacheBearerFromEnv(); got != "" {
+		t.Errorf("bearer = %q, want none", got)
+	}
+}
+
+func TestOperatorCacheGrantVerifiesForItsLifetimeAlone(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	raw, err := authwire.MintOperatorCacheGrant("k", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := authwire.VerifyCacheGrant("k", raw, now.Add(authwire.CacheOperatorGrantTTL-time.Second))
+	if err != nil || !g.Operator || g.Team != "" || g.Claim != nil || g.Scope != nil {
+		t.Fatalf("operator grant = %+v, %v", g, err)
+	}
+	if _, err := authwire.VerifyCacheGrant("k", raw, now.Add(authwire.CacheOperatorGrantTTL)); err == nil {
+		t.Error("an expired operator grant verified")
+	}
+	if _, err := authwire.VerifyCacheGrant("other", raw, now); err == nil {
+		t.Error("an operator grant verified under a key that did not sign it")
+	}
+	if _, err := authwire.MintOperatorCacheGrant(" ", now); err == nil {
+		t.Error("minted an operator grant with no key")
 	}
 }

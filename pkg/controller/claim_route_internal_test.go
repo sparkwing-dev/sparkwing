@@ -59,8 +59,7 @@ func newClaimRouteFixture(t *testing.T) claimRouteFixture {
 		if err := st.MarkNodeReady(ctx, "run-a", nodeID); err != nil {
 			t.Fatal(err)
 		}
-		node, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
-			"holder-"+nodeID, time.Minute, nil)
+		node, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{}, "holder-"+nodeID, time.Minute, nil)
 		if err != nil || node == nil || node.NodeID != nodeID {
 			t.Fatalf("claim %s: %v %v", nodeID, node, err)
 		}

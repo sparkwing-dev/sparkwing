@@ -18,10 +18,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-const (
-	operatorCacheToken = "operator-cache-token"
-	cacheGrantKey      = "cache-grant-key"
-)
+const cacheGrantKey = "cache-grant-key"
+
+func operatorCacheGrant(t *testing.T) string {
+	t.Helper()
+	g, err := authwire.MintOperatorCacheGrant(cacheGrantKey, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
 
 func mintTestCacheGrant(team, run string) (string, error) {
 	return authwire.MintClaimCacheGrant(cacheGrantKey, team, run, time.Now(), time.Hour,
@@ -63,7 +69,6 @@ func newGrantCacheWrapped(t *testing.T, wrap func(http.Handler) http.Handler) *h
 	cfg.DataDir = root
 	cfg.ProxyDir = filepath.Join(root, "proxy")
 	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
-	cfg.APIToken = operatorCacheToken
 	cfg.GrantKey = cacheGrantKey
 	s, err := cache.New(cfg)
 	if err != nil {
@@ -76,13 +81,12 @@ func newGrantCacheWrapped(t *testing.T, wrap func(http.Handler) http.Handler) *h
 
 // A run in team A gets a grant that names team A, and that grant cannot reach
 // team B's bins: a binary team B planted under team A's pipeline key is never
-// what team A's launcher runs. The launcher holds no operator cache token.
+// what team A's launcher runs. The launcher holds no operator grant.
 func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: compiles a pipeline binary")
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(authwire.CacheTokenEnv, "")
 	t.Setenv(authwire.CacheGrantEnv, "")
 	ctx := context.Background()
 	logger := discardLogger()
@@ -139,7 +143,7 @@ func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 	if got, _ := os.ReadFile(fetched); bytes.Equal(got, built) {
 		t.Fatal("team B's grant read team A's binary")
 	}
-	if err := bincache.TryBinary(ctx, cacheSrv.URL, operatorCacheToken, key, fetched); !errors.Is(err, bincache.ErrMiss) {
+	if err := bincache.TryBinary(ctx, cacheSrv.URL, operatorCacheGrant(t), key, fetched); !errors.Is(err, bincache.ErrMiss) {
 		t.Fatalf("the operator's unscoped tree = %v, want a miss: grants must not write there", err)
 	}
 }

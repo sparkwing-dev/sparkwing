@@ -200,11 +200,11 @@ func TestLastOwnerCannotLeaveOrBeDemoted(t *testing.T) {
 func TestDemotionTakesEffectOnTheNextRequest(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner, editor, _ := teamOf(f)
-	if code := f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]any{"name": "laptop", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", editor.auth, map[string]any{"scopes": machineScopes, "name": "laptop", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusCreated {
 		t.Fatalf("editor minting = %d", code)
 	}
 	f.call("PATCH", "/api/v1/team/members/"+editor.id, owner.auth, map[string]string{"role": "reader"}, nil)
-	if code := f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]any{"name": "laptop2", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/team/tokens", editor.auth, map[string]any{"scopes": machineScopes, "name": "laptop2", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusForbidden {
 		t.Fatalf("demoted editor minting = %d, want 403", code)
 	}
 }
@@ -219,7 +219,7 @@ func TestTeamRoutesNeverReachAnotherTeam(t *testing.T) {
 	f.join(b, bReader, "bread@example.com", "reader")
 	bInvite := f.invite(b, "pending@example.com", "reader")
 	var minted struct{ Prefix string }
-	f.call("POST", "/api/v1/team/runner-tokens", b.auth, map[string]any{"name": "b-box", "repos": []string{"github.com/acme/*"}}, &minted)
+	f.call("POST", "/api/v1/team/tokens", b.auth, map[string]any{"scopes": machineScopes, "name": "b-box", "repos": []string{"github.com/acme/*"}}, &minted)
 
 	q := "?team=" + b.team
 	if code := f.call("DELETE", "/api/v1/team/members/"+bReader.id+q, a.auth, nil, nil); code != http.StatusNotFound {
@@ -231,7 +231,7 @@ func TestTeamRoutesNeverReachAnotherTeam(t *testing.T) {
 	if code := f.call("DELETE", "/api/v1/team/invitations/"+bInvite+q, a.auth, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("a deleting b's invitation = %d, want 404", code)
 	}
-	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+minted.Prefix+q, a.auth, nil, nil); code != http.StatusNotFound {
+	if code := f.call("DELETE", "/api/v1/team/tokens/"+minted.Prefix+q, a.auth, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("a revoking b's runner token = %d, want 404", code)
 	}
 	var members []member
@@ -240,7 +240,7 @@ func TestTeamRoutesNeverReachAnotherTeam(t *testing.T) {
 		t.Fatalf("a's member list reaches another team: %+v", members)
 	}
 	var toks []struct{ Prefix string }
-	f.call("GET", "/api/v1/team/runner-tokens"+q, a.auth, nil, &toks)
+	f.call("GET", "/api/v1/team/tokens"+q, a.auth, nil, &toks)
 	if len(toks) != 0 {
 		t.Fatalf("a lists b's runner tokens: %+v", toks)
 	}
@@ -260,7 +260,7 @@ func TestRunnerTokenIsBoundToTheTeamThatMintedIt(t *testing.T) {
 		Prefix  string `json:"prefix"`
 		Command string `json:"command"`
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", a.auth, map[string]any{"name": "a-box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", a.auth, map[string]any{"scopes": machineScopes, "name": "a-box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint = %d", code)
 	}
 	if !strings.Contains(minted.Command, "printf '%s' "+minted.Token+" > ") ||
@@ -284,10 +284,10 @@ func TestRunnerTokenIsBoundToTheTeamThatMintedIt(t *testing.T) {
 			}
 		}
 	}
-	if code := f.call("GET", "/api/v1/team/runner-tokens", runner, nil, nil); code != http.StatusForbidden && code != http.StatusUnauthorized {
+	if code := f.call("GET", "/api/v1/team/tokens", runner, nil, nil); code != http.StatusForbidden && code != http.StatusUnauthorized {
 		t.Fatalf("runner token listing team tokens = %d", code)
 	}
-	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+minted.Prefix, b.auth, nil, nil); code != http.StatusNotFound {
+	if code := f.call("DELETE", "/api/v1/team/tokens/"+minted.Prefix, b.auth, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("team b revoking team a's token = %d, want 404", code)
 	}
 	if code := f.call("GET", "/api/v1/auth/whoami", runner, nil, nil); code != http.StatusOK {
@@ -301,8 +301,8 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 	other := f.user("e2", "ernie@example.com")
 	f.join(owner, other, "ernie@example.com", "editor")
 	var mine struct{ Token, Prefix string }
-	f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]any{"name": "eddie-box", "repos": []string{"github.com/acme/*"}}, &mine)
-	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+mine.Prefix, other.auth, nil, nil); code != http.StatusForbidden {
+	f.call("POST", "/api/v1/team/tokens", editor.auth, map[string]any{"scopes": machineScopes, "name": "eddie-box", "repos": []string{"github.com/acme/*"}}, &mine)
+	if code := f.call("DELETE", "/api/v1/team/tokens/"+mine.Prefix, other.auth, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("another editor revoking = %d, want 403", code)
 	}
 	var list []struct {
@@ -310,7 +310,7 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 		Name      string `json:"name"`
 		CreatedBy string `json:"created_by"`
 	}
-	f.call("GET", "/api/v1/team/runner-tokens", owner.auth, nil, &list)
+	f.call("GET", "/api/v1/team/tokens", owner.auth, nil, &list)
 	if len(list) != 1 || list[0].Name != "eddie-box" || list[0].CreatedBy != editor.id {
 		t.Fatalf("list = %+v", list)
 	}
@@ -318,7 +318,7 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 	if code := f.call("GET", "/api/v1/auth/whoami", "Bearer "+mine.Token, nil, nil); code != http.StatusOK {
 		t.Fatalf("live token = %d, want 200", code)
 	}
-	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+mine.Prefix, owner.auth, nil, nil); code != http.StatusNoContent {
+	if code := f.call("DELETE", "/api/v1/team/tokens/"+mine.Prefix, owner.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("owner revoking = %d", code)
 	}
 	if code := f.call("GET", "/api/v1/auth/whoami", "Bearer "+mine.Token, nil, nil); code != http.StatusUnauthorized {
@@ -329,11 +329,11 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 func TestReaderCannotMintRunnerTokens(t *testing.T) {
 	f := newIdentityFixture(t)
 	_, _, reader := teamOf(f)
-	if code := f.call("POST", "/api/v1/team/runner-tokens", reader.auth, map[string]any{"name": "r", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/team/tokens", reader.auth, map[string]any{"scopes": machineScopes, "name": "r", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusForbidden {
 		t.Fatalf("reader minting = %d, want 403", code)
 	}
 	owner := f.user("o2", "owen@example.com")
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{"name": "x; rm -rf /", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusBadRequest {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth, map[string]any{"scopes": machineScopes, "name": "x; rm -rf /", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusBadRequest {
 		t.Fatalf("shell-unsafe runner name = %d, want 400", code)
 	}
 }
@@ -342,11 +342,11 @@ func TestRunnerTokensAreCappedPerTeam(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
 	for i := range store.MaxRunnerTokensPerTeam {
-		if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{"name": fmt.Sprintf("box%d", i), "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusCreated {
+		if code := f.call("POST", "/api/v1/team/tokens", owner.auth, map[string]any{"scopes": machineScopes, "name": fmt.Sprintf("box%d", i), "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusCreated {
 			t.Fatalf("mint %d = %d", i, code)
 		}
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{"name": "box-extra", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusConflict {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth, map[string]any{"scopes": machineScopes, "name": "box-extra", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusConflict {
 		t.Fatalf("mint past the cap = %d, want 409", code)
 	}
 }

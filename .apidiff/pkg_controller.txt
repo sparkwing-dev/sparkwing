@@ -1,19 +1,15 @@
 # pkg/controller
 
 type Agent struct {
-	Name            string
-	Type            string
-	Location        string
-	Labels          map[string]string
-	Capabilities    []string
-	LastSeen        string
-	Status          string
-	ActiveJobs      []string
-	ActiveSlots     *int
-	MaxConcurrent   int
-	BasePriority    int
-	PriorityCeiling int
-	Budget          AgentResources
+	Name          string
+	Type          string
+	Location      string
+	Labels        map[string]string
+	Capabilities  []string
+	LastSeen      string
+	Status        string
+	ActiveJobs    []string
+	MaxConcurrent int
 
 	Headroom *AgentHeadroom
 }
@@ -23,10 +19,6 @@ type AgentHeadroom struct {
 	QueueDepth  int
 
 	ObservedAt string
-}
-type AgentResources struct {
-	Cores       float64
-	MemoryBytes int64
 }
 type Authenticator struct {
 }
@@ -151,20 +143,6 @@ type GitCredentialReleaseJSON struct {
 	TokenPrefix string
 	ReleasedAt  int64
 }
-type GitCredentialResponse struct {
-	Kind string
-
-	Host      string
-	Token     string
-	ExpiresAt int64
-
-	Repository        string
-	ExtraRepositories []string
-
-	Username   string
-	Secret     string
-	KnownHosts string
-}
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
@@ -284,21 +262,21 @@ const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
 const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsRead = store.ScopeLogsRead
-const ScopeNodesClaim = "nodes.claim"
+const ScopeNodesClaim = store.ScopeNodesClaim
 const ScopeRunsControl = store.ScopeRunsControl
 const ScopeRunsRead = store.ScopeRunsRead
-const ScopeRunsState = "runs.state"
+const ScopeRunsState = store.ScopeRunsState
 const ScopeRunsWrite = store.ScopeRunsWrite
-const ScopeSecretsRead = "secrets.read"
+const ScopeSecretsRead = store.ScopeSecretsRead
+const ScopeStorageCount = store.StorageCountScope
 const ScopeTeamAdmin = store.ScopeTeamAdmin
-const ScopeTriggersClaim = "triggers.claim"
+const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
 func ScopesForRole(role store.Role) []string
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
-func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
 func (s *Server) DaemonHandler() http.Handler
@@ -314,13 +292,10 @@ func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCou
 func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
-func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
-func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
-func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
@@ -374,21 +349,13 @@ type ServicesResponse struct {
 
 	DirectData bool
 }
-type SourceTokenResponse struct {
-	Token      string
-	ExpiresAt  int64
-	Repository string
-
-	ExtraRepositories []string
-}
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
-	CacheURL   string
-	CacheToken string
+	CacheURL string
 }
 type TokenRequestBudget struct {
 	PerTokenMinute int

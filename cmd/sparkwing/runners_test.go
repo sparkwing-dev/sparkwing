@@ -225,7 +225,7 @@ func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 
 func TestRunnersAddForceReplacesTheConfig(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := fssecure.WriteFile(f.config, []byte("# desk\nfleet:\n  listen: 127.0.0.1:4346\nagent:\n  controller: http://elsewhere\n  token: replace-me\n")); err != nil {
+	if err := fssecure.WriteFile(f.config, []byte("# desk\nrepos:\n  fallback_paths: [~/desk]\nagent:\n  controller: http://elsewhere\n  token: replace-me\n")); err != nil {
 		t.Fatal(err)
 	}
 	captureStdout(t, func() {
@@ -243,7 +243,7 @@ func TestRunnersAddForceReplacesTheConfig(t *testing.T) {
 	if strings.Contains(string(body), "replace-me") {
 		t.Errorf("--force did not replace the agent section: %s", body)
 	}
-	if !strings.Contains(string(body), "# desk") || !strings.Contains(string(body), "listen: 127.0.0.1:4346") {
+	if !strings.Contains(string(body), "# desk") || !strings.Contains(string(body), "fallback_paths: [~/desk]") {
 		t.Errorf("--force lost the file's other sections: %s", body)
 	}
 }

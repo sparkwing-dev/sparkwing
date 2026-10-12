@@ -41,6 +41,15 @@ func mintGrant(t *testing.T, key, team, run string, now time.Time, scope *authwi
 	return g
 }
 
+func operatorGrant(t *testing.T, token string) string {
+	t.Helper()
+	g, err := authwire.MintOperatorCacheGrant(testGrantKey(token), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
 func grantFor(t *testing.T, token, team string) string {
 	t.Helper()
 	return mintGrant(t, testGrantKey(token), team, "run-"+team, time.Now(), testScope)
@@ -97,7 +106,7 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 		if code, body := send(t, srv, http.MethodGet, w.read, teamB, ""); code == http.StatusOK || strings.Contains(body, "team-a secret") {
 			t.Errorf("team B read team A's %s: %d %q", w.read, code, body)
 		}
-		if code, body := send(t, srv, http.MethodGet, w.read, token, ""); strings.Contains(body, "team-a secret") {
+		if code, body := send(t, srv, http.MethodGet, w.read, operatorGrant(t, token), ""); strings.Contains(body, "team-a secret") {
 			t.Errorf("the operator's unscoped tree served team A's %s: %d", w.read, code)
 		}
 		if code, body := send(t, srv, w.method, w.write, teamB, "team-b poison"); code/100 != 2 {
@@ -129,7 +138,7 @@ func TestGrantsDoNotReachMirrorsOrAdminRoutes(t *testing.T) {
 }
 
 // The source-read, upload, seed, refresh and job-artifact routes are gone,
-// so even the operator token reaches nothing there.
+// so even the operator grant reaches nothing there.
 func TestRemovedRoutesAnswerNotFound(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
@@ -152,8 +161,8 @@ func TestRemovedRoutesAnswerNotFound(t *testing.T) {
 		if strings.HasPrefix(r.path, "/git/") {
 			want = http.StatusBadRequest
 		}
-		if code, body := send(t, srv, r.method, r.path, token, "x"); code != want {
-			t.Errorf("%s %s with the operator token = %d, want %d: %s", r.method, r.path, code, want, body)
+		if code, body := send(t, srv, r.method, r.path, operatorGrant(t, token), "x"); code != want {
+			t.Errorf("%s %s with the operator grant = %d, want %d: %s", r.method, r.path, code, want, body)
 		}
 	}
 }
@@ -198,7 +207,7 @@ func TestOnlyOperatorGrantsReadPrivateMirrors(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	grant := grantFor(t, token, "team-a")
-	operatorGrant := grantFor(t, token, authwire.OperatorTeam)
+	defaultTeam := grantFor(t, token, authwire.OperatorTeam)
 	private := "ssh://git@github.com/acme/private.git"
 
 	repoNamesMu.Lock()
@@ -213,10 +222,10 @@ func TestOnlyOperatorGrantsReadPrivateMirrors(t *testing.T) {
 	if out, err := exec.Command("git", "init", "--bare", filepath.Join(repoDir, repoHash(private)+".git")).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	if code, _ := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", token, ""); code != http.StatusOK {
+	if code, _ := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", operatorGrant(t, token), ""); code != http.StatusOK {
 		t.Fatalf("operator reading its own mirror = %d, want 200", code)
 	}
-	if code, body := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", operatorGrant, ""); code != http.StatusOK {
+	if code, body := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", defaultTeam, ""); code != http.StatusOK {
 		t.Errorf("the operator's own grant reading its private mirror = %d, want 200: %s", code, body)
 	}
 	if code, body := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", grant, ""); code != http.StatusNotFound {
@@ -273,7 +282,7 @@ func TestGrantsCannotRegisterMirrors(t *testing.T) {
 	if registered {
 		t.Errorf("a refused grant registration left %q registered", name)
 	}
-	if code, body := send(t, srv, http.MethodPost, path, token, ""); code != http.StatusOK {
+	if code, body := send(t, srv, http.MethodPost, path, operatorGrant(t, token), ""); code != http.StatusOK {
 		t.Errorf("operator registering the same mirror = %d, want 200: %s", code, body)
 	}
 }
@@ -301,33 +310,22 @@ func TestStoreCeilingCountsTheMirrors(t *testing.T) {
 	}
 }
 
-// The cache verifies grants with its grant key and nothing else, so its
-// operator token, which signs nothing, cannot stand in for the key.
+// The cache verifies grants with its grant key and nothing else, so a grant
+// signed with any other secret is refused.
 func TestCacheVerifiesGrantsWithTheGrantKeyAlone(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	byToken := mintGrant(t, token, "team-a", "run-1", time.Now(), testScope)
 	if code, _ := send(t, srv, http.MethodPut, "/bin/deadbeef", byToken, "x"); code != http.StatusUnauthorized {
-		t.Errorf("a grant signed with the operator token = %d, want 401", code)
+		t.Errorf("a grant signed with another secret = %d, want 401", code)
 	}
 	if code, body := send(t, srv, http.MethodPut, "/bin/deadbeef", grantFor(t, token, "team-a"), "x"); code/100 != 2 {
 		t.Errorf("a grant signed with the grant key = %d, want 2xx: %s", code, body)
 	}
 }
 
-func TestCacheRefusesAGrantKeyThatIsItsToken(t *testing.T) {
-	newBudgetedServer(t, "operator-token", egress.Config{})
-	c := DefaultConfig()
-	c.DataDir = t.TempDir()
-	c.APIToken = "same-secret"
-	c.GrantKey = "same-secret"
-	if _, err := New(c); err == nil {
-		t.Fatal("New accepted a grant key equal to the operator token")
-	}
-}
-
 // Deleting a team removes every blob its grants wrote and nothing another
-// team wrote, and only the operator token may ask.
+// team wrote, and only the operator grant may ask.
 func TestDeletingATeamTreeRemovesOnlyThatTeamsBlobs(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
@@ -342,11 +340,11 @@ func TestDeletingATeamTreeRemovesOnlyThatTeamsBlobs(t *testing.T) {
 		t.Fatalf("a team grant deleting a tree = %d, want 401", code)
 	}
 	for _, bad := range []string{"/admin/teams/team-a/artifacts", "/admin/teams/%2E%2E", "/admin/teams/"} {
-		if code, _ := send(t, srv, http.MethodDelete, bad, token, ""); code != http.StatusBadRequest {
+		if code, _ := send(t, srv, http.MethodDelete, bad, operatorGrant(t, token), ""); code != http.StatusBadRequest {
 			t.Fatalf("DELETE %s = %d, want 400", bad, code)
 		}
 	}
-	if code, body := send(t, srv, http.MethodDelete, "/admin/teams/team-a", token, ""); code != http.StatusNoContent {
+	if code, body := send(t, srv, http.MethodDelete, "/admin/teams/team-a", operatorGrant(t, token), ""); code != http.StatusNoContent {
 		t.Fatalf("operator delete = %d: %s", code, body)
 	}
 	if code, _ := send(t, srv, http.MethodGet, "/cache/key-1", teamA, ""); code == http.StatusOK {
@@ -355,7 +353,7 @@ func TestDeletingATeamTreeRemovesOnlyThatTeamsBlobs(t *testing.T) {
 	if code, body := send(t, srv, http.MethodGet, "/cache/key-1", teamB, ""); code != http.StatusOK || body != "bytes" {
 		t.Fatalf("team B's blob after deleting team A = %d %q", code, body)
 	}
-	if code, _ := send(t, srv, http.MethodDelete, "/admin/teams/team-a", token, ""); code != http.StatusNoContent {
+	if code, _ := send(t, srv, http.MethodDelete, "/admin/teams/team-a", operatorGrant(t, token), ""); code != http.StatusNoContent {
 		t.Fatalf("repeating the delete = %d, want 204", code)
 	}
 }

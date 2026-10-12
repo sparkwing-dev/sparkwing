@@ -20,11 +20,7 @@ var snapshot = sync.OnceValues(func() (seed []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	// safety: Each fixture must mint its own authority during the normal store.Open.
-	_, err = st.DB().Exec(`DELETE FROM sparkwing_meta WHERE key = 'controller_authority_id'`)
-	if err == nil {
-		_, err = st.DB().Exec(`VACUUM INTO ?`, filepath.Join(dir, "snapshot.db"))
-	}
+	_, err = st.DB().Exec(`VACUUM INTO ?`, filepath.Join(dir, "snapshot.db"))
 	if err := errors.Join(err, st.Close()); err != nil {
 		return nil, err
 	}

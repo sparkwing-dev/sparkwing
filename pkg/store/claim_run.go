@@ -24,9 +24,6 @@ func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now tim
 		return "", err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return "", err
-	}
 	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
 		return "", err
 	}
@@ -64,9 +61,6 @@ func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.D
 		return ClaimBeat{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return ClaimBeat{}, err
-	}
 	var prefix string
 	var anchor int64
 	err = tx.QueryRowContext(ctx, `SELECT claim_token_prefix, credit_charged_through FROM nodes
@@ -123,13 +117,20 @@ func (e secretUndeclaredError) Error() string {
 
 func (e secretUndeclaredError) Is(target error) bool { return target == ErrSecretUndeclared }
 
-// ReleaseClaimSecret returns the secret name to tok's live work claim, looked
-// up for the run's pipeline, when the run's accepted plan declares it. It
-// records the release as a secret_released event on the node under the
-// sensitive fence, so a release after the claim ended or its run was
-// cancelled is refused, and a planning claim is never answered.
+// ReleaseClaimSecret returns the secret name to tok's live claim, looked up
+// for the run's pipeline, when the run's plan declares it. A work or runner
+// node claim records the release as a secret_released event on its node, and
+// a trigger claim, whose holder runs nodes in its own process, on the run. The
+// release happens under the sensitive fence, so one after the claim ended or
+// its run was cancelled is refused, and a planning claim is never answered.
 func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name string, now time.Time) (_ *Secret, err error) {
-	if tok.Team != t.team || tok.Kind != ClaimTokenWork {
+	fence := fenceSensitiveClaimTx
+	switch {
+	case tok.Team != t.team:
+		return nil, ErrClaimNotLive
+	case tok.Kind == ClaimTokenTrigger:
+		fence = fenceSensitiveTriggerClaimTx
+	case tok.Kind != ClaimTokenWork && tok.Kind != ClaimTokenNode:
 		return nil, ErrClaimNotLive
 	}
 	var pipeline string
@@ -164,10 +165,7 @@ func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name st
 		return nil, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-		return nil, err
-	}
-	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
+	if err := fence(ctx, tx, tok, now); err != nil {
 		return nil, err
 	}
 	if _, err := appendEventTx(ctx, tx, t.team, tok.RunID, tok.NodeID, "secret_released",

@@ -289,19 +289,19 @@ func waitUntil(t *testing.T, what string, done func() bool) {
 	t.Fatalf("timed out waiting until %s", what)
 }
 
-func TestStoreCeilingAdminRoutesNeedTheBearerToken(t *testing.T) {
-	oldToken := apiToken
-	apiToken = "sw-secret"
-	t.Cleanup(func() { apiToken = oldToken })
+func TestStoreCeilingAdminRoutesNeedTheOperatorGrant(t *testing.T) {
+	oldKey := grantKey
+	grantKey = "sw-grant-key"
+	t.Cleanup(func() { grantKey = oldKey })
 
 	for path, handler := range map[string]http.HandlerFunc{
 		"/admin/store-ceiling/thaw":    handleStoreCeilingThaw,
 		"/admin/store-ceiling/measure": handleStoreCeilingMeasure,
 	} {
 		w := httptest.NewRecorder()
-		requireToken(handler)(w, httptest.NewRequest(http.MethodPost, path, nil))
+		requireOperator(handler)(w, httptest.NewRequest(http.MethodPost, path, nil))
 		if w.Code != http.StatusUnauthorized {
-			t.Errorf("%s answered %d without a token, want 401", path, w.Code)
+			t.Errorf("%s answered %d without an operator grant, want 401", path, w.Code)
 		}
 	}
 }
@@ -421,7 +421,7 @@ func TestStoreCeilingThawRefusalNamesTheMeasureRoute(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status %d, want 409", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "/admin/store-ceiling/measure") {
+	if !strings.Contains(w.Body.String(), "/api/v1/cache/store-ceiling/measure") {
 		t.Errorf("the refusal %q does not name the route that does work", w.Body.String())
 	}
 }

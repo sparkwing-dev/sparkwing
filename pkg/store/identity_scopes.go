@@ -13,6 +13,15 @@ const (
 	ScopeTeamAdmin      = "team.admin"
 )
 
+// ScopeNodesClaim and the other machine scopes are what a runner carries: it
+// claims work, reports the state of what it holds and reads that work's secrets.
+const (
+	ScopeNodesClaim    = "nodes.claim"
+	ScopeTriggersClaim = "triggers.claim"
+	ScopeRunsState     = "runs.state"
+	ScopeSecretsRead   = "secrets.read"
+)
+
 // safety: no role grants deployment administration; unknown roles grant nothing.
 var roleScopes = map[Role][]string{
 	RoleReader: {ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead},

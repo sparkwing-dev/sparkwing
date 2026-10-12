@@ -19,12 +19,21 @@ func freeTierFixture(t *testing.T, slots int64) *identityFixture {
 	t.Helper()
 	raw, pub := multiTeamLicense(t)
 	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
-		s.WithCacheCredentials("http://cache.invalid", "cache-token")
+		s.WithCacheURL("http://cache.invalid")
 	}})
 	if err := f.store.SetFreeTeamSlots(context.Background(), slots); err != nil {
 		t.Fatal(err)
 	}
 	return f
+}
+
+func storageCounter(t *testing.T, st *store.Store) string {
+	t.Helper()
+	raw, _, err := st.CreateToken("cache", store.TokenKindService, []string{controller.ScopeStorageCount}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + raw
 }
 
 func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
@@ -60,7 +69,7 @@ func (f *identityFixture) reserve(auth, team, kind string, bytes int64) (int, st
 }
 
 // The cache reserves, commits and releases a team's storage with its
-// operator token. Both teams start runs; the one whose write took the last
+// storage.count service token. Both teams start runs; the one whose write took the last
 // slot is held to its cache share, the next team's writes are refused as
 // paused until the operator grants it a slot, and the operator's own team is
 // never held.
@@ -80,7 +89,7 @@ func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	if code := f.trigger(second); code != http.StatusAccepted {
 		t.Fatalf("second team's run with no slot = %d, want a run is never refused for billing", code)
 	}
-	const cache = "Bearer cache-token"
+	cache := storageCounter(t, f.store)
 	code, res := f.reserve(cache, "first", "cache", 3072)
 	if code != http.StatusOK || res.ID == "" || res.Tier != store.TeamTierFree {
 		t.Fatalf("reserve the whole cache share = %d %+v", code, res)
@@ -135,9 +144,9 @@ func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	}
 }
 
-// Only the cache's operator token reaches the counter routes: a team's own
-// credential and an admin bearer are refused on every one, and the cache's
-// token names any team.
+// Only the cache's storage.count token reaches the counter routes: a team's
+// own credential and an admin bearer are refused on every one, and the
+// cache's token names any team.
 func TestTheCounterRoutesAnswerOnlyTheCacheToken(t *testing.T) {
 	f := freeTierFixture(t, 5)
 	for _, team := range []store.Team{"first", "second"} {
@@ -169,7 +178,7 @@ func TestTheCounterRoutesAnswerOnlyTheCacheToken(t *testing.T) {
 			}
 		}
 	}
-	const cache = "Bearer cache-token"
+	cache := storageCounter(t, f.store)
 	for _, team := range []string{"first", "second"} {
 		if code, _ := f.reserve(cache, team, "cache", 10); code != http.StatusOK {
 			t.Errorf("the cache reserving %s's cache = %d, want 200", team, code)
@@ -185,6 +194,55 @@ func TestTheCounterRoutesAnswerOnlyTheCacheToken(t *testing.T) {
 	}
 }
 
+// The counter routes answer the cache's storage.count service token while it
+// is live, and nothing that only resembles it: a team's own token, a team
+// admin's, the service token once revoked, an operator admin token, and the
+// static secret earlier releases shared.
+func TestTheCounterRoutesAnswerOnlyALiveStorageCountToken(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-token")
+	f := freeTierFixture(t, 5)
+	if code := f.trigger(freeTeamToken(t, f.store, "first")); code != http.StatusAccepted {
+		t.Fatal(code)
+	}
+	counter := storageCounter(t, f.store)
+	if code, _ := f.reserve(counter, "first", "cache", 10); code != http.StatusOK {
+		t.Fatalf("the service token = %d, want 200", code)
+	}
+	admin, _, err := f.store.CreateToken("ops", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamAdmin, _, err := tenant.CreateToken(t.Context(), "owner", store.TokenKindUser,
+		[]string{controller.ScopeTeamAdmin, controller.ScopeRunsWrite}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, auth := range map[string]string{
+		"a team token":         freeTeamToken(t, f.store, "second"),
+		"a team admin token":   "Bearer " + teamAdmin,
+		"an operator admin":    "Bearer " + admin,
+		"the old static token": "Bearer cache-token",
+	} {
+		if code, _ := f.reserve(auth, "first", "cache", 10); code/100 != 4 {
+			t.Errorf("%s reserving a team's cache = %d, want a refusal", name, code)
+		}
+	}
+	revoked, tok, err := f.store.CreateToken("cache-old", store.TokenKindService, []string{controller.ScopeStorageCount}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RevokeToken(tok.Prefix, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := f.reserve("Bearer "+revoked, "first", "cache", 10); code != http.StatusUnauthorized {
+		t.Errorf("a revoked service token = %d, want 401", code)
+	}
+}
+
 // Readers racing for the last bytes of a team's download day each see room
 // alone; the controller admits exactly one and tells the rest when to retry.
 func TestTheDownloadChargeRouteHoldsTheDailyCap(t *testing.T) {
@@ -193,6 +251,7 @@ func TestTheDownloadChargeRouteHoldsTheDailyCap(t *testing.T) {
 	if code := f.trigger(freeTeamToken(t, f.store, "first")); code != http.StatusAccepted {
 		t.Fatal(code)
 	}
+	counter := storageCounter(t, f.store)
 	charge := func(bytes int64) (int, http.Header) {
 		req, err := http.NewRequest(http.MethodPost, f.url+"/internal/downloads/charge",
 			strings.NewReader(fmt.Sprintf(`{"team":"first","bytes":%d}`, bytes)))
@@ -200,7 +259,7 @@ func TestTheDownloadChargeRouteHoldsTheDailyCap(t *testing.T) {
 			t.Error(err)
 			return 0, nil
 		}
-		req.Header.Set("Authorization", "Bearer cache-token")
+		req.Header.Set("Authorization", counter)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -247,12 +306,12 @@ func TestTheDownloadChargeRouteHoldsTheDailyCap(t *testing.T) {
 // team reserves funded and nothing is refused.
 func TestASingleTeamControllerCountsNoShare(t *testing.T) {
 	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithCacheCredentials("http://cache.invalid", "cache-token")
+		s.WithCacheURL("http://cache.invalid")
 	}})
 	if err := f.store.AsOperator().CreateTeam(context.Background(), "acme"); err != nil {
 		t.Fatal(err)
 	}
-	if code, got := f.reserve("Bearer cache-token", "acme", "cache", 1<<40); code != http.StatusOK || got.Tier != store.TeamTierFunded {
+	if code, got := f.reserve(storageCounter(t, f.store), "acme", "cache", 1<<40); code != http.StatusOK || got.Tier != store.TeamTierFunded {
 		t.Fatalf("reserve = %d %+v, want funded", code, got)
 	}
 }
@@ -266,11 +325,11 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 		t.Fatalf("with a slot free = %s, %v; want open", got, err)
 	}
 	freeTeamToken(t, f.store, "first")
-	code, res := f.reserve("Bearer cache-token", "first", "cache", 1)
+	code, res := f.reserve(storageCounter(t, f.store), "first", "cache", 1)
 	if code != http.StatusOK {
 		t.Fatalf("first team's reservation = %d", code)
 	}
-	if code := f.call("POST", "/internal/storage/commit", "Bearer cache-token", map[string]any{
+	if code := f.call("POST", "/internal/storage/commit", storageCounter(t, f.store), map[string]any{
 		"team": "first", "store": "cache", "reservation": res.ID, "bytes": 1,
 	}, nil); code != http.StatusNoContent {
 		t.Fatalf("first team's first committed byte = %d", code)

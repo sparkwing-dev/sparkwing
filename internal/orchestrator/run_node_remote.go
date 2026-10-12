@@ -109,7 +109,7 @@ func runNodeRemote(
 			trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], trigger.GitSHA, repoURL, workDir)
 	case direct:
 		sparkwingDir, err = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
-			ControllerURL: controllerURL, RunnerToken: token, RunID: runID,
+			ControllerURL: controllerURL, ClaimToken: token, RunID: runID,
 			RepoURL: repoURL, Branch: branch, SHA: trigger.GitSHA, WorkDir: workDir,
 			OwnerCredentials: ownerFenced,
 		}, logger)
@@ -351,7 +351,6 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_RUN_HANDLE_FILE":          true,
 	"SPARKWING_ONLY":                     true,
 	ArtifactStoreEnvVar:                  true,
-	"SPARKWING_CACHE_TOKEN":              true,
 	authwire.CacheGrantEnv:               true,
 	remoteExecutionCapabilityEnv:         true,
 	remoteExecutionCapabilityInputEnv:    true,
