@@ -65,7 +65,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCacheGrantKey,
+				credBillingToken, credCreditsToken, credCacheGrantKey,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	cachePodURL := fs.String("cache-pod-url", "",
@@ -437,6 +437,12 @@ func run(args []string) error {
 			fmt.Fprintln(os.Stderr,
 				"sparkwing-controller: bootstrap admin token skipped: the tokens table already holds a token")
 		}
+	}
+
+	if created, err := controller.EnsureCheckoutToken(st, creds.CreditsToken, time.Now().UTC()); err != nil {
+		return fmt.Errorf("%s credential: %w", credCreditsToken, err)
+	} else if created {
+		fmt.Fprintln(os.Stderr, "sparkwing-controller: checkout service token created from the "+credCreditsToken+" credential")
 	}
 
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {

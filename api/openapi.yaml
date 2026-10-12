@@ -1961,6 +1961,7 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
+        "403": {description: "The request names the checkout service's scope, which only the controller's `credits-token` credential provisions."}
     get:
       x-sparkwing-scope: admin
       tags: [tokens]
@@ -2019,6 +2020,7 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreateTokenResponse"}
+        "403": {description: "The token is the checkout service's; replace the controller's `credits-token` credential instead."}
 
   /api/v1/accounts/{account}:
     delete:

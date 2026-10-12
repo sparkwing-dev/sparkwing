@@ -2,29 +2,33 @@ package controller_test
 
 import (
 	"context"
+	"crypto/rand"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
+// safety: the API never mints credits.grant, so the checkout service's token
+// is seeded the way the controller seeds it from its credits-token credential.
 func (f *identityFixture) creditsGrantToken() string {
 	f.t.Helper()
-	var minted struct {
-		Token string `json:"token"`
+	raw := "sws_" + rand.Text() + rand.Text()
+	if created, err := controller.EnsureCheckoutToken(f.store, raw, time.Now()); err != nil || !created {
+		f.t.Fatalf("seed the checkout token = %v, %v", created, err)
 	}
-	if code := f.call("POST", "/api/v1/tokens", "Bearer "+f.admin, map[string]any{
-		"principal": "checkout-service", "kind": "service", "scopes": []string{controller.ScopeCreditsGrant},
-	}, &minted); code != http.StatusCreated {
-		f.t.Fatalf("mint a credits.grant token = %d", code)
-	}
-	return "Bearer " + minted.Token
+	return "Bearer " + raw
 }
 
 var muxRoute = regexp.MustCompile(`mux\.Handle\("([A-Z]+) ([^"]+)"`)
@@ -153,19 +157,108 @@ func TestPaidGrantLookupAnswersThePayingTeam(t *testing.T) {
 	}
 }
 
-// A team's owner cannot mint the checkout service's scope into a team token.
-func TestCreditsGrantScopeIsTheOperatorsToMint(t *testing.T) {
+// No API caller mints or rotates the checkout service's scope: not a team
+// owner, and not the admin token, whose mint would restore every operator
+// power the console holds.
+func TestCreditsGrantScopeIsNeverMintedThroughTheAPI(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
+	admin := "Bearer " + f.admin
 	if code := f.call("POST", "/api/v1/team/tokens", owner.auth, map[string]any{
 		"name": "sneaky", "scopes": []string{controller.ScopeCreditsGrant},
 	}, nil); code < 400 {
 		t.Errorf("a team token carrying credits.grant = %d, want a refusal", code)
 	}
-	if code := f.call("POST", "/api/v1/tokens", owner.auth, map[string]any{
-		"principal": "x", "kind": "service", "scopes": []string{controller.ScopeCreditsGrant},
-	}, nil); code != http.StatusForbidden {
-		t.Errorf("an owner minting credits.grant = %d, want 403", code)
+	for _, who := range []struct{ name, auth string }{{"an owner", owner.auth}, {"the admin token", admin}} {
+		for _, kind := range []string{"service", "user", "runner"} {
+			if code := f.call("POST", "/api/v1/tokens", who.auth, map[string]any{
+				"principal": "x", "kind": kind, "scopes": []string{controller.ScopeCreditsGrant},
+			}, nil); code != http.StatusForbidden {
+				t.Errorf("%s minting a %s token carrying credits.grant = %d, want 403", who.name, kind, code)
+			}
+		}
+	}
+
+	grant := f.creditsGrantToken()
+	prefix := strings.TrimPrefix(grant, "Bearer ")[:store.PrefixLen]
+	var rotated struct {
+		Token string `json:"token"`
+	}
+	if code := f.call("POST", "/api/v1/tokens/"+prefix+"/rotate", admin, map[string]any{}, &rotated); code != http.StatusForbidden || rotated.Token != "" {
+		t.Errorf("the admin token rotating the checkout token = %d %q, want 403 and no token", code, rotated.Token)
+	}
+	if code := f.call("GET", "/api/v1/credits/units", grant, nil, nil); code != http.StatusOK {
+		t.Errorf("the checkout token after a refused rotation = %d, want 200", code)
+	}
+
+	user, _, err := f.store.CreateToken("legacy", store.TokenKindUser, []string{controller.ScopeCreditsGrant}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+user, nil, nil); code != http.StatusForbidden {
+		t.Errorf("a user token carrying credits.grant = %d, want 403: only a service token passes", code)
+	}
+}
+
+// The credits-token credential seeds its token once: a restart with the same
+// file writes nothing, and a token the operator revoked stays revoked.
+func TestCheckoutTokenSeedsOnceAndNeverRevives(t *testing.T) {
+	f := newIdentityFixture(t)
+	raw := "sws_" + rand.Text() + rand.Text()
+	now := time.Now()
+	for i, want := range []bool{true, false} {
+		if created, err := controller.EnsureCheckoutToken(f.store, raw, now); err != nil || created != want {
+			t.Fatalf("seed #%d = %v, %v; want %v", i+1, created, err, want)
+		}
+	}
+	if created, err := controller.EnsureCheckoutToken(f.store, "", now); err != nil || created {
+		t.Fatalf("an empty credential = %v, %v; want nothing written", created, err)
+	}
+	if code := f.call("DELETE", "/api/v1/tokens/"+raw[:store.PrefixLen], "Bearer "+f.admin, nil, nil); code >= 300 {
+		t.Fatalf("revoke = %d", code)
+	}
+	if created, err := controller.EnsureCheckoutToken(f.store, raw, now); err != nil || created {
+		t.Fatalf("reseeding a revoked token = %v, %v; want it left revoked", created, err)
+	}
+	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+raw, nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("the revoked checkout token = %d, want 401", code)
+	}
+}
+
+// A metering controller serving without credentials, one with an empty token
+// table, still answers the checkout service's routes only to its token.
+func TestServiceRoutesRefuseAnAnonymousCaller(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	raw := licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMetering}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	ctrl := controller.New(st, nil).EnableAuthFromStore().WithLicense(license.Resolve(raw, pub, now, nil))
+	srv := httptest.NewServer(ctrl.Handler())
+	t.Cleanup(srv.Close)
+	for _, route := range [][2]string{
+		{"POST", "/api/v1/credits/grants"},
+		{"POST", "/api/v1/credits/reversals"},
+		{"POST", "/api/v1/credits/freezes"},
+		{"POST", "/api/v1/credits/warnings"},
+		{"POST", "/api/v1/credits/checkouts/closed"},
+		{"GET", "/api/v1/credits/units"},
+	} {
+		code, _ := creditsRequest(t, route[0], srv.URL+route[1], "", map[string]any{
+			"kind": "paid", "amount_micro": 5, "reference": "pi_anon", "payment_id": "pi_anon", "dispute_id": "dp_anon",
+		})
+		if code != http.StatusUnauthorized {
+			t.Errorf("anonymous %s %s = %d, want 401", route[0], route[1], code)
+		}
+	}
+	if code, _ := creditsRequest(t, http.MethodGet, srv.URL+"/api/v1/credits", "", nil); code != http.StatusOK {
+		t.Fatalf("the open controller's own reads = %d, want 200: the route check, not auth, refused", code)
 	}
 }
 

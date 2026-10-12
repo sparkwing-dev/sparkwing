@@ -94,7 +94,7 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 		t.Fatalf("an unmetered claim on a frozen team: %v", err)
 	}
 
-	if _, err := s.ReleaseCreditFreezes(ctx, store.DefaultTeam, "", "", "", now); err != nil {
+	if _, err := s.ReleaseCreditFreezes(ctx, store.DefaultTeam, "dp_1", "", "", now); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil || n == nil {
@@ -221,5 +221,25 @@ func TestAReversalMayNotUseTheUnappliedPrefix(t *testing.T) {
 	}
 	if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != dollars(80) {
 		t.Fatalf("balance = %d, %v; want $80 after the one $20 refund", bal, err)
+	}
+}
+
+// A release names its hold: an empty or blank id is refused and releases
+// nothing, so it can never stand for every hold on the team.
+func TestReleaseCreditFreezesRefusesABlankHold(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	now := time.Now()
+	if _, err := s.HoldTeamForDispute(ctx, "acme", "dp_1", "", "dispute opened", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", "   "} {
+		if n, err := s.ReleaseCreditFreezes(ctx, "acme", id, "op", "resolved", now); !errors.Is(err, store.ErrInvalidInput) || n != 0 {
+			t.Errorf("release %q = %d, %v; want an invalid-input refusal", id, n, err)
+		}
+	}
+	if f, err := acme.CreditFreeze(ctx); err != nil || !f.Frozen || len(f.Disputes) != 1 {
+		t.Fatalf("freeze after the refusals = %+v, %v; want dp_1 still holding", f, err)
 	}
 }

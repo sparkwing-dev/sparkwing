@@ -149,10 +149,18 @@ that keep the logs service running.
   | hold naming `team` on `POST /api/v1/credits/freezes` | `POST /api/v1/operator/teams/{team}/freeze` |
   | `release` on `POST /api/v1/credits/freezes` | `POST /api/v1/operator/teams/{team}/unfreeze`, with `hold` for one dispute's hold |
 
-  The checkout service's own `credits.grant` token keeps working
-  unchanged. A script that used the admin token for any row above now
-  gets `404` or `403`.
-- **Go:** pass the actor and reason to `Store.ReleaseCreditFreezes`; a
+  A script that used the admin token for any row above now gets `404` or
+  `403`.
+- **The checkout service's token:** `POST /api/v1/tokens` and
+  `POST /api/v1/tokens/{prefix}/rotate` refuse `credits.grant` with `403`,
+  and its routes answer only a service token, never an anonymous caller.
+  The token the checkout service already holds keeps working. Before the
+  next rotation, put its value in the controller's `credits-token`
+  credential so a restart re-seeds it; to rotate, write a new
+  `sws_` value there and in the checkout service, restart, and revoke the
+  old prefix.
+- **Go:** pass the actor, the reason and the one hold's id to
+  `Store.ReleaseCreditFreezes`, which refuses an empty id; a
   caller of the removed `Store.DisputeTeam` reads the team from the hold it
   holds, or from `Tenant.CreditFreeze`.
 

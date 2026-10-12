@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -11,6 +12,39 @@ import (
 // writes, so an operator listing tokens can tell the provisioned
 // credential apart from one an admin minted through the API.
 const BootstrapAdminPrincipal = "bootstrap:admin"
+
+// CheckoutServicePrincipal labels the token [EnsureCheckoutToken] writes.
+const CheckoutServicePrincipal = "checkout-service"
+
+// EnsureCheckoutToken stores raw as the checkout service's token, a service
+// token carrying only [ScopeCreditsGrant], unless a token with its prefix is
+// already stored, and reports whether it created one. An empty raw creates
+// nothing. The controller's API never mints that scope, so this credential,
+// provisioned beside the controller's other secrets, is the only way the
+// checkout service gets one.
+func EnsureCheckoutToken(st *store.Store, raw string, now time.Time) (bool, error) {
+	if raw == "" {
+		return false, nil
+	}
+	if st == nil {
+		return false, errors.New("checkout token: no store")
+	}
+	return st.CreateTokenIfAbsent(raw, CheckoutServicePrincipal, store.TokenKindService,
+		[]string{ScopeCreditsGrant}, now)
+}
+
+// safety: each scope here reaches an operator power, so no API call mints or
+// rotates it into a token; only a credential the deployment provisions carries one.
+var provisionedOnlyScopes = []string{ScopeCreditsGrant}
+
+func provisionedOnlyScope(scopes []string) string {
+	for _, s := range scopes {
+		if slices.Contains(provisionedOnlyScopes, s) {
+			return s
+		}
+	}
+	return ""
+}
 
 // EnsureBootstrapAdminToken stores raw as an admin token when the tokens
 // table holds no rows, and reports whether it created one. An empty raw

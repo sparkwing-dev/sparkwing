@@ -152,6 +152,7 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
+| `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files

@@ -67,8 +67,16 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("admin %s: %w", verb, err)
 	}
-	if verb == "freeze" && *hold != "" {
-		return errors.New("--hold names a hold to release; freeze takes none")
+	holdID := strings.TrimSpace(*hold)
+	if fs.Changed("hold") {
+		if verb == "freeze" {
+			return errors.New("--hold names a hold to release; freeze takes none")
+		}
+		// safety: a blank --hold must not fall through to releasing the
+		// console's holds, let alone read as every hold on the team.
+		if holdID == "" {
+			return errors.New("--hold names no hold; give the hold's id, or leave --hold out")
+		}
 	}
 	ctx := context.Background()
 	p, err := paths.DefaultPaths()
@@ -101,15 +109,15 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		changed = []string{id}
-	case *hold != "":
-		n, err := st.ReleaseCreditFreezes(ctx, t.Team(), strings.TrimSpace(*hold), breakGlassActor, why, now)
+	case holdID != "":
+		n, err := st.ReleaseCreditFreezes(ctx, t.Team(), holdID, breakGlassActor, why, now)
 		if err != nil {
 			return err
 		}
 		if n == 0 {
-			return fmt.Errorf("team %s holds no hold %q", t.Team(), *hold)
+			return fmt.Errorf("team %s holds no hold %q", t.Team(), holdID)
 		}
-		changed = []string{strings.TrimSpace(*hold)}
+		changed = []string{holdID}
 	default:
 		if _, err := t.ReleaseOperatorHolds(ctx, breakGlassActor, why, now); err != nil {
 			return err

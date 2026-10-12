@@ -638,17 +638,24 @@ func requireScope(scope string, next http.Handler, alternatives ...string) http.
 	})
 }
 
-// safety: the checkout service's scope reaches money, so only a token minted
-// with it passes; the admin scope that satisfies requireScope does not, and an
-// operator acts on a team's ledger through the console instead.
+// safety: the checkout service's scope reaches money, so only a service token
+// minted with it passes. No admin token, session or anonymous caller does,
+// even on a controller that serves without credentials.
 func requireServiceScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(scope) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p == nil {
+			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
+				Code: "unauthenticated", Message: "this route answers a service token carrying " + scope,
+			})
+			return
+		}
+		if p.Kind != store.TokenKindService || p.TokenPrefix == "" || p.session != "" || p.AccountID != "" || !p.HasScope(scope) {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code:         "missing_scope",
 				MissingScope: scope,
 				Principal:    p.label(),
-				Message:      "only a token carrying " + scope + " itself reaches this route; an admin token does not",
+				Message:      "only a service token carrying " + scope + " reaches this route",
 			})
 			return
 		}

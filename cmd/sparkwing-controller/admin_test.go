@@ -70,6 +70,11 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 			t.Errorf("audit line %q lacks %s", audit, want)
 		}
 	}
+	for _, blank := range []string{"", "   "} {
+		if err := runAdmin([]string{"unfreeze", "--team", "default", "--reason", "x", "--hold", blank}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+			t.Errorf("unfreeze --hold %q succeeded, want a refusal", blank)
+		}
+	}
 	if released, _ := admin("unfreeze", "--team", "default", "--reason", "abuse stopped"); !slices.Equal(released.Holds, []string{"dp_1"}) {
 		t.Fatalf("after unfreeze = %+v, want only the dispute's hold left", released)
 	}

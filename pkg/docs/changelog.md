@@ -45,7 +45,7 @@ unlock.
 
 ### Changed
 - **store + controller (Breaking):** `Store.ReleaseCreditFreezes` takes the actor and reason its business events record, and `Store.DisputeTeam` is removed
-  `BillingStanding` reports `DailyCapOverrideCents`, `RungOverrideCents` and `RunnerCapOverride`, and `controller.OperatorReason` checks the reason the console and the break-glass command record. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
+  `BillingStanding` reports `DailyCapOverrideCents`, `RungOverrideCents` and `RunnerCapOverride`, and `controller.OperatorReason` checks the reason the console and the break-glass command record; `Store.CreateTokenIfAbsent` and `controller.EnsureCheckoutToken` seed the checkout service's token from the `credits-token` credential, and an empty hold id is refused by `Store.ReleaseCreditFreezes` rather than read as every hold. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
 
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
@@ -73,7 +73,7 @@ unlock.
 
 ### Removed
 - **controller (Breaking):** Operator powers answer only the operator console; the admin token no longer reaches them
-  `GET`/`POST /api/v1/teams/{team}/trust`, `GET /api/v1/signups/waitlist` and `POST /api/v1/signups/waitlist/approve` are removed. `POST /api/v1/credits/grants` records `paid` grants only, `POST /api/v1/credits/freezes` holds by payment only, and every `credits.grant` route answers `403` to an admin token. Trust, free grants, holds, releases and the waitlist go through `/api/v1/operator/`, which a listed operator's own session reaches. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
+  `GET`/`POST /api/v1/teams/{team}/trust`, `GET /api/v1/signups/waitlist` and `POST /api/v1/signups/waitlist/approve` are removed. `POST /api/v1/credits/grants` records `paid` grants only, `POST /api/v1/credits/freezes` holds by payment only, and every `credits.grant` route answers `403` to an admin token. Trust, free grants, holds, releases and the waitlist go through `/api/v1/operator/`, which a listed operator's own session reaches. No API call mints or rotates a `credits.grant` token; the controller seeds the checkout service's token from its new `credits-token` credential, and the `credits.grant` routes answer only a service token, refusing an anonymous caller even on an open controller. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
 - **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `pkg/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
   Convert the service's logs with `sparkwing-controller migrate-logs` before retiring it, or they become unreadable. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 

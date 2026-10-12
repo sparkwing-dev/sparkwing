@@ -2244,6 +2244,7 @@ func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
+func (s *Store) CreateTokenIfAbsent(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
 func (s *Store) CreateTokenSession(ctx context.Context, tokenPrefix, principal string, team Team, ttl time.Duration, now time.Time) (rawSession string, sess *Session, err error)
 func (s *Store) CreateTokenWith(

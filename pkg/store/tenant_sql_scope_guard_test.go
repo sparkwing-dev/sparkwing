@@ -278,6 +278,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"the answer is that credential's own",
 	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
 		"the answer is that credential's own",
+	"(*Store).CreateTokenIfAbsent": "a provisioned credential is seeded once by its prefix, which is unique across " +
+		"every team's tokens",
 	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
 		"exists in any team, because an install with any credential already has an operator path",
 	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +

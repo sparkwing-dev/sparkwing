@@ -243,6 +243,40 @@ func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []str
 	return n == 1, nil
 }
 
+// CreateTokenIfAbsent stores raw as a token for principal unless a token
+// with raw's prefix is already stored, live or not, and reports whether it
+// wrote one. A credential a deployment provisions from a file is seeded this
+// way on every start: the same file writes nothing again, and a token the
+// operator revoked stays revoked until a new file replaces it.
+func (s *Store) CreateTokenIfAbsent(raw, principal, kind string, scopes []string, now time.Time) (bool, error) {
+	if principal == "" {
+		return false, errors.New("tokens: principal is required")
+	}
+	if err := ValidateRawToken(raw, kind); err != nil {
+		return false, err
+	}
+	hash, err := hashToken(raw)
+	if err != nil {
+		return false, err
+	}
+	res, err := s.execNoCtx(`
+        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
+        SELECT ?, ?, ?, ?, ?, ?, NULL
+         WHERE NOT EXISTS (SELECT 1 FROM tokens WHERE prefix = ?)
+    `, hash, raw[:PrefixLen], principal, kind, strings.Join(dedupeScopes(scopes), ","), now.UTC().Unix(), raw[:PrefixLen])
+	if err != nil {
+		if isTokenPrefixCollision(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("tokens: seed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("tokens: seed: %w", err)
+	}
+	return n == 1, nil
+}
+
 func createTokenRow(
 	ctx context.Context, e tokenExecer, team Team,
 	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
