@@ -91,19 +91,35 @@ func (s *Store) RecordNodeLogProgress(ctx context.Context, l NodeLog, now time.T
 	return err
 }
 
-// ChargeNodeLog records that the attempt's stored bytes up to charged
-// are committed to its team's storage. It reports false, changing
-// nothing, when another request charged the attempt since l was read, so
-// the caller commits each delta once.
-func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64) (bool, error) {
-	res, err := s.exec(ctx, `UPDATE node_logs SET charged_bytes = ?
+// ChargeNodeLog commits the attempt's stored bytes past what l records as
+// charged to its team's log storage, and records charged, in one
+// transaction. It reports false, changing nothing, when another request
+// charged the attempt since l was read, so each delta is committed once; a
+// commit the team's storage refuses leaves the attempt as it was, so no
+// reader ever sees bytes charged that the team's count never took.
+func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64, now time.Time) (_ bool, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	c := StorageCommit{Team: l.Team, Kind: StorageLogs, Bytes: charged - l.ChargedBytes, Now: now}
+	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
+		return false, err
+	}
+	if _, err := commitStorageTx(ctx, tx, c); err != nil {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE node_logs SET charged_bytes = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ? AND charged_bytes = ?`,
 		charged, string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation, l.ChargedBytes)
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n == 1, err
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // NodeLogClassPrefixes returns the start of every log prefix the team's

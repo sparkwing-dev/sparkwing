@@ -110,10 +110,10 @@ func TestNodeLogChargesOnceAndPrunesFinishedRunsOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := s.ChargeNodeLog(ctx, rec, 100); err != nil || !ok {
+	if ok, err := s.ChargeNodeLog(ctx, rec, 100, time.Now()); err != nil || !ok {
 		t.Fatalf("first charge = %v, %v", ok, err)
 	}
-	if ok, err := s.ChargeNodeLog(ctx, rec, 150); err != nil || ok {
+	if ok, err := s.ChargeNodeLog(ctx, rec, 150, time.Now()); err != nil || ok {
 		t.Fatalf("a charge from a stale read = %v, %v; want refused", ok, err)
 	}
 	if got, err := s.GetNodeLog(ctx, store.DefaultTeam, f.run, "a", attempt, gen); err != nil || got.ChargedBytes != 100 {

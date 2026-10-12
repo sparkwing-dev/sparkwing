@@ -393,29 +393,14 @@ func (s *Server) openNodeLog(w http.ResponseWriter, r *http.Request, want store.
 	return rec, true
 }
 
-// safety: the writer reports what it stored, and the delta is claimed in the
-// record before it is committed, so two requests never charge it twice; a
-// commit the team's storage refuses hands the claim back, so a retry is
-// refused again instead of passing on the checkpoint.
+// safety: the writer reports what it stored, and the store commits the delta
+// and records it charged in one transaction, so two requests never charge it
+// twice and none is granted on a charge the team's storage refused.
 func (s *Server) chargeNodeLog(ctx context.Context, rec store.NodeLog, stored int64, now time.Time) error {
 	if !s.MultiTeam() || stored <= rec.ChargedBytes {
 		return nil
 	}
-	claimed, err := s.store.ChargeNodeLog(ctx, rec, stored)
-	if err != nil || !claimed {
-		return err
-	}
-	err = s.store.CommitStorage(ctx, store.StorageCommit{
-		Team: rec.Team, Kind: store.StorageLogs, Bytes: stored - rec.ChargedBytes, Now: now,
-	})
-	if err == nil {
-		return nil
-	}
-	charged := rec
-	charged.ChargedBytes = stored
-	if _, rerr := s.store.ChargeNodeLog(context.WithoutCancel(ctx), charged, rec.ChargedBytes); rerr != nil {
-		return errors.Join(err, fmt.Errorf("hand back the log charge: %w", rerr))
-	}
+	_, err := s.store.ChargeNodeLog(ctx, rec, stored, now)
 	return err
 }
 
