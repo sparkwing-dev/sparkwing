@@ -59,27 +59,6 @@ func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 	}
 }
 
-func TestRun_LocalOnlyReplacesOptionsSecretSourceWithTheLocalStore(t *testing.T) {
-	p := newPathsWithStore(t)
-	seedLocalSecret(t, p, "TOKEN", "from-local-store")
-
-	capturedEnvSecret = ""
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:     "env-reading-pipe",
-		LocalOnly:    true,
-		SecretSource: staticSource{"TOKEN": "from-remote-override"},
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
-	}
-	if capturedEnvSecret != "from-local-store" {
-		t.Errorf("step body saw Token = %q, want local dotenv", capturedEnvSecret)
-	}
-}
-
 func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
 	p := newPathsWithStore(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{

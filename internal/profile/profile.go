@@ -16,8 +16,6 @@ type Profile struct {
 
 	Secrets *backends.Spec `yaml:"secrets,omitempty"`
 	State   *backends.Spec `yaml:"state,omitempty"`
-	Cache   *backends.Spec `yaml:"cache,omitempty"`
-	Logs    *backends.Spec `yaml:"logs,omitempty"`
 
 	// RerunImage is the runner image `sparkwing debug rerun` starts its
 	// debug pod from on this profile's cluster.
@@ -51,13 +49,11 @@ func (p *Profile) InheritControllerDefaults() {
 	if p == nil || p.Controller == nil {
 		return
 	}
-	for _, spec := range []*backends.Spec{p.Secrets, p.State, p.Cache, p.Logs} {
+	for _, spec := range []*backends.Spec{p.Secrets, p.State} {
 		if spec == nil || spec.Type != backends.TypeController {
 			continue
 		}
-		// safety: a controller logs surface names its controller and no URL, because the controller keeps the
-		// logs itself; a URL there is a leftover logs service address, which validation refuses.
-		if spec.URL == "" && spec != p.Logs {
+		if spec.URL == "" {
 			spec.URL = p.Controller.URL
 		}
 		if spec.Token == "" && spec.TokenEnv == "" {
@@ -75,8 +71,6 @@ func (p *Profile) Surfaces() backends.Surfaces {
 	}
 	return backends.Surfaces{
 		Secrets: p.Secrets,
-		Cache:   p.Cache,
-		Logs:    p.Logs,
 		State:   p.State,
 	}
 }
@@ -124,8 +118,6 @@ func (p *Profile) validateSurfaceFields() error {
 	for surface, spec := range map[string]*backends.Spec{
 		"secrets": p.Secrets,
 		"state":   p.State,
-		"cache":   p.Cache,
-		"logs":    p.Logs,
 	} {
 		if err := spec.ValidateFields(surface); err != nil {
 			return err

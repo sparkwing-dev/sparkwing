@@ -42,8 +42,6 @@ profiles:
   bucket:
     secrets: { type: none }
     state: { type: sqlite, path: /tmp/example-project.db }
-    logs: { type: s3, bucket: example-bucket, prefix: logs }
-    cache: { type: s3, bucket: example-bucket, prefix: cache }
 `
 
 func TestResolveProfileFlag_FindsProjectProfile(t *testing.T) {
@@ -54,7 +52,7 @@ func TestResolveProfileFlag_FindsProjectProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	state, _, _ := p.SurfaceStrings()
+	state := p.StateString()
 	if !strings.Contains(state, "example-project.db") {
 		t.Errorf("state surface: got %q, want the project profile's database", state)
 	}
@@ -68,7 +66,7 @@ func TestResolveProfileFlag_UserProfileWinsNameCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	state, _, _ := p.SurfaceStrings()
+	state := p.StateString()
 	if !strings.Contains(state, "user.db") {
 		t.Errorf("state surface: got %q, want the user profile", state)
 	}
@@ -110,8 +108,6 @@ profiles:
   bucket:
     secrets: { type: none }
     state: { type: s3, bucket: example-bucket, prefix: state }
-    logs: { type: s3, bucket: example-bucket, prefix: logs }
-    cache: { type: s3, bucket: example-bucket, prefix: cache }
 `)
 	_, err := resolveProfileFlag("bucket")
 	if err == nil || !strings.Contains(err.Error(), "state.type: s3 is removed") {

@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
-	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/stdoutlogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -22,84 +17,6 @@ import (
 // type=controller specs; other types ignore it. Pass nil when no
 // controller-typed spec can appear.
 type ProfileLookup func(name string) (controllerURL, token string, err error)
-
-// OpenArtifactStoreFromSpec constructs an ArtifactStore from a
-// backends.Spec. The spec must already have passed pkg/backends
-// validation (surface allow-list, required fields per type).
-//
-// Recognized but not yet implemented backend types return a clear
-// error so callers surface a configuration problem instead of
-// silently falling back.
-func OpenArtifactStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.ArtifactStore, error) {
-	switch spec.Type {
-	case backends.TypeFilesystem:
-		path, err := expandPath(spec.Path)
-		if err != nil {
-			return nil, fmt.Errorf("cache filesystem: %w", err)
-		}
-		return fs.NewArtifactStore(path)
-	case backends.TypeS3:
-		client, err := newS3Client(ctx, true)
-		if err != nil {
-			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
-		}
-		return s3store.NewArtifactStore(spec.Bucket, spec.Prefix, client), nil
-	case backends.TypeController:
-		url, token, err := resolveControllerProfile("cache", spec.Controller, lookup)
-		if err != nil {
-			return nil, err
-		}
-		return sparkwingcache.New(url, token, nil), nil
-	default:
-		return nil, fmt.Errorf("cache backend type %q is not supported (use filesystem, s3 or controller)", spec.Type)
-	}
-}
-
-// OpenLogStoreFromSpec constructs a LogStore from a backends.Spec.
-// See OpenArtifactStoreFromSpec for error semantics.
-func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.LogStore, error) {
-	switch spec.Type {
-	case backends.TypeFilesystem:
-		path, err := expandPath(spec.Path)
-		if err != nil {
-			return nil, fmt.Errorf("logs filesystem: %w", err)
-		}
-		return fs.NewLogStore(path)
-	case backends.TypeS3:
-		client, err := newS3Client(ctx, true)
-		if err != nil {
-			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
-		}
-		return logbatch.New(
-			s3store.NewLogStore(spec.Bucket, spec.Prefix, client),
-			logBatchOptions(spec)...,
-		), nil
-	case backends.TypeStdout:
-		if err := stdoutlogs.CheckSpec(spec.Bucket, spec.Prefix, spec.Path, spec.URL, spec.Token); err != nil {
-			return nil, err
-		}
-		return stdoutlogs.New(), nil
-	case backends.TypeController:
-		url, token, err := resolveControllerProfile("logs", spec.Controller, lookup)
-		if err != nil {
-			return nil, err
-		}
-		return client.NewWithToken(url, nil, token).NodeLogs(), nil
-	default:
-		return nil, fmt.Errorf("logs backend type %q is not supported (use filesystem, s3, stdout or controller)", spec.Type)
-	}
-}
-
-// safety: every zero field keeps the package default, so a profile
-// that names none of these keys still batches.
-func logBatchOptions(spec backends.Spec) []logbatch.Option {
-	return []logbatch.Option{
-		logbatch.WithFlushInterval(spec.BatchInterval),
-		logbatch.WithBufferThreshold(spec.BatchBytes),
-		logbatch.WithMaxObjects(spec.MaxLogObjects),
-		logbatch.WithMaxBytes(spec.MaxLogBytes),
-	}
-}
 
 func resolveControllerProfile(surface, controller string, lookup ProfileLookup) (string, string, error) {
 	if controller == "" {
@@ -118,8 +35,8 @@ func resolveControllerProfile(surface, controller string, lookup ProfileLookup) 
 	return url, token, nil
 }
 
-// OpenStateStoreFromSpec constructs a StateStore from a backends.Spec.
-// See OpenArtifactStoreFromSpec for error semantics. The lookup
+// OpenStateStoreFromSpec constructs a StateStore from a backends.Spec
+// that has passed pkg/backends validation. The lookup
 // callback is consulted for type=controller specs; pass nil when no
 // controller-typed spec can appear.
 //

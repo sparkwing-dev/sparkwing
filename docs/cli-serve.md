@@ -62,7 +62,7 @@ sparkwing serve logs
 
 Replace an owned dashboard and wait for readiness
 
-Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.
+Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. The address is checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.
 
 ### Flags
 
@@ -72,8 +72,6 @@ Stops the verified owned instance, then starts the invoked binary. Preserves eff
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
 | `--allow-remote` | Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host. |
-| `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix) |
-| `--artifact-store URL` | Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix) |
 | `--read-only` | Reject writes on /api/v1/* (auth + webhooks remain open) |
 
 ### Examples
@@ -120,8 +118,6 @@ application/json. --allow-remote widens the Host check only.
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
 | `--allow-remote` | Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host. |
-| `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix) |
-| `--artifact-store URL` | Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix) |
 | `--read-only` | Reject writes on /api/v1/* (auth + webhooks remain open) |
 
 ### Examples

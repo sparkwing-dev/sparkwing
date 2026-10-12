@@ -7,10 +7,7 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
-	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 func TestRoundTrip_FS_KeyConventions(t *testing.T) {
@@ -40,20 +37,6 @@ func TestRoundTrip_FS_KeyConventions(t *testing.T) {
 	if string(got) != "payload" {
 		t.Fatalf("Get = %q, want payload", got)
 	}
-
-	logURL := "fs://" + t.TempDir()
-	w2, _ := OpenLogStore(ctx, logURL)
-	if err := w2.Append(ctx, "run1", "node1", []byte(`{"msg":"hi"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	r2, _ := OpenLogStore(ctx, logURL)
-	got2, err := r2.Read(ctx, "run1", "node1", storage.ReadOpts{})
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if !strings.Contains(string(got2), `"hi"`) {
-		t.Fatalf("Read = %q, want hi", got2)
-	}
 }
 
 func TestRealBucket_S3(t *testing.T) {
@@ -66,15 +49,10 @@ func TestRealBucket_S3(t *testing.T) {
 	keyPrefix := "test/" + randID(t)
 
 	artURL := "s3://" + bucket + "/" + keyPrefix + "/cache"
-	logURL := "s3://" + bucket + "/" + keyPrefix + "/logs"
 
 	art, err := OpenArtifactStore(ctx, artURL)
 	if err != nil {
 		t.Fatalf("OpenArtifactStore: %v", err)
-	}
-	logs, err := OpenLogStore(ctx, logURL)
-	if err != nil {
-		t.Fatalf("OpenLogStore: %v", err)
 	}
 
 	key := "rt-" + randID(t)
@@ -91,23 +69,6 @@ func TestRealBucket_S3(t *testing.T) {
 	rc.Close()
 	if string(got) != "hello-real-bucket" {
 		t.Fatalf("Get = %q", got)
-	}
-
-	runID := "rt-" + randID(t)
-	t.Cleanup(func() { _ = logs.DeleteRun(context.Background(), runID) })
-
-	if err := logs.Append(ctx, runID, "n1", []byte(`{"msg":"hello"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if err := logs.Append(ctx, runID, "n1", []byte(`{"msg":"world"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	out, err := logs.Read(ctx, runID, "n1", storage.ReadOpts{})
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if !strings.Contains(string(out), "hello") || !strings.Contains(string(out), "world") {
-		t.Fatalf("Read = %q", out)
 	}
 }
 

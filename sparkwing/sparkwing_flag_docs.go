@@ -54,7 +54,6 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
 	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
 	{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority", Group: "System", Hot: true},
-	{Name: "sw-local-only", Desc: "Force local secrets, state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
 	{Name: "sw-no-update", Desc: "Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve", Group: "System"},
 	{Name: "sw-no-bincache", Desc: "Build a temporary pipeline binary with debug symbols instead of using the binary cache", Group: "System"},
 	{Name: "sw-hash-all-files", Desc: "Hash files Git ignores into the binary cache key, for a build that embeds them", Group: "System"},

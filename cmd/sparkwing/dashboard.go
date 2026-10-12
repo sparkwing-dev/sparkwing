@@ -24,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/localws"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
 const (
@@ -107,8 +106,6 @@ func runDashboardSupervise(args []string) error {
 	addr := fs.String("addr", "127.0.0.1:4343", "")
 	home := fs.String("home", "", "")
 	pidPath := fs.String("pid", "", "")
-	logStoreURL := fs.String("log-store", "", "")
-	artifactStoreURL := fs.String("artifact-store", "", "")
 	readOnly := fs.Bool("read-only", false, "")
 	allowRemote := fs.Bool("allow-remote", false, "")
 	allowOrigins := fs.String("allow-origin", "", "")
@@ -133,22 +130,6 @@ func runDashboardSupervise(args []string) error {
 		Version:      *version,
 		Instance:     *instance,
 	}
-	if *logStoreURL != "" {
-		ls, err := storeurl.OpenLogStore(ctx, *logStoreURL)
-		if err != nil {
-			return fmt.Errorf("--log-store: %w", err)
-		}
-		opts.LogStore = ls
-		opts.LogStoreLabel = schemeOf(*logStoreURL)
-	}
-	if *artifactStoreURL != "" {
-		as, err := storeurl.OpenArtifactStore(ctx, *artifactStoreURL)
-		if err != nil {
-			return fmt.Errorf("--artifact-store: %w", err)
-		}
-		opts.ArtifactStore = as
-		opts.ArtifactStoreLabel = schemeOf(*artifactStoreURL)
-	}
 	if !opts.AllowRemote && !localws.LoopbackBind(opts.Addr) {
 		return errors.New("non-loopback dashboard requires --allow-remote")
 	}
@@ -171,7 +152,7 @@ func runDashboardSupervise(args []string) error {
 	if err != nil {
 		return err
 	}
-	record := dashboardRecord{PID: os.Getpid(), Birth: birth, Boot: boot, Instance: *instance, Artifact: dashboardRunningArtifact(), Options: dashboardOptions{Addr: opts.Addr, LogStore: *logStoreURL, ArtifactStore: *artifactStoreURL, AllowOrigins: *allowOrigins, ReadOnly: *readOnly, AllowRemote: *allowRemote}}
+	record := dashboardRecord{PID: os.Getpid(), Birth: birth, Boot: boot, Instance: *instance, Artifact: dashboardRunningArtifact(), Options: dashboardOptions{Addr: opts.Addr, AllowOrigins: *allowOrigins, ReadOnly: *readOnly, AllowRemote: *allowRemote}}
 	if record.Instance == "" {
 		record.Instance = fmt.Sprintf("%d-%s", record.PID, record.Birth)
 		opts.Instance = record.Instance
@@ -187,13 +168,6 @@ func runDashboardSupervise(args []string) error {
 		return fmt.Errorf("local-ws: %w", err)
 	}
 	return nil
-}
-
-func schemeOf(raw string) string {
-	if i := strings.Index(raw, "://"); i > 0 {
-		return raw[:i]
-	}
-	return "custom"
 }
 
 func readBaseURL(home string) string {

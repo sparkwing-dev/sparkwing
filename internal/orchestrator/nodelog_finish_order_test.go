@@ -8,11 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -84,12 +82,6 @@ func TestNodeLog_IsCompleteBeforeAFailingNodeReportsTerminal(t *testing.T) {
 	}
 
 	durable := &bufferedLogStore{}
-	// safety: an hour of interval and a megabyte of threshold mean nothing
-	// reaches the store until something flushes the node on purpose.
-	batcher := logbatch.New(durable,
-		logbatch.WithFlushInterval(time.Hour),
-		logbatch.WithBufferThreshold(1<<20))
-	t.Cleanup(func() { _ = batcher.Close() })
 
 	state := &finishSnapshotState{StateBackend: localState{st: st}, durable: durable}
 	plan := sparkwing.NewPlan()
@@ -99,7 +91,7 @@ func TestNodeLog_IsCompleteBeforeAFailingNodeReportsTerminal(t *testing.T) {
 		return boom
 	})
 
-	res := NewNodeExecutor(Backends{State: state, Logs: NewLogStoreBackend(batcher, nil)}).
+	res := NewNodeExecutor(Backends{State: state, Logs: NewLogStoreBackend(durable, nil)}).
 		RunNode(t.Context(), runner.Request{RunID: runID, NodeID: nodeID, Node: node})
 	if res.Outcome != sparkwing.Failed {
 		t.Fatalf("outcome = %s, want failed", res.Outcome)

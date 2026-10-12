@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
@@ -49,7 +50,7 @@ func ExampleLogStore_Read() {
 	defer os.RemoveAll(dir)
 
 	ctx := context.Background()
-	logs, err := storeurl.OpenLogStore(ctx, "fs://"+dir)
+	logs, err := fs.NewLogStore(dir)
 	if err != nil {
 		fmt.Println("open:", err)
 		return

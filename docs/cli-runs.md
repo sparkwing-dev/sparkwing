@@ -517,8 +517,7 @@ exclusive views of the unified stream.
 local run (run_start, node_start, run_finish, ...). A run read through a
 backend emits that run's stored event records instead (admission_wait,
 concurrency_wait, cache_hit, ...) -- a different record shape. That is
-any profile whose state is a shared database, an object store or a
-controller, and any profile that declares its own logs surface.
+any profile whose state is a controller.
 
 --grep without --run searches the logs of recent runs instead, scanning up
 to --limit runs the run filters (--pipeline, --status, --branch, --sha,

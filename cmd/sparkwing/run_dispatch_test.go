@@ -60,13 +60,10 @@ func TestRemoveEnvDropsAmbientRunHandle(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_LocalOnly(t *testing.T) {
+func TestParseRunFlags_RetiredSwLocalOnlyIsUnknown(t *testing.T) {
 	flags, passthroughArgs := parseRunFlags([]string{"--sw-local-only"})
-	if !flags.localOnly {
-		t.Errorf("localOnly: want true got false")
-	}
-	if len(passthroughArgs) != 0 {
-		t.Errorf("passthrough should be empty, got %v", passthroughArgs)
+	if flags.unknownRunnerFlag != "--sw-local-only" {
+		t.Errorf("--sw-local-only should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
 	}
 }
 

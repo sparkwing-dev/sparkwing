@@ -73,8 +73,6 @@ type Dashboard struct {
 
 	Bundle fs.FS
 
-	Logs storage.LogStore
-
 	Paths paths.Paths
 
 	Capabilities backend.Capabilities

@@ -4492,7 +4492,7 @@ paths:
                     description: Which surface holds artifacts, logs and runs. Absent from a controller serving no dashboard.
                     properties:
                       artifacts: {type: string}
-                      logs: {type: string, description: "The node log store: `segments` on a controller, `fs` or the profile's logs type on a laptop dashboard."}
+                      logs: {type: string, description: "The node log store: `segments` on a controller, `fs` on a laptop dashboard."}
                       runs: {type: string}
                   features: {type: array, items: {type: string}, description: The dashboard features this deployment serves.}
                   read_only: {type: boolean, description: True when the dashboard refuses writes.}

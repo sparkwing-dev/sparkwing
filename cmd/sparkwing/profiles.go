@@ -53,7 +53,6 @@ func loadCfg() (*profile.Config, string, error) {
 type profileIndex struct {
 	Name       string `json:"name"`
 	Controller string `json:"controller,omitempty"`
-	Logs       string `json:"logs,omitempty"`
 	Token      string `json:"token,omitempty"`
 }
 
@@ -87,7 +86,6 @@ func runProfilesList(args []string) error {
 		index = append(index, profileIndex{
 			Name:       name,
 			Controller: p.ControllerURL(),
-			Logs:       profile.SpecString(p.Logs),
 			Token:      redactToken(p.ControllerToken()),
 		})
 	}
@@ -101,9 +99,9 @@ func runProfilesList(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tCONTROLLER\tLOGS\tTOKEN")
+	fmt.Fprintln(tw, "NAME\tCONTROLLER\tTOKEN")
 	for _, p := range index {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Name, emptyDash(p.Controller), p.Logs, p.Token)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Name, emptyDash(p.Controller), p.Token)
 	}
 	_ = tw.Flush()
 	return nil
@@ -144,7 +142,7 @@ func runProfilesShow(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "name:       %s\n", p.Name)
 	fmt.Fprintf(os.Stdout, "controller: %s\n", p.ControllerURL())
-	fmt.Fprintf(os.Stdout, "logs:       %s\n", profile.SpecString(p.Logs))
+	fmt.Fprintf(os.Stdout, "state:      %s\n", p.StateString())
 	if *showToken {
 		fmt.Fprintf(os.Stdout, "token:      %s\n", emptyDash(p.ControllerToken()))
 	} else {
