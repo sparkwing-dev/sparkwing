@@ -130,7 +130,6 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 }
 
 func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secrets.Source, storage.ArtifactStore, error) {
-	bindProjectPipelines()
 	var art storage.ArtifactStore
 	var err error
 	if os.Getenv("SPARKWING_LOCAL_ONLY") == "1" {

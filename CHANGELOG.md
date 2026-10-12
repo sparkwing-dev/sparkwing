@@ -39,6 +39,9 @@ unlock.
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 
 ### Changed
+- **orchestrator:** A pipeline whose `.sparkwing/sparkwing.yaml` does not parse fails instead of running without it
+  Before, a run, a controller-dispatched trigger and each node process logged a warning and planned with the submitted arguments alone, dropping the project's default args, guards and runner requirements. Now the run fails with the parse error, which names the file and, for a removed key such as `mirror_local`, the key; a local `sparkwing run`, `plan` or `--describe` exits naming it.
+
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
 

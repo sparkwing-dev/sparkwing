@@ -26,7 +26,7 @@ func Main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	projectCfg := bindProjectPipelines()
+	projectCfg, projectErr := bindProjectPipelines()
 
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {
 		described, err := sparkwingruntime.DescribeAll()
@@ -55,6 +55,13 @@ func Main() {
 			os.Exit(1)
 		}
 		return
+	}
+	// safety: handle-trigger and run-node record a config error against the
+	// run they serve; every other verb has no run to record it on, so it stops
+	// here rather than planning without the project's defaults and guards.
+	if projectErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing:", projectErr)
+		os.Exit(1)
 	}
 	// safety: only the exact form is the verb, so a pipeline named plan still
 	// runs under its own flags.
@@ -222,17 +229,20 @@ func Main() {
 	}
 }
 
-func bindProjectPipelines() *projectconfig.Config {
+func bindProjectPipelines() (*projectconfig.Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("find the project config: %w", err)
 	}
 	_, cfg, err := projectconfig.Discover(cwd)
-	if err != nil || cfg == nil {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
 	}
 	sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
-	return cfg
+	return cfg, nil
 }
 
 func selectLocalRenderer() sparkwing.Logger {

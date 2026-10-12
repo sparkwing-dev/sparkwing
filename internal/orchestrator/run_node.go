@@ -158,7 +158,10 @@ func RunNodeOnce(
 	rc.NoCache, rc.DryRun = noCacheFromEnv(), dryRunFromEnv()
 	sparkwing.SetGit(rc.Git)
 
-	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, logger)
+	invokeArgs, err := checkoutInvokeArgs(run.Pipeline, run.Args)
+	if err != nil {
+		return runner.Result{}, err
+	}
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	// safety: no logger here on purpose. Every dispatching process re-plans,
 	// so a sink would repeat one authored line once per node.

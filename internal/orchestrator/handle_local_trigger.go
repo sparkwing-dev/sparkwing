@@ -79,8 +79,11 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		),
 	}
 
-	applyCheckoutProjectConfig(&opts, logger)
-	if pinErr := refusePinnedCheckoutRun(opts.PipelineYAML); pinErr != nil {
+	pinErr := applyCheckoutProjectConfig(&opts)
+	if pinErr == nil {
+		pinErr = refusePinnedCheckoutRun(opts.PipelineYAML)
+	}
+	if pinErr != nil {
 		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, pinErr); ferr != nil {
 			finishTrigger = false
 			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)

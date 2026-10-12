@@ -948,39 +948,44 @@ func loadCheckoutProjectConfig() (*projectconfig.Config, string, error) {
 	return cfg, path, err
 }
 
-func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
-	cfg, path, err := loadCheckoutProjectConfig()
+// safety: a config that does not parse hides the run's defaults, guards and
+// runner requirements, so the run fails naming the error rather than planning
+// with the caller's arguments alone.
+func checkoutProjectConfig() (*projectconfig.Config, error) {
+	cfg, _, err := loadCheckoutProjectConfig()
 	if err != nil {
-		if logger == nil {
-			logger = slog.Default()
-		}
-		logger.Warn("project config unreadable; running with the caller's arguments only, "+
-			"which may differ from the arguments this run was dispatched with",
-			"path", path, "err", err)
-		return nil
+		return nil, &projectConfigError{err: err}
 	}
-	return cfg
+	return cfg, nil
 }
 
-func checkoutInvokeArgs(pipeline string, stored map[string]string, logger *slog.Logger) map[string]string {
-	cfg := checkoutProjectConfig(logger)
-	if cfg == nil {
-		return stored
+// safety: a parse error describes the author's own config, so a failed run
+// records it in full rather than the generic setup-failure text.
+type projectConfigError struct{ err error }
+
+func (e *projectConfigError) Error() string { return "project config: " + e.err.Error() }
+
+func (e *projectConfigError) Unwrap() error { return e.err }
+
+func checkoutInvokeArgs(pipeline string, stored map[string]string) (map[string]string, error) {
+	cfg, err := checkoutProjectConfig()
+	if err != nil || cfg == nil {
+		return stored, err
 	}
 	return mergeInvokeArgs(Options{
 		Args:         stored,
 		DefaultArgs:  cfg.Defaults.Args,
 		PipelineYAML: (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline),
-	})
+	}), nil
 }
 
-func applyCheckoutProjectConfig(opts *Options, logger *slog.Logger) {
+func applyCheckoutProjectConfig(opts *Options) error {
 	if opts.DefaultArgs != nil && opts.PipelineYAML != nil {
-		return
+		return nil
 	}
-	cfg := checkoutProjectConfig(logger)
-	if cfg == nil {
-		return
+	cfg, err := checkoutProjectConfig()
+	if err != nil || cfg == nil {
+		return err
 	}
 	if opts.DefaultArgs == nil {
 		opts.DefaultArgs = cfg.Defaults.Args
@@ -992,6 +997,7 @@ func applyCheckoutProjectConfig(opts *Options, logger *slog.Logger) {
 		}
 		opts.PipelineYAML = entry
 	}
+	return nil
 }
 
 func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string) map[string]any {
