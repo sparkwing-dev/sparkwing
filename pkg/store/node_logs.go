@@ -29,18 +29,38 @@ func applyNodeLogsMigration(ctx context.Context, tx *storeTx) error {
 	return execStatements(ctx, tx, nodeLogsTableSQL)
 }
 
+const nodeLogSegmentsTableSQL = `CREATE TABLE IF NOT EXISTS node_log_segments (
+    team TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    attempt BIGINT NOT NULL,
+    generation BIGINT NOT NULL,
+    n BIGINT NOT NULL,
+    stored_bytes BIGINT NOT NULL,
+    md5 TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY (team, run_id, node_id, attempt, generation, n)
+);`
+
+// NodeLogSealGrace is how long after a node attempt ends its writer may
+// still upload the attempt's log and seal it, and how long the controller
+// waits before it seals the attempt as abandoned.
+const NodeLogSealGrace = 60 * time.Second
+
 // NodeLog records where one node attempt's log segments live, recorded
-// when the controller first issues upload URLs for the attempt, so a
+// when the attempt's writer first asks the controller for it, so a
 // reader never has to guess the attempt's retention class or key.
 type NodeLog struct {
-	Team            Team
-	RunID           string
-	NodeID          string
-	Attempt         int64
-	Generation      int64
-	Prefix          string
+	Team       Team
+	RunID      string
+	NodeID     string
+	Attempt    int64
+	Generation int64
+	Prefix     string
+	// UploadedThrough is the highest segment number signed for upload.
 	UploadedThrough int64
-	StoredBytes     int64
+	// StoredBytes is the size of every segment signed for upload.
+	StoredBytes int64
 	// ChargedBytes is how much of StoredBytes is committed to the team's
 	// storage.
 	ChargedBytes int64
@@ -101,48 +121,120 @@ func (s *Store) OpenNodeLog(ctx context.Context, l NodeLog, now time.Time) (Node
 		string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation))
 }
 
-// RecordNodeLogProgress raises the attempt's uploaded-through segment and
-// stored byte count to what its writer reports; neither ever goes down.
-func (s *Store) RecordNodeLogProgress(ctx context.Context, l NodeLog, now time.Time) error {
-	_, err := s.exec(ctx, `UPDATE node_logs
-   SET uploaded_through = CASE WHEN uploaded_through > ? THEN uploaded_through ELSE ? END,
-       stored_bytes = CASE WHEN stored_bytes > ? THEN stored_bytes ELSE ? END,
-       updated_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ?`,
-		l.UploadedThrough, l.UploadedThrough, l.StoredBytes, l.StoredBytes, now.UnixNano(),
-		string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation)
-	return err
+// NodeLogSegment is one segment of a node attempt's log as the controller
+// signed its upload: the exact size and digests the upload URL binds.
+type NodeLogSegment struct {
+	N           int
+	StoredBytes int64
+	// MD5 is base64, as the Content-MD5 header carries it.
+	MD5 string
+	// SHA256 is hex, as the manifest carries it.
+	SHA256 string
 }
 
-// ChargeNodeLog commits the attempt's stored bytes past what l records as
-// charged to its team's log storage, and records charged, in one
-// transaction. It reports false, changing nothing, when another request
-// charged the attempt since l was read, so each delta is committed once; a
-// commit the team's storage refuses leaves the attempt as it was, so no
-// reader ever sees bytes charged that the team's count never took.
-func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64, now time.Time) (_ bool, err error) {
+var (
+	// ErrNodeLogSealed refuses a segment for an attempt whose log has a
+	// manifest.
+	ErrNodeLogSealed = errors.New("store: the node log is sealed")
+	// ErrNodeLogSegmentConflict refuses a segment number already signed
+	// for other bytes.
+	ErrNodeLogSegmentConflict = errors.New("store: the log segment was signed for other bytes")
+	// ErrNodeLogCap refuses a segment that would take the attempt's log
+	// past its byte cap.
+	ErrNodeLogCap = errors.New("store: the node log reached its byte cap")
+)
+
+// SignNodeLogSegment records seg as segment seg.N of l's attempt and adds
+// its size to the attempt's stored bytes, committing it to the team's log
+// storage when charge is set, in one transaction. Signing a number again
+// for the same size and digests changes nothing and charges nothing. It
+// refuses other bytes under a signed number with
+// [ErrNodeLogSegmentConflict], a segment past capBytes with [ErrNodeLogCap]
+// and a sealed attempt with [ErrNodeLogSealed]; a refused storage commit
+// records nothing, so a retry is refused again.
+func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSegment, capBytes int64, charge bool, now time.Time) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	c := StorageCommit{Team: l.Team, Kind: StorageLogs, Bytes: charged - l.ChargedBytes, Now: now}
-	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
-		return false, err
+	key := []any{string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation}
+	var sealed sql.NullInt64
+	var stored int64
+	err = tx.QueryRowContext(ctx, `SELECT sealed_at, stored_bytes FROM node_logs
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ?`+tx.forUpdate(), key...).Scan(&sealed, &stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("node log", l.RunID+"/"+l.NodeID)
 	}
-	if _, err := commitStorageTx(ctx, tx, c); err != nil {
-		return false, err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE node_logs SET charged_bytes = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ? AND charged_bytes = ?`,
-		charged, string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation, l.ChargedBytes)
 	if err != nil {
-		return false, err
+		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return false, err
+	if sealed.Valid {
+		return ErrNodeLogSealed
 	}
-	return true, tx.Commit()
+	prior := NodeLogSegment{N: seg.N}
+	err = tx.QueryRowContext(ctx, `SELECT stored_bytes, md5, sha256 FROM node_log_segments
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ? AND n = ?`,
+		append(key, seg.N)...).Scan(&prior.StoredBytes, &prior.MD5, &prior.SHA256)
+	switch {
+	case err == nil && prior != seg:
+		return ErrNodeLogSegmentConflict
+	case err == nil:
+		return tx.Commit()
+	case !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	if stored+seg.StoredBytes > capBytes {
+		return ErrNodeLogCap
+	}
+	var charged int64
+	if charge {
+		charged = seg.StoredBytes
+		c := StorageCommit{Team: l.Team, Kind: StorageLogs, Bytes: charged, Now: now}
+		if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
+			return err
+		}
+		if _, err := commitStorageTx(ctx, tx, c); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO node_log_segments
+    (team, run_id, node_id, attempt, generation, n, stored_bytes, md5, sha256)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, append(key, seg.N, seg.StoredBytes, seg.MD5, seg.SHA256)...); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE node_logs
+   SET uploaded_through = CASE WHEN uploaded_through > ? THEN uploaded_through ELSE ? END,
+       stored_bytes = stored_bytes + ?, charged_bytes = charged_bytes + ?, updated_at = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ?`,
+		append([]any{seg.N, seg.N, seg.StoredBytes, charged, now.UnixNano()}, key...)...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// NodeLogSegments returns the segments signed for l's attempt, by number.
+func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegment, err error) {
+	rows, err := s.query(ctx, `SELECT n, stored_bytes, md5, sha256 FROM node_log_segments
+ WHERE team = ? AND run_id = ? AND node_id = ? AND attempt = ? AND generation = ? ORDER BY n`,
+		string(l.Team), l.RunID, l.NodeID, l.Attempt, l.Generation)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	var out []NodeLogSegment
+	for rows.Next() {
+		var seg NodeLogSegment
+		if err := rows.Scan(&seg.N, &seg.StoredBytes, &seg.MD5, &seg.SHA256); err != nil {
+			return nil, err
+		}
+		out = append(out, seg)
+	}
+	return out, rows.Err()
 }
 
 // PrunableNodeLogs lists a team's log records of finished runs, least
@@ -205,17 +297,20 @@ func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []N
 
 // AbandonedNodeLogs lists unsealed attempts no writer will seal: the
 // node finished or another claim generation holds it, nothing has been
-// heard from the attempt since before cutoff, and a finished node
-// finished before cutoff too. A deleted run's records are not listed;
-// deleting the run deletes its logs.
+// heard from the attempt since before cutoff, a finished node finished
+// before cutoff too, and no live trigger claim drives the run. A deleted
+// run's records are not listed; deleting the run deletes its logs.
 func (s *Store) AbandonedNodeLogs(ctx context.Context, cutoff time.Time, limit int) (_ []NodeLog, err error) {
+	// safety: a trigger's in-process nodes keep their logs open until the trigger's child exits, so a node the
+	// child finished long ago is still sealed by its writer while the trigger claim lives.
 	rows, err := s.query(ctx, `SELECT `+nodeLogColumnsOf("l")+` FROM node_logs l
   JOIN nodes n ON n.team = l.team AND n.run_id = l.run_id AND n.node_id = l.node_id
  WHERE l.sealed_at IS NULL AND l.updated_at < ?
    AND ((n.status = ? AND COALESCE(n.finished_at, 0) < ?)
         OR (n.status != ? AND l.generation != n.claim_generation))
+   AND NOT EXISTS (SELECT 1 FROM triggers t WHERE t.team = l.team AND t.id = l.run_id AND `+triggerClaimLiveSQL("t.")+`)
  ORDER BY l.updated_at LIMIT ?`,
-		cutoff.UnixNano(), nodeStatusDone, cutoff.UnixNano(), nodeStatusDone, limit)
+		cutoff.UnixNano(), nodeStatusDone, cutoff.UnixNano(), nodeStatusDone, cutoff.UnixNano(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +320,9 @@ func (s *Store) AbandonedNodeLogs(ctx context.Context, cutoff time.Time, limit i
 // DeleteRunNodeLogs forgets a run's log records once their objects are
 // gone.
 func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error {
+	if _, err := s.exec(ctx, `DELETE FROM node_log_segments WHERE team = ? AND run_id = ?`, string(team), runID); err != nil {
+		return err
+	}
 	_, err := s.exec(ctx, `DELETE FROM node_logs WHERE team = ? AND run_id = ?`, string(team), runID)
 	return err
 }
@@ -292,38 +390,33 @@ func LiveLogAttempt(attempt, generation int64) string {
 // nodes a viewer is watching. A heartbeat without it is answered 204.
 const LogWatchHeader = "X-Sparkwing-Log-Watch"
 
-// LogSegmentsRequest asks the controller for upload URLs for a node
-// attempt's log segments. Attempt and Generation echo the previous
-// grant, so a writer whose attempt was superseded is refused; both are
-// zero on the first request. UploadedThrough and StoredBytes report
-// what the writer has stored so far.
-type LogSegmentsRequest struct {
-	Attempt         int64 `json:"attempt,omitempty"`
-	Generation      int64 `json:"generation,omitempty"`
-	Next            int   `json:"next"`
-	Count           int   `json:"count"`
-	UploadedThrough int   `json:"uploaded_through"`
-	StoredBytes     int64 `json:"stored_bytes"`
+// LogSegmentRequest asks the controller to sign the upload of one sealed
+// segment of a node attempt's log, for exactly its size and digests. N
+// zero signs nothing and names the attempt the writer writes. Attempt and
+// Generation echo that answer, so a writer whose attempt was superseded
+// is refused; both are zero on the first request.
+type LogSegmentRequest struct {
+	Attempt    int64 `json:"attempt,omitempty"`
+	Generation int64 `json:"generation,omitempty"`
+	N          int   `json:"n"`
+	// Size is the stored (compressed) segment's length in bytes.
+	Size int64 `json:"size,omitempty"`
+	// MD5 is the stored segment's MD5, base64, as Content-MD5 carries it.
+	MD5 string `json:"md5,omitempty"`
+	// SHA256 is the stored segment's SHA-256, hex, as the manifest lists it.
+	SHA256 string `json:"sha256,omitempty"`
 }
 
-// LogSegmentURL is one presigned PUT. N is the segment number; the
-// manifest's URL carries zero.
-type LogSegmentURL struct {
-	N       int               `json:"n"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers,omitempty"`
-}
-
-// LogSegmentsGrant answers a [LogSegmentsRequest]: the attempt the
-// writer writes, its key prefix, one URL per requested segment, and a
-// fresh manifest URL, all valid until ExpiresAt.
-type LogSegmentsGrant struct {
-	Attempt     int64           `json:"attempt"`
-	Generation  int64           `json:"generation"`
-	Prefix      string          `json:"prefix"`
-	URLs        []LogSegmentURL `json:"urls"`
-	ManifestURL LogSegmentURL   `json:"manifest_url"`
-	ExpiresAt   time.Time       `json:"expires_at"`
+// LogSegmentGrant answers a [LogSegmentRequest]: the attempt the writer
+// writes, its key prefix, and for a segment one presigned PUT that sends
+// Headers and accepts only the signed bytes until ExpiresAt.
+type LogSegmentGrant struct {
+	Attempt    int64             `json:"attempt"`
+	Generation int64             `json:"generation"`
+	Prefix     string            `json:"prefix"`
+	URL        string            `json:"url,omitempty"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	ExpiresAt  time.Time         `json:"expires_at,omitzero"`
 	// Watched reports that a viewer has the node's log open, so the
 	// writer pushes its lines to the live view.
 	Watched bool `json:"watched"`

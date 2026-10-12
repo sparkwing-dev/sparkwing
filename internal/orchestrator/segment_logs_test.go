@@ -253,14 +253,15 @@ func newFakeSegmentController(t *testing.T) (*httptest.Server, chan livePush) {
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/runs/r/nodes/n/log-segments":
-			grant := store.LogSegmentsGrant{
-				Attempt: 1, Generation: 1, Prefix: "p/", ExpiresAt: time.Now().Add(15 * time.Minute),
-				ManifestURL: store.LogSegmentURL{URL: srv.URL + "/put/manifest"},
-			}
-			for i := 1; i <= 16; i++ {
-				grant.URLs = append(grant.URLs, store.LogSegmentURL{N: i, URL: srv.URL + "/put/" + strconv.Itoa(i)})
+			var req store.LogSegmentRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			grant := store.LogSegmentGrant{Attempt: 1, Generation: 1, Prefix: "p/"}
+			if req.N > 0 {
+				grant.URL = srv.URL + "/put/" + strconv.Itoa(req.N)
 			}
 			_ = json.NewEncoder(w).Encode(grant)
+		case r.URL.Path == "/api/v1/runs/r/nodes/n/log-manifest":
+			w.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(r.URL.Path, "/put/"):
 			w.WriteHeader(http.StatusOK)
 		case r.URL.Path == "/api/v1/runs/r/nodes/n/logs":

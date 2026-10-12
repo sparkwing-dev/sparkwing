@@ -118,6 +118,10 @@ type BillingStanding struct {
 	TrustReason        string
 	LimitOverrideCents int64
 
+	DailyCapOverrideCents int64
+	RungOverrideCents     int64
+	RunnerCapOverride     int64
+
 	Trusted    bool
 	LimitMicro int64
 
@@ -272,6 +276,7 @@ type ClaimInputRequest struct {
 	Node         string
 	MaxAgeMS     int64
 }
+const ClaimLogTail
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
 func ClaimMemoKey(repo, pipeline, node, hash string) string
 type ClaimPlacement struct {
@@ -307,6 +312,8 @@ type ClaimToken struct {
 	ExpiresAt  time.Time
 
 	Ended bool
+
+	Attempt int64
 }
 type ClaimTokenKind string
 const ClaimTokenNode ClaimTokenKind = "node"
@@ -836,6 +843,9 @@ var ErrNoOutputDir = errors.New("store: this store keeps no output bytes; upload
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 var ErrNoTeam = errors.New("store: team is required")
 var ErrNoTokenCandidates = errors.New("unknown token")
+var ErrNodeLogCap = errors.New("store: the node log reached its byte cap")
+var ErrNodeLogSealed = errors.New("store: the node log is sealed")
+var ErrNodeLogSegmentConflict = errors.New("store: the log segment was signed for other bytes")
 var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
@@ -861,6 +871,7 @@ var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tok
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSecretUndeclared = errors.New("store: the run's pipeline does not declare this secret")
+var ErrSeededTokenRevoked = errors.New("tokens: this provisioned credential was revoked; replace it")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no such slot for this node")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
@@ -895,6 +906,7 @@ const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
 const EventKindCreditsUnpriced = "credits_unpriced_class"
 const EventKindMetricsStopped = "metrics_stopped"
+const EventKindSecretPreflightRefused = "secret_preflight_refused"
 type EventLimits struct {
 	MaxBytesPerEvent int64
 	MaxBytesPerRun   int64
@@ -1203,28 +1215,26 @@ func (o LegacyOutput) Ref() OutputRef
 func LiveLogAttempt(attempt, generation int64) string
 const LiveLogAttemptHeader = "X-Sparkwing-Log-Attempt"
 const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
-type LogSegmentURL struct {
-	N       int
-	URL     string
-	Headers map[string]string
-}
-type LogSegmentsGrant struct {
-	Attempt     int64
-	Generation  int64
-	Prefix      string
-	URLs        []LogSegmentURL
-	ManifestURL LogSegmentURL
-	ExpiresAt   time.Time
+type LogSegmentGrant struct {
+	Attempt    int64
+	Generation int64
+	Prefix     string
+	URL        string
+	Headers    map[string]string
+	ExpiresAt  time.Time
 
 	Watched bool
 }
-type LogSegmentsRequest struct {
-	Attempt         int64
-	Generation      int64
-	Next            int
-	Count           int
-	UploadedThrough int
-	StoredBytes     int64
+type LogSegmentRequest struct {
+	Attempt    int64
+	Generation int64
+	N          int
+
+	Size int64
+
+	MD5 string
+
+	SHA256 string
 }
 const LogWatchHeader = "X-Sparkwing-Log-Watch"
 func LooksLikeEmail(email string) bool
@@ -1458,20 +1468,31 @@ type NodeDispatch struct {
 	RedactedKeys     []byte
 }
 type NodeLog struct {
-	Team            Team
-	RunID           string
-	NodeID          string
-	Attempt         int64
-	Generation      int64
-	Prefix          string
+	Team       Team
+	RunID      string
+	NodeID     string
+	Attempt    int64
+	Generation int64
+	Prefix     string
+
 	UploadedThrough int64
-	StoredBytes     int64
+
+	StoredBytes int64
 
 	ChargedBytes int64
 
 	SealedAt  time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+const NodeLogSealGrace = 60 * time.Second
+type NodeLogSegment struct {
+	N           int
+	StoredBytes int64
+
+	MD5 string
+
+	SHA256 string
 }
 type NodeMetering int
 type NodeSettlement struct {
@@ -1884,6 +1905,13 @@ type Secret struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+type SecretPreflightError struct {
+	RunID    string
+	Pipeline string
+}
+func (e *SecretPreflightError) Detail() string
+func (e *SecretPreflightError) Error() string
+func (e *SecretPreflightError) Unwrap() error
 type SecretResealCounts struct {
 	Resealed int
 
@@ -2185,7 +2213,6 @@ func (s *Store) CancelNodeForExhaustedCredits(
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
-func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64, now time.Time) (_ bool, err error)
 func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error)
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error
 func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error)
@@ -2269,7 +2296,6 @@ func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error)
 func (s *Store) Dialect() Dialect
-func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error)
 func (s *Store) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
 func (s *Store) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
 func (s *Store) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
@@ -2394,6 +2420,7 @@ func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (prin
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
+func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegment, err error)
 func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID string) (settled, found bool, err error)
 func (s *Store) NodeOutputKey(ctx context.Context, runID, nodeID string) (string, error)
 func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error)
@@ -2435,14 +2462,13 @@ func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (er
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) RecordMigratedOutput(ctx context.Context, o LegacyOutput, provenance string, now time.Time) (err error)
-func (s *Store) RecordNodeLogProgress(ctx context.Context, l NodeLog, now time.Time) error
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseRunOutputs(ctx context.Context, team Team, runID string) (_ []Upload, err error)
@@ -2488,6 +2514,7 @@ func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window,
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SeedStorageRetention(ctx context.Context, days int64) (bool, error)
+func (s *Store) SeedToken(ctx context.Context, raw, principal, kind string, scopes []string, now time.Time) (_ bool, err error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
@@ -2522,6 +2549,7 @@ func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) erro
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SetTrustLocalBuilds(ctx context.Context, team Team, trust bool) error
 func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
+func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSegment, capBytes int64, charge bool, now time.Time) (err error)
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
@@ -3116,6 +3144,8 @@ func WithoutCreditMetering(ctx context.Context) context.Context
 func WriteOutputFileDurably(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
+func (e secretUndeclaredError) Error() string
+func (e secretUndeclaredError) Is(target error) bool
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row

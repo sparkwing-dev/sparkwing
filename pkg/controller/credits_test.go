@@ -32,6 +32,7 @@ type creditsFixture struct {
 	url      string
 	store    *store.Store
 	admin    string
+	service  string
 	runner   string
 	prefix   string
 	readonly string
@@ -64,6 +65,11 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
+	service, _, err := st.CreateToken("checkout-service", store.TokenKindService,
+		[]string{controller.ScopeCreditsGrant}, 0, now)
+	if err != nil {
+		t.Fatalf("service token: %v", err)
+	}
 	ctrl := controller.New(st, nil).EnableAuthFromStore()
 	if feature != "" {
 		pub, priv := licensetest.NewKey(t)
@@ -77,7 +83,7 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	t.Cleanup(srv.Close)
 	return creditsFixture{
 		url: srv.URL, store: st,
-		admin: admin, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
+		admin: admin, service: service, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
 	}
 }
 
@@ -755,16 +761,21 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	status, _ = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.readonly,
 		map[string]any{"kind": "paid", "amount_micro": 1000})
 	if status != http.StatusForbidden {
-		t.Fatalf("grant without admin = %d, want 403", status)
+		t.Fatalf("grant without credits.grant = %d, want 403", status)
+	}
+	status, _ = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
+		map[string]any{"kind": "paid", "amount_micro": 1000, "reference": "pay_admin"})
+	if status != http.StatusForbidden {
+		t.Fatalf("grant with an admin token = %d, want 403", status)
 	}
 
-	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
+	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service,
 		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCent, "reference": "pay_9"})
 	if status != http.StatusCreated {
 		t.Fatalf("grant = %d: %s", status, body)
 	}
 
-	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
+	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service,
 		map[string]any{"kind": "gift", "amount_micro": 5})
 	if status != http.StatusBadRequest {
 		t.Fatalf("unknown grant kind = %d: %s", status, body)
@@ -789,7 +800,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if len(history.Grants) != 1 {
 		t.Fatalf("grants = %d, want 1", len(history.Grants))
 	}
-	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "root" {
+	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "checkout-service" {
 		t.Fatalf("grant row = %+v", history.Grants[0])
 	}
 	if len(history.Charges) != 0 {

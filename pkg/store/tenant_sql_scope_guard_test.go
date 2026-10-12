@@ -144,8 +144,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
-	"(*Store).DisputeTeam": "asks which team a dispute's hold is on, so an operator's release that names only the " +
-		"dispute answers with that team; a dispute id is unique across teams",
 	"applyMigrationSQLite": "the SQLite schema ladder rewrites every team's rows, and its early steps run before the team " +
 		"column exists",
 	"(*Store).applyMigrationPostgresTx": "the PostgreSQL schema ladder rewrites every team's rows, and its early steps run " +
@@ -280,6 +278,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"the answer is that credential's own",
 	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
 		"the answer is that credential's own",
+	"(*Store).SeedToken": "a provisioned credential is seeded once by its prefix, which is unique across " +
+		"every team's tokens",
 	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
 		"exists in any team, because an install with any credential already has an operator path",
 	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -78,8 +79,15 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("kind required (user|runner|service)"))
 		return
 	}
-	if err := validateScopes(req.Scopes); err != nil {
+	scopes, err := normalizeScopes(req.Scopes)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Scopes = scopes
+	if scope := provisionedOnlyScope(req.Scopes); scope != "" {
+		writeError(w, http.StatusForbidden, fmt.Errorf(
+			"%s is never minted through the API; the controller seeds it from its credits-token credential", scope))
 		return
 	}
 	ttl := time.Duration(req.TTLSecs) * time.Second

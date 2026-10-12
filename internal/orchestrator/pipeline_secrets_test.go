@@ -88,3 +88,58 @@ func TestOrchestratorRun_MissingRequiredSecretFailsRun(t *testing.T) {
 		t.Errorf("expected ErrSecretMissing in chain, got %v", res.Error)
 	}
 }
+
+type preflightSec struct {
+	Deploy string `sw:"DEPLOY_KEY"`
+	Token  string `sw:"API_TOKEN,required"`
+	Hook   string `sw:"SLACK_HOOK,optional"`
+}
+
+type preflightPipe struct{ sparkwing.Base }
+
+func (preflightPipe) Secrets() any { return &preflightSec{} }
+
+var preflightNodeRan bool
+
+func (preflightPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "deploy", func(context.Context) error {
+		preflightNodeRan = true
+		return nil
+	})
+	return nil
+}
+
+func init() {
+	register("orch-sec-preflight", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &preflightPipe{} })
+}
+
+// A laptop run checks every declared secret against its store before the
+// first node, names each required one that is missing with the command that
+// sets it, and lets a missing optional one pass.
+func TestOrchestratorRun_SecretPreflightNamesEveryMissingSecretBeforeTheFirstNode(t *testing.T) {
+	preflightNodeRan = false
+	p := newPathsWithStore(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-sec-preflight"})
+	if err != nil {
+		t.Fatalf("RunLocal returned err: %v", err)
+	}
+	if res.Status != "failed" || res.Error == nil {
+		t.Fatalf("status = %q (%v), want failed", res.Status, res.Error)
+	}
+	if preflightNodeRan {
+		t.Fatal("a node ran although the preflight failed")
+	}
+	t.Logf("refusal:\n%s", res.Error)
+	want := `pipeline "orch-sec-preflight" did not start: it declares 2 required secrets that this machine's local secret store does not hold.
+- DEPLOY_KEY
+  Fix: sparkwing secrets set --name DEPLOY_KEY --file <path>
+- API_TOKEN
+  Fix: sparkwing secrets set --name API_TOKEN --file <path>
+If the run can do without a secret, declare it optional: tag its field in Secrets() ` + "`sw:\"NAME,optional\"`."
+	if got := res.Error.Error(); got != want {
+		t.Fatalf("refusal =\n%s\nwant\n%s", got, want)
+	}
+	if !errors.Is(res.Error, sparkwing.ErrSecretMissing) {
+		t.Errorf("the refusal does not match ErrSecretMissing: %v", res.Error)
+	}
+}

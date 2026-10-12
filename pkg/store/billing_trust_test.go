@@ -118,7 +118,7 @@ func TestAutomaticTrustRuleBoundaries(t *testing.T) {
 	if _, err := s.HoldTeamForDispute(ctx, "held", "dp_1", "pi_held", "dispute", paidAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReleaseCreditFreezes(ctx, "held", "dp_1", paidAt); err != nil {
+	if _, err := s.ReleaseCreditFreezes(ctx, "held", "dp_1", "", "", paidAt); err != nil {
 		t.Fatal(err)
 	}
 	if billingStanding(t, held, paidAt.Add(store.AutoTrustPaymentAge)).Trusted {
