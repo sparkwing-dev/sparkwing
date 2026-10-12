@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sparkwing node protocol: requests and replies",
+  "description": "The stdio messages of docs/node-protocol.md. The host writes a request per line to the SDK process's stdin; the SDK writes a reply per line to stdout. The result of describe and plan is defined in describe.schema.json; run_node and run_step answer a runResult, eval an evalResult.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Assigned by the host, unique within the process."
+        },
+        "op": {
+          "enum": [
+            "describe",
+            "plan",
+            "run_node",
+            "run_step",
+            "eval"
+          ]
+        },
+        "pipeline": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Flag name to string value."
+        },
+        "run": {
+          "$ref": "#/$defs/runContext"
+        },
+        "node": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failure": {
+          "$ref": "#/$defs/failure"
+        },
+        "closure": {
+          "type": "string"
+        },
+        "input": {
+          "type": "object",
+          "description": "Kind-specific input; after_run takes {outcome, error?} with error a string."
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "plan"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "required": [
+              "pipeline",
+              "args",
+              "run"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "run_node"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "required": [
+              "node",
+              "attempt"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "run_step"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "required": [
+              "node",
+              "step",
+              "attempt"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "eval"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "required": [
+              "closure"
+            ]
+          }
+        }
+      ]
+    },
+    "runContext": {
+      "type": "object",
+      "description": "The run a plan is built for. Plan code reads it as its run context; the pipeline is the request's own pipeline field.",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "description": "RFC 3339."
+        },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
+        "git": {
+          "$ref": "#/$defs/git"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "no_cache": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "additionalProperties": false
+    },
+    "trigger": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "enum": [
+            "manual",
+            "push",
+            "schedule",
+            "webhook"
+          ]
+        },
+        "user": {
+          "type": "string"
+        },
+        "pull_request": {
+          "$ref": "#/$defs/pullRequest"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "pullRequest": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer"
+        },
+        "action": {
+          "type": "string"
+        },
+        "base_ref": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "head_ref": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "additionalProperties": false
+    },
+    "git": {
+      "type": "object",
+      "properties": {
+        "sha": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "default_branch": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string",
+          "description": "owner/name."
+        },
+        "repo_url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "branch"
+      ],
+      "additionalProperties": false
+    },
+    "failure": {
+      "type": "object",
+      "description": "How the parent of an on_failure node failed.",
+      "properties": {
+        "node": {
+          "type": "string"
+        },
+        "stage": {
+          "enum": [
+            "action",
+            "verify"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "stage",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "reply": {
+      "type": "object",
+      "description": "A stdout line that is a JSON object with a reply key. A successful reply carries no error; a failed one carries no result.",
+      "properties": {
+        "reply": {
+          "type": "string",
+          "description": "The id of the request this answers."
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "result": {
+          "type": "object"
+        },
+        "error": {
+          "$ref": "#/$defs/replyError"
+        }
+      },
+      "required": [
+        "reply",
+        "ok"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            },
+            "required": [
+              "ok"
+            ]
+          },
+          "then": {
+            "required": [
+              "result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "ok": {
+                "const": false
+              }
+            },
+            "required": [
+              "ok"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "replyError": {
+      "type": "object",
+      "description": "Why the SDK could not do what the request asked.",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Optional. unknown_op, unknown_pipeline, unknown_node, unknown_step, unknown_closure, no_plan, bad_request, invalid_args or plan_failed. The host treats a missing or unknown code as sdk_error."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "runResult": {
+      "type": "object",
+      "description": "The result of run_node and run_step.",
+      "properties": {
+        "outcome": {
+          "enum": [
+            "success",
+            "failed"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "description": "The message of an error the body returned or threw."
+        },
+        "output": {
+          "description": "The body's JSON output. On run_step only the result step carries it."
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "additionalProperties": false
+    },
+    "evalResult": {
+      "type": "object",
+      "description": "The result of eval. value is a boolean for skip_if, a string or null for cache_key, null for before_run, verify and after_run, and an array of node documents for generator.",
+      "properties": {
+        "value": {},
+        "error": {
+          "type": "string",
+          "description": "The message of an error the closure returned or threw."
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeError": {
+      "type": "object",
+      "description": "The body of every error response from a /node/v1/ route.",
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "On 426 only: the version the host speaks."
+        }
+      },
+      "required": [
+        "error",
+        "code"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

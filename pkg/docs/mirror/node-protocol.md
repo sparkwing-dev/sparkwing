@@ -1,242 +1,370 @@
 # Node protocol
 
-The node protocol is the contract between the engine, which hosts a run, and an SDK process, which holds a pipeline's code. Any language can implement the SDK side: it reads the environment below, answers the engine's requests, calls the node-facing HTTP routes, and writes log records to stdout. This page is the contract; the Go SDK in `sparkwing/` is one implementation of it.
+The node protocol is the contract between the engine, which hosts a run, and an SDK process, which holds a pipeline's code. Any language can implement the SDK side. The Go SDK in `sparkwing/` is one implementation and the TypeScript SDK in `sdk/typescript` is another. `design/engine-hosted-execution.md` in the source repository explains why the engine is split this way.
 
-Each part of the contract is marked **Today** (the engine and the Go SDK do this) or **Target** (the contract the engine-hosted model needs; no SDK does it yet). The two JSON Schema files mark target fields the same way: a field whose description starts with `Target:` is not emitted yet.
+Status: specification. Until a release note says the engine hosts runs this way, the engine and the Go SDK still run pipelines inside the pipeline binary, and this page is the contract both are moving to.
 
-## Two execution models
+## Overview
 
-**In-process (Go, today).** The pipeline binary links the Go SDK and the orchestrator. `sparkwing run` builds the binary and starts it; the binary plans the run, schedules nodes, and runs each node either in its own process or in a child it starts with `run-node`. Retries, timeouts, memo lookup, step scheduling and dependency caches all execute inside the customer's binary.
-
-**Engine-hosted (target, every language).** The engine plans and schedules. For each node it starts one SDK process as a session leader, sends it requests over stdin, reads replies and log records from stdout, and serves the node-facing routes on a loopback URL. The SDK process evaluates the pipeline's code and closures and nothing else: retries, timeouts, step order, memo keys, dependency caches, secret masking and process cleanup belong to the host.
-
-Migration path:
-
-1. The routes, the environment, the describe document and the log record below are versioned now, and the Go SDK speaks them.
-2. The engine gains a node host that starts an SDK process and drives it over stdio. A TypeScript SDK targets this host from its first release.
-3. The Go SDK moves its engine logic (dependency cache, secret resolution, process handling, cleanup ledger, git cache rewrite, key hashing) behind the host and keeps every exported signature.
-4. The in-process path is removed once the Go SDK runs on the host.
+- **The host runs everything that is not customer code.** It handles DAG order, retries, timeouts, memo, dependency caches, artifacts, admission, approvals, secrets, masking, logs, process cleanup and usage measurement.
+- **The SDK process runs customer code only:** the plan function, node and step bodies, and closures such as `SkipIf` and `Verify`. It runs each one only when the host asks.
+- **One entry point:** `<entry> --sw-node-protocol`. The host writes requests to stdin. The SDK writes replies and log records to stdout, one JSON object per line. There are five operations: `describe`, `plan`, `run_node`, `run_step` and `eval`.
+- **One process per node attempt.** Each node process answers `plan` first. If the node's entry differs from the plan the run accepted, the host fails the node with `plan_drift`.
+- **Closures by id.** The plan lists every closure under an id. The host decides when each one runs and sends `eval`. A generator closure returns the nodes of a dynamic fan-out.
+- **Eight HTTP routes under `/node/v1/`** on a loopback URL, with a bearer scoped to one node process. They cover secrets, other nodes' outputs, OIDC tokens, cleanups, child runs and their results, and the latest run of another pipeline.
+- **Seven environment variables** name the run, the node, the routes and the runner. A process that is not bound to a node gets none of them.
+- **One protocol version, `1`, matched exactly.** A route request with another version gets HTTP 426. A describe or plan document with another version is refused before any node starts.
+- **Hard cut.** A pipeline binary built before this protocol does not run on an engine that speaks it. Rebuilding `.sparkwing` against a matching SDK is the only migration.
 
 ```mermaid
 sequenceDiagram
-  participant H as Node host (engine)
-  participant P as SDK process (Go or TypeScript)
-  H->>P: spawn with the environment contract
-  H->>P: describe (stdin)
-  P-->>H: describe document: pipelines, then plan: nodes, edges, envelope, steps
-  Note over H: restore caches, stage artifacts, check memo
-  H->>P: run_node N, or run_step S
-  P->>H: GET secrets, POST outputs, steps, annotations (HTTP)
-  P-->>H: NDJSON log records (stdout)
-  P-->>H: reply {outcome, output}
-  Note over H: retry or time out, save caches, publish artifacts
+  participant H as Host (engine)
+  participant P as SDK process
+  H->>P: spawn "<entry> --sw-node-protocol"
+  H->>P: plan (pipeline, args, run context)
+  P-->>H: plan document
+  Note over H: compare the node with the accepted plan, stage artifacts, restore caches
+  H->>P: eval before_run, run_step per step, eval verify
+  P->>H: GET /node/v1/secrets/NAME, GET /node/v1/nodes/build/output
+  P-->>H: log records on stdout
+  P-->>H: replies {outcome, output}
+  Note over H: save caches, publish artifacts, record output and usage
+  H->>P: close stdin
 ```
 
-## Environment contract
+## Processes
 
-The host sets these variables in the SDK process's environment. Values are strings. A descriptor named by a `_FD` variable is inherited from the host. The SDK removes the variable from its environment and keeps the descriptor from the processes it starts (the Go SDK marks it close-on-exec), and closes it when it is done with it.
+The host starts the SDK process with exactly one argument, `--sw-node-protocol`, from the repository root, the directory that holds `.sparkwing/`. A process either is bound to one node or is not bound to any:
 
-| Variable | Meaning | Value | Set by, today |
+| Process | Bound to | Requests it receives | Environment |
 |---|---|---|---|
-| `SPARKWING_RUN_ID` | Run the node belongs to | run id | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
-| `SPARKWING_NODE_ID` | Node the process runs | node id | as above |
-| `SPARKWING_CONTROLLER_URL` | Base URL of the node-facing routes | absolute `http` or `https` URL | local runner (loopback controller), broker supervisor (broker URL), Kubernetes and launcher Jobs |
-| `SPARKWING_AGENT_TOKEN` | Bearer for the node-facing routes | opaque token | Kubernetes and launcher Jobs, where it is the node's claim token, and the local runner without an API socket; the brokered child reads its bearer from stdin instead. The local runner never passes on a bearer it inherited. On the API socket path the local child gets no bearer and a URL only the socket reaches, so that path serves the Go SDK alone. A pipeline binary removes the variable from its environment at start, so the commands a step runs do not inherit it |
-| `SPARKWING_LOG_FORMAT` | Log record encoding on stdout | `json` | every path: local runner, broker supervisor, Kubernetes and launcher Jobs |
-| `SPARKWING_MASK_VALUES_FD` | Descriptor the SDK writes each secret value to, one base64 line per value, so the host masks it in every log | decimal descriptor number of at least 3 | local runner, broker supervisor, launcher Job |
-| `SPARKWING_PARENT_LIVENESS_FD` | Read end of a pipe the host holds open; end of file means the host is gone, and the SDK cancels its work and exits | decimal descriptor number of at least 3 | local runner |
-| `SPARKWING_RUNNER_NAME` | Runner that hosts the node, for `Runtime().Runner` | name | every path: local runner, Kubernetes and launcher Jobs, and the broker supervisor, which passes on a runner pool's holder prefix or its own `SPARKWING_RUNNER_*` |
-| `SPARKWING_RUNNER_TYPE` | Kind of that runner | `local` or `kubernetes`; unset for a runner that does not classify itself, such as a runner pool on a host | local runner, Kubernetes and launcher Jobs, broker supervisor as above |
-| `SPARKWING_RUNNER_LABELS` | Labels of that runner, for `WhenRunner` | comma-separated labels | local runner, Kubernetes Job, broker supervisor as above; a launcher Job advertises none |
-| `SPARKWING_CACHE_URL` | Artifact store for SDK cache helpers | URL | local runner and Kubernetes and launcher Jobs when an artifact store is configured; the brokered child reaches the supervisor's store at `/bin/` on `SPARKWING_CONTROLLER_URL` with its own bearer instead |
-| `SPARKWING_GITCACHE_URL` | Git mirror for the SDK's clone helper | URL | Kubernetes and launcher Jobs when a mirror is configured; a local node clones directly, and a brokered child's supervisor has already fetched the source |
-| `SPARKWING_CACHE_GRANT` | Run-scoped bearer for the two caches above | opaque token | broker supervisor, launcher Job, Kubernetes Job |
+| describe | nothing | `describe` | no contract variables |
+| plan | nothing | `plan` | no contract variables |
+| eval | one node, outside any attempt | `plan`, then `eval` for that node's `skip_if`, `cache_key` and `generator` closures | node variables |
+| attempt | one node, one attempt | `plan`, then `eval`, `run_node` or `run_step` for that node | node variables |
 
-The last three rows apply only while an SDK ships its own cache helpers. Under the hosted model the host restores and saves dependency caches from the describe document and points `git` at the mirror through `GIT_CONFIG_COUNT` entries, so a hosted SDK needs none of the three.
+The SDK does not need to know which kind of process it is. It answers whatever arrives under these rules:
 
-The dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST` are not part of this contract: every package manager already reads them, so the host sets them and the SDK does nothing.
+1. `describe` may be the first request and needs no plan.
+2. Every other request except `plan` needs a `plan` earlier in the same process; without one the SDK replies `no_plan`.
+3. `plan` arrives at most once per process.
+4. `run_node`, `run_step` and `eval` name a node, step or closure from that plan, or from a generator evaluated earlier in the same process.
 
-Run options are not environment variables in this contract; [Run options](#run-options) carries them.
+For one node attempt the host sends requests in this order:
 
-**Target:** `TRACEPARENT` carries the run's W3C trace context into the SDK process. No path sets or reads it today.
+1. `plan`, with the pipeline, args and run context the run accepted. The host hashes the node's entry in the reply and compares it with the accepted plan's `spec_hash`. On a mismatch, or if the node is missing, the attempt fails with `plan_drift`.
+2. For a node a generator added, `eval` of that generator, which rebuilds the node in this process. The host compares the node again.
+3. On attempt 1 only, `eval` for each `before_run` closure in order.
+4. One `run_node` for a node without steps, or one `run_step` per step for a node with steps (see [Steps](#steps)).
+5. After a successful body, `eval` of the `verify` closure.
+6. On the last attempt, whether it succeeded or ran out of retries, `eval` for each `after_run` closure.
+7. Close stdin.
 
-### Variables outside the contract
+The host evaluates `skip_if` and `cache_key` closures before the first attempt starts, so a skipped or memoized node never gets an attempt. It evaluates a `generator` after its source node succeeds. It may use a separate eval process on the run's host for these, or an attempt process, and the SDK answers the same way in both.
 
-The Go in-process path reads more variables than the contract names. They exist because the orchestrator runs inside the customer's binary, and an SDK in another language never reads them:
+## Framing
 
-- `SPARKWING_API_SOCKET`: a unix socket the local Go child uses in place of URL plus bearer.
-- `SPARKWING_LOGS_URL`: where the node appends its log records, a loopback address in the engine process that started it, which keeps the log as segments or, on a local run, in the run directory. The hosted model reads log records from stdout.
-- `SPARKWING_HOME`, `HOME`, `GOCACHE`, `GOMODCACHE`, `GOFLAGS`: Go toolchain and state locations.
-- `SPARKWING_NODE_CLAIM_HOLDER`, `SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`, `SPARKWING_NODE_CLAIM_RESERVATION`, `SPARKWING_NODE_CLAIM_LEASE_SECONDS`, `SPARKWING_NODE_SPEC_HASH`: the claim fence, which the engine-side executor holds.
-- `SPARKWING_EXECUTION_CAPABILITY_STDIN`, `SPARKWING_BROKERED_ARTIFACTS`, `SPARKWING_BROKERED_NODE_CLAIM`: broker-mode switches.
-- `SPARKWING_LEASE_TOKEN`, `SPARKWING_CHILD_LEASE_TOKEN`: admission leases for nested runs.
-- `SPARKWING_SOURCE_DIR`, `SPARKWING_GATE_INDEX`: checkout and hook staging paths.
-- `SPARKWING_START_AT`, `SPARKWING_STOP_AT`, `SPARKWING_DRY_RUN`, `SPARKWING_ONLY`, `SPARKWING_NO_CACHE`, `SPARKWING_PROFILE`, `SPARKWING_MODE`, `SPARKWING_WORKERS`, `SPARKWING_DEBUG_PAUSE_BEFORE`, `SPARKWING_DEBUG_PAUSE_AFTER`, `SPARKWING_DEBUG_PAUSE_ON_FAILURE`: run options and debug pauses, which [Run options](#run-options) replaces.
+- **Requests.** The host writes one JSON object per line to stdin, in the form `{"id": "<id>", "op": "<op>", ...fields}`. The host assigns ids as decimal strings counting from `"1"`, unique within the process.
+- **Lines.** Every line on stdout is at most 16 MiB, newline included. The host strips a trailing `\r`. It drops a longer line and writes a warning record in its place, so a reply lost that way leaves its request unanswered.
+- **Replies.** A stdout line that is a JSON object with a `reply` key is a reply, and it must be well formed. A successful reply is `{"reply": "<id>", "ok": true, "result": {...}}` and carries no `error`. A failed reply is `{"reply": "<id>", "ok": false, "error": {"code": "<code>", "message": "..."}}` and carries no `result`. `ok` is a JSON boolean, `error.message` is required and `error.code` is optional.
+- **Log records.** A stdout line that is a JSON object with a string `ts` and correctly typed known fields is a log record (see [Log records](#log-records)). The host ignores keys it does not know.
+- **Text.** The host stores any other stdout line verbatim as an `info` text record, and each stderr line as a `warn` text record.
+- **Protocol errors.** The host fails the attempt with `protocol_error` for a reply that is not well formed, a reply to an id the host never sent, or a second reply to the same id.
+- **Concurrency.** The host may have several `eval` and `run_step` requests in flight in one process, and the SDK may answer them in any order. At most one `run_node` is in flight. `run_node` and `run_step` are never in flight together, and `describe` and `plan` are always sent alone.
+- **End of input.** End of file on stdin means the host is done with the process. The SDK cancels any request still running, writes nothing further, and exits with status 0. The host closes stdin only after every reply arrives, so stdin closing mid-request means the host stopped the attempt or is itself gone.
+- **Stopping.** For a timeout or a cancel, the host sends SIGTERM to the process session and SIGKILL after its termination grace.
+- **Child commands.** A command the SDK starts must never inherit its stdin or stdout. The SDK reads the command's output and writes it as `exec_line` records, or passes it to stderr. A child that wrote to the protocol stream could forge a reply.
 
-## Transport
+## Requests
 
-**Today.** A node reaches the routes below at `SPARKWING_CONTROLLER_URL` with `Authorization: Bearer <token>`. Three hosts answer them:
-
-- the **loopback controller** a local run starts on `127.0.0.1`, with a run-scoped token in `SPARKWING_AGENT_TOKEN`; a run whose state is not a SQLite store gets a **loopback shim** instead, which serves the same routes over that state. A local node reads its secrets from the local secret store, so the shim serves no secrets route, and it holds no signing key, so it serves no OIDC token; it answers the bounce poll 204 when its state holds no bounce requests, and `execution-start` and `execution-finish` 501 when its state records no execution attempts. Its dispatcher takes a local node's concurrency slots, so it serves only the concurrency `state` read;
-- the **execution broker** a remote runner starts on `127.0.0.1` for one node. The child reads its bearer, a per-node capability, from stdin. The broker checks every request against its allowlist, replaces the bearer with the node's claim token, sets the claim-fence headers itself, and forwards to the controller; it keeps the node's log appends as segments itself; a signed output transfer passes without a bearer and without the runner's credential;
-- the **controller** itself, for a Kubernetes or launcher Job that holds its node's claim token. A runner's node claim token reaches its claim's run and the cross-pipeline routes below, writes only to its own node and carries its claim's fence whatever headers it sends ([auth](auth.md#claim-tokens)).
-
-The Go child on a local run may use the unix socket in `SPARKWING_API_SOCKET` instead of URL plus bearer. The socket stays as a Go-only optimization; it is not part of the contract.
-
-**Target.** The node host always gives the SDK a loopback URL and a bearer, and serves the routes itself in the shape of the broker: one node's run and node only, credentials and fence added by the host.
-
-## Versioning
-
-The protocol version is a string, currently `1`.
-
-- Every request to a node-facing route carries the header `Sparkwing-Node-Protocol: <version>`. **Today** the Go SDK sends it, and the loopback controller and the broker log one warning per listener when a request names a different version or none, then serve the request.
-- The describe document and the plan document carry `"protocol": "<version>"`. **Target.**
-- A change that removes or renames a route, a field, an environment variable or a request, or changes a field's meaning, takes a new version. Adding an optional field or a route does not.
-- **Target:** a host that receives a version it does not speak answers HTTP 426 with `{"error": "node protocol <got> unsupported", "supported": ["1"]}` and refuses a describe document with that version. Pipeline binaries pin the SDK they were built with and outlive engine upgrades, so a host keeps serving every version it has shipped until a release removes one with a migration note.
-
-## Node-facing routes
-
-Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{anyrun}` any run, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's route registrations equal; the `/api/v1/logs/` routes are served by the broker's own log endpoint, not the controller.
-
-<!-- node-routes:start -->
-| Method | Path | Reach | Request | Response | Handler |
-|---|---|---|---|---|---|
-| GET | `/api/v1/runs/{anyrun}` | broker | none; `include=nodes` adds the nodes, and `include=secret_values` is refused for any run but the node's own | 200 run record | `pkg/controller/handlers.go` `handleGetRun` |
-| GET | `/api/v1/triggers/{run}` | broker | none | 200 trigger record | `pkg/controller/handlers.go` `handleGetTrigger` |
-| POST | `/api/v1/triggers` | broker | a trigger request `{pipeline, args?, trigger?, git?, parent_run_id, parent_node_id, retry_of?}`, for `RunAndAwait`; `parent_run_id` is the node's run and `parent_node_id` the node | 201 `{run_id, status}` | `pkg/controller/handlers.go` `handleTrigger` |
-| GET | `/api/v1/triggers/spawned-child` | broker | query `parent_run_id`, `parent_node_id` = the node, `pipeline` | 200 `{run_id}`, empty when the node started none | `pkg/controller/handlers.go` `handleFindSpawnedChildTrigger` |
-| GET | `/api/v1/pipelines/{name}/latest` | broker | query `status`, `max_age`; for a pipeline reference | 200 the newest matching run; 404 when none | `pkg/controller/handlers.go` `handlePipelineLatest` |
-| GET | `/api/v1/runs/{run}/steps` | broker | none | 200 `{steps: [step]}` | `pkg/controller/handlers.go` `handleListNodeSteps` |
-| GET | `/api/v1/runs/{run}/nodes/{node}` | broker | none | 200 node record | `pkg/controller/handlers.go` `handleGetNode` |
-| GET | `/api/v1/runs/{run}/nodes/{other}` | broker | none | 200 node record | `pkg/controller/handlers.go` `handleGetNode` |
-| GET | `/api/v1/runs/{anyrun}/nodes/{spawned}/output` | broker | none | 200 `{url?, sha256?, size?, expires?, source_run_id?}`; 409 until the node is done | `pkg/controller/node_output.go` `handleGetNodeOutput` |
-| GET | `/api/v1/runs/{run}/nodes/{node}/bounce` | broker | none | 200 `{run_id, node_id, seq, requested_at, requested_by?, consumed_at?, outcome?}`; 204 when none is pending | `pkg/controller/bounce.go` `handlePendingNodeBounce` |
-| GET | `/api/v1/secrets/{name}` | broker | query `run` = the node's run | 200 `{name, value?, principal, pipeline?, masked, shared?, bound, created_at, updated_at}`; 404 when unset | `pkg/controller/claim_run.go` `handleClaimSecret` for a claim token, else `pkg/controller/secrets.go` `handleGetSecret` |
-| POST | `/api/v1/runs/{run}/events` | broker | `{node_id?, kind, payload?}`, payload base64 | 200 `{seq}` | `pkg/controller/handlers.go` `handleAppendEvent` |
-| POST | `/api/v1/runs/{run}/heartbeat` | broker | none | 204 | `pkg/controller/handlers.go` `handleTouchRunHeartbeat` |
-| POST | `/api/v1/runs/{run}/oidc-token` | broker | `{audience}` | 200 `{token, expires_at}`; 404 when the controller holds no signing key or the caller no live claim on the run | `pkg/controller/oidc_token.go` `handleOIDCToken` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/start` | broker | none | 204 | `pkg/controller/handlers.go` `handleStartNode` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/finish` | broker | `{outcome, error?, output?: {key, size, sha256}, failure_reason?, exit_code?}` | 204; 422 on an invalid outcome or an uncommitted output | `pkg/controller/handlers.go` `handleFinishNode` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/deps` | broker | `{deps: [node id]}` | 204 | `pkg/controller/handlers.go` `handleUpdateNodeDeps` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/dispatch` | broker | `{seq, dispatched_at, code_version?, binary_hash?, runner_labels?, env_json?, workdir?, input_envelope_json?, input_size_bytes, secret_redactions, redacted_keys?}` | 201 | `pkg/controller/handlers.go` `handleWriteNodeDispatch` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/metrics` | broker | `{kind, ts, cpu_millicores, memory_bytes, cpu_time_nanos?}` | 204 | `pkg/controller/metrics.go` `handleAddNodeMetric` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/execution-start` | broker | `{holder_id, membership_id?, reservation_id?, claim_generation, attempt_ordinal, executor_kind?, executor_id?, executor_name?}`; the broker overwrites the fence fields | 204; 200 `{spec_hash}` for a claim token; 409 on a lost claim | `pkg/controller/handlers.go` `handleAcknowledgeNodeExecutionStart`, `pkg/controller/claim_run.go` `handleClaimExecutionStart` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/execution-finish` | broker | `{holder_id, membership_id?, reservation_id?, claim_generation, attempt_ordinal, outcome, failure_reason?, executor_kind?}` | 204; 409 on a lost claim | `pkg/controller/handlers.go` `handleFinishNodeExecutionAttempt` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/output-upload` | broker | `{size, sha256}` | 200 `{upload_id, key, url, headers?, expires_at}` | `pkg/controller/node_output.go` `handleOutputUpload` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/output-commit` | broker | `{upload_id}` | 204 | `pkg/controller/node_output.go` `handleOutputCommit` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/activity` | broker | `{detail}` | 204 | `pkg/controller/handlers.go` `handleUpdateNodeActivity` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/touch` | broker | none | 204; 503 with `Retry-After` when the store is busy | `pkg/controller/handlers.go` `handleTouchNodeHeartbeat` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/annotations` | broker | `{message}` | 204 | `pkg/controller/handlers.go` `handleAppendNodeAnnotation` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/summary` | broker | `{markdown}` | 204 | `pkg/controller/handlers.go` `handleSetNodeSummary` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/artifact-manifest` | broker | `{manifest_digest}` | 204 | `pkg/controller/handlers.go` `handleSetNodeArtifactManifest` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/steps/start` | broker | `{step_id}` | 204 | `pkg/controller/handlers.go` `handleStartNodeStep` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/steps/finish` | broker | `{step_id, status}` | 204 | `pkg/controller/handlers.go` `handleFinishNodeStep` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/steps/skip` | broker | `{step_id}` | 204 | `pkg/controller/handlers.go` `handleSkipNodeStep` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/steps/annotations` | broker | `{step_id, message}` | 204 | `pkg/controller/handlers.go` `handleAppendStepAnnotation` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/steps/summary` | broker | `{step_id, markdown}` | 204 | `pkg/controller/handlers.go` `handleSetStepSummary` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/bounce/consume` | broker | `{seq, outcome?}` | 204 | `pkg/controller/bounce.go` `handleConsumeNodeBounce` |
-| POST | `/api/v1/runs/{run}/nodes/{node}/status` | broker | `{status}` | 204 | `pkg/controller/handlers.go` `handleSetNodeStatus` |
-| GET | `/api/v1/concurrency/{key}/holder` | broker | query `holder_id` = `<run>/<node>` | 200 `{holder_id, run_id, node_id?, claimed_at, queue_arrived_at?, lease_expires_at, superseded, cost?}`; 404 when not held | `pkg/controller/concurrency.go` `handleObserveSlot` |
-| GET | `/api/v1/concurrency/{key}/resolve` | broker | query `run_id`, `node_id` = the node's own, optional `cache_key_hash`, `leader_run_id`, `leader_node_id`, `bypass_read` | 200 `{status, holder_id?, holder_lease_expires?, output_ref?, origin_run_id?, origin_node_id?, leader_run_id?, leader_node_id?, leader_outcome?, leader_failure_reason?, position?, queue_length?, holders?}` | `pkg/controller/concurrency.go` `handleResolveWaiter` |
-| GET | `/api/v1/concurrency/{key}/state` | broker | none; a `RunAndAwait` parent reads its child's plan admission | 200 group state; 404 when the group is unknown | `pkg/controller/concurrency.go` `handleConcurrencyState` |
-| POST | `/api/v1/concurrency/{key}/acquire` | broker | `{holder_id, run_id, node_id?, max?, cost?, policy?, cache_key_hash?, cache_ttl_ns?, cancel_timeout_ns?, lease_secs?, bypass_read?}`; `holder_id` is `<run>/<node>` and `inherited_holder_id` is empty | 200 granted or cached, 202 queued, 429 skipped or failed; `{granted, kind, holder_id?, lease_expires_at?, output_ref?, position?, queue_length?, holders?}` and the leader and origin fields | `pkg/controller/concurrency.go` `handleAcquireSlot` |
-| POST | `/api/v1/concurrency/{key}/heartbeat` | broker | `{holder_id, lease_secs?}` | 200 `{lease_expires_at, cancelled_by_newer}` | `pkg/controller/concurrency.go` `handleHeartbeatSlot` |
-| POST | `/api/v1/concurrency/{key}/release` | broker | `{holder_id, outcome, output_ref?, cache_key_hash?, cache_ttl_ns?}` | 204 | `pkg/controller/concurrency.go` `handleReleaseSlot` |
-| POST | `/api/v1/concurrency/{key}/cancel-waiter` | broker | `{run_id, node_id?}` naming the node itself | 200 `{cancelled}` | `pkg/controller/concurrency.go` `handleCancelWaiter` |
-| POST | `/api/v1/concurrency/{key}/force-release` | broker | none; a `CancelOthers` holder drops the holders it superseded once their cancel timeout passes | 200 `{dropped: [holder]}`; 403 `missing_scope` unless the credential is admin | `pkg/controller/concurrency.go` `handleForceRelease` |
-| POST | `/api/v1/logs/{run}/{node}` | broker | NDJSON log records as `text/plain`, at most 4 MiB; optional `X-Sparkwing-Log-Stream`, `X-Sparkwing-Log-Seq`, `X-Sparkwing-Log-Seq-End` | 204 | the broker's log endpoint, `pkg/storage/logseg/handler.go` `AppendHandler` |
-| POST | `/api/v1/logs/{run}/{node}/seal` | broker | `{stream, final_seq, dropped}` | 204 | the broker's log endpoint, `pkg/storage/logseg/handler.go` `AppendHandler` |
-| PUT | `/api/v1/outputs/uploads/{upload}` | broker | the output bytes, at the URL `output-upload` granted, without a bearer; a relative URL resolves against `SPARKWING_CONTROLLER_URL` | 200 | `pkg/controller/node_output.go` `handleOutputBlobPut` |
-| GET | `/api/v1/outputs/objects/{key...}` | broker | none, at the URL `output` granted, without a bearer; a relative URL resolves against `SPARKWING_CONTROLLER_URL` | 200 the output bytes | `pkg/controller/node_output.go` `handleOutputBlobGet` |
-| GET | `/bin/{key...}` | broker | key `artifacts/blobs/<sha256>` or `artifacts/manifests/<sha256>` | 200 `application/octet-stream`; 404 | the broker itself, `internal/orchestrator/remote_execution_broker.go` `serveArtifact` |
-| HEAD | `/bin/{key...}` | broker | as GET | 200 or 404 | as GET |
-| PUT | `/bin/{key...}` | broker | the blob; its sha256 must equal the key's digest | 201; 400 on a digest mismatch | as GET |
-| POST | `/api/v1/runs/{id}/cache-grant` | direct | none | 200 `{grant, team, expires_at}` | `pkg/controller/cache_grant.go` `handleRunCacheGrant` |
-| POST | `/api/v1/runs/{id}/nodes` | direct | a node record, for a node a dynamic fan-out adds at run time | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
-| POST | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | direct | an attempt report, claim token only | 200 `{status}` | `pkg/controller/claim_dispatch.go` `handleReportAttempt` |
-| POST | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | direct | `{kind, key?, cache_key_hash?, pipeline?, node?, max_age_ms?}`, claim token only | 200 the input | `pkg/controller/claim_run.go` `handleClaimInput` |
-| POST | `/api/v1/runs/{id}/children` | direct | `{ordinal, pipeline, args?, repo?, branch?}`, claim token only | 200 the child run | `pkg/controller/claim_run.go` `handleEnqueueChildRun` |
-| GET | `/api/v1/runs/{id}/children/{childID}` | direct | none | 200 the child run | `pkg/controller/claim_run.go` `handleGetChildRun` |
-| GET | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | direct | none | 200 output grant | `pkg/controller/claim_run.go` `handleGetChildNodeOutput` |
-| POST | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | direct | live log lines | 204 | `pkg/controller/livelogs_http.go` `handleAppendNodeLiveLog` |
-| GET | `/node/v1/secrets/{name}` | target | none | 200 `{value, masked}`; the host registers the value with the masker before it answers | node host |
-| POST | `/node/v1/cleanups` | target | `{argv: [string], description}` | 201 `{id}`; the host runs argv when the node ends unless released | node host |
-| DELETE | `/node/v1/cleanups/{id}` | target | none | 204 | node host |
-| POST | `/node/v1/oidc-token` | target | `{audience}` | 200 `{token, expires_at}` | node host |
-<!-- node-routes:end -->
-
-**Auth.** `broker` routes take the node's bearer; the broker or loopback controller confines it to the node's own run and node. The broker then forwards with the node's claim token, so the controller still decides. The claim token reaches `GET /api/v1/pipelines/{name}/latest` and another run's output in its own team, starts a run only as its own node's child, and reads another run's record only for such a child, with no query, and the spawned-child lookup only for its own node. Any other read of another run and the concurrency state answer it `claim_mismatch`, `missing_scope` or `claim_required`, and force-release takes `admin`. An admin bearer or a loopback run token is served. `direct` routes take a claim token or the loopback run token, and the controller checks the claim fence headers (`X-Sparkwing-Claim-Holder`, `X-Sparkwing-Claim-Membership`, `X-Sparkwing-Claim-Reservation`, `X-Sparkwing-Claim-Generation`) on writes. `PUT` and `GET` under `/api/v1/outputs/` take no bearer: the URL the grant returned is signed, and the broker forwards it without its capability and without the runner's credential or fence. The controller grants an absolute URL, on itself or on object storage, which the node must reach; the loopback shim grants a relative one, which reaches it through the broker. `target` routes take the host's bearer and need no fence, because the host adds it.
-
-**Target namespace.** Once the node host serves the routes, a node calls them under `/node/v1/` with the run and node implied by its bearer, so `/api/v1/runs/{run}/nodes/{node}/start` becomes `/node/v1/start`. The request and response bodies stay as listed.
-
-## Requests over stdio
-
-**Today.** The Go pipeline binary answers three argv forms the engine uses, and nothing is exchanged over stdin except the brokered child's bearer:
-
-- `<binary> --describe` writes the describe array (`$defs/pipeline` of the describe schema, one element per pipeline) to stdout and exits.
-- `<binary> plan --json` plans the run named by `SPARKWING_RUN_ID` and writes one plan document (`$defs/plan`) to stdout. Pipeline code's own stdout goes to stderr while it plans.
-- `<binary> run-node [--controller <url>] [--logs <url>] [--timeout <d>] [--coordinated] <run> <node>` runs one node, writes NDJSON log records to stdout, and reports its result through the `finish` route. Exit status 0 is success, 1 is failure, 97 means the parent's liveness pipe closed.
-
-**Target.** The host starts the SDK process once per node attempt with the single argument `--sw-node-protocol`. Requests arrive on stdin and replies leave on stdout, one JSON object per line. A reply carries `reply`, the id of the request it answers; every stdout line without `reply` is a log record. End of file on stdin means no further requests: the SDK finishes the current one and exits.
-
-Requests:
-
-| `op` | Fields | Reply `result` |
+| `op` | Fields | `result` |
 |---|---|---|
-| `describe` | none | the describe document (root of the describe schema) |
-| `plan` | `pipeline`, `args` (object of strings), `run` (run context: `run_id`, `pipeline`, git facts) | the plan document (`$defs/plan`) |
-| `run_node` | `node`, `attempt` (1-based), `options` | `{outcome, error?, output?}`; `outcome` is one of `success`, `failed`, `skipped`, `cancelled`, and `output` is the node's JSON output |
-| `run_step` | `node`, `step`, `options` | `{outcome, error?}` |
-| `eval` | `closure` (id from the plan), `input?` | `{value}`: a boolean for `skip_if` and `verify`, a string for `cache_key`, null for `before_run` and `after_run` |
+| `describe` | none | the describe document: `{protocol, sdk?, pipelines}` |
+| `plan` | `pipeline`, `args`, `run` | the plan document |
+| `run_node` | `node`, `attempt`, `failure?` | `{outcome, error?, output?}` |
+| `run_step` | `node`, `step`, `attempt`, `failure?` | `{outcome, error?, output?}` |
+| `eval` | `closure`, `input?` | `{value?, error?}` |
 
-Every request is `{"id": "<id>", "op": "<op>", ...fields}`. A reply is `{"reply": "<id>", "ok": true, "result": {...}}` or `{"reply": "<id>", "ok": false, "error": {"message": "..."}}`. The host sends one request at a time per process, except `eval` requests for closures of a running node.
+[schemas/node-protocol.schema.json](schemas/node-protocol.schema.json) is the JSON Schema for requests, replies and results: `$defs/request`, `$defs/reply`, `$defs/runResult` and `$defs/evalResult`. [schemas/describe.schema.json](schemas/describe.schema.json) covers the describe and plan documents.
 
-When a plan lists steps, the host sends one `run_step` per step in an order the step edges allow, applies fail-fast or collect-all from `failure_policy`, and runs `finally` steps last. A plan without steps gets one `run_node`.
+### describe
 
-## Run options
+`describe` needs no run and no environment. The CLI uses it to list pipelines, parse flags and render help. `sdk` names the SDK so a refusal can say what to upgrade.
 
-**Today.** `sparkwing run` hands the Go binary its run options as `SPARKWING_START_AT`, `SPARKWING_STOP_AT`, `SPARKWING_DRY_RUN`, `SPARKWING_ONLY`, `SPARKWING_NO_CACHE`, `SPARKWING_PROFILE`, `SPARKWING_MODE` and `SPARKWING_WORKERS`. The binary has no flags for them.
-
-**Target.** Run options travel as one JSON object:
-
-```json
-{"start_at": "deploy", "stop_at": "smoke", "dry_run": true, "only": ["build"], "no_cache": true, "profile": "prod", "mode": "ci", "workers": 4}
+```text
+-> {"id":"1","op":"describe"}
+<- {"reply":"1","ok":true,"result":{"protocol":"1","sdk":{"language":"go","version":"v0.68.0"},"pipelines":[{"name":"ship","short":"Build and deploy","args":[{"name":"env","go_name":"Env","type":"string","required":true}]}]}}
 ```
 
-The in-process Go binary takes it as one argument, `--sw-options=<json>`, consumed before pipeline flags are parsed, so a pipeline's flag bag never receives it. Under the hosted model the host applies `start_at`, `stop_at`, `only`, `no_cache`, `profile`, `mode` and `workers` itself, and `run_node` and `run_step` carry `options: {"dry_run": <bool>}`, which is the one option pipeline code observes. An absent field is the default.
+### plan
+
+`plan` runs the pipeline's plan function and returns the plan document.
+
+- `pipeline` is a name from describe.
+- `args` maps each flag name to its string value.
+- `run` is the run context, which plan code reads from its run context object.
+
+The run context has these fields, and only `run_id` is required. The pipeline is the request's own `pipeline`.
+
+- `run_id`;
+- `started_at`, an RFC 3339 time;
+- `trigger`: `{source, user?, pull_request?}`. `source` is `manual`, `push`, `schedule` or `webhook`. `pull_request` is `{number, action, base_ref, base_sha, head_ref, head_sha}`;
+- `git`: `{sha, branch, default_branch?, repo?, repo_url?}`;
+- `dry_run` and `no_cache`, both booleans.
+
+Plan code must be deterministic for a given request, because every eval and attempt process plans again and the host compares the result.
+
+The SDK sends plan code's own stdout to stderr while it plans. A plan function that returns an error or throws gives the error code `plan_failed`. Args that fail the pipeline's declared types give `invalid_args`. An unregistered pipeline gives `unknown_pipeline`.
+
+```text
+-> {"id":"1","op":"plan","pipeline":"ship","args":{"env":"prod"},"run":{"run_id":"run-1","trigger":{"source":"push"},"git":{"sha":"4f2c1e0","branch":"main","repo":"acme/app"},"dry_run":false}}
+<- {"reply":"1","ok":true,"result":{"protocol":"1","pipeline":"ship","run_id":"run-1","nodes":[{"id":"build","deps":[],"work":{"steps":[{"id":"compile"},{"id":"test","needs":["compile"],"is_result":true}],"result_step":"test"}},{"id":"deploy","deps":["build"],"modifiers":{"timeout_ms":600000},"closures":{"skip_if":["deploy/skip_if/0"],"verify":"deploy/verify/0","after_run":["deploy/after_run/0"]},"work":{"steps":[{"id":"apply","is_result":true}],"result_step":"apply"}}]}}
+```
+
+### run_node and run_step
+
+- `run_node` runs the body of a node that lists no steps.
+- `run_step` runs one step body of a node that lists steps.
+- `attempt` counts from 1.
+- `failure` appears only for a node whose plan entry has `on_failure_of`. It is `{node, stage, message}`, where `node` is the node that failed and `stage` is `action` or `verify`, so a recovery body can branch on how its parent failed.
+
+The result has these fields:
+
+- `outcome` is `success` or `failed`.
+- `error` is the error message, a string, when the body returned an error or threw. It is a successful reply with `outcome: failed`, because the body ran. A failed reply means the node could not run at all.
+- `output` is the body's JSON output. For `run_step` only the result step carries it, and the host records it as the node's output. An absent `output` means the node has none. Because the reply must fit in one 16 MiB line, a node output is at most 16 MiB less the reply's own bytes.
+
+A step output stays in the SDK process's memory, so a later step in the same process can read it. The host never asks for it.
+
+```text
+-> {"id":"2","op":"run_step","node":"deploy","step":"apply","attempt":1}
+<- {"ts":"2026-01-02T03:04:05.123Z","level":"info","node":"deploy","step":"apply","msg":"applying release 42"}
+<- {"reply":"2","ok":true,"result":{"outcome":"success","output":{"release":42}}}
+-> {"id":"3","op":"eval","closure":"deploy/verify/0"}
+<- {"reply":"3","ok":true,"result":{"value":null,"error":"health check: 503 from /ready"}}
+-> {"id":"4","op":"eval","closure":"deploy/after_run/0","input":{"outcome":"failed","error":"verify: health check: 503 from /ready"}}
+<- {"reply":"4","ok":true,"result":{"value":null}}
+```
+
+### eval
+
+`eval` runs one closure by id. The result's `value` depends on the closure's kind (see [Closures](#closures)). `error` is the error message, a string, when the closure returned an error or threw. Like a body's error, it is a successful reply.
+
+### Errors
+
+A failed reply means the SDK could not do what the request asked, as distinct from customer code that ran and failed. The host fails the attempt and records the code as the node's failure reason. It also records the message and the SDK named by describe, so an author reads "this SDK does not support X" rather than a crash.
+
+| `code` | Raised by | Meaning |
+|---|---|---|
+| `unknown_op` | SDK | The SDK does not implement this `op`. |
+| `unknown_pipeline` | SDK | `plan` names a pipeline the SDK has not registered. |
+| `unknown_node` | SDK | No node with this id is in the process's plan or its generated nodes. |
+| `unknown_step` | SDK | The node has no step with this id. |
+| `unknown_closure` | SDK | No closure with this id is in the process's plan or its generated nodes. |
+| `no_plan` | SDK | The request needs a `plan` earlier in the same process. |
+| `bad_request` | SDK | The request is malformed: a missing field, a second `plan`, or similar. |
+| `invalid_args` | SDK | `plan` args fail the pipeline's declared flags. |
+| `plan_failed` | SDK | The plan function returned an error or threw. |
+| `plan_drift` | host | The node's entry in this process's plan differs from the accepted plan, or the node is missing from it. |
+| `plan_invalid` | host | The plan document fails validation: an unknown dependency, a cycle, a duplicate node or closure id, or similar. The run fails before any node starts. |
+| `protocol_mismatch` | host | The describe or plan document names a protocol version other than the host's. |
+| `protocol_error` | host | The framing rules above were broken. |
+| `sdk_exited` | host | The process exited with a request still unanswered. The reason includes the exit status or signal. |
+
+The host treats a missing code, or one it does not know, as `sdk_error` and keeps the SDK's message.
 
 ## Closures
 
-`BeforeRun`, `AfterRun`, `Verify`, `SkipIf` and `CacheKeyFn` are code, so the SDK evaluates them. **Today** the plan document marks their presence with `has_before_run`, `has_after_run` and `has_skip_if`, and the Go orchestrator calls them in process. **Target:** the plan lists each closure's id under `closures` on the node or step, and the host asks for one with `eval`. An id is opaque to the host and unique within the plan; the Go SDK uses `<node>/<kind>/<index>` and `<node>/<step>/<kind>/<index>`. The host enforces each closure's budget: a `skip_if` that errors or exceeds its budget evaluates to don't-skip.
+A closure is customer code that the host calls by id. The plan lists each node's closures under `closures`, and each step's under the step's own `closures`. The SDK assigns the ids. An id is opaque to the host, and it must be unique within the plan together with every generated node. The host refuses a plan with duplicate ids (`plan_invalid`). The Go SDK's ids look like `deploy/skip_if/0`, but an SDK that builds ids from node and step ids must keep them unique when those ids contain `/`.
+
+| Kind | Where the host evaluates it | `input` | `value` | When `error` is set |
+|---|---|---|---|---|
+| `skip_if` | eval process, before the first attempt. A step's runs in the attempt process, before that step | none | boolean; `true` skips the node or step. The host ORs several together | the host treats it as `false` |
+| `cache_key` | eval process, before the first attempt | none | a string the host namespaces into the memo key, or `null` to run without memo | the node fails before it runs |
+| `before_run` | attempt process, attempt 1, before the body | none | `null` | the node fails without retrying |
+| `verify` | attempt process, after each successful body | none | `null` | the attempt fails with reason `verify`, and retry and `on_failure` apply |
+| `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
+| `generator` | eval process, after the source node succeeds; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
+
+The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. Every other closure is bounded by the node's wall timeout.
+
+A failed reply to `eval` (for example `unknown_closure`) is never read as `false` or as a skipped check. The attempt fails.
+
+## Dynamic nodes
+
+A generator closure adds nodes at run time. Its source node lists the closure under `closures.generator`. A node that waits for every generated node lists the closure id under `needs_generated`.
+
+1. After the source succeeds and its output is recorded, the host evaluates the generator in a process bound to the source node. The generator usually reads the source's output through `GET /node/v1/nodes/{node}/output`.
+2. `value` is an array of node documents in the plan document's node shape. Each one lists the source in its `deps`.
+3. The host validates the new nodes against the plan (`plan_invalid`), records them with the run, and schedules them. A node with `needs_generated` becomes ready once every generated node has finished.
+4. Each generated node's eval and attempt processes evaluate the same generator again after `plan`, then run the node. The host compares the regenerated node's `spec_hash` as in step 1 of the attempt order. A generator must therefore return the same nodes for the same source output.
+
+```text
+-> {"id":"2","op":"eval","closure":"targets/generator/0"}
+<- {"reply":"2","ok":true,"result":{"value":[{"id":"test-linux","deps":["targets"]},{"id":"test-darwin","deps":["targets"]}]}}
+```
+
+## Steps
+
+A node whose plan entry lists `work.steps` runs one `run_step` per step. The host schedules the steps itself:
+
+- It orders them by `needs` and runs independent steps at the same time.
+- It applies `work.failure_policy` (fail fast or collect all), `continue_on_error` and `optional`.
+- It runs `finally` steps last.
+- It evaluates step `skip_if` closures.
+- It applies the run's step window (`start_at`, `stop_at`) and dry-run.
+- It writes `step_start`, `step_end`, `step_skipped` and `work_fail_fast` records and the step rows.
+
+In a dry run, the host runs a step only when the step has `has_dry_run` or `safe_without_dry_run`. It skips any other step with the reason `no_dry_run_defined`. The SDK runs a step's dry-run body instead of its body when the run context has `dry_run`.
 
 ## Describe and plan documents
 
-[schemas/describe.schema.json](schemas/describe.schema.json) is the JSON Schema for both documents: the root is the `describe` reply, `$defs/pipeline` is one pipeline as `--describe` writes it, and `$defs/plan` is the plan. The plan carries:
+[schemas/describe.schema.json](schemas/describe.schema.json) is the JSON Schema for both documents. The root is the `describe` result, `$defs/pipeline` is one pipeline, `$defs/plan` is the plan, and `$defs/node` is one node, which is also the shape a generator returns. The plan carries:
 
-- nodes and their edges: `deps`, `optional_deps`, `on_failure_of`, `pipeline_refs`, and step `needs`;
-- each node's envelope under `modifiers`: `retry`, `retry_backoff_ms`, `retry_auto`, `timeout_ms`, `no_progress_timeout_ms`, `on_failure`, the required, preferred and `when_runner` placement labels, memo flag and `cache_ttl_ms`, the concurrency group (`conc_*`), resources (`res_cores`, `res_memory_bytes`), `inline`, `optional`, `continue_on_error`;
-- artifacts as `outputs` (globs the node publishes) and `consumes` (producers it stages from);
-- approvals, secrets, the source checkout and plan-level concurrency and resources;
-- steps under `work`, with `needs`, `finally`, `is_result` and `failure_policy`;
-- **target** fields: `caches` (dependency-cache directories the host restores and saves), `memo_key` (files, env and constants the host hashes, or a closure), `closures`, `tools`, and `protocol`.
+- nodes and their edges: `deps`, `optional_deps`, `needs_generated`, `on_failure_of`, `pipeline_refs`, and step `needs`;
+- each node's envelope under `modifiers`:
+  - retries and timeouts: `retry`, `retry_backoff_ms`, `retry_auto`, `timeout_ms`, `no_progress_timeout_ms`;
+  - recovery: `on_failure`;
+  - placement labels: `runs_on`, `prefers`, `when_runner`;
+  - memo: `cache` and `cache_ttl_ms`;
+  - the concurrency group: `conc_*`;
+  - resources: `res_cores`, `res_memory_bytes`;
+  - other flags: `inline`, `optional`, `continue_on_error`, `skip_if_budget_ms`;
+- dependency caches under `caches`, which the host restores before the node's first process starts and saves after the node succeeds;
+- memo key inputs under `memo_key`: files, environment names and constants that the host hashes, or a `cache_key` closure;
+- closure ids under `closures`;
+- tools the node needs on `PATH` under `tools`;
+- artifacts: `outputs` (globs the node publishes after success) and `consumes` (producers whose artifacts the host stages first);
+- approvals, which only the host runs, plus the node's declared secrets, the source checkout, and plan-level concurrency and resources;
+- steps under `work`, with `needs`, `finally`, `is_result`, `continue_on_error`, `optional`, `has_dry_run`, `safe_without_dry_run`, `closures`, and the node's `failure_policy`;
+- `protocol`, the protocol version the SDK speaks.
 
-A node's `spec_hash` covers the node's own fields, so a Job that plans again runs only a node whose hash the accepted plan holds.
+`inline` means the host runs the node on the host that dispatches the run, in its own process, rather than through a runner. A node's `env` is added to the environment of that node's processes.
+
+Two fields belong to the host and an SDK leaves them out:
+
+- **`spec_hash`.** The host computes it over the node document in canonical JSON form (keys sorted, no insignificant whitespace, `spec_hash` itself excluded). It uses the same function on the accepted plan and on each later plan, so SDKs never have to agree on a JSON encoding.
+- **`requires`.** The host fills it from `sparkwing.yaml`. The SDK never reads `sparkwing.yaml`.
+
+## Environment contract
+
+The host builds a node-bound process's environment from scratch. It removes every `SPARKWING_*` variable it inherited, then sets the following. Values are strings.
+
+| Variable | Set for | Meaning |
+|---|---|---|
+| `SPARKWING_RUN_ID` | eval and attempt processes | The run the node belongs to. |
+| `SPARKWING_NODE_ID` | eval and attempt processes | The node the process is bound to. |
+| `SPARKWING_NODE_URL` | eval and attempt processes | Base URL of the node routes, such as `http://127.0.0.1:41873`. A route's URL is this value followed by its `/node/v1/` path. |
+| `SPARKWING_NODE_TOKEN` | eval and attempt processes | Bearer for the node routes. It is valid until the process exits. |
+| `SPARKWING_RUNNER_NAME` | eval and attempt processes | The runner that hosts the node. |
+| `SPARKWING_RUNNER_TYPE` | eval and attempt processes | `local` or `kubernetes`; unset for a runner that does not classify itself. |
+| `SPARKWING_RUNNER_LABELS` | eval and attempt processes | The runner's labels, comma-separated. |
+| `TRACEPARENT` | every process | The W3C trace context of the run, or of the node for a node-bound process. |
+
+The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer.
+
+The host also sets variables that other tools already define, and the SDK needs to do nothing with them:
+
+- the node's `env` from the plan;
+- `PATH`, with the node's `tools` in front;
+- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`;
+- `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>`, which point `git` at the source mirror.
+
+Run options are host state and never reach the SDK as variables. `start_at`, `stop_at`, `only`, `no_cache`, `profile`, `mode` and `workers` change what the host schedules. The two that plan code observes, `dry_run` and `no_cache`, travel in the `plan` request's run context.
+
+## Node routes
+
+A node-bound process calls these routes at `SPARKWING_NODE_URL`. The host serves them on loopback for the node it is running. On a remote runner, that is the runner process in the node's pod or job. Every request carries two headers:
+
+- `Authorization: Bearer <SPARKWING_NODE_TOKEN>`
+- `Sparkwing-Node-Protocol: 1`
+
+The bearer names one run and one node, and expires when the process exits, so no route takes a run or a node of its own. In a path, `{node}` is a node id with `/` escaped as `%2F`, so `build/linux` is sent as `build%2Flinux`. Request and response bodies are JSON, and `?` marks an optional field.
+
+An error response is `{"error": "<message>", "code": "<code>"}`. Every route can answer with these codes:
+
+- 401 `unauthorized`: the bearer is missing, unknown or expired.
+- 426 `protocol_mismatch`: the version header is missing or is not `1`. The body adds `"supported": ["1"]`.
+- 400 `bad_request`: the body or the query is malformed.
+- 502 `upstream_unavailable`: the host could not reach the controller. The SDK may retry after a delay.
+
+The host adds the controller credential and the claim fence when it forwards a request. The SDK never holds either.
+
+<!-- node-routes:start -->
+| Method | Path | Request | Response | Errors |
+|---|---|---|---|---|
+| GET | `/node/v1/secrets/{name}` | none | 200 `{value, masked}`. When `masked` is true, the host registers `value` with its masker before it answers | 404 `secret_not_found` |
+| GET | `/node/v1/nodes/{node}/output` | none; `{node}` is any node of the bearer's run | 200 `{output}`, the node's JSON output, `null` when it produced none | 404 `unknown_node`; 409 `not_ready` until the node finishes; 404 `no_output` when it finished without succeeding |
+| POST | `/node/v1/oidc-token` | `{audience}` | 200 `{token, expires_at}`; the host masks `token` | 404 `oidc_unavailable` when the controller holds no signing key |
+| POST | `/node/v1/cleanups` | `{argv: [string], description?}` | 201 `{id}`. When the process exits, the host runs `argv` once, with no shell, unless the cleanup was released | none beyond the common ones |
+| DELETE | `/node/v1/cleanups/{id}` | none; releases the cleanup | 204 | 404 `unknown_cleanup` |
+| POST | `/node/v1/children` | `{pipeline, args?: {name: value}, repo?, branch?}` | 201 `{run_id}`. The host records the node as the parent, links the new run to the run started by the node's previous attempt, and passes the trigger environment | 409 `cycle` when the pipeline is already among the run's ancestors |
+| GET | `/node/v1/children/{run}/await` | query `node?`, the node whose output to return, and `wait_ms?`, at most 60000 (default 30000) | 200 `{run_id, status, error?, output?}`. `status` is `pending`, `running`, `success`, `failed` or `cancelled`. The host holds the request until the run finishes or `wait_ms` passes. `output` is the named node's output once `status` is `success` | 404 `unknown_child` for a run this node did not start |
+| GET | `/node/v1/pipelines/{name}/latest` | query `node`, and `max_age_ms?` | 200 `{run_id, output}` from the newest successful run of the pipeline in the team | 404 `no_run` when none matches; 404 `no_output` when that run's node has none |
+<!-- node-routes:end -->
+
+Notes on the routes:
+
+- **Cleanups.** A cleanup is for a resource outside the process session, such as a container or a cloud object, which killing the session would leave behind. `argv` must be idempotent. The host runs it once, after the process exits for any reason, in the repository root with the node's environment, and bounds it in time.
+- **Child runs.** A child run that waits in plan admission does not count against the parent node's wall timeout while an `await` request for it is open. The SDK enforces its own wait limit, such as `RunAndAwait`'s `WithFreshTimeout`, by not calling `await` again.
+- **Pipeline references.** `latest` reads another pipeline's newest successful run, as `RefToLastRun` does.
+
+```http
+GET /node/v1/secrets/DEPLOY_TOKEN HTTP/1.1
+Authorization: Bearer swn_4c1d...
+Sparkwing-Node-Protocol: 1
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"value":"hunter2","masked":true}
+```
+
+```http
+GET /node/v1/nodes/build/output HTTP/1.1
+Authorization: Bearer swn_4c1d...
+Sparkwing-Node-Protocol: 0
+
+HTTP/1.1 426 Upgrade Required
+Content-Type: application/json
+
+{"error":"node protocol \"0\" unsupported","code":"protocol_mismatch","supported":["1"]}
+```
 
 ## Log records
 
-[schemas/log-record.schema.json](schemas/log-record.schema.json) is the JSON Schema for one line of stdout. A record is `{ts, level?, node?, step?, event?, msg?, attrs?}`. The host masks secret values in `msg` and `attrs` and may restamp `ts`.
+[schemas/log-record.schema.json](schemas/log-record.schema.json) is the JSON Schema for one log record line. A record is `{ts, level?, node?, step?, event?, msg?, attrs?}`. Before it stores a record, the host does three things:
 
-Events a node writes:
+- It sets `node` to the process's node, whatever the SDK wrote.
+- It keeps `step` only when that step has a `run_step` in flight, so the SDK must set `step` on every record it writes during a step.
+- It masks secret values in `msg` and `attrs`, and may restamp `ts`. The masked values are every masked secret the routes served, every OIDC token, every arg declared `secret`, and the bearer.
+
+Events the SDK writes:
 
 - none: a plain message at `level`;
-- `node_annotation`: `attrs` `{message, level?, file?, line?, end_line?}`. **Target:** `level`, `file`, `line` and `end_line` point the annotation at a source line, as a GitHub check annotation does;
-- `node_summary`: `attrs` `{markdown}`; the last record per node and step wins;
-- `step_start`, `step_end`, `step_skipped`, `work_fail_fast`: step lifecycle, written by whoever schedules steps;
-- `exec_start` and `exec_line`: a command and each line of its output;
-- `exec_end` (**target**): `attrs` `{exit_code?, cpu_ms?, max_rss?}` from a command that finished, when the SDK can measure it. The host measures each node process as a whole and needs no `exec_end` to do so.
+- `node_annotation`: `attrs` is `{message, level?, file?, line?, end_line?}`. The optional fields point the annotation at a source line, as a GitHub check annotation does. With `step` set, the annotation belongs to that step;
+- `node_summary`: `attrs` is `{markdown}`. The last record per node and step wins;
+- `exec_start` and `exec_line`: a command, then each line of its output;
+- `exec_end`: `attrs` is `{exit_code?, cpu_ms?, max_rss?}` from a command that finished, when the SDK can measure it.
 
-An annotation that points at a line:
+The host writes `step_start`, `step_end`, `step_skipped`, `work_fail_fast`, `node_start`, `node_end`, `retry` and similar events itself. It stores an SDK record that carries one of these as a plain message.
 
 ```json
 {"ts":"2026-01-02T03:04:05.123Z","level":"error","node":"lint","event":"node_annotation","msg":"unused variable","attrs":{"message":"unused variable","level":"error","file":"cmd/app/main.go","line":42}}
 ```
+
+## Usage
+
+The host measures CPU time and peak resident memory for each process session as a whole, process group included. It records those numbers for each attempt, and they are the authority for a node's usage, admission and billing. `exec_end` numbers are advisory. They break usage down per command and never replace the host's measurement.
+
+## Versioning
+
+The protocol version is the string `1`. The host speaks exactly one version.
+
+- **Routes.** Every request carries `Sparkwing-Node-Protocol: 1`. The host answers a missing or different version with 426, as shown above.
+- **Documents.** The describe and plan documents carry `"protocol": "1"`.
+  - When describe names another version, the CLI refuses the entry before any run exists, naming both versions and the SDK from `sdk`. For example: `pipeline entry speaks node protocol "0" (go SDK v0.66.0); this engine speaks "1"; rebuild .sparkwing against a matching SDK`.
+  - When the plan names another version, the run fails with `protocol_mismatch` before any node starts.
+- **Old binaries.** A pipeline binary from before this protocol does not answer `--sw-node-protocol`. It exits without a reply, and the host reports that the entry did not answer `describe` and must be rebuilt.
+- **What takes a new version.** Any of these changes: removing or renaming an op, a field, a route, an error code or an environment variable; changing a field's meaning; or changing the framing.
+- **What does not.** Adding an optional field, a route, an error code or a log event.

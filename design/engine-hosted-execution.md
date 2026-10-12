@@ -1,328 +1,135 @@
 # Engine-hosted execution
 
-Status: proposal. This page is a design for contributors; no released
-command behaves this way yet.
+Status: accepted design for contributors. [docs/node-protocol.md](../docs/node-protocol.md) is the wire contract; this page records how the engine uses it and why it is shaped this way.
 
-Sparkwing runs every pipeline through one execution model: the engine hosts
-the run, and the customer's SDK process answers for the parts only it can
-run. The engine evaluates nothing written in the customer's language. It
-asks the SDK process for the plan, then schedules the plan, dispatches
-nodes, retries, times out, caches, stages artifacts, admits work, resolves
-secrets and handles logs. The SDK process builds plans, runs node and step
-bodies, and evaluates closures when the engine asks for them by id.
-
-The Go SDK keeps its in-process path until it speaks the node protocol. A
-TypeScript SDK starts on the hosted path and never has an in-process one.
-
-## Where the orchestrator lives
-
-Today the orchestrator is a library compiled into the customer's pipeline
-binary. The CLI builds the binary and executes it with the pipeline's name;
-the binary plans, schedules and dispatches its own nodes, starting each node
-as another copy of itself with `run-node`. A controller-dispatched run
-starts the binary with `handle-trigger`, which does the same. Every engine
-behavior therefore ships at whatever SDK version the customer pinned, and
-none of it is reusable from another language.
+Sparkwing runs every pipeline through one execution model. The engine hosts the run, and the customer's SDK process answers only for the parts that are customer code. The engine evaluates nothing written in the customer's language. It asks the SDK process for the plan, then schedules the plan, dispatches nodes, retries, times out, caches, stages artifacts, admits work, resolves secrets and handles logs. The SDK process builds plans, runs node and step bodies, and evaluates closures when the engine asks for them by id. Go and TypeScript pipelines run the same way.
 
 ```mermaid
 flowchart LR
-  subgraph today[Today]
-    CLI1[sparkwing CLI] -->|exec: pipeline name, SPARKWING_* env| BIN1
-    subgraph BIN1[customer pipeline binary]
-      ORCH1[orchestrator: plan driver, DAG, retries, timeouts, memo, admission, caches, artifacts, secrets, logs]
-      BODY1[plan function, bodies, steps, closures]
-    end
-    BIN1 -->|exec: run-node| NODE1[same binary, one node]
+  CLI[sparkwing CLI or runner] --> HOST
+  subgraph HOST[engine node host]
+    ORCH[scheduler, DAG, retries, timeouts, memo, admission, caches, artifacts, secrets, logs, cleanups, usage]
   end
+  HOST <-->|stdio: requests, replies, log records| SDK[SDK process: plan function, bodies, steps, closures]
+  SDK -->|HTTP /node/v1/: secrets, outputs, OIDC, cleanups, child runs| HOST
 ```
 
-```mermaid
-flowchart LR
-  subgraph hosted[Engine-hosted]
-    CLI2[sparkwing CLI or runner] --> HOST
-    subgraph HOST[engine node host]
-      ORCH2[plan driver, DAG, retries, timeouts, memo, admission, caches, artifacts, secrets, logs]
-    end
-    HOST <-->|stdio: requests, responses, log records| SDK2[SDK process: plan function, bodies, steps, closures]
-    SDK2 -->|HTTP node routes: secrets, outputs, cleanups| HOST
-  end
-```
+## Why the engine hosts the run
+
+When the orchestrator is a library compiled into the customer's pipeline binary, two things follow:
+
+- Every engine behavior ships at whatever SDK version the customer pinned. A fix to retries or caching reaches a customer only after they rebuild.
+- None of the engine is reusable from another language.
+
+Moving the envelope into the engine fixes both. The SDK shrinks to what only it can do, and a new language needs only the five protocol operations and eight routes.
 
 ## The boundary
 
-| Concern | Hosted in the engine | Stays in the SDK process |
+| Concern | The engine | The SDK process |
 |---|---|---|
-| Plan | asks for the plan with the run's args and run context, validates it, records the snapshot, checks each node process plans the same graph | runs the author's plan function and returns the plan document |
-| DAG | readiness, fan-out, dependency failure, optional dependencies, OnFailure recovery nodes | nothing |
-| Retries and timeouts | attempts, backoff, wall and no-progress timeouts, killing the node's process session | nothing |
-| Memo | key from declared inputs hashed by the host, lookup and record | a key closure returns a string when the author wrote one |
-| Admission | per-node leases from declared resources, measured per-node usage | may send `exec_end` records with numbers it has |
+| Plan | asks for the plan with the run's args and run context, validates it, records the snapshot, and checks that each later process plans the same node | runs the author's plan function and returns the plan document |
+| DAG | readiness, fan-out, dependency failure, optional dependencies, OnFailure recovery nodes, approvals | nothing |
+| Retries and timeouts | attempts, backoff, wall and no-progress timeouts, killing the process session | nothing |
+| Memo | the key from declared inputs, lookup and record | a `cache_key` closure returns a string when the author wrote one |
+| Admission | per-node leases from declared resources, and measured per-node usage | may send `exec_end` records as an advisory breakdown |
 | Artifacts | staging before the node starts, publishing after success | nothing |
-| Dependency caches | restore before the node process starts, save after success, keyed from declared key files | declares the cache directories |
+| Dependency caches | restore before the node's first process, save after success, keyed from declared key files | declares the cache directories |
+| Tools | puts the declared tools on `PATH` | declares the tool names |
 | Secrets | resolves through the profile, registers values with the masker, answers the secrets route | asks the route by name |
-| Logs | reads stdout and stderr, masks, timestamps, stores | writes log records to stdout |
-| Steps | orders steps, applies fail-fast, finally, continue-on-error, skip ranges and dry-run | runs one step body when asked |
-| Closures | decides when to call SkipIf, BeforeRun, AfterRun, Verify, key closures and generators | evaluates the closure by id |
-| Cleanup and git cache | owns the cleanup ledger and puts the git cache rewrite into the node environment | registers cleanups through a route |
+| Logs | reads stdout and stderr, masks, timestamps, attributes records to node and step, stores | writes log records to stdout |
+| Steps | orders steps, applies fail-fast, finally, continue-on-error, optional, step windows and dry-run | runs one step body when asked |
+| Closures | decides when to call SkipIf, BeforeRun, Verify, AfterRun, cache-key and generator closures | evaluates a closure by id |
+| Cleanup and git cache | owns the cleanup ledger and puts the git mirror rewrite into the environment | registers cleanups through a route |
 
 ## Process model
 
-The wire contract is the node protocol specification
-(`docs/node-protocol.md` and its JSON Schemas). This page decides how the
-engine uses it.
+The engine starts the SDK entry with the single argument `--sw-node-protocol` for each of these:
 
-The engine starts one SDK process per node attempt with the single argument
-`--sw-node-protocol`. That process is long-lived for the attempt: it answers
-a `plan` request, then one `run_node` or a sequence of `run_step` requests,
-plus any `eval` requests the host sends for that node's closures. Plan
-evaluation before dispatch runs in its own short process, which also answers
-closures the host evaluates before any node starts.
+- **describe**, for the CLI to list pipelines and parse flags;
+- **plan**, once per run;
+- **eval**, for closures the host evaluates outside an attempt, bound to one node;
+- **attempt**, one process for each node attempt.
+
+An attempt process answers `plan`, then `eval` and either `run_node` or a series of `run_step` requests for that node. Then the host closes stdin.
 
 One process per attempt is the choice because:
 
-- the process is the unit the host measures, so per-node CPU and memory are
-  exact without SDK cooperation;
+- the process is the unit the host measures, so per-node CPU and memory are exact without the SDK's cooperation;
 - a timeout or cancel kills one process session and nothing else;
 - a retry starts clean, with no state left by the failed attempt;
-- it matches the remote shape, where a node already runs in its own pod or
-  launcher job.
+- it matches the remote shape, where a node already runs in its own pod or launcher job.
 
-The cost is that every node process rebuilds the plan, because bodies and
-closures are captured while the plan function runs. The Go path pays the same
-cost today. The host compares the node's plan entry with the accepted
-snapshot and fails the node with a plan-drift reason when they differ.
+The cost is that every process rebuilds the plan, because bodies and closures are captured while the plan function runs. That rebuild buys drift detection. The host compares the node's entry with the accepted snapshot and fails the attempt with `plan_drift` when they differ, so a node never runs code its plan did not hold.
 
-One process per run was the alternative. It saves plan evaluations, but a
-crash or leak in one body takes every node down, usage is no longer per
-node, and it does not map onto pods.
+One process per run was the alternative. It saves plan evaluations, but a crash or leak in one body takes every node down, usage is no longer per node, and it does not map onto pods.
 
-### Framing
+`skip_if`, `cache_key` and `generator` closures run in an eval process before an attempt exists. A skipped or memoized node therefore never claims a pod or a runner slot. A remote run evaluates them on the host that runs the scheduler.
 
-- The host writes one JSON request per line to the process's stdin:
-  `{"id": "<id>", "op": "<op>", ...fields}`.
-- The process writes one JSON object per line to stdout. A line with
-  `reply` answers the request with that id, as
-  `{"reply": "<id>", "ok": true, "result": ...}` or
-  `{"reply": "<id>", "ok": false, "error": {"message": "..."}}`; every other
-  line is a log record with the engine's log record fields.
-- stderr lines become warn-level text records, as they do for Go nodes.
-- The host sends one request at a time, except `eval` for a closure of the
-  running node.
-- End of stdin means no further requests; the SDK finishes the current one
-  and exits. This replaces the inherited liveness descriptor the Go path
-  uses.
+## Decisions
 
-```text
--> {"id":"1","op":"plan","pipeline":"ship","args":{},"run":{"run_id":"r1","pipeline":"ship"}}
-<- {"reply":"1","ok":true,"result":{"protocol":"1","pipeline":"ship","run_id":"r1","nodes":[...]}}
--> {"id":"2","op":"run_node","node":"build","attempt":1,"options":{"dry_run":false}}
-<- {"ts":"2026-01-02T03:04:05Z","level":"info","node":"build","msg":"compiling"}
-<- {"reply":"2","ok":true,"result":{"outcome":"success","output":{"digest":"sha-1"}}}
-```
+These choices go beyond the protocol's shape. Each needs Korey's ratification.
 
-| `op` | Fields | Result |
-|---|---|---|
-| `describe` | none | the describe document |
-| `plan` | `pipeline`, `args`, `run` | the plan document |
-| `run_node` | `node`, `attempt`, `options` | `outcome`, optional `output`, optional `error` |
-| `run_step` | `node`, `step`, `options` | `outcome`, optional `error` |
-| `eval` | `closure`, optional `input` | `value` |
+1. **Every attempt process answers `plan` before `run_node`.** `run_node` then needs no pipeline, args or run context, and drift becomes a host-side check rather than something each SDK must implement.
+2. **The host computes `spec_hash`.** It hashes the canonical JSON of each node document with one function on both sides of the comparison. SDKs in different languages never have to produce byte-identical JSON.
+3. **`--sw-node-protocol` is the only entry, and describe is a stdio request.** The `--describe` argument, `run-node`, `plan --json`, `handle-trigger`, `replay-node`, `ops`, `config`, `--plan` and `--explain` go away.
+4. **The environment variables are renamed to `SPARKWING_NODE_URL` and `SPARKWING_NODE_TOKEN`.** The old `SPARKWING_CONTROLLER_URL` and `SPARKWING_AGENT_TOKEN` names said the SDK talks to a controller, which it no longer does. A stale binary that reads the old names finds nothing and fails loudly instead of calling `/api/v1/` paths on the node host.
+5. **End of stdin replaces the liveness descriptor.** The mask-values descriptor goes too, because the host knows every secret it served.
+6. **Outputs come back as JSON in the route response.** The host fetches and verifies the stored output, so an SDK never follows a signed URL.
+7. **Awaiting a child run is a long poll that holds for at most 60 seconds.** The SDK repeats the call until the child finishes. While a call is open and the child waits in plan admission, the host pauses the parent node's timeout.
+8. **One protocol version, matched exactly, with 426 on the routes.** The header costs little, and a later protocol bump needs it.
+9. **`Inline` means "on the host that dispatches the run, in its own process".**
+10. **The host's measured usage is the authority for per-node numbers**, and `exec_end` is advisory.
+11. **Registered cleanups run when the attempt process exits, unless released.** They also run on a clean exit, because a library that did not release its cleanup did not clean up.
 
-`run_node` names no pipeline or args, so each node process answers `plan`
-first, and the SDK runs bodies from that plan. A body that throws is a
-`failed` outcome in an `ok` reply. A failed reply means the SDK could not
-answer at all, such as an unknown op, node or closure; the host fails the
-node with that message and the SDK's protocol version, so an author sees
-"this SDK does not support X" rather than a crash.
+## Cutover
 
-### Closures by id
+This is a hard cut in one breaking release:
 
-The plan document lists every closure a node or step has under `closures`,
-with ids the SDK assigns, such as `deploy/skip_if/0`. Ids are opaque to the
-host. The host decides when a closure runs and sends `eval` with that id;
-the SDK looks the closure up in the plan it built in the same process. An
-id the SDK does not know is a failed reply, never a skipped check. The host
-bounds each closure's time, and a `skip_if` that fails or overruns
-evaluates to don't-skip.
+- the in-process path is deleted;
+- the CLI, runners, the launcher and Kubernetes jobs reach a pipeline only through `--sw-node-protocol`;
+- a pipeline binary built against an older SDK does not answer it, and the engine reports that the entry must be rebuilt;
+- there are no migrations for old pipeline modules, binaries or stores, and no minimum-SDK gate;
+- the changelog carries one Breaking entry: rebuild `.sparkwing` against the new SDK.
 
-```mermaid
-sequenceDiagram
-  participant H as Engine node host
-  participant P as Plan process
-  participant N as Node process
-  H->>P: describe
-  P-->>H: protocol, pipelines, args
-  H->>P: plan (pipeline, args, run)
-  P-->>H: nodes, deps, modifiers, steps, closure ids
-  Note over H: snapshot, admit, restore caches, stage artifacts, check memo
-  H->>N: spawn with --sw-node-protocol and the node environment
-  H->>N: plan (same pipeline, args, run)
-  N-->>H: plan document, compared with the snapshot
-  H->>N: eval deploy/skip_if/0
-  N-->>H: value false
-  H->>N: run_node deploy
-  N->>H: GET /node/v1/secrets/name, GET /node/v1/nodes/build/output
-  N-->>H: log records on stdout
-  N-->>H: outcome success, output
-  Note over H: save caches, publish artifacts, record output, schedule dependents
-  H->>N: close stdin
-```
-
-## What describe and the plan document carry
-
-`--describe` stays static: no run context, no args. It wraps the pipeline
-array in an object with a `protocol` string, so the host can choose the path
-before anything runs. The plan document is per run and comes back from the
-`plan` request.
-
-```json
-{
-  "protocol": "1",
-  "pipelines": [{"name": "ship", "short": "Build and deploy", "args": []}]
-}
-```
-
-```json
-{
-  "protocol": "1",
-  "pipeline": "ship",
-  "run_id": "r1",
-  "nodes": [
-    {"id": "build", "deps": [], "modifiers": {"retry": 2, "retry_backoff_ms": 1000, "timeout_ms": 600000}},
-    {"id": "deploy", "deps": ["build"], "modifiers": {"has_skip_if": true},
-     "work": {"steps": [{"id": "apply"}]},
-     "closures": {"skip_if": ["deploy/skip_if/0"]}}
-  ]
-}
-```
-
-The Go plan snapshot that `plan --json` writes already carries the edges and
-most of the envelope: `deps`, `optional_deps`, retry, timeouts, placement
-labels, concurrency, resources, the memo flag, approvals, OnFailure, steps
-with their needs, and a per-node `spec_hash`. The hosted path still needs:
-
-- the `protocol` field on describe and on the plan;
-- cache directories as data: name, path or resolver, key files;
-- memo key inputs as data: file globs, environment names, constants, or a
-  key closure;
-- closure ids for each closure, where the snapshot has only `has_skip_if`
-  and similar flags;
-- step continue-on-error and optional flags, and step closure ids;
-- generator closure ids for nodes expanded at run time, which the snapshot
-  marks only as `dynamic`;
-- plan evaluation that takes its run context in the request instead of
-  reading a run row through a controller.
-
-## Pinned Go pipelines during the migration
-
-The host negotiates by reading describe before every run:
-
-```mermaid
-flowchart TD
-  D[run binary --describe] --> Q{describe shape}
-  Q -->|JSON array: Go SDK without protocol| IP[in-process path: exec the binary as today]
-  Q -->|object with a protocol the host speaks| HP[hosted path]
-  Q -->|object with a protocol the host does not speak| ERR[refuse the run, name the versions the host speaks]
-```
-
-- A Go binary built against any released SDK prints a JSON array. The host
-  treats that as the in-process model and runs it exactly as today, with the
-  orchestrator inside the binary.
-- The CLI and runner learn to read both shapes before any SDK prints the
-  object form, because an older CLI that meets the object form cannot list
-  the binary's pipelines.
-- The Go SDK moves to the hosted path by answering `--sw-node-protocol` and
-  printing the object form. Its in-process path remains until every engine
-  that customers run can host it, and its removal is a separate breaking
-  release.
-- The host keeps serving every protocol version it has shipped, because
-  pinned binaries outlive engine upgrades. Node routes carry the
-  `Sparkwing-Node-Protocol` header, and a host answers a version it does not
-  speak with HTTP 426 and the versions it does.
+This repository's own CI builds `.sparkwing` against the SDK in the same commit, so from the cutover onward it needs a CLI built from that commit too.
 
 ## Changes by component
 
-| Component | Today | Hosted |
+| Component | Engine-hosted | Replaces |
 |---|---|---|
-| CLI `run` | builds the binary, passes run options as `SPARKWING_*` variables, execs `<binary> <pipeline>` | builds the SDK entry, runs the host in-process or through the admission daemon, keeps step windows, dry-run, only and no-cache as host state |
-| CLI `pipeline describe`, `plan`, `explain` | asks the binary for its own help and plan text | renders describe and the plan document |
-| Local runner | starts `<binary> run-node --coordinated` and supervises it | starts `<entry> --sw-node-protocol`, sends requests, reads results from stdout instead of re-reading the node row |
-| Runner and trigger loop | execs `<binary> handle-trigger`, and the binary dispatches | dispatches in the engine from the plan document; nodes still run the SDK entry |
-| Launcher and Kubernetes jobs | job args `run-node <run> <node>`, claim fence in the pod environment | job args `--sw-node-protocol`; the executor holds the claim, and the pod gets only the node environment |
-| Admission daemon | leases taken by the binary's dispatcher | leases taken by the host per node |
-
-The node environment shrinks to what an SDK reads: run and node ids, the
-node route location and its bearer, runner identity, dry-run, trace context,
-and the dependency proxy names other tools already define. Everything that
-carries a CLI flag into the binary today becomes host state.
+| CLI `run` | builds the SDK entry and runs the host, either in-process or through the admission daemon. Step windows, dry-run, `only` and `no-cache` are host state | executing the binary with run options as `SPARKWING_*` variables |
+| CLI help, `plan`, `explain` | renders describe and the plan document | asking the binary for its own help and plan text |
+| Local runner | starts `<entry> --sw-node-protocol`, sends requests and reads results from stdout | `run-node --coordinated` and re-reading the node row |
+| Runner and trigger loop | schedules the run from the plan document and dispatches nodes through the Kubernetes and launcher runners | executing `handle-trigger` and letting the binary dispatch |
+| Pod side | `sparkwing-runner run-node` holds the claim, serves the node routes, starts the entry, and reports the attempt | executing the binary's `run-node` with the claim fence in its environment |
+| Admission daemon | leases taken by the host per node | leases taken by the binary's dispatcher |
+| Node routes | `/node/v1/` on the node host, with a bearer per node process | the `/api/v1/` node routes, the execution broker, and the loopback controller's node-facing routes |
 
 ## Failure modes
 
 | Failure | Host behavior |
 |---|---|
-| SDK process exits without answering | the node fails with the exit status or signal as its reason; the retry policy applies; records already read are kept |
-| SDK process hangs | the wall or no-progress timeout kills the session; no-progress counts log silence |
-| Response id the host never sent, or two answers to one id | the node fails with a protocol error; the host never guesses which answer counts |
-| Non-JSON stdout line | forwarded as a text record, as for Go nodes; it is never parsed as a response |
-| Node process plans a different graph | the node fails with a plan-drift reason |
-| Protocol version outside the host's range | the run is refused before any node starts |
-| Unknown method or closure | the node fails with the SDK's error code and the SDK version in the reason |
-| Host restarts mid-node | the node process sees end of stdin and exits; the run's recovery marks the attempt lost and the retry policy decides, as it does when a dispatcher dies today |
-| Secrets or outputs route fails | the SDK raises inside the body, so the node fails with that error |
-
-## Phases
-
-1. **Spike (in the tree).** An internal entry point reads a Go binary's
-   describe document, writes the run row, asks the binary for
-   `plan --json`, writes node rows and schedules the DAG itself, starting
-   each node through the local runner as `run-node`. A test runs a two-node
-   plan with one dependency and a dependency failure. No command reaches it.
-2. **Smallest first step: plan without a controller.** Let the Go binary
-   answer the protocol's `describe` and `plan` requests under
-   `--sw-node-protocol`, with the run context in the request instead of a
-   run row read through the controller, and have the spike use it. This is
-   additive, needs no new variable, and makes plan evaluation a pure stdio
-   exchange.
-3. **Hosted local runs for protocol 1 entries.** The CLI recognizes the
-   object describe form and runs the host locally: scheduling, retries,
-   timeouts, log forwarding, and the secrets and outputs routes on loopback.
-   The TypeScript SDK runs end to end here.
-4. **Envelope moves.** Memo, dependency caches, artifacts, steps and closure
-   calls run host-side for hosted entries, from the plan document.
-5. **Go SDK on the protocol.** The Go SDK runs nodes under
-   `--sw-node-protocol` and prints the object form from `--describe`.
-   Runners, the launcher and Kubernetes jobs use the hosted path for
-   protocol 1 binaries and the in-process path for older ones.
-6. **In-process removal.** A breaking release removes the in-process path
-   once supported engines all host protocol 1.
+| The SDK process exits without answering | the attempt fails with `sdk_exited` and the exit status or signal; the retry policy applies; records already read are kept |
+| The SDK process hangs | the wall or no-progress timeout kills the session; no-progress counts log silence |
+| A reply to an id the host never sent, a second reply, or a malformed reply | the attempt fails with `protocol_error`; the host never guesses which answer counts |
+| A stdout line that is not JSON | stored as a text record, never parsed as a reply |
+| A process plans a different node | the attempt fails with `plan_drift` |
+| A plan with a cycle, an unknown dependency or duplicate ids | the run fails with `plan_invalid` before any node starts |
+| A protocol version other than the host's | the CLI refuses the entry at describe; a plan with another version fails the run with `protocol_mismatch` |
+| An unknown op, node, step or closure | the attempt fails with the SDK's code, and the reason names the SDK and its version |
+| The host restarts mid-node | the process sees end of stdin and exits; the run's recovery marks the attempt lost and the retry policy decides |
+| A route call fails | the SDK raises inside the body, so the node fails with that error |
 
 ## What the spike proved
 
-- The engine can own the run row, node rows and DAG order while the binary
-  only evaluates the plan and runs one node per process. Each node ran in
-  its own process, the dependent started only after its dependency
-  succeeded, and a failed dependency skipped its dependent without starting
-  it.
-- A node reads its dependency's typed output through the engine, and its
-  log records reach the host through stdout unchanged.
-- The current verbs couple plan evaluation to a controller: `plan --json`
-  reads the run row through the controller, and `run-node` re-reads the run
-  row, rebuilds the whole plan and writes its own terminal row, which the
-  host reads back instead of receiving a result.
-- `--describe` carries no nodes, no edges, no envelope and no protocol
-  version, so the host cannot schedule from describe alone.
+An internal spike, reachable only from tests, ran a two-node plan with the engine owning the run row, the node rows and the DAG order:
+
+- Each node ran in its own process. The dependent started only after its dependency succeeded, and a failed dependency skipped its dependent without starting it.
+- A node read its dependency's typed output through the engine, and its log records reached the host through stdout unchanged.
+- Plan evaluation coupled to a controller does not fit the model. The spike's `plan --json` read the run row through a controller, and its `run-node` re-read the run row and wrote its own terminal row. That is why `plan` takes its run context in the request and `run_node` answers with a result.
 
 ## Open questions
 
-- Whether each node process must answer `plan` before `run_node`. This page
-  assumes it does, because `run_node` names no pipeline or args. The
-  alternative is to carry pipeline, args and run in every `run_node`.
-- Whether a failed reply carries a machine-readable code next to its
-  message, so the host can tell "unknown op" (an old SDK) from "unknown
-  node" (plan drift) without matching text.
-- Where a node reads another node's output under `/node/v1/`. This page
-  assumes `/node/v1/nodes/{other}/output`, answering the same signed grant as
-  the run-scoped route.
-- Whether describe names the SDK's language and version, which would let the
-  host's refusal name the package to upgrade. The describe schema allows no
-  field for it.
+- **TypeScript discovery.** How the CLI recognizes a TypeScript entry, and whether the runner image ships Node. The proposal is a `.sparkwing/package.json` that depends on `@sparkwing/sdk`, and Node LTS in the runner image.
+- **Cleanup time limit.** How long the host lets one cleanup command run before it kills it. Customers would notice this limit, so the value needs Korey's approval and a comparison with GitHub Actions and CircleCI.
+- **Node output size.** A node's output travels inside one reply line, and a line is at most 16 MiB, while the store accepts outputs up to 64 MiB. Either the smaller limit is accepted, which customers would notice and so needs Korey's approval, or a larger output takes another path, such as a file the SDK names in its result.
