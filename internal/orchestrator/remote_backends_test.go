@@ -2,18 +2,13 @@ package orchestrator_test
 
 import (
 	"context"
-	"net/http/httptest"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -32,82 +27,6 @@ func registerRemotePipelines(t *testing.T) {
 		sparkwing.Register[sparkwing.NoInputs]("remote-ok",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &remoteOKPipe{} })
 	})
-}
-
-func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
-	registerRemotePipelines(t)
-
-	ctrlDB := filepath.Join(t.TempDir(), "controller.db")
-	ctrlStore, err := teststore.Open(ctrlDB)
-	if err != nil {
-		t.Fatalf("controller store: %v", err)
-	}
-	t.Cleanup(func() { _ = ctrlStore.Close() })
-
-	srv := orchestrator.NewControllerServer(t, ctrlStore, nil)
-	t.Cleanup(srv.Close)
-
-	c := client.NewWithToken(srv.URL, nil, "")
-	if c.BaseURL() != srv.URL {
-		t.Errorf("BaseURL = %q, want %q", c.BaseURL(), srv.URL)
-	}
-
-	logStore, err := fs.NewLogStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	paths := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
-		Pipeline: "remote-ok",
-		State:    c,
-		LogStore: logStore,
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
-	}
-
-	run, err := ctrlStore.GetRun(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("controller-side GetRun: %v", err)
-	}
-	if run.Status != "success" {
-		t.Errorf("controller-side run.Status = %q, want success", run.Status)
-	}
-	if run.Pipeline != "remote-ok" {
-		t.Errorf("controller-side run.Pipeline = %q, want remote-ok", run.Pipeline)
-	}
-}
-
-// A run whose state lives on a controller that keeps segments needs no
-// logs service: the node's log reaches the controller from this process.
-func TestRunLocal_KeepsNodeLogsAsSegmentsWithoutALogsService(t *testing.T) {
-	registerRemotePipelines(t)
-	ctrlStore, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
-	if err != nil {
-		t.Fatalf("controller store: %v", err)
-	}
-	t.Cleanup(func() { _ = ctrlStore.Close() })
-	srv := httptest.NewServer(controller.New(ctrlStore, nil).Handler())
-	t.Cleanup(srv.Close)
-	c := client.NewWithToken(srv.URL, nil, "")
-
-	res, err := orchestrator.RunLocal(context.Background(), newPaths(t), orchestrator.Options{
-		Pipeline: "remote-ok",
-		State:    c,
-	})
-	if err != nil || res.Status != "success" {
-		t.Fatalf("RunLocal = %+v, %v; want success", res, err)
-	}
-	got, err := c.NodeLogs().Read(context.Background(), res.RunID, "remote-ok", storage.ReadOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(got), "node_end") {
-		t.Fatalf("node log read through the controller = %q", got)
-	}
 }
 
 func TestRemoteBackends_FromBaseURL(t *testing.T) {
@@ -140,4 +59,12 @@ func testLogBackend(t *testing.T) orchestrator.LogBackend {
 		t.Fatal(err)
 	}
 	return orchestrator.NewLogStoreBackend(logs, nil)
+}
+
+type noListArtifact struct {
+	storage.ArtifactStore
+}
+
+func (n *noListArtifact) List(_ context.Context, _ string) ([]string, error) {
+	return nil, storage.ErrListNotSupported
 }

@@ -1,6 +1,6 @@
 # pkg/storage/stdoutlogs
 
-func CheckSpec(bucket, prefix, path, url, urlSource, token string) error
+func CheckSpec(bucket, prefix, path, url, token string) error
 var ErrReadUnsupported = fmt.Errorf("stdout logs backend does not support reads; configure a persistent backend (filesystem, s3, controller) for log retrieval: %w", storage.ErrNotSupported)
 type LogStore struct {
 }

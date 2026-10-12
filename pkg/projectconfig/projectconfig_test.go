@@ -247,3 +247,24 @@ func TestLoad_RefusesADefaultProfile(t *testing.T) {
 		t.Fatalf("a project default profile must fail the load, since only --profile selects one; got %v", err)
 	}
 }
+
+// A project profile declares every surface, so the error a user meets after
+// dropping a removed state type names the states it accepts.
+func TestLoad_AProjectProfileErrorNamesTheSupportedStates(t *testing.T) {
+	const surfaces = "    secrets: { type: none }\n    cache: { type: filesystem, path: /tmp/c }\n    logs: { type: filesystem, path: /tmp/l }\n"
+	for name, state := range map[string]string{
+		"removed type": "    state: { type: s3, bucket: b }\n",
+		"no state":     "",
+	} {
+		path := writeYAML(t, t.TempDir(), projectconfig.Filename, "profiles:\n  shared:\n"+surfaces+state)
+		_, err := projectconfig.Load(path)
+		if err == nil || !strings.Contains(err.Error(), "sqlite") || !strings.Contains(err.Error(), "controller") ||
+			!strings.Contains(err.Error(), "remove the profile") {
+			t.Errorf("%s: Load = %v, want the supported states and removing the profile named", name, err)
+		}
+	}
+	ok := writeYAML(t, t.TempDir(), projectconfig.Filename, "profiles:\n  shared:\n"+surfaces+"    state: { type: sqlite }\n")
+	if _, err := projectconfig.Load(ok); err != nil {
+		t.Fatalf("a sqlite project profile: %v", err)
+	}
+}

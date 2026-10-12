@@ -72,7 +72,10 @@ func TestBindProjectPipelines_ResolvesTypedArgsPipelineForHelp(t *testing.T) {
 
 	writeTypedHelpProject(t, pipelineName, entrypoint)
 
-	cfg := bindProjectPipelines()
+	cfg, err := bindProjectPipelines()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg == nil {
 		t.Fatal("bindProjectPipelines returned nil config for a valid project")
 	}
@@ -114,7 +117,9 @@ func TestDescribeAll_IncludesTypedArgsPipelineAfterBind(t *testing.T) {
 		return typedHelpPipe{}
 	})
 	writeTypedHelpProject(t, pipelineName, entrypoint)
-	bindProjectPipelines()
+	if _, err := bindProjectPipelines(); err != nil {
+		t.Fatal(err)
+	}
 
 	all, err := sparkwingruntime.DescribeAll()
 	if err != nil {

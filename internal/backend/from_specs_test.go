@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
@@ -16,62 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
-
-func TestParseInlineSpec(t *testing.T) {
-	cases := []struct {
-		in   string
-		want backends.Spec
-	}{
-		{"sqlite:///tmp/state.db", backends.Spec{Type: backends.TypeSQLite, Path: "/tmp/state.db"}},
-		{"postgres://u:p@h:5432/d?sslmode=disable", backends.Spec{Type: backends.TypePostgres, URL: "postgres://u:p@h:5432/d?sslmode=disable"}},
-		{"postgresql://u:p@h:5432/d", backends.Spec{Type: backends.TypePostgres, URL: "postgresql://u:p@h:5432/d"}},
-		{"s3://my-bucket/runs", backends.Spec{Type: backends.TypeS3, Bucket: "my-bucket", Prefix: "runs"}},
-		{"s3://only-bucket", backends.Spec{Type: backends.TypeS3, Bucket: "only-bucket"}},
-		{"controller://prod", backends.Spec{Type: backends.TypeController, Controller: "prod"}},
-		{"fs:///var/log/sparkwing", backends.Spec{Type: backends.TypeFilesystem, Path: "/var/log/sparkwing"}},
-		{"stdout:", backends.Spec{Type: backends.TypeStdout}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			got, err := backend.ParseInlineSpec(tc.in)
-			if err != nil {
-				t.Fatalf("ParseInlineSpec(%q): %v", tc.in, err)
-			}
-			if got == nil || !reflect.DeepEqual(*got, tc.want) {
-				t.Fatalf("ParseInlineSpec(%q) = %+v, want %+v", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestParseInlineSpec_Empty(t *testing.T) {
-	got, err := backend.ParseInlineSpec("  ")
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if got != nil {
-		t.Fatalf("empty input should return nil spec, got %+v", got)
-	}
-}
-
-func TestParseInlineSpec_Unknown(t *testing.T) {
-	for _, in := range []string{"redis://localhost:6379", "gcs://b/p", "mysql://u@h/d"} {
-		_, err := backend.ParseInlineSpec(in)
-		if err == nil {
-			t.Fatalf("%s: expected error for unknown scheme", in)
-		}
-		if !strings.Contains(err.Error(), "(expected sqlite, postgres, s3, controller, fs, stdout)") {
-			t.Errorf("%s: want the supported scheme list, got: %v", in, err)
-		}
-	}
-}
-
-func TestParseInlineSpec_ControllerMissingProfile(t *testing.T) {
-	_, err := backend.ParseInlineSpec("controller://")
-	if err == nil {
-		t.Fatal("expected error when profile is missing")
-	}
-}
 
 func TestFromSpecs_SQLite(t *testing.T) {
 	dir := t.TempDir()
@@ -96,32 +37,15 @@ func TestFromSpecs_SQLite(t *testing.T) {
 	}
 }
 
-func TestFromSpecs_Postgres(t *testing.T) {
-	dsn := os.Getenv("SPARKWING_TEST_PG_URL")
-	if dsn == "" {
-		if os.Getenv("SPARKWING_REQUIRE_PG") != "" {
-			t.Fatal("SPARKWING_REQUIRE_PG is set, so SPARKWING_TEST_PG_URL must name a reachable Postgres")
-		}
-		t.Skip("SPARKWING_TEST_PG_URL not set; skipping pg FromSpecs test")
-	}
+func TestFromSpecs_RefusesRemovedStateTypes(t *testing.T) {
 	paths := newTempPaths(t, t.TempDir())
-	stateSpec := &backends.Spec{Type: backends.TypePostgres, URL: dsn}
-
-	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, nil, nil, paths, nil)
-	if err != nil {
-		t.Fatalf("FromSpecs(postgres): %v", err)
-	}
-	defer func() { _ = closer.Close() }()
-
-	caps, err := b.Capabilities(context.Background())
-	if err != nil {
-		t.Fatalf("Capabilities: %v", err)
-	}
-	if caps.Storage.Runs != "postgres" {
-		t.Errorf("Storage.Runs = %q, want postgres", caps.Storage.Runs)
-	}
-	if caps.Mode != "shared-db" {
-		t.Errorf("Mode = %q, want shared-db", caps.Mode)
+	for _, spec := range []backends.Spec{
+		{Type: backends.TypeS3, Bucket: "b"},
+		{Type: "postgres", URL: "postgres://db/sw"},
+	} {
+		if _, _, err := backend.FromSpecs(context.Background(), &spec, nil, nil, paths, nil); err == nil {
+			t.Errorf("FromSpecs(%s) opened a removed state type", spec.Type)
+		}
 	}
 }
 

@@ -20,7 +20,6 @@ var declaredRepoReaders = map[string]string{
 	"pkg/controller/handlers.go":                 "copies the trigger's repository onto the run row for display",
 	"pkg/controller/github_app_webhook.go":       "copies the installation's repository onto the pending run row for display",
 	"pkg/controller/client/client.go":            "sends the ?repo= list filter",
-	"pkg/storage/s3state/cas.go":                 "copies a parent run's repository onto a child trigger",
 	"internal/runretry/create.go":                "copies the source run's repository onto the retry's rows",
 	"internal/orchestrator/orchestrator.go":      "records the repository the run was started from",
 	"internal/orchestrator/replay.go":            "copies the replayed run's repository onto the replay",

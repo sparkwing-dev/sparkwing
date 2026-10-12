@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -68,30 +67,4 @@ func TestControllerSegmentLogsRefusesAControllerThatKeepsNone(t *testing.T) {
 			}
 		})
 	}
-}
-
-// A run whose state stays on this machine has no node rows on the
-// controller to grant segments against, so a controller logs surface
-// refuses it rather than keeping its logs nowhere.
-func TestControllerLogsRequireTheRunsStateOnThatController(t *testing.T) {
-	ctrl, tok := newSegmentController(t)
-	lookup := func(string) (string, string, error) { return ctrl.url, tok, nil }
-	logs := backends.Spec{Type: backends.TypeController, Controller: "prod"}
-	local := &backends.Spec{Type: backends.TypeSQLite, Path: "state.db"}
-	if got, err := openLogStoreFromSpec(t.Context(), logs, false, local, lookup); err == nil {
-		t.Fatalf("store = %T for a local run, want an error", got)
-	}
-	other := &backends.Spec{Type: backends.TypeController, Controller: "staging"}
-	if got, err := openLogStoreFromSpec(t.Context(), logs, true, other, lookup); err == nil {
-		t.Fatalf("store = %T for state on another controller, want an error", got)
-	}
-	remote := &backends.Spec{Type: backends.TypeController, Controller: "prod"}
-	got, err := openLogStoreFromSpec(t.Context(), logs, true, remote, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := got.(*segmentLogStore); !ok {
-		t.Fatalf("store = %T, want segments", got)
-	}
-	got.(*segmentLogStore).Close(t.Context())
 }

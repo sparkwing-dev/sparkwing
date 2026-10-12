@@ -112,8 +112,6 @@ func runDashboardSupervise(args []string) error {
 	readOnly := fs.Bool("read-only", false, "")
 	allowRemote := fs.Bool("allow-remote", false, "")
 	allowOrigins := fs.String("allow-origin", "", "")
-	noLocalStore := fs.Bool("no-local-store", false, "")
-	profileName := fs.String("profile", "", "")
 	version := fs.String("version", "", "")
 	instance := fs.String("instance", "", "")
 	if err := fs.Parse(args); err != nil {
@@ -132,7 +130,6 @@ func runDashboardSupervise(args []string) error {
 		ReadOnly:     *readOnly,
 		AllowRemote:  *allowRemote,
 		AllowOrigins: splitCSV(*allowOrigins),
-		NoLocalStore: *noLocalStore,
 		Version:      *version,
 		Instance:     *instance,
 	}
@@ -152,10 +149,6 @@ func runDashboardSupervise(args []string) error {
 		opts.ArtifactStore = as
 		opts.ArtifactStoreLabel = schemeOf(*artifactStoreURL)
 	}
-	if err := applyDashboardProfile(ctx, &opts, *profileName); err != nil {
-		return err
-	}
-
 	if !opts.AllowRemote && !localws.LoopbackBind(opts.Addr) {
 		return errors.New("non-loopback dashboard requires --allow-remote")
 	}
@@ -178,7 +171,7 @@ func runDashboardSupervise(args []string) error {
 	if err != nil {
 		return err
 	}
-	record := dashboardRecord{PID: os.Getpid(), Birth: birth, Boot: boot, Instance: *instance, Artifact: dashboardRunningArtifact(), Options: dashboardOptions{Addr: opts.Addr, LogStore: *logStoreURL, ArtifactStore: *artifactStoreURL, Profile: *profileName, AllowOrigins: *allowOrigins, ReadOnly: *readOnly, NoLocalStore: *noLocalStore, AllowRemote: *allowRemote}}
+	record := dashboardRecord{PID: os.Getpid(), Birth: birth, Boot: boot, Instance: *instance, Artifact: dashboardRunningArtifact(), Options: dashboardOptions{Addr: opts.Addr, LogStore: *logStoreURL, ArtifactStore: *artifactStoreURL, AllowOrigins: *allowOrigins, ReadOnly: *readOnly, AllowRemote: *allowRemote}}
 	if record.Instance == "" {
 		record.Instance = fmt.Sprintf("%d-%s", record.PID, record.Birth)
 		opts.Instance = record.Instance
@@ -364,33 +357,6 @@ func waitForListenerOrExit(addr string, exited <-chan struct{}, timeout time.Dur
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("failed to accept connections within %s", timeout)
-}
-
-func applyDashboardProfile(ctx context.Context, opts *localws.Options, profileName string) error {
-	if profileName == "" {
-		return nil
-	}
-	p, err := resolveProfileFlag(profileName)
-	if err != nil {
-		return err
-	}
-	if opts.LogStore == nil && p.Logs != nil {
-		ls, err := storeurl.OpenLogStoreFromSpec(ctx, *p.Logs, nil)
-		if err != nil {
-			return fmt.Errorf("--profile %s logs surface: %w", profileName, err)
-		}
-		opts.LogStore = ls
-		opts.LogStoreLabel = p.Logs.Type
-	}
-	if opts.ArtifactStore == nil && p.Cache != nil {
-		as, err := storeurl.OpenArtifactStoreFromSpec(ctx, *p.Cache, nil)
-		if err != nil {
-			return fmt.Errorf("--profile %s cache surface: %w", profileName, err)
-		}
-		opts.ArtifactStore = as
-		opts.ArtifactStoreLabel = p.Cache.Type
-	}
-	return nil
 }
 
 func stopSupervisor(pid int, pidPath string) error {

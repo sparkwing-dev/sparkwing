@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -22,118 +20,37 @@ func OpenReadBackendForProfile(ctx context.Context, paths Paths, p *profile.Prof
 	return backend.FromSpecs(ctx, state, logs, cache, paths, profileControllerLookup(p))
 }
 
-func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile) error {
-	return applyProfileBackends(ctx, opts, p, false)
-}
-
 // safety: keepState is set by a run whose state already reaches this
-// machine's store through the admission daemon. Resolving the state surface
-// again would open the file the daemon owns, which is the whole point of
-// that run not owning it.
-func applyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile, keepState bool) error {
-	if opts.LocalOnly {
-		opts.LogStore = nil
-		opts.ArtifactStore = nil
-		if keepState {
-			return nil
-		}
-		opts.State = nil
+// machine's store through the admission daemon, or that holds the standalone
+// store the fallback chose. Opening the state again would take a file that
+// run does not own.
+func resolveLocalBackends(opts *Options, paths Paths, keepState bool) error {
+	if opts.State == nil && !keepState {
 		if opts.DefaultStateDB == "" {
-			return fmt.Errorf("--sw-local-only: no default state database path resolved")
+			return fmt.Errorf("state backend: no state database path resolved")
 		}
-		spec := backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
-		st, err := openStateStoreFromSpec(ctx, spec, nil)
+		st, err := storeOpen(opts.DefaultStateDB)
 		if err != nil {
-			return fmt.Errorf("--sw-local-only: open sqlite state: %w", err)
-		}
-		opts.State = st
-		return nil
-	}
-
-	state, logs, cache := effectiveSurfaceSpecs(p, opts, opts.DefaultStateDB)
-
-	lookup := profileControllerLookup(p)
-	if opts.ProfileLookup != nil {
-		lookup = opts.ProfileLookup
-	}
-
-	if opts.ArtifactStore == nil && cache != nil {
-		store, err := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup)
-		if err != nil {
-			return fmt.Errorf("cache backend: %w", err)
-		}
-		opts.ArtifactStore = store
-	}
-	if opts.LogStore == nil && logs != nil {
-		_, remoteState := opts.State.(*client.Client)
-		remoteState = remoteState || (opts.State == nil && !keepState)
-		store, err := openLogStoreFromSpec(ctx, *logs, remoteState, state, lookup)
-		if err != nil {
-			return fmt.Errorf("logs backend: %w", err)
-		}
-		opts.LogStore = store
-	}
-	if opts.State == nil && state != nil && !keepState {
-		st, err := openStateStoreFromSpec(ctx, *state, lookup)
-		if err != nil {
-			return fmt.Errorf("state backend: %w", err)
+			return fmt.Errorf("state backend: open %s: %w", opts.DefaultStateDB, err)
 		}
 		opts.State = st
 	}
-	return nil
-}
-
-// hack: indirections so a test can count every store a run opens, whichever
-// path opened it.
-var (
-	openStateStoreFromSpec = storeurl.OpenStateStoreFromSpec
-	storeOpen              = store.Open
-)
-
-func applyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths, keepState bool) error {
-	hadState := opts.State != nil
-	if err := applyProfileBackends(ctx, opts, p, keepState); err != nil {
-		return err
+	if opts.State == nil {
+		return fmt.Errorf("state backend: no store resolved")
 	}
-	localCache := opts.LocalOnly
-	if !localCache && opts.ArtifactStore == nil {
-		localCache = isLocalState(p.Surfaces().State)
-	}
-	if opts.ArtifactStore == nil && localCache {
+	if opts.ArtifactStore == nil {
 		art, err := localArtifactStore(paths)
 		if err != nil {
 			return fmt.Errorf("local artifact cache: %w", err)
 		}
 		opts.ArtifactStore = art
 	}
-	if opts.LocalOnly || hadState || opts.State == nil {
-		return nil
-	}
-	if p == nil || !p.EffectiveMirrorLocal() {
-		return nil
-	}
-	state, _, _ := profileSurfaceSpecs(p, opts.DefaultStateDB)
-	if isLocalState(state) {
-		return nil
-	}
-	local, err := storeOpen(paths.StateDB())
-	if err != nil {
-		return fmt.Errorf("mirror: open local state %s: %w", paths.StateDB(), err)
-	}
-	opts.MirrorLocal = local
 	return nil
 }
 
-func isLocalState(spec *backends.Spec) bool {
-	return spec == nil || spec.Type == backends.TypeSQLite
-}
-
-func effectiveSurfaceSpecs(p *profile.Profile, _ *Options, stateDBPath string) (state, logs, cache *backends.Spec) {
-	if p != nil {
-		return profileSurfaceSpecs(p, stateDBPath)
-	}
-	return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
-}
+// hack: an indirection so a test can count every store a run opens, whichever
+// path opened it.
+var storeOpen = store.Open
 
 func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, cache *backends.Spec) {
 	surf := p.Surfaces()
@@ -155,25 +72,6 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 		state = &filled
 	}
 	return state, surf.Logs, surf.Cache
-}
-
-// safety: a controller logs surface keeps the node logs of the runs that controller holds; a run whose state
-// stays elsewhere has no node rows there to grant segments against, so it is refused rather than lost.
-func openLogStoreFromSpec(ctx context.Context, spec backends.Spec, remoteState bool, state *backends.Spec, lookup storeurl.ProfileLookup) (storage.LogStore, error) {
-	if spec.Type != backends.TypeController {
-		return storeurl.OpenLogStoreFromSpec(ctx, spec, lookup)
-	}
-	if !remoteState || state == nil || state.Type != backends.TypeController || state.Controller != spec.Controller {
-		return nil, fmt.Errorf("logs backend type=controller keeps the logs of runs whose state lives on controller %q; set the state surface to that controller too", spec.Controller)
-	}
-	if lookup == nil {
-		return nil, errors.New("logs backend type=controller needs a profile lookup; caller did not provide one")
-	}
-	url, token, err := lookup(spec.Controller)
-	if err != nil {
-		return nil, fmt.Errorf("logs backend profile %q: %w", spec.Controller, err)
-	}
-	return controllerSegmentLogs(ctx, client.NewWithToken(url, nil, token), nil)
 }
 
 func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {

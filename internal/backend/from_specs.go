@@ -4,10 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
-	"path/filepath"
-	"runtime"
-	"strings"
 
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -43,7 +39,7 @@ func FromSpecs(
 	}
 
 	switch stateSpec.Type {
-	case backends.TypeSQLite, backends.TypePostgres:
+	case backends.TypeSQLite:
 		ss, err := storeurl.OpenStateStoreFromSpec(ctx, *stateSpec, profileLookup)
 		if err != nil {
 			return nil, nopCloser{}, fmt.Errorf("state backend: %w", err)
@@ -53,17 +49,8 @@ func FromSpecs(
 			return nil, nopCloser{}, fmt.Errorf("state backend type=%s did not return *store.Store", stateSpec.Type)
 		}
 		b := NewStoreBackend(st, paths, logStore)
-		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, false))
+		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec))
 		return b, &multiCloser{closers: append([]io.Closer{st}, logCloser...)}, nil
-
-	case backends.TypeS3:
-		art, err := storeurl.OpenArtifactStoreFromSpec(ctx, *stateSpec, profileLookup)
-		if err != nil {
-			return nil, nopCloser{}, fmt.Errorf("artifact backend: %w", err)
-		}
-		b := NewS3Backend(art, logStore)
-		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, true))
-		return b, &multiCloser{closers: logCloser}, nil
 
 	case backends.TypeController:
 		ss, err := storeurl.OpenStateStoreFromSpec(ctx, *stateSpec, profileLookup)
@@ -80,7 +67,7 @@ func FromSpecs(
 			logStore = c.NodeLogs()
 		}
 		b := NewClientBackend(c, logStore)
-		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, false))
+		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec))
 		return b, &multiCloser{closers: append([]io.Closer{c}, logCloser...)}, nil
 
 	default:
@@ -88,14 +75,9 @@ func FromSpecs(
 	}
 }
 
-func capabilitiesFor(state, logs, artifacts *backends.Spec, readOnly bool) Capabilities {
+func capabilitiesFor(state, logs, artifacts *backends.Spec) Capabilities {
 	mode := "local"
-	switch state.Type {
-	case backends.TypePostgres:
-		mode = "shared-db"
-	case backends.TypeS3:
-		mode = "s3-only"
-	case backends.TypeController:
+	if state.Type == backends.TypeController {
 		mode = "cluster"
 	}
 	tag := func(spec *backends.Spec, def string) string {
@@ -104,69 +86,14 @@ func capabilitiesFor(state, logs, artifacts *backends.Spec, readOnly bool) Capab
 		}
 		return spec.Type
 	}
-	c := Capabilities{
+	return Capabilities{
 		Mode: mode,
 		Storage: CapabilitiesStorage{
 			Runs:      state.Type,
 			Logs:      tag(logs, ""),
 			Artifacts: tag(artifacts, ""),
 		},
-		Features: []string{"pipelines", "runs", "logs"},
-		ReadOnly: readOnly,
-	}
-	switch state.Type {
-	case backends.TypeSQLite, backends.TypePostgres, backends.TypeController:
-		c.Features = append(c.Features, "secrets", "approvals", "cross-pipeline-refs")
-	}
-	return c
-}
-
-func ParseInlineSpec(s string) (*backends.Spec, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	if s == "stdout:" || s == "stdout://" {
-		return &backends.Spec{Type: backends.TypeStdout}, nil
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return nil, fmt.Errorf("parse spec %q: %w", s, err)
-	}
-	switch strings.ToLower(u.Scheme) {
-	case "sqlite":
-		path := u.Path
-		if u.Host != "" {
-			path = "/" + u.Host + u.Path
-		}
-		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") && filepath.IsAbs(strings.TrimPrefix(path, "/")) {
-			path = strings.TrimPrefix(path, "/")
-		}
-		return &backends.Spec{Type: backends.TypeSQLite, Path: path}, nil
-	case "postgres", "postgresql":
-		return &backends.Spec{Type: backends.TypePostgres, URL: s}, nil
-	case "s3":
-		prefix := strings.TrimPrefix(u.Path, "/")
-		return &backends.Spec{Type: backends.TypeS3, Bucket: u.Host, Prefix: prefix}, nil
-	case "controller":
-		profile := u.Host
-		if profile == "" {
-			profile = strings.TrimPrefix(u.Path, "/")
-		}
-		if profile == "" {
-			return nil, fmt.Errorf("controller spec %q is missing a profile name", s)
-		}
-		return &backends.Spec{Type: backends.TypeController, Controller: profile}, nil
-	case "fs", "file", "filesystem":
-		path := u.Path
-		if u.Host != "" {
-			path = "/" + u.Host + u.Path
-		}
-		return &backends.Spec{Type: backends.TypeFilesystem, Path: path}, nil
-	case "stdout":
-		return &backends.Spec{Type: backends.TypeStdout}, nil
-	default:
-		return nil, fmt.Errorf("unknown spec scheme %q (expected sqlite, postgres, s3, controller, fs, stdout)", u.Scheme)
+		Features: []string{"pipelines", "runs", "logs", "secrets", "approvals", "cross-pipeline-refs"},
 	}
 }
 

@@ -111,7 +111,7 @@ func collectStructDecl(out map[string]goStruct, prefix string, gen *ast.GenDecl)
 
 // safety: a request body declared as an unnamed struct inside its handler has
 // no type name to cite, so it is addressed as <receiver>.<func>.<var> instead;
-// Loopback mirrors the Server handler names, so the receiver has to be there.
+// handler names are unique only per receiver, so the receiver is part of it.
 func collectLocalStructs(out map[string]goStruct, fn *ast.FuncDecl) {
 	if fn.Body == nil {
 		return
