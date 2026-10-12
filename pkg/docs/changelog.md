@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
 - **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).

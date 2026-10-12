@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -21,6 +22,12 @@ import (
 )
 
 func Main() {
+	// safety: ahead of the other verbs' startup, which claims an inherited
+	// descriptor and SPARKWING_* variables that the protocol leaves to the host.
+	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+		bindProjectPipelines()
+		os.Exit(sdkserve.Main(sdkserve.Config{SDKVersion: sparkwingModuleVersion(), PlanDoc: planDocument}))
+	}
 	secrets.ShareRegisteredFromEnv()
 	if err := takeAgentToken(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
