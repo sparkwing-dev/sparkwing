@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -32,11 +33,34 @@ func TestAcceptPlan_SecretPreflightNamesEveryUnreadableSecret(t *testing.T) {
 	plan := f.claim(t, store.PlanNodeID, store.ClaimTokenPlan)
 	_, err := f.accept(plan, preflightPlan(`{"name":"OWN"},{"name":"SHARED","required":true},{"name":"ABSENT"},`+
 		`{"name":"TEAM_ONLY"},{"name":"ELSEWHERE"},{"name":"MAYBE","optional":true}`))
-	if !errors.Is(err, store.ErrPlanInvalid) {
-		t.Fatalf("accept = %v, want a refusal wrapping ErrPlanInvalid", err)
+	var refused *store.SecretPreflightError
+	if !errors.As(err, &refused) || !errors.Is(err, store.ErrPlanInvalid) {
+		t.Fatalf("accept = %v, want a SecretPreflightError wrapping ErrPlanInvalid", err)
 	}
-	t.Logf("refusal:\n%s", err)
-	msg := err.Error()
+	answered := err.Error()
+	if want := `pipeline "demo" did not start: this run cannot read 3 required secrets it declares: ABSENT, TEAM_ONLY, ELSEWHERE. ` +
+		`A team member sees which scope each is missing from, and the command that sets it, with: ` +
+		`sparkwing runs status --run run-preflight --profile <profile>`; answered != want {
+		t.Fatalf("planner's refusal =\n%s\nwant\n%s", answered, want)
+	}
+	events, err := f.s.ListEventsAfter(t.Context(), f.run, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msg string
+	for _, ev := range events {
+		if ev.Kind == store.EventKindSecretPreflightRefused {
+			var payload struct{ Message string }
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			msg = payload.Message
+		}
+	}
+	if msg != refused.Detail() {
+		t.Fatalf("recorded detail = %q, want the refusal's detail", msg)
+	}
+	t.Logf("team detail:\n%s", msg)
 	for _, want := range []string{
 		`pipeline "demo" did not start: it declares 3 required secrets this run cannot read.`,
 		`- ABSENT is not set: pipeline "demo" has no copy and the team has no shared one.`,
@@ -48,7 +72,7 @@ func TestAcceptPlan_SecretPreflightNamesEveryUnreadableSecret(t *testing.T) {
 		"`sw:\"NAME,optional\"`",
 	} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("refusal lacks %q:\n%s", want, msg)
+			t.Errorf("detail lacks %q:\n%s", want, msg)
 		}
 	}
 	for _, readable := range []string{"- OWN", "- SHARED", "- MAYBE"} {
@@ -59,7 +83,7 @@ func TestAcceptPlan_SecretPreflightNamesEveryUnreadableSecret(t *testing.T) {
 	if _, err := f.s.GetNode(t.Context(), f.run, "a"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("node of the refused plan: err = %v, want not found", err)
 	}
-	if _, err := f.report(plan, store.AttemptReport{Outcome: "failed", Error: msg}); err != nil {
+	if _, err := f.report(plan, store.AttemptReport{Outcome: "failed", Error: answered}); err != nil {
 		t.Fatalf("report the refusal: %v", err)
 	}
 	f.wantRun(t, "failed")

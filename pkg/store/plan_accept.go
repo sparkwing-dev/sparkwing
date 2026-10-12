@@ -204,6 +204,14 @@ func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body [
 		return false, err
 	}
 	if err := secretPreflightTx(ctx, tx, tok.Team, tok.RunID, required); err != nil {
+		if refused := (*SecretPreflightError)(nil); errors.As(err, &refused) {
+			if rerr := tx.Rollback(); rerr != nil {
+				return false, rerr
+			}
+			if rerr := s.recordSecretPreflight(ctx, tok.Team, refused); rerr != nil {
+				return false, rerr
+			}
+		}
 		return false, err
 	}
 	table, err := creditRateTableTx(ctx, tx)

@@ -2,16 +2,24 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-// safety: names every required secret the run cannot read at once, with the
-// command that fixes each, and wraps [ErrPlanInvalid], so the plan is refused
-// before any of its nodes exists.
-type secretPreflightError struct {
+// EventKindSecretPreflightRefused records the plan a run's required secrets
+// refused, with which scope each is missing from and the command that sets
+// it. It is read through the run's events, which only the team reads.
+const EventKindSecretPreflightRefused = "secret_preflight_refused"
+
+// SecretPreflightError refuses a plan that declares a required secret its run
+// cannot read. Its text names only those declared secrets and where a team
+// member finds why, because it is answered to the planning claim; the reason
+// and owners of each are in [SecretPreflightError.Detail].
+type SecretPreflightError struct {
+	RunID    string
 	Pipeline string
-	Problems []secretProblem
+	problems []secretProblem
 }
 
 type secretProblem struct {
@@ -24,16 +32,26 @@ type secretProblem struct {
 	OtherPipelines []string
 }
 
-func (e *secretPreflightError) Unwrap() error { return ErrPlanInvalid }
+func (e *SecretPreflightError) Unwrap() error { return ErrPlanInvalid }
 
-func (e *secretPreflightError) Error() string {
-	var b strings.Builder
-	noun := "secret"
-	if len(e.Problems) > 1 {
-		noun = "secrets"
+func (e *SecretPreflightError) Error() string {
+	names := make([]string, len(e.problems))
+	for i, p := range e.problems {
+		names[i] = p.Name
 	}
-	fmt.Fprintf(&b, "pipeline %q did not start: it declares %d required %s this run cannot read.", e.Pipeline, len(e.Problems), noun)
-	for _, p := range e.Problems {
+	return fmt.Sprintf("pipeline %q did not start: this run cannot read %d required %s it declares: %s. "+
+		"A team member sees which scope each is missing from, and the command that sets it, with: "+
+		"sparkwing runs status --run %s --profile <profile>",
+		e.Pipeline, len(names), plural(len(names), "secret", "secrets"), strings.Join(names, ", "), e.RunID)
+}
+
+// Detail is the refusal for the team: each secret, which scope it is missing
+// from, and the command that fixes it.
+func (e *SecretPreflightError) Detail() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "pipeline %q did not start: it declares %d required %s this run cannot read.",
+		e.Pipeline, len(e.problems), plural(len(e.problems), "secret", "secrets"))
+	for _, p := range e.problems {
 		set := fmt.Sprintf("sparkwing secrets set --name %s --file <path> --profile <profile>", p.Name)
 		switch {
 		case p.Unshared:
@@ -49,6 +67,29 @@ func (e *secretPreflightError) Error() string {
 	}
 	b.WriteString("\nIf the run can do without a secret, declare it optional: tag its field in Secrets() `sw:\"NAME,optional\"`.")
 	return b.String()
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// safety: the planning claim's transaction is rolled back before this, so the
+// detail lands even though the plan does not, and only once per run however
+// often the claim resubmits.
+func (s *Store) recordSecretPreflight(ctx context.Context, team Team, refused *SecretPreflightError) error {
+	t, err := s.ForTeam(ctx, team)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"message": refused.Detail()})
+	if err != nil {
+		return err
+	}
+	_, err = t.AppendEventOnce(ctx, refused.RunID, PlanNodeID, EventKindSecretPreflightRefused, payload)
+	return err
 }
 
 func quoteList(names []string) string {
@@ -103,16 +144,16 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, runID string
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	refused := &secretPreflightError{Pipeline: pipeline}
+	refused := &SecretPreflightError{RunID: runID, Pipeline: pipeline}
 	for _, name := range required {
 		if readable[name] {
 			continue
 		}
-		refused.Problems = append(refused.Problems, secretProblem{
+		refused.problems = append(refused.problems, secretProblem{
 			Name: name, Unshared: unshared[name], OtherPipelines: others[name],
 		})
 	}
-	if len(refused.Problems) == 0 {
+	if len(refused.problems) == 0 {
 		return nil
 	}
 	return refused

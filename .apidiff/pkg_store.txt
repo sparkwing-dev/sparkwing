@@ -895,6 +895,7 @@ const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
 const EventKindCreditsUnpriced = "credits_unpriced_class"
 const EventKindMetricsStopped = "metrics_stopped"
+const EventKindSecretPreflightRefused = "secret_preflight_refused"
 type EventLimits struct {
 	MaxBytesPerEvent int64
 	MaxBytesPerRun   int64
@@ -1884,6 +1885,13 @@ type Secret struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+type SecretPreflightError struct {
+	RunID    string
+	Pipeline string
+}
+func (e *SecretPreflightError) Detail() string
+func (e *SecretPreflightError) Error() string
+func (e *SecretPreflightError) Unwrap() error
 type SecretResealCounts struct {
 	Resealed int
 
@@ -3114,8 +3122,6 @@ func WithoutCreditMetering(ctx context.Context) context.Context
 func WriteOutputFileDurably(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
-func (e *secretPreflightError) Error() string
-func (e *secretPreflightError) Unwrap() error
 func (e secretUndeclaredError) Error() string
 func (e secretUndeclaredError) Is(target error) bool
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

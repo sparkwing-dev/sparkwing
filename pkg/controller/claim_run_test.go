@@ -171,31 +171,77 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	}
 }
 
-// A plan whose required secret the run cannot read is refused with 422 and
-// the message naming it, so the planning pod's report fails the run before any
-// node is created.
+// A plan whose required secrets the run cannot read is refused with 422. The
+// planning claim learns only which declared names the run cannot read, never
+// whether a row exists elsewhere or which pipeline owns it; that detail, with
+// the fix for each, goes to the run's events, which only the team reads.
 func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	plan := "Bearer " + f.launchedRun(olga, "run-missing", "acme", "widgets")
+	tn, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sec := range []store.Secret{{Name: "TEAM_ONLY", Value: "v"}, {Name: "ELSEWHERE", Value: "v", Pipeline: "release"}} {
+		sec.Masked = true
+		if err := tn.CreateOrReplaceSecret(sealedSecret(t, store.Team(olga.team), sec), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	doc := map[string]any{
-		"nodes":   []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}},
-		"secrets": []map[string]any{{"name": "DEPLOY_TOKEN", "required": true}, {"name": "SLACK_HOOK", "optional": true}},
+		"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}},
+		"secrets": []map[string]any{
+			{"name": "DEPLOY_TOKEN", "required": true},
+			{"name": "TEAM_ONLY"},
+			{"name": "ELSEWHERE"},
+			{"name": "SLACK_HOOK", "optional": true},
+		},
 	}
 	var refused map[string]any
 	if code := f.call("POST", "/api/v1/runs/run-missing/plan", plan, doc, &refused); code != http.StatusUnprocessableEntity {
 		t.Fatalf("accept plan = %d %v, want 422", code, refused)
 	}
-	msg := fmt.Sprint(refused["error"])
-	if !strings.Contains(msg, `pipeline "build" did not start: it declares 1 required secret this run cannot read.`) ||
-		!strings.Contains(msg, "sparkwing secrets set --name DEPLOY_TOKEN --file <path> --profile <profile> --pipeline build") ||
-		strings.Contains(msg, "SLACK_HOOK") {
-		t.Fatalf("refusal = %q, want DEPLOY_TOKEN named with its fix and the optional SLACK_HOOK left out", msg)
+	want := `pipeline "build" did not start: this run cannot read 3 required secrets it declares: DEPLOY_TOKEN, TEAM_ONLY, ELSEWHERE. ` +
+		`A team member sees which scope each is missing from, and the command that sets it, with: ` +
+		`sparkwing runs status --run run-missing --profile <profile>`
+	if got := fmt.Sprint(refused["error"]); got != want {
+		t.Fatalf("the planner's refusal =\n%s\nwant\n%s", got, want)
 	}
-	tn, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
+	for _, leak := range []string{"team-wide", "shared", "release", "only for", "not set", "admin"} {
+		if strings.Contains(fmt.Sprint(refused), leak) {
+			t.Fatalf("the planner's refusal tells it %q: %v", leak, refused)
+		}
+	}
+	if code := f.call("GET", "/api/v1/runs/run-missing/events", plan, nil, nil); code == http.StatusOK {
+		t.Fatal("the planning claim read the run's events")
+	}
+	var events []store.Event
+	if code := f.call("GET", "/api/v1/runs/run-missing/events", olga.auth, nil, &events); code != http.StatusOK {
+		t.Fatalf("a team member's events read = %d", code)
+	}
+	var detail string
+	for _, ev := range events {
+		if ev.Kind == store.EventKindSecretPreflightRefused {
+			var payload struct{ Message string }
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			detail = payload.Message
+		}
+	}
+	for _, line := range []string{
+		"- TEAM_ONLY is set team-wide but not shared with runs",
+		`- ELSEWHERE is set only for pipeline "release"`,
+		"sparkwing secrets set --name DEPLOY_TOKEN --file <path> --profile <profile> --pipeline build",
+	} {
+		if !strings.Contains(detail, line) {
+			t.Fatalf("the team's detail lacks %q:\n%s", line, detail)
+		}
+	}
+	if strings.Contains(detail, "SLACK_HOOK") {
+		t.Fatalf("the detail names the optional SLACK_HOOK:\n%s", detail)
 	}
 	if _, err := tn.GetNode(context.Background(), "run-missing", store.PlanNodeID); err != nil {
 		t.Fatalf("the run's own planning node: %v", err)

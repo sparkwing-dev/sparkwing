@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **store:** `SecretPreflightError` refuses a plan whose required secrets the run cannot read, and `EventKindSecretPreflightRefused` names the run event that holds its `Detail`
+
 - **controller:** `sparkwing-controller migrate-logs --root DIR [--archive-store URL] [--cache-blob-store URL] [--credentials-dir DIR] [--default-team T] [--dry-run]` converts a `sparkwing-logs` service's stored node logs into segments the controller reads
   It reads the service's volume and archive directly, so the service need not run, records each converted log in the controller's state database so it is pruned and deleted with its run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. A run it cannot convert whole, such as one the state database does not hold, is named and left unconverted. Run it with the controller stopped: it opens and upgrades the state database, which a dry run leaves unopened. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
@@ -40,7 +42,7 @@ unlock.
 
 ### Changed
 - **controller + cli:** A run whose required secrets are missing fails before its first node, naming every one with the command that sets it
-  A field of a pipeline's `Secrets()` struct is required unless its tag ends in `,optional`. On a controller, the plan is refused when a required secret is neither set for the run's pipeline nor shared team-wide, and the run fails with one message listing each such secret, which scope it is missing from, and the `sparkwing secrets set` command that fixes it; before, the run started and failed at the first node that read it. A laptop run checks the same declarations against the store it reads from (the local store, or the profile's) and reports every missing one at once instead of the first. A missing optional secret still lets the run start. A node that reads a secret its pipeline does not declare is refused as before, and the error now names the pipeline and the `sw:"NAME"` tag to add.
+  A field of a pipeline's `Secrets()` struct is required unless its tag ends in `,optional`. On a controller, the plan is refused when a required secret is neither set for the run's pipeline nor shared team-wide, and the run fails naming every such secret; before, the run started and failed at the first node that read it. Which scope each is missing from and the `sparkwing secrets set` command that fixes it are recorded as a `secret_preflight_refused` run event, which `sparkwing runs status` shows (`secret_preflight` in its JSON), and never sent to the planning claim. A laptop run checks the same declarations against the store it reads from (the local store, or the profile's) and reports every missing one at once instead of the first. A missing optional secret still lets the run start. A node that reads a secret its pipeline does not declare is refused as before, and the error now names the pipeline and the `sw:"NAME"` tag to add.
 
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
