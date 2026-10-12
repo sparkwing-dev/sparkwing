@@ -524,7 +524,7 @@ kept for S3 and Postgres state profiles.
 |---|---|
 | `sparkwing run build --profile shared` with an S3 or Postgres `state:` | `sparkwing pipeline trigger build --profile prod` to run on a controller, or `sparkwing run build` to run here |
 | `state: {type: s3, ...}` or `state: {type: postgres, ...}` in a profile | Delete the `state:` key, or replace the profile with a controller profile (`sparkwing cloud connect`). The config fails to load with `state.type: s3 is removed` (or `postgres`) and a pointer to this section. |
-| `url_source: env:VAR` on any surface | Delete it; it named the Postgres state DSN. The config fails to load with `<surface>.url_source is removed`. |
+| `url_source: env:VAR` on any surface | Delete it; it named the Postgres state DSN. The config fails to load with `field url_source not found`; a Postgres `state:` that carries it fails on that key before its type is checked. |
 | `mirror_local:` on a profile | Delete it. The config fails to load with `field mirror_local not found`. |
 | `cache: {binaries: {...}}` | Delete the `binaries:` block. The config fails to load with `field binaries not found`. Runs fetch prebuilt binaries from the git cache `SPARKWING_GITCACHE_URL` names. |
 | `sparkwing run X --sw-artifact-digest-backfill` | Delete the flag; it applied only to binaries fetched from a profile's cache. `run` refuses it as an unknown runner flag. |
@@ -559,7 +559,9 @@ kept for S3 and Postgres state profiles.
   drops `Loopback`, `LoopbackState`, `LoopbackConcurrency` and
   `NewLoopback`; a local run's node processes reach the full controller.
   `pkg/backends` drops `TypePostgres`, `Spec.Binaries` and
-  `Surfaces.BinaryCache` and adds `MigrationGuideURL`.
+  `Surfaces.BinaryCache` and `Spec.URLSource` and adds
+  `MigrationGuideURL`. `stdoutlogs.CheckSpec` drops its `urlSource`
+  parameter.
   `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only.
   `pkg/localws` drops `Options.NoLocalStore`. `pkg/pipelines` drops
   `KindProfileName` and `GuardContext.ProfileName`.

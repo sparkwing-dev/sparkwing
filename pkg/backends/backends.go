@@ -33,12 +33,6 @@ type Spec struct {
 	URL    string `yaml:"url,omitempty"`
 	Token  string `yaml:"token,omitempty"`
 
-	// URLSource named the environment variable holding a Postgres state
-	// DSN. Postgres state is removed; the key is still decoded so a
-	// profile carrying it fails validation with the migration pointer
-	// rather than a bare unknown-field error.
-	URLSource string `yaml:"url_source,omitempty"`
-
 	// TokenEnv names an env var the runtime reads to populate Token
 	// at use time. Set TokenEnv on checked-in config so the token
 	// itself stays out of git; leave Token empty when TokenEnv is
@@ -173,18 +167,12 @@ const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"
 // safety: a removed state type that loaded would leave the profile's runs
 // recording nowhere it names, so the config fails to load instead.
 func (s *Spec) refuseRemovedState(surface string) error {
-	var key string
-	switch {
-	case surface == "state" && (s.Type == TypeS3 || s.Type == "postgres"):
-		key = "state.type: " + s.Type
-	case s.URLSource != "":
-		key = surface + ".url_source"
-	default:
+	if surface != "state" || (s.Type != TypeS3 && s.Type != "postgres") {
 		return nil
 	}
-	return fmt.Errorf("%s is removed: S3 and Postgres state profiles are gone and sparkwing run records to this machine; "+
+	return fmt.Errorf("state.type: %s is removed: S3 and Postgres state profiles are gone and sparkwing run records to this machine; "+
 		"delete the profile's state key, or run on a controller with sparkwing pipeline trigger <pipeline> --profile <name> "+
-		"(see \"S3 and Postgres state profiles are removed\" in %s)", key, MigrationGuideURL)
+		"(see \"S3 and Postgres state profiles are removed\" in %s)", s.Type, MigrationGuideURL)
 }
 
 // safety: these are the logs surfaces that write one object per append,

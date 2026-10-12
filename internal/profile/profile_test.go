@@ -149,9 +149,8 @@ func TestDefaultPath_XDG(t *testing.T) {
 
 func TestLoad_RefusesARemovedStateProfile(t *testing.T) {
 	for name, body := range map[string]string{
-		"s3":         "profiles:\n  shared:\n    state: {type: s3, bucket: b, prefix: state}\n",
-		"postgres":   "profiles:\n  shared:\n    state: {type: postgres, url_source: env:SPARKWING_PG_URL}\n",
-		"url_source": "profiles:\n  shared:\n    logs: {type: s3, bucket: b, url_source: env:PG}\n",
+		"s3":       "profiles:\n  shared:\n    state: {type: s3, bucket: b, prefix: state}\n",
+		"postgres": "profiles:\n  shared:\n    state: {type: postgres, url: postgres://db/sparkwing}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
@@ -171,13 +170,19 @@ func TestLoad_RefusesARemovedStateProfile(t *testing.T) {
 	}
 }
 
-func TestLoad_RefusesMirrorLocal(t *testing.T) {
-	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	if err := os.WriteFile(path, []byte("profiles:\n  prod:\n    mirror_local: false\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "mirror_local") {
-		t.Fatalf("Load = %v, want mirror_local refused", err)
+func TestLoad_RefusesRemovedKeys(t *testing.T) {
+	for key, body := range map[string]string{
+		"mirror_local": "profiles:\n  prod:\n    mirror_local: false\n",
+		"url_source":   "profiles:\n  prod:\n    logs: {type: s3, bucket: b, url_source: env:PG}\n",
+		"binaries":     "profiles:\n  prod:\n    cache: {type: filesystem, path: /tmp/c, binaries: {type: s3, bucket: b}}\n",
+	} {
+		path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
+		}
 	}
 }
 

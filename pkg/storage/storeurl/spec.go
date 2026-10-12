@@ -75,7 +75,7 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 			logBatchOptions(spec)...,
 		), nil
 	case backends.TypeStdout:
-		if err := stdoutlogs.CheckSpec(spec.Bucket, spec.Prefix, spec.Path, spec.URL, spec.URLSource, spec.Token); err != nil {
+		if err := stdoutlogs.CheckSpec(spec.Bucket, spec.Prefix, spec.Path, spec.URL, spec.Token); err != nil {
 			return nil, err
 		}
 		return stdoutlogs.New(), nil

@@ -73,8 +73,6 @@ func TestValidateFields_RefusesTheRemovedStateTypes(t *testing.T) {
 	}{
 		{"state", backends.Spec{Type: backends.TypeS3, Bucket: "b"}, "state.type: s3"},
 		{"state", backends.Spec{Type: "postgres", URL: "postgres://db/sw"}, "state.type: postgres"},
-		{"state", backends.Spec{Type: "postgres", URLSource: "env:PG"}, "state.type: postgres"},
-		{"cache", backends.Spec{Type: backends.TypeS3, Bucket: "b", URLSource: "env:PG"}, "cache.url_source"},
 	}
 	for _, tc := range cases {
 		err := tc.spec.ValidateFields(tc.surface)

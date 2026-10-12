@@ -10,8 +10,6 @@ type Spec struct {
 	URL    string
 	Token  string
 
-	URLSource string
-
 	TokenEnv string
 
 	Controller string
