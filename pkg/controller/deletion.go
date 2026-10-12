@@ -374,7 +374,7 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
 	if objs := s.logObjects(); objs != nil {
-		classes, err := s.teamLogClasses(ctx, team)
+		classes, err := s.teamLogClasses(ctx, objs, team)
 		if err != nil {
 			return err
 		}
@@ -389,17 +389,15 @@ func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
 }
 
 // safety: an attempt keeps the class it was written under, so a class the operator has since retired still holds
-// logs; the team's records name it even when the configuration no longer does.
-func (s *Server) teamLogClasses(ctx context.Context, team store.Team) ([]string, error) {
+// logs; the store's own class directories name it even once the configuration and the team's records no longer do.
+func (s *Server) teamLogClasses(ctx context.Context, objs logObjectStore, team store.Team) ([]string, error) {
 	classes := s.logClasses()
-	starts, err := s.store.NodeLogClassPrefixes(ctx, team)
+	held, err := objs.classes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list the team's log classes: %w", err)
+		return nil, fmt.Errorf("list the log retention classes: %w", err)
 	}
-	for _, start := range starts {
-		rest, ok := strings.CutPrefix(start, "logs/")
-		class, _, cut := strings.Cut(rest, "/")
-		if _, valid := logseg.ClassDays(class); ok && cut && valid && !slices.Contains(classes, class) {
+	for _, class := range held {
+		if _, valid := logseg.ClassDays(class); valid && !slices.Contains(classes, class) {
 			classes = append(classes, class)
 		}
 	}

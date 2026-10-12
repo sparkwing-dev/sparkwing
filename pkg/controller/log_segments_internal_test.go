@@ -622,7 +622,8 @@ func TestARefusedLogChargeStaysRefusedOnRetry(t *testing.T) {
 }
 
 // A team's logs written under a retention class the controller no longer
-// configures still go when the team is deleted.
+// configures still go when the team is deleted, and at its recheck, after
+// the purge removed the records that named the class.
 func TestTeamDeletionReachesARetiredRetentionClass(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
@@ -640,6 +641,9 @@ func TestTeamDeletionReachesARetiredRetentionClass(t *testing.T) {
 		t.Fatalf("record = %+v, %v; want the r365 class", rec, err)
 	}
 	f.srv.WithLogRetention(nil)
+	if err := f.st.DeleteRunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.srv.purgeTeamLogs(ctx, store.DefaultTeam); err != nil {
 		t.Fatal(err)
 	}

@@ -41,11 +41,11 @@ type Log struct {
 
 	Broken int
 }
-func (l *Log) CheckPresent(ctx context.Context, objs Objects) error
 func (l *Log) Completeness(node NodeProgress, now time.Time) Completeness
 func (l *Log) LossLine() []byte
 func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]byte, error)
 func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
+func (l *Log) Verify(ctx context.Context, objs Objects) error
 const LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
 const LogSeqHeader = "X-Sparkwing-Log-Seq"
 const LogStreamHeader = "X-Sparkwing-Log-Stream"
