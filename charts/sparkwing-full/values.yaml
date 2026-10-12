@@ -167,7 +167,7 @@ controller:
   # from --credentials-dir: license, oidc-key, oidc-key.published,
   # github-client-secret, google-client-secret, github-app-key,
   # github-app-webhook-secret, cloudfront-key,
-  # billing-token, and the others below. Every key is mounted under its
+  # billing-token, credits-token, and the others below. Every key is mounted under its
   # own name; a key the controller does not know is ignored. The single
   # Secret values below land in the same directory under their fixed
   # names.

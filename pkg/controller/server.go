@@ -829,7 +829,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNode)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNodeOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputUpload)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputUpload)))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleLogSegments)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogSegments)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments", newClaimLogTailRoute(claimLogKinds, http.HandlerFunc(s.handleLogSegments)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogSegments)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest", newClaimLogTailRoute(claimLogKinds, http.HandlerFunc(s.handleLogManifest)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogManifest)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputCommit)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputCommit)))))
 	mux.Handle("POST /api/v1/runs/{id}/children", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleEnqueueChildRun)))
 	mux.Handle("GET /api/v1/runs/{id}/children/{childID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildRun)))
@@ -1060,16 +1061,16 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
-	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
-	mux.Handle("POST /api/v1/credits/reversals", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
-	mux.Handle("POST /api/v1/credits/freezes", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
-	mux.Handle("POST /api/v1/credits/checkouts/closed", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
-	mux.Handle("POST /api/v1/credits/cards", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
-	mux.Handle("POST /api/v1/credits/card-payments", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
-	mux.Handle("POST /api/v1/credits/warnings", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))
-	mux.Handle("POST /api/v1/credits/card-refunds", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
-	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
-	mux.Handle("GET /api/v1/credits/payments/{reference}", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
+	mux.Handle("POST /api/v1/credits/grants", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
+	mux.Handle("POST /api/v1/credits/reversals", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
+	mux.Handle("POST /api/v1/credits/freezes", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
+	mux.Handle("POST /api/v1/credits/checkouts/closed", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
+	mux.Handle("POST /api/v1/credits/cards", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
+	mux.Handle("POST /api/v1/credits/card-payments", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
+	mux.Handle("POST /api/v1/credits/warnings", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))
+	mux.Handle("POST /api/v1/credits/card-refunds", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
+	mux.Handle("GET /api/v1/credits/units", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
+	mux.Handle("GET /api/v1/credits/payments/{reference}", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
@@ -1077,8 +1078,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	mux.Handle("DELETE /api/v1/accounts/{account}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteAccount)))
 	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
-	mux.Handle("GET /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustShow)))
-	mux.Handle("POST /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustSet)))
 	mux.Handle("PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetRepoDispatch)))
 	mux.Handle("POST /api/v1/launcher/claim", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLaunchClaim)))
 	mux.Handle("POST /api/v1/launcher/sync", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLauncherSync)))
@@ -1092,8 +1091,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/operator/waitlist/approve", s.requireOperator(s.handleApproveWaitlist))
 	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
 	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
-	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))
-	mux.Handle("POST /api/v1/signups/waitlist/approve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleApproveWaitlist)))
 
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret), ScopeTeamAdmin))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListSecrets), ScopeTeamAdmin))
@@ -1462,106 +1459,130 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			s.sweepEgressUsage(ctx)
 			s.pruneOutputsWithoutStoragePass(ctx, time.Now())
-			concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
-				CacheCap: s.concurrencyCacheCap,
-			})
-			if err != nil {
-				s.logger.Error("concurrency maintenance failed", "err", err)
-			}
-			for _, h := range concurrency.StaleHolders {
-				s.logger.Warn("reaped stale concurrency holder",
-					"key", h.Key, "holder_id", h.HolderID,
-					"run_id", h.RunID, "node_id", h.NodeID)
-			}
-			for _, w := range concurrency.StaleWaiters {
-				s.logger.Warn("reaped stale concurrency waiter",
-					"key", w.Key, "run_id", w.RunID,
-					"node_id", w.NodeID, "policy", w.Policy,
-					"arrived_at", w.ArrivedAt.Format(time.RFC3339))
-			}
-			if concurrency.CacheExpired > 0 {
-				s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
-			}
-			if concurrency.CacheEvicted > 0 {
-				s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
-			}
-			if recoveries, err := store.Maintenance.RecoverExpiredNodeClaims(s.store, ctx); err != nil {
-				s.logger.Error("node agent-lost sweep failed", "err", err)
-			} else {
-				for _, recovery := range recoveries {
-					s.logger.Warn("terminated node as agent_lost",
-						"run_id", recovery.RunID, "node_id", recovery.NodeID,
-						"retry_run_id", recovery.RetryRunID,
-						"execution_started", recovery.Started,
-						"invocations", recovery.Invocations)
-				}
-			}
-			s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
-			s.sealAbandonedLogs(ctx, time.Now())
-			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
-				s.logger.Error("queue-timeout sweep failed", "err", err)
-			} else {
-				for _, p := range pairs {
-					s.logger.Warn("terminated node as unclaimable",
-						"run_id", p[0], "node_id", p[1])
-				}
-			}
-			reapCtx := ctx
-			if !s.Metering() {
-				reapCtx = store.WithoutCreditMetering(ctx)
-			}
-			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
-			if err != nil {
-				s.logger.Error("reap failed", "err", err)
-				continue
-			}
-			for _, id := range ids {
-				s.settleExpiredTriggerClaim(reapCtx, id)
-			}
-			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
-				5*store.DefaultLeaseDuration,
-				"reaped: trigger consumer finished without dispatching the pipeline"); err != nil {
-				s.logger.Error("stale pending sweep failed", "err", err)
-			} else {
-				for _, id := range ids {
-					s.logger.Warn("reaped stale pending run", "run_id", id)
-					s.reportGitHubRunState(ctx, id, "failed")
-				}
-			}
-
-			if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
-				runHeartbeatStaleAfter,
-				"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
-				s.logger.Error("stale running sweep failed", "err", err)
-			} else {
-				for _, id := range ids {
-					s.logger.Warn("reaped stale running run", "run_id", id)
-					s.reportGitHubRunState(ctx, id, "failed")
-				}
-			}
-
-			if ids, err := store.Maintenance.ReapQueueExpiredRuns(s.store, ctx,
-				s.queueTimeout, runHeartbeatStaleAfter,
-				"reaped: no runner claimed this run's trigger before the queue deadline"); err != nil {
-				s.logger.Error("queue-deadline sweep failed", "err", err)
-			} else {
-				for _, id := range ids {
-					s.logger.Warn("reaped run whose trigger outlived the queue deadline",
-						"run_id", id, "queue_timeout", s.queueTimeout)
-					s.reportGitHubRunState(ctx, id, "timed_out")
-				}
-			}
-
-			if pairs, err := store.Maintenance.ReapTimedOutApprovals(s.store, ctx); err != nil {
-				s.logger.Error("approval timeout sweep failed", "err", err)
-			} else {
-				for _, p := range pairs {
-					s.logger.Warn("reaped timed-out approval",
-						"run_id", p[0], "node_id", p[1])
-				}
-			}
-
+			s.reapLeased(ctx, interval)
 			s.sampleOperationalSeries(ctx)
+		}
+	}
+}
+
+// safety: a controller that dies mid-sweep keeps the others from sweeping for
+// at most this long. A live sweep can outlast it and overlap the next holder's,
+// which the sweeps' conditional writes and the per-run GitHub lock absorb.
+const reaperLeaseTTL = time.Minute
+
+// safety: controllers overlap on one store while a deploy rolls, so one at a
+// time sweeps: a stale run is reported to GitHub once and a waiting node is
+// judged from one view of the runners. A half-interval window keeps a long
+// sweep from handing the lease to the other process on the next tick.
+func (s *Server) reapLeased(ctx context.Context, interval time.Duration) bool {
+	ran, err := s.store.RunReaperLeased(ctx, s.measureHolder(), interval/2, reaperLeaseTTL,
+		func(ctx context.Context) error {
+			s.reap(ctx)
+			return nil
+		})
+	if err != nil {
+		s.logger.Error("maintenance sweep lease failed", "err", err)
+	}
+	return ran
+}
+
+func (s *Server) reap(ctx context.Context) {
+	concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
+		CacheCap: s.concurrencyCacheCap,
+	})
+	if err != nil {
+		s.logger.Error("concurrency maintenance failed", "err", err)
+	}
+	for _, h := range concurrency.StaleHolders {
+		s.logger.Warn("reaped stale concurrency holder",
+			"key", h.Key, "holder_id", h.HolderID,
+			"run_id", h.RunID, "node_id", h.NodeID)
+	}
+	for _, w := range concurrency.StaleWaiters {
+		s.logger.Warn("reaped stale concurrency waiter",
+			"key", w.Key, "run_id", w.RunID,
+			"node_id", w.NodeID, "policy", w.Policy,
+			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
+	}
+	if concurrency.CacheExpired > 0 {
+		s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
+	}
+	if concurrency.CacheEvicted > 0 {
+		s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
+	}
+	if recoveries, err := store.Maintenance.RecoverExpiredNodeClaims(s.store, ctx); err != nil {
+		s.logger.Error("node agent-lost sweep failed", "err", err)
+	} else {
+		for _, recovery := range recoveries {
+			s.logger.Warn("terminated node as agent_lost",
+				"run_id", recovery.RunID, "node_id", recovery.NodeID,
+				"retry_run_id", recovery.RetryRunID,
+				"execution_started", recovery.Started,
+				"invocations", recovery.Invocations)
+		}
+	}
+	s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
+	s.sealAbandonedLogs(ctx, time.Now())
+	if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
+		s.logger.Error("queue-timeout sweep failed", "err", err)
+	} else {
+		for _, p := range pairs {
+			s.logger.Warn("terminated node as unclaimable",
+				"run_id", p[0], "node_id", p[1])
+		}
+	}
+	reapCtx := ctx
+	if !s.Metering() {
+		reapCtx = store.WithoutCreditMetering(ctx)
+	}
+	ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
+	if err != nil {
+		s.logger.Error("reap failed", "err", err)
+		return
+	}
+	for _, id := range ids {
+		s.settleExpiredTriggerClaim(reapCtx, id)
+	}
+	if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
+		5*store.DefaultLeaseDuration,
+		"reaped: trigger consumer finished without dispatching the pipeline"); err != nil {
+		s.logger.Error("stale pending sweep failed", "err", err)
+	} else {
+		for _, id := range ids {
+			s.logger.Warn("reaped stale pending run", "run_id", id)
+			s.reportGitHubRunState(ctx, id, "failed")
+		}
+	}
+
+	if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
+		runHeartbeatStaleAfter,
+		"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
+		s.logger.Error("stale running sweep failed", "err", err)
+	} else {
+		for _, id := range ids {
+			s.logger.Warn("reaped stale running run", "run_id", id)
+			s.reportGitHubRunState(ctx, id, "failed")
+		}
+	}
+
+	if ids, err := store.Maintenance.ReapQueueExpiredRuns(s.store, ctx,
+		s.queueTimeout, runHeartbeatStaleAfter,
+		"reaped: no runner claimed this run's trigger before the queue deadline"); err != nil {
+		s.logger.Error("queue-deadline sweep failed", "err", err)
+	} else {
+		for _, id := range ids {
+			s.logger.Warn("reaped run whose trigger outlived the queue deadline",
+				"run_id", id, "queue_timeout", s.queueTimeout)
+			s.reportGitHubRunState(ctx, id, "timed_out")
+		}
+	}
+
+	if pairs, err := store.Maintenance.ReapTimedOutApprovals(s.store, ctx); err != nil {
+		s.logger.Error("approval timeout sweep failed", "err", err)
+	} else {
+		for _, p := range pairs {
+			s.logger.Warn("reaped timed-out approval",
+				"run_id", p[0], "node_id", p[1])
 		}
 	}
 }

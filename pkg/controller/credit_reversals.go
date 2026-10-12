@@ -139,97 +139,52 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 }
 
 type creditFreezeReq struct {
-	// safety: A payment identifies its team; naming a team directly is reserved for the operator.
-	PaymentID string `json:"payment_id,omitempty"`
-	Team      string `json:"team,omitempty"`
+	// safety: the payment names the team, so the checkout service holds only a
+	// team that paid through it.
+	PaymentID string `json:"payment_id"`
 	// safety: Each dispute owns one hold, so releasing it leaves other holds intact.
-	DisputeID string `json:"dispute_id,omitempty"`
+	DisputeID string `json:"dispute_id"`
 	Reason    string `json:"reason,omitempty"`
-	// safety: Only the operator may release all holds by omitting a dispute ID.
-	Release bool `json:"release,omitempty"`
 }
 
 type creditFreezeJSON struct {
 	Team     string   `json:"team"`
 	Frozen   bool     `json:"frozen"`
 	Disputes []string `json:"disputes"`
-	Released int64    `json:"released,omitempty"`
 }
 
-// safety: Any remaining dispute hold blocks the team's metered claims.
+// safety: Any remaining dispute hold blocks the team's metered claims. The
+// checkout service never releases a hold; the operator does, in the console.
 func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 	var req creditFreezeReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	req.PaymentID, req.Team = strings.TrimSpace(req.PaymentID), strings.TrimSpace(req.Team)
-	req.DisputeID = strings.TrimSpace(req.DisputeID)
-	// safety: the checkout service holds only a team that paid through it and
-	// never releases one; a named team and every release are the operator's.
-	if (req.Team != "" || req.Release) && !isAdmin(r) {
-		writeError(w, http.StatusForbidden, fmt.Errorf(
-			"naming a team or releasing a hold needs the %s scope", ScopeAdmin))
+	req.PaymentID, req.DisputeID = strings.TrimSpace(req.PaymentID), strings.TrimSpace(req.DisputeID)
+	if req.PaymentID == "" || req.DisputeID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("a hold names the payment_id and the dispute_id"))
 		return
 	}
-	if req.PaymentID != "" && req.Team != "" {
-		writeError(w, http.StatusBadRequest, errors.New("name the team by payment_id or by team, not both"))
+	team, err := s.store.PaymentTeam(r.Context(), req.PaymentID)
+	if errors.Is(err, store.ErrUnknownPayment) {
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
-	team := store.Team(req.Team)
-	if req.PaymentID != "" {
-		paid, err := s.store.PaymentTeam(r.Context(), req.PaymentID)
-		if errors.Is(err, store.ErrUnknownPayment) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		if err != nil {
-			s.writeInternalError(w, r, "freeze payment team", err)
-			return
-		}
-		team = paid
+	if err != nil {
+		s.writeInternalError(w, r, "freeze payment team", err)
+		return
 	}
-	now := time.Now()
-	out := creditFreezeJSON{}
-	if req.Release {
-		if team == "" && req.DisputeID == "" {
-			writeError(w, http.StatusBadRequest, errors.New("a release names a team, a dispute_id, or both"))
+	if _, err := s.store.HoldTeamForDispute(r.Context(), team, req.DisputeID, req.PaymentID, req.Reason, time.Now()); err != nil {
+		if s.writeDisputeConflict(w, r, err, req.DisputeID, req.PaymentID) {
 			return
 		}
-		if team == "" {
-			held, found, err := s.store.DisputeTeam(r.Context(), req.DisputeID)
-			if err != nil {
-				s.writeInternalError(w, r, "freeze dispute team", err)
-				return
-			}
-			if !found {
-				writeError(w, http.StatusNotFound, fmt.Errorf("no hold names dispute %q", req.DisputeID))
-				return
-			}
-			team = held
-		}
-		n, err := s.store.ReleaseCreditFreezes(r.Context(), team, req.DisputeID, now)
-		if err != nil {
-			s.writeInternalError(w, r, "release freeze", err)
+		if errors.Is(err, store.ErrUnknownTeam) {
+			writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", team))
 			return
 		}
-		out.Released = n
-	} else {
-		if team == "" || req.DisputeID == "" {
-			writeError(w, http.StatusBadRequest, errors.New("a hold names the team, by payment_id or team, and the dispute_id"))
-			return
-		}
-		if _, err := s.store.HoldTeamForDispute(r.Context(), team, req.DisputeID, req.PaymentID, req.Reason, now); err != nil {
-			if s.writeDisputeConflict(w, r, err, req.DisputeID, req.PaymentID) {
-				return
-			}
-			if errors.Is(err, store.ErrUnknownTeam) {
-				writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", team))
-				return
-			}
-			s.writeInternalError(w, r, "hold team", err)
-			return
-		}
+		s.writeInternalError(w, r, "hold team", err)
+		return
 	}
 	tenant, ok := s.namedTenant(w, r, string(team))
 	if !ok {
@@ -240,13 +195,12 @@ func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "read freeze", err)
 		return
 	}
-	out.Team, out.Frozen, out.Disputes = string(team), freeze.Frozen, freeze.Disputes
+	out := creditFreezeJSON{Team: string(team), Frozen: freeze.Frozen, Disputes: freeze.Disputes}
 	if out.Disputes == nil {
 		out.Disputes = []string{}
 	}
-	s.logger.Warn("team credit freeze changed", "team", out.Team, "release", req.Release,
-		"dispute_id", req.DisputeID, "payment_id", req.PaymentID, "frozen", out.Frozen,
-		"released", out.Released, "by", principalName(r))
+	s.logger.Warn("team credit freeze changed", "team", out.Team, "dispute_id", req.DisputeID,
+		"payment_id", req.PaymentID, "frozen", out.Frozen, "by", principalName(r))
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -265,10 +219,6 @@ var checkoutOutcomeEvents = map[string]string{
 // report closes nothing but an open, unpaid checkout the named team holds for
 // that session, so it cannot release another team's hold or unpay a payment.
 func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
-	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeCreditsGrant) {
-		writeError(w, http.StatusForbidden, fmt.Errorf("closing a checkout needs the %s scope itself", ScopeCreditsGrant))
-		return
-	}
 	var req checkoutClosedReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)

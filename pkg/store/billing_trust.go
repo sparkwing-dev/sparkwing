@@ -46,6 +46,11 @@ type BillingStanding struct {
 	TrustAt            time.Time
 	TrustReason        string
 	LimitOverrideCents int64
+	// The operator's daily spend cap, card-charge rung and Cloud node cap
+	// for a granted team; zero is the default.
+	DailyCapOverrideCents int64
+	RungOverrideCents     int64
+	RunnerCapOverride     int64
 
 	Trusted    bool
 	LimitMicro int64
@@ -134,8 +139,10 @@ func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	var b BillingStanding
 	var atNS int64
 	err := q.QueryRowContext(ctx, `SELECT billing_trust, billing_trust_by, billing_trust_at, billing_trust_reason,
-	    billing_purchase_limit_cents FROM teams WHERE name = ?`, string(team)).
-		Scan(&b.Trust, &b.TrustBy, &atNS, &b.TrustReason, &b.LimitOverrideCents)
+	    billing_purchase_limit_cents, billing_daily_cap_cents, billing_rung_cents, billing_runner_cap
+	    FROM teams WHERE name = ?`, string(team)).
+		Scan(&b.Trust, &b.TrustBy, &atNS, &b.TrustReason, &b.LimitOverrideCents,
+			&b.DailyCapOverrideCents, &b.RungOverrideCents, &b.RunnerCapOverride)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}

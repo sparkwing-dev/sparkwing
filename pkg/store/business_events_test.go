@@ -84,7 +84,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	if _, err := st.HoldTeamForDispute(ctx, team, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := st.ReleaseCreditFreezes(ctx, team, "", now); err != nil || n != 1 {
+	if n, err := st.ReleaseCreditFreezes(ctx, team, "dp_1", "", "", now); err != nil || n != 1 {
 		t.Fatalf("released = %d, %v", n, err)
 	}
 

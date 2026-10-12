@@ -12,6 +12,10 @@ import (
 
 var claimWorkKinds = []store.ClaimTokenKind{store.ClaimTokenWork}
 
+// safety: a runner's node claim ends when its node reports, before the runner seals the node's log, so the log
+// routes take it as a claim, whose tail ClaimLogTail allows, rather than as the runner it acts for.
+var claimLogKinds = []store.ClaimTokenKind{store.ClaimTokenWork, store.ClaimTokenNode}
+
 // safety: every claim that runs a node's code reads that node's secrets
 // through its own claim, under the plan's declaration and with an event.
 var claimSecretKinds = []store.ClaimTokenKind{store.ClaimTokenWork, store.ClaimTokenNode, store.ClaimTokenTrigger}
