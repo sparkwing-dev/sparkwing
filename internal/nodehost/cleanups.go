@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 // CleanupTimeout bounds each cleanup a node registered. It is one constant for
@@ -180,17 +182,21 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 	}
 	ctx, cancel := context.WithTimeout(ctx, CleanupTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path, c.argv[1:]...)
+	cmd := exec.Command(path, c.argv[1:]...)
 	cmd.Args[0] = name
 	cmd.Dir, cmd.Env = dir, env
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.WaitDelay = cleanupWaitDelay
-	err = cmd.Run()
+	err = runCleanupProcess(ctx, cmd)
 	var exit *exec.ExitError
 	switch {
-	case err == nil:
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		fmt.Fprintf(log, "cleanup %s failed: timed out\n", name)
+	case ctx.Err() != nil:
+		fmt.Fprintf(log, "cleanup %s failed: cancelled\n", name)
+	case err == nil || errors.Is(err, exec.ErrWaitDelay):
+	case errors.Is(err, procgroup.ErrCleanup):
+		fmt.Fprintf(log, "cleanup %s failed: the processes it started could not be stopped\n", name)
 	case errors.As(err, &exit):
 		fmt.Fprintf(log, "cleanup %s failed: %s\n", name, exit.ProcessState)
 	default:

@@ -22,7 +22,7 @@ unlock.
 
 ### Added
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
-- **engine:** `POST /node/v1/cleanups` registers an argv the host runs, newest first and with no shell, in the node's environment when the node's process exits, each bounded to 2 minutes; `DELETE /node/v1/cleanups/{id}` releases one. A node holds at most 16 cleanups of at most 64 arguments
+- **engine:** `POST /node/v1/cleanups` registers an argv the host runs, newest first and with no shell, in the node's environment when the node's process exits, each bounded to 2 minutes and ending every process it started; `DELETE /node/v1/cleanups/{id}` releases one. A node holds at most 16 cleanups of at most 64 arguments
 - **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
 - **controller + web:** The operator console sets a trusted team's daily cap, card rung and Cloud node cap, and releases a payment dispute's hold
