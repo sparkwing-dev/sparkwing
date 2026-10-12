@@ -127,7 +127,6 @@ is running and exits after five idle minutes; see
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
 | `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
-| `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
 | `--sw-no-update` | Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve |
 | `--sw-no-bincache` | Build a temporary pipeline binary with debug symbols instead of using the binary cache |
 | `--sw-hash-all-files` | Hash files Git ignores into the binary cache key, for a build that embeds them |

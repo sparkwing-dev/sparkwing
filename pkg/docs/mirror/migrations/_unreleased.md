@@ -606,8 +606,8 @@ kept for S3 and Postgres state profiles.
   `install/terraform/mode3-postgres` module now documents the controller's
   database alone.
 - **Output:** a run no longer writes `runs/<id>/state.ndjson` into this
-  machine's cache directory. `run_start` reports a `backends` block only
-  for `--sw-local-only`, and never a `profile` block.
+  machine's cache directory. `run_start` reports no `backends` or
+  `profile` block.
   `sparkwing configure profiles show -o json` drops `mirror_local`. The
   controller's health no longer reports `object_store.stalled`.
 - **Go packages:** `pkg/storage/s3state` is removed. `pkg/controller`

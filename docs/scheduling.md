@@ -176,8 +176,6 @@ pipelines:
 the project `defaults.requires`. The reserved label **`local`** is the
 compatibility spelling of `location=coordinator`: no runner can claim that
 node, because a runner cannot advertise either term for itself.
-`--sw-local-only` is different; it selects local secrets, state, cache, and
-log backends, not placement.
 
 ```yaml
 pipelines:
@@ -317,7 +315,6 @@ no claim step, so label matching against remote runners does not apply
 on -- while `WhenRunner` evaluates against the local runner, which
 advertises `local` unless the caller overrides its label set). Use
 `requires: [local]` keeps any runner from claiming a dispatched node.
-`--sw-local-only` selects local backends but does not add a placement rule.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` hands the run to a
 controller, which schedules each node onto a runner whose labels satisfy

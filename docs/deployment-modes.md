@@ -208,13 +208,12 @@ controller with Postgres and object storage when you outgrow a single box
 team's fleet coordinates through Sparkwing Cloud, or through a controller
 the team runs.
 
-## Forcing local mode for a single run
+## Local runs
 
-Every `sparkwing run` records to this machine. `sparkwing run <pipeline>
---sw-local-only` also keeps its node processes off a shared cache named by
-`SPARKWING_CACHE_URL`, pinning secrets, state, cache, and logs to the local
-secret store, SQLite, and filesystem layout. Git hooks run their pipelines
-this way.
+Every `sparkwing run` records to this machine: the local secret store,
+SQLite, and the run directories. Its node processes share artifacts
+through `SPARKWING_CACHE_URL` when it is set, and through `cache/` under
+the Sparkwing home otherwise.
 
 ## Selecting a profile
 

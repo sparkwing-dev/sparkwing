@@ -74,8 +74,6 @@ type Options struct {
 
 	NoCache bool
 
-	LocalOnly bool
-
 	DryRun bool
 
 	Debug DebugDirectives
@@ -721,7 +719,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
-	if opts.LocalOnly || opts.SecretSource == nil {
+	if opts.SecretSource == nil {
 		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
 		opts.localSecrets = true
 	}
@@ -1062,13 +1060,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
 	}
-	if opts.LocalOnly {
-		inv["backends"] = map[string]any{
-			"state": "sqlite",
-			"logs":  "filesystem",
-			"cache": "filesystem",
-		}
-	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv
 }
@@ -1104,9 +1095,6 @@ func buildRunFlags(opts Options) map[string]any {
 	}
 	if opts.DryRun {
 		flags["dry_run"] = true
-	}
-	if opts.LocalOnly {
-		flags["local_only"] = true
 	}
 	if opts.StartAt != "" {
 		flags["start_at"] = opts.StartAt
@@ -1171,9 +1159,6 @@ func buildReproducer(opts Options, _ string) string {
 			continue
 		}
 		flagName := "--" + strings.ReplaceAll(k, "_", "-")
-		if k == "local_only" {
-			flagName = "--sw-local-only"
-		}
 		if k == "priority" {
 			flagName = "--sw-priority"
 		}

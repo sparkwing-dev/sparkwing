@@ -76,7 +76,7 @@ type Pipeline struct {
 	// pipeline must satisfy in addition to their own Job.Requires().
 	// Wholesale replaces defaults.requires when non-empty. The
 	// reserved label "local" keeps fleet helpers from claiming the
-	// node; --sw-local-only instead selects local storage backends.
+	// node.
 	Requires []string `yaml:"requires,omitempty"`
 }
 

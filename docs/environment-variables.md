@@ -112,7 +112,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_DEBUG_PAUSE_BEFORE` | `sparkwing debug` sets it for the pipeline binary: pause before the named step. |
 | `SPARKWING_DEBUG_PAUSE_AFTER` | `sparkwing debug` sets it for the pipeline binary: pause after the named step. |
 | `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | `sparkwing debug` sets it for the pipeline binary: pause when a step fails. |
-| `SPARKWING_LOCAL_ONLY` | Carries `--sw-local-only` to the pipeline binary. |
 | `SPARKWING_LOG_LEVEL` | Carries `--sw-verbose` (`-v`) to the pipeline binary as `debug`. |
 | `SPARKWING_MASK_VALUES_FD` | The inherited pipe the pipeline binary writes registered secret values to, so the launcher masks them in the child's stdout and stderr. |
 | `SPARKWING_NO_CACHE` | Carries `--sw-no-cache` to the pipeline binary. |

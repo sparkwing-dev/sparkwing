@@ -101,6 +101,9 @@ unlock.
 - **cli (Breaking):** A profile's `logs` and `cache` surfaces, the log batching keys, the `stdout` logs type and `sparkwing serve --log-store` and `--artifact-store` are removed
   Nothing wrote what they read once S3 and Postgres state went. A profile naming `logs`, `cache`, `batch_interval`, `batch_bytes`, `max_log_objects` or `max_log_bytes` fails to load as an unknown field. Read verbs take node logs from this machine's run directories or the profile's controller, `configure profiles list` drops its `LOGS` column, and `configure profiles show -o json` drops `logs` and `cache`. In Go, `pkg/storage/logbatch`, `pkg/storage/stdoutlogs`, the S3 `LogStore`, `storeurl.OpenLogStore`, `OpenLogStoreFromSpec` and `OpenArtifactStoreFromSpec`, `storage.FlushNode` and `FlushLosses`, `backends.Surfaces.Cache` and `Logs`, `localws.Options.LogStore` and `ArtifactStore`, and `controller.Dashboard.Logs` are gone.
 
+- **cli (Breaking):** `sparkwing run --sw-local-only` and `SPARKWING_LOCAL_ONLY` are removed
+  Every `sparkwing run` already records to this machine, so the flag only kept node processes off `SPARKWING_CACHE_URL`; unset that variable instead. `--sw-local-only` is refused as an unknown runner flag, and a managed git hook installed before this release fails until `sparkwing pipeline hooks install` rewrites it.
+
 - **release (Breaking):** Releases no longer build, sign or publish `ghcr.io/sparkwing-dev/sparkwing-logs` or the `sparkwing-logs` binaries
   See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
