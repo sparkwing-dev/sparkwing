@@ -222,7 +222,7 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 	if err != nil {
 		return logseg.Completeness{}, true, err
 	}
-	if err := log.CheckPresent(ctx, l.objs); err != nil {
+	if err := log.Verify(ctx, l.objs); err != nil {
 		return logseg.Completeness{}, true, err
 	}
 	if log.Manifest == nil && node.Terminal && now.Sub(node.FinishedAt) >= logseg.SealGrace {

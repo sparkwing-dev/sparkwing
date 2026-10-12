@@ -112,25 +112,21 @@ func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]
 	return opts.Apply(out.Bytes())
 }
 
-// CheckPresent lists the attempt and sets Broken to the first segment
-// its manifest names that the store no longer holds, so a verdict taken
-// without reading every segment still sees one that went missing.
-func (l *Log) CheckPresent(ctx context.Context, objs Objects) error {
+// Verify reads every segment the manifest names and sets Broken to the
+// first one the store no longer holds or that fails its digest, so a
+// verdict taken without a read still sees a segment lost or replaced.
+func (l *Log) Verify(ctx context.Context, objs Objects) error {
 	if l.Manifest == nil || l.Broken != 0 {
 		return nil
 	}
-	keys, err := objs.List(ctx, l.Prefix)
-	if err != nil {
-		return err
-	}
-	held := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		held[k] = true
-	}
 	for _, seg := range l.Segments {
-		if !held[SegmentKey(l.Prefix, seg.N)] {
+		_, err := l.Segment(ctx, objs, seg)
+		if errors.Is(err, errBadSegment) || errors.Is(err, storage.ErrNotFound) {
 			l.Broken = seg.N
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil

@@ -539,42 +539,54 @@ func TestPruningATeamOverItsShareDeletesOnlyFinishedRunsSegments(t *testing.T) {
 	}
 }
 
-// A sealed log that lost a segment must not read, or report, as whole:
-// the reader gets the lines before the gap and a loss marker, and
-// completeness says incomplete.
+// A sealed log that lost a segment, or holds other bytes under its key,
+// must not read, or report, as whole: the reader gets the lines before
+// the gap and a loss marker, and completeness says incomplete.
 func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	for i := 1; i <= 4; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	objs := f.srv.logObjects()
-	if _, err := objs.deletePrefix(ctx, logseg.SegmentKey(rec.Prefix, 2)); err != nil {
-		t.Fatal(err)
-	}
-	logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: objs}
-	body, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), logLine(1)) || strings.Contains(string(body), logLine(4)) ||
-		!strings.Contains(string(body), "segment 2 is missing") {
-		t.Fatalf("read of a log missing segment 2 = %q, want line 1 then a loss marker", body)
-	}
-	c, found, err := logs.NodeLogCompleteness(ctx, "run-d", "a", logseg.NodeProgress{Started: true}, time.Now())
-	if err != nil || !found || c.State != logseg.StateIncomplete {
-		t.Fatalf("completeness of a log missing segment 2 = %+v, %v, %v; want incomplete", c, found, err)
+	for name, damage := range map[string]func(context.Context, fsLogObjects, string) error{
+		"deleted": func(ctx context.Context, objs fsLogObjects, key string) error {
+			_, err := objs.deletePrefix(ctx, key)
+			return err
+		},
+		"replaced": func(ctx context.Context, objs fsLogObjects, key string) error {
+			return objs.objs.Put(ctx, key, strings.NewReader("not the segment the manifest names"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newLogSegmentFixture(t)
+			ctx := t.Context()
+			tok := f.claim(t, "a", store.ClaimTokenWork)
+			s, _ := f.sink(t, tok, "a")
+			for i := 1; i <= 4; i++ {
+				if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.Close(ctx, logseg.End{}); err != nil {
+				t.Fatal(err)
+			}
+			rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			objs := f.srv.logObjects()
+			if err := damage(ctx, objs.(fsLogObjects), logseg.SegmentKey(rec.Prefix, 2)); err != nil {
+				t.Fatal(err)
+			}
+			logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: objs}
+			body, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), logLine(1)) || strings.Contains(string(body), logLine(4)) ||
+				!strings.Contains(string(body), "segment 2 is missing") {
+				t.Fatalf("read of a log with segment 2 %s = %q, want line 1 then a loss marker", name, body)
+			}
+			c, found, err := logs.NodeLogCompleteness(ctx, "run-d", "a", logseg.NodeProgress{Started: true}, time.Now())
+			if err != nil || !found || c.State != logseg.StateIncomplete {
+				t.Fatalf("completeness of a log with segment 2 %s = %+v, %v, %v; want incomplete", name, c, found, err)
+			}
+		})
 	}
 }
 
