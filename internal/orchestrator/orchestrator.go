@@ -2183,6 +2183,13 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 			}
 		}
 		if autoAttempt > 0 {
+			// safety: a done node is final on every path, as the store's own
+			// retry leaves a node pending through its backoff, so the reset
+			// comes before the wait rather than after it.
+			if err := resetNodeForAutoRetry(ctx, s.backends.State, s.runID, node.ID()); err != nil {
+				res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("reset node for auto-retry: %w", err)}
+				break
+			}
 			wait := scaledBackoff(autoBackoff, autoAttempt)
 			ordinal := autoConsumed + autoAttempt + 1
 			budget := retryCfg.Attempts + 1
@@ -2197,13 +2204,9 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
-					s.applyResult(node.ID(), runner.Result{Outcome: sparkwing.Cancelled})
+					s.markCancelled(ctx, node.ID(), "ctx-cancelled")
 					return
 				}
-			}
-			if err := resetNodeForAutoRetry(s.ctx, s.backends.State, s.runID, node.ID()); err != nil {
-				res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("reset node for auto-retry: %w", err)}
-				break
 			}
 		}
 
@@ -2211,7 +2214,9 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 		if retryCfg.Auto {
 			dispatchCtx = store.WithExecutionAttemptOrdinal(dispatchCtx, autoConsumed+autoAttempt+1)
 		}
+		dispatched := false
 		res = s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
+			dispatched = true
 			return activeRunner.RunNode(dispatchCtx, runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
@@ -2223,6 +2228,12 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 				ReacquireWorkerSlot: slot.reacquire,
 			})
 		})
+		// safety: the reset left the node pending, so a retry cancelled before
+		// its runner was called records the cancel itself or the node stays pending.
+		if autoAttempt > 0 && !dispatched {
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
+			return
+		}
 
 		if res.Outcome != sparkwing.Failed || res.Err == nil {
 			break
