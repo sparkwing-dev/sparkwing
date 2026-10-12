@@ -73,35 +73,22 @@ func DescribePipelineByName(name string) (sparkwing.DescribePipeline, bool, erro
 				dp.RisksBySteps = perStep
 			}
 		}
-		dp.Args = appendTransitiveArgs(dp.Args, plan)
+		dp.Args = appendJobArgs(dp.Args, plan)
 	}
 	return dp, true, nil
 }
 
-func appendTransitiveArgs(args []sparkwing.DescribeArg, plan *sparkwing.Plan) []sparkwing.DescribeArg {
-	surface := plan.TransitiveArgsSurface()
-	if len(surface) == 0 {
-		return args
-	}
+func appendJobArgs(args []sparkwing.DescribeArg, plan *sparkwing.Plan) []sparkwing.DescribeArg {
 	have := make(map[string]bool, len(args))
 	for _, a := range args {
 		have[a.Name] = true
 	}
-	jobsByFlag := make(map[string]string, len(surface))
-	schemasSeen := map[*sparkwing.Schema]string{}
-	for flag, t := range surface {
-		jobsByFlag[flag] = t.JobID
-		schemasSeen[t.Schema] = t.JobID
-	}
-	for s, jobID := range schemasSeen {
-		for _, da := range s.DescribeArgs() {
-			if have[da.Name] {
-				continue
-			}
-			da.JobID = jobID
-			args = append(args, da)
-			have[da.Name] = true
+	for _, da := range plan.JobArgs() {
+		if have[da.Name] {
+			continue
 		}
+		args = append(args, da)
+		have[da.Name] = true
 	}
 	return args
 }

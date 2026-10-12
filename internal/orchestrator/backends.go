@@ -54,7 +54,7 @@ type Backends struct {
 	APISocket string
 }
 
-// safety: profile:local guards and the Local/Remote predicates test this. A
+// safety: profile:local and profile:controller guards test this. A
 // run this machine dispatches is local whatever store holds its state; a run a
 // controller dispatched is not.
 func (b Backends) dispatchesLocally() bool {

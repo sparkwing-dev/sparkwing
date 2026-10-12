@@ -168,7 +168,6 @@ func RunNodeOnce(
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	// safety: no logger here on purpose. Every dispatching process re-plans,
 	// so a sink would repeat one authored line once per node.
-	ctx = sparkwingruntime.WithProfileResolution(ctx, nodeProfileResolution(cfg.coordinated))
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)
@@ -200,12 +199,6 @@ func RunNodeOnce(
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
-	}
-
-	// safety: propagate the dispatcher's resolved args or an external node
-	// silently falls back to schema defaults.
-	if ra := plan.ResolvedArgs(); ra != nil {
-		ctx = sparkwingruntime.WithResolvedArgs(ctx, ra)
 	}
 
 	if info := podRunnerInfo(); info != nil {
@@ -303,13 +296,6 @@ func RunNodeOnce(
 	}
 
 	r := NewNodeExecutor(backends)
-	// safety: this process is the only thing that can serve a SpawnNode
-	// call in the node it is about to run. The dispatcher's handler
-	// splices the child into a live plan object that exists only in the
-	// dispatcher's memory, and a pod has no dispatcher to ask at all.
-	ctx = sparkwingruntime.WithSpawnHandler(ctx, newNodeSpawnHandler(
-		r, backends, plan, runID, run.Pipeline, nodeID, delegate,
-		nodeProcessPipelineRequires(run.Pipeline, logger)))
 	req := runner.Request{
 		RunID:    runID,
 		NodeID:   nodeID,

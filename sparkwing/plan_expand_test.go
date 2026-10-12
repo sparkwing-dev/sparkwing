@@ -13,13 +13,13 @@ func TestInsertExpandedRejectsWholeBatch(t *testing.T) {
 			noop := func(context.Context) error { return nil }
 			source := Job(plan, "source", noop)
 			existing := Job(plan, "existing", noop)
-			fresh := NewDetachedNode("fresh", &jobFn{fn: noop})
+			fresh := newNode("test", "fresh", &jobFn{fn: noop})
 			var invalid *JobNode
 			switch failure {
 			case "existing id":
-				invalid = NewDetachedNode("existing", &jobFn{fn: noop})
+				invalid = newNode("test", "existing", &jobFn{fn: noop})
 			case "batch duplicate":
-				invalid = NewDetachedNode("fresh", &jobFn{fn: noop})
+				invalid = newNode("test", "fresh", &jobFn{fn: noop})
 			}
 			before := plan.Nodes()
 			if err := plan.insertExpanded(source, []*JobNode{fresh, invalid}); err == nil {

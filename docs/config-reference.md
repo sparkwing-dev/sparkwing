@@ -17,7 +17,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `args` | `map[string]string` | no | Args supplies per-arg default values for every pipeline. Each key is layered under pipeline.args (pipeline wins per-key), and the merged map sits in the priority chain between schema.Computed and the explicit operator CLI flag. |
+| `args` | `map[string]string` | no | Args supplies per-arg default values for every pipeline. Each key is layered under pipeline.args (pipeline wins per-key), and the merged map overrides a field's `default` tag while an explicit operator CLI flag overrides it. |
 | `guards` | `pipelines.Guards` | no | Guards apply to every pipeline. Wholesale-replaced by a pipeline that declares its own non-empty guards block. |
 | `requires` | `[]string` | no | Requires are runner labels every pipeline's jobs must satisfy in addition to their own Job.Requires(). Wholesale- replaced by pipeline.requires when set. |
 
@@ -32,7 +32,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | `on` | `Triggers` | no | On declares the triggers that auto-fire this pipeline. Absent means manual-only (a command invoked by name). |
 | `hidden` | `bool` | no | Hidden omits the entry from default `pipeline list` output; it stays invocable by exact name and shows under `list --all`. |
 | `guards` | `Guards` | no | Guards gate dispatch on the resolved profile, args, and git branch. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `profile:local`, `profile:controller`, `profile:name=<name>`, `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches the checked-out head. The default token matches only when the dispatch supplies default-branch metadata. `arg:` tokens read the merged argument set the run executes with, so a value supplied by defaults.args or this entry's own args: block is guarded exactly like one typed on the command line. See pkg/pipelines/guards.go. |
-| `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than schema Default and Computed; lower than an explicit operator CLI flag. Keyed by CLI flag name (kebab-case, matching what the SDK's WithArgs[T] field tags resolve to). |
+| `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than a field's `default` tag; lower than an explicit operator CLI flag. Keyed by the field's `flag` tag on pipeline Inputs or a job's WithArgs[T]. |
 | `profile` | `string` | no | Profile pins the pipeline to the controller profile it names: `sparkwing run` refuses it, and `sparkwing pipeline trigger` accepts only --profile with this name. Empty leaves the pipeline unpinned. |
 | `requires` | `[]string` | no | Requires are runner-label requirements all jobs in this pipeline must satisfy in addition to their own Job.Requires(). Wholesale replaces defaults.requires when non-empty. The reserved label "local" keeps fleet helpers from claiming the node; --sw-local-only instead selects local storage backends. |
 

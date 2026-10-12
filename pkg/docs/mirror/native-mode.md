@@ -37,6 +37,14 @@ Piped output is one compact JSON service record; `--output pretty|json|plain` ov
 
 For the bind address and the other `serve start` flags, see [cli-serve.md](cli-serve.md).
 
+## Run history
+
+The Runs page shows 50 runs per page, newest first, and pages through every run in the store with **Newer**, **Older** and **Newest**. The page lives in the URL as `older=` or `newer=` followed by a run's start instant and id, so a copied link reopens the same page. Only the newest page polls for new runs, every two seconds, and a run arriving while you read it does not move the rows on screen; an older page loads once and offers **Refresh**.
+
+Filters apply in the store, before paging, so a status, trigger, repository, pipeline, branch, commit, tag, date or search filter finds matching runs however old they are. Changing a filter returns to the newest page. The filter menus offer the values seen on the current page; a value from an older run can still be typed into the search box.
+
+Search, the log search view, reads job logs of matching runs newest first, 200 runs per request, and stops a request after 10 matches. It reports how many runs it has searched; **Search older runs** continues from the last run searched.
+
 ## Why no resident process
 
 Locally, nothing needs to stay up between runs:

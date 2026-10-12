@@ -95,7 +95,7 @@ The protocol version is a string, currently `1`.
 
 ## Node-facing routes
 
-Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a spawned child's hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
+Every route a node calls today, and the routes the hosted model adds. **Reach** is how a node reaches the route: `broker` routes are on the execution broker's allowlist, and a local run's loopback controller serves the same paths; `direct` routes a node calls on the controller with its own credential and the broker refuses; `target` routes no host serves yet. In a `broker` path, `{run}` and `{node}` match only the node's own run and node, `{other}` matches any node of the same run whose id has no `/`, and `{spawned}` matches any node of the same run, including a hierarchical id such as `build/linux`, sent with the slash escaped as `%2F`. Bodies are JSON unless stated; `?` marks an optional field. A test holds this table, the broker's allowlist and the controller's and logs service's route registrations equal.
 
 <!-- node-routes:start -->
 | Method | Path | Reach | Request | Response | Handler |
@@ -149,7 +149,7 @@ Every route a node calls today, and the routes the hosted model adds. **Reach** 
 | POST | `/api/v1/runs/{id}/oidc-token` | direct | `{audience}` | 200 `{token, expires_at}` | `pkg/controller/oidc_token.go` `handleOIDCToken` |
 | PUT | `/api/v1/outputs/uploads/{id}` | direct | the output bytes, at the URL `output-upload` granted | 200 | `pkg/controller/node_output.go` `handleOutputBlobPut` |
 | GET | `/api/v1/outputs/objects/{key...}` | direct | none, at the URL `output` granted | 200 the output bytes | `pkg/controller/node_output.go` `handleOutputBlobGet` |
-| POST | `/api/v1/runs/{id}/nodes` | direct | a node record, for a node spawned at run time | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
+| POST | `/api/v1/runs/{id}/nodes` | direct | a node record, for a node a dynamic fan-out adds at run time | 201 | `pkg/controller/handlers.go` `handleCreateNode` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | direct | an attempt report, claim token only | 200 `{status}` | `pkg/controller/claim_dispatch.go` `handleReportAttempt` |
 | POST | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | direct | `{kind, key?, cache_key_hash?, pipeline?, node?, max_age_ms?}`, claim token only | 200 the input | `pkg/controller/claim_run.go` `handleClaimInput` |
 | POST | `/api/v1/runs/{id}/children` | direct | `{ordinal, pipeline, args?, repo?, branch?}`, claim token only | 200 the child run | `pkg/controller/claim_run.go` `handleEnqueueChildRun` |
@@ -215,7 +215,7 @@ The in-process Go binary takes it as one argument, `--sw-options=<json>`, consum
 
 [schemas/describe.schema.json](schemas/describe.schema.json) is the JSON Schema for both documents: the root is the `describe` reply, `$defs/pipeline` is one pipeline as `--describe` writes it, and `$defs/plan` is the plan. The plan carries:
 
-- nodes and their edges: `deps`, `optional_deps`, `on_failure_of`, `pipeline_refs`, and step and spawn `needs`;
+- nodes and their edges: `deps`, `optional_deps`, `on_failure_of`, `pipeline_refs`, and step `needs`;
 - each node's envelope under `modifiers`: `retry`, `retry_backoff_ms`, `retry_auto`, `timeout_ms`, `no_progress_timeout_ms`, `on_failure`, the required, preferred and `when_runner` placement labels, memo flag and `cache_ttl_ms`, the concurrency group (`conc_*`), resources (`res_cores`, `res_memory_bytes`), `inline`, `optional`, `continue_on_error`;
 - artifacts as `outputs` (globs the node publishes) and `consumes` (producers it stages from);
 - approvals, secrets, the source checkout and plan-level concurrency and resources;

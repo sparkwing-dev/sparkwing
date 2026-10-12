@@ -392,3 +392,87 @@ func TestRunsGrep_StopsAtMatchLimitInRunOrder(t *testing.T) {
 		t.Fatalf("response: %s", rec.Body.String())
 	}
 }
+
+func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	base := time.Now().Add(-time.Hour)
+	for i := range 250 {
+		branch := "main"
+		if i%2 == 1 {
+			branch = "noise"
+		}
+		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("run-%03d", i), Pipeline: "build", Status: "success", GitBranch: branch, StartedAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := &fakeBackend{
+		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.ListRuns(ctx, f) },
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
+	}
+	type page struct {
+		Matches []struct {
+			RunID string `json:"run_id"`
+		} `json:"matches"`
+		RunsScanned int `json:"runs_scanned"`
+		NextCursor  *struct {
+			AfterID        string `json:"after_id"`
+			AfterStartedAt string `json:"after_started_at"`
+		} `json:"next_cursor"`
+	}
+	seen := map[string]bool{}
+	query := "/api/v1/runs/grep?q=needle&nbranch=noise&limit=40&max_matches=0"
+	pages := 0
+	for {
+		rec := httptest.NewRecorder()
+		RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, query, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("search = %d: %s", rec.Code, rec.Body.String())
+		}
+		var p page
+		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		for _, m := range p.Matches {
+			if seen[m.RunID] {
+				t.Fatalf("run %s matched on two pages", m.RunID)
+			}
+			seen[m.RunID] = true
+		}
+		if p.NextCursor == nil {
+			break
+		}
+		if pages > 10 {
+			t.Fatal("search never reached the oldest run")
+		}
+		query = "/api/v1/runs/grep?q=needle&nbranch=noise&limit=40&max_matches=0&after_id=" + p.NextCursor.AfterID +
+			"&after_started_at=" + p.NextCursor.AfterStartedAt
+	}
+	if len(seen) != 125 || pages != 4 {
+		t.Fatalf("searched %d main-branch runs over %d pages, want 125 over 4", len(seen), pages)
+	}
+	if seen["run-001"] || !seen["run-000"] {
+		t.Fatalf("exclusion or oldest run wrong: %v", seen)
+	}
+}
+
+func TestRunsGrep_ResumesAfterTheRunWhereTheMatchLimitStopped(t *testing.T) {
+	b := &fakeBackend{
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{ID: "newest", StartedAt: time.Unix(0, 3_000_000_000_000_000_123)}, {ID: "older"}}, nil
+		},
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte(`{"msg":"needle"}` + "\n"), nil },
+	}
+	rec := httptest.NewRecorder()
+	RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
+	if !strings.Contains(rec.Body.String(), `"next_cursor":{"after_id":"newest","after_started_at":"3000000000000000123"}`) {
+		t.Fatalf("response: %s", rec.Body.String())
+	}
+}

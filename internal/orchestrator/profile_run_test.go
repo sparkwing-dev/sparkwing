@@ -179,14 +179,3 @@ func TestDispatchesLocally_FollowsTheDispatchBackend(t *testing.T) {
 		t.Error("a run a controller dispatched is reported local")
 	}
 }
-
-func TestNodeProfileResolution_ACoordinatedNodeSeesItsLocalDispatcher(t *testing.T) {
-	t.Setenv(ProfileEnv, "shared")
-	got := nodeProfileResolution(true)
-	if !got.IsLocal || got.Name != "shared" {
-		t.Errorf("coordinated node resolution = %+v, want local with the dispatcher's profile", got)
-	}
-	if got := nodeProfileResolution(false); got.IsLocal || got.Name != "" {
-		t.Errorf("controller-dispatched node resolution = %+v, want remote and unnamed", got)
-	}
-}

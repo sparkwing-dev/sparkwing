@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -95,8 +93,7 @@ func (b *S3Backend) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.R
 			runs = append(runs, st.run)
 		}
 	}
-	runs = applyRunFilter(runs, f)
-	return runs, nil
+	return store.FilterRuns(runs, f)
 }
 
 func (b *S3Backend) GetRun(ctx context.Context, runID string) (*store.Run, error) {
@@ -265,67 +262,4 @@ func parseStateNDJSON(rc io.Reader) (*runState, error) {
 
 func runIDFromStateKey(key string) (string, bool) {
 	return s3state.RunIDFromStateKey(key)
-}
-
-func applyRunFilter(runs []*store.Run, f store.RunFilter) []*store.Run {
-	pipelineSet := toSet(f.Pipelines)
-	statusSet := toSet(f.Statuses)
-	branchSet := toSet(f.GitBranches)
-	out := runs[:0]
-	for _, r := range runs {
-		if r == nil {
-			continue
-		}
-		if len(pipelineSet) > 0 && !pipelineSet[r.Pipeline] {
-			continue
-		}
-		if len(statusSet) > 0 && !statusSet[r.Status] {
-			continue
-		}
-		if len(branchSet) > 0 && !branchSet[r.GitBranch] {
-			continue
-		}
-		if len(f.GitSHAPrefixes) > 0 {
-			matched := false
-			for _, prefix := range f.GitSHAPrefixes {
-				prefix = strings.ToLower(strings.TrimSpace(prefix))
-				if prefix != "" && strings.HasPrefix(strings.ToLower(r.GitSHA), prefix) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
-		}
-		if !f.Since.IsZero() && r.StartedAt.Before(f.Since) {
-			continue
-		}
-		if f.ParentRunID != "" && r.ParentRunID != f.ParentRunID {
-			continue
-		}
-		out = append(out, r)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAt.After(out[j].StartedAt)
-	})
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out
-}
-
-func toSet(values []string) map[string]bool {
-	if len(values) == 0 {
-		return nil
-	}
-	m := make(map[string]bool, len(values))
-	for _, v := range values {
-		m[v] = true
-	}
-	return m
 }

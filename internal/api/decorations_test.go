@@ -23,9 +23,6 @@ const fixtureSnapshot = `{
           {"id": "compile"},
           {"id": "package", "needs": ["compile"], "is_result": true}
         ],
-        "spawns": [
-          {"id": "fanout", "needs": ["package"], "target_job": "deploy"}
-        ],
         "result_step": "package"
       }
     },
@@ -71,9 +68,6 @@ func TestDecorationsFromSnapshot(t *testing.T) {
 	}
 	if build.Work == nil || len(build.Work.Steps) != 2 || build.Work.ResultStep != "package" {
 		t.Errorf("build.work=%+v missing inner-work tree", build.Work)
-	}
-	if len(build.Work.Spawns) != 1 || build.Work.Spawns[0].TargetJob != "deploy" {
-		t.Errorf("build.work.spawns=%+v want one targeting deploy", build.Work.Spawns)
 	}
 
 	release, ok := got["release"]
