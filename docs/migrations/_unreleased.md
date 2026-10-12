@@ -710,9 +710,15 @@ controller is upgraded, or its pushes and pull requests stop starting runs.
   `GITHUB_WEBHOOK_BINDINGS` document or `GITHUB_WEBHOOK_SECRET`, and the
   controller's `GITHUB_TOKEN` posted commit statuses for its pull request runs.
 - **After:** the [GitHub App](../github-app.md) is the only signed GitHub
-  trigger. The old route, the bindings API and table, the `sparkwing cluster
-  webhooks` commands, the three environment settings and the chart values
+  trigger. The old `/webhooks/github/{pipeline}` route, the
+  `/api/v1/webhooks/github/bindings` API (`POST` to connect, `DELETE` to
+  disconnect) and its table, the `sparkwing cluster webhooks` commands, the
+  three environment settings and the chart values
   `controller.githubWebhookSecret` and `controller.githubStatusToken` are gone.
+  The OpenAPI document drops the bindings API's bodies,
+  `components.schemas.GitHubWebhookBindingRequest`,
+  `components.schemas.GitHubWebhookBindingResponse` and
+  `components.schemas.GitHubWebhookDisconnectResponse`.
   A delivery to the old URL answers `404`. Schema v92 drops the stored bindings
   and their secrets; nothing reads them back.
 
@@ -774,7 +780,7 @@ To move a repository:
 (`/upload`, `/uploads/<id>`), ancestor negotiation and bundle seeding
 (`/sync/negotiate`, `/sync/seed`), an eager mirror fetch (`/git/refresh`) and
 job-ID artifacts (`/artifacts/<job>`). The controller proxied seeding and
-refresh as `POST /api/v1/gitcache/seed` and `POST /api/v1/gitcache/refresh`.
+refresh as `POST` on `/api/v1/gitcache/seed` and `/api/v1/gitcache/refresh`.
 All of them took the cache's operator token or `admin`, except
 `/artifacts/<job>`, which also took a run's cache grant.
 
@@ -871,13 +877,15 @@ surface accepts.
 
 **Before:** `sparkwing-controller --pool` kept a set of PVCs labeled
 `sparkwing.dev/pool=cache` warm with privileged `docker:27-dind` pods and
-served `GET /api/v1/pool` and `POST /api/v1/pool/{checkout,return,heartbeat}`.
+served `GET` on `/api/v1/pool` and `POST` on `/api/v1/pool/checkout`,
+`/api/v1/pool/return` and `/api/v1/pool/heartbeat`.
 `sparkwing-full` turned it on by default (`controller.pool.enabled: true`) and
 gave the controller a Role over PVCs, pods, configmaps, events and namespaces,
 a ClusterRole over StorageClasses, and a warmer ServiceAccount.
 
 **After:** the controller has no pool and makes no Kubernetes API calls. The
-four routes answer 404. Nothing Sparkwing ships ever checked a PVC out, so no
+four routes answer 404, and the OpenAPI document drops the list response,
+`components.schemas.PoolListResponse`. Nothing Sparkwing ships ever checked a PVC out, so no
 build loses a cache it was using.
 
 **Operator steps:**
@@ -910,7 +918,8 @@ template ever mounted one of its PVCs.
 held a server-sent event stream open for up to 30 minutes and sent one
 `ready`, `superseded` or `stream_end` event when the waiter resolved.
 
-**After:** the route answers 404. Nothing Sparkwing ships opened it.
+**After:** `/api/v1/concurrency/{key}/notify` answers 404. Nothing Sparkwing
+ships opened it.
 
 **Upgrade:** a client of your own that waited on the stream polls
 `GET /api/v1/concurrency/{key}/resolve?run_id=...&node_id=...` instead. It
@@ -926,7 +935,8 @@ was attack surface with no caller.
 `GET /api/v1/artifacts/{key}` to a `runs.read` caller, run keys to the run's
 team and content-addressed keys to the operator.
 
-**After:** the route answers 404. Nothing Sparkwing ships called it.
+**After:** `/api/v1/artifacts/{key}` answers 404. Nothing Sparkwing ships
+called it.
 
 **Upgrade:** a script that read artifacts this way reads the artifact store
 its profile names directly, the local directory or the bucket. On a cluster
@@ -944,7 +954,8 @@ top consumers (`GET /api/v1/egress`), read a named team's credit balance
 `--free-team-slots` (`PUT /api/v1/storage/teams/{team}/free-slot`). The cache's
 operator token could list its mirror files with `GET /repos`.
 
-**After:** all four answer 404.
+**After:** `/api/v1/egress`, `/api/v1/credits/teams/{team}`,
+`/api/v1/storage/teams/{team}/free-slot` and the cache's `/repos` answer 404.
 
 **What replaces each:**
 
@@ -1532,12 +1543,24 @@ host to the controller Service.
 `sparkwing serve` runs the controller in local mode with the dashboard
 attached and needs nothing.
 
-**Removed routes:** `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`,
-`POST /api/v1/me/identities/{provider}/link` and `/link/complete`,
-`POST /api/v1/team/github-app/connect`, `/connect/available`,
-`/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and
-`GET /api/v1/auth/bootstrap-needed` answer 404. No CLI command called them; a
-client of your own drives the browser pages that replace them.
+**Removed routes:** these answer 404. No CLI command called them; a client
+of your own drives the browser pages that replace them.
+
+| Method | Path |
+|---|---|
+| `POST` | `/api/v1/auth/oauth/google/start` |
+| `POST` | `/api/v1/auth/oauth/google/exchange` |
+| `POST` | `/api/v1/auth/oauth/github/start` |
+| `POST` | `/api/v1/auth/oauth/github/exchange` |
+| `POST` | `/api/v1/me/identities/{provider}/link` |
+| `POST` | `/api/v1/me/identities/{provider}/link/complete` |
+| `POST` | `/api/v1/team/github-app/connect` |
+| `POST` | `/api/v1/team/github-app/connect/available` |
+| `POST` | `/api/v1/team/github-app/connect/select` |
+| `POST` | `/api/v1/team/github-app/connect/complete` |
+| `GET` | `/api/v1/operator/session` |
+| `GET` | `/api/v1/auth/bootstrap-needed` |
+
 `/api/v1/auth/login`, `/api/v1/auth/session` and `/api/v1/auth/logout` remain.
 
 **Why:** two processes split one browser surface, and the proxy's route
