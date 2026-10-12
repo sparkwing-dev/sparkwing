@@ -75,6 +75,9 @@ func (b *ClientBackend) StreamNodeLog(ctx context.Context, runID, nodeID string)
 	return b.logStore.Stream(ctx, runID, nodeID)
 }
 
+// Remote returns the controller client and log store b reads through.
+func (b *ClientBackend) Remote() (*client.Client, storage.LogStore) { return b.c, b.logStore }
+
 var _ LiveLogReader = (*ClientBackend)(nil)
 
 // safety: a node with no buffer is the ordinary case once it finishes, so

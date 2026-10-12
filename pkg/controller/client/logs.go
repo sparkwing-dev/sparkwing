@@ -118,9 +118,16 @@ func (l NodeLogs) Grep(ctx context.Context, runID, nodeID, pattern string, maxMa
 	}
 }
 
+// ErrLogStreamRefused reports a log stream the controller refused for
+// good, such as one the token may not read, as against a failure a
+// reconnect may get past.
+var ErrLogStreamRefused = errors.New("controller/client: the controller refused the log stream")
+
 // Stream opens a node's log as server-sent events, each data line one
-// raw log record, and returns (nil, nil) when the controller has no live
-// read of the node.
+// raw log record, resuming after the cursor [storage.WithLogCursor] put
+// on ctx. It returns (nil, nil) when the controller has no live read of
+// the node, and an error wrapping [ErrLogStreamRefused] for a 4xx other
+// than a timeout or rate limit.
 func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		l.c.baseURL+l.logPath(runID, nodeID)+"/stream?format=raw", nil)
@@ -128,6 +135,9 @@ func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadClos
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	if cursor := storage.LogCursor(ctx); cursor != "" {
+		req.Header.Set("Last-Event-ID", cursor)
+	}
 	l.c.setRunnerIdentity(req)
 	if l.c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+l.c.token)
@@ -145,6 +155,9 @@ func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadClos
 	if resp.StatusCode != http.StatusOK {
 		err := readHTTPError(resp)
 		closeDrained(resp.Body)
+		if resp.StatusCode/100 == 4 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+			return nil, fmt.Errorf("%w: %w", ErrLogStreamRefused, err)
+		}
 		return nil, err
 	}
 	return resp.Body, nil

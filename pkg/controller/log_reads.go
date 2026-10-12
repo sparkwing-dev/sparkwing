@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"time"
 
@@ -100,23 +101,135 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) 
 	return out.Bytes(), nil
 }
 
-// Stream serves a segment node's log as server-sent events: the
-// segments uploaded so far, then the live ring from where they end,
-// until the manifest lands. A node without segments answers (nil, nil),
-// so the reader uses the live ring alone.
+// Stream serves a node's log in this run as server-sent events: each of
+// its attempts in order, every attempt's segments and then the live ring
+// from where they end until its manifest lands, ending with stream_end
+// once the node is done and its last attempt sealed. Each write is
+// followed by an event id, a cursor a reader hands back through
+// [storage.WithLogCursor] to resume after it. A node the run neither
+// records nor holds logs for answers (nil, nil), so the reader uses the
+// live ring alone.
 func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {
-	rec, ok, err := l.record(ctx, runID, nodeID)
+	cur, err := parseLogCursor(storage.LogCursor(ctx), runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	recs, err := l.nodeRecords(ctx, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	_, known, err := l.s.store.NodeDone(ctx, l.team, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if len(recs) == 0 && !known {
 		return nil, nil
 	}
 	pr, pw := io.Pipe()
 	go func() {
-		pw.CloseWithError(streamSegments(ctx, l.objs, l.s.liveLogs, rec, pw))
+		pw.CloseWithError(l.streamNode(ctx, runID, nodeID, cur, pw))
 	}()
 	return pr, nil
+}
+
+// safety: records are keyed by run, so a retry run's node streams its own attempts and never an ancestor run's;
+// ordered by attempt and then claim generation, they stand in the order the attempts began, so a cursor's index
+// keeps naming the same attempt as later ones are added.
+func (l segmentLogs) nodeRecords(ctx context.Context, runID, nodeID string) ([]store.NodeLog, error) {
+	all, err := l.s.store.RunNodeLogs(ctx, l.team, runID)
+	if err != nil {
+		return nil, err
+	}
+	var recs []store.NodeLog
+	for _, rec := range all {
+		if rec.NodeID == nodeID {
+			recs = append(recs, rec)
+		}
+	}
+	if len(recs) > 0 {
+		return recs, nil
+	}
+	found, err := logseg.FindAttempts(ctx, l.objs, l.s.logClasses(), string(l.team), runID, nodeID)
+	for _, a := range found {
+		recs = append(recs, store.NodeLog{Team: l.team, RunID: runID, NodeID: nodeID, Attempt: a.Attempt, Generation: a.Generation, Prefix: a.Prefix})
+	}
+	return recs, err
+}
+
+func (l segmentLogs) streamNode(ctx context.Context, runID, nodeID string, cur logCursor, out io.Writer) error {
+	if _, err := io.WriteString(out, ": open\n\n"); err != nil {
+		return err
+	}
+	mark := func(c logCursor) error {
+		_, err := fmt.Fprintf(out, "id: %s\n\n", c.encode(runID, nodeID))
+		return err
+	}
+	for {
+		recs, err := l.nodeRecords(ctx, runID, nodeID)
+		if err != nil {
+			return err
+		}
+		if cur.attempt < len(recs) {
+			at := cur.attempt
+			if err := streamSegments(ctx, l.objs, l.s.liveLogs, recs[at], cur.off, out,
+				func(off int64) error { return mark(logCursor{attempt: at, off: off}) }); err != nil {
+				return err
+			}
+			cur = logCursor{attempt: at + 1}
+			if err := mark(cur); err != nil {
+				return err
+			}
+			continue
+		}
+		done, known, err := l.s.store.NodeDone(ctx, l.team, runID, nodeID)
+		if err != nil {
+			return err
+		}
+		if done || !known {
+			if recs, err = l.nodeRecords(ctx, runID, nodeID); err != nil {
+				return err
+			}
+			if cur.attempt >= len(recs) {
+				_, err := io.WriteString(out, "event: stream_end\ndata: {}\n\n")
+				return err
+			}
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(nodeStreamPoll):
+		}
+	}
+}
+
+// perf: between a node's attempts the stream reads the run's log records this often for the next one.
+const nodeStreamPoll = time.Second
+
+// safety: a place in a node's stream is the index of an attempt among the node's attempts in this run and a byte
+// offset in that attempt's log, both of which only grow, so a cursor names the same place for as long as the run lasts.
+type logCursor struct {
+	attempt int
+	off     int64
+}
+
+// safety: the cursor names an attempt by its place in this run's node rather than by claim generation, which
+// never leaves the controller, and carries a digest of the run and node so it resumes no other stream.
+func (c logCursor) encode(runID, nodeID string) string {
+	return fmt.Sprintf("%d.%d.%08x", c.attempt, c.off, crc32.ChecksumIEEE([]byte(runID+"\x00"+nodeID)))
+}
+
+func parseLogCursor(raw, runID, nodeID string) (logCursor, error) {
+	if raw == "" {
+		return logCursor{}, nil
+	}
+	var c logCursor
+	var scope uint32
+	if n, err := fmt.Sscanf(raw, "%d.%d.%08x", &c.attempt, &c.off, &scope); err != nil || n != 3 ||
+		c.attempt < 0 || c.off < 0 || c.encode(runID, nodeID) != raw {
+		return logCursor{}, fmt.Errorf("%w: %q", storage.ErrBadCursor, raw)
+	}
+	return c, nil
 }
 
 // safety: one search reads at most this much log and runs at most this long, so a broad grep cannot hold the
@@ -128,12 +241,11 @@ var controllerSearchBounds = web.SearchBounds{MaxBytes: 256 << 20, Timeout: 10 *
 const segmentStreamPoll = 5 * time.Second
 
 // safety: offsets count bytes of the whole log, off how far the reader was sent and segEnd how far the segments
-// reach; the ring is joined only at off, so no line is sent twice or skipped.
-func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, rec store.NodeLog, out io.Writer) error {
-	if _, err := io.WriteString(out, ": open\n\n"); err != nil {
-		return err
-	}
-	var off, segEnd int64
+// reach; the ring is joined only at off, so no line is sent twice or skipped. It returns once the manifest landed.
+func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, rec store.NodeLog, off int64, out io.Writer,
+	mark func(off int64) error,
+) error {
+	var segEnd int64
 	read := 0
 	for {
 		live.Watch(rec.RunID, rec.NodeID)
@@ -150,23 +262,25 @@ func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, re
 				if err := writeSSELines(out, body[max(skip, 0):]); err != nil {
 					return err
 				}
+				if err := mark(segEnd + int64(len(body))); err != nil {
+					return err
+				}
 			}
 			segEnd += int64(len(body))
 			off = max(off, segEnd)
 			read++
 		}
 		if log.Manifest != nil {
-			_, err := io.WriteString(out, "event: stream_end\ndata: {}\n\n")
-			return err
+			return nil
 		}
-		if err := tailLiveRing(ctx, live, rec, &off, out); err != nil {
+		if err := tailLiveRing(ctx, live, rec, &off, out, mark); err != nil {
 			return err
 		}
 	}
 }
 
 // perf: when the ring cannot continue from off it waits out the poll rather than listing segments in a loop.
-func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *int64, out io.Writer) error {
+func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *int64, out io.Writer, mark func(int64) error) error {
 	deadline := time.Now().Add(segmentStreamPoll)
 	for {
 		waitCtx, cancel := context.WithDeadline(ctx, deadline)
@@ -183,6 +297,9 @@ func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *i
 				return err
 			}
 			*off = chunk.Next
+			if err := mark(*off); err != nil {
+				return err
+			}
 		default:
 			select {
 			case <-ctx.Done():

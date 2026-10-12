@@ -19,11 +19,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string) {
-	body, err := b.StreamNodeLog(r.Context(), runID, nodeID)
+	cursor := r.Header.Get("Last-Event-ID")
+	if q := r.URL.Query().Get("cursor"); q != "" {
+		cursor = q
+	}
+	body, err := b.StreamNodeLog(storage.WithLogCursor(r.Context(), cursor), runID, nodeID)
+	if errors.Is(err, storage.ErrBadCursor) {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return

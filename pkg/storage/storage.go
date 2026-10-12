@@ -23,6 +23,25 @@ var ErrListNotSupported = errors.New("storage: list not supported")
 // rather than failing them.
 var ErrNotSupported = errors.New("storage: operation not supported")
 
+// ErrBadCursor is returned by a log stream whose resume cursor is not one
+// it issued for that run and node.
+var ErrBadCursor = errors.New("storage: log stream cursor is not valid here")
+
+type logCursorKey struct{}
+
+// WithLogCursor returns ctx carrying the cursor a log stream resumes
+// after: the last SSE event id a reader received from it, as the
+// stream's Last-Event-ID.
+func WithLogCursor(ctx context.Context, cursor string) context.Context {
+	return context.WithValue(ctx, logCursorKey{}, cursor)
+}
+
+// LogCursor returns the cursor [WithLogCursor] put on ctx, or "".
+func LogCursor(ctx context.Context) string {
+	c, _ := ctx.Value(logCursorKey{}).(string)
+	return c
+}
+
 // ErrPreconditionFailed is returned by [ConditionalWriter] writes when
 // the required precondition does not hold: the object already exists
 // for PutIfAbsent, or its current ETag differs from (or the object is
@@ -229,9 +248,10 @@ type LogStore interface {
 	// in the run.
 	ReadRun(ctx context.Context, runID string) ([]byte, error)
 
-	// Stream opens a live-tail stream for one node's log.
-	// Implementations that don't support streaming return (nil, nil);
-	// the caller falls back to polling Read.
+	// Stream opens a live-tail stream for one node's log, resuming after
+	// the cursor [WithLogCursor] put on ctx, if any. Implementations
+	// that don't support streaming return (nil, nil); the caller falls
+	// back to polling Read.
 	Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 
 	// DeleteRun removes every log file for the run. Idempotent.

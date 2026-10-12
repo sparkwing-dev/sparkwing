@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -104,12 +105,21 @@ func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string,
 	return err
 }
 
+// safety: a controller follows each node across its attempts itself, so a backend reading through one follows as
+// followLogsRemote does; any other backend keeps one log per node, streamed once.
 func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFilter string, out io.Writer) error {
+	if cb, ok := b.(*backend.ClientBackend); ok {
+		if ctrl, logs := cb.Remote(); logs != nil {
+			if nodeLogs, ok := logs.(client.NodeLogs); ok {
+				return followLogsRemote(ctx, ctrl, nodeLogs, runID, nodeFilter, out)
+			}
+		}
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var writeMu sync.Mutex
-	follows := newNodeFollows()
+	seen := map[string]struct{}{}
 	var wg sync.WaitGroup
 	var multi atomic.Bool
 
@@ -117,7 +127,6 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer follows.ended(nodeID)
 			streamNodeViaBackend(runCtx, b, runID, nodeID, &multi, &writeMu, out)
 		}()
 	}
@@ -139,10 +148,11 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 						if nodeFilter != "" && n.NodeID != nodeFilter {
 							continue
 						}
-						if !follows.start(n) {
+						if _, ok := seen[n.NodeID]; ok {
 							continue
 						}
-						if follows.count() > 1 {
+						seen[n.NodeID] = struct{}{}
+						if len(seen) > 1 {
 							multi.Store(true)
 						}
 						spawn(n.NodeID)
@@ -245,7 +255,7 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 // the controller's segment stream and live ring both frame that way --
 // so the framing is stripped rather than printed at the reader.
 func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) (ended bool) {
-	return readSSE(ctx, rc, func(payload string) {
+	return readSSE(ctx, rc, nil, func(payload string) {
 		mu.Lock()
 		defer mu.Unlock()
 		if multi.Load() {

@@ -62,6 +62,18 @@ func (s *Store) CurrentNodeAttempt(ctx context.Context, team Team, runID, nodeID
 	return attempt + 1, generation, err
 }
 
+// NodeDone reports whether a node of the run has finished for good, and
+// found false when the run has no such node.
+func (s *Store) NodeDone(ctx context.Context, team Team, runID, nodeID string) (done, found bool, err error) {
+	var status string
+	err = s.queryRow(ctx, `SELECT status FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	return status == nodeStatusDone, err == nil, err
+}
+
 // OpenNodeLog records prefix as the attempt's log location unless the
 // attempt already has one, and returns the attempt's record. The first
 // prefix wins, so a retried request never moves an attempt's log.

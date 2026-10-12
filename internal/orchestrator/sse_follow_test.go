@@ -3,13 +3,18 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -70,59 +75,61 @@ func TestCopySSEStream_StopsOnACancelledFollow(t *testing.T) {
 	}
 }
 
-type oneStreamLogs struct {
+type resumingLogs struct {
 	storage.LogStore
-	opened atomic.Int32
+	mu      sync.Mutex
+	cursors []string
 }
 
-func (l *oneStreamLogs) Stream(context.Context, string, string) (io.ReadCloser, error) {
-	l.opened.Add(1)
-	return io.NopCloser(strings.NewReader("data: line 1\n\nevent: stream_end\ndata: {}\n\n")), nil
+// Stream answers the first open with a line and a cursor, then drops the
+// connection; a resume from that cursor gets the next line and the end.
+func (l *resumingLogs) Stream(ctx context.Context, _, _ string) (io.ReadCloser, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cursors = append(l.cursors, storage.LogCursor(ctx))
+	if storage.LogCursor(ctx) == "" {
+		return io.NopCloser(strings.NewReader(": open\n\ndata: line 1\n\nid: c1\n\n")), nil
+	}
+	return io.NopCloser(strings.NewReader("data: line 2\n\nid: c2\n\nevent: stream_end\ndata: {}\n\n")), nil
 }
 
-// A node whose log stream ended is sealed while the run goes on, so the
-// follow stops there rather than reconnecting and printing it again.
-func TestStreamNode_StopsAtTheEndOfASealedNodesLog(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	logs := &oneStreamLogs{}
-	var out bytes.Buffer
-	var multi atomic.Bool
-	streamNode(ctx, logs, "run-1", "a", &multi, &sync.Mutex{}, &out)
-	if ctx.Err() != nil || logs.opened.Load() != 1 || out.String() != "line 1\n" {
-		t.Fatalf("follow opened the stream %d times and wrote %q (ctx %v); want once, line 1 alone",
-			logs.opened.Load(), out.String(), ctx.Err())
+// A stream that drops mid-node is resumed from the last event id the
+// controller sent, so nothing is printed twice, and the follow stops at
+// stream_end.
+func TestFollowedNode_ResumesFromItsCursorWithoutReplay(t *testing.T) {
+	logs := &resumingLogs{}
+	var lines []string
+	f := &followedNode{done: make(chan struct{})}
+	if err := f.follow(context.Background(), logs, "run-1", "a", func(l string) { lines = append(lines, l) }); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(lines, ",") != "line 1,line 2" || strings.Join(logs.cursors, ",") != ",c1" {
+		t.Fatalf("printed %q over opens with cursors %q; want each line once, resumed from c1", lines, logs.cursors)
 	}
 }
 
-// A follow streams a node again when a retry or a later claim runs it
-// under a new attempt after the last attempt's log ended, and not while a
-// stream is open, between attempts, or once the node is done.
-func TestNodeFollows_StreamsEachAttemptOfANodeOnce(t *testing.T) {
-	f := newNodeFollows()
-	node := func(status string, consumed int, generation int64) *store.Node {
-		return &store.Node{NodeID: "a", Status: status, AttemptsConsumed: consumed, ClaimGeneration: generation}
-	}
-	for i, step := range []struct {
-		node  *store.Node
-		ended bool
-		want  bool
-	}{
-		{node("running", 0, 1), false, true},
-		{node("running", 0, 1), false, false},
-		{node("pending", 1, 1), true, false},
-		{node("running", 1, 2), false, true},
-		{node("running", 1, 3), true, true},
-		{node("done", 2, 3), true, false},
-	} {
-		if step.ended {
-			f.ended("a")
+// A stream the controller refuses, as it does a token without logs.read,
+// ends the follow with that refusal rather than retrying it forever.
+func TestFollowLogsRemote_EndsOnARefusedStream(t *testing.T) {
+	const runID = "run-refused"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/nodes"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []store.Node{{RunID: runID, NodeID: "a", Status: "done"}}})
+		case r.URL.Path == "/api/v1/capabilities":
+			_, _ = io.WriteString(w, `{"logs":{"segments":true}}`)
+		case strings.HasSuffix(r.URL.Path, "/stream"):
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		case r.URL.Path == "/api/v1/runs/"+runID:
+			_ = json.NewEncoder(w).Encode(store.Run{ID: runID, Status: "success"})
+		default:
+			http.NotFound(w, r)
 		}
-		if got := f.start(step.node); got != step.want {
-			t.Fatalf("step %d: start(%+v) = %v, want %v", i, *step.node, got, step.want)
-		}
-	}
-	if f.count() != 1 {
-		t.Fatalf("count = %d, want one node", f.count())
+	}))
+	t.Cleanup(srv.Close)
+	shortFollowTiming(t, time.Second, 10*time.Millisecond)
+	ctrl := client.NewWithToken(srv.URL, nil, "")
+	if err := followLogsRemote(context.Background(), ctrl, ctrl.NodeLogs(), runID, "", io.Discard); !errors.Is(err, client.ErrLogStreamRefused) {
+		t.Fatalf("follow = %v, want the refusal", err)
 	}
 }

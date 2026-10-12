@@ -261,6 +261,9 @@ func TestSegmentStreamJoinsTheLiveRingByOffset(t *testing.T) {
 	if _, err := s.Close(ctx, logseg.End{}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.st.DB().ExecContext(ctx, `UPDATE nodes SET status = 'done' WHERE run_id = 'run-d' AND node_id = 'a'`); err != nil {
+		t.Fatal(err)
+	}
 	for {
 		line, ok := next()
 		if !ok {
@@ -712,5 +715,96 @@ func TestPruningCountsTheBytesItDeletes(t *testing.T) {
 		if left, err := objs.List(ctx, prefixes[runID]); err != nil || len(left) != want {
 			t.Fatalf("%s holds %v after the prune, %v; want %d object(s)", runID, left, err, want)
 		}
+	}
+}
+
+func sealedAttempt(t *testing.T, f logSegmentFixture, runID string, attempt, generation int64, body string) {
+	t.Helper()
+	ctx := t.Context()
+	objs := f.srv.logObjects()
+	prefix, err := logseg.AttemptPrefix(logseg.ClassStandard, string(store.DefaultTeam), runID, "a", attempt, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), gz.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logseg.SealAbandoned(ctx, objs, prefix, logseg.Manifest{Run: runID, Node: "a", Attempt: attempt, Generation: generation},
+		logseg.ReasonRunnerLost, objs.putIfAbsent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.OpenNodeLog(ctx, store.NodeLog{
+		Team: store.DefaultTeam, RunID: runID, NodeID: "a",
+		Attempt: attempt, Generation: generation, Prefix: prefix,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A node's stream runs through every attempt of it in this run, in order --
+// a replacement claim of the first attempt and a retry that started and
+// finished between two polls among them -- leaves out the attempts of the
+// run it retries, ends once the node is done, and resumes from an event id
+// without sending a line twice.
+func TestNodeLogStreamFollowsEveryAttemptAndResumes(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	sealedAttempt(t, f, "run-ancestor", 1, 1, "ancestor line\n")
+	sealedAttempt(t, f, "run-d", 1, 1, "first claim\n")
+	sealedAttempt(t, f, "run-d", 1, 2, "replacement claim\n")
+	sealedAttempt(t, f, "run-d", 2, 3, "retry\n")
+	if _, err := f.st.DB().ExecContext(ctx, `UPDATE nodes SET status = 'done' WHERE run_id = 'run-d' AND node_id = 'a'`); err != nil {
+		t.Fatal(err)
+	}
+	admin, _, err := f.st.CreateToken("root", store.TokenKindUser, []string{ScopeAdmin}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := func(cursor string) (int, []string, []string) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-d/logs/a/stream?format=raw", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+admin)
+		if cursor != "" {
+			req.Header.Set("Last-Event-ID", cursor)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var lines, ids []string
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			switch line := sc.Text(); {
+			case strings.HasPrefix(line, "data: "):
+				lines = append(lines, strings.TrimPrefix(line, "data: "))
+			case strings.HasPrefix(line, "id: "):
+				ids = append(ids, strings.TrimPrefix(line, "id: "))
+			}
+		}
+		return resp.StatusCode, lines, ids
+	}
+	code, lines, ids := stream("")
+	if code != http.StatusOK || strings.Join(lines, ",") != "first claim,replacement claim,retry,{}" {
+		t.Fatalf("stream = %d %q; want each attempt of this run in order, then the end", code, lines)
+	}
+	if len(ids) < 2 {
+		t.Fatalf("event ids = %q; want one after each write", ids)
+	}
+	if _, resumed, _ := stream(ids[1]); strings.Join(resumed, ",") != "replacement claim,retry,{}" {
+		t.Fatalf("resumed from %s = %q; want the lines after it alone", ids[1], resumed)
+	}
+	if code, _, _ := stream("0.0.00000000"); code != http.StatusBadRequest {
+		t.Fatalf("a cursor for another stream = %d, want 400", code)
 	}
 }
