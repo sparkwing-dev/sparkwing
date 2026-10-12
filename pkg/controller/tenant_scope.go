@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -106,50 +107,81 @@ func (s *Server) requestTenant(w http.ResponseWriter, r *http.Request) (*store.T
 }
 
 // safety: the mux unescapes every segment before matching, so /api/v1/%72uns/x
-// reaches a /api/v1/runs/{id} handler. Reading the id by position, unescaped
-// as the mux does, keeps the run checked here the run the handler is handed,
-// and a path too short to name one is still checked rather than passed on.
-func teamBoundaryRunID(pattern string, r *http.Request) (string, bool) {
+// reaches a /api/v1/runs/{id} handler. Reading the id at the {id} segment of
+// the matched pattern, unescaped as the mux does, keeps the run checked here
+// the run the handler is handed, and a path too short to name one checks the
+// empty id rather than passing on.
+func boundaryRunID(pattern string, r *http.Request) string {
 	_, path, _ := strings.Cut(pattern, " ")
-	if !strings.HasPrefix(path, "/api/v1/runs/{id}") && !strings.HasPrefix(path, "/api/v1/triggers/{id}") {
-		return "", false
-	}
+	at := slices.Index(strings.Split(path, "/"), "{id}")
 	segs := strings.Split(r.URL.EscapedPath(), "/")
-	if len(segs) < 5 {
-		return "", true
+	if at < 0 || len(segs) <= at {
+		return ""
 	}
-	id, err := url.PathUnescape(segs[4])
+	id, err := url.PathUnescape(segs[at])
 	if err != nil {
-		return segs[4], true
+		return segs[at]
 	}
-	return id, true
+	return id
 }
 
-// safety: it wraps the mux rather than each route, so a route added under /api/v1/runs/{id} is inside
-// the boundary; it answers as for a missing run, so another team's run looks like no run.
+// safety: it wraps the mux rather than each route, and reads each route's
+// tenant resource from tenantRoutes by the pattern the mux matched, so a
+// route missing from the table is refused instead of served unchecked. A run
+// or trigger of another team answers as a missing run, so it looks like no run.
 func (s *Server) teamBoundary(mux *http.ServeMux, next http.Handler) http.Handler {
+	return s.boundaryOver(tenantRoutes, mux, next)
+}
+
+func (s *Server) boundaryOver(routes map[string]tenantResource, mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := mux.Handler(r)
-		runID, scoped := teamBoundaryRunID(pattern, r)
-		if !scoped {
+		// safety: no match leaves the fallback to answer 404 or 405, and a
+		// pattern with no method is the path a trailing-slash redirect names,
+		// which reaches no handler before the client asks again.
+		if !strings.Contains(pattern, " ") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		t, ok := s.requestTenant(w, r)
-		if !ok {
+		res, listed := routes[pattern]
+		if !listed {
+			s.writeInternalError(w, r, "team boundary", fmt.Errorf("route %q declares no tenant resource", pattern))
 			return
 		}
-		owned, err := t.OwnsRun(r.Context(), runID)
-		if err != nil {
-			s.writeInternalError(w, r, "team boundary", err)
-			return
-		}
-		if !owned {
-			writeError(w, http.StatusNotFound, runNotFound(runID))
+		switch res.owner {
+		case ownerNone, ownerAccount, ownerDeployment:
+		case ownerTeam:
+			if _, ok := s.requestTenant(w, r); !ok {
+				return
+			}
+		case ownerRun:
+			if !s.ownsBoundaryRun(w, r, pattern) {
+				return
+			}
+		default:
+			s.writeInternalError(w, r, "team boundary", fmt.Errorf("route %q: %s has no ownership rule", pattern, res.name))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) ownsBoundaryRun(w http.ResponseWriter, r *http.Request, pattern string) bool {
+	runID := boundaryRunID(pattern, r)
+	t, ok := s.requestTenant(w, r)
+	if !ok {
+		return false
+	}
+	owned, err := t.OwnsRun(r.Context(), runID)
+	if err != nil {
+		s.writeInternalError(w, r, "team boundary", err)
+		return false
+	}
+	if !owned {
+		writeError(w, http.StatusNotFound, runNotFound(runID))
+		return false
+	}
+	return true
 }
 
 func runNotFound(runID string) error {

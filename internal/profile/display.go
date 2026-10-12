@@ -24,11 +24,6 @@ func SpecString(s *backends.Spec) string {
 		return "filesystem:" + s.Path
 	case backends.TypeController:
 		return "controller://" + s.Controller
-	case backends.TypePostgres:
-		if s.URLSource != "" {
-			return s.Type + ":" + s.URLSource
-		}
-		return s.Type
 	case backends.TypeStdout:
 		return "stdout"
 	default:

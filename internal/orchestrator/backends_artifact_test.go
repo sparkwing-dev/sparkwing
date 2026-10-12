@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -26,23 +24,5 @@ func TestLocalBackends_ThreadsArtifact(t *testing.T) {
 	}
 	if b := orchestrator.LocalBackends(p, st, nil); b.Artifact != nil {
 		t.Errorf("Artifact = %v, want nil", b.Artifact)
-	}
-}
-
-func TestS3Backends_ThreadsArtifact(t *testing.T) {
-	logs, err := fs.NewLogStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("fs.NewLogStore: %v", err)
-	}
-	cache, err := fs.NewArtifactStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("fs.NewArtifactStore: %v", err)
-	}
-	state := s3state.New(cache)
-	t.Cleanup(func() { _ = state.Close() })
-
-	art := &noListArtifact{}
-	if b := orchestrator.S3Backends(logs, state, art); b.Artifact != art {
-		t.Errorf("Artifact = %v, want the supplied store", b.Artifact)
 	}
 }

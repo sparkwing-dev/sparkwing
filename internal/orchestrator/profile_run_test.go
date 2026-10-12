@@ -1,17 +1,12 @@
 package orchestrator
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 func writeInnerProfiles(t *testing.T, body string) {
@@ -21,107 +16,6 @@ func writeInnerProfiles(t *testing.T, body string) {
 		t.Fatalf("write profiles: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)
-}
-
-func TestResolveActiveProfile_NoneSelected(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
-	p, chain, err := resolveActiveProfile(nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if p != nil {
-		t.Fatalf("expected nil profile, got %#v", p)
-	}
-	if chain == nil || string(chain.Source) != "none" {
-		t.Fatalf("want chain source=none, got %#v", chain)
-	}
-}
-
-func TestResolveActiveProfile_UserProfileViaEnv(t *testing.T) {
-	writeInnerProfiles(t, `
-profiles:
-  team:
-    state: { type: s3, bucket: team, prefix: state }
-`)
-	t.Setenv("SPARKWING_PROFILE", "team")
-	p, chain, err := resolveActiveProfile(nil)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p == nil || p.Name != "team" || p.State == nil || p.State.Bucket != "team" {
-		t.Fatalf("resolved %#v", p)
-	}
-	if chain == nil || chain.Selected != "team" {
-		t.Fatalf("chain should report team selected, got %#v", chain)
-	}
-}
-
-func TestResolveActiveProfile_UserProfileNotFound(t *testing.T) {
-	writeInnerProfiles(t, `
-profiles:
-  team: { state: { type: sqlite } }
-`)
-	t.Setenv("SPARKWING_PROFILE", "ghost")
-	_, _, err := resolveActiveProfile(nil)
-	if err == nil {
-		t.Fatal("expected not-found error")
-	}
-	if !strings.Contains(err.Error(), "ghost") {
-		t.Errorf("error should name the profile: %v", err)
-	}
-}
-
-func TestResolveActiveProfile_DeclaredProfilesSelectNothingWithoutTheHandoff(t *testing.T) {
-	t.Setenv(ProfileEnv, "")
-	writeInnerProfiles(t, `
-profiles:
-  cloud:
-    controller: { url: https://user.example.dev }
-`)
-	cfg := &projectconfig.Config{
-		Profiles: map[string]*profile.Profile{
-			"cloud": {Name: "cloud", Controller: &profile.ControllerSpec{URL: "https://project.example.dev"}},
-		},
-	}
-	p, chain, err := resolveActiveProfile(cfg)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p != nil || chain == nil || chain.Source != profile.ChainSourceNone {
-		t.Fatalf("resolved %#v (chain %#v), want the local store", p, chain)
-	}
-}
-
-func TestResolveActiveProfile_RefusesAControllerProfile(t *testing.T) {
-	writeInnerProfiles(t, `
-profiles:
-  prod:
-    controller: { url: https://api.example.dev }
-  team:
-    state: { type: sqlite }
-`)
-	for _, name := range []string{"prod", "team"} {
-		t.Setenv("SPARKWING_PROFILE", name)
-		if _, _, err := resolveActiveProfile(nil); err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile "+name) {
-			t.Errorf("profile %s on a local run = %v, want a refusal naming pipeline trigger", name, err)
-		}
-	}
-}
-
-func TestRemoteStateProfile_AcceptsOnlyS3OrPostgresStateWithoutAController(t *testing.T) {
-	for name, tc := range map[string]struct {
-		p  *profile.Profile
-		ok bool
-	}{
-		"s3":         {&profile.Profile{Name: "s3", State: &backends.Spec{Type: backends.TypeS3, Bucket: "b"}}, true},
-		"postgres":   {&profile.Profile{Name: "pg", State: &backends.Spec{Type: backends.TypePostgres, URL: "postgres://x"}}, true},
-		"sqlite":     {&profile.Profile{Name: "lite", State: &backends.Spec{Type: backends.TypeSQLite}}, false},
-		"controller": {&profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}, false},
-	} {
-		if err := RemoteStateProfile(tc.p); (err == nil) != tc.ok {
-			t.Errorf("%s: RemoteStateProfile = %v, want ok=%v", name, err, tc.ok)
-		}
-	}
 }
 
 func TestRefusePinnedLocalRun(t *testing.T) {
@@ -151,11 +45,14 @@ func TestRefusePinnedCheckoutRun_FailsWhenTheConfigCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestDispatchesLocally_FollowsTheDispatchBackend(t *testing.T) {
-	if !LocalBackends(Paths{Root: t.TempDir()}, nil, nil).dispatchesLocally() {
-		t.Error("a run on this machine's store is not reported local")
+func TestRefuseProfileHandoff_FailsARunAnOlderCLIPointedAtAProfile(t *testing.T) {
+	t.Setenv(ProfileEnv, "")
+	if err := refuseProfileHandoff(); err != nil {
+		t.Fatalf("no handoff: %v", err)
 	}
-	if RemoteBackends(client.NewWithToken("http://127.0.0.1:1", nil, ""), nil, nil, nil, 0).dispatchesLocally() {
-		t.Error("a run a controller dispatched is reported local")
+	t.Setenv(ProfileEnv, "shared")
+	err := refuseProfileHandoff()
+	if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile shared") {
+		t.Fatalf("handoff = %v, want a refusal naming the trigger command", err)
 	}
 }

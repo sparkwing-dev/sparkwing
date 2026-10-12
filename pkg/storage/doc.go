@@ -8,9 +8,8 @@
 // [ArtifactStore] is a content-addressed blob store. [LogStore]
 // persists per-node log streams keyed by (runID, nodeID). [StateStore]
 // is the run-record handle (runs, nodes, steps, annotations,
-// approvals, dispatches, debug pauses). The SQLite-backed
-// *store.Store satisfies it today; Postgres, HTTP (controller), and
-// object-store NDJSON backends slot in behind the same interface.
+// approvals, dispatches, debug pauses). The SQLite- and
+// Postgres-backed *store.Store and the controller HTTP client satisfy it.
 //
 // # Implementations
 //
@@ -25,7 +24,6 @@
 // Default backend per execution mode:
 //
 //	local         filesystem            filesystem
-//	ci-embedded   S3 (or compatible)    S3 (or compatible)
 //	distributed   sparkwing-cache HTTP  controller segments ([logseg])
 //
 // # Opening backends

@@ -4,14 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apiroutes"
 )
 
-type specRoute struct{ method, path, reach string }
+type specRoute struct{ method, path string }
 
 func nodeProtocolSpecRoutes(t *testing.T) []specRoute {
 	t.Helper()
@@ -33,7 +32,6 @@ func nodeProtocolSpecRoutes(t *testing.T) []specRoute {
 		routes = append(routes, specRoute{
 			method: strings.TrimSpace(cells[1]),
 			path:   strings.Trim(strings.TrimSpace(cells[2]), "`"),
-			reach:  strings.TrimSpace(cells[3]),
 		})
 	}
 	if len(routes) == 0 {
@@ -44,8 +42,8 @@ func nodeProtocolSpecRoutes(t *testing.T) []specRoute {
 
 var routeWildcard = regexp.MustCompile(`\{[^}]*\}`)
 
-// hack: the spec, the broker and each server name wildcards differently, so the
-// names are erased before comparing.
+// hack: the spec and each server name wildcards differently, so the names are
+// erased before comparing.
 func normalizeRoute(method, path string) string {
 	return method + " " + routeWildcard.ReplaceAllStringFunc(path, func(w string) string {
 		if strings.HasSuffix(w, "...}") {
@@ -55,61 +53,36 @@ func normalizeRoute(method, path string) string {
 	})
 }
 
-func TestNodeProtocolSpecListsExactlyTheBrokerAllowlist(t *testing.T) {
-	spec := map[string]bool{}
-	for _, r := range nodeProtocolSpecRoutes(t) {
-		switch r.reach {
-		case "broker":
-			spec[r.method+" "+r.path] = true
-		case "direct", "target":
-		default:
-			t.Errorf("docs/node-protocol.md: %s %s has reach %q, want broker, direct or target", r.method, r.path, r.reach)
-		}
-	}
-	allowed := map[string]bool{}
-	for _, r := range brokerRoutes {
-		allowed[r.method+" "+r.pattern] = true
-	}
-	for _, missing := range sortedDifference(allowed, spec) {
-		t.Errorf("the broker allows %s, which docs/node-protocol.md does not list as a broker route", missing)
-	}
-	for _, extra := range sortedDifference(spec, allowed) {
-		t.Errorf("docs/node-protocol.md lists %s as a broker route, which the broker does not allow", extra)
-	}
-}
-
-func TestNodeProtocolSpecRoutesMatchTheRegisteredHandlers(t *testing.T) {
-	registered := map[string]bool{}
-	for _, file := range []string{
-		filepath.Join("..", "..", "pkg", "controller", "server.go"),
-	} {
-		routes, err := apiroutes.Parse(file, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, r := range routes {
-			registered[normalizeRoute(r.Method, r.Path)] = true
-		}
-	}
+func TestNodeProtocolRoutesAreTheNodeNamespace(t *testing.T) {
+	seen := map[string]bool{}
 	for _, r := range nodeProtocolSpecRoutes(t) {
 		key := normalizeRoute(r.method, r.path)
-		brokerServed := strings.HasPrefix(r.path, "/bin/") || strings.HasPrefix(r.path, "/api/v1/logs/")
 		switch {
-		case r.reach == "target" && registered[key]:
-			t.Errorf("docs/node-protocol.md marks %s %s as target, but a server registers it; mark it broker or direct", r.method, r.path)
-		case r.reach != "target" && !brokerServed && !registered[key]:
-			t.Errorf("docs/node-protocol.md lists %s %s, which the controller does not register and the broker does not serve itself", r.method, r.path)
+		case !strings.HasPrefix(r.path, "/node/v1/"):
+			t.Errorf("docs/node-protocol.md lists %s %s outside /node/v1/", r.method, r.path)
+		case r.method != "GET" && r.method != "POST" && r.method != "DELETE":
+			t.Errorf("docs/node-protocol.md lists %s %s with a method the node routes do not use", r.method, r.path)
+		case seen[key]:
+			t.Errorf("docs/node-protocol.md lists %s %s twice", r.method, r.path)
 		}
+		seen[key] = true
 	}
 }
 
-func sortedDifference(a, b map[string]bool) []string {
-	var out []string
-	for k := range a {
-		if !b[k] {
-			out = append(out, k)
+// safety: the node routes carry a bearer scoped to one attempt, so a controller
+// route on the same path would accept a credential it was never meant to see.
+func TestNodeProtocolRoutesAreNotControllerRoutes(t *testing.T) {
+	routes, err := apiroutes.Parse(filepath.Join("..", "..", "pkg", "controller", "server.go"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := map[string]bool{}
+	for _, r := range routes {
+		registered[normalizeRoute(r.Method, r.Path)] = true
+	}
+	for _, r := range nodeProtocolSpecRoutes(t) {
+		if registered[normalizeRoute(r.method, r.path)] {
+			t.Errorf("the controller registers %s %s, a node route only the node host serves", r.method, r.path)
 		}
 	}
-	sort.Strings(out)
-	return out
 }

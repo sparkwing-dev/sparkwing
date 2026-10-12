@@ -70,13 +70,11 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoadSaveRoundTrip(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	mirror := false
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
 			"prod": {
-				Controller:  &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
-				State:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
-				MirrorLocal: &mirror,
+				Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
+				State:      &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
 			},
 		},
 	}
@@ -96,9 +94,6 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 	if prod.State == nil || prod.State.Type != backends.TypeSQLite {
 		t.Errorf("state: %+v", prod.State)
-	}
-	if prod.MirrorLocal == nil || *prod.MirrorLocal != false {
-		t.Errorf("mirror_local: %+v", prod.MirrorLocal)
 	}
 }
 
@@ -152,18 +147,42 @@ func TestDefaultPath_XDG(t *testing.T) {
 	}
 }
 
-func TestEffectiveMirrorLocal_DefaultsTrue(t *testing.T) {
-	if !(*profile.Profile)(nil).EffectiveMirrorLocal() {
-		t.Error("nil profile should report MirrorLocal=true (laptop default)")
+func TestLoad_RefusesARemovedStateProfile(t *testing.T) {
+	for name, body := range map[string]string{
+		"s3":       "profiles:\n  shared:\n    state: {type: s3, bucket: b, prefix: state}\n",
+		"postgres": "profiles:\n  shared:\n    state: {type: postgres, url: postgres://db/sparkwing}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := profile.Load(path)
+			if err == nil {
+				t.Fatal("Load accepted a removed state profile")
+			}
+			for _, want := range []string{`profile "shared"`, "is removed", backends.MigrationGuideURL} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+		})
 	}
-	p := &profile.Profile{}
-	if !p.EffectiveMirrorLocal() {
-		t.Error("unset MirrorLocal should default to true")
-	}
-	f := false
-	p.MirrorLocal = &f
-	if p.EffectiveMirrorLocal() {
-		t.Error("MirrorLocal=false should report false")
+}
+
+func TestLoad_RefusesRemovedKeys(t *testing.T) {
+	for key, body := range map[string]string{
+		"mirror_local": "profiles:\n  prod:\n    mirror_local: false\n",
+		"url_source":   "profiles:\n  prod:\n    logs: {type: s3, bucket: b, url_source: env:PG}\n",
+		"binaries":     "profiles:\n  prod:\n    cache: {type: filesystem, path: /tmp/c, binaries: {type: s3, bucket: b}}\n",
+	} {
+		path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
+		}
 	}
 }
 

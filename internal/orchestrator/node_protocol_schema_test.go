@@ -190,8 +190,17 @@ func (s protocolSchema) mustValidate(t *testing.T, def string, v any) {
 	}
 }
 
+// safety: schema properties the Go SDK does not emit yet, per $defs entry; the
+// check fails once a listed one is emitted, so the list cannot go stale.
+var notYetEmitted = map[string][]string{
+	"node":      {"needs_generated", "tools"},
+	"modifiers": {"skip_if_budget_ms"},
+	"step":      {"has_dry_run", "safe_without_dry_run"},
+	"memoKey":   {"const", "env", "files"},
+}
+
 // safety: walks the Go type, so a field no sample sets still has to be in the
-// schema, and a schema field the type lacks has to be marked Target.
+// schema, and a schema field the type lacks has to be listed in notYetEmitted.
 func (s protocolSchema) requireFieldsDeclared(t *testing.T, def string, typ reflect.Type) {
 	t.Helper()
 	props, _ := s.def(t, def)["properties"].(map[string]any)
@@ -206,16 +215,25 @@ func (s protocolSchema) requireFieldsDeclared(t *testing.T, def string, typ refl
 			t.Errorf("%s emits %q, which $defs/%s does not declare; add it to docs/schemas and docs/node-protocol.md", typ, name, def)
 		}
 	}
+	pending := map[string]bool{}
+	for _, name := range notYetEmitted[def] {
+		pending[name] = true
+		if _, ok := props[name]; !ok {
+			t.Errorf("notYetEmitted[%q] lists %q, which $defs/%s does not declare", def, name, def)
+		}
+		if emitted[name] {
+			t.Errorf("%s emits %q; remove it from notYetEmitted[%q]", typ, name, def)
+		}
+	}
 	var stale []string
-	for name, p := range props {
-		desc, _ := p.(map[string]any)["description"].(string)
-		if !emitted[name] && !strings.HasPrefix(desc, "Target:") {
+	for name := range props {
+		if !emitted[name] && !pending[name] {
 			stale = append(stale, name)
 		}
 	}
 	sort.Strings(stale)
 	for _, name := range stale {
-		t.Errorf("$defs/%s declares %q, which %s does not emit; mark it Target: or remove it", def, name, typ)
+		t.Errorf("$defs/%s declares %q, which %s does not emit; emit it or list it in notYetEmitted", def, name, typ)
 	}
 }
 
@@ -399,5 +417,78 @@ func TestLogRecordsMatchTheSchema(t *testing.T) {
 	pointed["attrs"].(map[string]any)["line"] = 0.0
 	if errs := s.validate(s.root, pointed, "record"); len(errs) == 0 {
 		t.Error("the schema accepted an annotation at line 0")
+	}
+}
+
+// safety: SDK authors copy the transcripts in docs/node-protocol.md, so every
+// request-pipe line and frame-pipe line in them has to match the schemas.
+func TestNodeProtocolTranscriptsMatchTheSchemas(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-protocol.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proto := loadProtocolSchema(t, "node-protocol.schema.json")
+	describe := loadProtocolSchema(t, "describe.schema.json")
+	record := loadProtocolSchema(t, "log-record.schema.json")
+	type target struct {
+		schema protocolSchema
+		def    string
+	}
+	results := map[string]target{
+		"describe": {describe, ""},
+		"plan":     {describe, "plan"},
+		"run_node": {proto, "runResult"},
+		"run_step": {proto, "runResult"},
+		"eval":     {proto, "evalResult"},
+	}
+	check := func(s protocolSchema, def string, v any, at string) {
+		if errs := s.validate(s.def(t, def), v, at); len(errs) > 0 {
+			t.Errorf("docs/node-protocol.md: %s", strings.Join(errs, "; "))
+		}
+	}
+	checked := 0
+	for _, block := range strings.Split(string(raw), "```text\n")[1:] {
+		block, _, _ = strings.Cut(block, "```")
+		ops := map[string]string{}
+		for i, line := range strings.Split(strings.TrimSpace(block), "\n") {
+			dir, msg := line[:min(3, len(line))], line[min(3, len(line)):]
+			var v any
+			if err := json.Unmarshal([]byte(msg), &v); err != nil || (dir != "-> " && dir != "<- ") {
+				t.Errorf("docs/node-protocol.md: transcript line %q is not a request (\"-> \") or a frame (\"<- \") holding one JSON object", line)
+				continue
+			}
+			obj, _ := v.(map[string]any)
+			at := fmt.Sprintf("transcript line %d", i+1)
+			checked++
+			switch {
+			case dir == "-> ":
+				check(proto, "request", v, at)
+				id, _ := obj["id"].(string)
+				if _, dup := ops[id]; dup {
+					t.Errorf("docs/node-protocol.md: %s reuses request id %q", at, id)
+				}
+				ops[id], _ = obj["op"].(string)
+			case obj["reply"] != nil:
+				check(proto, "reply", v, at)
+				op, sent := ops[obj["reply"].(string)]
+				if !sent {
+					t.Errorf("docs/node-protocol.md: %s answers id %v, which no request in its transcript sent", at, obj["reply"])
+					continue
+				}
+				if result, ok := obj["result"].(map[string]any); ok && obj["ok"] == true {
+					check(results[op].schema, results[op].def, result, at+" result")
+					if nodes, ok := result["value"].([]any); ok && op == "eval" {
+						for _, n := range nodes {
+							check(describe, "node", n, at+" generated node")
+						}
+					}
+				}
+			default:
+				check(record, "", v, at)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no transcript lines in docs/node-protocol.md")
 	}
 }

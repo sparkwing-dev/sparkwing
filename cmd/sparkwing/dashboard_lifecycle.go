@@ -33,10 +33,8 @@ func dashboardFlags(command Command, args []string, start bool) (dashboardOption
 		fs.StringVar(&o.Addr, "addr", o.Addr, "bind address")
 		fs.StringVar(&o.LogStore, "log-store", "", "log backend URL")
 		fs.StringVar(&o.ArtifactStore, "artifact-store", "", "artifact backend URL")
-		fs.StringVar(&o.Profile, "profile", "", "storage profile")
 		fs.StringVar(&o.AllowOrigins, "allow-origin", "", "browser origins")
 		fs.BoolVar(&o.ReadOnly, "read-only", false, "reject writes")
-		fs.BoolVar(&o.NoLocalStore, "no-local-store", false, "skip local store")
 		fs.BoolVar(&o.AllowRemote, "allow-remote", false, "allow non-loopback bind")
 	}
 	if err := parseAndCheck(command, fs, args); err != nil {
@@ -108,17 +106,6 @@ func runDashboardLaunch(args []string, restart bool) error {
 	}
 	if err = web.VerifyBundleEmbedded(); err != nil {
 		return err
-	}
-	supplied := false
-	if o.Profile != "" {
-		p, e := resolveProfileFlag(o.Profile)
-		if e != nil {
-			return e
-		}
-		supplied = p.Logs != nil && p.Cache != nil
-	}
-	if o.NoLocalStore && (o.LogStore == "" || o.ArtifactStore == "") && !supplied {
-		return errors.New("--no-local-store requires --log-store and --artifact-store, or a profile supplying both")
 	}
 	if _, err = dashboardBoot(); err != nil {
 		return err
@@ -238,7 +225,7 @@ func validateDashboardStoreURL(raw string, artifact bool) error {
 
 func dashboardOptionArgs(o dashboardOptions) []string {
 	a := []string{"--addr", o.Addr}
-	for _, v := range [][2]string{{"--log-store", o.LogStore}, {"--artifact-store", o.ArtifactStore}, {"--profile", o.Profile}, {"--allow-origin", o.AllowOrigins}} {
+	for _, v := range [][2]string{{"--log-store", o.LogStore}, {"--artifact-store", o.ArtifactStore}, {"--allow-origin", o.AllowOrigins}} {
 		if v[1] != "" {
 			a = append(a, v[0], v[1])
 		}
@@ -246,7 +233,7 @@ func dashboardOptionArgs(o dashboardOptions) []string {
 	for _, v := range []struct {
 		name  string
 		value bool
-	}{{"--read-only", o.ReadOnly}, {"--no-local-store", o.NoLocalStore}, {"--allow-remote", o.AllowRemote}} {
+	}{{"--read-only", o.ReadOnly}, {"--allow-remote", o.AllowRemote}} {
 		if v.value {
 			a = append(a, v.name)
 		}
@@ -264,17 +251,11 @@ func mergeDashboardOptions(old, next dashboardOptions, fs *flag.FlagSet) dashboa
 	if fs.Changed("artifact-store") {
 		old.ArtifactStore = next.ArtifactStore
 	}
-	if fs.Changed("profile") {
-		old.Profile = next.Profile
-	}
 	if fs.Changed("allow-origin") {
 		old.AllowOrigins = next.AllowOrigins
 	}
 	if fs.Changed("read-only") {
 		old.ReadOnly = next.ReadOnly
-	}
-	if fs.Changed("no-local-store") {
-		old.NoLocalStore = next.NoLocalStore
 	}
 	if fs.Changed("allow-remote") {
 		old.AllowRemote = next.AllowRemote

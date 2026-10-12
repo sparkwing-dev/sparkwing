@@ -1,25 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Sparkwing node protocol: describe document",
-  "description": "What an SDK process answers to the describe and plan requests of docs/node-protocol.md. A property whose description starts with 'Target:' is part of the contract the engine-hosted model needs and no SDK emits yet; every other property is emitted today.",
+  "description": "What an SDK process answers to the describe and plan requests of docs/node-protocol.md. $defs/node is also the shape a generator closure returns.",
   "type": "object",
   "properties": {
     "protocol": {
       "type": "string",
-      "description": "Target: the node protocol version the SDK speaks, the same value it sends in the Sparkwing-Node-Protocol header."
+      "description": "The node protocol version the SDK speaks, the same value it sends in the Sparkwing-Node-Protocol header. The host refuses any value but its own."
     },
+    "sdk": { "$ref": "#/$defs/sdk" },
     "pipelines": {
       "type": "array",
-      "items": { "$ref": "#/$defs/pipeline" },
-      "description": "Target: the envelope around the array `--describe` writes today."
+      "items": { "$ref": "#/$defs/pipeline" }
     }
   },
   "required": ["protocol", "pipelines"],
   "additionalProperties": false,
   "$defs": {
+    "sdk": {
+      "type": "object",
+      "description": "The SDK that answered, so a refusal can name the package to upgrade.",
+      "properties": {
+        "language": { "type": "string", "description": "Such as go or typescript." },
+        "version": { "type": "string", "description": "The SDK's release version." }
+      },
+      "required": ["language", "version"],
+      "additionalProperties": false
+    },
     "pipeline": {
       "type": "object",
-      "description": "One registered pipeline, as `<binary> --describe` writes each array element.",
+      "description": "One registered pipeline.",
       "properties": {
         "name": { "type": "string" },
         "short": { "type": "string" },
@@ -82,15 +92,15 @@
     },
     "plan": {
       "type": "object",
-      "description": "One run's plan, as `<binary> plan --json` writes it: the nodes, their edges and each node's execution envelope.",
+      "description": "One run's plan, the result of the plan request: the nodes, their edges and each node's execution envelope.",
       "properties": {
-        "protocol": { "type": "string", "description": "Target: the node protocol version, as at the top level." },
+        "protocol": { "type": "string", "description": "The node protocol version, as at the top level." },
         "pipeline": { "type": "string" },
         "run_id": { "type": "string" },
         "priority": { "type": "integer" },
         "claim_wait_ms": { "type": "integer" },
         "admission_class": { "type": "string" },
-        "requires": { "type": "array", "items": { "type": "string" }, "description": "Runner labels the whole pipeline requires." },
+        "requires": { "type": "array", "items": { "type": "string" }, "description": "Runner labels the whole pipeline requires. The host fills it from sparkwing.yaml; an SDK leaves it out." },
         "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
         "plan_concurrency": { "$ref": "#/$defs/concurrencyKey" },
         "plan_concurrency_groups": { "type": "array", "items": { "$ref": "#/$defs/concurrencyKey" } },
@@ -137,7 +147,7 @@
     },
     "node": {
       "type": "object",
-      "description": "One node of the plan. `deps` and `optional_deps` are its edges.",
+      "description": "One node of the plan, or one node a generator closure returns. `deps`, `optional_deps` and `needs_generated` are its edges.",
       "properties": {
         "id": { "type": "string" },
         "deps": { "type": ["array", "null"], "items": { "type": "string" } },
@@ -151,12 +161,13 @@
         "on_failure_of": { "type": "string" },
         "modifiers": { "$ref": "#/$defs/modifiers" },
         "work": { "$ref": "#/$defs/work" },
-        "spec_hash": { "type": "string" },
+        "spec_hash": { "type": "string", "description": "The host's hash of the node document; an SDK leaves it out." },
         "pipeline_refs": { "type": "array", "items": { "$ref": "#/$defs/pipelineRef" } },
-        "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Dependency-cache directories the host restores before the node starts and saves after it succeeds." },
+        "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Dependency-cache directories the host restores before the node's first process starts and saves after the node succeeds." },
         "memo_key": { "$ref": "#/$defs/memoKey", "description": "Memo key inputs the host hashes." },
         "closures": { "$ref": "#/$defs/closures", "description": "Ids of the node's closures, which the host evaluates with eval." },
-        "tools": { "type": "array", "items": { "type": "string" }, "description": "Target: tool names the node needs on PATH." }
+        "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names the host puts on PATH before the node starts." },
+        "needs_generated": { "type": "array", "items": { "type": "string" }, "description": "Generator closure ids; the node waits for every node each generator adds." }
       },
       "required": ["id", "deps"],
       "additionalProperties": false
@@ -211,14 +222,15 @@
         "conc_cancel_timeout_ms": { "type": "integer" },
         "res_cores": { "type": "number" },
         "res_memory_bytes": { "type": "integer" },
-        "inline": { "type": "boolean" },
+        "inline": { "type": "boolean", "description": "The host runs the node on the host that dispatches the run, in its own process, rather than through a runner." },
         "optional": { "type": "boolean" },
         "continue_on_error": { "type": "boolean" },
         "on_failure": { "type": "string", "description": "Id of the node that runs when this one fails." },
         "has_before_run": { "type": "boolean" },
         "has_after_run": { "type": "boolean" },
         "has_skip_if": { "type": "boolean" },
-        "has_verify": { "type": "boolean", "description": "The node carries a Verify closure." }
+        "has_verify": { "type": "boolean", "description": "The node carries a Verify closure." },
+        "skip_if_budget_ms": { "type": "integer", "minimum": 0, "description": "Time the host allows each node skip_if closure; absent means 30000." }
       },
       "additionalProperties": false
     },
@@ -244,6 +256,8 @@
         "risks": { "type": "array", "items": { "type": "string" } },
         "continue_on_error": { "type": "boolean", "description": "A failure of this step does not fail the node." },
         "optional": { "type": "boolean", "description": "The step may be skipped without failing the node." },
+        "has_dry_run": { "type": "boolean", "description": "The step has a dry-run body, which the SDK runs instead of its body in a dry run." },
+        "safe_without_dry_run": { "type": "boolean", "description": "The step's body runs unchanged in a dry run." },
         "closures": { "$ref": "#/$defs/closures", "description": "Ids of the step's closures; a step has only skip_if." }
       },
       "required": ["id"],
@@ -275,9 +289,9 @@
       "type": "object",
       "description": "Memo key inputs. The host hashes files, env and const together; closure names a cache_key closure whose string the host namespaces.",
       "properties": {
-        "files": { "type": "array", "items": { "type": "string" }, "description": "Target: files whose content the host hashes." },
-        "env": { "type": "array", "items": { "type": "string" }, "description": "Target: environment variable names whose values the host hashes." },
-        "const": { "type": "array", "items": { "type": "string" }, "description": "Target: constant strings the host hashes." },
+        "files": { "type": "array", "items": { "type": "string" }, "description": "Files whose content the host hashes." },
+        "env": { "type": "array", "items": { "type": "string" }, "description": "Environment variable names whose values the host hashes." },
+        "const": { "type": "array", "items": { "type": "string" }, "description": "Constant strings the host hashes." },
         "closure": { "type": "string", "description": "Id of the node's cache_key closure, the same id as closures.cache_key." }
       },
       "additionalProperties": false

@@ -51,7 +51,6 @@ type runFlags struct {
 
 	noBincache      bool
 	hashAllFiles    bool
-	digestBackfill  bool
 	allowUnadmitted bool
 
 	mode string
@@ -182,13 +181,14 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(argument, "--sw-ref="):
 			flags.ref = strings.TrimPrefix(argument, "--sw-ref=")
 			argumentIndex++
+		// safety: a removed flag left to the passthrough would reach the
+		// pipeline as an argument named profile, so it is refused instead.
 		case argument == "--profile":
+			flags.profile = "<name>"
 			if argumentIndex+1 < len(args) {
 				flags.profile = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
+				argumentIndex++
 			}
-			passthroughArgs = append(passthroughArgs, argument)
 			argumentIndex++
 		case strings.HasPrefix(argument, "--profile="):
 			flags.profile = strings.TrimPrefix(argument, "--profile=")
@@ -201,9 +201,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case argument == "--sw-hash-all-files":
 			flags.hashAllFiles = true
-			argumentIndex++
-		case argument == "--sw-artifact-digest-backfill":
-			flags.digestBackfill = true
 			argumentIndex++
 		case argument == "--sw-allow-unadmitted":
 			flags.allowUnadmitted = true

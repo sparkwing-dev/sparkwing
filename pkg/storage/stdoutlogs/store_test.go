@@ -127,13 +127,13 @@ func TestDeleteRun_IsNoop(t *testing.T) {
 }
 
 func TestCheckSpec_RejectsExtraFields(t *testing.T) {
-	if err := stdoutlogs.CheckSpec("", "", "", "", "", ""); err != nil {
+	if err := stdoutlogs.CheckSpec("", "", "", "", ""); err != nil {
 		t.Errorf("empty fields should validate, got %v", err)
 	}
-	if err := stdoutlogs.CheckSpec("b", "", "", "", "", ""); err == nil || !strings.Contains(err.Error(), "bucket") {
+	if err := stdoutlogs.CheckSpec("b", "", "", "", ""); err == nil || !strings.Contains(err.Error(), "bucket") {
 		t.Errorf("want bucket error, got %v", err)
 	}
-	if err := stdoutlogs.CheckSpec("", "", "/tmp", "", "", ""); err == nil || !strings.Contains(err.Error(), "path") {
+	if err := stdoutlogs.CheckSpec("", "", "/tmp", "", ""); err == nil || !strings.Contains(err.Error(), "path") {
 		t.Errorf("want path error, got %v", err)
 	}
 }

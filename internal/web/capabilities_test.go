@@ -88,15 +88,6 @@ func TestCapabilitiesHandler_ServesBackendCaps(t *testing.T) {
 			wantRuns: "sqlite",
 		},
 		{
-			name: "s3",
-			caps: backend.Capabilities{
-				Mode:     "s3-only",
-				Storage:  backend.CapabilitiesStorage{Artifacts: "s3", Logs: "s3", Runs: "s3"},
-				ReadOnly: true,
-			},
-			wantRuns: "s3",
-		},
-		{
 			name: "controller",
 			caps: backend.Capabilities{
 				Mode:    "cluster",

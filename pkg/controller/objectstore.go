@@ -111,11 +111,6 @@ func objectStoreHealth(bucket bool) (map[string]any, []string) {
 		}
 	}
 
-	stalls := objectguard.Stalls()
-	if len(stalls) > 0 {
-		summary["stalled"] = true
-		problems = append(problems, "object-store replay stalled")
-	}
 	return summary, problems
 }
 

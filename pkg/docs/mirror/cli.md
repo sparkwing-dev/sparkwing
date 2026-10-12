@@ -127,8 +127,7 @@ indexed in [cli-reference.md](cli-reference.md):
   a profile, so a command reaches a controller only when its own command
   line names one. Every verb that can reach a controller accepts
   `--profile`. `sparkwing run` always executes
-  locally; it accepts `--profile` only for a profile with no controller
-  whose state is S3 or Postgres, a temporary exception slated for removal.
+  locally and takes no `--profile`.
   `sparkwing pipeline trigger <pipeline> --profile NAME` is the verb for
   remote (cluster) execution.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail
