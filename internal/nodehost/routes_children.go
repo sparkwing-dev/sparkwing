@@ -16,6 +16,9 @@ const (
 	// perf: a child run takes seconds at least, so a poll a second keeps the
 	// controller's load per waiting node small.
 	awaitPoll = time.Second
+	// safety: a child's args are a pipeline's inputs, not data, so a small
+	// body bounds what a node can make the host hold.
+	maxChildBody = 64 << 10
 )
 
 type childRequest struct {
@@ -28,19 +31,21 @@ type childRequest struct {
 // safety: the controller reads the parent run, node and attempt from the
 // claim, so the node names none of them.
 func (s *Server) serveStartChild(w http.ResponseWriter, r *http.Request, g *grant) {
-	var req childRequest
-	if !decodeBody(r, &req) || !validName(req.Pipeline) || len(req.Args) > 256 {
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name a pipeline")
-		return
-	}
-	claim, ok := s.claimFor(w, g)
+	claim, ctx, done, ok := s.forward(w, r, g)
 	if !ok {
 		return
 	}
-	ctx, cancel := forwardContext(r, g)
-	defer cancel()
-	claim.childMu.Lock()
-	defer claim.childMu.Unlock()
+	defer done()
+	var req childRequest
+	if !decodeBody(r, maxChildBody, &req) || !validName(req.Pipeline) || len(req.Args) > 256 {
+		s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name a pipeline, in at most 64 KiB")
+		return
+	}
+	if !acquire(ctx, claim.childSlot) {
+		s.upstreamFailed(w, g, "children", 0, ctx.Err())
+		return
+	}
+	defer func() { <-claim.childSlot }()
 	var out struct {
 		RunID string `json:"run_id"`
 	}
@@ -77,10 +82,11 @@ func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *gran
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the run id, node or wait_ms is malformed")
 		return
 	}
-	claim, ok := s.claimFor(w, g)
+	claim, ctx, done, ok := s.forward(w, r, g)
 	if !ok {
 		return
 	}
+	defer done()
 	// safety: only a child this claim started is reachable; the controller
 	// checks the same, and the host refuses before asking it.
 	if !claim.startedChild(child) {
@@ -88,8 +94,6 @@ func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *gran
 		s.writeError(w, http.StatusNotFound, "unknown_child", "node "+quote(g.NodeID)+" did not start run "+quote(child))
 		return
 	}
-	ctx, cancel := forwardContext(r, g)
-	defer cancel()
 	run, status, err := awaitChild(ctx, claim, g.RunID, child, wait)
 	switch {
 	case err != nil:
@@ -120,12 +124,8 @@ func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *gran
 			s.upstreamFailed(w, g, "await", status, nil)
 			return
 		}
-		output, err := claim.fetchOutput(ctx, grant)
-		if err != nil {
-			s.upstreamFailed(w, g, "await", 0, err)
-			return
-		}
-		reply["output"] = output
+		s.writeOutput(ctx, w, g, "await", grant, reply)
+		return
 	}
 	s.writeJSON(w, http.StatusOK, reply)
 }

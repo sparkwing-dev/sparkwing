@@ -22,7 +22,7 @@ unlock.
 
 ### Added
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
-- **engine:** node routes for another node's output, OIDC tokens, child runs and their results, and a pipeline's latest run; the host forwards them to the controller with the node's claim token, which the node process never holds
+- **engine:** node routes for another node's output, OIDC tokens, child runs and their results, and a pipeline's latest run; the host forwards them to the controller with the node's claim token, which the node process never holds. A node has at most 4 of these requests open at once and gets 429 `too_many_requests` beyond that, and a child run's request body is at most 64 KiB
 - **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
 - **controller + web:** The operator console sets a trusted team's daily cap, card rung and Cloud node cap, and releases a payment dispute's hold

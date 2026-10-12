@@ -6,19 +6,18 @@ import (
 )
 
 func (s *Server) serveOIDCToken(w http.ResponseWriter, r *http.Request, g *grant) {
-	var req struct {
-		Audience string `json:"audience"`
-	}
-	if !decodeBody(r, &req) || req.Audience == "" || len(req.Audience) > 1024 {
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name an audience")
-		return
-	}
-	claim, ok := s.claimFor(w, g)
+	claim, ctx, done, ok := s.forward(w, r, g)
 	if !ok {
 		return
 	}
-	ctx, cancel := forwardContext(r, g)
-	defer cancel()
+	defer done()
+	var req struct {
+		Audience string `json:"audience"`
+	}
+	if !decodeBody(r, 4<<10, &req) || req.Audience == "" || len(req.Audience) > 1024 {
+		s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name an audience")
+		return
+	}
 	var token struct {
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`

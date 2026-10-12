@@ -27,6 +27,10 @@ const upstreamTimeout = 60 * time.Second
 
 const maxUpstreamReply = 1 << 20
 
+// safety: a node holds at most this many forwards at once, awaits included,
+// so it bounds the host's handlers, buffers and controller polls per node.
+const forwardLimit = 4
+
 // Claim is one claimed node attempt's controller credential. The host holds
 // it and forwards node routes with it; the node process never sees it. Make
 // one per claim: it numbers the child runs the attempt starts, which the
@@ -36,9 +40,13 @@ type Claim struct {
 	token string
 	http  *http.Client
 
+	slots chan struct{}
+	// safety: one output in memory at a time, so a node holds at most one
+	// 64 MiB output in the host however many reads it opens.
+	outputSlot chan struct{}
 	// safety: one call at a time, so a call that failed in transit keeps its
 	// ordinal and its retry cannot start a second child.
-	childMu   sync.Mutex
+	childSlot chan struct{}
 	nextChild int64
 	mu        sync.Mutex
 	children  map[string]bool
@@ -56,6 +64,7 @@ func NewClaim(controllerURL, token string) (*Claim, error) {
 	}
 	return &Claim{
 		base: strings.TrimRight(base.String(), "/"), token: token, children: map[string]bool{},
+		slots: make(chan struct{}, forwardLimit), outputSlot: make(chan struct{}, 1), childSlot: make(chan struct{}, 1),
 		http: &http.Client{Timeout: upstreamTimeout, Transport: otelutil.WrapTransport(nil)},
 	}, nil
 }
@@ -185,12 +194,48 @@ func validName(name string) bool {
 	return name != "" && len(name) <= 256 && name != "." && name != ".." && !strings.ContainsAny(name, "/\\")
 }
 
-func (s *Server) claimFor(w http.ResponseWriter, g *grant) (*Claim, bool) {
+// safety: the slot is taken before the body is read, and a node past its
+// limit is refused at once, so waiting requests hold nothing; revoking the
+// grant ends the forward too.
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, g *grant) (*Claim, context.Context, func(), bool) {
 	if g.Claim == nil {
 		s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "this node has no controller to forward to")
-		return nil, false
+		return nil, nil, nil, false
 	}
-	return g.Claim, true
+	select {
+	case g.Claim.slots <- struct{}{}:
+	default:
+		s.writeError(w, http.StatusTooManyRequests, "too_many_requests",
+			fmt.Sprintf("a node has at most %d controller requests open at once; retry after one ends", forwardLimit))
+		return nil, nil, nil, false
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	stop := context.AfterFunc(g.ctx, cancel)
+	return g.Claim, ctx, func() { stop(); cancel(); <-g.Claim.slots }, true
+}
+
+func acquire(ctx context.Context, slot chan struct{}) bool {
+	select {
+	case slot <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (s *Server) writeOutput(ctx context.Context, w http.ResponseWriter, g *grant, route string, grant store.OutputReadGrant, reply map[string]any) {
+	if !acquire(ctx, g.Claim.outputSlot) {
+		s.upstreamFailed(w, g, route, 0, ctx.Err())
+		return
+	}
+	defer func() { <-g.Claim.outputSlot }()
+	output, err := g.Claim.fetchOutput(ctx, grant)
+	if err != nil {
+		s.upstreamFailed(w, g, route, 0, err)
+		return
+	}
+	reply["output"] = output
+	s.writeJSON(w, http.StatusOK, reply)
 }
 
 // safety: a controller reply can quote URLs and credentials, so only the
@@ -204,14 +249,6 @@ func (s *Server) upstreamFailed(w http.ResponseWriter, g *grant, route string, s
 	s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "the controller could not be reached; retry after a delay")
 }
 
-// safety: revoking the grant ends a forward in flight, not just the
-// request's own context.
-func forwardContext(r *http.Request, g *grant) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(r.Context())
-	stop := context.AfterFunc(g.ctx, cancel)
-	return ctx, func() { stop(); cancel() }
-}
-
-func decodeBody(r *http.Request, into any) bool {
-	return json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(into) == nil
+func decodeBody(r *http.Request, limit int64, into any) bool {
+	return json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(into) == nil
 }

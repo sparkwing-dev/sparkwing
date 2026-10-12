@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -15,12 +14,11 @@ func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *gran
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the node id is malformed")
 		return
 	}
-	claim, ok := s.claimFor(w, g)
+	claim, ctx, done, ok := s.forward(w, r, g)
 	if !ok {
 		return
 	}
-	ctx, cancel := forwardContext(r, g)
-	defer cancel()
+	defer done()
 	var row struct {
 		Status  string `json:"status"`
 		Outcome string `json:"outcome"`
@@ -58,12 +56,7 @@ func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *gran
 		s.upstreamFailed(w, g, "output", status, nil)
 		return
 	}
-	output, err := claim.fetchOutput(ctx, grant)
-	if err != nil {
-		s.upstreamFailed(w, g, "output", 0, err)
-		return
-	}
-	s.writeJSON(w, http.StatusOK, map[string]json.RawMessage{"output": output})
+	s.writeOutput(ctx, w, g, "output", grant, map[string]any{})
 }
 
 // safety: the controller resolves the run within the claim's team and only
@@ -80,12 +73,11 @@ func (s *Server) servePipelineLatest(w http.ResponseWriter, r *http.Request, g *
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the pipeline, node or max_age_ms is malformed")
 		return
 	}
-	claim, ok := s.claimFor(w, g)
+	claim, ctx, done, ok := s.forward(w, r, g)
 	if !ok {
 		return
 	}
-	ctx, cancel := forwardContext(r, g)
-	defer cancel()
+	defer done()
 	var in store.ClaimInput
 	status, code, err := claim.call(ctx, http.MethodPost, runPath(g.RunID, "nodes", g.NodeID, "claim", "input"),
 		store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: pipeline, Node: node, MaxAgeMS: maxAge}, &in)
@@ -108,10 +100,5 @@ func (s *Server) servePipelineLatest(w http.ResponseWriter, r *http.Request, g *
 		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" of the newest run recorded no output")
 		return
 	}
-	output, err := claim.fetchOutput(ctx, in.Output)
-	if err != nil {
-		s.upstreamFailed(w, g, "latest", 0, err)
-		return
-	}
-	s.writeJSON(w, http.StatusOK, map[string]any{"run_id": in.RunID, "output": output})
+	s.writeOutput(ctx, w, g, "latest", in.Output, map[string]any{"run_id": in.RunID})
 }
