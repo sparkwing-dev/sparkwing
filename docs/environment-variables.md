@@ -119,6 +119,7 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NO_UPDATE` | Carries `--sw-no-update` to the pipeline binary, which records it with the run's invocation. Setting it by hand changes only that record; the flag is what skips sparks resolution. |
 | `SPARKWING_ALLOW_UNADMITTED` | Carries `--sw-allow-unadmitted` to the pipeline binary; a pipeline binary no CLI launched reads it the same way. See [local-execution](local-execution.md). |
 | `SPARKWING_ONLY` | Carries `--sw-only` to the pipeline binary. |
+| `SPARKWING_PROTOCOL_HANDLES` | Windows only: the host sets it for a process it starts with `--sw-node-protocol`, naming the inherited request and frame pipe handles as `<request>,<frame>`. The SDK removes it at startup. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_PROFILE` | Set only by a CLI from before `sparkwing run --profile` was removed. A pipeline binary that finds it refuses the run, naming `sparkwing pipeline trigger`, rather than recording locally; `sparkwing run` drops an inherited value, so exporting it selects nothing. |
 | `SPARKWING_REF` | Carries `--sw-ref` to the pipeline binary. |
 | `SPARKWING_STOP_AT` | Carries `--sw-stop-at` to the pipeline binary. |
