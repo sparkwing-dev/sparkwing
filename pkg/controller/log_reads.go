@@ -118,7 +118,7 @@ func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
-	_, known, err := l.s.store.NodeDone(ctx, l.team, runID, nodeID)
+	_, known, err := l.s.store.NodeLogSettled(ctx, l.team, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (l segmentLogs) streamNode(ctx context.Context, runID, nodeID string, cur l
 		if cur.attempt < len(recs) {
 			at := cur.attempt
 			if err := streamSegments(ctx, l.objs, l.s.liveLogs, recs[at], cur.off, out,
-				func(off int64) error { return mark(logCursor{attempt: at, off: off}) }); err != nil {
+				func(off int64) string { return logCursor{attempt: at, off: off}.encode(runID, nodeID) }); err != nil {
 				return err
 			}
 			cur = logCursor{attempt: at + 1}
@@ -181,11 +181,11 @@ func (l segmentLogs) streamNode(ctx context.Context, runID, nodeID string, cur l
 			}
 			continue
 		}
-		done, known, err := l.s.store.NodeDone(ctx, l.team, runID, nodeID)
+		settled, known, err := l.s.store.NodeLogSettled(ctx, l.team, runID, nodeID)
 		if err != nil {
 			return err
 		}
-		if done || !known {
+		if settled || !known {
 			if recs, err = l.nodeRecords(ctx, runID, nodeID); err != nil {
 				return err
 			}
@@ -243,7 +243,7 @@ const segmentStreamPoll = 5 * time.Second
 // safety: offsets count bytes of the whole log, off how far the reader was sent and segEnd how far the segments
 // reach; the ring is joined only at off, so no line is sent twice or skipped. It returns once the manifest landed.
 func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, rec store.NodeLog, off int64, out io.Writer,
-	mark func(off int64) error,
+	id func(off int64) string,
 ) error {
 	var segEnd int64
 	read := 0
@@ -258,11 +258,8 @@ func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, re
 			if err != nil {
 				return err
 			}
-			if skip := off - segEnd; skip < int64(len(body)) {
-				if err := writeSSELines(out, body[max(skip, 0):]); err != nil {
-					return err
-				}
-				if err := mark(segEnd + int64(len(body))); err != nil {
+			if skip := max(off-segEnd, 0); skip < int64(len(body)) {
+				if err := writeSSELines(out, body[skip:], segEnd+skip, id); err != nil {
 					return err
 				}
 			}
@@ -273,14 +270,14 @@ func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, re
 		if log.Manifest != nil {
 			return nil
 		}
-		if err := tailLiveRing(ctx, live, rec, &off, out, mark); err != nil {
+		if err := tailLiveRing(ctx, live, rec, &off, out, id); err != nil {
 			return err
 		}
 	}
 }
 
 // perf: when the ring cannot continue from off it waits out the poll rather than listing segments in a loop.
-func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *int64, out io.Writer, mark func(int64) error) error {
+func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *int64, out io.Writer, id func(int64) string) error {
 	deadline := time.Now().Add(segmentStreamPoll)
 	for {
 		waitCtx, cancel := context.WithDeadline(ctx, deadline)
@@ -293,13 +290,10 @@ func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *i
 		case !time.Now().Before(deadline):
 			return nil
 		case ok && chunk.Attempt == store.LiveLogAttempt(rec.Attempt, rec.Generation) && chunk.Start <= *off && chunk.Next > *off:
-			if err := writeSSELines(out, chunk.Data); err != nil {
+			if err := writeSSELines(out, chunk.Data[*off-chunk.Start:], *off, id); err != nil {
 				return err
 			}
 			*off = chunk.Next
-			if err := mark(*off); err != nil {
-				return err
-			}
 		default:
 			select {
 			case <-ctx.Done():
@@ -310,9 +304,14 @@ func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *i
 	}
 }
 
-func writeSSELines(out io.Writer, data []byte) error {
-	for line := range bytes.SplitSeq(bytes.TrimSuffix(data, []byte("\n")), []byte("\n")) {
-		if _, err := fmt.Fprintf(out, "data: %s\n\n", line); err != nil {
+// safety: every line carries the cursor just past it as its event id, so a reader that loses the connection after
+// any line resumes after that line and is sent none twice.
+func writeSSELines(out io.Writer, data []byte, base int64, id func(off int64) string) error {
+	for len(data) > 0 {
+		line, rest, _ := bytes.Cut(data, []byte("\n"))
+		base += int64(len(data) - len(rest))
+		data = rest
+		if _, err := fmt.Fprintf(out, "id: %s\ndata: %s\n\n", id(base), line); err != nil {
 			return err
 		}
 	}

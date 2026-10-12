@@ -24,9 +24,11 @@ import (
 )
 
 func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string) {
+	// safety: an EventSource keeps the URL it opened with and sends its newest progress as Last-Event-ID, so that
+	// header wins over a cursor in the query.
 	cursor := r.Header.Get("Last-Event-ID")
-	if q := r.URL.Query().Get("cursor"); q != "" {
-		cursor = q
+	if cursor == "" {
+		cursor = r.URL.Query().Get("cursor")
 	}
 	body, err := b.StreamNodeLog(storage.WithLogCursor(r.Context(), cursor), runID, nodeID)
 	if errors.Is(err, storage.ErrBadCursor) {

@@ -109,9 +109,12 @@ func TestFollowedNode_ResumesFromItsCursorWithoutReplay(t *testing.T) {
 }
 
 // A stream the controller refuses, as it does a token without logs.read,
-// ends the follow with that refusal rather than retrying it forever.
+// ends the follow with that refusal rather than retrying it forever, even
+// when the run reads as terminal only after the refusal was queued.
 func TestFollowLogsRemote_EndsOnARefusedStream(t *testing.T) {
 	const runID = "run-refused"
+	streamRefused := make(chan struct{})
+	var refuseOnce sync.Once
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/nodes"):
@@ -120,7 +123,9 @@ func TestFollowLogsRemote_EndsOnARefusedStream(t *testing.T) {
 			_, _ = io.WriteString(w, `{"logs":{"segments":true}}`)
 		case strings.HasSuffix(r.URL.Path, "/stream"):
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			refuseOnce.Do(func() { close(streamRefused) })
 		case r.URL.Path == "/api/v1/runs/"+runID:
+			<-streamRefused
 			_ = json.NewEncoder(w).Encode(store.Run{ID: runID, Status: "success"})
 		default:
 			http.NotFound(w, r)
@@ -131,5 +136,41 @@ func TestFollowLogsRemote_EndsOnARefusedStream(t *testing.T) {
 	ctrl := client.NewWithToken(srv.URL, nil, "")
 	if err := followLogsRemote(context.Background(), ctrl, ctrl.NodeLogs(), runID, "", io.Discard); !errors.Is(err, client.ErrLogStreamRefused) {
 		t.Fatalf("follow = %v, want the refusal", err)
+	}
+}
+
+type failingLogs struct {
+	storage.LogStore
+	opened atomic.Int32
+}
+
+func (l *failingLogs) Stream(context.Context, string, string) (io.ReadCloser, error) {
+	if l.opened.Add(1) == 1 {
+		return io.NopCloser(strings.NewReader("id: c1\ndata: line 1\n\n")), nil
+	}
+	return nil, errors.New("HTTP 502: bad gateway")
+}
+
+// A node stream that keeps failing after it sent something uses up its own
+// budget and ends the node's follow with an error, rather than retrying
+// for as long as the run's status reads keep succeeding.
+func TestFollowedNode_EndsAfterItsStreamKeepsFailing(t *testing.T) {
+	shortFollowTiming(t, 30*time.Millisecond, time.Millisecond)
+	logs := &failingLogs{}
+	f := &followedNode{done: make(chan struct{})}
+	err := f.follow(context.Background(), logs, "run-1", "a", func(string) {})
+	if err == nil || !strings.Contains(err.Error(), "502") || !f.started.Load() {
+		t.Fatalf("follow = %v after %d opens; want the stream's failure", err, logs.opened.Load())
+	}
+}
+
+// An event whose closing blank line never arrived is neither printed nor
+// taken as progress, so a resume sends it again rather than skipping it.
+func TestReadSSE_ActsOnAnEventOnlyOnceItIsComplete(t *testing.T) {
+	var lines, ids []string
+	readSSE(context.Background(), strings.NewReader("id: c1\ndata: one\n\nid: c2\ndata: tw"),
+		func(id string) { ids = append(ids, id) }, func(l string) { lines = append(lines, l) })
+	if strings.Join(lines, ",") != "one" || strings.Join(ids, ",") != "c1" {
+		t.Fatalf("lines %q ids %q; want the complete event alone", lines, ids)
 	}
 }

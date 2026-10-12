@@ -365,7 +365,12 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 					terminalAt = time.Now()
 				}
 				if followFinished(streams, time.Since(terminalAt) >= followDrain) {
-					return nil
+					select {
+					case err := <-refused:
+						return fmt.Errorf("run %s: %w", runID, err)
+					default:
+						return nil
+					}
 				}
 			}
 			continue
@@ -405,9 +410,12 @@ func followFinished(streams map[string]*followedNode, drained bool) bool {
 	return true
 }
 
+// safety: a stream that keeps failing, or keeps closing without sending anything, uses up the node's own budget
+// and ends the follow with an error, since the run's healthy status reads would never stop it.
 func (f *followedNode) follow(ctx context.Context, logc storage.LogStore, runID, nodeID string, onLine func(string)) error {
 	cursor := ""
-	failures := 0
+	var failures remoteFollowFailures
+	consecutive := 0
 	for ctx.Err() == nil {
 		body, err := logc.Stream(storage.WithLogCursor(ctx, cursor), runID, nodeID)
 		switch {
@@ -417,10 +425,8 @@ func (f *followedNode) follow(ctx context.Context, logc storage.LogStore, runID,
 			return err
 		case err == nil && body == nil:
 			return nil
-		case err != nil:
-			failures++
-		default:
-			failures = 0
+		case err == nil:
+			from := cursor
 			ended := readSSE(ctx, body, func(id string) {
 				cursor = id
 				f.started.Store(true)
@@ -432,38 +438,59 @@ func (f *followedNode) follow(ctx context.Context, logc storage.LogStore, runID,
 			if ended {
 				return nil
 			}
+			if cursor != from {
+				failures.succeeded()
+				consecutive = 0
+				break
+			}
+			err = errors.New("the log stream closed without sending anything")
+			fallthrough
+		default:
+			consecutive++
+			if elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget); exhausted {
+				return fmt.Errorf("log stream failing for %s: %w", elapsed.Round(time.Second), err)
+			}
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(remoteFollowBackoff(failures)):
+		case <-time.After(remoteFollowBackoff(consecutive)):
 		}
 	}
 	return nil
 }
 
-// safety: stream_end means the node is done and its last attempt sealed, so the caller stops rather than
-// reconnecting; that event's payload is framing, not log text, and onID hears each event id to resume from.
+// safety: an event is acted on only once its closing blank line arrives, its lines before its id, so a cut
+// connection never moves the cursor past a line not printed; stream_end means the node will write no more, so the
+// caller stops rather than reconnecting, and that event's payload is framing, not log text.
 func readSSE(ctx context.Context, body io.Reader, onID, onLine func(string)) (ended bool) {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var id string
+	var lines []string
 	for sc.Scan() {
 		if ctx.Err() != nil {
 			return false
 		}
 		line := sc.Text()
 		switch {
+		case line == "":
+			for _, l := range lines {
+				onLine(l)
+			}
+			if id != "" && onID != nil {
+				onID(id)
+			}
+			id, lines = "", lines[:0]
 		case strings.HasPrefix(line, "event:"):
 			if strings.TrimSpace(strings.TrimPrefix(line, "event:")) == "stream_end" {
 				return true
 			}
 		case strings.HasPrefix(line, "id:"):
-			if onID != nil {
-				onID(strings.TrimSpace(strings.TrimPrefix(line, "id:")))
-			}
+			id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 		case strings.HasPrefix(line, "data: "):
-			onLine(strings.TrimPrefix(line, "data: "))
+			lines = append(lines, strings.TrimPrefix(line, "data: "))
 		case strings.HasPrefix(line, "data:"):
-			onLine(strings.TrimPrefix(line, "data:"))
+			lines = append(lines, strings.TrimPrefix(line, "data:"))
 		}
 	}
 	return false

@@ -758,7 +758,7 @@ func TestNodeLogStreamFollowsEveryAttemptAndResumes(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
 	sealedAttempt(t, f, "run-ancestor", 1, 1, "ancestor line\n")
-	sealedAttempt(t, f, "run-d", 1, 1, "first claim\n")
+	sealedAttempt(t, f, "run-d", 1, 1, "first claim\nsecond line\n")
 	sealedAttempt(t, f, "run-d", 1, 2, "replacement claim\n")
 	sealedAttempt(t, f, "run-d", 2, 3, "retry\n")
 	if _, err := f.st.DB().ExecContext(ctx, `UPDATE nodes SET status = 'done' WHERE run_id = 'run-d' AND node_id = 'a'`); err != nil {
@@ -768,8 +768,12 @@ func TestNodeLogStreamFollowsEveryAttemptAndResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream := func(cursor string) (int, []string, []string) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-d/logs/a/stream?format=raw", nil)
+	stream := func(cursor string, query ...string) (int, []string, []string) {
+		u := f.url + "/api/v1/runs/run-d/logs/a/stream?format=raw"
+		for _, q := range query {
+			u += "&cursor=" + q
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -795,16 +799,54 @@ func TestNodeLogStreamFollowsEveryAttemptAndResumes(t *testing.T) {
 		return resp.StatusCode, lines, ids
 	}
 	code, lines, ids := stream("")
-	if code != http.StatusOK || strings.Join(lines, ",") != "first claim,replacement claim,retry,{}" {
+	if code != http.StatusOK || strings.Join(lines, ",") != "first claim,second line,replacement claim,retry,{}" {
 		t.Fatalf("stream = %d %q; want each attempt of this run in order, then the end", code, lines)
 	}
-	if len(ids) < 2 {
-		t.Fatalf("event ids = %q; want one after each write", ids)
+	if len(ids) < 3 {
+		t.Fatalf("event ids = %q; want one on each line", ids)
 	}
-	if _, resumed, _ := stream(ids[1]); strings.Join(resumed, ",") != "replacement claim,retry,{}" {
-		t.Fatalf("resumed from %s = %q; want the lines after it alone", ids[1], resumed)
+	if _, resumed, _ := stream(ids[0]); strings.Join(resumed, ",") != "second line,replacement claim,retry,{}" {
+		t.Fatalf("resumed from the first line's id %s = %q; want the lines after it alone", ids[0], resumed)
+	}
+	if _, resumed, _ := stream(ids[0], ids[2]); strings.Join(resumed, ",") != "second line,replacement claim,retry,{}" {
+		t.Fatalf("resumed with Last-Event-ID %s and an older-looking query cursor = %q; want the header to win", ids[0], resumed)
 	}
 	if code, _, _ := stream("0.0.00000000"); code != http.StatusBadRequest {
 		t.Fatalf("a cursor for another stream = %d, want 400", code)
+	}
+}
+
+// A failed node that sits done during a dispatcher's retry backoff, with
+// retry budget left, still has a log to come; its log settles once the
+// budget is spent or the run is over.
+func TestNodeLogSettlesOnlyWithNoRetryToCome(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	set := func(q string) {
+		t.Helper()
+		if _, err := f.st.DB().ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settled := func() bool {
+		t.Helper()
+		got, found, err := f.st.NodeLogSettled(ctx, store.DefaultTeam, "run-d", "a")
+		if err != nil || !found {
+			t.Fatalf("settled = %v, %v, %v", got, found, err)
+		}
+		return got
+	}
+	set(`UPDATE nodes SET status = 'done', outcome = 'failed', attempts_consumed = 1, retry_budget = 2 WHERE run_id = 'run-d' AND node_id = 'a'`)
+	if settled() {
+		t.Fatal("a failed node with retries left reads as settled")
+	}
+	set(`UPDATE nodes SET attempts_consumed = 3 WHERE run_id = 'run-d' AND node_id = 'a'`)
+	if !settled() {
+		t.Fatal("a failed node that spent its retries reads as unsettled")
+	}
+	set(`UPDATE nodes SET attempts_consumed = 1 WHERE run_id = 'run-d' AND node_id = 'a'`)
+	set(`UPDATE runs SET status = 'failed' WHERE id = 'run-d'`)
+	if !settled() {
+		t.Fatal("a node of a finished run reads as unsettled")
 	}
 }

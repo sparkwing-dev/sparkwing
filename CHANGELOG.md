@@ -25,7 +25,7 @@ unlock.
   It reads the service's volume and archive directly, so the service need not run, records each converted log in the controller's state database so it is pruned and deleted with its run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. A run it cannot convert whole, such as one the state database does not hold, is named and left unconverted. Run it with the controller stopped: it opens and upgrades the state database, which a dry run leaves unopened. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **controller + cli:** `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node through every attempt of it in the run and resumes from `Last-Event-ID`
-  Each write carries an event id that resumes the stream after it, and the stream ends with `stream_end` once the node is done, so `sparkwing runs logs --follow` shows each retry and replacement claim once, in order, and ends with an error on a refused stream. Following needs a controller that keeps log segments. In Go, `storage.WithLogCursor` carries the cursor to `LogStore.Stream`.
+  Each line carries an event id that resumes the stream after it, and the stream ends with `stream_end` once the node will write no more, so `sparkwing runs logs --follow` shows each retry and replacement claim once, in order, and ends with an error on a refused stream. Following needs a controller that keeps log segments. In Go, `storage.WithLogCursor` carries the cursor to `LogStore.Stream`.
 
 - **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
