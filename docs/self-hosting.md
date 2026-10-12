@@ -81,18 +81,33 @@ deletes its least recently written finished runs' logs.
 
 ### Moving the logs service's logs to segments
 
-This release ships no logs service. Logs a deployment's earlier
-`sparkwing-logs` holds stay readable only once converted: before upgrading,
-run `sparkwing-logs export` from the previous release's `sparkwing-logs`
-binary. It converts every node log the service holds, on its volume and in
-its archive, into segments and manifests the controller reads. Run it once
-with the service's own root and archive, against the controller's
-`--cache-blob-store`, or its state directory for a controller without one:
+This release ships no logs service. Logs an earlier `sparkwing-logs` holds
+stay readable once `sparkwing-controller migrate-logs` converts them into
+the segments and manifests the controller reads. It reads the service's
+storage directly, its volume (`--root`) and its archive (`--archive-store`,
+if it kept one), so the service need not run; it writes to the controller's
+`--cache-blob-store`, or without one to the directory beside the
+controller's state database. Upgrade in this order:
 
-```bash
-sparkwing-logs export --root /var/lib/sparkwing-logs \
-  --archive-store s3://my-logs-bucket/logs --to s3://my-cache-bucket/cache
-```
+1. Scale the logs service to zero so its volume stops changing, and keep
+   its PVC.
+2. Run the new controller image once as a Job that mounts the logs PVC and
+   uses the controller's service account, with `--dry-run` first to see
+   what it will convert:
+
+   ```bash
+   sparkwing-controller migrate-logs --root /var/lib/sparkwing-logs \
+     --archive-store s3://my-logs-bucket/logs \
+     --cache-blob-store s3://my-cache-bucket/cache --dry-run
+   ```
+
+   then the same command without `--dry-run`. It prints the runs, attempts
+   and bytes it converted and those already converted, and exits non-zero
+   naming each run it could not convert.
+3. Read a converted run through the controller (`sparkwing runs logs --run
+   <id> --profile <p>`) to confirm.
+4. Upgrade the charts, controller and runners to this release.
+5. Delete the logs PVC.
 
 Each stored attempt becomes one attempt under `logs/r90/` or, for a team
 the service marked as without credits, `logs/r30/`. Its manifest says
@@ -100,10 +115,9 @@ the service marked as without credits, `logs/r30/`. Its manifest says
 with missing lines, `cut_off` for a numbered stream that never sealed,
 and `incomplete` with reason `migrated without seal` for a log no writer
 numbered. A run that names no team goes under `--default-team`
-(`default`). An attempt already exported is skipped, so the command may
-run again, and it exits non-zero naming every run it could not convert.
-See [the migration notes](migrations/_unreleased.md#node-logs-reach-the-controller-as-segments)
-for the upgrade order.
+(`default`). An attempt already converted is skipped, so the command can be
+stopped and run again; a run converted after an interrupted pass picks up
+where it stopped.
 
 ### Controller credentials
 

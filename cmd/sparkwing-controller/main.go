@@ -40,6 +40,9 @@ func main() {
 	if len(args) > 0 && args[0] == "migrate-outputs" {
 		run = func(args []string) error { return runMigrateOutputs(args[1:], os.Stdout) }
 	}
+	if len(args) > 0 && args[0] == "migrate-logs" {
+		run = func(args []string) error { return runMigrateLogs(args[1:], os.Stdout) }
+	}
 	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing-controller:", err)
 		os.Exit(1)

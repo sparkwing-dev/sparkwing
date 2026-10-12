@@ -21,6 +21,9 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **controller:** `sparkwing-controller migrate-logs --root DIR [--archive-store URL] [--cache-blob-store URL] [--default-team T] [--dry-run]` converts a `sparkwing-logs` service's stored node logs into segments the controller reads
+  It reads the service's volume and archive directly, so the service need not run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
 - **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
 - **controller + web:** Team → GitHub previews repository-declared push and pull request pipelines, with separate owner consent for automatic triggers and GitHub Actions workers
@@ -54,9 +57,6 @@ unlock.
 
 - **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
-
-- **logs:** `sparkwing-logs export --root R --to URL [--archive-store S] [--default-team T]` converts every node log the service holds into the segment layout the controller reads
-  One attempt per stored attempt file, under `logs/r90/` or `logs/r30/` by the team's standing, with each manifest's status from the service's seals; an unnumbered log reads `incomplete`, reason `migrated without seal`. Already exported attempts are skipped, and the command exits non-zero naming each run it could not convert. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
 
 ### Changed
 - **web + controller:** The Runs page pages through every run, 50 at a time, instead of showing the newest 200
@@ -219,7 +219,7 @@ unlock.
 
 ### Removed
 - **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `pkg/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
-  Run the previous release's `sparkwing-logs export` before upgrading, or the service's logs become unreadable. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+  Convert the service's logs with `sparkwing-controller migrate-logs` before retiring it, or they become unreadable. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **controller (Breaking):** `--logs-url`, `--logs-archive-store`, the `logs-delete-token` credential file, the `logs.write` and `logs.delete` scopes, `GET /api/v1/runs/{id}/log-access`, `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate`, the `logs` field of `GET /api/v1/services` and signed `kind=log` downloads are removed
   Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone, and `WithStoragePass` and `WithSignedDownloads` take the cache store alone; `client.ProcessIdentity` names a process for `Client.WithRunnerIdentity`. The storage pass counts and prunes logs from segments, team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).

@@ -511,11 +511,10 @@ See the migration guide section "The controller serves the dashboard".
 An upgrade from a chart that deployed `sparkwing-logs` removes its
 Deployment, Service and ServiceAccount; runners upload node logs to the
 controller instead. The logs PVC carries `helm.sh/resource-policy: keep`
-by default, so it survives the upgrade: export its logs with the previous
-release's `sparkwing-logs export` before upgrading, then delete it. A values file
+by default, so it survives the upgrade: convert its logs with
+`sparkwing-controller migrate-logs` before upgrading, then delete it. A values file
 that still sets `controller.logs` or `sparkwing-runner-bundle.logs` fails
-to render. See the migration guide section "Node logs reach the
-controller as segments".
+to render. See the migration guide section "The logs service is removed".
 
 State-DB compatibility: the controller's SQLite schema migrates
 forward automatically on startup. There is no rollback story for
