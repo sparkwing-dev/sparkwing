@@ -35,10 +35,7 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 			nodeErr = errors.New(in.Error)
 		}
 	}
-	ctx = s.nodeContext(ctx, planned, c.Node)
-	if c.Step != nil {
-		ctx = sparkwing.WithStep(ctx, c.Step.ID())
-	}
+	ctx = s.nodeContext(ctx, planned, c.Node, c.Step)
 	value, err := callClosure(ctx, c, nodeErr)
 	var res nodeproto.EvalResult
 	if err != nil {
@@ -65,8 +62,11 @@ func callClosure(ctx context.Context, c sparkwingruntime.Closure, nodeErr error)
 		return fn(ctx), nil
 	case sparkwing.CacheKeyFn:
 		key, err := fn(ctx)
-		if err != nil || key.IsNoCache() {
+		switch {
+		case err != nil || key.IsNoCache():
 			return nil, err
+		case key == "":
+			return nil, fmt.Errorf("resolve cache key for %s: empty key", c.Node.ID())
 		}
 		return string(key), nil
 	case sparkwing.BeforeRunFn:

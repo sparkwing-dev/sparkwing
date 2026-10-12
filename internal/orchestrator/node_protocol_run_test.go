@@ -19,7 +19,9 @@ import (
 
 const runPipeline = "node-protocol-run-fixture"
 
-type runFixtureInputs struct{}
+type runFixtureInputs struct {
+	Target string `flag:"target" default:"staging"`
+}
 
 type releaseOut struct {
 	Release int `json:"release"`
@@ -33,6 +35,16 @@ func (releaseJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "apply", func(ctx context.Context) (releaseOut, error) {
 		sparkwing.Info(ctx, "applying release 42")
 		return releaseOut{Release: 42}, nil
+	}), nil
+}
+
+type targetJob struct {
+	sparkwing.Produces[string]
+}
+
+func (targetJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "read", func(ctx context.Context) (string, error) {
+		return sparkwing.Inputs[runFixtureInputs](ctx).Target, nil
 	}), nil
 }
 
@@ -88,6 +100,10 @@ func (runFixturePipeline) Plan(_ context.Context, plan *sparkwing.Plan, _ runFix
 	sparkwing.Job(plan, "keyfail", func(context.Context) error { return nil }).
 		Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "", errors.New("no lockfile") })
 	sparkwing.Job(plan, "stepped", steppedJob{})
+	sparkwing.Job(plan, "emptykey", func(context.Context) error { return nil }).
+		Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "", nil })
+	sparkwing.Job(plan, "inputs", targetJob{}).
+		SkipIf(func(ctx context.Context) bool { return sparkwing.Inputs[runFixtureInputs](ctx).Target == "prod" })
 	return nil
 }
 
@@ -153,7 +169,7 @@ func (s *entrySession) next() (nodeproto.Reply, []map[string]any) {
 func startRunEntry(t *testing.T) *entrySession {
 	t.Helper()
 	s := startEntry(t)
-	if reply, _ := s.call(planRequestFor(runPipeline, map[string]string{})); !reply.OK {
+	if reply, _ := s.call(planRequestFor(runPipeline, map[string]string{"target": "prod"})); !reply.OK {
 		t.Fatalf("plan = %+v", reply.Error)
 	}
 	return s
@@ -211,6 +227,11 @@ func TestNodeProtocolEntryRunsNodes(t *testing.T) {
 		t.Errorf("recover = %+v, want the body to see the verify failure", res)
 	}
 
+	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "inputs", Attempt: 1})
+	if res := runResult(t, reply); res.Outcome != nodeproto.OutcomeSuccess || string(res.Output) != `"staging"` {
+		t.Errorf("inputs = %+v, want the body to read the planned target", res)
+	}
+
 	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "nope", Attempt: 1})
 	wantCode(t, reply, nodeproto.CodeUnknownNode)
 	s.end()
@@ -234,6 +255,8 @@ func TestNodeProtocolEntryEvaluatesClosures(t *testing.T) {
 		{closure: "nocache/cache_key/0", value: "null"},
 		{closure: "keyfail/cache_key/0", value: "null", err: ptr("no lockfile")},
 		{closure: "stepped/step/lint/skip_if/0", value: "true"},
+		{closure: "emptykey/cache_key/0", value: "null", err: ptr("resolve cache key for emptykey: empty key")},
+		{closure: "inputs/skip_if/0", value: "true"},
 	} {
 		reply, logs := s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: tc.closure, Input: tc.input})
 		value, errMsg := evalResult(t, reply)

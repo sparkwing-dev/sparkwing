@@ -23,7 +23,7 @@ func runNode(ctx context.Context, s *server, req nodeproto.Request) (any, error)
 	if n.Work() == nil {
 		return nil, &nodeproto.Error{Code: nodeproto.CodeBadRequest, Message: fmt.Sprintf("node %q has no body to run", req.Node)}
 	}
-	ctx = s.nodeContext(ctx, planned, n)
+	ctx = s.nodeContext(ctx, planned, n, nil)
 	if f := req.Failure; f != nil {
 		stage := sparkwing.StageAction
 		if f.Stage == "verify" {
@@ -66,8 +66,16 @@ func runBody(ctx context.Context, n *sparkwing.JobNode) (out any, err error) {
 	return nil, nil
 }
 
-func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing.JobNode) context.Context {
+// safety: the one context every node body, step body and closure runs under,
+// so each sees the same logger, ids, inputs and dry-run as the old executor.
+func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing.JobNode, step *sparkwing.WorkStep) context.Context {
 	ctx = sparkwingruntime.WithNode(sparkwingruntime.WithLogger(ctx, frameLogger{s}), n.ID())
+	if step != nil {
+		ctx = sparkwing.WithStep(ctx, step.ID())
+	}
+	if in := planned.Plan.Inputs(); in != nil {
+		ctx = sparkwingruntime.WithInputs(ctx, in)
+	}
 	if planned.Run.DryRun {
 		ctx = sparkwingruntime.WithDryRun(ctx)
 	}
