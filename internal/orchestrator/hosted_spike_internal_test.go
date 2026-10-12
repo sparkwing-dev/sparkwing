@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestHostedCheck_RefusesADependencyCycle(t *testing.T) {
-	snap := planSnapshot{Nodes: []snapshotNode{
+	snap := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
 		{ID: "a", Deps: []string{"c"}},
 		{ID: "b", Deps: []string{"a"}},
 		{ID: "c", Deps: []string{"b"}},
@@ -23,7 +24,7 @@ func TestHostedCheck_RefusesADependencyCycle(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "dependency cycle a -> c -> b -> a") {
 		t.Fatalf("err = %v, want the cycle named", err)
 	}
-	if err := hostedCheck(planSnapshot{Nodes: []snapshotNode{{ID: "a"}, {ID: "a"}}}); err == nil {
+	if err := hostedCheck(nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "a"}}}); err == nil {
 		t.Fatal("a plan holding one node twice was admitted")
 	}
 }
@@ -41,7 +42,7 @@ func TestHostedSchedule_AStalledPlanFailsItsPendingNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	snap := planSnapshot{Nodes: []snapshotNode{{ID: "a", Deps: []string{"b"}}, {ID: "b", Deps: []string{"a"}}}}
+	snap := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a", Deps: []string{"b"}}, {ID: "b", Deps: []string{"a"}}}}
 	lr := &countingRunner{}
 	cfg := hostedRun{Logger: slog.New(slog.DiscardHandler)}
 
@@ -57,11 +58,11 @@ func TestHostedSchedule_AStalledPlanFailsItsPendingNodes(t *testing.T) {
 }
 
 func TestHostedCheck_RefusesPlacementItDoesNotEnforce(t *testing.T) {
-	for name, snap := range map[string]planSnapshot{
-		"runs_on":     {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{RunsOn: []string{"gpu"}}}}},
-		"prefers":     {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{Prefers: []string{"fast"}}}}},
-		"when_runner": {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{WhenRunner: []string{"linux"}}}}},
-		"requires":    {Requires: []string{"arm64"}, Nodes: []snapshotNode{{ID: "a"}}},
+	for name, snap := range map[string]nodeproto.PlanDoc{
+		"runs_on":     {Nodes: []nodeproto.PlanNode{{ID: "a", Modifiers: &nodeproto.PlanModifiers{RunsOn: []string{"gpu"}}}}},
+		"prefers":     {Nodes: []nodeproto.PlanNode{{ID: "a", Modifiers: &nodeproto.PlanModifiers{Prefers: []string{"fast"}}}}},
+		"when_runner": {Nodes: []nodeproto.PlanNode{{ID: "a", Modifiers: &nodeproto.PlanModifiers{WhenRunner: []string{"linux"}}}}},
+		"requires":    {Requires: []string{"arm64"}, Nodes: []nodeproto.PlanNode{{ID: "a"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := hostedCheck(snap)
@@ -73,9 +74,9 @@ func TestHostedCheck_RefusesPlacementItDoesNotEnforce(t *testing.T) {
 }
 
 func TestHostedCheck_RefusesPlanLevelConcurrency(t *testing.T) {
-	for name, snap := range map[string]planSnapshot{
-		"plan_concurrency":        {PlanConc: &snapshotConc{}, Nodes: []snapshotNode{{ID: "a"}}},
-		"plan_concurrency_groups": {PlanConcs: []snapshotConc{{}}, Nodes: []snapshotNode{{ID: "a"}}},
+	for name, snap := range map[string]nodeproto.PlanDoc{
+		"plan_concurrency":        {PlanConc: &nodeproto.PlanConc{}, Nodes: []nodeproto.PlanNode{{ID: "a"}}},
+		"plan_concurrency_groups": {PlanConcs: []nodeproto.PlanConc{{}}, Nodes: []nodeproto.PlanNode{{ID: "a"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := hostedCheck(snap)
@@ -103,7 +104,7 @@ func TestHostedFinalize_CancellationFinishesEveryNodeRow(t *testing.T) {
 	if err := st.CreateRun(t.Context(), store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	snap := planSnapshot{Nodes: []snapshotNode{{ID: "a"}, {ID: "b", Deps: []string{"a"}}}}
+	snap := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "b", Deps: []string{"a"}}}}
 	if err := hostedAdmit(t.Context(), st, runID, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestHostedRunNode_RecordsTheNodeProcessUsage(t *testing.T) {
 	if err := st.CreateRun(t.Context(), store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	snap := planSnapshot{Nodes: []snapshotNode{{ID: "a"}}}
+	snap := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}
 	if err := hostedAdmit(t.Context(), st, runID, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -159,13 +160,13 @@ func TestHostedRunNode_RecordsTheNodeProcessUsage(t *testing.T) {
 }
 
 func TestHostedCheck_RefusesAdmissionSettingsItDoesNotAdmit(t *testing.T) {
-	for name, snap := range map[string]planSnapshot{
-		"priority":        {Priority: 5, Nodes: []snapshotNode{{ID: "a"}}},
-		"admission_class": {AdmissionClass: "batch", Nodes: []snapshotNode{{ID: "a"}}},
-		"claim_wait":      {ClaimWaitMS: 1000, Nodes: []snapshotNode{{ID: "a"}}},
-		"plan_resources":  {Resources: &snapshotResources{}, Nodes: []snapshotNode{{ID: "a"}}},
-		"node_cores":      {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{ResCores: 2}}}},
-		"node_memory":     {Nodes: []snapshotNode{{ID: "a", Modifiers: &snapshotModifiers{ResMemoryBytes: 1 << 30}}}},
+	for name, snap := range map[string]nodeproto.PlanDoc{
+		"priority":        {Priority: 5, Nodes: []nodeproto.PlanNode{{ID: "a"}}},
+		"admission_class": {AdmissionClass: "batch", Nodes: []nodeproto.PlanNode{{ID: "a"}}},
+		"claim_wait":      {ClaimWaitMS: 1000, Nodes: []nodeproto.PlanNode{{ID: "a"}}},
+		"plan_resources":  {Resources: &nodeproto.PlanResources{}, Nodes: []nodeproto.PlanNode{{ID: "a"}}},
+		"node_cores":      {Nodes: []nodeproto.PlanNode{{ID: "a", Modifiers: &nodeproto.PlanModifiers{ResCores: 2}}}},
+		"node_memory":     {Nodes: []nodeproto.PlanNode{{ID: "a", Modifiers: &nodeproto.PlanModifiers{ResMemoryBytes: 1 << 30}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := hostedCheck(snap)

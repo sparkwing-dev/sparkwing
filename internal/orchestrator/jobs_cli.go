@@ -593,6 +593,9 @@ func renderStatus(
 	if refusal, ok := latestComputeGuardRefusal(ctx, b, runID); ok {
 		fmt.Fprintf(out, "%s %s\n", label("guard:    "), refusal.statusLine())
 	}
+	if refusal, ok := latestSecretPreflight(ctx, b, runID); ok {
+		fmt.Fprintf(out, "%s %s\n", label("secrets:  "), indent(refusal, "           "))
+	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "nodes (%d total, %d done):\n", len(nodes), countFinished(nodes))
@@ -760,41 +763,62 @@ type runEventLister interface {
 }
 
 func latestComputeGuardRefusal(ctx context.Context, b runEventLister, runID string) (computeGuardRefusal, bool) {
-	const page = 500
 	var found computeGuardRefusal
 	var ok bool
+	eachEventPayload(ctx, b, runID, store.EventKindComputeLimitBlocked, func(raw []byte) {
+		var payload computeGuardRefusal
+		if json.Unmarshal(raw, &payload) == nil && payload.Limit != "" {
+			found, ok = payload, true
+		}
+	})
+	return found, ok
+}
+
+func latestSecretPreflight(ctx context.Context, b runEventLister, runID string) (string, bool) {
+	var found string
+	eachEventPayload(ctx, b, runID, store.EventKindSecretPreflightRefused, func(raw []byte) {
+		var payload struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(raw, &payload) == nil && payload.Message != "" {
+			found = payload.Message
+		}
+	})
+	return found, found != ""
+}
+
+func eachEventPayload(ctx context.Context, b runEventLister, runID, kind string, visit func([]byte)) {
+	const page = 500
 	var after int64
 	for {
 		events, err := b.ListEventsAfter(ctx, runID, after, page)
 		if err != nil || len(events) == 0 {
-			break
+			return
 		}
 		// safety: the contract is seq > after, ascending; a backend that
 		// ignores after would otherwise replay one page forever.
 		last := events[len(events)-1].Seq
 		if last <= after {
-			break
+			return
 		}
 		for _, event := range events {
-			if event.Kind != store.EventKindComputeLimitBlocked || len(event.Payload) == 0 {
-				continue
-			}
-			var payload computeGuardRefusal
-			if json.Unmarshal(event.Payload, &payload) == nil && payload.Limit != "" {
-				found, ok = payload, true
+			if event.Kind == kind && len(event.Payload) > 0 {
+				visit(event.Payload)
 			}
 		}
 		after = last
 		if len(events) < page {
-			break
+			return
 		}
 	}
-	return found, ok
 }
 
 func addComputeGuardRefusal(ctx context.Context, b runEventLister, payload map[string]any, runID string) {
 	if refusal, ok := latestComputeGuardRefusal(ctx, b, runID); ok {
 		payload["compute_guard"] = refusal
+	}
+	if refusal, ok := latestSecretPreflight(ctx, b, runID); ok {
+		payload["secret_preflight"] = refusal
 	}
 }
 
