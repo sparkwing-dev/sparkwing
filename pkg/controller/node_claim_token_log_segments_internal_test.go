@@ -13,9 +13,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-// A runner's node claim token carries no logs scope, so its node uploads
-// its log segments under the claim's runs.state, filed under the claim's
-// attempt, and the claim's end stops the next upload.
+// A runner's node claim token uploads its node's log segments, filed under
+// the claim's attempt. The runner seals the log after its node reports, so
+// the ended claim still finishes that attempt's log, and opens no other.
 func TestNodeClaimTokenUploadsItsNodesLogSegmentsUntilTheClaimEnds(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -60,20 +60,22 @@ func TestNodeClaimTokenUploadsItsNodesLogSegmentsUntilTheClaimEnds(t *testing.T)
 	if err := sink.Append([]byte("step 1\n"), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if m, err := sink.Close(ctx, logseg.End{}); err != nil || m.Status != logseg.StatusComplete {
-		t.Fatalf("seal with the claim token = %+v, %v", m, err)
-	}
-	got, err := srv.dashboardLogs(store.DefaultTeam).Read(ctx, "r1", "n1", storage.ReadOpts{})
-	if err != nil || string(got) != "step 1\n" {
-		t.Fatalf("read %q, %v", got, err)
-	}
-
 	fence := store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	}
 	if err := node.FinishNode(store.WithNodeClaimFence(ctx, fence), "r1", "n1", "success", "", nil); err != nil {
 		t.Fatalf("finish with the claim token: %v", err)
+	}
+	if err := sink.Append([]byte("step 2\n"), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := sink.Close(ctx, logseg.End{}); err != nil || m.Status != logseg.StatusComplete {
+		t.Fatalf("seal after the node reported = %+v, %v", m, err)
+	}
+	got, err := srv.dashboardLogs(store.DefaultTeam).Read(ctx, "r1", "n1", storage.ReadOpts{})
+	if err != nil || string(got) != "step 1\nstep 2\n" {
+		t.Fatalf("read %q, %v", got, err)
 	}
 	if err := node.NewLogSegmentUploader(ctx, "r1", "n1").Open(ctx); err == nil {
 		t.Fatal("the claim token opened the node's log after its claim ended")

@@ -14,6 +14,7 @@ import {
 import { toast } from "@/components/Toasts";
 import { fmtCents } from "@/lib/billing";
 import {
+  type ActionExtra,
   type ActionKind,
   type OperatorTeam,
   type TeamMatch,
@@ -25,6 +26,7 @@ import {
   approveWaitlisted,
   availableActions,
   balanceCents,
+  disputeHolds,
   getOperatorTeam,
   getWaitlist,
   needsAmount,
@@ -328,8 +330,8 @@ function TeamView({ slug }: { slug: string }) {
               </span>
             ) : null}
           </Fact>
-          <Fact label="Limit override">
-            {b.limit_override_cents ? fmtCents(b.limit_override_cents) : "none"}
+          <Fact label="Overrides">
+            {overrides(b) || "none"}
           </Fact>
           <Fact label="Frozen">
             {team.frozen ? `yes: ${team.holds.join(", ")}` : "no"}
@@ -362,6 +364,16 @@ function TeamView({ slug }: { slug: string }) {
   );
 }
 
+function overrides(b: OperatorTeam["billing"]): string {
+  const parts: string[] = [];
+  if (b.limit_override_cents)
+    parts.push(`${fmtCents(b.limit_override_cents)} per 30 days`);
+  if (b.daily_cap_cents) parts.push(`${fmtCents(b.daily_cap_cents)} a day`);
+  if (b.rung_cents) parts.push(`card charged at ${fmtCents(b.rung_cents)}`);
+  if (b.runner_cap) parts.push(`${b.runner_cap} Cloud nodes`);
+  return parts.join(", ");
+}
+
 function Fact({
   label,
   children,
@@ -387,25 +399,29 @@ function ActionForm({
   const actions = availableActions(team);
   const [kind, setKind] = useState<ActionKind>(actions[0]);
   const [amount, setAmount] = useState("");
+  const [extra, setExtra] = useState<ActionExtra>({});
   const [reason, setReason] = useState("");
   // key is minted per review, so a retried confirmation cannot grant twice.
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const current = actions.includes(kind) ? kind : actions[0];
-  const problem = actionProblem(current, reason, amount);
+  const problem = actionProblem(current, reason, amount, extra);
+  const setField = (field: keyof ActionExtra) => (value: string) =>
+    setExtra((cur) => ({ ...cur, [field]: value }));
 
   const confirm = async () => {
     setBusy(true);
     setError("");
     try {
       await performAction(
-        actionRequest(team.team, current, reason, amount, key),
+        actionRequest(team.team, current, reason, amount, key, extra),
       );
       toast(`${actionLabels[current]}: done for ${team.team}.`);
       setKey("");
       setReason("");
       setAmount("");
+      setExtra({});
       onDone();
     } catch (err) {
       setError(errorText(err));
@@ -447,7 +463,47 @@ function ActionForm({
               />
             </label>
           ) : null}
+          {current === "release-hold" ? (
+            <label className="flex-1">
+              <span className={labelClass}>Hold</span>
+              <select
+                aria-label="Dispute hold to release"
+                className={`${inputClass} w-full`}
+                value={extra.hold ?? ""}
+                disabled={key !== ""}
+                onChange={(e) => setField("hold")(e.target.value)}
+              >
+                <option value="">Choose a hold</option>
+                {disputeHolds(team).map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
+        {current === "set-limit" ? (
+          <div className="flex gap-3">
+            {(
+              [
+                ["daily", "Daily cap in US dollars (optional)"],
+                ["rung", "Card charge rung in US dollars (optional)"],
+                ["runners", "Cloud node cap (optional)"],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex-1">
+                <span className={labelClass}>{label}</span>
+                <input
+                  className={`${inputClass} w-full`}
+                  value={extra[field] ?? ""}
+                  disabled={key !== ""}
+                  onChange={(e) => setField(field)(e.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+        ) : null}
         <label className="block">
           <span className={labelClass}>Reason</span>
           <textarea
@@ -481,7 +537,7 @@ function ActionForm({
               {actionLabels[current]} on {team.display_name || team.team} (
               {team.team})
             </p>
-            <p>{actionEffect(team, current, amount)}</p>
+            <p>{actionEffect(team, current, amount, extra)}</p>
             <p className="text-[var(--muted)]">Reason: {reason.trim()}</p>
             <div className="flex gap-2">
               <button className={buttonClass} disabled={busy} onClick={confirm}>

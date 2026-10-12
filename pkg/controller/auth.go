@@ -93,9 +93,10 @@ const (
 	// grants it.
 	ScopeAdmin = "admin"
 	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
-	// paid grant for a verified payment, reverses a payment, holds or releases
-	// the team a payment funded, and reads the ledger's units, and reaches
-	// nothing else. Only the operator mints it; no team's token may carry it.
+	// paid grant for a verified payment, reverses a payment, holds the team a
+	// payment funded, and reads the ledger's units, and reaches nothing else.
+	// Only the operator mints it; no team's token may carry it, and the admin
+	// scope does not stand in for it.
 	ScopeCreditsGrant = "credits.grant"
 	// ScopeClaimsLaunch is the launcher's scope. It claims any team's ready
 	// node of a controller-dispatched run, and the claim's token, for the Job
@@ -135,23 +136,29 @@ func ScopesForRole(role store.Role) []string {
 	return store.ScopesForRole(role)
 }
 
-func validateScopes(scopes []string) error {
-	var unknown []string
+// safety: a token request's scopes are normalized once, here, and every later
+// check and the stored row read the result, so no check can see a spelling the
+// store would not keep. A scope that is not exactly a known one is refused.
+func normalizeScopes(scopes []string) ([]string, error) {
+	var out, unknown []string
 	for _, s := range scopes {
 		trimmed := strings.TrimSpace(s)
-		if trimmed == "" || slices.Contains(allScopes, trimmed) || slices.Contains(unknown, s) {
-			continue
+		switch {
+		case trimmed == "" || slices.Contains(out, trimmed):
+		case slices.Contains(allScopes, trimmed):
+			out = append(out, trimmed)
+		case !slices.Contains(unknown, s):
+			unknown = append(unknown, s)
 		}
-		unknown = append(unknown, s)
 	}
 	if len(unknown) == 0 {
-		return nil
+		return out, nil
 	}
 	noun := "scope"
 	if len(unknown) > 1 {
 		noun = "scopes"
 	}
-	return fmt.Errorf(
+	return nil, fmt.Errorf(
 		"unknown %s %s (valid: %s)",
 		noun, quoteScopes(unknown), strings.Join(allScopes, ", "),
 	)
@@ -634,6 +641,31 @@ func requireScope(scope string, next http.Handler, alternatives ...string) http.
 			Principal:    p.label(),
 			Message:      "token lacks required scope: " + scope,
 		})
+	})
+}
+
+// safety: the checkout service's scope reaches money, so only a service token
+// minted with it passes. No admin token, session or anonymous caller does,
+// even on a controller that serves without credentials.
+func requireServiceScope(scope string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p == nil {
+			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
+				Code: "unauthenticated", Message: "this route answers a service token carrying " + scope,
+			})
+			return
+		}
+		if p.Kind != store.TokenKindService || p.TokenPrefix == "" || p.session != "" || p.AccountID != "" || !p.HasScope(scope) {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:         "missing_scope",
+				MissingScope: scope,
+				Principal:    p.label(),
+				Message:      "only a service token carrying " + scope + " reaches this route",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

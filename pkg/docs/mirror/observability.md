@@ -56,7 +56,7 @@ the logs.
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
 | `logs_auth` | The runner's log-append calls were rejected (401/403), so the run's structured logs are unrecoverable. | Check the runner token's scopes (`nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`); the run fails loud rather than reporting success with no output. |
-| `credits_exhausted` | The credit balance stayed at zero past the grace period, so the controller cancelled the node. | A Sparkwing Cloud operator can grant credits with the private `sparkwing-ops` tool. Then rerun. The run's `credits_exhausted` event carries the balance and how long it had been spent. |
+| `credits_exhausted` | The credit balance stayed at zero past the grace period, so the controller cancelled the node. | A Sparkwing Cloud operator can grant credits from the operator console. Then rerun. The run's `credits_exhausted` event carries the balance and how long it had been spent. |
 | `source_unavailable` | A launcher Job's init container was refused the run's source credential. The refusal answers the same on every attempt, so the node is not retried. | Check the source credential the controller holds for the repository, then re-run. |
 | `source_fetch` | A launcher Job's init container could not check out the run's source for a reason a later attempt may not meet. The node is retried within its budget, a planning node included. | If every attempt fails, check that the repository and commit are reachable from the cluster. |
 | `logs_dropped` | The log store stayed unreachable past the append retry budget, so log lines were lost. The node's own work may have succeeded; its record of that work is incomplete. | Check the logs backend named in the run's `invocation.backends` -- for `s3`, the bucket, `AWS_REGION`, credentials, and `AWS_ENDPOINT_URL_S3`. The `logs_drop` event carries the lost-line count and the first error. Set `logs.drop_policy: warn` in [config.yaml](machine-config.md) to keep such runs green instead. |
@@ -150,11 +150,18 @@ from the laptop the same way, and turns its live view on from its run
 heartbeat. The runner appends every line to a spool file and uploads a
 gzip-compressed segment every 10 seconds or 1 MiB, whichever comes first;
 an idle node uploads nothing. When the binary exits, the runner uploads
-the last segment and a manifest that lists every segment with its
-SHA-256 and seals the log. The controller issues the upload URLs in
-batches of 16 (`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`),
-presigned into its cache bucket when it has `--cache-blob-store`,
-otherwise signed against its own output directory. Segments live under
+the last segment and posts the controller a manifest that lists every
+segment with its SHA-256 and seals the log. The runner asks for each
+segment's upload URL once the segment is compressed
+(`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`), and the
+controller signs it for that segment's exact size and Content-MD5 and
+charges the team's log storage that size, presigned into its cache
+bucket when it has `--cache-blob-store`, otherwise signed against its
+own output directory. A node's stored segments are capped at 65 MiB.
+While the controller is unreachable the runner keeps cut segments in
+its spool and retries them at each later cut, so uploads pause for the
+outage and a runner lost during it loses what it had not uploaded.
+Segments live under
 `logs/<class>/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`,
 where `<class>` is the retention class (see
 [self-hosting.md](self-hosting.md#node-log-retention)).
@@ -171,7 +178,7 @@ a viewer watches the node: the dashboard's log stream or `sparkwing runs
 logs --follow` holds a 30-second watch and renews it while open. The
 runner learns of the watch from replies it already receives: the node
 claim heartbeat (every 3 to 5 seconds), the run heartbeat (every 30
-seconds, for a trigger's in-process nodes) and its segment URL requests.
+seconds, for a trigger's in-process nodes) and its segment signing requests.
 On the first watched reply it pushes everything after the last uploaded
 segment, then each new line about every 250 ms, each push carrying its
 byte offset in the log; when the watch lapses it stops. An unwatched

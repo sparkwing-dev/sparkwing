@@ -225,8 +225,7 @@ type createGrantReq struct {
 	Kind        string `json:"kind"`
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
-	Reverses    string `json:"reverses,omitempty"`
-	// safety: The operator names the funded team; a reversal inherits its original payment's team.
+	// safety: The checkout service names the team its checkout session was for.
 	Team string `json:"team,omitempty"`
 	// safety: Settling a checkout releases that session's hold on the team balance cap.
 	Checkout string `json:"checkout,omitempty"`
@@ -350,36 +349,19 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !store.ValidCreditGrantKind(req.Kind) {
-		writeError(w, http.StatusBadRequest, errors.New("kind must be free, paid or reversal"))
+	// safety: this route records a verified payment and nothing else; an
+	// operator's free grant goes through the console, and a refund through
+	// /api/v1/credits/reversals.
+	if req.Kind != store.CreditGrantPaid {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be %s", store.CreditGrantPaid))
 		return
 	}
-	// safety: the checkout service's credential records a verified payment and
-	// nothing else; a free grant or a hand-sized reversal is the operator's.
-	if req.Kind != store.CreditGrantPaid && !isAdmin(r) {
-		writeError(w, http.StatusForbidden, fmt.Errorf(
-			"a %s grant needs the %s scope; %s records paid grants only", req.Kind, ScopeAdmin, ScopeCreditsGrant))
+	if req.AmountMicro <= 0 {
+		writeError(w, http.StatusBadRequest, errors.New("amount_micro must be positive"))
 		return
-	}
-	if err := grantAmountRule(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Team == "" && req.Kind == store.CreditGrantReversal && req.Reverses != "" {
-		team, found, err := s.store.PaidGrantTeam(r.Context(), req.Reverses)
-		if err != nil {
-			s.writeInternalError(w, r, "reversal team", err)
-			return
-		}
-		if !found {
-			writeError(w, http.StatusBadRequest,
-				fmt.Errorf("no paid grant carries the reference %q", req.Reverses))
-			return
-		}
-		req.Team = string(team)
 	}
 	// safety: on a controller serving several teams an unnamed grant would fund
-	// whichever team the operator's token acts for, which is never the team a
+	// whichever team the caller's token acts for, which is never the team a
 	// payment was for, so the team is required there.
 	if req.Team == "" && s.MultiTeam() {
 		writeError(w, http.StatusBadRequest, errors.New("team is required: name the team whose balance the grant funds"))
@@ -395,7 +377,7 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 	who := principalName(r)
 	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
-		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who, Checkout: req.Checkout,
+		Reference: req.Reference, CreatedBy: who, Checkout: req.Checkout,
 	})
 	if errors.Is(err, store.ErrCreditGrantConflict) {
 		writeError(w, http.StatusConflict, err)
@@ -428,19 +410,6 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		"kind", res.Grant.Kind, "amount_micro", res.Grant.AmountMicro,
 		"reference", res.Grant.Reference, "reverses", res.Grant.Reverses, "by", who)
 	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
-}
-
-func grantAmountRule(req createGrantReq) error {
-	if req.Kind == store.CreditGrantReversal {
-		if req.AmountMicro >= 0 {
-			return errors.New("amount_micro must be negative for a reversal")
-		}
-		return nil
-	}
-	if req.AmountMicro <= 0 {
-		return errors.New("amount_micro must be positive")
-	}
-	return nil
 }
 
 func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {

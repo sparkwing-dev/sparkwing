@@ -73,8 +73,7 @@ type SpawnedPipelineRef struct {
 	ChildRunID string `json:"child_run_id"`
 }
 
-// NodeModifiers mirrors the orchestrator's snapshotModifiers wire
-// shape locally so this package doesn't import the orchestrator.
+// NodeModifiers mirrors the nodeproto.PlanModifiers wire shape.
 // Kept lossless so the dashboard sees every label the explain CLI
 // shows.
 type NodeModifiers struct {

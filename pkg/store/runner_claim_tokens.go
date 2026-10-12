@@ -113,7 +113,7 @@ func (s *Store) authorizeTriggerClaim(ctx context.Context, digest string, class 
 			return ClaimToken{}, err
 		}
 	}
-	return s.applyClaimClass(ctx, tok, live, class)
+	return s.applyClaimClass(ctx, tok, live, class, now)
 }
 
 // safety: the caller's writing transaction re-reads the trigger under the
