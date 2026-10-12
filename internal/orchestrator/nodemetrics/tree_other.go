@@ -2,4 +2,8 @@
 
 package nodemetrics
 
-func processSnapshot(int) (map[int]processSample, bool) { return nil, false }
+func snapshotProcesses(func(map[int]processSample) map[int]processSample) (map[int]processSample, bool) {
+	return nil, false
+}
+
+func sessionMembers(int, map[int]processSample) map[int]processSample { return nil }
