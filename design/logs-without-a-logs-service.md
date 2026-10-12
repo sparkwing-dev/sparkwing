@@ -87,14 +87,15 @@ flowchart LR
   subgraph runner[runner host: pod, VM or laptop]
     CHILD[pipeline binary: node logger, masked] -->|loopback append protocol, unchanged| SINK[log sink in the engine-side process]
     SINK --> SPOOL[(local spool file)]
-    SPOOL -->|every 10 s or 1 MiB: PUT seg-N| OBJ
+    SPOOL -->|every 10 s or 1 MiB: seal, then PUT seg-N| OBJ
     SINK -.->|only while watched: about 1 s pushes| RING
     SINK -->|heartbeat| HB[claim or run heartbeat]
   end
   HB -->|reply: watched| SINK
-  SINK -->|request URL batches| CTL[controller]
-  CTL -->|presigned PUT URLs| SINK
-  SINK -->|finish: PUT manifest| OBJ[(object store)]
+  SINK -->|per segment: size, MD5, SHA-256| CTL[controller]
+  CTL -->|one PUT signed for that size and MD5| SINK
+  SINK -->|finish: POST manifest| CTL
+  CTL -->|manifest, checked against signed segments| OBJ[(object store)]
   RING[controller live ring] --> CTL
   CTL -->|reads: list, get, verify, serve| OBJ
   VIEW[dashboard or CLI follow] -->|open stream: sets watched| CTL
@@ -116,7 +117,7 @@ manifest. It runs in whatever process the engine owns on that host:
 | Execution path | Who runs the sink | How the pipeline binary reaches it | Uploads through |
 |---|---|---|---|
 | Laptop, no controller | the pipeline binary (`localLogs` stays) | in-process | nothing: the spool file is the log |
-| Laptop, remote profile | the pipeline binary | in-process | the profile's controller: URL batches on the run owner's token |
+| Laptop, remote profile | the pipeline binary | in-process | the profile's controller: signed segment URLs on the run owner's token |
 | k8s Job | `sparkwing-runner run-node` | the brokered child posts to the broker over loopback, as today | controller presign, runner token plus claim fence |
 | Warm runner | the runner's broker (`remote_execution_broker.go`) | unchanged: the broker already terminates `/api/v1/logs/*` from the child | controller presign, runner token plus claim fence |
 | Launcher | `runLaunchedNode` serves the loopback append endpoint and sets `SPARKWING_LOGS_URL` to it for the child | the child's existing `HTTPLogs` posts there with its `swc_` token | controller presign, claim token |
@@ -182,12 +183,14 @@ no limit is new.
   roughly 20 % smaller objects.
 
 The controller records the node attempt's log prefix in its run store when
-it issues the first URL batch, so readers never guess a retention class.
+the writer first asks for its attempt, so readers never guess a retention
+class.
 
 ### Manifest
 
-The sink writes the manifest last, through a URL issued with the segment
-batch. It seals the log.
+The sink posts the manifest to the controller last. The controller checks
+every segment it lists against the size and SHA-256 it signed, then writes
+it. It seals the log.
 
 ```json
 {
@@ -249,14 +252,18 @@ costs three round trips per object. Log segments need neither the commit
 copy nor content addressing: the key is fixed by run, node, attempt and
 number, and only the claim holder may write it.
 
-A new route issues URLs in batches:
+A sink seals a segment before it asks for its URL: it compresses and
+hashes the segment, then asks for one presigned PUT for exactly those
+bytes.
 
 ```text
 POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments
-  request:  {"attempt": 1, "generation": 3, "next": 17, "count": 16,
-             "uploaded_through": 15, "stored_bytes": 412883}
-  response: {"prefix": "...", "urls": [{"n": 17, "url": "...", "headers": {...}}, ...],
-             "manifest_url": "...", "expires_at": "...", "watched": false}
+  request:  {"attempt": 1, "generation": 3, "n": 17, "size": 22301,
+             "md5": "<base64>", "sha256": "<hex>"}
+  response: {"attempt": 1, "generation": 3, "prefix": "...", "url": "...",
+             "headers": {"Content-MD5": "..."}, "expires_at": "...", "watched": false}
+POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest
+  request:  the manifest, at most 4 MiB
 ```
 
 - Auth: the claim token route group, falling back to `runs.state` plus
@@ -265,28 +272,44 @@ POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments
   a remote profile uses the run owner's token on a run it created. The
   controller refuses a superseded attempt or generation, so a fenced-out
   runner cannot write the new attempt's log.
-- Batch size 16 and URL lifetime 15 min, the existing presign TTL. At the
-  10 s cadence one batch lasts at least 160 s; a node producing 1 MiB per
-  second asks every 16 s.
-- The sink asks for the next batch when fewer than 4 URLs remain or the
-  batch is within 2 min of expiry.
-- Every batch includes a fresh manifest URL, so a node that finishes after
-  a long silence never holds an expired one.
-- The request reports `uploaded_through` and `stored_bytes`, which the
-  controller uses for live reads and storage accounting without listing
-  the bucket.
+- Request `n: 0` signs nothing; it names the attempt and records where
+  its log lives. The sink makes it when the node's first line arrives.
+- The S3 presign sets `ContentLength` and `ContentMD5` on the
+  `PutObjectInput`, so both are signed headers and the store refuses any
+  other body. The controller charges the team exactly `size` when it
+  signs, so a writer stores what it paid for and nothing else.
+- Signing is idempotent per attempt and segment number: the same `n` with
+  the same size and digests is free and returns a fresh URL, which is how
+  a retried upload gets one; other bytes under a signed `n` are refused
+  with 409. The run store keeps one row per signed segment
+  (`node_log_segments`) and the attempt's running total.
+- The controller enforces the per-node cap: it refuses a segment that
+  would take the attempt's stored bytes past 64 MiB plus one segment of
+  gzip headroom.
+- The manifest goes through the controller, which checks each listed
+  segment against the size and SHA-256 it signed and writes it with the
+  conditional create the abandoned-attempt seal uses. No manifest URL
+  exists.
+- A launcher pod's child reports the node's outcome before the trusted
+  process seals the log, and reporting ends the claim. An ended claim may
+  still sign its own attempt's segments and post its manifest for
+  `SealGrace` (60 s) after the attempt ended, while no later claim holds
+  the node; it may not touch any other attempt.
+- URL lifetime is 15 min, the existing presign TTL, though the sink uses
+  each URL at once.
 - A controller with no object store issues HMAC-signed PUT URLs to its own
   disk, the mechanism outputs already use (`PUT /api/v1/outputs/uploads/{id}`
-  in `pkg/controller/server.go`).
+  in `pkg/controller/server.go`). The size and MD5 are signed fields, and
+  the disk handler checks both against the body.
 
-Presigned PUT URLs cannot bind an unknown size. The sink enforces the byte
-cap; the controller charges what was actually stored, reported by the sink
-and corrected by the hourly storage pass's listing
-(`pkg/controller/storage_pass.go`). A node that lies about its size uploads
-into its own team's storage and pays for it there. The bucket ceiling
-(`runBucketCeiling` in `pkg/controller/objectstore.go`) stays the
-operator's backstop, and the controller stops issuing log URLs while the
-ceiling has frozen writes.
+The cost of asking per segment is availability: a controller outage pauses
+uploads. The sink keeps cut segments in its spool, within the node's 64 MiB
+cap, and retries them with backoff at each later cut and at close. A runner
+that dies during an outage loses up to the outage's length of log, where
+batched URLs would have let it keep uploading for their lifetime. The
+bucket ceiling (`runBucketCeiling` in `pkg/controller/objectstore.go`)
+stays the operator's backstop, and the controller signs no log URLs while
+the ceiling has frozen writes.
 
 ### Cost
 
@@ -302,7 +325,7 @@ output on most 10 s intervals, gzip ratio 6:1.
 |---|---|---|
 | Segment PUTs | 8 x 18 x 1,000 = 144,000 | $0.72 |
 | Manifest PUTs | 8,000 | $0.04 |
-| URL batch calls to the controller | about 16,000 | controller CPU only |
+| Segment signing calls to the controller | about 144,000 | controller CPU and one row each |
 | Stored | 2.4 GB raw, 0.4 GB compressed | $0.009 per month; $0.028 over 90 days |
 | Reads (one in ten runs viewed, one node each) | about 2,000 GETs and 100 LISTs | under $0.01 |
 | Total | | about $0.80, almost all PUTs |
@@ -359,7 +382,7 @@ sequenceDiagram
   participant R as runner sink
   V->>C: GET /runs/{id}/logs/{node}/stream
   C->>C: register watch (30 s lease)
-  C->>O: LIST attempt prefix (or use uploaded_through)
+  C->>O: LIST attempt prefix
   C->>O: GET seg-1..seg-k, verify sha256
   C-->>V: records 1..last_seq(k)
   R->>C: heartbeat
@@ -368,7 +391,7 @@ sequenceDiagram
   C-->>V: ring records with seq > last_seq(k)
   Note over C,V: a seq gap waits for the next segment, then fills from it
   R->>O: PUT seg-(k+1) on the 10 s cadence
-  R->>O: PUT manifest at finish
+  R->>C: POST manifest at finish
   C-->>V: end of stream once the manifest lands
 ```
 
@@ -445,8 +468,8 @@ prefix:
 | `logs/r90/` | 90 days | teams with credits, single-team installs (today's `DefaultArchiveRetention`) |
 | `logs/r30/` | 30 days | teams without credits (today's `FreeArchiveRetention`) |
 
-- The controller picks the class when it issues a node attempt's first URL
-  batch, from the team's standing at that moment, and records it with the
+- The controller picks the class when a node attempt's writer first asks
+  for it, from the team's standing at that moment, and records it with the
   prefix. A team that later gains or loses credits changes the class of
   new runs only.
 - A per-team retention beyond these two is an operator-defined class: the
@@ -473,7 +496,7 @@ prefix:
 
 | Concern | Today | After |
 |---|---|---|
-| Log quota | the logs service reserves 1 MiB blocks from the controller over `/internal/storage/*` with a forwarded `logs.write` credential (`pkg/logs/log_quota.go`, `storage_counters.go`) | the controller reserves a block in-process when it issues a URL batch, commits `stored_bytes` from the next batch request and from the manifest, and releases the rest at seal |
+| Log quota | the logs service reserves 1 MiB blocks from the controller over `/internal/storage/*` with a forwarded `logs.write` credential (`pkg/logs/log_quota.go`, `storage_counters.go`) | the controller commits each segment's exact size when it signs the segment's URL |
 | Reconciliation | the storage pass lists the logs archive bucket (`--logs-archive-store`) | the storage pass lists `logs/` in the controller's own object store per team |
 | Bucket ceiling | three ceilings: controller, logs service, cache | the controller's and the cache's |
 | Egress | the logs service meters in memory and Prometheus only and reports no totals; signed `kind=log` downloads skip metering (`data_download.go`) | the controller meters every log byte it serves under the existing `log` and `log_stream` classes (`pkg/controller/egress.go`); signed log downloads are removed |
@@ -593,11 +616,11 @@ has run there.
 |---|---|---|
 | Runner lost mid-run | at most the segment being cut plus records not yet flushed, about 10 s or 1 MiB | the reaper seals the attempt `incomplete`, reason `runner lost`; the dashboard shows the state |
 | Segment PUT fails | the sink retries with backoff from 200 ms to 2 s, three times, then keeps the bytes in the spool and retries at the next cut | after finish-time retries fail, the manifest records `incomplete`, reason `upload failed`, and a `logs_drop` event fires as it does for logbatch today |
-| Controller unreachable | already-issued URLs keep working for up to 15 min; the claim heartbeat fails, so the claim is lost on the existing schedule | as for runner loss once the claim expires |
+| Controller unreachable | uploads pause; cut segments stay in the spool and retry with backoff, and the claim heartbeat fails, so the claim is lost on the existing schedule | as for runner loss once the claim expires; a runner lost meanwhile loses the outage's log |
 | Object store unreachable | uploads fail and the spool grows on local disk | as for a failed PUT; the controller's read path returns 503 naming the store |
-| URL batch expired | the sink requests a new batch before cutting | none needed |
+| Signed URL expired | the retry signs the same segment again, free | none needed |
 | Retry writes a segment twice | the key is fixed per number, so the second PUT overwrites identical bytes | the manifest digest matches |
-| Superseded attempt keeps writing | its URLs name its own attempt and generation; the controller refuses it new batches | the reader serves the latest attempt |
+| Superseded attempt keeps writing | its URLs name its own attempt and generation; the controller refuses to sign more | the reader serves the latest attempt |
 | Spool disk full | the sink cannot keep records | dropped lines counted in the manifest and a `logs_drop` event, as today's drop policy |
 | Segment missing or digest mismatch at read | the reader serves what verifies and stops at the first bad segment | completeness `incomplete`, naming the segment |
 | Node seal and controller seal race | conditional create on the manifest lets one win | the loser's write fails and it rereads |
@@ -624,15 +647,19 @@ Each item names a recommendation concrete enough that "yes" answers it.
 3. **Segment cadence.** 10 s or 1 MiB, fixed, no operator setting.
    Recommendation: fixed. It costs about $0.72 per 1,000 typical runs in
    PUTs; revisit with measured request counts before adding a knob.
-4. **URL issuance.** A new `log-segments` route returning 16 presigned PUT
-   URLs plus a manifest URL per call, 15 min lifetime, rather than the
-   reserve, PUT and commit flow artifacts use. Recommendation: yes.
-5. **Segment size enforcement.** Unsized presigned PUTs, with the sink
-   enforcing the 64 MiB cap and the controller charging measured bytes,
-   rather than presigned POST policies with a size range. Recommendation:
-   unsized PUTs. POST policies are not supported by every S3-compatible
-   store (Cloudflare R2 has none), and an over-uploading node only fills
-   its own team's storage.
+4. **URL issuance.** A `log-segments` route that signs one segment's PUT
+   per call, after the sink sealed it, rather than the reserve, PUT and
+   commit flow artifacts use. Recommendation: yes.
+5. **Segment size enforcement.** Decided: each segment's presigned PUT
+   signs its exact `Content-Length` and `Content-MD5`, the controller
+   charges that size when it signs and enforces the 64 MiB cap, and the
+   manifest goes through the controller, which checks it against the
+   signed segments. This replaced unsized PUTs issued 16 at a time, which
+   let anyone holding a URL store an object of any size and charged the
+   writer's own report. Signed headers need no POST policy, which
+   Cloudflare R2 lacks. The cost is a controller round trip per segment:
+   a controller outage pauses uploads, and a runner that dies during one
+   loses up to the outage's length of log.
 6. **Retention mechanism.** Retention classes as key prefixes with one
    lifecycle rule each, owned by the operator and verified by the
    controller at boot, rather than object tags or a controller sweeper.
