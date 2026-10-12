@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestNodeLogRecordFollowsTheRunningAttempt(t *testing.T) {
@@ -102,7 +103,7 @@ func TestAbandonedNodeLogsWaitForTheGraceAfterTheNodeFinished(t *testing.T) {
 	if err := s.CreateTrigger(ctx, store.Trigger{ID: f.run, Pipeline: "demo", CreatedAt: time.Now(), TriggerSource: "runs-submit"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET status = 'claimed', lease_expires_at = ? WHERE id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE triggers SET status = 'claimed', lease_expires_at = ? WHERE id = ?`),
 		time.Now().Add(time.Hour).UnixNano(), f.run); err != nil {
 		t.Fatal(err)
 	}
@@ -172,5 +173,31 @@ func TestSigningALogSegmentChargesItsSizeOnce(t *testing.T) {
 	}
 	if prunable, err := s.PrunableNodeLogs(ctx, store.DefaultTeam, 10); err != nil || len(prunable) != 1 {
 		t.Fatalf("a finished run's logs = %+v, %v", prunable, err)
+	}
+}
+
+// An ended claim keeps log authority over its own attempt for the seal
+// grace after the attempt ended, and none after it.
+func TestAnEndedClaimKeepsItsLogTailForTheGrace(t *testing.T) {
+	f := newDispatchRun(t, "run-tail")
+	f.mustAccept(t, planOf("a"))
+	raw := f.claimRaw(t, "a", store.ClaimTokenWork)
+	ctx, s := t.Context(), f.s
+	live, err := s.AuthorizeClaimToken(ctx, raw, store.ClaimLogTail, time.Now())
+	if err != nil || live.Ended {
+		t.Fatalf("a live claim = %+v, %v", live, err)
+	}
+	if _, err := f.report(live, store.AttemptReport{Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AuthorizeClaimToken(ctx, raw, store.ClaimReporting, time.Now()); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("the ended claim reports = %v, want ErrClaimNotLive", err)
+	}
+	tail, err := s.AuthorizeClaimToken(ctx, raw, store.ClaimLogTail, time.Now())
+	if err != nil || !tail.Ended || tail.Attempt != 1 {
+		t.Fatalf("the ended claim's tail = %+v, %v; want attempt 1, ended", tail, err)
+	}
+	if _, err := s.AuthorizeClaimToken(ctx, raw, store.ClaimLogTail, time.Now().Add(store.NodeLogSealGrace)); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("the tail past the grace = %v, want ErrClaimNotLive", err)
 	}
 }
