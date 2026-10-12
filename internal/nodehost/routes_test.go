@@ -143,8 +143,8 @@ func TestProtocolMismatchAnswers426WithSupportedVersion(t *testing.T) {
 		if got.status != http.StatusUpgradeRequired {
 			t.Fatalf("protocol %q: status %d, want 426", protocol, got.status)
 		}
-		if got.body["error"] != "node protocol unsupported" {
-			t.Fatalf("protocol %q: error %v, want the fixed message", protocol[:min(len(protocol), 8)], got.body["error"])
+		if got.body["error"] != "node protocol unsupported" || got.body["code"] != "protocol_mismatch" {
+			t.Fatalf("protocol %q: body %v, want the fixed message and protocol_mismatch", protocol[:min(len(protocol), 8)], got.body)
 		}
 		supported, _ := got.body["supported"].([]any)
 		if len(supported) != 1 || supported[0] != authwire.NodeProtocolVersion {
@@ -190,7 +190,7 @@ func TestSecretRefusesANameTheNodeDidNotDeclare(t *testing.T) {
 	})
 	for _, name := range []string{"OTHER", "token", "TOKEN ", "../TOKEN"} {
 		got := secret(t, s, name, bearer)
-		if got.status != http.StatusForbidden || got.body["error"] != "secret_undeclared" {
+		if got.status != http.StatusForbidden || got.body["code"] != "secret_undeclared" {
 			t.Fatalf("%q: status %d body %v, want 403 secret_undeclared", name, got.status, got.body)
 		}
 	}
@@ -285,12 +285,12 @@ func TestSecretMissingAndFailingBackend(t *testing.T) {
 		}}, Masker: masker,
 	})
 
-	if got := secret(t, s, "UNSET", bearer); got.status != http.StatusNotFound || got.body["error"] != "secret_not_found" {
+	if got := secret(t, s, "UNSET", bearer); got.status != http.StatusNotFound || got.body["code"] != "secret_not_found" {
 		t.Fatalf("UNSET: status %d body %v, want 404 secret_not_found", got.status, got.body)
 	}
 	got := secret(t, s, "BROKEN", bearer)
-	if got.status != http.StatusBadGateway || got.body["error"] != "secret_unavailable" ||
-		strings.Contains(got.body["message"].(string), "backend") {
+	if got.status != http.StatusBadGateway || got.body["code"] != "secret_unavailable" ||
+		strings.Contains(got.body["error"].(string), "backend") {
 		t.Fatalf("BROKEN: status %d body %v, want 502 secret_unavailable without the backend's error", got.status, got.body)
 	}
 	if l := logs.String(); strings.Contains(l, "backend") || strings.Contains(l, "pw-cred") || strings.Contains(l, bearer) {
