@@ -358,7 +358,6 @@ func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string,
 func (l NodeLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
 func (l NodeLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
-func (l NodeLogs) StreamAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error)
 type OIDCToken struct {
 	Token     string
 	ExpiresAt time.Time

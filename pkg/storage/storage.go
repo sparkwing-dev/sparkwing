@@ -237,14 +237,3 @@ type LogStore interface {
 	// DeleteRun removes every log file for the run. Idempotent.
 	DeleteRun(ctx context.Context, runID string) error
 }
-
-// AttemptLogStreamer is a log store that keeps each node attempt's log
-// apart, so a follower streams one attempt's log rather than whichever
-// is newest.
-type AttemptLogStreamer interface {
-	// StreamAttempt opens the log of the node's attempt written under
-	// claim generation as server-sent events, ending with a stream_end
-	// event once that log is sealed. It returns an error wrapping
-	// ErrNotFound while the attempt has no log.
-	StreamAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error)
-}

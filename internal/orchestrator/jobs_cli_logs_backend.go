@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -105,21 +104,12 @@ func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string,
 	return err
 }
 
-// safety: a controller keeps each attempt's log apart, so a backend reading one follows through
-// followLogsRemote, attempt by attempt; any other backend keeps one log per node, streamed once.
 func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFilter string, out io.Writer) error {
-	if cb, ok := b.(*backend.ClientBackend); ok {
-		if ctrl, logs := cb.Remote(); logs != nil {
-			if attempts, ok := logs.(storage.AttemptLogStreamer); ok {
-				return followLogsRemote(ctx, ctrl, attempts, runID, nodeFilter, out)
-			}
-		}
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var writeMu sync.Mutex
-	seen := map[string]struct{}{}
+	follows := newNodeFollows()
 	var wg sync.WaitGroup
 	var multi atomic.Bool
 
@@ -127,6 +117,7 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer follows.ended(nodeID)
 			streamNodeViaBackend(runCtx, b, runID, nodeID, &multi, &writeMu, out)
 		}()
 	}
@@ -148,11 +139,10 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 						if nodeFilter != "" && n.NodeID != nodeFilter {
 							continue
 						}
-						if _, ok := seen[n.NodeID]; ok {
+						if !follows.start(n) {
 							continue
 						}
-						seen[n.NodeID] = struct{}{}
-						if len(seen) > 1 {
+						if follows.count() > 1 {
 							multi.Store(true)
 						}
 						spawn(n.NodeID)

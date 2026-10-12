@@ -21,10 +21,7 @@ type segmentLogs struct {
 	objs logObjectStore
 }
 
-var (
-	_ storage.LogStore           = segmentLogs{}
-	_ storage.AttemptLogStreamer = segmentLogs{}
-)
+var _ storage.LogStore = segmentLogs{}
 
 func (l segmentLogs) Append(context.Context, string, string, []byte) error {
 	return fmt.Errorf("%w: node logs reach the controller as segments", storage.ErrNotSupported)
@@ -115,28 +112,11 @@ func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadC
 	if !ok {
 		return nil, nil
 	}
-	return l.stream(ctx, rec), nil
-}
-
-// StreamAttempt streams one attempt's log as [segmentLogs.Stream] does
-// the newest.
-func (l segmentLogs) StreamAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error) {
-	rec, err := l.s.store.GetNodeLog(ctx, l.team, runID, nodeID, attempt, generation)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("%w: %w", storage.ErrNotFound, err)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return l.stream(ctx, rec), nil
-}
-
-func (l segmentLogs) stream(ctx context.Context, rec store.NodeLog) io.ReadCloser {
 	pr, pw := io.Pipe()
 	go func() {
 		pw.CloseWithError(streamSegments(ctx, l.objs, l.s.liveLogs, rec, pw))
 	}()
-	return pr
+	return pr, nil
 }
 
 // safety: one search reads at most this much log and runs at most this long, so a broad grep cannot hold the

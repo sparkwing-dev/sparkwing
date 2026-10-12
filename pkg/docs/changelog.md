@@ -24,9 +24,6 @@ unlock.
 - **controller:** `sparkwing-controller migrate-logs --root DIR [--archive-store URL] [--cache-blob-store URL] [--credentials-dir DIR] [--default-team T] [--dry-run]` converts a `sparkwing-logs` service's stored node logs into segments the controller reads
   It reads the service's volume and archive directly, so the service need not run, records each converted log in the controller's state database so it is pruned and deleted with its run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. A run it cannot convert whole, such as one the state database does not hold, is named and left unconverted. Run it with the controller stopped: it opens and upgrades the state database, which a dry run leaves unopened. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
-- **controller + cli:** `GET /api/v1/runs/{id}/logs/{node}/stream?attempt=N&generation=G` streams one attempt's log, and `sparkwing runs logs --follow` follows a node attempt by attempt
-  An attempt with no log yet answers 404 rather than another attempt's log, so a follow shows each retry and each later claim of a node once, in order, including one that started and finished between two polls. In Go, `client.NodeLogs.StreamAttempt` and `storage.AttemptLogStreamer` stream one attempt.
-
 - **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
 - **controller + web:** Team → GitHub previews repository-declared push and pull request pipelines, with separate owner consent for automatic triggers and GitHub Actions workers
