@@ -31,8 +31,6 @@ type profileEffectiveJSON struct {
 	Source     string `json:"source"`
 	Controller string `json:"controller"`
 	State      string `json:"state"`
-	Logs       string `json:"logs"`
-	Cache      string `json:"cache"`
 }
 
 type profileConsideredJSON struct {
@@ -47,15 +45,12 @@ type profileReportJSON struct {
 }
 
 func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) error {
-	state, logs, cache := p.SurfaceStrings()
 	report := profileReportJSON{
 		Effective: profileEffectiveJSON{
 			Name:       chain.Selected,
 			Source:     string(chain.Source),
 			Controller: p.ControllerURL(),
-			State:      state,
-			Logs:       logs,
-			Cache:      cache,
+			State:      p.StateString(),
 		},
 		Considered: chainRows(chain),
 	}
@@ -64,16 +59,12 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 }
 
 func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string, out io.Writer) error {
-	state, logs, cache := p.SurfaceStrings()
-
 	fmt.Fprintf(out, "effective profile: %s\n", chain.Selected)
 	fmt.Fprintf(out, "  source:           %s\n", effectiveSourceDetail(chain, cfgPath))
 	if p.ControllerURL() != "" {
 		fmt.Fprintf(out, "  controller:       %s\n", p.ControllerURL())
 	}
-	fmt.Fprintf(out, "  state:            %s\n", state)
-	fmt.Fprintf(out, "  logs:             %s\n", logs)
-	fmt.Fprintf(out, "  cache:            %s\n", cache)
+	fmt.Fprintf(out, "  state:            %s\n", p.StateString())
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "resolution chain considered:")

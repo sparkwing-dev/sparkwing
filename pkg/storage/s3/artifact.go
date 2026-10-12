@@ -1,17 +1,10 @@
-// Package s3 implements storage.ArtifactStore + storage.LogStore on
-// top of any S3-compatible object store. Both surfaces run the
-// shared pkg/storage/conformance suites against an in-memory
-// gofakes3 server.
+// Package s3 implements storage.ArtifactStore on top of any
+// S3-compatible object store. It runs the shared
+// pkg/storage/conformance suites against an in-memory gofakes3 server.
 //
 // Object layout (Prefix is caller-supplied):
 //
-//	<Prefix>/<key>                            ArtifactStore
-//	<Prefix>/<runID>/<nodeID>/<seq>.ndjson    LogStore (rolling)
-//
-// Logs use object-per-Append because S3 has no append primitive;
-// read-modify-write would lose lines on concurrent appenders. A
-// nanosecond timestamp + monotonic seq keeps Append keys lex-sortable
-// across goroutines and processes.
+//	<Prefix>/<key>    ArtifactStore
 package s3
 
 import (

@@ -208,7 +208,7 @@ replaced was cut off:
 | `incomplete` | A segment failed to upload or verify, the binary skipped sequence numbers or reported drops, or the runner was lost and the controller sealed the attempt. | `- logs incomplete: ... -` naming the reason |
 | `cut_off` | The binary was killed or never started, sent no seal after numbering its lines, or reached the 64 MiB node cap. | `- logs cut off after line N: ... -` |
 | `streaming` | The node is running, or finished less than 60 seconds ago and its manifest has not landed. | Nothing yet. |
-| `unknown` | The log store keeps no manifests: a local run's filesystem, S3 or stdout logs surface. | Nothing. |
+| `unknown` | The log store keeps no manifests: a local run's run directory. | Nothing. |
 
 `sparkwing runs logs` prints the line after the node's log and the
 dashboard draws it below the log. Neither stores it, counts it, or puts it

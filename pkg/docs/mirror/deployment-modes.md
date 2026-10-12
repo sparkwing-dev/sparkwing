@@ -88,7 +88,7 @@ profiles:
     controller:
       url: https://api.example.dev
       token: swu_xxx
-    # state/cache/logs are implied by controller; reads/writes go through it.
+    # state is implied by the controller; reads go through it.
 ```
 
 A profile with a `controller:` block points commands at that controller

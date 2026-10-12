@@ -17,9 +17,8 @@
 // execution mode:
 //
 //   - [fs] -- filesystem (laptop / local dev)
-//   - [s3] -- any S3-compatible object store (ci-embedded, distributed)
+//   - [s3] -- any S3-compatible object store (artifacts only)
 //   - [sparkwingcache] -- the sparkwing-cache HTTP service (distributed)
-//   - [stdoutlogs] -- write-only stream to process stdout (ephemeral CI)
 //
 // Default backend per execution mode:
 //
@@ -29,9 +28,9 @@
 // # Opening backends
 //
 // Production code does not instantiate implementations directly.
-// Use [storeurl.OpenArtifactStore] / [storeurl.OpenLogStore], which
-// parse a backend URL (`fs:///...`, `s3://bucket/prefix`, ...) and
-// return the matching implementation behind the interface. State is
+// Use [storeurl.OpenArtifactStore], which parses a backend URL
+// (`fs:///...`, `s3://bucket/prefix`, ...) and returns the matching
+// implementation behind the interface. State is
 // opened from a backends.Spec via [storeurl.OpenStateStoreFromSpec].
 //
 // # Adding a backend
