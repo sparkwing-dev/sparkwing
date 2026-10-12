@@ -178,7 +178,7 @@ The host treats a missing code, or one it does not know, as `sdk_error` and keep
 
 ## Closures
 
-A closure is customer code that the host calls by id. The plan lists each node's closures under `closures`, and each step's under the step's own `closures`. The SDK assigns the ids. An id is opaque to the host, and it must be unique within the plan together with every generated node. The host refuses a plan with duplicate ids (`plan_invalid`). The Go SDK's ids look like `deploy/skip_if/0`, but an SDK that builds ids from node and step ids must keep them unique when those ids contain `/`.
+A closure is customer code that the host calls by id. The plan lists each node's closures under `closures`, and each step's under the step's own `closures`. The SDK assigns the ids. An id is opaque to the host, and it must be unique within the plan together with every generated node. The host refuses a plan with duplicate ids (`plan_invalid`). The Go SDK's ids look like `deploy/skip_if/0`; its encoding, described on `$defs/closures` in the schema, escapes `/` in node and step ids so they stay unique. Any SDK that builds ids from node and step ids must keep them unique when those ids contain `/`.
 
 | Kind | Where the host evaluates it | `input` | `value` | When `error` is set |
 |---|---|---|---|---|

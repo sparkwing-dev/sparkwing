@@ -47,8 +47,10 @@ unlock.
 - **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 - **sdk:** The plan document carries `protocol`, the node protocol version it was written for
+- **sdk:** The plan document lists each node's and step's closure ids under `closures`, and also carries `memo_key.closure`, `modifiers.has_verify` and step `continue_on_error` and `optional`
 
 ### Changed
+- **sdk (Breaking):** The plan document lists a node's dependency caches under `caches` instead of `dir_caches`
 - **orchestrator:** A pipeline whose `.sparkwing/sparkwing.yaml` does not parse fails instead of running without it
   Before, a run, a controller-dispatched trigger and each node process logged a warning and planned with the submitted arguments alone, dropping the project's default args, guards and runner requirements. Now the run fails with the parse error, which names the file and, for a removed key such as `mirror_local`, the key; a local `sparkwing run`, `plan` or `--describe` exits naming it.
 - **store + controller (Breaking):** `Store.ReleaseCreditFreezes` takes the actor and reason its business events record, and `Store.DisputeTeam` is removed

@@ -133,7 +133,7 @@ Groups take the same declaration and apply it to every member:
 The engine performs the restore and the save, not the node's own hooks:
 it restores before the node's `BeforeRun` hooks and saves after its
 `AfterRun` hooks. The plan snapshot lists each node's declared caches
-under `dir_caches`.
+under `caches`.
 
 ### Directory helpers
 

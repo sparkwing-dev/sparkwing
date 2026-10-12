@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -192,9 +193,10 @@ func (s protocolSchema) mustValidate(t *testing.T, def string, v any) {
 // safety: schema properties the Go SDK does not emit yet, per $defs entry; the
 // check fails once a listed one is emitted, so the list cannot go stale.
 var notYetEmitted = map[string][]string{
-	"node":      {"caches", "closures", "memo_key", "needs_generated", "tools"},
-	"modifiers": {"has_verify", "skip_if_budget_ms"},
-	"step":      {"closures", "continue_on_error", "has_dry_run", "optional", "safe_without_dry_run"},
+	"node":      {"needs_generated", "tools"},
+	"modifiers": {"skip_if_budget_ms"},
+	"step":      {"has_dry_run", "safe_without_dry_run"},
+	"memoKey":   {"const", "env", "files"},
 }
 
 // safety: walks the Go type, so a field no sample sets still has to be in the
@@ -256,6 +258,9 @@ func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
 		"work":           reflect.TypeFor[nodeproto.PlanWork](),
 		"step":           reflect.TypeFor[nodeproto.PlanStep](),
 		"stepGroup":      reflect.TypeFor[nodeproto.PlanStepGroup](),
+		"cache":          reflect.TypeFor[depcache.Spec](),
+		"memoKey":        reflect.TypeFor[nodeproto.PlanMemoKey](),
+		"closures":       reflect.TypeFor[nodeproto.PlanClosures](),
 	} {
 		s.requireFieldsDeclared(t, def, typ)
 	}
@@ -291,8 +296,9 @@ func (protocolFixturePipeline) Plan(_ context.Context, plan *sparkwing.Plan, _ p
 type protocolStepsJob struct{}
 
 func (protocolStepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	build := sparkwing.Step(w, "build", func(context.Context) error { return nil })
-	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build)
+	build := sparkwing.Step(w, "build", func(context.Context) error { return nil }).
+		SkipIf(func(context.Context) bool { return false })
+	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build).Optional()
 	return nil, nil
 }
 
@@ -330,6 +336,10 @@ func TestDescribeAndPlanOutputMatchTheSchema(t *testing.T) {
 		Resources(sparkwing.Cores(2), sparkwing.MemoryGB(1)).
 		Env("MODE", "ci").
 		Outputs("dist/**").
+		CacheDir(sparkwing.GoModules()).
+		BeforeRun(func(context.Context) error { return nil }).
+		AfterRun(func(context.Context, error) {}).
+		Verify(func(context.Context) error { return nil }).
 		SkipIf(func(context.Context) bool { return false }).
 		Memoize(func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key("build"), nil }, sparkwing.TTL(time.Hour))
 	sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
