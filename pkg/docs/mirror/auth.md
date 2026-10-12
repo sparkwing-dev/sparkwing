@@ -11,7 +11,12 @@ Raw tokens are `<prefix>_<entropy>`:
   or `sparkwing cloud connect --admin-token-stdin`, which mints one and writes the
   profile that holds it).
 - `swr_...` -- runner. Created for remote machine agents or pool replicas.
+- `swt_...` -- team. Minted by a team member, either for the CLI or for a
+  machine, with `POST /api/v1/team/tokens` (see [team tokens](#team-tokens)).
 - `sws_...` -- service. Created for in-cluster back-channel callers.
+- `swc_...` -- claim. Minted by the controller with each claim it awards and
+  returned once in the claim's answer; nobody creates one by hand (see
+  [claim tokens](#claim-tokens)).
 
 The **prefix segment** is the first 12 characters of a raw token. It's
 a non-secret identifier used in `sparkwing cluster tokens list`, `revoke`, and
@@ -296,8 +301,8 @@ and the effect.
 Only the operator's own signed-in account reaches it. The controller lists
 operator accounts by account id with `--operator-accounts`
 (comma-separated), and every route under
-`/api/v1/operator/` answers `403` to any other caller: a team owner, a
-password session and every bearer token, an admin token included. A console
+`/api/v1/operator/` answers `403` to any other caller: a team owner, an
+operator-token session and every bearer token, an admin token included. A console
 action therefore needs the operator's sign-in, not a credential that
 automation can hold. The controller serves the `/operator` page only to a
 listed operator's own signed-in session and answers `403` to every other
@@ -487,7 +492,7 @@ already finished still occupies the budget until it ages out of the hour.
 ### The team-wide runner count
 
 `max_concurrent_runners` counts every cloud runner a team holds, whichever of
-its tokens claimed it, so minting more runner tokens gives a team no more
+its tokens claimed it, so minting more machine tokens gives a team no more
 concurrency than its spend limits assume. It always applies: unset or zero
 means 100 per team, never unlimited. An operator raises one granted team
 past it with `runner_cap` on `POST /api/v1/teams/{team}/trust`
@@ -531,20 +536,21 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
-| `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
+| `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
+| `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
+| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`, and POST `/internal/egress/totals`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
 
-A runner needs `nodes.claim`, `triggers.claim`, `runs.state` and
-`secrets.read`. That set claims work, drives the run it claimed from plan to
-finish, reads the secrets its pipeline owns, and uploads its nodes' log
-segments. The controller refuses to mint the removed `logs.write` and
-`logs.delete` scopes; see
+A runner needs `nodes.claim`, `triggers.claim` and
+`runs.state`. That set claims work, drives the run it claimed from plan to
+finish, and uploads its nodes' log segments; the claim tokens its claims
+return read the secrets the run's plan declares. The controller refuses to
+mint the removed `logs.write` and `logs.delete` scopes; see
 [the migration notes](migrations/_unreleased.md#node-logs-reach-the-controller-as-segments). It mints no token,
 reads no user, lists no secret, cannot start or retry a run of its own
 choosing, and cannot read cached source for an unclaimed run. A pool replica that executes
@@ -559,7 +565,7 @@ run in place of the scope, so the claim the runner already took is what opens
 them. Add `runs.read` only to give a token the deployment-wide view.
 
 A warm-pool dispatcher hands nodes to a pool on that same set. It opens and
-closes each offer round while holding the run's trigger claim, so the readiness
+closes each claim round while holding the run's trigger claim, so the readiness
 routes admit it without an `admin` token.
 
 A route can narrow a field below its route scope. The node dispatch reads
@@ -624,7 +630,7 @@ from the run or the source trigger generation. A runner with `runs.state` but
 without the applicable fence gets `403 claim_required`; a stale generation
 gets `409 Conflict`.
 
-An assisted executor acknowledges its claim generation and next monotonic
+A runner acknowledges its claim generation and next monotonic
 attempt ordinal immediately before each job-body invocation. Node log appends
 must carry that started ordinal in addition to the exact claim fence. The logs
 service validates it against the controller and stores it in an immutable
@@ -634,6 +640,64 @@ coordinator's `_compile` output.
 Ordinary node reads return executor and attempt attribution but remove holder
 and reservation values; claim responses still return the fence the winner must
 present.
+
+### Claim tokens
+
+Every claim answers with a `claim_token`, and the process that runs the
+claimed work authenticates with it instead of the credential that claimed.
+`POST /api/v1/nodes/claim` and `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`
+return a node claim token, and `POST /api/v1/triggers/claim` and
+`POST /api/v1/triggers/{id}/claim` a trigger claim token. The runner keeps its
+own token for claiming, heartbeating and its own calls; a pooled node's
+supervisor, the brokered child behind it and a Kubernetes Job run on the
+node's claim token, and the Job spec carries nothing else that
+authenticates.
+
+A node claim token acts as the runner that made the claim, confined to that
+claim:
+
+- It reaches the routes under the claim's run (`/api/v1/runs/{run}`,
+  `/api/v1/runs/{run}/...`, `GET /api/v1/triggers/{run}`), the run's
+  secrets, the slot routes for its own `run/node` holder and
+  `GET /api/v1/services`.
+- For `Ref.Get`, `TryGet` and `RunAndAwait` it also reaches, in its own
+  team: `GET /api/v1/pipelines/{name}/latest`, any run's
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/output`, `POST /api/v1/triggers`
+  naming its run and node as the parent (and as `retry_of` only a child that
+  node started), `GET /api/v1/runs/{id}` with no query for such a child, and
+  `GET /api/v1/triggers/spawned-child` for its node under its run or the run
+  that run retries. Each is served with the one scope its route needs for
+  that request alone, and another team's pipeline, run or output answers as
+  missing. The child is claimed like any other run and never holds the
+  parent's claim token. Anything else answers `403 claim_mismatch`.
+- It reads any node of its run but writes only to its own node. Of the
+  run-level writes it makes only a node's own: events, the run heartbeat, the
+  cache grant, the run's workload OIDC token, the run's source credential and
+  the run's Git proxy. Run
+  create and finish, plan, node create and the readiness routes answer
+  `403 claim_mismatch`.
+- Every request carries the claim's own holder, membership, reservation and
+  generation, whatever fence headers it sent, and never a trigger generation,
+  so it never acts as the run's dispatcher.
+- It holds `nodes.claim` and `runs.state` where the runner holds them, and
+  never `admin`, so the claim's fence binds it even when an operator token
+  claimed. `runs.state` is what its node's log segment uploads need.
+- It stops when the claim ends: the node finishes, the lease lapses, the node
+  is claimed again, or the runner's own token is revoked or expires. A
+  request after that answers `403 claim_ended`, or `401` for a dead runner
+  token.
+
+A trigger claim token answers `GET /api/v1/secrets/{name}` and
+`POST /api/v1/runs/{id}/source-credential` alone, for the trigger's own run,
+and stops with the trigger claim. The source credential route answers a node
+or trigger claim token and no bearer, so the runner's token fetches no
+source credential (see [Git credentials](git-credentials.md)). A trigger child that runs
+a node in its own process does so under the trigger claim, which is why the
+trigger claim reads secrets. Every other route a trigger child calls goes
+through the runner's loopback trigger broker, which admits only its run's
+routes and forwards them with the runner's token. On an open controller,
+which mints no claim token, the broker forwards the secret read with no
+bearer, as the controller answers it directly.
 
 `PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
 pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every
@@ -706,15 +770,17 @@ name the same repository and it means nothing either way.
 - An `admin` principal reads any row. `?pipeline=<name>` selects a pipeline's
   row, `?run=<id>` selects the pipeline of that run, and without either the
   unscoped row answers.
-- A `secrets.read` principal without `admin` cannot name a pipeline. It names
-  the run it is executing with `?run=<id>`, and the controller answers only
-  when the caller holds that run's claim; the name then resolves against that
-  run's pipeline, falling back to an unscoped row only when that row is shared.
-  A caller holding no claim reads nothing. A caller holding claims in one
-  pipeline may omit `?run`; holding claims in two, it must name the run.
-- A controller-dispatched work node's claim token names its own run with
-  `?run=<id>` and reads only a name its accepted plan declares, resolved like
-  the row above. The pipeline's code declares its secrets, as in GitHub
+- A `team.admin` principal reads its own team's rows the same way, a
+  management read by name. A masked row answers it `403 write_only`.
+- Any other bearer, a runner's token or a `secrets.read` token included, is
+  answered `403 claim_required`, even while it holds the run's claim: a node
+  reads with its claim token.
+- A claim token (a controller-dispatched work node's, a runner's node claim
+  or a runner's trigger claim) names its own run with `?run=<id>` and reads
+  only a name the run's plan declares, resolved against the run's pipeline
+  and falling back to an unscoped row only when that row is shared. Each
+  release is recorded as a `secret_released` event on the run, naming the
+  node for a node's claim. The pipeline's code declares its secrets, as in GitHub
   Actions, so push access to the repository is the trust boundary; fork pull
   requests never run on this path. A plan is refused when a declared name
   breaks the secret-name grammar or it declares more than 100 names, and a
@@ -725,8 +791,8 @@ name the same repository and it means nothing either way.
   chosen repositories is a future feature.
 
 So one runner token cannot lift another pipeline's deploy credential by asking
-for it by name, and a token working two runs cannot read the wrong one's
-credential by accident. `GET /api/v1/secrets` (the list) and the secret writes
+for it by name, a claim reads only its own run's declared secrets, and every
+node read leaves a `secret_released` event. `GET /api/v1/secrets` (the list) and the secret writes
 stay `admin`; the list carries each row's pipeline and shared flag.
 
 Token creation validates scopes against that same set: a scope the
@@ -808,7 +874,7 @@ every request, so a demotion or removal bites on the user's next request:
 | Role     | Scopes                                                                 |
 |----------|------------------------------------------------------------------------|
 | `reader` | `runs.read`, `logs.read`, `triggers.read`                              |
-| `editor` | reader, plus `runs.write`, `runs.control`, `approvals.write`; mints runner tokens for the team |
+| `editor` | reader, plus `runs.write`, `runs.control`, `approvals.write`; mints machine tokens for the team |
 | `owner`  | editor, plus `team.admin`                                              |
 
 No role grants `admin`, which stays the deployment operator's scope. Nobody
@@ -819,26 +885,8 @@ Every `/api/v1/team/...` route acts on the caller's active team, taken from the
 session and never from the request, and an id belonging to another team
 answers 404.
 
-A runner token minted from team settings carries the runner scope set and
-belongs to the team that minted it. It expires once it goes 90 days unused:
-each use moves its expiry to 90 days past that use, written at most once an
-hour, and the runner-token list shows when. Revoking it takes effect at once.
-Removing a member revokes every runner token
-they minted in that team, and demoting a member to `reader` revokes theirs,
-both in the same step as the role change. A team holds at most 100 live runner
-tokens, at most 50 open invitations, and creates at most 100 invitations a day;
-withdrawing an invitation still counts toward that day. No token minted into a
-team carries `admin`.
-
-Any member mints a personal CLI token with `POST /api/v1/team/cli-tokens`,
-from a signed-in session only; a bearer token cannot mint one. It is a user
-token bound to the member and the active team, carrying the member's role
-scopes without `team.admin`, so a reader's token only reads. Token creation
-uses the role held when the token is written, so a pending request cannot
-restore authority after a demotion. It expires 90 days after it is minted. Removing the member, or demoting them to `reader`, revokes
-it with their runner tokens; an owner demoted to `editor` keeps it, since it
-already carried only the editor's scopes. The member lists and revokes their
-own CLI tokens and no one else's, and holds at most 10 live ones in a team.
+A team holds at most 50 open invitations, and creates at most 100 invitations
+a day; withdrawing an invitation still counts toward that day.
 
 With `--email-sender` set, the controller
 emails each invitation through Amazon SES, taking credentials and region from
@@ -871,9 +919,11 @@ One replica works on a deletion at a time, under a five-minute lease it renews
 before each step. A pass that fails leaves the deletion where it was with the
 error recorded and the next pass starts that step again;
 `GET /api/v1/me/team-deletions` shows the requester its state. The slug is
-never registered again. The purge deletes the team's segments under every
-retention class's `teams/<team>/` prefix. An owner cannot delete their only
-team; deleting their account does that.
+never registered again. The controller deletes the team's cache tree under
+an operator grant it signs with its `cache-grant-key` credential, the key the
+cache verifies grants with, and the purge deletes the team's segments under
+every retention class's `teams/<team>/` prefix. An owner cannot delete their
+only team; deleting their account does that.
 
 A user deletes their account with `DELETE /api/v1/me`, typing their email back
 as `confirm_email`, from a session signed in within the last 10 minutes; an
@@ -902,10 +952,63 @@ id or email, and deletes a team with `DELETE /api/v1/teams/{team}`; both need
 Owning a secret means creating and deleting it, not keeping it from editors.
 Anyone who can run a team's pipelines -- an editor or above -- can use the
 secrets those pipelines read: they can change what a pipeline runs, and a
-runner token they mint reads the secrets of every run it claims. This is the
+machine token they mint reads the secrets of every run it claims. This is the
 same model as GitHub Actions, where anyone who can push a workflow can use the
 repository's secrets. Grant `editor` only to someone you would hand those
 secrets.
+
+### Team tokens
+
+A member mints a team token with `POST /api/v1/team/tokens`, from a signed-in
+session only; a bearer token cannot mint one. The raw token starts `swt_` and
+belongs to the team that minted it. Its `scopes` come from exactly one of two
+families, and a request that mixes them, names an unknown scope or sends an
+empty list answers `400`:
+
+- A **member** token is for the CLI. Its scopes are a subset of the caller's
+  role scopes without `team.admin`, so a reader's token only reads, and a
+  scope above the caller's role answers `403`. Any member mints one, and the
+  request sends no `name` or `repos`. The token acts as the member and expires
+  90 days after it is minted. A member holds at most 10 live ones in a team.
+  The response carries `token`, `prefix`, `family`, `scopes`, `expires_at`,
+  and the `profile`, `setup` and `run` values the dashboard shows for
+  connecting the CLI.
+- A **machine** token is for a runner. Its scopes are a subset of
+  `nodes.claim`, `triggers.claim` and `runs.state` that includes
+  `nodes.claim` or `triggers.claim`. Minting one
+  needs `editor` (`403` otherwise), and the request names the agent in `name`
+  (1 to 63 letters, digits, `-`, `_` or `.`) and the repositories in `repos`,
+  allowlist patterns that the returned connect `command` passes to the runner.
+  The token's principal is `agent:<name>`, and a name a live machine or runner
+  token already holds answers `409`. It expires once it goes 90 days unused:
+  each use moves its expiry to 90 days past that use, written at most once an
+  hour, and the token list shows when. A team holds at most 100 live machine
+  tokens.
+
+Token creation uses the role held when the token is written, so a pending
+request cannot restore authority after a demotion. No token minted into a team
+carries `admin`.
+
+`GET /api/v1/team/tokens` answers any member with the tokens they minted, of
+either family, and adds every machine token of the team for an editor or
+owner. Each row names `prefix`, `name`, `family`, `scopes`, `created_by`,
+`created_at`, `expires_at`, `last_used_at` and `git_credentials`.
+`DELETE /api/v1/team/tokens/{prefix}` revokes a token at once: the member who
+minted it revokes their own, and an owner revokes any machine token. A token
+the caller cannot see answers `404`, and one they see but may not revoke
+answers `403`. An owner releases stored git credentials to a machine with
+`PUT /api/v1/team/tokens/{prefix}/git-credentials` (see
+[Git credentials](git-credentials.md#who-receives-it)).
+
+Removing a member revokes every token they minted in that team, and demoting a
+member to `reader` revokes them too, both in the same step as the role change.
+An owner demoted to `editor` keeps theirs, since a member token already
+carried only the editor's scopes.
+
+CLI tokens (`swu_`) and runner tokens (`swr_`) minted from team settings
+before team tokens existed keep authenticating as they did until they expire
+or are revoked. The same routes list and revoke them, and they count toward
+the 10 member tokens and 100 machine tokens a team may hold.
 
 ### Linked sign-ins
 
@@ -1054,8 +1157,8 @@ the auth middleware runs, so they are open regardless of auth config:
 the health probe (k8s httpGet probes can't carry `Authorization`), the
 service-discovery endpoint
 the runner uses to find the cache pod, the session endpoints a client
-uses to establish, validate, and end a session (`/api/v1/auth/login`,
-`/api/v1/auth/session`, `/api/v1/auth/logout`), the capabilities report a
+uses to validate and end a session (`/api/v1/auth/session`,
+`/api/v1/auth/logout`), the capabilities report a
 signed-out dashboard draws its sign-in page from, and the GitHub webhook,
 which is HMAC-verified instead of bearer-authenticated. The sign-in pages
 (`/login`, `/auth/{provider}/start` and `/auth/{provider}/callback`) and the
@@ -1079,17 +1182,11 @@ through a profile.
 The controller serves the dashboard on the listener that serves its API, so
 the dashboard holds no credential of its own. Every page and API request
 carries the signed-in browser's session, and the controller checks each
-route's scope against that session as it does for any caller. A browser
-session carries the scopes of the user who signed in, so an account holding
-only `runs.read` reads runs and gets `403` on cancel. On a multi-team
-controller the session belongs to one user and one active team, which keeps a
-browser inside its own team.
-
-Create narrower accounts with `sparkwing cluster users add --scope
-runs.read,logs.read`; omitting `--scope` grants `admin`. The first-visit
-bootstrap account defaults to `admin` and may carry more scopes beside it, but
-a scope set that omits `admin` is rejected with `400`, and
-`sparkwing cluster users list` prints the scope set of every account.
+route's scope against that session as it does for any caller. An account
+session carries the scopes of the account's role in its active team, so a
+viewer reads runs and gets `403` on cancel; the session belongs to one account
+and one active team, which keeps a browser inside its own team. An
+operator-token session carries the scopes of the token it was opened with.
 
 Whenever the controller enforces token auth, because a token exists or a
 multi-team license is loaded, it sends a browser without a session to `/login`
@@ -1110,7 +1207,7 @@ scope` and nothing is removed.
 
 The controller's `/login` page offers "Sign in with Google" when its sign-in
 providers include `google` and "Sign in with GitHub" when they include
-`github`, above the password form. Each flow runs on the controller's own
+`github`, above the operator-token form. Each flow runs on the controller's own
 origin: `GET /auth/<provider>/start` creates a state and a PKCE verifier,
 keeps the provider, state, verifier and return path in a ten-minute
 `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), and
@@ -1176,7 +1273,7 @@ such as runners, key on their TCP peer. See
 [security.md](security.md#login-and-hashing-budgets) for the budgets and the
 argon2 memory bound.
 
-The login, first-admin, and logout forms carry a CSRF token in both a
+The sign-in and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. The controller rejects a missing,
 cross-origin, or mismatched token with `403` before it checks a credential.
 Unsafe API requests (`POST`, `PUT`, `PATCH`, and `DELETE`) that the session
@@ -1227,37 +1324,29 @@ somewhere forwarding no trusted `X-Forwarded-Proto`: the controller then sends
 cookie-authenticated writes. The chart passes it whenever the Ingress has
 `ingress.tls`.
 
-## First-visit signup
+## Signing in
+
+Dashboard sign-in is Google or GitHub, where a multi-team license and an OAuth
+client offer them, or an operator token. Sparkwing keeps no passwords.
+
+An operator token is a user token holding the `admin` scope, such as the
+bootstrap admin token below or one minted with `sparkwing cluster tokens
+create --type user --principal NAME --scope admin`. Paste it into the `/login` form and the
+controller opens a browser session for its principal. The session stores no
+copy of the token's scopes: every request reads the token's scopes and team,
+so revoking or expiring the token signs its browsers out on their next
+request. A token without `admin`, and every runner or service token, answers
+`403` and opens no session. Failed attempts spend the same per-prefix and
+per-client budgets a bearer does.
 
 Controller authentication is enabled at startup when the tokens table contains
 an active token. `--require-auth` makes startup fail when it does not, and
 the `bootstrap-admin-token` credential puts the first admin token in that table before the listener binds, so a provisioned
 controller starts with both satisfied; see the
-[security operator checklist](security.md#operator-checklist).
-
-A freshly-installed sparkwing cluster has no users, so there is
-nothing to log in *as*. While controller authentication is disabled,
-browsing to `/login` on an empty cluster renders a "Create first admin"
-form. Submitting it posts to `/login/bootstrap`, which creates the first
-admin user and signs the new admin in.
-
-The bootstrap path is one-shot and latched: once any user exists, the
-login page shows the standard sign-in form, `/login/bootstrap` refuses,
-and `POST /api/v1/users` goes back to requiring an admin token. There is
-no way to reopen the bootstrap path short of restarting the controller
-against a freshly emptied database.
-
-When controller authentication is enabled, or a multi-team license is
-loaded, `/login` offers no first-admin form and `POST /api/v1/users`
-requires an admin token even if the users table is empty. An operator can use that token with
-`sparkwing cluster users add` to create the first dashboard user. That
-first account has to be an admin, so leave `--scope` off, or name a list
-that contains `admin`; a narrower list is refused with `400` while the
-users table is empty.
-
-After the first admin is created, additional users are added via
-`sparkwing cluster users add`. Pass `--scope` to bound what that account's
-dashboard sessions reach; omitting it grants `admin`.
+[security operator checklist](security.md#operator-checklist). That token is
+how the first operator signs in, by API or by the sign-in form. A controller
+with authentication disabled serves its pages without sign-in, and its
+`/login` sends the browser straight on to the page it asked for.
 
 ## CLI
 
@@ -1465,17 +1554,14 @@ resets the backoff.
   span. There is no dedicated audit database.
 - **Per-user multi-tenancy**: principals are a free-form label. Adding a
   roles model is orthogonal and doesn't require a wire-shape change.
-- **Fine-grained `admin` split**: `triggers.claim`, `runs.state`, and
-  `secrets.read` carved the runner's work out of `admin`. What remains can be
+- **Fine-grained `admin` split**: `triggers.claim` and `runs.state`
+  carved the runner's work out of `admin`. What remains can be
   split further into `cache.write`, `locks.admin`, and similar when a real
   caller needs that narrower trust.
-- **Execution capabilities beyond assisted nodes**: workstation and gateway
-  agents keep their enrollment bearer in the supervisor and give each
-  job-body child a process-lifetime loopback capability for its exact run,
-  node, and acknowledged attempt log/lifecycle. Schema 30 is the internal
-  current-node dependency; schema 31 adds the current-attempt mutation fence and
-  durable grants for `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`,
-  cross-pipeline references, and dynamic `SpawnNode` before this path can ship.
-  Other execution modes retain their documented credential boundary. A future
+- **Execution capabilities beyond runner job bodies**: a runner keeps its
+  token in the supervisor and gives each job-body child a process-lifetime
+  loopback capability for its exact run, node, and acknowledged attempt
+  log/lifecycle. Other execution modes retain their documented credential
+  boundary. A future
   capability service could make the same split portable across container and
   process boundaries that do not share one supervisor.

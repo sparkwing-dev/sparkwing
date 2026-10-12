@@ -37,9 +37,9 @@ type Server struct {
 	store  *store.Store
 	logger *slog.Logger
 
-	hostKeyScan        func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
-	gitCredentialLimit perMinuteLimiter
-	identityLinkLimit  perMinuteLimiter
+	hostKeyScan           func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
+	sourceCredentialLimit perMinuteLimiter
+	identityLinkLimit     perMinuteLimiter
 
 	auth *Authenticator
 
@@ -72,11 +72,6 @@ type Server struct {
 	computeAlarmMu sync.Mutex
 	computeAlarmOn bool
 
-	bootstrapMu     sync.Mutex
-	bootstrapExpiry time.Time
-	bootstrapNeeded bool
-	bootstrapClosed bool
-
 	artifactStore storage.ArtifactStore
 
 	bucketUsageStore storage.ArtifactStore
@@ -101,7 +96,6 @@ type Server struct {
 	oidc         oidcState
 
 	cacheURL                     string
-	cacheToken                   string
 	cacheGrantKey                string
 	downloadFree, downloadFunded int64
 
@@ -122,9 +116,6 @@ type Server struct {
 	runnerPresence   *runnerPresenceRegistry
 	runnerHeartbeats *runnerHeartbeatRegistry
 	placement        placementPolicy
-
-	assistedRunID string
-	draining      atomic.Bool
 
 	// safety: names this process in the cron tick lease and on each recorded
 	// tick, so an operator can tell which controller evaluated.
@@ -173,67 +164,6 @@ func (s *Server) WithLocalExecution() *Server {
 	return s
 }
 
-// WithAssistedRunScope restricts executor preparation and offers to one
-// foreground coordinator run.
-func (s *Server) WithAssistedRunScope(runID string) *Server {
-	s.assistedRunID = runID
-	return s
-}
-
-// StopAssistedClaims makes a foreground coordinator refuse new preparations
-// and offers while already-claimed nodes wind down.
-func (s *Server) StopAssistedClaims() { s.draining.Store(true) }
-
-// AssistedRunHandler exposes only the authenticated surfaces an enrolled
-// executor needs for one foreground run.
-func (s *Server) AssistedRunHandler() http.Handler {
-	full := s.Handler()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.assistedPathAllowed(r.Method, r.URL.Path) {
-			http.NotFound(w, r)
-			return
-		}
-		if s.draining.Load() && r.Method == http.MethodPost &&
-			(r.URL.Path == "/api/v1/nodes/claim" || r.URL.Path == "/api/v1/nodes/claim/prepare") {
-			http.Error(w, "foreground coordinator is stopping", http.StatusServiceUnavailable)
-			return
-		}
-		full.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) assistedPathAllowed(method, path string) bool {
-	if method == http.MethodGet && (path == "/api/v1/health" || path == "/api/v1/auth/whoami" || path == "/api/v1/services") {
-		return true
-	}
-	if method == http.MethodPost && (path == "/api/v1/nodes/claim" || path == "/api/v1/nodes/claim/prepare") {
-		return true
-	}
-	if strings.HasPrefix(path, "/api/v1/agents/") && strings.HasSuffix(path, "/heartbeat") {
-		return method == http.MethodPost
-	}
-	if method == http.MethodGet && path == "/api/v1/triggers/"+s.assistedRunID {
-		return true
-	}
-	prefix := "/api/v1/runs/" + s.assistedRunID
-	if method == http.MethodGet && path == prefix {
-		return true
-	}
-	if strings.HasPrefix(path, prefix+"/gitcache/git/") {
-		return method == http.MethodGet || method == http.MethodPost
-	}
-	if strings.HasPrefix(path, prefix+"/nodes/") {
-		suffix := strings.TrimPrefix(path, prefix+"/nodes/")
-		if method == http.MethodGet && !strings.Contains(suffix, "/") {
-			return true
-		}
-		if method == http.MethodGet && strings.HasSuffix(suffix, "/output") {
-			return true
-		}
-	}
-	return false
-}
-
 // New constructs a Server bound to the given store. A trigger it accepts is
 // recorded for a runner to claim. Callers own the store's lifecycle; New
 // never closes it.
@@ -269,7 +199,7 @@ type placementPolicy struct {
 	liveness       time.Duration
 }
 
-// WithLocalFirstPlacement holds a node back from a legacy claim-mode runner
+// WithLocalFirstPlacement holds a node back from a claim-mode runner
 // that does not advertise the node's Prefers, for hold measured from the node's
 // ready time, while another runner that does advertise it has polled within
 // liveness and has a free slot. After the hold any eligible runner takes the
@@ -359,14 +289,6 @@ func (s *Server) WithCacheGrantKey(key string) *Server {
 	return s
 }
 
-// WithCacheCredentials configures a private controller-to-cache hop. The
-// bearer is never forwarded to an executor.
-func (s *Server) WithCacheCredentials(url, token string) *Server {
-	s.cacheURL = url
-	s.cacheToken = token
-	return s
-}
-
 // WithLiveLogLimits sizes the in-memory live log buffers: perNodeBytes
 // per running node, totalBytes across every node together, maxNodes
 // buffers at once, and idle before a node that stopped writing without
@@ -449,38 +371,6 @@ func (s *Server) reconcileBeforeRead(h http.HandlerFunc) http.HandlerFunc {
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
 	return s
-}
-
-func (s *Server) bootstrapAllowed() bool {
-	s.bootstrapMu.Lock()
-	defer s.bootstrapMu.Unlock()
-	if s.bootstrapClosed {
-		return false
-	}
-	if !s.bootstrapExpiry.IsZero() && time.Now().Before(s.bootstrapExpiry) {
-		return s.bootstrapNeeded
-	}
-	needed := true
-	if s.store != nil {
-		n, err := s.store.CountUsers()
-		if err == nil && n > 0 {
-			needed = false
-		}
-	}
-	s.bootstrapNeeded = needed
-	s.bootstrapExpiry = time.Now().Add(60 * time.Second)
-	if !needed {
-		s.bootstrapClosed = true
-	}
-	return needed
-}
-
-func (s *Server) markBootstrapClosed() {
-	s.bootstrapMu.Lock()
-	defer s.bootstrapMu.Unlock()
-	s.bootstrapClosed = true
-	s.bootstrapNeeded = false
-	s.bootstrapExpiry = time.Now().Add(60 * time.Second)
 }
 
 func (s *Server) authMiddleware() *Authenticator {
@@ -978,13 +868,13 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/cache-grant", newClaimSensitiveRoute(claimSourceKinds, nil, s.handleRunCacheGrant(s.runTeam)).orElse(requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/source-credential", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleRunSourceCredential)))
-	mux.Handle("POST /api/v1/runs/{id}/source-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceToken), ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/git-credential", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunGitCredential), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/source-credential", newClaimSensitiveRoute(claimSourceCredentialKinds, nil, http.HandlerFunc(s.handleRunSourceCredential)))
 	mux.Handle("POST /api/v1/runs/{id}/oidc-token", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(handleClaimOIDCToken)).orElse(requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
 	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
+	mux.Handle("POST /api/v1/cache/store-ceiling/measure", requireScope(ScopeAdmin, s.handleCacheStoreCeiling("measure")))
+	mux.Handle("POST /api/v1/cache/store-ceiling/thaw", requireScope(ScopeAdmin, s.handleCacheStoreCeiling("thaw")))
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/register", requireScope(ScopeNodesClaim,
 		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheRegister))))
 	mux.Handle("GET /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
@@ -996,10 +886,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
-	mux.Handle("PUT /api/v1/agents/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEnrollAgent)))
-	// safety: an agent treats a lost liveness heartbeat as fatal, so shedding
-	// one would take the agent and every node it runs down with it.
-	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatAgent)))
 
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
@@ -1059,7 +945,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
 
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimNode))))
-	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handlePrepareNodeClaim))))
 	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
 	// to the live claim on the run's trigger rather than to the scope alone. A node claim
 	// never satisfies them, which keeps a runner from skipping its node's dependencies.
@@ -1131,20 +1016,17 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListInvitations)))
 	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
 	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
-	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
 	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
 	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
-	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
-	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
-	mux.Handle("PUT /api/v1/team/runner-tokens/{prefix}/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetRunnerGitCredentials)))
 	mux.Handle("GET /api/v1/team/git-credentials", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitCredentials)))
 	mux.Handle("POST /api/v1/team/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitCredential)))
 	mux.Handle("POST /api/v1/team/git-credentials/{host}/confirm", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleConfirmGitCredential)))
 	mux.Handle("DELETE /api/v1/team/git-credentials/{host}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitCredential)))
 	mux.Handle("GET /api/v1/team/git-credentials/releases", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListGitCredentialReleases)))
-	mux.Handle("POST /api/v1/team/cli-tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateCLIToken)))
-	mux.Handle("GET /api/v1/team/cli-tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCLITokens)))
-	mux.Handle("DELETE /api/v1/team/cli-tokens/{prefix}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRevokeCLIToken)))
+	mux.Handle("POST /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateTeamToken)))
+	mux.Handle("GET /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListTeamTokens)))
+	mux.Handle("DELETE /api/v1/team/tokens/{prefix}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRevokeTeamToken)))
+	mux.Handle("PUT /api/v1/team/tokens/{prefix}/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetTeamTokenGitCredentials)))
 	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
 	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
 	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
@@ -1214,20 +1096,16 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))
 	mux.Handle("POST /api/v1/signups/waitlist/approve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleApproveWaitlist)))
 
-	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
-	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
-	mux.Handle("DELETE /api/v1/users/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteUser)))
-
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret), ScopeTeamAdmin))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListSecrets), ScopeTeamAdmin))
-	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimWorkKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
+	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimSecretKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its operator token, which these
-	// handlers check.
+	// safety: the cache proves itself with its storage.count service token,
+	// which these handlers check.
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
 	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
@@ -1241,7 +1119,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
 	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
 	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
-	router.Handle("POST /api/v1/auth/login", noStore(s.loginLimit.middleware(http.HandlerFunc(s.handleLogin))))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
@@ -1286,8 +1163,8 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
 	return noStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if raw, route := claimRouteFor(mux, r); route != nil {
-			s.serveClaim(w, r, raw, route, next)
+		if raw, route := claimRouteFor(mux, r); raw != "" {
+			s.serveClaimBearer(w, r, raw, route, next, byToken)
 			return
 		}
 		if sess := browserSessionFrom(r.Context()); sess != nil {

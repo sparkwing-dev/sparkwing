@@ -26,7 +26,7 @@ func sessionLifetimeServer(t *testing.T, maxLifetime time.Duration) (*httptest.S
 	if maxLifetime != 0 {
 		srv = srv.WithSessionMaxLifetime(maxLifetime)
 	}
-	ts := httptest.NewServer(srv.Handler())
+	ts := httptest.NewServer(operatorSignInServer(t, st, srv).Handler())
 	t.Cleanup(ts.Close)
 	return ts, st
 }
@@ -62,7 +62,6 @@ func resolveSession(t *testing.T, ts *httptest.Server, id string) (int, []byte) 
 
 func TestSessionRoute_RefusesRenewalPastTheAbsoluteCap(t *testing.T) {
 	ts, st := sessionLifetimeServer(t, 0)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
 	now := time.Now().UTC()
@@ -91,7 +90,6 @@ func TestSessionRoute_RefusesRenewalPastTheAbsoluteCap(t *testing.T) {
 
 func TestLoginSessionStartsWithSevenDaysOfValidity(t *testing.T) {
 	ts, _ := sessionLifetimeServer(t, 0)
-	bootstrapAdmin(t, ts)
 	started := time.Now().UTC()
 	login := loginForSessionHash(t, ts)
 	finished := time.Now().UTC()
@@ -115,7 +113,6 @@ func TestLoginSessionStartsWithSevenDaysOfValidity(t *testing.T) {
 func TestSessionRoute_ClampsRenewalToTheAbsoluteCap(t *testing.T) {
 	const maxLifetime = 3 * time.Hour
 	ts, st := sessionLifetimeServer(t, maxLifetime)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
 	now := time.Now().UTC()
@@ -154,7 +151,6 @@ func TestSessionRoute_ClampsRenewalToTheAbsoluteCap(t *testing.T) {
 
 func TestSessionRoute_ExtendsARecentlyUsedSessionBeforeItsFinalHour(t *testing.T) {
 	ts, st := sessionLifetimeServer(t, 0)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
 	now := time.Now().UTC()
@@ -183,7 +179,6 @@ func TestSessionRoute_ExtendsARecentlyUsedSessionBeforeItsFinalHour(t *testing.T
 
 func TestSessionRoute_RefusesASessionCreatedInTheFuture(t *testing.T) {
 	ts, st := sessionLifetimeServer(t, 0)
-	bootstrapAdmin(t, ts)
 	login := loginForSessionHash(t, ts)
 
 	now := time.Now().UTC()

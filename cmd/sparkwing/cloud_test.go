@@ -230,6 +230,44 @@ func TestCloudDisconnectLeavesATokenItCannotRevoke(t *testing.T) {
 	}
 }
 
+// A member team token is a CLI token by another name, so disconnect revokes it;
+// a machine team token is a runner's credential and stays live.
+func TestCloudDisconnectRevokesAMemberTeamTokenOnly(t *testing.T) {
+	for _, tc := range []struct {
+		principal string
+		scopes    []string
+		revoked   bool
+	}{
+		{"eddie@example.com", []string{"runs.read"}, true},
+		{"agent:box", []string{"nodes.claim", "runs.read"}, false},
+	} {
+		f := newCloudFixture(t)
+		raw, tok, err := f.store.CreateToken(tc.principal, store.TokenKindTeam, tc.scopes, 0, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		withStdin(t, raw+"\n")
+		captureStdout(t, func() {
+			if err := runCloud([]string{"connect", "--controller", f.controller, "--token-stdin", "--name", "team"}); err != nil {
+				t.Fatalf("cloud connect: %v", err)
+			}
+		})
+		withStdin(t, f.admin+"\n")
+		captureStdout(t, func() {
+			if err := runCloud([]string{"disconnect", "--name", "team", "--admin-token-stdin"}); err != nil {
+				t.Fatalf("cloud disconnect: %v", err)
+			}
+		})
+		after, err := f.store.LookupTokenByPrefix(tok.Prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := after.RevokedAt != nil; got != tc.revoked {
+			t.Errorf("%s: revoked = %v, want %v", tc.principal, got, tc.revoked)
+		}
+	}
+}
+
 func TestCloudDisconnectKeepsTheTokenWhenAsked(t *testing.T) {
 	f := newCloudFixture(t)
 	f.connect(t, "--name", "prod")

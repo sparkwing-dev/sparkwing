@@ -707,10 +707,10 @@ func TestRunnerFallsBackAtOnceOnlyWhenTheControllerCanVouch(t *testing.T) {
 type finalizeRecorder struct {
 	coordinator
 	mu    sync.Mutex
-	first *store.ExecutorClaimRoundResult
+	first *store.ClaimRoundResult
 }
 
-func (f *finalizeRecorder) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
+func (f *finalizeRecorder) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ClaimRoundResult, error) {
 	res, err := f.coordinator.FinalizeNodeReady(ctx, runID, nodeID)
 	if err == nil {
 		f.mu.Lock()
@@ -722,11 +722,11 @@ func (f *finalizeRecorder) FinalizeNodeReady(ctx context.Context, runID, nodeID 
 	return res, err
 }
 
-func (f *finalizeRecorder) firstResolution() (store.ExecutorClaimRoundResult, bool) {
+func (f *finalizeRecorder) firstResolution() (store.ClaimRoundResult, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.first == nil {
-		return store.ExecutorClaimRoundResult{}, false
+		return store.ClaimRoundResult{}, false
 	}
 	return *f.first, true
 }

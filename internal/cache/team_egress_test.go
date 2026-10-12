@@ -37,7 +37,7 @@ func downloadBin(t *testing.T, srv *httptest.Server, bearer string) fetched {
 // A download by a grant is charged to its team in the controller before the
 // first byte. A free team past its cap is refused with 429 and the
 // controller's Retry-After, while a funded team, another free team, the
-// operator's own team and the operator token keep downloading.
+// operator's own team and the operator grant keep downloading.
 func TestAFreeTeamPastItsDailyDownloadCapIsRefused(t *testing.T) {
 	srv, ctl, token := newTeamEgressServer(t)
 	free := grantFor(t, token, "free")
@@ -70,10 +70,10 @@ func TestAFreeTeamPastItsDailyDownloadCapIsRefused(t *testing.T) {
 	if got := ctl.Downloaded(authwire.OperatorTeam); got != 0 {
 		t.Fatalf("the operator's team was charged %d bytes, want none", got)
 	}
-	putBin(t, srv, token)
+	putBin(t, srv, operatorGrant(t, token))
 	for i := range 3 {
-		if got := downloadBin(t, srv, token); got.status != http.StatusOK {
-			t.Fatalf("operator token download %d = %d, want 200", i, got.status)
+		if got := downloadBin(t, srv, operatorGrant(t, token)); got.status != http.StatusOK {
+			t.Fatalf("operator grant download %d = %d, want 200", i, got.status)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func TestDownloadsFailClosedWhileTheControllerCannotCount(t *testing.T) {
 	free, paying := grantFor(t, token, "free"), grantFor(t, token, "paying")
 	putBin(t, srv, free)
 	putBin(t, srv, paying)
-	putBin(t, srv, token)
+	putBin(t, srv, operatorGrant(t, token))
 	if got := downloadBin(t, srv, paying); got.status != http.StatusOK {
 		t.Fatalf("a funded download with the controller up = %d", got.status)
 	}
@@ -94,7 +94,7 @@ func TestDownloadsFailClosedWhileTheControllerCannotCount(t *testing.T) {
 	if got := downloadBin(t, srv, free); got.status != http.StatusServiceUnavailable || len(got.body) == 60 {
 		t.Fatalf("a free team's download with the controller down = %d, want 503 and no binary", got.status)
 	}
-	if got := downloadBin(t, srv, token); got.status != http.StatusOK {
+	if got := downloadBin(t, srv, operatorGrant(t, token)); got.status != http.StatusOK {
 		t.Fatalf("the operator's download with the controller down = %d, want 200", got.status)
 	}
 	if got := downloadBin(t, srv, paying); got.status != http.StatusOK {

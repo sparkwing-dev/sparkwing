@@ -103,7 +103,7 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key s
 		return true
 	}
 	allowed, wait := t.requests.AllowWithRetry(key, now)
-	if !allowed && !s.ownAgentLivenessHeartbeat(r) {
+	if !allowed {
 		observePrincipalThrottled(budgetClassToken)
 		s.logger.Warn("request shed",
 			"principal", key, "route_class", budgetClassToken, "retry_after", wait,
@@ -177,46 +177,6 @@ func (s *Server) ownRunLiveness(r *http.Request) bool {
 		return err == nil && held
 	}
 	return false
-}
-
-// safety: an agent treats a lost liveness heartbeat as fatal and takes every
-// node it runs down with it, so a token's beat for the agent it enrolled is
-// spared. A beat naming any other agent is somebody else's and is budgeted
-// like any other request, or the route would be an unbudgeted lane.
-func (s *Server) ownAgentLivenessHeartbeat(r *http.Request) bool {
-	name, ok := agentLivenessHeartbeatName(r)
-	if !ok || s.store == nil {
-		return false
-	}
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p == nil || p.TokenPrefix == "" {
-		return false
-	}
-	// safety: this is the ownership the heartbeat handler itself enforces
-	// through the store, checked after the budget has refused the request.
-	enrolled, err := s.store.ExecutorNameForTokenPrefix(r.Context(), p.TokenPrefix)
-	if err != nil {
-		return false
-	}
-	return enrolled == name
-}
-
-// safety: the budget runs ahead of the mux, which is what sets path values, so
-// the agent's name is read off the path here rather than through PathValue.
-func agentLivenessHeartbeatName(r *http.Request) (string, bool) {
-	const prefix, suffix = "/api/v1/agents/", "/heartbeat"
-	if r.Method != http.MethodPost {
-		return "", false
-	}
-	path := r.URL.Path
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		return "", false
-	}
-	name := path[len(prefix) : len(path)-len(suffix)]
-	if name == "" || strings.Contains(name, "/") {
-		return "", false
-	}
-	return name, true
 }
 
 // safety: an alarm the operator hears once a minute is a notice; one raised per

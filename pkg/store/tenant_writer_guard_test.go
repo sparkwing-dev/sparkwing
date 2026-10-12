@@ -16,11 +16,10 @@ var tablesWithNoTeamWriter = []string{
 	"storage_month_usage",
 	"storage_quotas",
 	"storage_run_usage",
-	"users",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const tablesWithNoTeamWriterSize = 7
+const tablesWithNoTeamWriterSize = 6
 
 // A predicate is only as real as the data under it. The scope guard beside
 // this one reads statement text, so it can prove a team predicate exists
@@ -33,7 +32,7 @@ const tablesWithNoTeamWriterSize = 7
 // default and a scoped read of it is a scoped read of nothing. One writer
 // that names the key satisfies the whole table, so a second writer on the
 // same table that drops it still passes here; the per-statement half is
-// the scope guard beside this one, once its backlog is gone.
+// the scope guard beside this one.
 func TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey(t *testing.T) {
 	written, inserts := tablesInsertedWithTeam(t)
 	if inserts < 30 {

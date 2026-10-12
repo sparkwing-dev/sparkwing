@@ -12,13 +12,12 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/accounts/{account}` | `admin` |
 | `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
-| `PUT` | `/api/v1/agents/{name}` | `admin` |
-| `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
+| `POST` | `/api/v1/cache/store-ceiling/measure` | `admin` |
+| `POST` | `/api/v1/cache/store-ceiling/thaw` | `admin` |
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
@@ -77,7 +76,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
-| `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
 | `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
 | `GET` | `/api/v1/operator/teams` | `operator` |
@@ -120,7 +118,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/git-credential` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
@@ -183,7 +180,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
-| `POST` | `/api/v1/runs/{id}/source-token` | `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
@@ -208,9 +204,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/team/billing/pay` | `team.admin` |
 | `GET` | `/api/v1/team/build-trust` | `runs.read` |
 | `PUT` | `/api/v1/team/build-trust` | `team.admin` |
-| `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
-| `POST` | `/api/v1/team/cli-tokens` | `runs.read` |
-| `DELETE` | `/api/v1/team/cli-tokens/{prefix}` | `runs.read` |
 | `GET` | `/api/v1/team/git-credentials` | `runs.read` |
 | `POST` | `/api/v1/team/git-credentials` | `team.admin` |
 | `GET` | `/api/v1/team/git-credentials/releases` | `team.admin` |
@@ -236,10 +229,10 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/team/members` | `runs.read` |
 | `DELETE` | `/api/v1/team/members/{user_id}` | `runs.read` |
 | `PATCH` | `/api/v1/team/members/{user_id}` | `team.admin` |
-| `GET` | `/api/v1/team/runner-tokens` | `runs.write` |
-| `POST` | `/api/v1/team/runner-tokens` | `runs.write` |
-| `DELETE` | `/api/v1/team/runner-tokens/{prefix}` | `runs.write` |
-| `PUT` | `/api/v1/team/runner-tokens/{prefix}/git-credentials` | `team.admin` |
+| `GET` | `/api/v1/team/tokens` | `runs.read` |
+| `POST` | `/api/v1/team/tokens` | `runs.read` |
+| `DELETE` | `/api/v1/team/tokens/{prefix}` | `runs.read` |
+| `PUT` | `/api/v1/team/tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `DELETE` | `/api/v1/teams/{team}` | `admin` |
 | `PUT` | `/api/v1/teams/{team}/repos/{owner}/{name}/dispatch` | `admin` |
@@ -260,9 +253,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `GET` | `/api/v1/users` | `admin` |
-| `POST` | `/api/v1/users` | `admin` |
-| `DELETE` | `/api/v1/users/{name}` | `admin` |
 | `POST` | `/internal/downloads/charge` | `public` |
 | `POST` | `/internal/egress/totals` | `public` |
 | `POST` | `/internal/storage/commit` | `public` |

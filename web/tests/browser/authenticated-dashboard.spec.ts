@@ -45,11 +45,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     );
     const login = page.locator('form[action="/login"]');
     await expect(login).toHaveAttribute("method", /post/i);
-    await expect(login.locator('input[name="username"]')).toHaveAttribute(
-      "autocomplete",
-      "username",
-    );
-    await expect(login.locator('input[name="password"]')).toHaveAttribute(
+    await expect(login.locator('input[name="token"]')).toHaveAttribute(
       "type",
       "password",
     );
@@ -68,8 +64,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     const forgedLogin = await page.request.post(`${dashboard.origin}/login`, {
       failOnStatusCode: false,
       form: {
-        username: "admin",
-        password: "correct-horse",
+        token: dashboard.admin_token,
         next: "/runs",
         csrf_token: "forged-token",
       },
@@ -84,8 +79,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     );
     expect(unauthenticatedAPI.status()).toBe(401);
 
-    await login.locator('input[name="username"]').fill("admin");
-    await login.locator('input[name="password"]').fill("correct-horse");
+    await login.locator('input[name="token"]').fill(dashboard.admin_token);
     await login.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(
       `${dashboard.origin}/runs?run=auth-run&tab=logs`,
@@ -295,8 +289,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     await expect(again.locator('input[name="csrf_token"]')).toHaveValue(
       loginCSRF?.value ?? "missing",
     );
-    await again.locator('input[name="username"]').fill("admin");
-    await again.locator('input[name="password"]').fill("correct-horse");
+    await again.locator('input[name="token"]').fill(dashboard.admin_token);
     await again.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(
       `${dashboard.origin}/cluster?view=services&tab=nodes`,

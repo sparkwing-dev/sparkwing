@@ -104,14 +104,6 @@ func TestVersionHoldUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) 
 	wantRefusedAndUnwritten(t, "version hold --clear", err, holdFile)
 }
 
-func TestFleetInitUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
-	userConfig := scratchUserConfigDir(t)
-	underAScratchHome(t)
-
-	err := runFleetInit([]string{"--listen", "127.0.0.1:4346", "--public-url", "http://127.0.0.1:4346"})
-	wantRefusedAndUnwritten(t, "fleet init", err, filepath.Join(userConfig, userconfig.Filename))
-}
-
 func TestXrepoAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
 	userConfig := scratchUserConfigDir(t)
 	underAScratchHome(t)

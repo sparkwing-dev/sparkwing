@@ -465,7 +465,7 @@ func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 	}
 }
 
-func TestNodeClaim_LegacyRunnerCannotSelfAssertReservedLocation(t *testing.T) {
+func TestNodeClaim_RunnerCannotSelfAssertReservedLocation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}

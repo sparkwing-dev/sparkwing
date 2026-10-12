@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
@@ -28,24 +26,6 @@ func TestWriteErrorMasksInternalDetails(t *testing.T) {
 		if strings.Contains(body, sentinel) {
 			t.Errorf("internal response exposed %q: %s", sentinel, body)
 		}
-	}
-}
-
-func TestWriteExecutionAdmissionErrorPreservesUnresolvedSafeHold(t *testing.T) {
-	rec := httptest.NewRecorder()
-	err := &executionpolicy.UpgradeRequiredError{
-		Scope: "supervisor", Missing: []string{"future-supervisor-v9"}, SafeHold: true,
-	}
-	if !writeExecutionAdmissionError(rec, err) {
-		t.Fatal("typed upgrade error was not handled")
-	}
-	var body executionAdmissionErrorBody
-	if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
-		t.Fatal(decodeErr)
-	}
-	if rec.Code != http.StatusConflict || body.Code != "upgrade_required" || !body.SafeHold ||
-		body.MinimumRelease != "" || len(body.Missing) != 1 || body.Missing[0] != "future-supervisor-v9" {
-		t.Fatalf("safe-hold response = status %d, body %+v", rec.Code, body)
 	}
 }
 
@@ -69,7 +49,7 @@ func TestResetNodeForAutoRetryMasksStoreFailure(t *testing.T) {
 	}
 }
 
-func TestAssistedRoutesMaskStoreFailures(t *testing.T) {
+func TestAgentRoutesMaskStoreFailures(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -81,10 +61,8 @@ func TestAssistedRoutesMaskStoreFailures(t *testing.T) {
 	tests := []struct {
 		name, method, path, body string
 	}{
-		{name: "fleet", method: http.MethodGet, path: "/api/v1/agents"},
-		{name: "heartbeat", method: http.MethodPost, path: "/api/v1/agents/private-path/heartbeat", body: `{"headroom":{"cores":1,"memory_bytes":1,"queue_depth":0}}`},
-		{name: "legacy claim", method: http.MethodPost, path: "/api/v1/nodes/claim", body: `{"holder_id":"private-url.invalid"}`},
-		{name: "offer prepare", method: http.MethodPost, path: "/api/v1/nodes/claim/prepare", body: `{"executor_name":"private-token-prefix"}`},
+		{name: "agents", method: http.MethodGet, path: "/api/v1/agents"},
+		{name: "claim", method: http.MethodPost, path: "/api/v1/nodes/claim", body: `{"holder_id":"private-url.invalid"}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -11,25 +11,24 @@ import TeamShell, {
 import CopyField from "@/components/CopyField";
 import { toast } from "@/components/Toasts";
 import {
-  type CLIToken,
   type Me,
   type Member,
-  type MintedCLIToken,
-  type MintedRunnerToken,
-  type RunnerToken,
+  type MintedMachineToken,
+  type MintedMemberToken,
+  type Role,
+  type TeamToken,
   canConnectMachines,
   canManageTeam,
   cliTokenStartsRuns,
   controllerURLPlaceholder,
-  listCLITokens,
   listMembers,
-  listRunnerTokens,
+  listTeamTokens,
   memberLabel,
-  mintCLIToken,
-  mintRunnerToken,
+  memberScopesForRole,
+  mintMachineToken,
+  mintMemberToken,
   parseRepoPatterns,
-  revokeCLIToken,
-  revokeRunnerToken,
+  revokeTeamToken,
   runnerConnectCommand,
   unixSecondsISO,
 } from "@/lib/teams";
@@ -42,14 +41,14 @@ export default function MachinesPage() {
 
 function Machines({ me }: { me: Me }) {
   const role = me.active_team.role;
-  const [tokens, setTokens] = useState<RunnerToken[] | null>(null);
+  const [tokens, setTokens] = useState<TeamToken[] | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setTokens(await listRunnerTokens());
+      setTokens(await listTeamTokens());
       setLoadError("");
     } catch (err) {
       setLoadError(errorText(err));
@@ -67,7 +66,7 @@ function Machines({ me }: { me: Me }) {
       .catch(() => {});
   }, []);
 
-  async function revoke(t: RunnerToken) {
+  async function revoke(t: TeamToken) {
     const label = t.name || t.prefix;
     if (
       !window.confirm(
@@ -78,7 +77,7 @@ function Machines({ me }: { me: Me }) {
     }
     setBusy(t.prefix);
     try {
-      await revokeRunnerToken(t.prefix);
+      await revokeTeamToken(t.prefix);
       toast(`Revoked ${label}`, "success");
       await load();
     } catch (err) {
@@ -88,7 +87,7 @@ function Machines({ me }: { me: Me }) {
     }
   }
 
-  async function setGitCredentials(t: RunnerToken, enabled: boolean) {
+  async function setGitCredentials(t: TeamToken, enabled: boolean) {
     const label = t.name || t.prefix;
     setBusy(t.prefix);
     try {
@@ -108,6 +107,8 @@ function Machines({ me }: { me: Me }) {
   }
 
   const owner = canManageTeam(role);
+  const machines = tokens?.filter((t) => t.family === "machine") ?? null;
+  const cliTokens = tokens?.filter((t) => t.family === "member") ?? null;
 
   // An editor may revoke only the tokens they minted; the controller decides,
   // so the button is offered to editors and a refusal is shown as it comes back.
@@ -128,15 +129,15 @@ function Machines({ me }: { me: Me }) {
       >
         {loadError ? (
           <div className="p-4 text-sm text-red-300">{loadError}</div>
-        ) : tokens === null ? (
+        ) : machines === null ? (
           <div className="p-4 text-xs text-[var(--muted)]">Loading…</div>
-        ) : tokens.length === 0 ? (
+        ) : machines.length === 0 ? (
           <div className="p-4 text-xs text-[var(--muted)]">
             No machines connected yet.
           </div>
         ) : (
           <ul>
-            {tokens.map((t) => (
+            {machines.map((t) => (
               <li
                 key={t.prefix}
                 className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] last:border-0"
@@ -189,40 +190,43 @@ function Machines({ me }: { me: Me }) {
           </ul>
         )}
       </Panel>
-      <CLIAccess team={me.active_team.display_name} />
+      <CLIAccess
+        team={me.active_team.display_name}
+        role={role}
+        tokens={cliTokens}
+        loadError={loadError}
+        reload={load}
+      />
     </>
   );
 }
 
-function creatorSuffix(t: RunnerToken, members: Member[]): string {
+function creatorSuffix(t: TeamToken, members: Member[]): string {
   const creator = memberLabel(t.created_by, members);
   return creator ? ` · by ${creator}` : "";
 }
 
-function CLIAccess({ team }: { team: string }) {
-  const [tokens, setTokens] = useState<CLIToken[] | null>(null);
-  const [loadError, setLoadError] = useState("");
+function CLIAccess({
+  team,
+  role,
+  tokens,
+  loadError,
+  reload,
+}: {
+  team: string;
+  role: Role;
+  tokens: TeamToken[] | null;
+  loadError: string;
+  reload: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [minted, setMinted] = useState<MintedCLIToken | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setTokens(await listCLITokens());
-      setLoadError("");
-    } catch (err) {
-      setLoadError(errorText(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const [minted, setMinted] = useState<MintedMemberToken | null>(null);
 
   async function mint() {
     setBusy("mint");
     try {
-      setMinted(await mintCLIToken());
-      await load();
+      setMinted(await mintMemberToken(memberScopesForRole(role)));
+      await reload();
     } catch (err) {
       toast(errorText(err), "error");
     } finally {
@@ -230,7 +234,7 @@ function CLIAccess({ team }: { team: string }) {
     }
   }
 
-  async function revoke(t: CLIToken) {
+  async function revoke(t: TeamToken) {
     if (
       !window.confirm(
         `Revoke ${t.prefix}? A terminal using this token is refused at once.`,
@@ -240,10 +244,10 @@ function CLIAccess({ team }: { team: string }) {
     }
     setBusy(t.prefix);
     try {
-      await revokeCLIToken(t.prefix);
+      await revokeTeamToken(t.prefix);
       if (minted?.prefix === t.prefix) setMinted(null);
       toast(`Revoked ${t.prefix}`, "success");
-      await load();
+      await reload();
     } catch (err) {
       toast(errorText(err), "error");
     } finally {
@@ -361,7 +365,7 @@ function ConnectForm({
   const [repos, setRepos] = useState("");
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<
-    (MintedRunnerToken & { name: string; repos: string[] }) | null
+    (MintedMachineToken & { repos: string[] }) | null
   >(null);
 
   const repoPatterns = parseRepoPatterns(repos);
@@ -372,8 +376,8 @@ function ConnectForm({
     if (!n || repoPatterns.length === 0) return;
     setMinting(true);
     try {
-      const out = await mintRunnerToken(n, repoPatterns);
-      setMinted({ ...out, name: n, repos: repoPatterns });
+      const out = await mintMachineToken(n, repoPatterns);
+      setMinted({ ...out, repos: repoPatterns });
       setName("");
       setRepos("");
       await onMinted();

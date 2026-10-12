@@ -26,16 +26,16 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 
 	saved := struct {
 		dataRoot, repoDir, binsDir, cacheDir     string
-		namesFile, proxyDir, sshKeyDir, apiToken string
+		namesFile, proxyDir, sshKeyDir, grantKey string
 		teamsDir                                 string
 	}{
 		dataRoot, repoDir, binsDir, cacheDir,
-		namesFile, proxyDir, sshKeyDir, apiToken,
+		namesFile, proxyDir, sshKeyDir, grantKey,
 		teamsDir,
 	}
 	t.Cleanup(func() {
 		dataRoot, repoDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.binsDir, saved.cacheDir
-		namesFile, proxyDir, sshKeyDir, apiToken = saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
+		namesFile, proxyDir, sshKeyDir, grantKey = saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.grantKey
 		teamsDir = saved.teamsDir
 	})
 
@@ -44,7 +44,6 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	c.DataDir = root
 	c.ProxyDir = filepath.Join(root, "proxy")
 	c.SSHKeyDir = filepath.Join(root, "no-ssh-key")
-	c.APIToken = token
 	if token != "" {
 		c.GrantKey = testGrantKey(token)
 	}
@@ -113,7 +112,7 @@ func TestTheCacheNeverRefusesADownload(t *testing.T) {
 
 	var served int
 	for i := range 12 {
-		got := get(t, srv, cacheDownloadPath, "s3cret")
+		got := get(t, srv, cacheDownloadPath, operatorGrant(t, "s3cret"))
 		if got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download %d = %d with %d bytes, want 200 and a body", i, got.status, len(got.body))
 		}
@@ -162,7 +161,7 @@ func TestDownloadRoutesStillRequireTheBearer(t *testing.T) {
 	}
 
 	// safety: the credentialed fetch a runner makes must keep working.
-	got := get(t, srv, cacheDownloadPath, "s3cret")
+	got := get(t, srv, cacheDownloadPath, operatorGrant(t, "s3cret"))
 	if got.status != http.StatusOK || len(got.body) == 0 {
 		t.Fatalf("a bearer fetch = %d with %d bytes, want 200 and a body", got.status, len(got.body))
 	}
@@ -176,10 +175,10 @@ func TestBodylessAndRefusedResponsesChargeNothing(t *testing.T) {
 	seedCacheEntry(t, "job1", 1<<16)
 
 	for range 8 {
-		if got := fetch(t, srv, http.MethodHead, cacheDownloadPath, "s3cret"); got.status != http.StatusOK || len(got.body) != 0 {
+		if got := fetch(t, srv, http.MethodHead, cacheDownloadPath, operatorGrant(t, "s3cret")); got.status != http.StatusOK || len(got.body) != 0 {
 			t.Fatalf("HEAD = %d with %d bytes, want 200 and no body", got.status, len(got.body))
 		}
-		if got := get(t, srv, "/cache/nothing-is-stored-here", "s3cret"); got.status != http.StatusNotFound {
+		if got := get(t, srv, "/cache/nothing-is-stored-here", operatorGrant(t, "s3cret")); got.status != http.StatusNotFound {
 			t.Fatalf("a missing entry = %d, want 404", got.status)
 		}
 		if got := get(t, srv, cacheDownloadPath, ""); got.status != http.StatusUnauthorized {
@@ -235,7 +234,7 @@ func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 		t.Fatalf("health egress = %+v, want no alarm", health.Egress)
 	}
 
-	if got := get(t, srv, cacheDownloadPath, "s3cret").status; got != http.StatusOK {
+	if got := get(t, srv, cacheDownloadPath, operatorGrant(t, "s3cret")).status; got != http.StatusOK {
 		t.Fatalf("download = %d", got)
 	}
 
@@ -260,7 +259,7 @@ func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 
 	var served int
 	for range 3 {
-		got := get(t, srv, cacheDownloadPath, "s3cret")
+		got := get(t, srv, cacheDownloadPath, operatorGrant(t, "s3cret"))
 		if got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download = %d with %d bytes, want 200 and a body", got.status, len(got.body))
 		}
@@ -277,7 +276,7 @@ func TestTheCacheDailyAlarmRefusesNothing(t *testing.T) {
 	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 150})
 	seedCacheEntry(t, "job1", 100)
 	for i := range 3 {
-		if got := get(t, srv, cacheDownloadPath, "s3cret"); got.status != http.StatusOK || len(got.body) == 0 {
+		if got := get(t, srv, cacheDownloadPath, operatorGrant(t, "s3cret")); got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download %d = %d with %d bytes, want 200 and the whole body", i, got.status, len(got.body))
 		}
 	}

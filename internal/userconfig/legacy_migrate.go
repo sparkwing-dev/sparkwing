@@ -33,7 +33,6 @@ var legacyFiles = []legacyFile{
 	{name: "admission.yaml", section: Admission},
 	{name: "budget", section: Admission, key: "budget"},
 	{name: "agent.yaml", section: Agent},
-	{name: "fleet.yaml", section: Fleet},
 	{name: "profiles.yaml", section: Profiles},
 	{name: "repos.yaml", section: Repos},
 }

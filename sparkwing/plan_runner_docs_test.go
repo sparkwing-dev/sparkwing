@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
+func TestPrefersDocumentationStatesPlacementHold(t *testing.T) {
 	tests := []struct {
 		file     string
 		receiver string
@@ -25,7 +25,7 @@ func TestPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
 	}
 }
 
-func TestGeneratedPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
+func TestGeneratedPrefersDocumentationStatesPlacementHold(t *testing.T) {
 	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -47,7 +47,7 @@ func TestGeneratedPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.
 	}
 }
 
-func TestSchedulingPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
+func TestSchedulingPrefersDocumentationStatesPlacementHold(t *testing.T) {
 	for _, path := range []string{"../docs/scheduling.md", "../pkg/docs/mirror/scheduling.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -97,7 +97,7 @@ func methodDoc(t *testing.T, path, receiver, method string) string {
 func assertPreferenceContract(t *testing.T, doc string) {
 	t.Helper()
 	doc = strings.Join(strings.Fields(doc), " ")
-	for _, want := range []string{"enrolled-executor", "priority ceiling"} {
+	for _, want := range []string{"holds the node back", "advertise"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("preference documentation does not contain %q", want)
 		}

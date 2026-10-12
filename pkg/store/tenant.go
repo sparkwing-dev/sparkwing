@@ -295,7 +295,6 @@ var tenantTables = []string{
 	"invitations",
 	"memberships",
 	"node_bounces",
-	"node_claim_offers",
 	"node_dispatches",
 	"node_execution_attempts",
 	"node_log_segments",
@@ -323,8 +322,8 @@ var tenantTables = []string{
 	"team_build_trust",
 	"uploads",
 	"tokens",
+	"trigger_claim_tokens",
 	"triggers",
-	"users",
 }
 
 // safety: these tables are created after v49 with the team column already
@@ -337,7 +336,7 @@ var keyedAtCreation = []string{
 	"storage_commit_receipts", "storage_reservations", "team_download_day", "team_storage",
 	"uploads", "data_objects",
 	"team_build_trust",
-	"claim_tokens", "child_invocations",
+	"claim_tokens", "child_invocations", "trigger_claim_tokens",
 	"business_events",
 	"repos",
 	"card_charges", "card_attempts", "card_refunds", "team_spend_days",
@@ -345,14 +344,13 @@ var keyedAtCreation = []string{
 	"node_logs", "node_log_segments",
 }
 
-// safety: executors enroll with the deployment and take work from every team; sparkwing_meta is the
-// deployment's bag, so per-team keys need their own table. A human belongs to the deployment and reaches
-// teams through tenant-owned memberships. signup_gate and signup_admissions gate new accounts deployment-wide.
+// safety: sparkwing_meta is the deployment's bag, so per-team keys need their own table. A human
+// belongs to the deployment and reaches teams through tenant-owned memberships. signup_gate and
+// signup_admissions gate new accounts deployment-wide.
 var operatorTables = []string{
 	"accounts",
 	"card_spend_days",
 	"egress_day",
-	"executors",
 	"github_app_connect_states",
 	"github_app_deliveries",
 	"identities",

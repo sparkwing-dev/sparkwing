@@ -22,7 +22,7 @@ import (
 // Principal is the request-scoped authenticated identity.
 type Principal struct {
 	Name        string    // free-form label ("alice", "pool-prod")
-	Kind        string    // "user" | "runner" | "service"
+	Kind        string    // "user" | "runner" | "service", a team token as the kind its family acts as
 	Scopes      []string  // exact-string set membership
 	TokenPrefix string    // non-secret prefix for audit
 	Authed      time.Time // when this request authenticated
@@ -63,22 +63,23 @@ const (
 	// they are held apart from the scopes a runner carries: a runner
 	// reports state on work it holds and never reaches for another run.
 	ScopeRunsControl  = store.ScopeRunsControl
-	ScopeNodesClaim   = "nodes.claim"
+	ScopeNodesClaim   = store.ScopeNodesClaim
 	ScopeLogsRead     = store.ScopeLogsRead
 	ScopeTriggersRead = store.ScopeTriggersRead
 	// ScopeTriggersClaim gates the trigger worker lifecycle: claim,
 	// heartbeat, and done. It carries no authority over run or node
 	// state.
-	ScopeTriggersClaim = "triggers.claim"
+	ScopeTriggersClaim = store.ScopeTriggersClaim
 	// ScopeRunsState gates run and node state writes: run create and
 	// finish, node create, start, finish, and run event append. The
 	// per-node routes are additionally bound to the caller's own
 	// claim.
-	ScopeRunsState = "runs.state"
-	// ScopeSecretsRead gates GET /api/v1/secrets/{name}. A non-admin
-	// holder resolves a name against the pipeline of the run it
-	// currently holds a claim in.
-	ScopeSecretsRead = "secrets.read"
+	ScopeRunsState = store.ScopeRunsState
+	// ScopeSecretsRead releases no secret. A node reads its run's secrets
+	// with its claim token, so a bearer holding only this scope is answered
+	// 403 claim_required on GET /api/v1/secrets/{name}. Tokens minted with
+	// it keep authenticating; no team token or runner is minted with it.
+	ScopeSecretsRead = store.ScopeSecretsRead
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
 	// Any principal with this scope can resolve any approval. Reads
 	// are covered by runs.read.
@@ -102,6 +103,12 @@ const (
 	// no secret or source. Only the operator mints it; no team's token may
 	// carry it.
 	ScopeClaimsLaunch = store.LaunchScope
+	// ScopeStorageCount is the cache service's scope. It reserves, commits
+	// and releases any team's storage, charges any team's downloads and
+	// records the cache's egress totals on the /internal counter routes, and
+	// reaches nothing else. Only the operator mints it; no team's token may
+	// carry it.
+	ScopeStorageCount = store.StorageCountScope
 )
 
 var allScopes = []string{
@@ -119,6 +126,7 @@ var allScopes = []string{
 	ScopeAdmin,
 	ScopeCreditsGrant,
 	ScopeClaimsLaunch,
+	ScopeStorageCount,
 }
 
 // ScopesForRole returns the scopes a membership at role carries, or none for
@@ -364,7 +372,7 @@ func (a *Authenticator) verify(raw, key, client string, now time.Time) (*Princip
 	}
 	principal := &Principal{
 		Name:        tok.Principal,
-		Kind:        tok.Kind,
+		Kind:        store.ActingKind(tok.Kind, tok.Principal),
 		Scopes:      tok.Scopes,
 		TokenPrefix: tok.Prefix,
 		Authed:      now,
@@ -392,8 +400,6 @@ func authRejection(err error) bool {
 	case errors.Is(err, store.ErrInvalidToken), errors.Is(err, store.ErrNoTokenCandidates):
 		return true
 	case errors.Is(err, store.ErrUnknownToken), errors.Is(err, store.ErrTokenRevoked), errors.Is(err, store.ErrTokenExpired):
-		return true
-	case errors.Is(err, store.ErrInvalidCredentials):
 		return true
 	default:
 		return false

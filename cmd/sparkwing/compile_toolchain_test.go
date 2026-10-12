@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,6 +43,20 @@ exit 1
 }
 
 func TestPipelineToolchainOverrideDoesNotReachRuntime(t *testing.T) {
+	// safety: the cached path replaces its process with the pipeline, so the
+	// launch runs in a child and the parent reads what the pipeline recorded.
+	if dir := os.Getenv("SPARKWING_TEST_TOOLCHAIN_CHILD_DIR"); dir != "" {
+		uncached := os.Getenv("SPARKWING_TEST_TOOLCHAIN_UNCACHED") == "true"
+		if err := compileAndExec(dir, nil, os.Environ(), compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if os.Getenv("GOTOOLCHAIN") != "go1.26.6" {
+			fmt.Fprintln(os.Stderr, "process pin changed")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	for _, uncached := range []bool{false, true} {
 		name := "cached"
 		if uncached {
@@ -91,11 +107,12 @@ exit 1
 			t.Setenv("PROBE_LOG", probeLog)
 			t.Setenv("BUILD_LOG", buildLog)
 			t.Setenv("RUNTIME_LOG", runtimeLog)
-			t.Setenv("SPARKWING_FLEET", "1")
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
-			runtimeEnv := os.Environ()
-			if err := compileAndExec(dir, nil, runtimeEnv, compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
-				t.Fatal(err)
+			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideDoesNotReachRuntime$")
+			child.Env = append(os.Environ(), "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir,
+				fmt.Sprintf("SPARKWING_TEST_TOOLCHAIN_UNCACHED=%t", uncached))
+			if out, err := child.CombinedOutput(); err != nil {
+				t.Fatalf("launch: %v: %s", err, out)
 			}
 			for path, want := range map[string]string{buildLog: "go1.26.8", runtimeLog: "go1.26.6", probeLog: "probe"} {
 				data, err := os.ReadFile(path)
@@ -105,9 +122,6 @@ exit 1
 				if strings.TrimSpace(string(data)) != want {
 					t.Fatalf("%s = %q, want %q", filepath.Base(path), data, want)
 				}
-			}
-			if os.Getenv("GOTOOLCHAIN") != "go1.26.6" {
-				t.Fatal("process pin changed")
 			}
 		})
 	}

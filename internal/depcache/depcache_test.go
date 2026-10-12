@@ -472,8 +472,7 @@ func TestRemoteDepCacheMissSaveHitCycle(t *testing.T) {
 	srv, blobs := newCacheServiceStub(t, "sekrit")
 	t.Setenv("SPARKWING_CACHE_URL", srv.URL)
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	t.Setenv("SPARKWING_CACHE_GRANT", "")
-	t.Setenv("SPARKWING_CACHE_TOKEN", "sekrit")
+	t.Setenv("SPARKWING_CACHE_GRANT", "sekrit")
 
 	backend := selectBackend()
 	if _, ok := backend.(*remoteBackend); !ok {

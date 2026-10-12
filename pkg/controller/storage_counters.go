@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
@@ -27,7 +26,8 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server {
 }
 
 // safety: the counter routes sit outside the principal middleware because
-// the cache's operator token, the only caller they answer, is not a principal.
+// the cache's storage.count service token, the only caller they answer,
+// is authenticated here exactly as the middleware would.
 func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) bool {
 	scheme, raw, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	raw = strings.TrimSpace(raw)
@@ -35,9 +35,9 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) bool {
 		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes need a bearer"))
 		return false
 	}
-	token := s.cacheToken
-	if token == "" || subtle.ConstantTimeCompare([]byte(raw), []byte(token)) != 1 {
-		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer the cache's operator token"))
+	p, err := s.authMiddleware().Authenticate(raw)
+	if err != nil || p == nil || !p.HasScope(ScopeStorageCount) {
+		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer a "+ScopeStorageCount+" service token"))
 		return false
 	}
 	return true

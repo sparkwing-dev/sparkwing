@@ -27,7 +27,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	16: nil,
 	17: nil,
 	18: nil,
-	19: {usersScopesCols},
+	19: nil,
 	20: {nodeDispatchRedactionCols},
 	23: {secretsSharedCols, triggerClaimOwnerCols},
 	24: {triggerWebhookDeliveryCols},
@@ -157,9 +157,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v79 adds one nullable checkout column an older binary never
 	// names, so an older binary keeps writing the migrated database.
 	79: {creditCheckoutCloseCols},
-	// safety: v81 adds one nullable executor column an older binary never
-	// names, so an older binary keeps writing the migrated database.
-	81: {executorAcceptCols},
+	// safety: v81 widened the executors table v98 drops, and now adds nothing.
+	81: nil,
 	// safety: v82 adds a unique index and no column. An older binary still
 	// reads and writes the store; its agent-token rotation, which inserts the
 	// successor before revoking the predecessor, fails on the index instead.
@@ -190,8 +189,17 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v94 adds a consent table older binaries never read or write.
 	94: nil,
 	95: nil,
-	// safety: v96 adds a table older binaries never read or write.
-	96: nil,
+	// safety: v97 rebuilds a unique index and adds no column; an older binary
+	// never mints a team token, so the wider index refuses nothing it writes.
+	97: nil,
+	// safety: v98 drops the executor and offer tables and adds nothing; an older
+	// binary fails its claim and readiness statements that name them, loudly.
+	98: nil,
+	// safety: v99 adds the trigger claim token table and no column; an older
+	// binary never mints into it, and a token it holds no row for is refused.
+	99: nil,
+	// safety: v100 adds a table older binaries never read or write.
+	100: nil,
 }
 
 func columnSpecMaps() []map[string]string {

@@ -37,7 +37,7 @@ func TestRunnerTokenMintRechecksTheMintersRole(t *testing.T) {
 			if _, err := st.AcceptInvitation(ctx, member.Account.ID, inv.ID, time.Now()); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := tn.CreateRunnerToken(ctx, "agent:before-"+change, []string{"nodes.claim"}, member.Account.ID, time.Now()); err != nil {
+			if _, _, err := tn.CreateMachineToken(ctx, "before-"+change, []string{"nodes.claim"}, member.Account.ID, time.Now()); err != nil {
 				t.Fatalf("an editor cannot mint a runner token: %v", err)
 			}
 			switch change {
@@ -49,7 +49,7 @@ func TestRunnerTokenMintRechecksTheMintersRole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw, _, err := tn.CreateRunnerToken(ctx, "agent:after-"+change, []string{"nodes.claim"}, member.Account.ID, time.Now())
+			raw, _, err := tn.CreateMachineToken(ctx, "after-"+change, []string{"nodes.claim"}, member.Account.ID, time.Now())
 			if !errors.Is(err, store.ErrNotMember) && !errors.Is(err, store.ErrRoleAboveOwn) {
 				t.Fatalf("minting for a member who was %s = %v, want a refusal", change, err)
 			}

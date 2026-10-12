@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -166,34 +165,41 @@ func TestRotateToken_GraceAtCapAccepted(t *testing.T) {
 	}
 }
 
-func TestDeleteUser_InvalidatesSessionAndTokens(t *testing.T) {
+func TestRevokeToken_EndsTheDashboardSessionsItOpened(t *testing.T) {
 	f := newRevocationFixture(t)
 	now := time.Now().UTC()
-	if _, err := f.store.CreateUser("mallory", "correct-horse", []string{ScopeAdmin}, now); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	rawSession, _, _, err := f.store.CreateSession(t.Context(), "mallory", []string{ScopeAdmin}, time.Hour, now)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	raw, _, err := f.store.CreateToken("mallory", store.TokenKindUser, []string{ScopeRunsRead}, 0, now)
+	_, tok, err := f.store.CreateToken("operator", store.TokenKindUser, []string{ScopeAdmin}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusOK {
-		t.Fatalf("whoami before delete = %d, want 200", got)
+	rawSession, _, err := f.store.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, time.Hour, now)
+	if err != nil {
+		t.Fatalf("CreateTokenSession: %v", err)
 	}
-
-	resp := f.do(t, http.MethodDelete, "/api/v1/users/mallory", f.admin, "")
+	sessionStatus := func() int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, f.base+"/api/v1/auth/session", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Session "+rawSession)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := sessionStatus(); got != http.StatusOK {
+		t.Fatalf("session before revoke = %d, want 200", got)
+	}
+	resp := f.do(t, http.MethodDelete, "/api/v1/tokens/"+tok.Prefix, f.admin, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete user = %d, want 204", resp.StatusCode)
+		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
 	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusUnauthorized {
-		t.Fatalf("whoami after delete = %d, want 401", got)
-	}
-	if _, err := f.store.LookupSession(t.Context(), rawSession, now.Add(time.Second)); err == nil {
-		t.Fatalf("session of a deleted user still resolves")
+	if got := sessionStatus(); got != http.StatusUnauthorized {
+		t.Fatalf("session after its token was revoked = %d, want 401", got)
 	}
 }
 
@@ -289,66 +295,6 @@ func TestAuthenticate_InvalidateDuringLookupIsNotOverwritten(t *testing.T) {
 	}
 	if _, err := a.Authenticate(raw); err == nil {
 		t.Fatalf("a token revoked mid-lookup still authenticates from the cache")
-	}
-}
-
-func TestDeleteUser_KeepsTheCallersOwnToken(t *testing.T) {
-	f := newRevocationFixture(t)
-	now := time.Now().UTC()
-	if _, err := f.store.CreateUser("root", "correct-horse", []string{ScopeAdmin}, now); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	other, _, err := f.store.CreateToken("root", store.TokenKindUser, []string{ScopeRunsRead}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-
-	resp := f.do(t, http.MethodDelete, "/api/v1/users/root", f.admin, "")
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete user = %d, want 204", resp.StatusCode)
-	}
-	if got := f.whoamiStatus(t, f.admin); got != http.StatusOK {
-		t.Fatalf("whoami with the deleting token = %d, want 200", got)
-	}
-	if got := f.whoamiStatus(t, other); got != http.StatusUnauthorized {
-		t.Fatalf("whoami with another token of the deleted principal = %d, want 401", got)
-	}
-}
-
-func TestDeleteUser_UnknownIs404(t *testing.T) {
-	f := newRevocationFixture(t)
-	resp := f.do(t, http.MethodDelete, "/api/v1/users/nobody", f.admin, "")
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("delete an unknown user = %d, want 404", resp.StatusCode)
-	}
-}
-
-func TestDeleteUser_StoreFailureIs500WithoutDriverDetail(t *testing.T) {
-	f := newRevocationFixture(t)
-	now := time.Now().UTC()
-	if _, err := f.store.CreateUser("mallory", "correct-horse", []string{ScopeAdmin}, now); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if got := f.whoamiStatus(t, f.admin); got != http.StatusOK {
-		t.Fatalf("whoami = %d, want 200", got)
-	}
-	if err := f.store.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
-
-	resp := f.do(t, http.MethodDelete, "/api/v1/users/mallory", f.admin, "")
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("delete against a broken store = %d, want 500", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	if strings.Contains(string(body), "sql") || strings.Contains(string(body), "users: ") {
-		t.Fatalf("driver detail echoed to the caller: %s", body)
 	}
 }
 

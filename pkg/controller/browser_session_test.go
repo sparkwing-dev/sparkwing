@@ -19,14 +19,15 @@ import (
 const dashOrigin = "https://dash.example"
 
 type browserFixture struct {
-	t      *testing.T
-	st     *store.Store
-	srv    *controller.Server
-	h      http.Handler
-	token  string
-	sessID string
-	csrf   string
-	logs   *syncBuffer
+	t          *testing.T
+	st         *store.Store
+	srv        *controller.Server
+	h          http.Handler
+	token      string
+	aliceToken string
+	sessID     string
+	csrf       string
+	logs       *syncBuffer
 }
 
 func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
@@ -41,20 +42,22 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateUser("alice", "correct-horse-battery", []string{controller.ScopeAdmin}, now); err != nil {
-		t.Fatal(err)
-	}
-	sessID, csrf, _, err := st.CreateSession(context.Background(), "alice", []string{controller.ScopeAdmin}, time.Hour, now)
+	aliceToken, alice, err := st.CreateToken("alice", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sessID, sess, err := st.CreateTokenSession(context.Background(), alice.Prefix, alice.Principal, alice.Team, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrf := sess.CSRFToken
 	logs := &syncBuffer{}
 	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).EnableAuthFromStore()
 	if d != nil {
 		srv.WithDashboard(*d)
 	}
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: token, sessID: sessID, csrf: csrf, logs: logs}
+	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: token, aliceToken: aliceToken, sessID: sessID, csrf: csrf, logs: logs}
 }
 
 func (f *browserFixture) serve(req *http.Request) *httptest.ResponseRecorder {

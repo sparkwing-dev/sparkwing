@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,16 +19,25 @@ import (
 )
 
 type K8sRunnerFactoryConfig struct {
-	Kubeconfig       string
-	Namespace        string
-	Image            string
-	ServiceAccount   string
-	ImagePullSecret  string
-	ControllerURL    string
+	Kubeconfig      string
+	Namespace       string
+	Image           string
+	ServiceAccount  string
+	ImagePullSecret string
+	// ControllerURL is the controller a Job's pod talks to.
+	ControllerURL string
+	// DispatcherURL is the controller the dispatcher's own calls go to, with
+	// AgentToken; empty uses ControllerURL. A trigger child behind its
+	// runner's broker reaches the controller at a loopback address no pod
+	// can.
+	DispatcherURL    string
 	ArtifactStoreURL string
 	// GitcacheURL is handed to the pod as SPARKWING_GITCACHE_URL so run-node
 	// can compile a pipeline the image does not carry.
-	GitcacheURL  string
+	GitcacheURL string
+	// AgentToken is the dispatcher's own credential for its controller
+	// calls. A Job never receives it; each Job carries its node's claim
+	// token instead.
 	AgentToken   string
 	Labels       []string
 	NodeSelector map[string]string
@@ -103,7 +113,6 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		GitcacheURL:        cfg.GitcacheURL,
 		DependencyProxyURL: k8srunner.ResolveDependencyProxy(cfg.DependencyProxyURL, cfg.DependencyProxyFallbackURL),
 		ImagePullPolicy:    pullPolicy,
-		AgentToken:         cfg.AgentToken,
 		Labels:             cfg.Labels,
 		NodeSelector:       cfg.NodeSelector,
 		TeamNodes:          cfg.TeamNodes,
@@ -125,10 +134,11 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		}
 		httpClient := &http.Client{Timeout: 30 * time.Second}
 		var ctrl *client.Client
+		dispatcherURL := cmp.Or(cfg.DispatcherURL, cfg.ControllerURL)
 		if cfg.AgentToken != "" {
-			ctrl = client.NewWithToken(cfg.ControllerURL, httpClient, cfg.AgentToken)
+			ctrl = client.NewWithToken(dispatcherURL, httpClient, cfg.AgentToken)
 		} else {
-			ctrl = client.New(cfg.ControllerURL, httpClient)
+			ctrl = client.New(dispatcherURL, httpClient)
 		}
 		return k8srunner.New(kcli, ctrl, runCfg, logger)
 	}, nil

@@ -152,7 +152,6 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
-| `cache-token` | The cache's operator token, the same value as the cache's own `cache-token` | no controller-to-cache hop |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files
@@ -263,15 +262,15 @@ instead.
 
 After a controller is running, a Linux or macOS workstation can run
 `sparkwing-runner` as a user service. With `sparkwing-runner` on PATH and a
-profile naming the controller, one command does the whole enrollment:
+profile naming the controller, one command does the whole setup:
 
 ```bash
 go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
 sparkwing cluster runners add --profile prod --name dev-laptop
 ```
 
-It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
-`runs.state` and `secrets.read`, writes
+It mints a runner token scoped to `nodes.claim`, `triggers.claim` and
+`runs.state`, writes
 the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
 keeping the file's other sections, installs the user service, and
 prints the token prefix with the command that revokes it. The runner uploads
@@ -313,8 +312,8 @@ replace its own executable; update the service binary through the same installer
 or service manager you used to install it.
 
 The installer asks for the controller URL, API token, runner name,
-and maximum concurrent jobs. It writes the existing unenrolled agent format,
-which uses legacy FIFO claims with local admission enabled. Its default CPU
+and maximum concurrent jobs. It writes the agent format `sparkwing cluster
+runners add` writes, which uses FIFO claims with local admission enabled. Its default CPU
 and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
 `~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
 `~/.config/systemd/user/`.
@@ -353,15 +352,14 @@ already exists, because a shell script cannot merge YAML without risking the
 other sections; `sparkwing cluster runners add` merges it instead. The service
 uses that file rather than embedding the token in its
 launchd plist or systemd unit. The contribution caps reported capacity; the
-reserve constrains local admission. Neither enables the reservation-backed
-assisted offer protocol.
+reserve constrains local admission.
 
 The section carries claim-mode keys only. It has no `name` and no
-`coordinators`; a section that still sets either key fails to load and names the
-removed enrolled mode. `allow_repos`, which `runners add --allow-repo` writes,
-makes the agent fetch source directly rather than through the controller's
-gitcache proxy; see [local-execution.md](local-execution.md#an-agent-that-fetches-source-itself). See [local-execution.md](local-execution.md) for the
-controller-side enrolled design.
+`coordinators`; a section that still sets either key fails to load and says
+enrolled mode has been removed. `allow_repos`, which `runners add --allow-repo`
+writes, makes the agent fetch source directly rather than through the
+controller's gitcache proxy; see
+[local-execution.md](local-execution.md#an-agent-that-fetches-source-itself).
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
 --config <path>` command, but neither installer creates a Windows service. On
@@ -422,7 +420,7 @@ The AWS SDK's own `AWS_ENDPOINT_URL_S3` points it at an S3-compatible store.
 
 | Service | Flag | Keys |
 |---|---|---|
-| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
+| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator grant's own under `cache/{bins,cache,artifacts}/...` |
 | `sparkwing-controller` | `--cache-blob-store s3://bucket/cache` | node log segments under `cache/logs/<class>/teams/<team>/runs/...`; see [Node log retention](#node-log-retention) |
 
 **The cache** moves its binary, dependency-archive and artifact stores to the
@@ -441,14 +439,18 @@ does, in its database, and the cache asks it for room before a team's
 write and charges each team's download to its day there
 ([Tenant limits](limits.md)). The cache's store ceiling covers its
 volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller` and its token, the
-file `cache-token` in its `--credentials-dir`, which the controller holds as
-`SPARKWING_CACHE_TOKEN`; a cache with a `cache-grant-key` and `--blob-store`
-refuses to start without them. Give the controller `--cache-blob-store`, the same URL the cache uses, and its hourly
-storage pass lists it to reconcile the counts, cache objects and log segments
-alike, and expires a team's cache objects 30 days after their last write. The
-controller's role then needs `s3:ListBucket`, `s3:PutObject`, `s3:GetObject`,
-`s3:DeleteObject` and `s3:GetLifecycleConfiguration` on the cache's prefix.
+bucket. On a multi-team deployment give the cache `--controller` and a
+`service` token holding only the `storage.count` scope, minted with
+`sparkwing cluster tokens create --type service --principal cache --scope storage.count`
+and mounted as the file `controller-token` in its `--credentials-dir`; a cache
+with a `cache-grant-key` and `--blob-store` refuses to start without
+`--controller`, and one with `--controller` refuses to start without the
+token. Give the controller `--cache-blob-store`, the same URL the cache uses,
+and its hourly storage pass lists it to reconcile the counts, cache objects
+and log segments alike, and expires a team's cache objects 30 days after
+their last write. The controller's role then needs `s3:ListBucket`,
+`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and
+`s3:GetLifecycleConfiguration` on the cache's prefix.
 `GET /api/v1/storage` shows a team what it holds.
 
 Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the

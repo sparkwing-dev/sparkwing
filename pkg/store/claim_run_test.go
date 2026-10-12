@@ -64,7 +64,7 @@ func TestStartClaimExecution_StampsOnceAndClosesTheSourceMint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := team.SpendSourceCredential(ctx, tok, "cred", "github.com", "pod", time.Now()); !errors.Is(err, store.ErrSourceCredentialSpent) {
+	if _, err := team.SpendSourceCredential(ctx, tok, store.GitCredentialRelease{CredentialID: "cred", Host: "github.com", Runner: "pod"}, time.Now()); !errors.Is(err, store.ErrSourceCredentialSpent) {
 		t.Fatalf("a source mint after the start: err = %v, want ErrSourceCredentialSpent", err)
 	}
 	if _, err := f.accept(tok, planOf("a")); err != nil {

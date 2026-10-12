@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -52,14 +53,14 @@ func newStorageFakes(t *testing.T) (cache *storageFake, ts controller.TeamStorag
 	cache = &storageFake{status: http.StatusNoContent}
 	cacheSrv := httptest.NewServer(http.HandlerFunc(cache.handler))
 	t.Cleanup(cacheSrv.Close)
-	return cache, controller.TeamStorage{CacheURL: cacheSrv.URL, CacheToken: "cache-op"}
+	return cache, controller.TeamStorage{CacheURL: cacheSrv.URL}
 }
 
 func newDeletionFixture(t *testing.T, ts controller.TeamStorage) *identityFixture {
 	t.Helper()
 	raw, pub := multiTeamLicense(t)
 	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
-	f.srv.WithTeamStorage(ts)
+	f.srv.WithTeamStorage(ts).WithCacheGrantKey("grant-key")
 	return f
 }
 
@@ -99,8 +100,8 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	var minted struct {
 		Token string `json:"token"`
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth,
-		map[string]any{"name": "box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
+		map[string]any{"scopes": machineScopes, "name": "box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint runner token = %d", code)
 	}
 	f.seedRun("acme", "run-acme")
@@ -144,8 +145,13 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 		t.Fatalf("a pass inside the tenant-cache window deleted the cache: %v", got)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	if got := cache.seen(); len(got) != 1 || got[0] != "DELETE /admin/teams/acme Bearer cache-op" {
+	got := cache.seen()
+	bearer, ok := strings.CutPrefix(strings.Join(got, ""), "DELETE /admin/teams/acme Bearer ")
+	if len(got) != 1 || !ok {
 		t.Fatalf("cache service saw %v", got)
+	}
+	if g, err := authwire.VerifyCacheGrant("grant-key", bearer, time.Now()); err != nil || !g.Operator {
+		t.Fatalf("the purge's bearer = %+v, %v; want an operator grant signed with the grant key", g, err)
 	}
 	var mine []teamDeletionBody
 	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)

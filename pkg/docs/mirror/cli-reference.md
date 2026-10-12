@@ -18,7 +18,6 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing docs`](cli-docs.md) -- Embedded user docs (offline)
 - [`sparkwing doctor`](cli-doctor.md) -- Inspect and repair abandoned local state
 - [`sparkwing examples`](cli-examples.md) -- Read complete example pipelines
-- [`sparkwing fleet`](cli-fleet.md) -- Configure foreground assisted execution
 - [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
 - [`sparkwing queue`](cli-queue.md) -- Inspect local admission holders, connections, and waiters

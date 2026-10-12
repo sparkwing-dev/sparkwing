@@ -145,7 +145,7 @@ func TestTeamGrantsReadOnlyWhatOriginServesAnonymously(t *testing.T) {
 	if out, err := cloneMirror(privateURL, filepath.Join(repoDir, repoHash(privateURL)+".git")); err != nil {
 		t.Fatalf("the cache's own credential did not clone the private origin: %v\n%s", err, out)
 	}
-	if !fetchFromCache(t, srv, privateName, token, privateSHA) {
+	if !fetchFromCache(t, srv, privateName, operatorGrant(t, token), privateSHA) {
 		t.Error("the operator could not fetch its private mirror")
 	}
 
@@ -160,7 +160,7 @@ func TestTeamGrantsReadOnlyWhatOriginServesAnonymously(t *testing.T) {
 	origin.setPrivate("public.git", true)
 	laterSHA := commitTo(t, filepath.Join(root, "public-src"), filepath.Join(repos, "public.git"), "later.txt", "private now")
 	// safety: the operator's read clones its own mirror of the now-private origin with the cache's credential.
-	if !fetchFromCache(t, srv, publicName, token, laterSHA) {
+	if !fetchFromCache(t, srv, publicName, operatorGrant(t, token), laterSHA) {
 		t.Fatal("the operator could not fetch the commit its credential reaches")
 	}
 	if fetchFromCache(t, srv, publicName, grant, laterSHA) {
@@ -216,7 +216,7 @@ func TestRegistrationClearsThePublicCloneCooldown(t *testing.T) {
 	})
 
 	origin.setPrivate("public.git", true)
-	if code, body := send(t, srv, http.MethodPost, register, token, ""); code != http.StatusOK {
+	if code, body := send(t, srv, http.MethodPost, register, operatorGrant(t, token), ""); code != http.StatusOK {
 		t.Fatalf("register = %d: %s", code, body)
 	}
 	grant := grantFor(t, token, "team-a")
@@ -227,7 +227,7 @@ func TestRegistrationClearsThePublicCloneCooldown(t *testing.T) {
 	if fetchFromCache(t, srv, name, grant, sha) {
 		t.Fatal("a team read retried the clone inside its cooldown")
 	}
-	if code, body := send(t, srv, http.MethodPost, register, token, ""); code != http.StatusOK {
+	if code, body := send(t, srv, http.MethodPost, register, operatorGrant(t, token), ""); code != http.StatusOK {
 		t.Fatalf("re-register = %d: %s", code, body)
 	}
 	if !fetchFromCache(t, srv, name, grant, sha) {

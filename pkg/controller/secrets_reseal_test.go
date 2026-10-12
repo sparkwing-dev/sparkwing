@@ -253,10 +253,14 @@ func TestSecrets_EnvelopeMovedToAnotherTeamDoesNotOpen(t *testing.T) {
 	}
 	hs := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(c).Handler())
 	t.Cleanup(hs.Close)
-	cl := client.NewWithToken(hs.URL, nil, raw)
-	if _, err := cl.ClaimSpecificTrigger(ctx, "run-acme", time.Minute); err != nil {
+	if err := acme.UpdatePlanSnapshot(ctx, "run-acme", []byte(`{"nodes":[],"secrets":[{"name":"API_KEY"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	trig, err := client.NewWithToken(hs.URL, nil, raw).ClaimSpecificTrigger(ctx, "run-acme", time.Minute)
+	if err != nil || trig == nil {
 		t.Fatalf("ClaimSpecificTrigger: %v", err)
 	}
+	cl := client.NewWithToken(hs.URL, nil, trig.ClaimToken)
 
 	sec, err := cl.GetSecretForRun(ctx, "API_KEY", "run-acme")
 	if err != nil || sec.Value != "acme-value" {

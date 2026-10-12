@@ -14,8 +14,8 @@ func TestCacheGrantRefusesARunnerTokenWithoutALiveClaim(t *testing.T) {
 	f := newTenancyFixture(t, openSQLiteStore(t))
 	f.srv.WithCacheGrantKey("cache-grant-key-distinct-from-operator-token")
 
-	code, raw := f.do(http.MethodPost, "/api/v1/team/runner-tokens", f.editorA,
-		map[string]any{"name": "dave-box", "repos": []string{"github.com/acme/*"}})
+	code, raw := f.do(http.MethodPost, "/api/v1/team/tokens", f.editorA,
+		map[string]any{"scopes": machineScopes, "name": "dave-box", "repos": []string{"github.com/acme/*"}})
 	if code != http.StatusCreated {
 		t.Fatalf("mint runner token: %d %s", code, raw)
 	}

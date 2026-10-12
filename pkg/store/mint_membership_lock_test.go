@@ -18,11 +18,11 @@ import (
 func TestTokenMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 	mints := map[string]func(*store.Tenant, string) (string, error){
 		"cli": func(tn *store.Tenant, account string) (string, error) {
-			raw, _, err := tn.CreateCLIToken(context.Background(), "cli:"+account, []string{"runs.read"}, account, time.Now())
+			raw, _, err := tn.CreateMemberToken(context.Background(), "cli:"+account, []string{"runs.read"}, account, time.Now())
 			return raw, err
 		},
 		"runner": func(tn *store.Tenant, account string) (string, error) {
-			raw, _, err := tn.CreateRunnerToken(context.Background(), "agent:"+account, []string{"nodes.claim"}, account, time.Now())
+			raw, _, err := tn.CreateMachineToken(context.Background(), account, []string{"nodes.claim"}, account, time.Now())
 			return raw, err
 		},
 	}

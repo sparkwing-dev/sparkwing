@@ -14,8 +14,7 @@ import (
 	"time"
 )
 
-// CacheGrantPrefix begins every cache grant, so the cache tells a grant from
-// its operator token without trying to verify every bearer as one.
+// CacheGrantPrefix begins every cache grant.
 const CacheGrantPrefix = "swcg1."
 
 // CacheGrantTTL bounds a grant a runner token mints through its live node or
@@ -28,11 +27,14 @@ const CacheGrantTTL = 6 * time.Hour
 // claim it was minted for, the repository and refs that confine it within the
 // team, and when it stops being accepted.
 type CacheGrant struct {
-	Team    string      `json:"t"`
-	Run     string      `json:"r"`
-	Expires int64       `json:"e"`
-	Claim   *CacheClaim `json:"c,omitempty"`
-	Scope   *CacheScope `json:"s,omitempty"`
+	// Operator marks a grant the controller signs for its own calls to the
+	// cache. It names no team, run, claim or scope, and opens every route.
+	Operator bool        `json:"o,omitempty"`
+	Team     string      `json:"t"`
+	Run      string      `json:"r"`
+	Expires  int64       `json:"e"`
+	Claim    *CacheClaim `json:"c,omitempty"`
+	Scope    *CacheScope `json:"s,omitempty"`
 }
 
 // CacheScope is the repository and git refs the controller read from the
@@ -123,7 +125,26 @@ func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.D
 	if run == "" || ttl <= 0 {
 		return "", errors.New("cache grant: a run and a positive lifetime are required")
 	}
-	payload, err := json.Marshal(CacheGrant{Team: team, Run: run, Expires: now.Add(ttl).Unix(), Claim: claim, Scope: scope})
+	return sealCacheGrant(signingKey, CacheGrant{Team: team, Run: run, Expires: now.Add(ttl).Unix(), Claim: claim, Scope: scope})
+}
+
+// CacheOperatorGrantTTL bounds the grant the controller signs for one call of
+// its own to the cache. The cache checks a grant when a request arrives, so a
+// long clone outlives it safely.
+const CacheOperatorGrantTTL = 5 * time.Minute
+
+// MintOperatorCacheGrant signs the grant the controller presents on its own
+// calls to the cache: the git-cache proxy, team purges and the store-ceiling
+// admin routes. Only the controller and the cache hold signingKey.
+func MintOperatorCacheGrant(signingKey string, now time.Time) (string, error) {
+	if strings.TrimSpace(signingKey) == "" {
+		return "", errors.New("cache grant: no grant key to sign with")
+	}
+	return sealCacheGrant(signingKey, CacheGrant{Operator: true, Expires: now.Add(CacheOperatorGrantTTL).Unix()})
+}
+
+func sealCacheGrant(signingKey string, g CacheGrant) (string, error) {
+	payload, err := json.Marshal(g)
 	if err != nil {
 		return "", err
 	}
@@ -134,8 +155,9 @@ func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.D
 }
 
 // VerifyCacheGrant returns the grant raw carries when its signature matches
-// signingKey, it names the claim and scope it was minted for, and it has not
-// expired at now.
+// signingKey, it has not expired at now, and it is either an operator grant
+// naming nothing else or names the team, run, claim and scope it was minted
+// for.
 func VerifyCacheGrant(signingKey, raw string, now time.Time) (CacheGrant, error) {
 	if strings.TrimSpace(signingKey) == "" || !strings.HasPrefix(raw, CacheGrantPrefix) {
 		return CacheGrant{}, ErrCacheGrant
@@ -162,36 +184,37 @@ func VerifyCacheGrant(signingKey, raw string, now time.Time) (CacheGrant, error)
 	if err := json.Unmarshal(payload, &g); err != nil {
 		return CacheGrant{}, ErrCacheGrant
 	}
-	if !cacheGrantTeam.MatchString(g.Team) || g.Run == "" || g.Claim == nil || g.Scope == nil ||
-		!now.Before(time.Unix(g.Expires, 0)) {
+	if !now.Before(time.Unix(g.Expires, 0)) {
+		return CacheGrant{}, ErrCacheGrant
+	}
+	// safety: an operator grant opens every team's tree, so one that also
+	// names a team or claim is malformed rather than read as either kind.
+	if g.Operator {
+		if g.Team != "" || g.Run != "" || g.Claim != nil || g.Scope != nil {
+			return CacheGrant{}, ErrCacheGrant
+		}
+		return g, nil
+	}
+	if !cacheGrantTeam.MatchString(g.Team) || g.Run == "" || g.Claim == nil || g.Scope == nil {
 		return CacheGrant{}, ErrCacheGrant
 	}
 	return g, nil
 }
 
 // CacheGrantEnv names the variable a runner hands a run's cache grant in. The
-// run's processes send it to the cache in place of the operator token, which a
-// runner never holds.
+// run's processes send it to the cache as their bearer.
 const CacheGrantEnv = "SPARKWING_CACHE_GRANT"
 
-// CacheTokenEnv names the variable an operator's own shell carries the cache's
-// operator token in.
-const CacheTokenEnv = "SPARKWING_CACHE_TOKEN"
-
-// CacheTokenCredential and CacheGrantKeyCredential are the file names the
-// cache's operator token and the grant signing key take in a service's
-// credentials directory. The cache and the controller read the same names, so
-// one projected Secret volume serves both.
+// CacheGrantKeyCredential and CacheControllerTokenCredential are the file
+// names the grant signing key and the cache's storage.count service token
+// take in the cache's credentials directory.
 const (
-	CacheTokenCredential    = "cache-token"
-	CacheGrantKeyCredential = "cache-grant-key"
+	CacheGrantKeyCredential        = "cache-grant-key"
+	CacheControllerTokenCredential = "controller-token"
 )
 
 // CacheBearerFromEnv returns the bearer this process sends the cache: the
-// run's grant when a runner handed it one, otherwise the operator token.
+// run's grant when a runner handed it one.
 func CacheBearerFromEnv() string {
-	if grant := os.Getenv(CacheGrantEnv); grant != "" {
-		return grant
-	}
-	return os.Getenv(CacheTokenEnv)
+	return os.Getenv(CacheGrantEnv)
 }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
@@ -111,9 +112,6 @@ func (r *pipelineRun) exec(args, env []string) error {
 	// safety: the pipeline binary drives the terminal from here, so the CLI
 	// must stop catching signals it can no longer act on for that program.
 	r.stopSignals()
-	if fleetExecutionEnv(env) {
-		return runExec(r.lease.Path(), args, execDir, env, r.opts.AfterChild)
-	}
 	return r.lease.ExecReplace(args, execDir, env, r.opts.AfterChild)
 }
 
@@ -175,7 +173,7 @@ func pipelineBinary(
 			}
 		}
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if fetchErr := bincache.TryBinary(ctx, gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(ctx, gcURL, authwire.CacheBearerFromEnv(), key, tempPath); fetchErr == nil {
 				source = "gitcache"
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
@@ -203,7 +201,7 @@ func pipelineBinary(
 	}
 	if published && source == "compiled" {
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if err := bincache.UploadBinary(ctx, gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
+			if err := bincache.UploadBinary(ctx, gcURL, authwire.CacheBearerFromEnv(), key, lease.Path()); err != nil {
 				slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
 			}
 		}
@@ -251,23 +249,11 @@ func runExec(bin string, args []string, dir string, env []string, afterChild fun
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			if fleetExecutionEnv(env) {
-				return exitError(ee.ExitCode(), err)
-			}
 			os.Exit(ee.ExitCode()) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status
 		}
 		return err
 	}
 	return nil
-}
-
-func fleetExecutionEnv(env []string) bool {
-	for _, entry := range env {
-		if entry == "SPARKWING_FLEET=1" {
-			return true
-		}
-	}
-	return false
 }
 
 type compileOptions struct {

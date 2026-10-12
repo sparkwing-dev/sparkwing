@@ -2,7 +2,6 @@ package bincache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/cgi"
@@ -148,31 +147,5 @@ func TestGitHubTokenFetchRefusesAnotherHost(t *testing.T) {
 	}
 	if got := githubTokenRemote("git@github.com:acme/widgets.git"); got != "https://github.com/acme/widgets.git" {
 		t.Fatalf("ssh remote = %q, want its https form", got)
-	}
-}
-
-func TestRequestSourceToken(t *testing.T) {
-	answer := `{"token":"ghs_ok","expires_at":1,"repository":"acme/widgets"}`
-	status := http.StatusOK
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/runs/run-1/source-token" || r.Header.Get("Authorization") != "Bearer runner-tok" {
-			http.Error(w, "unexpected", http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(answer))
-	}))
-	defer srv.Close()
-	ctx := context.Background()
-	if tok, err := RequestSourceToken(ctx, srv.URL, "runner-tok", "run-1"); err != nil || tok != "ghs_ok" {
-		t.Fatalf("token = %q, %v", tok, err)
-	}
-	status = http.StatusNotFound
-	if _, err := RequestSourceToken(ctx, srv.URL, "runner-tok", "run-1"); !errors.Is(err, ErrNoSourceToken) {
-		t.Fatalf("404 = %v, want ErrNoSourceToken", err)
-	}
-	status, answer = http.StatusOK, `{"token":"ghs_ok\nGIT_CONFIG_KEY_9=core.sshCommand"}`
-	if _, err := RequestSourceToken(ctx, srv.URL, "runner-tok", "run-1"); err == nil {
-		t.Fatal("a token carrying a newline was accepted")
 	}
 }

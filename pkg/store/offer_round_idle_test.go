@@ -2,12 +2,9 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -23,6 +20,21 @@ func runnerToken(t *testing.T, tn *store.Tenant, name string) string {
 	return tok.Prefix
 }
 
+func seedRoundNode(t *testing.T, st *store.Store, runID string, labels ...string) {
+	t.Helper()
+	ctx := context.Background()
+	plan := []byte(`{"nodes":[{"id":"work","modifiers":{"res_cores":1}}]}`)
+	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "round-test", Status: "running", StartedAt: time.Now(), PlanSnapshot: plan}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "work", Status: "pending", NeedsLabels: labels}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, runID, "work"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+}
+
 func reopenRound(ctx context.Context, t *testing.T, st *store.Store, runID, nodeID string) bool {
 	t.Helper()
 	if revoked, err := runTeam(ctx, t, st, runID).RevokeNodeReady(ctx, runID, nodeID); err != nil || !revoked {
@@ -31,9 +43,9 @@ func reopenRound(ctx context.Context, t *testing.T, st *store.Store, runID, node
 	if err := st.MarkNodeReady(ctx, runID, nodeID); err != nil {
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
-	result, err := st.FinalizeExecutorClaimRound(ctx, runID, nodeID)
+	result, err := st.FinalizeClaimRound(ctx, runID, nodeID)
 	if err != nil {
-		t.Fatalf("FinalizeExecutorClaimRound: %v", err)
+		t.Fatalf("FinalizeClaimRound: %v", err)
 	}
 	if !result.Pending && !result.Revoked {
 		t.Fatalf("round result = %+v, want pending or revoked", result)
@@ -51,7 +63,7 @@ func TestOfferRoundKeepsItsWindowOnlyWhileSomethingCouldClaim(t *testing.T) {
 	acme := tenantFor(t, st, "acme")
 	homeRunner := runnerToken(t, home, "home")
 	acmeRunner := runnerToken(t, acme, "acme")
-	seedExecutorNode(t, st, "run", 1, "linux")
+	seedRoundNode(t, st, "run", "linux")
 
 	known := func(live ...store.RunnerPresence) context.Context { return store.WithQueueRunners(ctx, live) }
 	for _, tc := range []struct {
@@ -68,11 +80,6 @@ func TestOfferRoundKeepsItsWindowOnlyWhileSomethingCouldClaim(t *testing.T) {
 		if got := reopenRound(tc.ready, t, st, "run", "work"); got != tc.want {
 			t.Errorf("%s: round open = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-
-	enrollTeamOfferExecutor(t, st, home, "home-desk", 10)
-	if !reopenRound(known(), t, st, "run", "work") {
-		t.Fatal("a live executor of the team: round closed at once, want the window")
 	}
 }
 
@@ -138,54 +145,5 @@ func TestOfferRoundIgnoresARunnerWhoseAllowListRefusesTheRepository(t *testing.T
 		if got := reopenRound(tc.ready, t, st, "run-gh", "compile"); got != tc.want {
 			t.Errorf("%s: round open = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-}
-
-// An executor of another team can never take this team's node, so it does
-// not push the avoided executor off the node it last lost.
-func TestSoftAvoidanceIgnoresAnotherTeamsExecutor(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	home, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	acme := tenantFor(t, st, "acme")
-	coordinatorID, err := st.CoordinatorID(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	avoided := enrollTeamOfferExecutor(t, st, home, "desk-a", 50)
-	enrollTeamOfferExecutor(t, st, acme, "desk-b", 50)
-	var avoidedID string
-	if err := st.DB().QueryRowContext(ctx, `SELECT executor_id FROM executors WHERE name = 'desk-a'`).Scan(&avoidedID); err != nil {
-		t.Fatal(err)
-	}
-	until := time.Now().Add(time.Minute)
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-avoid", Pipeline: "release", Status: "running", StartedAt: time.Now(),
-		RetryAvoidCoordinatorID: coordinatorID, RetryAvoidExecutorKind: "agent",
-		RetryAvoidExecutorID: avoidedID, RetryAvoidUntil: &until,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	seedSealedNode(t, st, "run-avoid", "build")
-	reportCtx, err := executionpolicy.WithRuntimeReport(ctx, executionpolicy.CurrentRuntimeReport(buildinfo.Identity{
-		Binary: "sparkwing-runner", Version: "v0.41.0", GOOS: "linux", GOARCH: "amd64",
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.HeartbeatExecutor(reportCtx, avoided, "desk-a",
-		store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30}, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	sink := executionpolicy.NewPreparationSink()
-	if _, err := st.PrepareNextExecutorClaim(executionpolicy.WithPreparationSink(ctx, sink), avoided, "desk-a"); err != nil &&
-		!errors.Is(err, executionpolicy.ErrBodyAttestationRequired) {
-		t.Fatalf("the team's only executor should be prepared for the node it avoided: %v", err)
-	}
-	if binding := sink.Load(); binding.RunID != "run-avoid" {
-		t.Fatalf("prepared %s/%s, want run-avoid/build", binding.RunID, binding.NodeID)
 	}
 }

@@ -84,7 +84,7 @@ func TestDirectSubmodulesFetchWithTheOneReleasedToken(t *testing.T) {
 // asks nothing further, so nothing in the fetched tree can widen the token.
 func TestFetchRunSourceDirectChecksOutSubmodulesOnlyForTheOwnersList(t *testing.T) {
 	for name, answer := range map[string]string{
-		"listed":   `{"kind":"github_app","host":"github.com","token":"ghs_wide","extra_repositories":["acme/lib"]}`,
+		"listed":   `{"kind":"github_app","host":"github.com","token":"ghs_wide","repositories":["acme/widgets","acme/lib"]}`,
 		"unlisted": `{"kind":"github_app","host":"github.com","token":"ghs_narrow"}`,
 	} {
 		var mu sync.Mutex
@@ -93,7 +93,7 @@ func TestFetchRunSourceDirectChecksOutSubmodulesOnlyForTheOwnersList(t *testing.
 			mu.Lock()
 			asks = append(asks, r.URL.Path)
 			mu.Unlock()
-			if !strings.HasSuffix(r.URL.Path, "/git-credential") {
+			if !strings.HasSuffix(r.URL.Path, "/source-credential") {
 				http.NotFound(w, r)
 				return
 			}
@@ -104,7 +104,7 @@ func TestFetchRunSourceDirectChecksOutSubmodulesOnlyForTheOwnersList(t *testing.
 		writeTestFile(t, filepath.Join(checkout, ".gitmodules"), "[submodule \"lib\"]\n")
 		var subCred *DirectCredential
 		_, err := fetchRunSourceDirect(context.Background(), RunSource{
-			ControllerURL: srv.URL, RunnerToken: "runner-tok", RunID: "run-1",
+			ControllerURL: srv.URL, ClaimToken: "swc_claim-tok", RunID: "run-1",
 		}, nil, func(DirectCredential) (string, error) {
 			return filepath.Join(checkout, ".sparkwing"), nil
 		}, func(_ string, cred DirectCredential) error {

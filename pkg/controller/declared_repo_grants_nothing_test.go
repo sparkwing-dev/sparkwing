@@ -26,26 +26,28 @@ func TestDeclaredRepo_TypingAVictimRepositoryReadsNoSecretOfIts(t *testing.T) {
 	seedRunNode(t, f.store, "run-attacker", "build")
 	setRunPipeline(t, f.store, "run-attacker", "attacker-build")
 	setRunDeclaredRepo(t, f.store, "run-attacker", "victim/private")
+	declareSecrets(t, f.store, "run-attacker", "DEPLOY_KEY")
 	if err := f.store.MarkNodeReady(ctx, "run-attacker", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
+	n, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
+	node := client.NewWithToken(f.url, nil, n.ClaimToken)
 
-	sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-attacker")
+	sec, err := node.GetSecretForRun(ctx, "DEPLOY_KEY", "run-attacker")
 	if err != nil {
 		t.Fatalf("GetSecretForRun on the claimed run: %v", err)
 	}
 	if sec.Value != "attacker-key" {
 		t.Fatalf("GetSecretForRun = %q, want attacker-key; the typed repository decided the read", sec.Value)
 	}
-	named, err := c.GetSecretForPipeline(ctx, "DEPLOY_KEY", "victim-deploy")
-	if err != nil {
-		t.Fatalf("GetSecretForPipeline: %v", err)
+	if named, err := c.GetSecretForPipeline(ctx, "DEPLOY_KEY", "victim-deploy"); err == nil {
+		t.Errorf("naming the victim pipeline with the runner's bearer answered %q; a runner's bearer reads no secret", named.Value)
 	}
-	if named.Value == "victim-key" {
-		t.Error("naming the victim pipeline in the query answered with its row; the hint is admin-only")
+	if named, err := node.GetSecretForPipeline(ctx, "DEPLOY_KEY", "victim-deploy"); err == nil {
+		t.Errorf("naming the victim pipeline with the claim token answered %q; a claim names its own run", named.Value)
 	}
 }
 
@@ -170,14 +172,16 @@ func TestDeclaredRepo_AWebhookRunStillResolvesItsOwnSecrets(t *testing.T) {
 	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-web", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	declareSecrets(t, f.store, "run-web", "DEPLOY_KEY")
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
+	n, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
 
-	sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
+	sec, err := client.NewWithToken(f.url, nil, n.ClaimToken).GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
 	if err != nil {
 		t.Fatalf("GetSecretForRun on a webhook-originated run: %v", err)
 	}

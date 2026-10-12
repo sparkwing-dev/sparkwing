@@ -37,7 +37,6 @@ read-only render is:
 helm template sparkwing ./charts/sparkwing-full \
   --set controller.allowOpenBootstrap=true \
   --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
-  --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
   --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key
 ```
 
@@ -106,16 +105,12 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # after the first `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
-# A runner token needs `nodes.claim`, `triggers.claim`, `runs.state`,
-# and `secrets.read`.
+# A runner token needs `nodes.claim`, `triggers.claim` and `runs.state`.
 
-# The cache's operator token and the key cache grants are signed with.
-# Both are random secrets of their own and neither is ever a runner token:
-# pipeline code can read the runner's token, and either of these opens
-# every team's cache. The chart refuses to render when two of the three
-# name the same Secret key.
-kubectl -n sparkwing create secret generic sparkwing-cache-token \
-    --from-literal=token="$(openssl rand -hex 32)"
+# The key cache grants are signed with, the only bearer the cache accepts.
+# It is a random secret of its own and never a runner token: pipeline code
+# can read the runner's token, and the key signs access to every team's
+# cache. The chart refuses to render when both name the same Secret key.
 kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
     --from-literal=key="$(openssl rand -hex 32)"
 ```
@@ -196,8 +191,7 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
-    --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
-    --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
+      --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
     --set ingress.hosts[0].paths[0].path=/ \
@@ -287,9 +281,8 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | The runner's bearer-token Secret. | `""` |
-| `sparkwing-runner-bundle.cache.tokenSecret.name` | The cache's operator token, which the controller also holds. Never the runner's token. | `""` |
-| `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with and the cache verifies them with. | `""` |
-| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a token (bootstrap only). | `false` |
+| `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with, its own included, and the cache verifies them with. Never the runner's token. | `""` |
+| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a grant (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
@@ -331,8 +324,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    (`controller.requireAuth`, on by default), so it never serves a request
    unauthenticated. Without that Secret the render refuses, because a
    controller whose tokens table is empty serves **every endpoint
-   unauthenticated**, token minting and first-admin creation included, to
-   anything that reaches its Service.
+   unauthenticated**, token minting included, to anything that reaches its
+   Service.
 
    `controller.allowOpenBootstrap=true` opts into that open window instead.
    The chart then drops `--require-auth`; mint the first token through the
@@ -355,12 +348,11 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    A configured Secret name requires a non-empty key; the chart rejects
    incomplete pairs. Runner and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
-   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as the
-   credential file `cache-token`, and
-   `sparkwing-runner-bundle.cache.grantKeySecret` what both read as
-   `cache-grant-key`; the chart mounts each into both services' credentials
-   directories. A cache-enabled install without the cache
-   token fails at render time unless
+   `sparkwing-runner-bundle.cache.grantKeySecret` is what both the cache and
+   the controller read as `cache-grant-key`; the chart mounts it into both
+   services' credentials directories, and the controller signs its own calls
+   to the cache with it, so no static cache token exists. A cache-enabled
+   install without the grant key fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`. The bootstrap
    window above needs it and the token upgrade should turn it back off.
 
@@ -369,11 +361,11 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    Secret.
 
 3. The controller serves the dashboard and gates its pages behind `/login`
-   whenever it enforces tokens. Create dashboard accounts with
-   `sparkwing cluster users add`, whose `--scope` bounds what a signed-in
-   account reaches. During the `allowOpenBootstrap` window the controller
-   serves pages without sign-in, and `/login` offers a "create first admin"
-   form. Session cookies are `Secure` and `__Host-` prefixed, so configure
+   whenever it enforces tokens. The operator signs in with an admin token,
+   such as the bootstrap admin token; people sign in with Google or GitHub
+   where a multi-team license and an OAuth client offer them. During the
+   `allowOpenBootstrap` window the controller serves pages without sign-in.
+   Session cookies are `Secure` and `__Host-` prefixed, so configure
    an HTTPS ingress before signing in; `ingress.allowInsecure=true` without
    TLS passes `--insecure-cookies`, which drops both so a plain HTTP session
    holds.
@@ -556,9 +548,9 @@ inside the runner pod. See
 [`sparkwing-runner-bundle/README.md`](../sparkwing-runner-bundle/README.md#troubleshooting).
 
 **Dashboard redirects to /login and I have no account**
-A controller that enforces tokens offers no sign-up form. Add an
-account with `sparkwing cluster users add` using an admin token, such
-as the bootstrap admin token.
+A controller that enforces tokens offers no sign-up form. Sign in with an
+admin token, such as the bootstrap admin token, in the `/login` form's
+operator-token field.
 
 **`helm template` fails with "missing in charts/ directory: sparkwing-runner-bundle"**
 The vendored sub-chart tarball was deleted. Restore it with

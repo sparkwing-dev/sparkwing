@@ -2,12 +2,14 @@
 
 A runner without the operator's git cache fetches each run's source straight
 from its host. It holds no git credential of its own, so the controller
-releases one for each run, at fetch time, to the runner holding the run's
-claim.
+releases one for each run, at fetch time, to the runner's claim on the run.
+`POST /api/v1/runs/{id}/source-credential` is the one route that releases a
+source credential, to the claim token of a node or trigger claim on the run;
+a runner's own token, or any other bearer, gets `403 claim_token_required`.
 
 A repository opted into controller dispatch on Sparkwing Cloud works
 differently: each Job's init container asks
-`POST /api/v1/runs/{id}/source-credential` with its claim token, at most three
+the same route with its claim token, at most three
 times, for a read-only GitHub App token covering the run's repository and its
 [extra repositories](#extra-repositories), named by their GitHub IDs, and checks the run out into
 `SPARKWING_SOURCE_DIR` on the Job's scratch volume before the pipeline's
@@ -17,17 +19,19 @@ never Cloud Jobs. Submodules there must name a listed repository.
 
 ## Which credential a run gets
 
-`POST /api/v1/runs/{id}/git-credential` resolves the credential in a fixed
-order, the same for every run:
+The route resolves the credential in a fixed order, the same for every run:
 
-1. **The team's GitHub App token**, when the run's repository is on github.com
-   and an installation bound to the run's team covers it. The token reads only
-   that repository, with `contents: read`, for at most an hour. See
+1. **The team's GitHub App token**, when the run's repository is on github.com,
+   an installation bound to the run's team covers it, and the repository
+   qualifies: it is the one the App's webhook recorded on the run's trigger, or
+   the run names it by hand and one of the team's App trigger subscriptions
+   (Team > GitHub) names it. The token reads only that repository, by its
+   GitHub ID, with `contents: read`, for at most an hour. See
    [GitHub App](github-app.md#source-for-cloud-runners).
 2. Otherwise **a git credential the team stored** for the host of the run's
    repository.
 3. Otherwise the route answers 404 with `{"error": "no_source_credential"}`
-   and a message naming both remedies, and the run fails before anything is
+   and a message naming the remedies, and the run fails before anything is
    fetched.
 
 A runner never falls back to credentials of the machine it runs on. The one
@@ -56,9 +60,9 @@ pull request's, must not widen what its own token reads.
 When the run's repository has a list, the controller mints the run's App
 token for it and the listed repositories together, checking again that the
 installation covering the run's repository still covers each one; a listed
-repository it no longer covers fails the request with 403 until an owner
-updates the list. The answer names the listed repositories in
-`extra_repositories`. When it names any and the checkout has a `.gitmodules`,
+repository it no longer covers, or one listed before its GitHub ID was
+recorded, fails the request with 409 until an owner saves the list again. The answer's `repositories` names the run's repository
+first and the listed ones after it. When it names any and the checkout has a `.gitmodules`,
 the runner runs `git submodule update --init --recursive --depth 1` with the
 same credential. `url.insteadOf` rewrites a submodule's ssh URL on the
 credential's host to https, so the one token serves every submodule. When no
@@ -106,14 +110,15 @@ A team stores at most 50 credentials.
 
 The controller releases a stored credential only when all of these hold:
 
-- the caller holds a live claim on a node or the trigger of the run, with a
-  runner token of the run's own team, both when the request arrives and
-  inside the transaction that records the release, which locks the claim, so
-  a lease that lapses in between releases nothing;
+- the caller presents the claim token of a live node or trigger claim on the
+  run, made with a runner or machine token of the run's own team that still
+  authenticates, both when the request arrives and inside the transaction that
+  records the release, which locks the run, so a lease that lapses in between
+  releases nothing. A Cloud Job's claim never receives one;
 - the host of the run's repository is the credential's host;
 - the caller is a cloud runner, one whose token the operator meters, or a
   machine a team owner opted in with
-  `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials` (the dashboard's
+  `PUT /api/v1/team/tokens/{prefix}/git-credentials` (the dashboard's
   **Team > Machines** page).
 
 Otherwise the route answers 403 `git_credential_not_released`, or 409
@@ -122,9 +127,12 @@ A runner its owner fenced with `--allow-repo` then fetches with the machine's
 own credentials; any other runner fails the run with the message.
 
 Each release writes an audit row naming the host, the run, the runner and the
-time. An owner reads the latest 200 at
-`GET /api/v1/team/git-credentials/releases`. A claim asks at most ten times a
-minute; past that the route answers 429.
+time, as each App token the route issues does. An owner reads the latest 200
+at `GET /api/v1/team/git-credentials/releases`. A claim asks at most ten times
+a minute; past that the route answers 429. A node's claim gets at most three
+credentials and none once its attempt has started running the pipeline's code,
+since the node's own process holds the same claim token; past that the route
+answers `403 source_credential_spent`.
 
 ## How the runner uses it
 

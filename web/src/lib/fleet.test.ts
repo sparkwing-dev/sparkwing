@@ -4,9 +4,6 @@ import type { Agent } from "./api";
 import {
   fleetHeadroomState,
   fleetLocation,
-  fleetRegistration,
-  fleetSlotTotals,
-  fleetSlots,
   formatFleetResources,
   sortFleetAgents,
 } from "./fleet";
@@ -26,12 +23,6 @@ function agent(fields: Partial<Agent>): Agent {
 describe("fleet presentation", () => {
   it("does not infer a missing location", () => {
     assert.equal(fleetLocation(agent({})), "unknown");
-  });
-
-  it("separates registered policy from legacy activity", () => {
-    assert.equal(fleetRegistration(agent({ active_slots: 0, max_concurrent: 2 })), "registered");
-    assert.equal(fleetRegistration(agent({ max_concurrent: 2 })), "legacy");
-    assert.equal(fleetRegistration(agent({ max_concurrent: 0 })), "legacy");
   });
 
   it("distinguishes fresh, stale, and absent headroom observations", () => {
@@ -64,35 +55,11 @@ describe("fleet presentation", () => {
     );
   });
 
-  it("distinguishes unknown slots and capacity from zero headroom", () => {
-    assert.equal(
-      fleetSlots(agent({ active_jobs: ["one", "two"], max_concurrent: 4 })),
-      "-/4",
-    );
-    assert.equal(
-      fleetSlots(agent({ active_slots: 2, max_concurrent: 4 })),
-      "2/4",
-    );
+  it("distinguishes unknown headroom from zero headroom", () => {
     assert.equal(formatFleetResources(), "unknown");
     assert.equal(
       formatFleetResources({ cores: 0, memory_bytes: 0 }),
       "0 cores / 0.0 GiB",
-    );
-  });
-
-  it("does not turn distinct run IDs into slot utilization", () => {
-    assert.deepEqual(
-      fleetSlotTotals([
-        agent({ active_jobs: ["one", "two"], max_concurrent: 4 }),
-      ]),
-      { active: null, capacity: 4 },
-    );
-    assert.deepEqual(
-      fleetSlotTotals([
-        agent({ active_slots: 2, max_concurrent: 4 }),
-        agent({ name: "gateway", active_slots: 1, max_concurrent: 2 }),
-      ]),
-      { active: 3, capacity: 6 },
     );
   });
 });

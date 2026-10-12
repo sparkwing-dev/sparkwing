@@ -27,12 +27,11 @@ type installFingerprint struct {
 	Balance int64
 	Grants  []string
 	Tokens  []string
-	Users   []string
 }
 
 func (f installFingerprint) String() string {
-	return fmt.Sprintf("schema=%d\nruns=%v\nnodes=%v\nsecrets=%v\nbalance=%d\ngrants=%v\ntokens=%v\nusers=%v",
-		f.Schema, f.Runs, f.Nodes, f.Secrets, f.Balance, f.Grants, f.Tokens, f.Users)
+	return fmt.Sprintf("schema=%d\nruns=%v\nnodes=%v\nsecrets=%v\nbalance=%d\ngrants=%v\ntokens=%v",
+		f.Schema, f.Runs, f.Nodes, f.Secrets, f.Balance, f.Grants, f.Tokens)
 }
 
 // safety: fixed rather than generated, because the drill has to open the restored
@@ -121,10 +120,6 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	if _, _, err := st.CreateToken("operator", store.TokenKindUser, []string{"admin"}, 0, start); err != nil {
 		t.Fatalf("create admin token: %v", err)
 	}
-
-	if _, err := st.CreateUser("operator", "drill-password-1", []string{"admin"}, start); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
 }
 
 func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) installFingerprint {
@@ -190,20 +185,11 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		f.Tokens = append(f.Tokens, fmt.Sprintf("%s/%s/%s", tok.Prefix, tok.Principal, tok.Kind))
 	}
 
-	users, err := st.ListUsers()
-	if err != nil {
-		t.Fatalf("list users: %v", err)
-	}
-	for _, u := range users {
-		f.Users = append(f.Users, u.Name)
-	}
-
 	sort.Strings(f.Runs)
 	sort.Strings(f.Nodes)
 	sort.Strings(f.Secrets)
 	sort.Strings(f.Grants)
 	sort.Strings(f.Tokens)
-	sort.Strings(f.Users)
 	return f
 }
 
@@ -226,7 +212,7 @@ func assertSameInstall(t *testing.T, want, got installFingerprint) {
 // populates one of every record class a controller holds, backs the store
 // up the way the page says to, restores it somewhere else, and compares
 // what the two stores serve: runs, nodes, secret values opened under the
-// backed-up key, the credit ledger, API tokens and dashboard users.
+// backed-up key, the credit ledger and API tokens.
 //
 // The "sqlite without the secrets key" subtest is why the key is part of
 // the backup rather than a detail of the deployment: the rows restore, and

@@ -18,14 +18,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
-// safety: the remedy names what this binary offers, because an operator reading a
-// refused upload cannot act on the controller's verbs and the cache serves no
-// delete of its own.
+// safety: the remedy names the controller routes an operator's admin bearer reaches, because the
+// cache's own admin routes take only the controller's operator grant and the cache serves no delete.
 const (
 	storeCeilingSubject = "the cache store"
-	storeCeilingRemedy  = "Free space on the cache volume, then POST /admin/store-ceiling/measure to " +
-		"measure it again; POST /admin/store-ceiling/thaw accepts writes until the next measurement. " +
-		"Raise --max-store-bytes or --max-store-objects on sparkwing-cache to accept more."
+	storeCeilingRemedy  = "Free space on the cache volume, then POST /api/v1/cache/store-ceiling/measure on the " +
+		"controller to measure it again; POST /api/v1/cache/store-ceiling/thaw accepts writes until the next " +
+		"measurement. Raise --max-store-bytes or --max-store-objects on sparkwing-cache to accept more."
 )
 
 var storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
@@ -176,7 +175,7 @@ func handleStoreCeilingThaw(w http.ResponseWriter, r *http.Request) {
 		// safety: the refusal names the lever this service actually offers, because the
 		// operator reading it cannot schedule a measurement without a restart.
 		http.Error(w, err.Error()+
-			". POST /admin/store-ceiling/measure walks the store now, which is what clears a freeze "+
+			". POST /api/v1/cache/store-ceiling/measure on the controller walks the store now, which is what clears a freeze "+
 			"once space has been freed", http.StatusConflict)
 		return
 	}

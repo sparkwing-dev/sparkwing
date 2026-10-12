@@ -9,7 +9,7 @@ import (
 
 func newServerForListeners(t *testing.T, metricsAddr string) *Server {
 	t.Helper()
-	saved := []*string{&dataRoot, &repoDir, &binsDir, &cacheDir, &namesFile, &proxyDir, &sshKeyDir, &apiToken, &teamsDir}
+	saved := []*string{&dataRoot, &repoDir, &binsDir, &cacheDir, &namesFile, &proxyDir, &sshKeyDir, &grantKey, &teamsDir}
 	values := make([]string, len(saved))
 	for i, p := range saved {
 		values[i] = *p
@@ -24,7 +24,7 @@ func newServerForListeners(t *testing.T, metricsAddr string) *Server {
 	cfg.DataDir = root
 	cfg.ProxyDir = filepath.Join(root, "proxy")
 	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
-	cfg.APIToken = "s3cret"
+	cfg.GrantKey = testGrantKey("s3cret")
 	cfg.MetricsAddr = metricsAddr
 	// safety: New replaces globals that a store measurement still running from an earlier test reads.
 	measureOnce.Wait()

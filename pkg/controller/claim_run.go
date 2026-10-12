@@ -12,6 +12,10 @@ import (
 
 var claimWorkKinds = []store.ClaimTokenKind{store.ClaimTokenWork}
 
+// safety: every claim that runs a node's code reads that node's secrets
+// through its own claim, under the plan's declaration and with an event.
+var claimSecretKinds = []store.ClaimTokenKind{store.ClaimTokenWork, store.ClaimTokenNode, store.ClaimTokenTrigger}
+
 type claimHeartbeatReq struct {
 	LeaseSecs int `json:"lease_secs"`
 }
