@@ -65,10 +65,11 @@ func openState(t *testing.T) *store.Store {
 	return st
 }
 
-// A dry run over a logs volume counts its logs and writes nothing beside
-// the controller's state database.
+// A dry run over a logs volume counts its logs, writes nothing beside the
+// controller's state database, and never opens the database, whose schema
+// opening it would upgrade.
 func TestMigrateLogsDryRunCountsAndWritesNothing(t *testing.T) {
-	home, root := logsVolume(t, true)
+	home, root := logsVolume(t, false)
 	var out bytes.Buffer
 	if err := runMigrateLogs([]string{"--root", root, "--dry-run"}, &out); err != nil {
 		t.Fatal(err)
@@ -78,6 +79,13 @@ func TestMigrateLogsDryRunCountsAndWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "lo")); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote under the state directory: %v", err)
+	}
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.StateDB()); !os.IsNotExist(err) {
+		t.Fatalf("dry run opened the state database: %v", err)
 	}
 }
 

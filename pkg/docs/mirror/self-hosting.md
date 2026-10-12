@@ -111,9 +111,10 @@ order:
 
    then the same command without `--dry-run`. It prints the runs, attempts
    and bytes it converted and those already converted, and exits non-zero
-   naming each run it could not convert. Opening the state database
-   upgrades its schema, so the old controller cannot start against it
-   afterward.
+   naming each run it could not convert. The dry run leaves the state
+   database unopened, so it checks no run against it; the real run opens
+   it, which upgrades its schema, so the old controller cannot start
+   against it afterward.
 3. Upgrade the charts, controller and runners to this release.
 4. Read a converted run through the controller (`sparkwing runs logs --run
    <id> --profile <p>`) to confirm.

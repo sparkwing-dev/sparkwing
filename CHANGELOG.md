@@ -22,7 +22,7 @@ unlock.
 
 ### Added
 - **controller:** `sparkwing-controller migrate-logs --root DIR [--archive-store URL] [--cache-blob-store URL] [--credentials-dir DIR] [--default-team T] [--dry-run]` converts a `sparkwing-logs` service's stored node logs into segments the controller reads
-  It reads the service's volume and archive directly, so the service need not run, records each converted log in the controller's state database so it is pruned and deleted with its run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. A run it cannot convert whole, such as one the state database does not hold, is named and left unconverted. Run it with the controller stopped: it opens and upgrades the state database. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+  It reads the service's volume and archive directly, so the service need not run, records each converted log in the controller's state database so it is pruned and deleted with its run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. A run it cannot convert whole, such as one the state database does not hold, is named and left unconverted. Run it with the controller stopped: it opens and upgrades the state database, which a dry run leaves unopened. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 

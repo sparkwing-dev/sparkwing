@@ -38,7 +38,8 @@ type ExportOptions struct {
 	// DefaultTeam is the team of a run whose files name none.
 	DefaultTeam string
 	// Runs is the controller's record of runs: each run is checked
-	// against it and each converted attempt recorded in it.
+	// against it and each converted attempt recorded in it. A dry run may
+	// leave it nil, and then checks no run against it.
 	Runs Runs
 	// DryRun counts what an export would write and writes nothing.
 	DryRun bool
@@ -83,7 +84,7 @@ func Export(ctx context.Context, opts ExportOptions) (ExportReport, error) {
 		opts.Logger = slog.Default()
 	}
 	report := ExportReport{Failed: map[string]error{}}
-	if opts.Runs == nil {
+	if opts.Runs == nil && !opts.DryRun {
 		return report, errors.New("logexport: an export needs the controller's runs")
 	}
 	var archived []string
@@ -301,9 +302,13 @@ func exportRun(ctx context.Context, opts ExportOptions, run exportSource, report
 	if run.free {
 		class = logseg.ClassFree
 	}
-	at, nodes, err := opts.Runs.RunNodes(ctx, team, run.id)
-	if err != nil {
-		return fmt.Errorf("the controller's run %s of team %s: %w", run.id, team, err)
+	var at time.Time
+	var nodes []string
+	if opts.Runs != nil {
+		var err error
+		if at, nodes, err = opts.Runs.RunNodes(ctx, team, run.id); err != nil {
+			return fmt.Errorf("the controller's run %s of team %s: %w", run.id, team, err)
+		}
 	}
 	seals := map[string][]sealRecord{}
 	var attempts []exportAttempt
@@ -322,6 +327,11 @@ func exportRun(ctx context.Context, opts ExportOptions, run exportSource, report
 	}
 	slices.SortFunc(attempts, func(x, y exportAttempt) int { return strings.Compare(x.file, y.file) })
 	for i, a := range attempts {
+		attempts[i].node = a.stem
+		if opts.Runs == nil {
+			continue
+		}
+		var err error
 		if attempts[i].node, err = nodeOfStem(a.stem, nodes); err != nil {
 			return err
 		}

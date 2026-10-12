@@ -312,7 +312,7 @@ func TestExportFilesANodeUnderTheIDTheRunRecords(t *testing.T) {
 func TestExportDryRunCountsAndWritesNothing(t *testing.T) {
 	ctx := t.Context()
 	opts := fixture(t)
-	opts.DryRun = true
+	opts.DryRun, opts.Runs = true, nil
 	report, err := Export(ctx, opts)
 	if err != nil || report.Runs != 4 || report.Attempts != 4 || report.Bytes != int64(2*len(threeLines)+2*len("line 1\n")) {
 		t.Fatalf("dry run = %+v, %v", report, err)

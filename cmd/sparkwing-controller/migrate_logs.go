@@ -39,8 +39,10 @@ that cannot be converted whole -- one the controller's database does not
 hold, whose metadata cannot be read, whose file is missing, or whose node a
 log file's name cannot be told apart from another -- is not converted and is
 named. An attempt that already has a manifest is skipped, so the command can
-be stopped and run again. --dry-run writes nothing and prints what it would
-convert. It exits non-zero naming every run it could not convert.
+be stopped and run again. --dry-run writes nothing, leaves the state database
+unopened, and prints what it would convert; since it checks no run against
+the database, the real run may still name runs it cannot convert. It exits
+non-zero naming every run it could not convert.
 
 Stop the controller first: opening its state database upgrades the schema,
 so an older controller cannot resume afterward.`
@@ -64,24 +66,29 @@ func runMigrateLogs(args []string, stdout io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		return err
-	}
-	creds, err := readCredentials(*credentialsDir)
-	if err != nil {
-		return err
-	}
-	st, err := openControllerStore(ctx, p.StateDB(), creds.PGURL)
-	if err != nil {
-		return mapStoreOpenError(err)
-	}
-	defer func() {
-		if cerr := st.Close(); cerr != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing-controller: close state:", cerr)
+	opts := logexport.ExportOptions{Root: *root, DefaultTeam: *defaultTeam, DryRun: *dryRun}
+	// safety: opening the state database upgrades its schema, which a dry run must not do to a controller
+	// the operator may still return to.
+	if !*dryRun {
+		p, err := paths.DefaultPaths()
+		if err != nil {
+			return err
 		}
-	}()
-	opts := logexport.ExportOptions{Root: *root, DefaultTeam: *defaultTeam, DryRun: *dryRun, Runs: storeRuns{st}}
+		creds, err := readCredentials(*credentialsDir)
+		if err != nil {
+			return err
+		}
+		st, err := openControllerStore(ctx, p.StateDB(), creds.PGURL)
+		if err != nil {
+			return mapStoreOpenError(err)
+		}
+		defer func() {
+			if cerr := st.Close(); cerr != nil {
+				fmt.Fprintln(os.Stderr, "sparkwing-controller: close state:", cerr)
+			}
+		}()
+		opts.Runs = storeRuns{st}
+	}
 	if *archiveStore != "" {
 		archive, err := openTeamStore(ctx, *archiveStore, nil)
 		if err != nil {
