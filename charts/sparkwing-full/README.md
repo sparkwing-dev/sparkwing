@@ -5,7 +5,7 @@ single Kubernetes cluster:
 
 - `sparkwing-controller` -- the orchestrator (state DB, /api/v1/*,
   webhooks) and the dashboard with its sign-in pages
-- `sparkwing-runner-bundle` (sub-chart) -- runner + cache + logs
+- `sparkwing-runner-bundle` (sub-chart) -- runner + cache
 
 This is the chart referenced in architectural decision 0001 for the
 **Enterprise self-host** topology. It models the complete stack as one
@@ -17,7 +17,7 @@ paid tier and live in separate charts.
 > `appVersion` do not currently identify a compatible public image set. A bare
 > install renders the intended topology, but it is not a supported runnable
 > release. Until a corrected release is published, build or mirror one
-> mutually compatible controller, runner, cache, and logs image set and
+> mutually compatible controller, runner, and cache image set and
 > explicitly set every enabled component's `image.repository` and `image.tag`.
 
 If you only need a runner pool against a remote controller (Cloud or
@@ -57,12 +57,12 @@ fresh clone with no `helm dependency update` first.
    |   API + dashboard pages       |
    |   (state DB on PVC)           |
    +-------------------------------+
-        ^               |
-        | claim         | dashboard log reads
-        |               v
-   +---------+      +---------+      +---------+
-   |  runner |----> | gitcache|      |  logs   |
-   +---------+      +---------+      +---------+
+        ^
+        | claim, node log segments
+        |
+   +---------+      +---------+
+   |  runner |----> | gitcache|
+   +---------+      +---------+
             (sparkwing-runner-bundle sub-chart)
 ```
 
@@ -72,8 +72,8 @@ fresh clone with no `helm dependency update` first.
 - Explicit repositories and tags for a mutually compatible image set. The
   current default GHCR/appVersion combination is not a runnable release.
 - A default `StorageClass` (or set `controller.storage.pvc.storageClassName`
-  / equivalents on the sub-chart). The controller, cache, and logs
-  PVCs are all RWO.
+  / equivalents on the sub-chart). The controller and cache
+  PVCs are both RWO.
 - `helm` v3.13+ (chart uses standard idioms; nothing exotic).
 
 ### Pre-install Secrets (optional but recommended)
@@ -105,8 +105,7 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # after the first `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
-# A runner token needs `nodes.claim`, `triggers.claim`, `runs.state`,
-# and `logs.write`.
+# A runner token needs `nodes.claim`, `triggers.claim` and `runs.state`.
 
 # The key cache grants are signed with, the only bearer the cache accepts.
 # It is a random secret of its own and never a runner token: pipeline code
@@ -129,8 +128,6 @@ sparkwing-runner-bundle:
     image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
   cache:
     image: {repository: registry.example/sparkwing-cache, tag: <compatible-tag>}
-  logs:
-    image: {repository: registry.example/sparkwing-logs, tag: <compatible-tag>}
 ```
 
 ```bash
@@ -139,14 +136,13 @@ helm dep up ./charts/sparkwing-full
 
 # Install the complete stack with an explicitly compatible image set. This
 # source-test configuration has no auth or encryption-at-rest,
-# so the controller, the cache and the logs service must opt out of their
-# token requirement explicitly.
+# so the controller and the cache must opt out of their token
+# requirement explicitly.
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
     --set controller.allowOpenBootstrap=true \
-    --set sparkwing-runner-bundle.cache.allowUnauthenticated=true \
-    --set sparkwing-runner-bundle.logs.allowUnauthenticated=true
+    --set sparkwing-runner-bundle.cache.allowUnauthenticated=true
 ```
 
 ### Verify the source stack in Kubernetes
@@ -243,7 +239,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
 | `controller.allowOpenBootstrap` | Render without `bootstrapAdminToken` and drop `--require-auth`, so an empty tokens table serves every route unauthenticated until a token exists and the controller restarts. A controller that already holds a token stays authenticated. Bool only. | `false` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
-| `controller.logs.url` | The logs service the controller announces to clients and reads dashboard log panes from, passed as `--logs-url`. | (auto-computed from sub-chart) |
 | `controller.cache.url` | The cache the controller's gitcache proxy forwards to. | (auto-computed from sub-chart) |
 | `controller.externalURL` | Base URL the controller answers on from outside the cluster, passed as `--external-url`. | `""` |
 | `controller.oauthRedirectURIs` | Comma-separated sign-in callback URLs, passed as `--oauth-redirect-uris`. | `""` |
@@ -288,7 +283,6 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | The runner's bearer-token Secret. | `""` |
 | `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with, its own included, and the cache verifies them with. Never the runner's token. | `""` |
 | `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a grant (bootstrap only). | `false` |
-| `sparkwing-runner-bundle.logs.allowUnauthenticated` | Serve every run's logs without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
@@ -303,7 +297,7 @@ you set top-level `nameOverride` or `fullnameOverride`, also set
 `sparkwing-runner-bundle.controller.url` to the resulting controller Service;
 the chart stops at render time with this instruction when the URL is missing.
 Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
-included in the controller URLs for the bundled logs and cache Services.
+included in the controller URL for the bundled cache Service.
 
 Set `sparkwing-runner-bundle.runner.triggerRunner.kind=warm` and
 `sparkwing-runner-bundle.runner.automountServiceAccountToken=true` to offer
@@ -354,20 +348,17 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    A configured Secret name requires a non-empty key; the chart rejects
    incomplete pairs. Runner and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
-   `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
-   service's signal to resolve callers against the controller.
    `sparkwing-runner-bundle.cache.grantKeySecret` is what both the cache and
    the controller read as `cache-grant-key`; the chart mounts it into both
    services' credentials directories, and the controller signs its own calls
    to the cache with it, so no static cache token exists. A cache-enabled
    install without the grant key fails at render time unless
-   `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
-   logs-enabled one without the runner token unless
-   `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap
-   window above needs both and the token upgrade should turn both back off.
+   `sparkwing-runner-bundle.cache.allowUnauthenticated=true`. The bootstrap
+   window above needs it and the token upgrade should turn it back off.
 
-   The dashboard's log panes read the logs service with the signed-in
-   browser's own credential, so the dashboard needs no token Secret.
+   The dashboard's log panes read node logs through the controller with
+   the signed-in browser's own credential, so the dashboard needs no token
+   Secret.
 
 3. The controller serves the dashboard and gates its pages behind `/login`
    whenever it enforces tokens. The operator signs in with an admin token,
@@ -417,7 +408,7 @@ kubectl -n sparkwing delete pvc -l app.kubernetes.io/instance=sparkwing
 ```
 
 (That second line wipes the controller's state DB AND the runner
-bundle's cache + logs PVCs. Skip it if you want to roll forward
+bundle's cache PVC. Skip it if you want to roll forward
 later with the same data.)
 
 ## Ingress
@@ -476,11 +467,11 @@ Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-controller:<chart appVersion>`
 - (sub-chart) `ghcr.io/sparkwing-dev/sparkwing-runner:<...>`,
-  `sparkwing-cache`, `sparkwing-logs`
+  `sparkwing-cache`
 
 These fallbacks describe the chart's intended registry layout; they are not a
 compatible public release contract for the current chart version. Pin both
-repository and tag for every enabled image. Keep all four images on the same
+repository and tag for every enabled image. Keep all three images on the same
 compatible Sparkwing revision until a corrected chart release publishes and
 verifies a public default set.
 
@@ -506,9 +497,16 @@ included. Runner pods rolling-update one at a time.
 
 An upgrade from a chart that deployed `sparkwing-web` removes its
 Deployment and Service; the Ingress then routes to the controller
-Service. A values file that still sets `web` fails to render: move
-`web.logs.url` to `controller.logs.url` and drop the rest. See the
-migration guide section "The controller serves the dashboard".
+Service. A values file that still sets `web` fails to render: drop it.
+See the migration guide section "The controller serves the dashboard".
+
+An upgrade from a chart that deployed `sparkwing-logs` removes its
+Deployment, Service and ServiceAccount; runners upload node logs to the
+controller instead. The logs PVC carries `helm.sh/resource-policy: keep`
+by default, so it survives the upgrade: convert its logs with
+`sparkwing-controller migrate-logs` before upgrading, then delete it. A values file
+that still sets `controller.logs` or `sparkwing-runner-bundle.logs` fails
+to render. See the migration guide section "The logs service is removed".
 
 State-DB compatibility: the controller's SQLite schema migrates
 forward automatically on startup. There is no rollback story for

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -95,7 +94,7 @@ func TestFollowLogsRemote_NoStreamsReturnsWithoutDrainDelay(t *testing.T) {
 		done <- followLogsRemote(
 			context.Background(),
 			client.NewWithToken(srv.URL, nil, ""),
-			sparkwinglogs.New(srv.URL, nil, ""),
+			client.NewWithToken(srv.URL, nil, "").NodeLogs(),
 			runID, "", io.Discard,
 		)
 	}()
@@ -126,7 +125,7 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 	})
 
 	ctrl := client.NewWithToken(url, nil, "")
-	logc := sparkwinglogs.New(url, nil, "")
+	logc := client.NewWithToken(url, nil, "").NodeLogs()
 
 	done := make(chan error, 1)
 	started := time.Now()
@@ -173,7 +172,7 @@ func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 	url, statusRead := followSpyWithStatusRead(t, runID, func(int32) (store.Run, bool) { return runningRun(runID), true })
 
 	ctrl := client.NewWithToken(url, nil, "")
-	logc := sparkwinglogs.New(url, nil, "")
+	logc := client.NewWithToken(url, nil, "").NodeLogs()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

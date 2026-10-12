@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"io/fs"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +18,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -230,14 +228,6 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	}
 	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
 	l.Config.ControllerURL = f.url
-	logRoot := t.TempDir()
-	logSrv, err := logs.New(logRoot, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	logTS := httptest.NewServer(logSrv.WithControllerAuth(f.url, time.Minute).Handler())
-	t.Cleanup(logTS.Close)
-	l.Config.LogsURL = logTS.URL
 	home := t.TempDir()
 
 	var wg sync.WaitGroup
@@ -368,18 +358,24 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if slotEvents != 0 {
 		t.Errorf("build left %d concurrency holders; it takes and releases one", slotEvents)
 	}
-	var durable strings.Builder
-	if err := filepath.WalkDir(filepath.Join(logRoot), func(path string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && strings.Contains(path, "check") {
-			raw, _ := os.ReadFile(path)
-			durable.Write(raw)
-		}
-		return err
-	}); err != nil {
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-e2e", "check")
+	if err != nil {
+		t.Fatalf("check kept no log segments: %v", err)
+	}
+	objs, err := fsstore.NewArtifactStore(f.st.OutputDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(durable.String(), "token=***") || strings.Contains(durable.String(), "tok-e2e-value") {
-		t.Errorf("check's durable log = %q, want its masked token line", durable.String())
+	segments, err := logseg.Open(ctx, objs, rec.Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable, err := segments.Read(ctx, objs, storage.ReadOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(durable), "token=***") || strings.Contains(string(durable), "tok-e2e-value") || segments.Manifest == nil {
+		t.Errorf("check's durable log = %q (manifest %+v), want its masked token line, sealed", durable, segments.Manifest)
 	}
 	for job, out := range podLogs {
 		if strings.Contains(out.String(), "tok-e2e-value") {

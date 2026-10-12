@@ -39,17 +39,14 @@ type remoteExecutionBroker struct {
 	nodeID         string
 	fence          store.NodeClaimFence
 	controller     *httputil.ReverseProxy
-	logs           *httputil.ReverseProxy
 	artifact       storage.ArtifactStore
 	controllerHost string
-	logsHost       string
-	logsURL        string
-	logSeal        childLogSeal
+	logSink        *nodeLogSink
 	protocol       nodeProtocolCheck
 }
 
 func startRemoteExecutionBroker(
-	controllerURL, logsURL, upstreamToken, runID, nodeID string,
+	controllerURL, upstreamToken, runID, nodeID string,
 	fence store.NodeClaimFence,
 	artifact storage.ArtifactStore,
 	logger *slog.Logger,
@@ -57,13 +54,6 @@ func startRemoteExecutionBroker(
 	controllerTarget, err := executionBrokerTarget(controllerURL)
 	if err != nil {
 		return nil, fmt.Errorf("controller target: %w", err)
-	}
-	var logsTarget *url.URL
-	if logsURL != "" {
-		logsTarget, err = executionBrokerTarget(logsURL)
-		if err != nil {
-			return nil, fmt.Errorf("logs target: %w", err)
-		}
 	}
 	capabilityBytes := make([]byte, 32)
 	if _, err := rand.Read(capabilityBytes); err != nil {
@@ -80,16 +70,7 @@ func startRemoteExecutionBroker(
 		controller: httputil.NewSingleHostReverseProxy(controllerTarget), controllerHost: controllerTarget.Host,
 		protocol: nodeProtocolCheck{logger: logger},
 	}
-	if logsTarget != nil {
-		b.logs = httputil.NewSingleHostReverseProxy(logsTarget)
-		b.logsHost = logsTarget.Host
-		b.logsURL = logsURL
-		b.logSeal.init()
-	}
 	b.controller.ErrorHandler = executionBrokerProxyError(logger)
-	if b.logs != nil {
-		b.logs.ErrorHandler = executionBrokerProxyError(logger)
-	}
 	b.server = &http.Server{
 		Handler:           b,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -148,8 +129,12 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	b.protocol.observe(r)
 	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
 	allowed := route != nil && (route.check == nil || route.check(b, r, segments))
-	if !allowed || (logsRequest && b.logs == nil) {
+	if !allowed || (logsRequest && b.logSink == nil) {
 		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
+		return
+	}
+	if logsRequest && b.logSink != nil {
+		b.logSink.ServeHTTP(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.EscapedPath(), "/bin/") {
@@ -158,15 +143,6 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if err := b.bindRequest(r); err != nil {
 		http.Error(w, "invalid execution request", http.StatusBadRequest)
-		return
-	}
-	if logsRequest {
-		r.Host = b.logsHost
-		if b.isChildLogAppend(r) {
-			b.forwardChildLogAppend(w, r)
-			return
-		}
-		b.logs.ServeHTTP(w, r)
 		return
 	}
 	r.Host = b.controllerHost
@@ -343,11 +319,8 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodPost, "/api/v1/concurrency/{key}/release", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/cancel-waiter", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/force-release", oneSegmentKey},
-	{http.MethodGet, "/api/v1/logs/{run}/{node}", nil},
 	{http.MethodPost, "/api/v1/logs/{run}/{node}", nil},
-	{http.MethodGet, "/api/v1/logs/{run}/{node}/seal", nil},
 	{http.MethodPost, "/api/v1/logs/{run}/{node}/seal", nil},
-	{http.MethodGet, "/api/v1/logs/{run}/{node}/stream", nil},
 	{http.MethodPut, "/api/v1/outputs/uploads/{upload}", nil},
 	{http.MethodGet, "/api/v1/outputs/objects/{key...}", nil},
 	{http.MethodGet, "/bin/{key...}", nil},

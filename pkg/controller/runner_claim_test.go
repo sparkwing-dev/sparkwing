@@ -33,7 +33,7 @@ func newRunnerClaimFixture(t *testing.T) runnerClaimFixture {
 	ctx := context.Background()
 	now := time.Now()
 	runner, _, err := st.CreateToken("runner-a", store.TokenKindRunner, []string{
-		controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState, controller.ScopeLogsWrite,
+		controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState,
 	}, 0, now)
 	if err != nil {
 		t.Fatal(err)

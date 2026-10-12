@@ -91,7 +91,7 @@ func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
 		t.Error("profile block must not carry a controller field")
 	}
 	flags := inv["flags"].(map[string]any)
-	if flags["profile"] != "prod" || flags["secrets"] != "vault" {
+	if flags["profile"] != "prod" || flags["secrets"] != nil {
 		t.Errorf("normal profile flags = %#v", flags)
 	}
 	for k, v := range prof {

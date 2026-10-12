@@ -36,6 +36,8 @@ type Client struct {
 	claimCaps      atomic.Pointer[claimCapabilities]
 
 	pollAdvice atomic.Int64
+
+	watchObserver func(WatchReport)
 }
 
 // New constructs a Client targeting the given controller base URL.
@@ -386,7 +388,32 @@ func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) e
 // network, killed process) and flip the run to failed.
 func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/heartbeat", url.PathEscape(runID))
-	return c.post(ctx, path, nil, http.StatusNoContent, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	setNodeClaimFenceHeaders(req, ctx)
+	c.askWatched(req)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusOK:
+		var out struct {
+			WatchedNodes []string `json:"watched_nodes"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return fmt.Errorf("decode run heartbeat: %w", err)
+		}
+		c.reportWatch(WatchReport{RunID: runID, WholeRun: true, Nodes: out.WatchedNodes})
+		return nil
+	default:
+		return readHTTPError(resp)
+	}
 }
 
 // AppendNodeAnnotation POSTs a single persistent summary string to
@@ -1309,6 +1336,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 	req.Header.Set("Content-Type", "application/json")
 	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
+	c.askWatched(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -1316,6 +1344,15 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusNoContent:
+		return nil
+	case http.StatusOK:
+		var out struct {
+			Watched bool `json:"watched"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return fmt.Errorf("decode node claim heartbeat: %w", err)
+		}
+		c.reportWatch(WatchReport{RunID: runID, NodeID: nodeID, Watched: out.Watched})
 		return nil
 	case http.StatusConflict:
 		return store.ErrLockHeld

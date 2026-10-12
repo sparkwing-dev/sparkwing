@@ -299,14 +299,11 @@ func runnerTokenSetup(raw string) string {
 }
 
 // hack: --metrics-addr= because a second runner on a machine would collide on its port; no
-// --gitcache since the git cache is the operator's; --logs only when announced, since the
-// controller serves no logs route. Patterns are single-quoted because '*' is a shell glob.
-// The claim flags follow the token's scopes, since a loop the token may not claim for fails.
-func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist, scopes []string) string {
+// --gitcache since the git cache is the operator's. Patterns are single-quoted because '*' is
+// a shell glob. The claim flags follow the token's scopes, since a loop the token may not
+// claim for fails.
+func runnerConnectArgs(controllerURL, name string, allow sourceurl.RepoAllowlist, scopes []string) string {
 	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
-	if logsURL != "" {
-		cmd += " --logs " + strings.TrimRight(logsURL, "/")
-	}
 	for _, p := range allow.Patterns() {
 		cmd += " --allow-repo '" + p + "'"
 	}

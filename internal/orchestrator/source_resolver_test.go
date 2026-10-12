@@ -2,6 +2,12 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -144,4 +150,40 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// A local run reads its secrets and state from this machine even when the
+// shell exports a profile, a secrets profile and controller URLs that name a
+// live controller.
+func TestRun_LocalRunContactsNoControllerWhateverTheEnvironmentSays(t *testing.T) {
+	var requests atomic.Int32
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer controller.Close()
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	body := fmt.Sprintf("profiles:\n  remote:\n    controller: { url: %s, token: swu_test }\n", controller.URL)
+	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", config)
+	t.Setenv("SPARKWING_PROFILE", "remote")
+	t.Setenv("SPARKWING_SECRETS_PROFILE", "remote")
+	t.Setenv("SPARKWING_CONTROLLER_URL", controller.URL)
+	t.Setenv("SPARKWING_LOGS_URL", controller.URL)
+
+	p := newPathsWithStore(t)
+	seedLocalSecret(t, p, "TOKEN", "from-local-store")
+	capturedEnvSecret = ""
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "env-reading-pipe"})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
+	if res.Status != "success" || capturedEnvSecret != "from-local-store" {
+		t.Fatalf("status %q (err=%v), secret %q; want success with the local secret", res.Status, res.Error, capturedEnvSecret)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Fatalf("a local run sent %d requests to the controller", n)
+	}
 }

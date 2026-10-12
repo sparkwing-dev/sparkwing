@@ -46,7 +46,6 @@ var publishImageBinaries = []string{
 	"sparkwing-controller",
 	"sparkwing-runner",
 	"sparkwing-cache",
-	"sparkwing-logs",
 }
 
 func scannedDigest(binary string) string {
@@ -140,7 +139,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 			name:       "a tag that lands on other bytes fails the step",
 			tag:        "v1.2.3",
 			latest:     true,
-			drift:      map[string]string{"sparkwing-logs": otherDigest("sparkwing-logs")},
+			drift:      map[string]string{"sparkwing-controller": otherDigest("sparkwing-controller")},
 			wantFail:   true,
 			wantStderr: []string{"resolves to", "after the retag"},
 			wantCreate: true,

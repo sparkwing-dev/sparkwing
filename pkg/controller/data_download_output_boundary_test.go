@@ -34,7 +34,7 @@ func TestDataDownloadPreservesClaimOutputBoundary(t *testing.T) {
 	}
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("FIXTURE", "FIXTURE", "")})
 	srv := New(f.st, nil).EnableAuthFromStore().WithCacheGrantKey("private-fixture-key")
-	if err := srv.WithSignedDownloads(bucket, nil, client, "", "", ""); err != nil {
+	if err := srv.WithSignedDownloads(bucket, client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	f.handler = srv.Handler()

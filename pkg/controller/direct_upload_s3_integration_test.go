@@ -54,7 +54,7 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.WithSignedDownloads(store, nil, client, "", "", ""); err != nil {
+	if err := s.WithSignedDownloads(store, client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	s.WithDirectUploads(client, bucketName, prefix)

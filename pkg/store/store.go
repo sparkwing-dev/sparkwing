@@ -1048,7 +1048,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 98
+const expectedSchemaVersion = 99
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -1819,10 +1819,10 @@ var migrationRequirements = map[int][]string{
 	87: {cardBillingRequirement},
 	88: {claimCacheScopeRequirement},
 	89: {metricSampleKindRequirement, "process-tree-accounting"},
-	95: {tokenSessionsRequirement},
+	96: {tokenSessionsRequirement},
 }
 
-// safety: v95 drops the password users table and the steps after it drop the
+// safety: v96 drops the password users table and the steps after it drop the
 // assisted-offer tables, so a binary predating them would open the store and
 // then fail its sign-in, claim and readiness statements; the requirement makes
 // it refuse the store whole, which is the only state a rollback may reach.
@@ -1923,7 +1923,7 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 18:
 		return scrubSecretInputHashes(ctx, tx)
 	case 19:
-		// safety: v19 widened the password users table that v95 drops, so a database that never held it
+		// safety: v19 widened the password users table that v96 drops, so a database that never held it
 		// skips straight past it.
 		return nil
 	case 20:
@@ -2092,7 +2092,7 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 80:
 		return ensureColumnsSQLite(ctx, tx, "teams", billingTrustCols)
 	case 81:
-		// safety: v81 widened the executors table that v97 drops, so a database that never held it
+		// safety: v81 widened the executors table that v98 drops, so a database that never held it
 		// skips straight past it.
 		return nil
 	case 82:
@@ -2132,15 +2132,17 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
 	case 95:
+		return applyNodeLogsMigration(ctx, tx)
+	case 96:
 		if err := ensureColumnsSQLite(ctx, tx, "sessions", sessionTokenCols); err != nil {
 			return err
 		}
 		return dropPasswordUsers(ctx, tx)
-	case 96:
-		return widenAgentNameIndex(ctx, tx, time.Now())
 	case 97:
-		return dropAssistedOffers(ctx, tx)
+		return widenAgentNameIndex(ctx, tx, time.Now())
 	case 98:
+		return dropAssistedOffers(ctx, tx)
+	case 99:
 		return applyTriggerClaimTokensMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2371,7 +2373,7 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 18:
 		return scrubSecretInputHashes(ctx, tx)
 	case 19:
-		// safety: v19 widened the password users table that v95 drops, so a database that never held it
+		// safety: v19 widened the password users table that v96 drops, so a database that never held it
 		// skips straight past it.
 		return nil
 	case 20:
@@ -2565,7 +2567,7 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 80:
 		return addColumnsTx(ctx, tx, "teams", billingTrustColsPostgres)
 	case 81:
-		// safety: v81 widened the executors table that v97 drops, so a database that never held it
+		// safety: v81 widened the executors table that v98 drops, so a database that never held it
 		// skips straight past it.
 		return nil
 	case 82:
@@ -2605,15 +2607,17 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		_, err := tx.ExecContext(ctx, githubAppAutomationTable)
 		return err
 	case 95:
+		return applyNodeLogsMigration(ctx, tx)
+	case 96:
 		if err := addColumnsTx(ctx, tx, "sessions", sessionTokenCols); err != nil {
 			return err
 		}
 		return dropPasswordUsers(ctx, tx)
-	case 96:
-		return widenAgentNameIndex(ctx, tx, time.Now())
 	case 97:
-		return dropAssistedOffers(ctx, tx)
+		return widenAgentNameIndex(ctx, tx, time.Now())
 	case 98:
+		return dropAssistedOffers(ctx, tx)
+	case 99:
 		return applyTriggerClaimTokensMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)

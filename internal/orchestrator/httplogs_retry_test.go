@@ -11,18 +11,15 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestHTTPLogs_ClaimedNodeBuffersUntilAttemptAndKeepsItsOrdinal(t *testing.T) {
+func TestHTTPLogs_ClaimedNodeBuffersUntilAttempt(t *testing.T) {
 	var posts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posts.Add(1)
-		if got := r.Header.Get(store.AttemptOrdinalHeader); got != "7" {
-			t.Errorf("attempt ordinal = %q, want 7", got)
-		}
 		if got := r.Header.Get(store.ClaimGenerationHeader); got != "3" {
 			t.Errorf("claim generation = %q, want 3", got)
 		}
@@ -161,8 +158,8 @@ func TestHTTPLogs_BatchRetryKeepsItsSequenceRange(t *testing.T) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		seen = append(seen, request{
-			first: r.Header.Get(logs.LogSeqHeader),
-			last:  r.Header.Get(logs.LogSeqEndHeader),
+			first: r.Header.Get(logseg.LogSeqHeader),
+			last:  r.Header.Get(logseg.LogSeqEndHeader),
 			body:  string(body),
 		})
 		if len(seen) == 1 {
@@ -198,7 +195,7 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			posts.Add(1)
-			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
+			http.Error(w, "the node's own credential is required", http.StatusUnauthorized)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -226,7 +223,7 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 
 	fataler := nlog.(interface{ Fatal() error })
 	if fataler.Fatal() == nil {
-		t.Errorf("Fatal: got nil, want non-nil after 403")
+		t.Errorf("Fatal: got nil, want non-nil after a 401")
 	}
 }
 

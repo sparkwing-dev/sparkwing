@@ -35,7 +35,7 @@ const (
 )
 
 // FreeEventShare is the part of allowance a free team's run events are held
-// to, one sixteenth; the cache and the logs service hold the rest.
+// to, one sixteenth; the cache and the node logs hold the rest.
 func FreeEventShare(allowance int64) int64 { return allowance / 16 }
 
 // StorageLimitFreeEvents names a free team's event share in a

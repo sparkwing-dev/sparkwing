@@ -116,7 +116,7 @@ func TestJobLogsRemoteWithTokens_EventsOnlyEmitsStoreEvents(t *testing.T) {
 	srv := NewControllerServer(t, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	var buf bytes.Buffer
-	if err := JobLogsRemoteWithTokens(ctx, srv.URL, srv.URL, "", runID, LogsOpts{EventsOnly: true}, &buf); err != nil {
+	if err := JobLogsRemoteWithTokens(ctx, srv.URL, "", runID, LogsOpts{EventsOnly: true}, &buf); err != nil {
 		t.Fatalf("JobLogsRemoteWithTokens --events-only: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")

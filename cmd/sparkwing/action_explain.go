@@ -185,6 +185,7 @@ func runPipelineExplain(args []string) error {
 		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
+	printPin(pipeline)
 	printPlanSnapshot(&snap)
 
 	fmt.Println()

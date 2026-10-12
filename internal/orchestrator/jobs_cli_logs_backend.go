@@ -1,19 +1,18 @@
 package orchestrator
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -106,7 +105,16 @@ func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string,
 	return err
 }
 
+// safety: a controller follows each node across its attempts itself, so a backend reading through one follows as
+// followLogsRemote does; any other backend keeps one log per node, streamed once.
 func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFilter string, out io.Writer) error {
+	if cb, ok := b.(*backend.ClientBackend); ok {
+		if ctrl, logs := cb.Remote(); logs != nil {
+			if nodeLogs, ok := logs.(client.NodeLogs); ok {
+				return followLogsRemote(ctx, ctrl, nodeLogs, runID, nodeFilter, out)
+			}
+		}
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -197,9 +205,9 @@ func streamNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID 
 			_ = live.Close()
 			return
 		}
-		copySSEStream(ctx, rc, nodeID, multi, mu, out)
+		ended := copySSEStream(ctx, rc, nodeID, multi, mu, out)
 		_ = rc.Close()
-		if ctx.Err() != nil {
+		if ended || ctx.Err() != nil {
 			return
 		}
 		select {
@@ -244,40 +252,15 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 }
 
 // safety: every body that reaches here is a server-sent-events stream --
-// the logs service's and the controller's live ring both frame that way --
+// the controller's segment stream and live ring both frame that way --
 // so the framing is stripped rather than printed at the reader.
-func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) {
-	scanner := bufio.NewScanner(rc)
-	scanner.Buffer(make([]byte, 0, 64*1024), sseMaxLine)
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			return
-		}
-		payload, ok := sseData(scanner.Text())
-		if !ok {
-			continue
-		}
+func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) (ended bool) {
+	return readSSE(ctx, rc, nil, func(payload string) {
 		mu.Lock()
+		defer mu.Unlock()
 		if multi.Load() {
 			fmt.Fprintf(out, "[%s] ", nodeID)
 		}
-		fmt.Fprint(out, payload)
-		fmt.Fprintln(out)
-		mu.Unlock()
-	}
-}
-
-const sseMaxLine = 1 << 20
-
-// safety: only a data field carries log text; the comments, the id and
-// event fields, and the blank line between events carry framing.
-func sseData(line string) (string, bool) {
-	if line == "" || strings.HasPrefix(line, ":") {
-		return "", false
-	}
-	rest, ok := strings.CutPrefix(line, "data:")
-	if !ok {
-		return "", false
-	}
-	return strings.TrimPrefix(rest, " "), true
+		fmt.Fprintln(out, payload)
+	})
 }

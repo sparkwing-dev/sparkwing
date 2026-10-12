@@ -51,11 +51,6 @@ turned into a dash, so https://api.sparkwing.example becomes
 api-sparkwing-example. An existing profile of that name is never replaced
 without --force, because the token it holds stays live until it is revoked.
 
---set-default writes defaults.profile into this repository's
-.sparkwing/sparkwing.yaml, so runs in this checkout select the connection with
-no flag. The name resolves against the project's own profiles: block first and
-config.yaml second, so the token stays out of the checkout.
-
 The command closes with the dashboard URL the controller announces and the
 probes 'sparkwing cloud status' runs.
 
@@ -72,7 +67,6 @@ is not up yet, or one that serves unauthenticated (omit both token flags).
 | `--admin-token-stdin` | Read an admin token from stdin and mint a user token with it |
 | `--token-stdin` | Read an already-minted user token from stdin |
 | `--scope CSV` | Comma-separated scopes for the minted token (default: runs.read,runs.write,runs.control,triggers.read,logs.read,approvals.write) |
-| `--set-default` | Set defaults.profile in this project's .sparkwing/sparkwing.yaml |
 | `--force` | Replace an existing profile of that name |
 | `--no-probe` | Write the profile without contacting the controller |
 
@@ -81,9 +75,6 @@ is not up yet, or one that serves unauthenticated (omit both token flags).
 ```sh
 # Connect with a one-time admin token
 sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
-
-# Connect and make it this repository's default
-sparkwing cloud connect --controller https://api.sparkwing.example --name prod --admin-token-stdin --set-default
 
 # Store a token someone minted for you
 sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
@@ -132,7 +123,7 @@ Prints the selected profile, its controller, the principal
 and scopes the controller reports for its token, the announced dashboard URL,
 and the controller, auth, logs and gitcache probes. A profile with no
 controller reports its storage probes alone. Exits non-zero when a probe
-fails; a missing optional logs service warns without failing, and a controller
+fails; a controller that keeps no node logs warns without failing, and a controller
 that announces no cache pod URL omits the gitcache probe.
 
 --cluster answers "is this cluster alive?" for an operator. It adds the probes

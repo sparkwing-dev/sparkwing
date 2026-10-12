@@ -4,11 +4,13 @@ package cluster
 
 import (
 	"context"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -30,9 +32,16 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 		t.Setenv(name, value)
 	}
 
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrlSrv := httptest.NewServer(controller.New(st, discardLogger()).Handler())
+	t.Cleanup(ctrlSrv.Close)
 	opts := TriggerLoopOptions{
-		ControllerURL: "https://controller.example", LogsURL: "https://logs.example",
-		GitcacheURL: "http://cache.internal", Token: "runner-a-agent-token",
+		ControllerURL: ctrlSrv.URL,
+		GitcacheURL:   "http://cache.internal", Token: "runner-a-agent-token",
 	}
 	child := triggerChildEnvOf(t, opts)
 

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -182,52 +180,6 @@ func TestCloudConnectStoresATokenSuppliedOnStdin(t *testing.T) {
 	}
 	if got := loadSavedProfile(t, f.profiles, "admin-conn").ControllerToken(); got != f.admin {
 		t.Error("the supplied token did not reach the profile")
-	}
-}
-
-func TestCloudConnectSetsTheProjectDefault(t *testing.T) {
-	f := newCloudFixture(t)
-	root := t.TempDir()
-	sparkwingDir := filepath.Join(root, ".sparkwing")
-	if err := os.MkdirAll(sparkwingDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for name, body := range map[string]string{
-		"main.go":              "package main\n",
-		projectconfig.Filename: "pipelines:\n  - name: build\n    entrypoint: Build\n",
-	} {
-		if err := os.WriteFile(filepath.Join(sparkwingDir, name), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Chdir(root)
-
-	out := f.connect(t, "--name", "prod", "--set-default")
-	if !strings.Contains(out, "defaults.profile: prod") {
-		t.Errorf("output does not report the project default:\n%s", out)
-	}
-
-	path := filepath.Join(sparkwingDir, projectconfig.Filename)
-	cfg, err := projectconfig.Load(path)
-	if err != nil {
-		t.Fatalf("the written project config does not load: %v", err)
-	}
-	if cfg.Defaults.Profile != "prod" {
-		t.Fatalf("defaults.profile = %q, want prod", cfg.Defaults.Profile)
-	}
-	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "build" {
-		t.Errorf("writing the default perturbed the pipelines section: %+v", cfg.Pipelines)
-	}
-
-	resolved, chain, _, err := resolveProfileChain("")
-	if err != nil {
-		t.Fatalf("resolve with no flag: %v", err)
-	}
-	if resolved == nil || resolved.ControllerURL() != f.controller {
-		t.Fatalf("no-flag resolution did not select the connected profile: %+v", resolved)
-	}
-	if chain.Source != profile.ChainSourceProjectDefault {
-		t.Errorf("chain source = %q, want %q", chain.Source, profile.ChainSourceProjectDefault)
 	}
 }
 

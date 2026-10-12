@@ -11,7 +11,10 @@
 {{- end -}}
 {{- end -}}
 {{- if .Values.web -}}
-{{- fail "sparkwing-full: web was removed with the sparkwing-web Deployment; the controller serves the dashboard now. Unset web (move web.logs.url to controller.logs.url) and follow the migration guide section \"The controller serves the dashboard\"" -}}
+{{- fail "sparkwing-full: web was removed with the sparkwing-web Deployment; the controller serves the dashboard now. Unset web and follow the migration guide section \"The controller serves the dashboard\"" -}}
+{{- end -}}
+{{- if .Values.controller.logs -}}
+{{- fail "sparkwing-full: controller.logs was removed with the sparkwing-logs Deployment; runners upload node logs to the controller now. Unset controller.logs and follow the migration guide section \"The logs service is removed\"" -}}
 {{- end -}}
 {{- if and .Values.controller.databaseSecret.name (not .Values.controller.databaseSecret.key) -}}
 {{- fail "sparkwing-full: controller.databaseSecret.key is required when controller.databaseSecret.name is set" -}}

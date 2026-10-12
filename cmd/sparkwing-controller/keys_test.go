@@ -57,7 +57,7 @@ func TestReadCredentialsRefusesEveryPresentEmptyCredential(t *testing.T) {
 	for _, name := range []string{
 		credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
 		credBootstrapAdminToken, credLicense, credGitHubClientSecret, credGoogleClientSecret,
-		credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey, credLogsDeleteToken,
+		credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
 		credBillingToken, credCacheGrantKey,
 	} {
 		for _, body := range []string{"", " \n\t"} {

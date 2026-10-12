@@ -8,6 +8,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -22,7 +25,7 @@ func writeInnerProfiles(t *testing.T, body string) {
 
 func TestResolveActiveProfile_NoneSelected(t *testing.T) {
 	os.Unsetenv("SPARKWING_PROFILE")
-	p, chain, err := resolveActiveProfile(nil, nil)
+	p, chain, err := resolveActiveProfile(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +44,7 @@ profiles:
     state: { type: s3, bucket: team, prefix: state }
 `)
 	t.Setenv("SPARKWING_PROFILE", "team")
-	p, chain, err := resolveActiveProfile(nil, nil)
+	p, chain, err := resolveActiveProfile(nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -59,7 +62,7 @@ profiles:
   team: { state: { type: sqlite } }
 `)
 	t.Setenv("SPARKWING_PROFILE", "ghost")
-	_, _, err := resolveActiveProfile(nil, nil)
+	_, _, err := resolveActiveProfile(nil)
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -68,57 +71,91 @@ profiles:
 	}
 }
 
-func TestResolveActiveProfile_DefaultProfileFallsBackToTheUserFile(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
-	writeInnerProfiles(t, `
-profiles:
-  cloud:
-    controller: { url: https://api.example.dev, token: swu_secret }
-`)
-	cfg := &projectconfig.Config{Defaults: projectconfig.Defaults{Profile: "cloud"}}
-	p, chain, err := resolveActiveProfile(nil, cfg)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p == nil || p.ControllerURL() != "https://api.example.dev" {
-		t.Fatalf("resolved %#v", p)
-	}
-	if chain == nil || chain.Source != profile.ChainSourceProjectDefault {
-		t.Fatalf("chain = %#v, want the project-default source", chain)
-	}
-}
-
-func TestResolveActiveProfile_DefaultProfileNamesNeitherFile(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
-	writeInnerProfiles(t, "profiles:\n  team: { state: { type: sqlite } }\n")
-	cfg := &projectconfig.Config{Defaults: projectconfig.Defaults{Profile: "ghost"}}
-	_, _, err := resolveActiveProfile(nil, cfg)
-	if err == nil {
-		t.Fatal("expected a default naming nothing to fail")
-	}
-	if !strings.Contains(err.Error(), "ghost") || !strings.Contains(err.Error(), "defaults.profile") {
-		t.Errorf("error should name the default and the profile: %v", err)
-	}
-}
-
-func TestResolveActiveProfile_ProjectProfileWinsOverTheUserFile(t *testing.T) {
-	os.Unsetenv("SPARKWING_PROFILE")
+func TestResolveActiveProfile_DeclaredProfilesSelectNothingWithoutTheHandoff(t *testing.T) {
+	t.Setenv(ProfileEnv, "")
 	writeInnerProfiles(t, `
 profiles:
   cloud:
     controller: { url: https://user.example.dev }
 `)
 	cfg := &projectconfig.Config{
-		Defaults: projectconfig.Defaults{Profile: "cloud"},
 		Profiles: map[string]*profile.Profile{
 			"cloud": {Name: "cloud", Controller: &profile.ControllerSpec{URL: "https://project.example.dev"}},
 		},
 	}
-	p, _, err := resolveActiveProfile(nil, cfg)
+	p, chain, err := resolveActiveProfile(cfg)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if p.ControllerURL() != "https://project.example.dev" {
-		t.Errorf("resolved %q, want the project's own declaration", p.ControllerURL())
+	if p != nil || chain == nil || chain.Source != profile.ChainSourceNone {
+		t.Fatalf("resolved %#v (chain %#v), want the local store", p, chain)
+	}
+}
+
+func TestResolveActiveProfile_RefusesAControllerProfile(t *testing.T) {
+	writeInnerProfiles(t, `
+profiles:
+  prod:
+    controller: { url: https://api.example.dev }
+  team:
+    state: { type: sqlite }
+`)
+	for _, name := range []string{"prod", "team"} {
+		t.Setenv("SPARKWING_PROFILE", name)
+		if _, _, err := resolveActiveProfile(nil); err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile "+name) {
+			t.Errorf("profile %s on a local run = %v, want a refusal naming pipeline trigger", name, err)
+		}
+	}
+}
+
+func TestRemoteStateProfile_AcceptsOnlyS3OrPostgresStateWithoutAController(t *testing.T) {
+	for name, tc := range map[string]struct {
+		p  *profile.Profile
+		ok bool
+	}{
+		"s3":         {&profile.Profile{Name: "s3", State: &backends.Spec{Type: backends.TypeS3, Bucket: "b"}}, true},
+		"postgres":   {&profile.Profile{Name: "pg", State: &backends.Spec{Type: backends.TypePostgres, URL: "postgres://x"}}, true},
+		"sqlite":     {&profile.Profile{Name: "lite", State: &backends.Spec{Type: backends.TypeSQLite}}, false},
+		"controller": {&profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}, false},
+	} {
+		if err := RemoteStateProfile(tc.p); (err == nil) != tc.ok {
+			t.Errorf("%s: RemoteStateProfile = %v, want ok=%v", name, err, tc.ok)
+		}
+	}
+}
+
+func TestRefusePinnedLocalRun(t *testing.T) {
+	if err := RefusePinnedLocalRun(nil); err != nil {
+		t.Fatalf("an undeclared pipeline was refused: %v", err)
+	}
+	if err := RefusePinnedLocalRun(&pipelines.Pipeline{Name: "build"}); err != nil {
+		t.Fatalf("an unpinned pipeline was refused: %v", err)
+	}
+	err := RefusePinnedLocalRun(&pipelines.Pipeline{Name: "release", Profile: "prod"})
+	if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger release --profile prod") {
+		t.Fatalf("a pinned pipeline ran locally or the refusal named no trigger command: %v", err)
+	}
+}
+
+// A leftover key the strict decoder rejects must not hide a pin from a cron,
+// detached run or local child trigger.
+func TestRefusePinnedCheckoutRun_FailsWhenTheConfigCannotBeRead(t *testing.T) {
+	checkoutAt(t, "defaults:\n  profile: prod\npipelines:\n  - name: release\n    entrypoint: Release\n    profile: prod\n")
+	err := refusePinnedCheckoutRun(nil)
+	if err == nil || !strings.Contains(err.Error(), "profile pin") {
+		t.Fatalf("refusePinnedCheckoutRun with an unreadable config = %v, want a refusal", err)
+	}
+	checkoutAt(t, "pipelines:\n  - name: release\n    entrypoint: Release\n")
+	if err := refusePinnedCheckoutRun(nil); err != nil {
+		t.Fatalf("a readable config with no pin was refused: %v", err)
+	}
+}
+
+func TestDispatchesLocally_FollowsTheDispatchBackend(t *testing.T) {
+	if !LocalBackends(Paths{Root: t.TempDir()}, nil, nil).dispatchesLocally() {
+		t.Error("a run on this machine's store is not reported local")
+	}
+	if RemoteBackends(client.NewWithToken("http://127.0.0.1:1", nil, ""), nil, nil, nil, 0).dispatchesLocally() {
+		t.Error("a run a controller dispatched is reported local")
 	}
 }

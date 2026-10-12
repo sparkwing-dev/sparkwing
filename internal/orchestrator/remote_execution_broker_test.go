@@ -103,7 +103,7 @@ func TestRemoteExecutionBrokerBindsExactAttemptAndDeniesSupervisorRoutes(t *test
 		HolderID: "real-holder", MembershipID: "real-membership",
 		ReservationID: "real-reservation", ClaimGeneration: 23,
 	}
-	broker, err := startRemoteExecutionBroker(upstream.URL, upstream.URL, "parent-token", "run-1", "node-a", fence, nil,
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "node-a", fence, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -152,9 +152,6 @@ func TestRemoteExecutionBrokerBindsExactAttemptAndDeniesSupervisorRoutes(t *test
 		broker.capability); status != http.StatusNoContent {
 		t.Fatalf("execution start status = %d", status)
 	}
-	if status := do(http.MethodPost, "/api/v1/logs/run-1/node-a", `{}`, broker.capability); status != http.StatusNoContent {
-		t.Fatalf("exact log status = %d", status)
-	}
 	if status := do(http.MethodPost, "/api/v1/logs/run-1/node-b", `{}`, broker.capability); status != http.StatusForbidden {
 		t.Fatalf("other node log status = %d, want 403", status)
 	}
@@ -164,8 +161,8 @@ func TestRemoteExecutionBrokerBindsExactAttemptAndDeniesSupervisorRoutes(t *test
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(captured) != 3 {
-		t.Fatalf("upstream requests = %d, want only exact secret, start, and log: %+v", len(captured), captured)
+	if len(captured) != 2 {
+		t.Fatalf("upstream requests = %d, want only exact secret and start: %+v", len(captured), captured)
 	}
 	start := captured[1]
 	if start.authorization != "Bearer parent-token" || start.holder != fence.HolderID ||
@@ -225,7 +222,7 @@ func TestRemoteExecutionBrokerUploadsOwnNodeOutput(t *testing.T) {
 		}
 	}))
 	t.Cleanup(upstream.Close)
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "node-a", store.NodeClaimFence{HolderID: "holder"}, nil, nil)
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "node-a", store.NodeClaimFence{HolderID: "holder"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +292,7 @@ func TestRemoteExecutionBrokerFilesystemOutputs(t *testing.T) {
 				t.Cleanup(alias.Close)
 				srv.WithExternalURL(alias.URL)
 			}
-			producer, err := startRemoteExecutionBroker(upstream.URL, "", token, "run-fs", "produce", store.NodeClaimFence{}, nil, nil)
+			producer, err := startRemoteExecutionBroker(upstream.URL, token, "run-fs", "produce", store.NodeClaimFence{}, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -305,7 +302,7 @@ func TestRemoteExecutionBrokerFilesystemOutputs(t *testing.T) {
 			if err := writer.FinishNode(ctx, "run-fs", "produce", "success", "", data); err != nil {
 				t.Fatalf("producer output: %v", err)
 			}
-			consumer, err := startRemoteExecutionBroker(upstream.URL, "", token, "run-fs", "consume", store.NodeClaimFence{}, nil, nil)
+			consumer, err := startRemoteExecutionBroker(upstream.URL, token, "run-fs", "consume", store.NodeClaimFence{}, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -352,7 +349,7 @@ func TestRemoteExecutionBrokerMemoizedSlot(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "team-token", "run-1", "node-a", store.NodeClaimFence{}, nil, nil)
+	broker, err := startRemoteExecutionBroker(upstream.URL, "team-token", "run-1", "node-a", store.NodeClaimFence{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +406,7 @@ func TestRemoteExecutionBrokerProxiesOnlyContentAddressedArtifacts(t *testing.T)
 	}
 	upstream := httptest.NewServer(http.NotFoundHandler())
 	defer upstream.Close()
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "node-a", store.NodeClaimFence{}, artifact,
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "node-a", store.NodeClaimFence{}, artifact,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -501,10 +498,10 @@ func TestClaimedRegisteredNodeRunsOnlyInIsolatedChild(t *testing.T) {
 	previous := runNodeIsolatedFn
 	t.Cleanup(func() { runNodeIsolatedFn = previous })
 	called := false
-	runNodeIsolatedFn = func(_ context.Context, controllerURL, logsURL, runID, nodeID, token, _ string, _ *slog.Logger) (runner.Result, error) {
+	runNodeIsolatedFn = func(_ context.Context, controllerURL, runID, nodeID, token, _ string, _ *slog.Logger) (runner.Result, error) {
 		called = true
-		if controllerURL != server.URL || logsURL != "" || runID != "run-isolated" || nodeID != "build" || token != "parent-token" {
-			t.Fatalf("isolated call = %q %q %q %q %q", controllerURL, logsURL, runID, nodeID, token)
+		if controllerURL != server.URL || runID != "run-isolated" || nodeID != "build" || token != "parent-token" {
+			t.Fatalf("isolated call = %q %q %q %q", controllerURL, runID, nodeID, token)
 		}
 		return runner.Result{Outcome: sparkwing.Success}, nil
 	}
@@ -543,7 +540,7 @@ func TestRemoteExecutionBrokerConsumerReadsProducerMetadata(t *testing.T) {
 	}
 	upstream := httptest.NewServer(controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
 	defer upstream.Close()
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "consume", store.NodeClaimFence{}, nil, nil)
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "consume", store.NodeClaimFence{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +563,7 @@ func TestRemoteExecutionBrokerConsumerReadsProducerMetadata(t *testing.T) {
 func TestRemoteExecutionBrokerProducerMetadataScope(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	defer upstream.Close()
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "consume", store.NodeClaimFence{}, nil, nil)
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "consume", store.NodeClaimFence{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +606,7 @@ func TestRemoteExecutionBrokerReadsHierarchicalNodeIDs(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer upstream.Close()
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", "parent-token", "run-1", "build/linux", store.NodeClaimFence{}, nil,
+	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "build/linux", store.NodeClaimFence{}, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

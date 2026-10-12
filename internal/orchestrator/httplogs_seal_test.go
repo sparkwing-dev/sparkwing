@@ -1,93 +1,100 @@
-package orchestrator_test
+package orchestrator
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func sealFixture(t *testing.T) (*logs.Client, *atomic.Bool, string) {
+func sealFixture(t *testing.T) (failAppends *atomic.Bool, url string, sealed func() *logseg.Manifest) {
 	t.Helper()
-	srv, err := logs.New(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
+	ctrl, tok := newSegmentController(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sink := openNodeLogSink(t.Context(), client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger)
+	if sink == nil {
+		t.Fatal("the controller issued no segment URLs")
 	}
-	h := srv.Handler()
-	var failAppends atomic.Bool
+	t.Cleanup(func() { sink.close(context.Background(), false) })
+	failAppends = &atomic.Bool{}
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if failAppends.Load() && r.Method == http.MethodPost && !strings.HasSuffix(r.URL.Path, "/seal") {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
 		}
-		h.ServeHTTP(w, r)
+		sink.ServeHTTP(w, r)
 	}))
 	t.Cleanup(hs.Close)
-	return logs.NewClient(hs.URL, nil), &failAppends, hs.URL
-}
-
-func verdict(t *testing.T, c *logs.Client, run, node string) logs.Completeness {
-	t.Helper()
-	r, err := c.ReadSeals(context.Background(), run, node)
-	if err != nil {
-		t.Fatal(err)
+	return failAppends, hs.URL, func() *logseg.Manifest {
+		t.Helper()
+		sink.close(t.Context(), false)
+		return ctrl.log(t).Manifest
 	}
-	return r.Assess(logs.NodeProgress{Started: true, Terminal: true, FinishedAt: time.Now().Add(-2 * logs.SealGrace)}, time.Now())
 }
 
 func TestHTTPLogs_CloseSealsTheStream(t *testing.T) {
-	client, _, url := sealFixture(t)
-	nlog, err := orchestrator.NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
+	_, url, sealed := sealFixture(t)
+	nlog, err := NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
 		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "hello"})
 	}
-
-	if got := verdict(t, client, "run", "node"); got.State != logs.StateCutOff {
-		t.Fatalf("before close = %+v, want cut_off", got)
-	}
 	if err := nlog.Close(); err != nil {
 		t.Fatal(err)
 	}
-	got := verdict(t, client, "run", "node")
-	if got.State != logs.StateComplete || got.Lines != 3 {
-		t.Fatalf("after close = %+v, want complete with 3 lines", got)
+	if m := sealed(); m == nil || m.Status != logseg.StatusComplete || m.Lines != 3 || len(m.Gaps) != 0 {
+		t.Fatalf("manifest = %+v, want complete with 3 lines", m)
 	}
-	r, _ := client.ReadSeals(context.Background(), "run", "node")
-	if s := r.Streams[0].Seal; s == nil || s.FinalSeq != 3 || s.Bytes == 0 || len(s.SHA256) != 64 {
-		t.Fatalf("seal = %+v", s)
+}
+
+// A runner that never seals leaves the sink to judge its log cut off.
+func TestHTTPLogs_UnsealedStreamReadsCutOff(t *testing.T) {
+	_, url, sealed := sealFixture(t)
+	nlog, err := NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run-s", "a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "hello"})
+	}
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
+	}
+	if m := sealed(); m == nil || m.Status != logseg.StatusCutOff || m.Lines != 3 {
+		t.Fatalf("manifest = %+v, want cut off after 3 lines", m)
 	}
 }
 
 func TestHTTPLogs_SealReportsLinesTheRunnerDropped(t *testing.T) {
-	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 0)
-	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 0)
-	client, failAppends, url := sealFixture(t)
-	nlog, err := orchestrator.NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
+	SetTestHTTPNodeLogRetry(t, 2, 0)
+	SetTestHTTPNodeLogDropCooldown(t, 0)
+	failAppends, url, sealed := sealFixture(t)
+	nlog, err := NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	flush := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "one"})
-	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+	if err := flush(); err != nil {
 		t.Fatal(err)
 	}
 	failAppends.Store(true)
 	for range 3 {
 		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "lost"})
 	}
-	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+	if err := flush(); err != nil {
 		t.Fatal(err)
 	}
 	failAppends.Store(false)
@@ -95,19 +102,15 @@ func TestHTTPLogs_SealReportsLinesTheRunnerDropped(t *testing.T) {
 	if err := nlog.Close(); err != nil {
 		t.Fatal(err)
 	}
-	got := verdict(t, client, "run", "node")
-	if got.State != logs.StateIncomplete || got.MissingLines != 3 {
-		t.Fatalf("verdict = %+v, want incomplete with 3 missing", got)
-	}
-	r, _ := client.ReadSeals(context.Background(), "run", "node")
-	if s := r.Streams[0]; s.Seal.Dropped != 3 || s.Missing != 3 || len(s.Gaps) != 1 || s.Gaps[0].From != 2 || s.Gaps[0].To != 4 {
-		t.Fatalf("stream = %+v seal = %+v", s, s.Seal)
+	m := sealed()
+	if m == nil || m.Status != logseg.StatusIncomplete || m.Lines != 2 || len(m.Gaps) != 1 || m.Gaps[0].From != 2 || m.Gaps[0].To != 4 {
+		t.Fatalf("manifest = %+v, want incomplete with lines 2-4 missing", m)
 	}
 }
 
 func TestHTTPLogs_EncodingLossDoesNotMarkTheGapReceived(t *testing.T) {
-	client, _, url := sealFixture(t)
-	nlog, err := orchestrator.NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
+	_, url, sealed := sealFixture(t)
+	nlog, err := NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,20 +120,20 @@ func TestHTTPLogs_EncodingLossDoesNotMarkTheGapReceived(t *testing.T) {
 	if err := nlog.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := verdict(t, client, "run", "node"); got.State != logs.StateIncomplete || got.MissingLines != 1 {
-		t.Fatalf("encoding gap = %+v", got)
+	if m := sealed(); m == nil || m.Status != logseg.StatusIncomplete || m.Lines != 2 || len(m.Gaps) != 1 || m.Gaps[0].From != 2 || m.Gaps[0].To != 2 {
+		t.Fatalf("manifest = %+v, want incomplete with line 2 missing", m)
 	}
 }
 
-// A retried node keeps one writer across its execution attempts, and each
-// attempt's lines land in their own file; the numbering runs on across
-// them, so the seal must judge the stream, not one file.
+// A retried node keeps one writer across its execution attempts; the
+// numbering runs on across them, so the seal must judge the stream, not
+// one attempt.
 func TestHTTPLogs_SealSpansExecutionAttempts(t *testing.T) {
-	client, _, url := sealFixture(t)
+	_, url, sealed := sealFixture(t)
 	ctx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
 		HolderID: "holder", MembershipID: "membership", ReservationID: "reservation", ClaimGeneration: 3,
 	})
-	nlog, err := orchestrator.NewHTTPLogs(url, nil, nil).OpenNodeLog(ctx, "run", "node", nil)
+	nlog, err := NewHTTPLogs(url, nil, nil).OpenNodeLog(ctx, "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,21 +148,14 @@ func TestHTTPLogs_SealSpansExecutionAttempts(t *testing.T) {
 	if err := nlog.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err := client.ReadSeals(context.Background(), "run", "node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(r.Streams) != 1 || r.Streams[0].Missing != 0 || r.UnconfirmedFiles != 0 {
-		t.Fatalf("report = %+v", r)
-	}
-	if got := verdict(t, client, "run", "node"); got.State != logs.StateComplete || got.Lines != 4 {
-		t.Fatalf("verdict = %+v, want complete over 4 lines", got)
+	if m := sealed(); m == nil || m.Status != logseg.StatusComplete || m.Lines != 4 || len(m.Gaps) != 0 {
+		t.Fatalf("manifest = %+v, want complete over 4 lines", m)
 	}
 }
 
-// A logs service that predates seals answers the seal route 404; the
-// runner gives up at once rather than spending the node's finish budget.
-func TestHTTPLogs_ServiceWithoutSealsCostsOneRequest(t *testing.T) {
+// An endpoint that refuses the seal is not asked again; the runner gives
+// up at once rather than spending the node's finish budget.
+func TestHTTPLogs_RefusedSealCostsOneRequest(t *testing.T) {
 	var seals atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/seal") {
@@ -170,7 +166,7 @@ func TestHTTPLogs_ServiceWithoutSealsCostsOneRequest(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	nlog, err := orchestrator.NewHTTPLogs(srv.URL, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
+	nlog, err := NewHTTPLogs(srv.URL, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,13 +182,13 @@ func TestHTTPLogs_ServiceWithoutSealsCostsOneRequest(t *testing.T) {
 // A writer that skips its seal says why, so a log that reads cut off or
 // unconfirmed can be traced to the runner that let it.
 func TestHTTPLogs_SkippedSealWarnsWithTheReason(t *testing.T) {
-	_, _, url := sealFixture(t)
+	_, url, _ := sealFixture(t)
 	var out strings.Builder
 	logger := slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	ctx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
 		HolderID: "holder", MembershipID: "membership", ReservationID: "reservation", ClaimGeneration: 3,
 	})
-	nlog, err := orchestrator.NewHTTPLogs(url, nil, logger).OpenNodeLog(ctx, "run", "node", nil)
+	nlog, err := NewHTTPLogs(url, nil, logger).OpenNodeLog(ctx, "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +201,7 @@ func TestHTTPLogs_SkippedSealWarnsWithTheReason(t *testing.T) {
 	}
 
 	out.Reset()
-	nlog, err = orchestrator.NewHTTPLogs(url, nil, logger).OpenNodeLog(context.Background(), "run", "other", nil)
+	nlog, err = NewHTTPLogs(url, nil, logger).OpenNodeLog(context.Background(), "run-s", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

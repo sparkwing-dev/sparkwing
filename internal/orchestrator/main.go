@@ -189,7 +189,11 @@ func Main() {
 			}
 		}
 	}
-	prof, profChain, profErr := resolveActiveProfile(pipelineYAML, projectCfg)
+	if pinErr := RefusePinnedLocalRun(pipelineYAML); pinErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing run:", pinErr)
+		os.Exit(1)
+	}
+	prof, profChain, profErr := resolveActiveProfile(projectCfg)
 	if profErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
 		os.Exit(1)
@@ -198,10 +202,6 @@ func Main() {
 	opts.ProfileChain = profChain
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
-		os.Exit(1)
-	}
-	if secretsErr := applySecretsProfileOverride(&opts); secretsErr != nil {
-		fmt.Fprintln(os.Stderr, "sparkwing run: --sw-secrets:", secretsErr)
 		os.Exit(1)
 	}
 

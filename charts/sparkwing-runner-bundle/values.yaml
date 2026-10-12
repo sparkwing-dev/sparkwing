@@ -10,10 +10,9 @@
 #   1. controller.*          -- where to claim work from
 #   2. runner.*              -- the work-claiming pool
 #   3. cache.*               -- git + artifact + go-mod proxy
-#   4. logs.*                -- log streaming + storage service
-#   5. serviceAccount.*      -- shared SA for runner pods
-#   6. secrets.*             -- references to pre-created Secrets
-#   7. image / imagePullSecrets -- shared image policy
+#   4. serviceAccount.*      -- shared SA for runner pods
+#   5. secrets.*             -- references to pre-created Secrets
+#   6. image / imagePullSecrets -- shared image policy
 
 # -----------------------------------------------------------------------
 # 1. Controller (the orchestrator this runner pool claims work from).
@@ -31,9 +30,8 @@ controller:
   # installs should leave this false and set url explicitly.
   bundled: false
 
-  # Auth token the runner uses for controller claims and log writes.
-  # Configuring it also enables the logs service's controller-backed
-  # validation of incoming bearer tokens. Reference an existing
+  # Auth token the runner uses for controller claims and node log
+  # uploads, which go through the controller. Reference an existing
   # Secret created out-of-band; the chart does NOT create the secret
   # itself (so you can rotate it without `helm upgrade`). Pipeline code
   # the runner executes can read this token, so it is never the cache's
@@ -56,7 +54,7 @@ runner:
 
   image:
     # Registry-layout fallback only. Pin repository and tag with the
-    # cache and logs images; appVersion is not a runnable public
+    # cache image; appVersion is not a runnable public
     # release default for this chart version.
     repository: ghcr.io/sparkwing-dev/sparkwing-runner
     tag: "" # falls back to .Chart.AppVersion when empty
@@ -262,7 +260,7 @@ cache:
     storeReconcile: ""
 
   image:
-    # Pin this with runner and logs to one compatible revision.
+    # Pin this with runner to one compatible revision.
     repository: ghcr.io/sparkwing-dev/sparkwing-cache
     tag: "" # falls back to .Chart.AppVersion
     pullPolicy: IfNotPresent
@@ -351,118 +349,16 @@ cache:
   affinity: {}
 
 # -----------------------------------------------------------------------
-# 4. Logs. Stores per-run log files and serves the SSE tail endpoint
-#    the controller / dashboard read from.
-# -----------------------------------------------------------------------
-logs:
-  enabled: true
-
-  # Serve the log routes to anyone who can reach the Service. false (the
-  # default) requires controller.tokenSecret so the logs service can
-  # resolve each caller's bearer against the controller, and passes
-  # --require-auth so the pod refuses to start open. true is only
-  # appropriate on a bootstrap install, before the Secret exists.
-  allowUnauthenticated: false
-
-  replicas: 1
-
-  image:
-    # Pin this with runner and cache to one compatible revision.
-    repository: ghcr.io/sparkwing-dev/sparkwing-logs
-    tag: "" # falls back to .Chart.AppVersion
-    pullPolicy: IfNotPresent
-
-  service:
-    type: ClusterIP
-    port: 80
-    targetPort: 4345
-
-  # Path prefix served by the logs pod. The controller is told this
-  # URL at trigger time; it appears in the dashboard's log links.
-  rootPath: /data/logs
-
-  storage:
-    # Disable for an ephemeral / test deployment; log history is
-    # lost on every pod restart.
-    enabled: true
-    size: 10Gi
-    storageClassName: ""
-    keepOnUninstall: true
-
-  # Resource quotas passed to sparkwing-logs. Each entry becomes the
-  # flag of the same name; leave one empty to keep the binary's
-  # default, and set it to 0 to turn that bound off. Size them against
-  # storage.size above: on the defaults the volume fills to
-  # min-free-bytes and every further append answers 507 until you turn
-  # on retention or delete runs. See docs/security.md.
-  limits:
-    # Stored-byte cap for one node's log (default 64MiB).
-    maxNodeBytes: ""
-    # Stored-byte cap for every node log in one run (default 1GiB).
-    maxRunBytes: ""
-    # Request-body bytes all in-flight appends may hold at once
-    # (default 32MiB). Keep it well under resources.limits.memory.
-    maxInflightBytes: ""
-    # Free space below which appends are rejected with 507
-    # (default 512MiB).
-    minFreeBytes: ""
-    # Age after a run's last write at which the sweeper deletes it.
-    # Off unless you set it, so an upgrade deletes no history.
-    retention: ""
-    # How often the sweeper runs (default 1h).
-    sweepInterval: ""
-    # Bytes one log search may read (default 256MiB).
-    searchMaxBytes: ""
-    # How long one log search may scan (default 10s).
-    searchTimeout: ""
-    # Byte cap for one log line; a longer line is stored cut to the cap
-    # with a truncation marker in place of its tail. Off unless set.
-    maxLineBytes: ""
-    # Share of control bytes in one append above which it reads as
-    # binary and is dropped, leaving one warning line per node log.
-    # Off unless set; 0.3 catches a pipeline that cats a binary.
-    binaryRatio: ""
-    # Stored bytes across the whole log store at or above which every append
-    # is refused with 507 until a measurement finds the store back under
-    # it. Empty leaves the store unlimited.
-    maxStoreBytes: ""
-    # Log files across the whole store at or above which every append is
-    # refused with 507. Empty leaves the count unlimited.
-    maxStoreObjects: ""
-    # Stored bytes at which /api/v1/health reports the store as warning,
-    # refusing nothing. Empty disables the warning.
-    warnStoreBytes: ""
-    # Log files at which /api/v1/health reports the store as warning.
-    warnStoreObjects: ""
-    # How often the service walks the store and replaces its running
-    # count with the measurement (default 1h); "0" measures once at
-    # startup.
-    storeReconcile: ""
-
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-
-# -----------------------------------------------------------------------
-# 5. ServiceAccount. The runner, cache, and logs pods each get their
+# 4. ServiceAccount. The runner and cache pods each get their
 #    own; only the runner's is bound to the chart's Role.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create one (true) or use an existing SA you've already RBAC'd.
   create: true
   # Names the runner SA; empty + create=true => generated from
-  # .Release.Name. The cache and logs SAs always follow their
-  # component names.
+  # .Release.Name. The cache SA always follows its component name.
   name: ""
-  # create=false gives the chart one pre-created account for all three
+  # create=false gives the chart one pre-created account for both
   # pods, which is the sharing the separate accounts exist to end. The
   # render fails until you set this true, so the choice is recorded in
   # your values rather than made by omission.
@@ -505,7 +401,7 @@ networkPolicy:
   extraIngress: []
 
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
-# The runner, cache, and logs servers reach the controller over HTTP
+# The runner and cache servers reach the controller over HTTP
 # and never call the Kubernetes API, so the Role carries no rules and
 # no pod mounts a ServiceAccount token by default. Pipelines that
 # must reach the API should bring their own Role outside this chart.
@@ -513,7 +409,7 @@ rbac:
   create: true
 
 # -----------------------------------------------------------------------
-# 6. Image pull secrets. Same list applies to all three components.
+# 5. Image pull secrets. Same list applies to both components.
 # -----------------------------------------------------------------------
 imagePullSecrets: []
 # - name: ghcr-pull-secret
@@ -522,8 +418,8 @@ volumePermissions:
   enabled: true
 
 # -----------------------------------------------------------------------
-# 7. Pod-level security defaults. Applied uniformly across runner +
-#    cache + logs unless a per-component override sets its own.
+# 6. Pod-level security defaults. Applied uniformly across runner +
+#    cache unless a per-component override sets its own.
 # -----------------------------------------------------------------------
 podSecurityContext:
   runAsNonRoot: true
@@ -537,7 +433,7 @@ podSecurityContext:
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  # Every path the runner, cache, and logs pods write lives on a
+  # Every path the runner and cache pods write lives on a
   # mounted volume: the component's /data volume, the /tmp scratch
   # emptyDir, and SPARKWING_HOME inside it. Set false only for an
   # image that writes to its own layer.
@@ -546,7 +442,7 @@ containerSecurityContext:
     drop: ["ALL"]
 
 # -----------------------------------------------------------------------
-# 8. Namespace resource guards. The runner clamps a pipeline's declared
+# 7. Namespace resource guards. The runner clamps a pipeline's declared
 #    pin to runner.jobCeiling, so these are the cluster-side backstop for
 #    anything the runner does not create:
 #    a LimitRange bounds one container, a ResourceQuota bounds the
@@ -559,7 +455,7 @@ limitRange:
   # including the Job pods the k8s runner backend creates, is then held
   # to it: a pod asking for more than max is rejected at admission.
   enabled: false
-  # Ceiling for one container. Size it above the runner, cache, and logs
+  # Ceiling for one container. Size it above the runner and cache
   # pods' own limits. It binds on a runner Job only when it sits under
   # runner.jobCeiling, which the runner already enforces per pod: a pod
   # asks for a burst limit of twice its core charge and 1.25x its memory,

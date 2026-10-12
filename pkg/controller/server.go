@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -82,13 +83,14 @@ type Server struct {
 	directUploads    *directUploadS3
 	lastOutputPrune  time.Time
 	outputSigner     outputSigner
+	logRetention     map[store.Team]int
+	logLifecycle     logLifecycle
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
 	egressPrunedMonth string
 
 	cachePodURL  string
-	logsURL      string
 	dashboardURL string
 	externalURL  string
 	oidc         oidcState
@@ -141,9 +143,7 @@ type Server struct {
 	checkout  *billingCheckout
 	operators atomic.Pointer[map[string]bool]
 
-	dashboard         *Dashboard
-	forwardedLogsOnce sync.Once
-	forwardedLogs     storage.LogStore
+	dashboard *Dashboard
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -263,16 +263,6 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 // the announcement (clients fall back to "no cache pod").
 func (s *Server) WithCachePodURL(url string) *Server {
 	s.cachePodURL = url
-	return s
-}
-
-// WithLogsURL announces the externally-reachable sparkwing-logs URL
-// via GET /api/v1/services, so a runner posts node log lines to the
-// service that routes them instead of to the controller, which does
-// not. Empty disables the announcement, which is correct for a
-// co-located deployment where one mux serves both.
-func (s *Server) WithLogsURL(url string) *Server {
-	s.logsURL = url
 	return s
 }
 
@@ -839,6 +829,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNode)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNodeOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputUpload)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputUpload)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleLogSegments)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogSegments)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputCommit)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputCommit)))))
 	mux.Handle("POST /api/v1/runs/{id}/children", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleEnqueueChildRun)))
 	mux.Handle("GET /api/v1/runs/{id}/children/{childID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildRun)))
@@ -851,15 +842,18 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/logs", requireScope(ScopeLogsRead, s.metered(egress.ClassLog, s.dashboardRead(web.RunLogsHandler))))
-	mux.Handle("GET /api/v1/runs/{id}/logs/search", requireScope(ScopeLogsRead, s.dashboardRead(web.RunLogsSearchHandler)))
+	mux.Handle("GET /api/v1/runs/{id}/logs/search", requireScope(ScopeLogsRead, s.dashboardRead(func(b backend.Backend) http.HandlerFunc {
+		return web.RunLogsSearchHandler(b, controllerSearchBounds)
+	})))
 	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", requireScope(ScopeLogsRead, s.metered(egress.ClassLog, s.dashboardRead(web.NodeLogsHandler))))
 	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", requireScope(ScopeLogsRead, s.meteredStream(egress.ClassLogStream, s.dashboardRead(web.NodeLogStreamHandler))))
 	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", requireScope(ScopeLogsRead, s.dashboardRead(web.NodeLogCompletenessHandler)))
-	mux.Handle("GET /api/v1/runs/grep", requireScope(ScopeLogsRead, s.dashboardRead(web.RunsGrepHandler)))
+	mux.Handle("GET /api/v1/runs/grep", requireScope(ScopeLogsRead, s.dashboardRead(func(b backend.Backend) http.HandlerFunc {
+		return web.RunsGrepHandler(b, controllerSearchBounds)
+	})))
 	mux.Handle("GET /api/v1/runs/{id}/events/stream", requireScope(ScopeRunsRead, s.dashboardRead(web.EventsStreamHandler)))
 	mux.Handle("GET /api/v1/capacity/profiles", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityProfilesHandler)))
 	mux.Handle("GET /api/v1/capacity/profiles/explain", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityExplainHandler)))
-	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
@@ -963,7 +957,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input", newClaimSensitiveRoute(claimWorkKinds, pathClaimBinding, http.HandlerFunc(s.handleClaimInput)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleValidateClaimLog)).orElse(requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim))))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleUpdateNodeActivity)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity)))))
@@ -1049,7 +1042,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
 	mux.Handle("DELETE /api/v1/github-app/installations/{installation_id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorGitHubAppUnbind)))
 
-	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
+	// safety: service discovery names the internal cache URL, so any bearer will do but anonymity will not.
 	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
 
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
@@ -1110,8 +1103,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its storage.count service token and
-	// the logs service with the caller's forwarded credential, which these handlers check.
+	// safety: the cache proves itself with its storage.count service token,
+	// which these handlers check.
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
 	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
@@ -1119,6 +1112,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	// safety: these carry a URL signature this process minted, not a bearer.
 	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
 	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
+	router.HandleFunc("PUT /api/v1/log-segments/{key...}", s.handleLogSegmentPut)
 	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
@@ -1503,6 +1497,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				}
 			}
 			s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
+			s.sealAbandonedLogs(ctx, time.Now())
 			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
 				s.logger.Error("queue-timeout sweep failed", "err", err)
 			} else {

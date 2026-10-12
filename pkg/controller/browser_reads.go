@@ -6,24 +6,21 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the run-scoped reads sit behind the team boundary, which answers another team's run as missing; the
 // run list behind them is the request's own team's, so a grep never reaches another team's logs.
 func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r = withLogsReader(r)
 		tenant, ok := s.requestTenant(w, r)
 		if !ok {
 			return
 		}
-		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs()).
+		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs(tenant.Team())).
 			Scoped(tenant, liveLogReader{s.liveLogs})
 		read(b).ServeHTTP(w, r)
 	})
@@ -47,50 +44,18 @@ func (s *Server) dashboardPaths() paths.Paths {
 	return paths.Paths{}
 }
 
-// safety: a read made through the logs service carries the caller's own credential, because the logs service asks
-// this controller whose run it is; a credential of the controller's own would answer for the operator's team.
-func (s *Server) dashboardLogs() storage.LogStore {
-	if s.dashboard != nil && s.dashboard.Logs != nil {
+// safety: a laptop dashboard reads the runs on its own disk, so a nil store there sends reads to the run
+// directories; elsewhere nil means a controller with nowhere to keep segments, so a read finds no log.
+func (s *Server) dashboardLogs(team store.Team) storage.LogStore {
+	if s.dashboard != nil && (s.dashboard.Logs != nil || s.dashboard.Local) {
 		return s.dashboard.Logs
 	}
-	if s.logsURL == "" {
+	objs := s.logObjects()
+	if objs == nil {
 		return nil
 	}
-	s.forwardedLogsOnce.Do(func() {
-		s.forwardedLogs = sparkwinglogs.New(s.logsURL, &http.Client{
-			Transport: forwardCredential{base: otelutil.WrapTransport(nil)},
-		}, "")
-	})
-	return s.forwardedLogs
+	return segmentLogs{s: s, team: team, objs: objs}
 }
-
-type forwardedCredentialKey struct{}
-
-type forwardCredential struct{ base http.RoundTripper }
-
-func (t forwardCredential) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
-	req.Header.Del("Authorization")
-	if credential, _ := req.Context().Value(forwardedCredentialKey{}).(string); credential != "" {
-		req.Header.Set("Authorization", credential)
-	}
-	return t.base.RoundTrip(req)
-}
-
-// safety: the logs service budgets concurrent reads per reader, so a browser session's reads are named for its
-// principal rather than counted against whatever identity the shared client carries.
-func withLogsReader(r *http.Request) *http.Request {
-	ctx := r.Context()
-	p, ok := PrincipalFromContext(ctx)
-	credential := r.Header.Get("Authorization")
-	if ok && p.session != "" {
-		credential = "Session " + p.session
-		ctx = logs.WithReaderIdentity(ctx, viewerIdentityPrefix+p.Name)
-	}
-	return r.WithContext(context.WithValue(ctx, forwardedCredentialKey{}, credential))
-}
-
-const viewerIdentityPrefix = "dashboard:"
 
 type liveLogReader struct{ l *liveLogs }
 

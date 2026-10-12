@@ -829,8 +829,17 @@ paths:
         heartbeat cannot extend a claim past the claim's own bound.
         A launcher Job's claim token renews its own claim here with no
         `holder_id`, bills the node's seconds since the last beat, and is
-        answered `200` with `cancel` set once the run is being cancelled;
-        a lost claim, or one its team can no longer pay for, is `409`.
+        answered `200` with `cancel` set once the run is being cancelled
+        and `watched` set while a viewer has the node's log open; a lost
+        claim, or one its team can no longer pay for, is `409`. A runner
+        heartbeat that sends `X-Sparkwing-Log-Watch: 1` is answered `200`
+        with `watched` instead of `204`.
+      parameters:
+        - in: header
+          name: X-Sparkwing-Log-Watch
+          required: false
+          schema: {type: string, enum: ["1"]}
+          description: Ask whether a viewer watches the node.
       requestBody:
         required: true
         content:
@@ -843,6 +852,15 @@ paths:
                 holder_id: {type: string}
                 lease_secs: {type: integer, minimum: 0}
       responses:
+        "200":
+          description: Lease extended; says whether a viewer watches the node.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.nodeHeartbeatResp
+                type: object
+                properties:
+                  watched: {type: boolean}
         "204": {description: Lease extended.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
@@ -856,8 +874,24 @@ paths:
       description: |
         Keeps the reaper from declaring the run lost while its nodes are
         between claims. The caller must hold a live claim on one of the
-        run's nodes.
+        run's nodes. A caller that sends `X-Sparkwing-Log-Watch: 1` is
+        answered `200` with the run's nodes a viewer has open.
+      parameters:
+        - in: header
+          name: X-Sparkwing-Log-Watch
+          required: false
+          schema: {type: string, enum: ["1"]}
+          description: Ask which of the run's nodes a viewer watches.
       responses:
+        "200":
+          description: Heartbeat recorded; lists the watched nodes.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.runHeartbeatResp
+                type: object
+                properties:
+                  watched_nodes: {type: array, items: {type: string}}
         "204": {description: Heartbeat recorded. Empty body.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2707,7 +2741,7 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the data download, cache, logs, and dashboard URLs a client should use.
+      summary: Announce the data download, cache, and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
@@ -2729,7 +2763,6 @@ paths:
                 properties:
                   data_download_url: {type: string, description: Controller endpoint for requesting signed team-object downloads.}
                   cache_pod: {type: string}
-                  logs: {type: string}
                   dashboard: {type: string}
                   multi_team: {type: boolean}
                   direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
@@ -3111,44 +3144,6 @@ paths:
         "404": {description: No finished output matches the reference.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/claim/validate:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-      - in: path
-        name: nodeID
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: claim or logs.write
-      tags: [nodes]
-      summary: Validate a log writer's exact execution attempt.
-      description: |
-        Internal controller-to-log-service fence check. The request must carry
-        either the four `X-Sparkwing-Claim-*` headers plus a positive
-        `X-Sparkwing-Attempt-Ordinal`, or a positive
-        `X-Sparkwing-Trigger-Generation` and, except for `_compile`, an attempt
-        ordinal. Mixing node and trigger identities is rejected. The identity
-        must still hold the claim that opened the named attempt; the attempt
-        itself may already have finished, because a node writes its closing
-        lines after closing the attempt. Trusted controller-internal calls
-        bypass claim validation. A controller-dispatched node's work claim
-        token is its own attempt and names none: it validates only its own
-        run and node while its claim has not ended, the answer names the
-        claim's team in `X-Sparkwing-Claim-Team` and the attempt its log is
-        written to in `X-Sparkwing-Claim-Generation` and
-        `X-Sparkwing-Attempt-Ordinal`, and a request carrying any
-        claim, trigger or attempt header is refused `403` `attempt_unbound`.
-      responses:
-        "204": {description: The claim that opened the attempt is live. Empty body.}
-        "400": {description: Node and trigger identities were combined.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: "A claim token named an attempt (`attempt_unbound`), or its claim is not live."}
-        "409": {description: "Missing, malformed, stale, or expired identity."}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/execution-finish:
     parameters:
       - in: path
@@ -3525,7 +3520,7 @@ paths:
       tags: [nodes]
       summary: Read the tail of a running node's log from a byte offset.
       description: >
-        Serves the controller's in-memory ring for one running node, which is the live view for a deployment whose durable logs surface has no live read of its own. Answers 404 once the node has finished and its ring has been released, which is the reader's signal to use the durable copy.
+        Serves the controller's in-memory ring for one running node, the live view a watched node's runner feeds. Answers 404 once the node has finished and its ring has been released, which is the reader's signal to use the durable copy.
 
       parameters:
         - in: query
@@ -3547,8 +3542,14 @@ paths:
       tags: [nodes]
       summary: Add one batch of a running node's log lines to the live ring.
       description: >
-        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the logs surface's job; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write.
+        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the node's log segments; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write. A runner that keeps the node's log as segments sends `X-Sparkwing-Log-Offset`, the byte offset in the whole log the batch begins at, so a reader can join the ring to the segments; bytes the ring already holds are skipped and an offset past its end starts the ring over there.
 
+      parameters:
+        - in: header
+          name: X-Sparkwing-Log-Offset
+          required: false
+          schema: {type: integer, format: int64}
+          description: Byte offset in the node's whole log at which the batch begins.
       requestBody:
         required: true
         content:
@@ -4542,7 +4543,7 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.capabilitiesResp
                 type: object
-                required: [teams, billing, auth, claims]
+                required: [teams, billing, auth, claims, logs]
                 properties:
                   mode: {type: string, description: "The dashboard's mode, such as cluster or local. Absent from a controller serving no dashboard."}
                   storage:
@@ -4551,7 +4552,7 @@ paths:
                     description: Which surface holds artifacts, logs and runs. Absent from a controller serving no dashboard.
                     properties:
                       artifacts: {type: string}
-                      logs: {type: string}
+                      logs: {type: string, description: "The node log store: `segments` on a controller, `fs` or the profile's logs type on a laptop dashboard."}
                       runs: {type: string}
                   features: {type: array, items: {type: string}, description: The dashboard features this deployment serves.}
                   read_only: {type: boolean, description: True when the dashboard refuses writes.}
@@ -4582,6 +4583,12 @@ paths:
                     properties:
                       allow_repos: {type: boolean, description: Trigger and node claims read allow_repos; a runner sends the list only when this is true.}
                       profile: {type: boolean, description: Trigger and node claims read platform and resources; a runner sends them only when this is true.}
+                  logs:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesLogs
+                    type: object
+                    required: [segments]
+                    properties:
+                      segments: {type: boolean, description: "The controller keeps node logs as segments: POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments issues upload URLs."}
                   github_app:
                     x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
                     type: object
@@ -4796,19 +4803,6 @@ paths:
         schema: {type: string}
     post:
       x-sparkwing-scope: claim or nodes.claim or triggers.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
-  /api/v1/runs/{id}/log-access:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -5856,13 +5850,11 @@ paths:
       tags: [storage]
       summary: Reserve room in a team's cache or log store before a write.
       description: |
-        The cache calls it with its operator token for any team; the logs
-        service forwards the appending caller's credential, which must be
-        allowed to write logs and names only its own team's `logs` store. A free
-        team is held to its share of the allowance, three quarters for the
-        cache and three sixteenths for logs, counting what it stores and
-        every reservation still held; a funded team is counted without a
-        limit. `up_to` grants as much of `bytes` as the team has room for,
+        Only the cache's `storage.count` service token may call it, for any
+        team. A free team is held to its share of the allowance, three
+        quarters for the cache and three sixteenths for logs, counting what
+        it stores and every reservation still held; a funded team is counted
+        without a limit. `up_to` grants as much of `bytes` as the team has room for,
         zero or less asking for all of it. A reservation expires after an
         hour unless it is committed or released.
       requestBody:
@@ -5977,8 +5969,8 @@ paths:
       tags: [storage]
       summary: Charge a download to its team's UTC day.
       description: |
-        Only the cache's operator token reaches it. A download whose size is
-        known is charged whole before its first byte and refused when it
+        Only the cache's `storage.count` service token reaches it. A
+        download whose size is known is charged whole before its first byte and refused when it
         would pass the team's daily cap, `--team-daily-download-free-bytes`
         or `--team-daily-download-funded-bytes` by whether the team pays.
         Zero `bytes` checks that room is left. `record` charges a finished
@@ -6018,8 +6010,8 @@ paths:
       tags: [storage]
       summary: Keep a service's day and month egress totals.
       description: |
-        Only the cache's operator token reaches it. Each stored total keeps
-        the larger of itself and what the call reports, and the answer is
+        Only the cache's `storage.count` service token reaches it. Each
+        stored total keeps the larger of itself and what the call reports, and the answer is
         the stored totals, so a restarted cache reports zeros to read back
         where its day and month stood.
       requestBody:
@@ -6399,7 +6391,7 @@ paths:
       tags: [artifacts]
       summary: Sign a short-lived URL for one team object.
       description: >-
-        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. Log downloads require a bearer authorized for log reads; cache grants cannot sign logs. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
       requestBody:
         required: true
         content:
@@ -6409,7 +6401,7 @@ paths:
               type: object
               required: [kind, key]
               properties:
-                kind: {type: string, enum: [binary, artifact, source, log]}
+                kind: {type: string, enum: [binary, artifact, source]}
                 key: {type: string, description: Team-relative object key.}
       responses:
         "200":
@@ -7013,7 +7005,7 @@ paths:
       tags: [dashboard]
       summary: Search the logs of the caller's team's runs.
       description: >-
-        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team. A response that did not reach the oldest matching run carries `next_cursor`, whose `after_id` and `after_started_at` (a string of Unix nanoseconds) sent back as query values search the runs older than the last one searched.
+        Takes `q` and the run filters `pipeline`, `status`, `branch`, `sha` and their `n`-prefixed exclusions, `since`, `limit` and `max_matches`. Reads only runs of the caller's team. One search reads at most 256 MiB of logs and scans for at most 10 seconds; one that stops at a bound answers `truncated: true` and names the bound in `stopped`. A response that did not reach the oldest matching run carries `next_cursor`, whose `after_id` and `after_started_at` (a string of Unix nanoseconds) sent back as query values search the runs older than the last one searched.
       responses:
         default: {description: Undescribed.}
 
@@ -7043,7 +7035,7 @@ paths:
       tags: [dashboard]
       summary: Read every node log of a run.
       description: >-
-        Renders each record as plain text, ANSI text or raw NDJSON by the `format` query value or the Accept header. Reads through the logs service with the caller's own credential when one is configured.
+        Renders each record as plain text, ANSI text or raw NDJSON by the `format` query value or the Accept header. Reads each node from its log segments.
       responses:
         default: {description: Undescribed.}
 
@@ -7058,7 +7050,7 @@ paths:
       tags: [dashboard]
       summary: Search one run's node logs.
       description: >-
-        Takes `q` and an optional `limit` of at most 5000 matches.
+        Takes `q` and an optional `limit` of at most 5000 matches. One search reads at most 256 MiB of logs and scans for at most 10 seconds; one that stops at a bound answers `truncated: true` and names the bound in `stopped`.
       responses:
         default: {description: Undescribed.}
 
@@ -7077,7 +7069,14 @@ paths:
       tags: [dashboard]
       summary: Read one node's log.
       description: >-
-        Renders by the `format` query value or the Accept header, as the whole-run read does.
+        Renders by the `format` query value or the Accept header, as the whole-run read does. Reads the node from its log segments, verifying each against the manifest. `tail`, `head`, `lines` and `grep` narrow the read on the controller. `line_numbers=1` with `grep` and no other filter answers NDJSON objects `{"line_no", "line"}` for the matching lines, at most `max_matches` of them.
+      parameters:
+        - {in: query, name: tail, required: false, schema: {type: integer}, description: The last N lines.}
+        - {in: query, name: head, required: false, schema: {type: integer}, description: The first N lines.}
+        - {in: query, name: lines, required: false, schema: {type: string}, description: "An inclusive 1-based range, A:B."}
+        - {in: query, name: grep, required: false, schema: {type: string}, description: Lines containing this text.}
+        - {in: query, name: line_numbers, required: false, schema: {type: string, enum: ["1"]}, description: Number the grep matches.}
+        - {in: query, name: max_matches, required: false, schema: {type: integer}, description: Stop a numbered grep after this many matches.}
       responses:
         default: {description: Undescribed.}
 
@@ -7096,7 +7095,7 @@ paths:
       tags: [dashboard]
       summary: Report whether a node's log is whole.
       description: >-
-        Answers the verdict the logs surface's seals support, or `unknown` when it keeps none.
+        Answers the verdict the node's segment manifest supports, or `unknown` when the log store keeps no manifests.
       responses:
         default: {description: Undescribed.}
 
@@ -7115,7 +7114,7 @@ paths:
       tags: [dashboard]
       summary: Stream one node's log as server-sent events.
       description: >-
-        Streams the durable log when the logs surface has a live read, and the controller's in-memory live buffer otherwise; with neither it answers 501.
+        Streams the node's log in this run across all of its attempts, in the order they began: each attempt's segments, then the controller's in-memory live buffer from the byte where they end until that attempt's log is sealed, holding the node's 30-second live-view watch while open. Attempts of the run this one retries are not included. Each line carries as its event id the cursor just past it; send the last one back as Last-Event-ID, or as the cursor query parameter, to resume after it. Last-Event-ID wins when both are sent, and a cursor the controller did not issue for this run and node answers 400. The stream ends with a stream_end event once the node will write no more -- it is done with an outcome other than failed, or its run is over, since only a failure can be retried -- and its last attempt is sealed. A node the run neither records nor holds logs for falls back to the live buffer alone; with neither it answers 501.
       responses:
         default: {description: Undescribed.}
 
@@ -7153,6 +7152,108 @@ paths:
         "404": {description: No cache is configured on this controller.}
         "409": {description: The cache has no measurement scheduled to end the thaw.}
         "502": {description: The cache is unreachable.}
+
+  /api/v1/log-segments/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: public
+      summary: Upload one node log segment or manifest through a URL this controller signed.
+      description: |
+        Served by a controller that keeps log segments on its own disk. A
+        segment may be written again with the same bytes; the manifest is
+        written once, and a second write is refused with 412. A segment is
+        at most 8 MiB and a manifest at most 4 MiB.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "200": {description: Stored.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "412": {description: The attempt already has a manifest.}
+        "413": {description: Past the object's size limit.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/log-segments:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim or runs.state
+      tags: [nodes]
+      summary: Get upload URLs for the running attempt's log segments.
+      description: |
+        Returns up to 16 presigned PUT URLs for the node attempt's log
+        segments, starting at `next`, and a manifest URL, all valid for
+        15 minutes. The first request records where the attempt's log
+        lives. `attempt` and `generation` echo the previous grant, so an
+        execution that retries in its own process keeps writing one log; a
+        writer of another claim generation is refused with 409. `count` 0
+        issues only the manifest URL and tells the controller the writer is
+        alive, which keeps it from sealing a silent node's attempt as
+        abandoned. A claim token asks only for its own node. A trigger claim
+        may write the `_compile` node, which has no node row. A controller
+        with no object store and no output directory answers 503.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/store.LogSegmentsRequest
+              type: object
+              required: [next, count, uploaded_through, stored_bytes]
+              properties:
+                attempt: {type: integer, format: int64}
+                generation: {type: integer, format: int64}
+                next: {type: integer}
+                count: {type: integer}
+                uploaded_through: {type: integer}
+                stored_bytes: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The URL batch.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.LogSegmentsGrant
+                type: object
+                properties:
+                  attempt: {type: integer, format: int64}
+                  generation: {type: integer, format: int64}
+                  prefix: {type: string}
+                  urls:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/store.LogSegmentURL
+                      type: object
+                      properties:
+                        n: {type: integer}
+                        url: {type: string}
+                        headers: {type: object, additionalProperties: {type: string}}
+                  manifest_url:
+                    x-sparkwing-go-type: pkg/store.LogSegmentURL
+                    type: object
+                    properties:
+                      n: {type: integer}
+                      url: {type: string}
+                      headers: {type: object, additionalProperties: {type: string}}
+                  expires_at: {type: string, format: date-time}
+                  watched: {type: boolean, description: "A viewer has the node's log open, so the writer pushes its lines to the live ring."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The attempt was superseded or already sealed.}
+        "503": {description: The controller has nowhere to keep log segments.}
+        "507": {description: The object-store bucket ceiling has frozen writes.}
 
 components:
   securitySchemes:
@@ -7957,11 +8058,11 @@ components:
         tier: {type: string, enum: [funded, free, none], description: "funded stores without a byte limit; free holds a free-tier slot; none has neither credits nor a slot."}
         allowance_bytes: {type: integer, format: int64, description: "The whole free allowance the shares are cut from."}
         cache_share_bytes: {type: integer, format: int64, description: "Three quarters of the allowance, what the cache holds a free team to."}
-        log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the logs service holds a free team to."}
+        log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the storage pass holds a free team's log segments to."}
         event_share_bytes: {type: integer, format: int64, description: "One sixteenth of the allowance, what the team's run events are held to."}
         event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
         cache_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the cache, as the controller counts it."}
-        log_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the logs service, as the controller counts it."}
+        log_bytes: {type: integer, format: int64, description: "What the team stores in log segments and holds reserved, as the controller counts it."}
     EgressTotals:
       x-sparkwing-go-type: pkg/store.EgressTotals
       type: object

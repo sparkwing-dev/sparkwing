@@ -374,12 +374,7 @@ export async function listTeamTokens(): Promise<TeamToken[]> {
 
 // A runner needs every machine scope to claim, report and fetch what a run
 // uses, so the page mints them all.
-export const machineScopes = [
-  "nodes.claim",
-  "triggers.claim",
-  "runs.state",
-  "logs.write",
-];
+export const machineScopes = ["nodes.claim", "triggers.claim", "runs.state"];
 
 export async function mintMachineToken(
   name: string,

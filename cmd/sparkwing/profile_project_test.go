@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 func projectAt(t *testing.T, body string) {
@@ -34,9 +37,6 @@ const bucketProject = `
 pipelines:
   - name: demo
     entrypoint: Demo
-
-defaults:
-  profile: bucket
 
 profiles:
   bucket:
@@ -87,7 +87,7 @@ func TestResolveProfileFlag_NotFoundNamesBothNamespaces(t *testing.T) {
 	}
 }
 
-func TestResolveProfileChain_NoFlagUsesProjectDefault(t *testing.T) {
+func TestResolveProfileChain_NoFlagSelectsNothingAProjectDeclares(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, bucketProject)
 
@@ -95,42 +95,10 @@ func TestResolveProfileChain_NoFlagUsesProjectDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if p == nil {
-		t.Fatal("no-flag resolution returned no profile despite defaults.profile: bucket")
+	if p != nil || chain.Source != "none" {
+		t.Errorf("got profile %#v (chain %+v), want the local store", p, chain)
 	}
-	if chain.Selected != "bucket" {
-		t.Errorf("Selected: got %q, want bucket", chain.Selected)
-	}
-	state, _, _ := p.SurfaceStrings()
-	if !strings.Contains(state, "example-bucket") {
-		t.Errorf("state surface: got %q, want the project default's bucket", state)
-	}
-}
-
-func TestResolveProfileChain_NoFlagNoProjectDefault(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
-	projectAt(t, "pipelines:\n  - name: demo\n    entrypoint: Demo\n")
-
-	p, _, _, err := resolveProfileChain("")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p != nil {
-		t.Errorf("got profile %#v, want none", p)
-	}
-}
-
-func TestResolveProfile_UsesProjectResolutionChain(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
-	projectAt(t, bucketProject)
-	for _, name := range []string{"bucket", ""} {
-		p, err := resolveProfile(name)
-		if err != nil {
-			t.Fatalf("resolve %q: %v", name, err)
-		}
-		state, _, _ := p.SurfaceStrings()
-		if !strings.Contains(state, "example-bucket") {
-			t.Errorf("resolve %q state = %q", name, state)
-		}
+	if _, err := resolveProfile(""); !errors.Is(err, profile.ErrNoProfile) {
+		t.Errorf("resolveProfile with no flag = %v, want ErrNoProfile", err)
 	}
 }

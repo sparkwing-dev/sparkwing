@@ -32,7 +32,7 @@ func brokeredChildEnv(t *testing.T, runnerInfo *sparkwing.RunnerInfo) map[string
 	if runnerInfo != nil {
 		ctx = sparkwingruntime.WithRunner(ctx, runnerInfo)
 	}
-	res, err := runNodeChild(ctx, script, dir, upstream.URL, "", "parent-token", "", "",
+	res, err := runNodeChild(ctx, script, dir, upstream.URL, "parent-token", "", "",
 		"run-1", "build/linux", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil || res.Err != nil {
 		t.Fatalf("brokered child = %+v, %v", res, err)

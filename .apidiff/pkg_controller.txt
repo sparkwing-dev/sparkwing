@@ -183,6 +183,7 @@ type LiveLogRead struct {
 
 	Done bool
 }
+const LiveLogWatchLease = 30 * time.Second
 func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
@@ -260,9 +261,7 @@ const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
 const ScopeCreditsGrant = "credits.grant"
-const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = store.ScopeLogsRead
-const ScopeLogsWrite = store.ScopeLogsWrite
 const ScopeNodesClaim = store.ScopeNodesClaim
 const ScopeRunsControl = store.ScopeRunsControl
 const ScopeRunsRead = store.ScopeRunsRead
@@ -318,7 +317,7 @@ func (s *Server) WithLicense(lic *license.License) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
-func (s *Server) WithLogsURL(url string) *Server
+func (s *Server) WithLogRetention(days map[store.Team]int) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
@@ -333,8 +332,8 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
-func (s *Server) WithSignedDownloads(cache, logs *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
-func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server
+func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
+func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
@@ -343,8 +342,6 @@ type ServicesResponse struct {
 	DataDownloadURL string
 
 	CachePod string
-
-	Logs string
 
 	Dashboard string
 
@@ -358,9 +355,6 @@ const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
-	LogsURL   string
-	LogsToken string
-
 	CacheURL string
 }
 type TokenRequestBudget struct {
@@ -393,7 +387,8 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
-func (t forwardCredential) RoundTrip(req *http.Request) (*http.Response, error)
+func (o fsLogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
+func (o fsLogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (g googleProvider) AuthorizeURL(state, verifier, redirectURI string) string
@@ -403,10 +398,14 @@ func (hashingBudgetCollector) Describe(ch chan<- *prometheus.Desc)
 func (l liveLogReader) ReadNodeLiveLog(_ context.Context, runID, nodeID string, since int64) ([]byte, int64, bool, bool, error)
 func (l liveLogReader) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
 func (l *liveLogs) Append(runID, nodeID string, data []byte)
+func (l *liveLogs) AppendAt(runID, nodeID, attempt string, off int64, data []byte)
 func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
 func (l *liveLogs) Stats() (nodes int, bytes int64)
 func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
+func (l *liveLogs) Watch(runID, nodeID string)
+func (l *liveLogs) Watched(runID, nodeID string) bool
+func (l *liveLogs) WatchedNodes(runID string) []string
 func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric)
 func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc)
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
@@ -414,6 +413,14 @@ func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
 func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (pipeSink) Flush() error
+func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
+func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
+func (l segmentLogs) Append(context.Context, string, string, []byte) error
+func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error
+func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (logseg.Completeness, bool, error)
+func (l segmentLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
+func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)
+func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error
 func (r *statusRecorder) Unwrap() http.ResponseWriter

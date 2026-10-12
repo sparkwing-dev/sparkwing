@@ -27,7 +27,7 @@ func TestRemoteExecutionBrokerCarriesCrossPipelineCallsOnTheClaimToken(t *testin
 	ctx := context.Background()
 	now := time.Now()
 	runner, _, err := st.CreateToken("pool", store.TokenKindRunner, []string{
-		controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeLogsWrite,
+		controller.ScopeNodesClaim, controller.ScopeRunsState,
 	}, 0, now)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestRemoteExecutionBrokerCarriesCrossPipelineCallsOnTheClaimToken(t *testin
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	}
-	broker, err := startRemoteExecutionBroker(upstream.URL, "", n.ClaimToken, "parent", "ship", fence, nil, nil)
+	broker, err := startRemoteExecutionBroker(upstream.URL, n.ClaimToken, "parent", "ship", fence, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

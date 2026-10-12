@@ -22,6 +22,7 @@ type ConditionalWriter interface {
 	ConditionalWritesSupported(ctx context.Context) (bool, error)
 }
 type ETag string
+var ErrBadCursor = errors.New("storage: log stream cursor is not valid here")
 var ErrListNotSupported = errors.New("storage: list not supported")
 var ErrNotFound = errors.New("storage: not found")
 var ErrNotSupported = errors.New("storage: operation not supported")
@@ -31,6 +32,7 @@ type FlushLossReporter interface {
 }
 func FlushLosses(store LogStore, runID, nodeID string) (lines int, bytes int64)
 func FlushNode(ctx context.Context, store LogStore, runID, nodeID string) error
+func LogCursor(ctx context.Context) string
 type LogStore interface {
 	Append(ctx context.Context, runID, nodeID string, data []byte) error
 
@@ -51,6 +53,7 @@ type ReadOpts struct {
 	Lines string
 	Grep  string
 }
+func (o ReadOpts) Apply(data []byte) ([]byte, error)
 func SafeArtifactKey(key string) error
 func SafeLogIDs(runID, nodeID string) error
 func SafeRelPath(id string) error
@@ -114,3 +117,4 @@ func Usage(ctx context.Context, store ArtifactStore) (StoreUsage, bool, error)
 type UsageReporter interface {
 	Usage(ctx context.Context) (StoreUsage, error)
 }
+func WithLogCursor(ctx context.Context, cursor string) context.Context

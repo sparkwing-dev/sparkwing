@@ -58,11 +58,11 @@ func runRunsBounce(ctx context.Context, args []string) error {
 func resolveNodeBouncer(ctx context.Context, on, home, runID string) (nodeBouncer, func(), error) {
 	noop := func() {}
 	if on != "" {
-		c, _, err := resolveRunsClient(on, cmdJobsBounce.Path)
+		c, err := resolveRunsClient(on, cmdJobsBounce.Path)
 		return c, noop, err
 	}
-	if home == "" && orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL") != "" {
-		if c, _, err := resolveRunsClient("", cmdJobsBounce.Path); err == nil {
+	if home == "" && orchestrator.LocalDashboardURL("SPARKWING_CONTROLLER_URL") != "" {
+		if c, err := resolveRunsClient("", cmdJobsBounce.Path); err == nil {
 			return c, noop, nil
 		}
 	}

@@ -128,7 +128,7 @@ func (s *Server) createMachineToken(w http.ResponseWriter, r *http.Request, p *P
 	writeJSON(w, http.StatusCreated, teamTokenResp{
 		Token: raw, Prefix: tok.Prefix, Family: store.TokenFamilyMachine, Name: name, Scopes: tok.Scopes,
 		ExpiresAt: tok.ExpiresAt.Unix(),
-		Command:   runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name, allow, tok.Scopes),
+		Command:   runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), name, allow, tok.Scopes),
 	})
 }
 

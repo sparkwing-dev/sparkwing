@@ -28,7 +28,6 @@ func writeYAML(t *testing.T, dir, name, contents string) string {
 
 const mergedFixture = `
 defaults:
-  profile: prod
   args:
     region: us-east
 
@@ -37,7 +36,7 @@ profiles:
     secrets: { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
     state:   { type: sqlite, path: .sparkwing/state.db }
     cache:   { type: filesystem, path: .sparkwing/cache }
-    logs:    { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
+    logs:    { type: filesystem, path: .sparkwing/logs }
 
 pipelines:
   - name: release
@@ -77,9 +76,6 @@ func TestLoad_RoundTrip(t *testing.T) {
 
 	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "release" {
 		t.Errorf("pipelines = %#v", cfg.Pipelines)
-	}
-	if cfg.Defaults.Profile != "prod" {
-		t.Errorf("defaults.profile = %q, want prod", cfg.Defaults.Profile)
 	}
 	if cfg.Defaults.Args["region"] != "us-east" {
 		t.Errorf("defaults.args[region] = %q, want us-east", cfg.Defaults.Args["region"])
@@ -244,69 +240,10 @@ func TestLoad_DefaultsGuardsStayStrict(t *testing.T) {
 	}
 }
 
-func TestSetDefaultProfilePreservesEverythingElse(t *testing.T) {
-	path := writeYAML(t, t.TempDir(), projectconfig.Filename,
-		"# project notes\ndefaults:\n  args:\n    region: us-east\npipelines:\n  - name: release\n    entrypoint: Release\n")
-	if err := projectconfig.SetDefaultProfile(path, "prod"); err != nil {
-		t.Fatal(err)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "# project notes") {
-		t.Errorf("lost comments: %s", body)
-	}
-	cfg, err := projectconfig.Load(path)
-	if err != nil {
-		t.Fatalf("result is invalid config: %v", err)
-	}
-	if cfg.Defaults.Profile != "prod" {
-		t.Errorf("defaults.profile = %q, want prod", cfg.Defaults.Profile)
-	}
-	if cfg.Defaults.Args["region"] != "us-east" {
-		t.Errorf("lost defaults.args: %v", cfg.Defaults.Args)
-	}
-	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "release" {
-		t.Errorf("lost pipelines: %+v", cfg.Pipelines)
-	}
-
-	if err := projectconfig.SetDefaultProfile(path, "staging"); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err = projectconfig.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Defaults.Profile != "staging" {
-		t.Errorf("defaults.profile = %q, want staging", cfg.Defaults.Profile)
-	}
-}
-
-func TestSetDefaultProfileCreatesTheFileAndRejectsAnEmptyName(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", projectconfig.Filename)
-	if err := projectconfig.SetDefaultProfile(path, "prod"); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := projectconfig.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Defaults.Profile != "prod" {
-		t.Errorf("defaults.profile = %q, want prod", cfg.Defaults.Profile)
-	}
-	if err := projectconfig.SetDefaultProfile(path, "  "); err == nil {
-		t.Error("expected an empty profile name to be refused")
-	}
-}
-
-func TestLoad_DefaultProfileMayNameAUserProfile(t *testing.T) {
+func TestLoad_RefusesADefaultProfile(t *testing.T) {
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, "defaults:\n  profile: cloud\n")
-	cfg, err := projectconfig.Load(path)
-	if err != nil {
-		t.Fatalf("a default naming a profile outside the project must load: %v", err)
-	}
-	if cfg.Defaults.Profile != "cloud" {
-		t.Errorf("defaults.profile = %q, want cloud", cfg.Defaults.Profile)
+	_, err := projectconfig.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "field profile not found") {
+		t.Fatalf("a project default profile must fail the load, since only --profile selects one; got %v", err)
 	}
 }

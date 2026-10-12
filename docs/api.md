@@ -1,11 +1,11 @@
 # Controller HTTP API
 
-The controller and the logs service expose HTTP APIs under the
+The controller exposes its HTTP API under the
 `/api/v1` base path. The CLI, runners, the dashboard, and pipelines'
 cross-run refs are all clients. Responses are JSON.
 
 The complete route surface -- every method, path, and the scope each
-requires, for both services -- is generated from the routing code in
+requires -- is generated from the routing code in
 [api-reference.md](api-reference.md). This page covers the cross-cutting
 behavior that table doesn't.
 
@@ -50,9 +50,8 @@ Artifact downloads accept only committed keys under `artifacts/`. Other keys
 return `400`. Node outputs use their run's output routes, which check the claim's
 node dependencies.
 
-Log downloads require a token with `logs.read` or `admin`. A run cache grant
-cannot sign log downloads, even for its own run. Revoking a claimant's token
-stops its cache grant from signing new URLs.
+Node logs are not signed downloads; read them through the log routes below.
+Revoking a claimant's token stops its cache grant from signing new URLs.
 
 A `source` download names the exact `sources/<sha256>/<submission-id>` key
 bound to the claim's run. User and raw runner bearers cannot sign it. A user
@@ -91,30 +90,38 @@ redelivery answers `duplicate` with the runs it already started, and a
 delivery with no `X-GitHub-Delivery` header answers `400`. See
 [security.md](security.md).
 
-## Logs service
+## Node logs
 
-Logs live in a separate service keyed by run and node
-(`/api/v1/logs/{runID}/{nodeID}`), with a whole-run read and an SSE
-stream for live tail. The routes and their scopes are in
-[api-reference.md](api-reference.md).
+The controller serves node logs, which runners upload as segments (see
+[Log completeness](observability.md#log-completeness)). Every read needs
+`logs.read` and answers only for the caller's team:
+
+- `GET /api/v1/runs/{id}/logs` reads the whole run.
+- `GET /api/v1/runs/{id}/logs/{node}` reads one node, filtered by `tail`,
+  `head`, `lines` or `grep`.
+- `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node over SSE
+  through every attempt of it in this run, in order, holding the node's
+  live-view watch while open, and ends with a `stream_end` event once the
+  node is done with an outcome other than failed, or its run is over (only
+  a failure can be retried), and its last attempt is sealed. Each line carries the cursor just past
+  it as its event id; sending the last one back as `Last-Event-ID` (or
+  `cursor=`, which the header overrides) resumes after it.
+- `GET /api/v1/runs/{id}/logs/{node}/completeness` returns the node's
+  completeness verdict.
+- `GET /api/v1/runs/{id}/logs/search` searches one run, and
+  `GET /api/v1/runs/grep` searches across runs; each reads at most 256 MiB
+  and scans for at most 10 seconds.
+
 On a node read, `grep=TEXT&line_numbers=1` returns NDJSON objects with
 `line_no` (the position in the full node log) and `line`. Matching is
 case-sensitive. `max_matches=N` caps the response; omitting it returns all
-matches. Without `line_numbers=1`, the read returns plain text as before.
+matches. Without `line_numbers=1`, the read returns plain text.
 
-A runner numbers its appends: each carries `X-Sparkwing-Log-Stream`, a
-name for the writer, and `X-Sparkwing-Log-Seq`, the line's position in
-that stream from 1. When the node finishes, the runner seals each stream
-with `POST /api/v1/logs/{runID}/{nodeID}/seal`, a JSON body naming the
-stream, its `final_seq`, the `lines` and `bytes` it numbered, the lines
-it `dropped` without delivering, and the `sha256` of everything it
-numbered. A seal carries the same claim headers as an append, so only
-the node's current claim holder can send one, and a seal into another
-team's run answers `403`. Sealing a stream twice is a no-op.
-`GET` on the same path returns what the service holds for the node's
-streams; the dashboard's `GET /api/v1/runs/{id}/logs/{node}/completeness`
-turns that into one verdict. See
-[Log completeness](observability.md#log-completeness).
+A runner asks for upload URLs with
+`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`, under its node or
+trigger claim, and puts each gzip segment and the attempt's sealing
+manifest to the URLs it gets back. The routes and their scopes are in
+[api-reference.md](api-reference.md).
 
 ## Run coordination
 

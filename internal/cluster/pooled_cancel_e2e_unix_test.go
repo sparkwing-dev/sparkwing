@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -48,23 +48,27 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ctrlHTTP := httptest.NewServer(controller.New(st, nil).Handler())
-	t.Cleanup(ctrlHTTP.Close)
-	ctrl := client.New(ctrlHTTP.URL, nil)
-	logSrv, err := logs.New(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// safety: a node's lines reach the live ring only while someone watches it, so the test opens a viewer once
+	// the node's log exists and takes the first live push as the sign that the pipeline child is writing.
 	started := make(chan struct{})
-	var once sync.Once
-	logHandler := logSrv.Handler()
-	logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logHandler.ServeHTTP(w, r)
-		if r.Method == http.MethodPost {
+	var once, viewing sync.Once
+	viewCtx, stopViewing := context.WithCancel(context.Background())
+	var ctrlHTTP *httptest.Server
+	ctrlHandler := controller.New(st, nil).Handler()
+	ctrlHTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctrlHandler.ServeHTTP(w, r)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/r1/nodes/n1/log-segments":
+			viewing.Do(func() { go viewNodeLog(viewCtx, ctrlHTTP.URL+"/api/v1/runs/r1/logs/n1/stream") })
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/r1/nodes/n1/logs":
 			once.Do(func() { close(started) })
 		}
 	}))
-	t.Cleanup(logsHTTP.Close)
+	t.Cleanup(ctrlHTTP.Close)
+	// safety: a node's stream stays open until the node settles, which a node left for lease recovery never does
+	// here, so the viewer is stopped before the server, whose Close waits out every open request.
+	t.Cleanup(stopViewing)
+	ctrl := client.New(ctrlHTTP.URL, nil).WithWatchObserver(orchestrator.NoteWatch)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := st.CreateTrigger(ctx, store.Trigger{ID: "r1", Pipeline: "p", CreatedAt: time.Now(), TriggerSource: "runs-submit"}); err != nil {
@@ -82,7 +86,7 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	done := make(chan struct{})
 	var agent *procgroup.Group
 	if terminateAgent {
-		config := fmt.Sprintf("agent:\n  controller: %s\n  logs: %s\n  token: test-token\n  local_admission: false\n  heartbeat: 200ms\n  poll: 20ms\n", ctrlHTTP.URL, logsHTTP.URL)
+		config := fmt.Sprintf("agent:\n  controller: %s\n  token: test-token\n  local_admission: false\n  heartbeat: 200ms\n  poll: 20ms\n", ctrlHTTP.URL)
 		configPath := filepath.Join(home, "config.yaml")
 		if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 			t.Fatal(err)
@@ -107,7 +111,7 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 		}
 		go func() {
 			defer close(done)
-			executePooledNode(ctx, ctrl, ctrlHTTP.URL, logsHTTP.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
+			executePooledNode(ctx, ctrl, ctrlHTTP.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
 				time.Minute, 200*time.Millisecond, "agent", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 		}()
 	}
@@ -160,4 +164,17 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	} else if node.Status != "done" || node.Outcome != "cancelled" {
 		t.Fatalf("cancelled pipeline node = %+v, %v", node, err)
 	}
+}
+
+func viewNodeLog(ctx context.Context, url string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 }

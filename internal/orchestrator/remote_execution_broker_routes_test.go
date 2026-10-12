@@ -45,7 +45,7 @@ func newBrokeredRunnerNode(t *testing.T, configure func(*controller.Server, stri
 	now := time.Now().UTC()
 	token, _, err := st.CreateToken("runner-a", store.TokenKindRunner, []string{
 		controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState,
-		controller.ScopeSecretsRead, controller.ScopeLogsWrite,
+		controller.ScopeSecretsRead,
 	}, 0, now)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func newBrokeredRunnerNode(t *testing.T, configure func(*controller.Server, stri
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	}
-	broker, err := startRemoteExecutionBroker(srv.URL, "", token, "run-1", "parent", fence, nil,
+	broker, err := startRemoteExecutionBroker(srv.URL, token, "run-1", "parent", fence, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func adminBrokeredNode(t *testing.T, nodeID string, wrap ...func(http.Handler) h
 	}
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	broker, err := startRemoteExecutionBroker(srv.URL, "", token, "run-1", nodeID, store.NodeClaimFence{}, nil,
+	broker, err := startRemoteExecutionBroker(srv.URL, token, "run-1", nodeID, store.NodeClaimFence{}, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +342,7 @@ func TestBrokeredNodeMovesOutputsThroughTheLoopbackShim(t *testing.T) {
 	}
 	t.Cleanup(shim.Close)
 	brokered := func(node string) *client.Client {
-		b, err := startRemoteExecutionBroker(shim.url, "", shim.token, "run-1", node, store.NodeClaimFence{}, nil, logger)
+		b, err := startRemoteExecutionBroker(shim.url, shim.token, "run-1", node, store.NodeClaimFence{}, nil, logger)
 		if err != nil {
 			t.Fatal(err)
 		}

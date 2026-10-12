@@ -1,7 +1,7 @@
-<!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
+<!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes answer only the signed-in session of an account the controller lists with --operator-accounts; no token reaches them.
+Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes answer only the signed-in session of an account the controller lists with --operator-accounts; no token reaches them.
 
 ## Controller
 
@@ -67,6 +67,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
 | `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
 | `POST` | `/api/v1/launcher/sync` | `ScopeClaimsLaunch` |
+| `PUT` | `/api/v1/log-segments/{key...}` | `public` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
@@ -121,7 +122,6 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
@@ -140,7 +140,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `claim` or `logs.write` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
@@ -151,6 +150,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-segments` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs/stream` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
@@ -259,20 +259,4 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
-
-## Logs service
-
-| Method | Path | Scope |
-|---|---|---|
-| `GET` | `/api/v1/health` | `public` |
-| `GET` | `/api/v1/logs/search` | `logs.read` |
-| `DELETE` | `/api/v1/logs/{runID}` | `logs.delete` |
-| `GET` | `/api/v1/logs/{runID}` | `logs.read` |
-| `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
-| `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` or `logs.claim` |
-| `GET` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.read` |
-| `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` or `logs.claim` |
-| `GET` | `/api/v1/logs/{runID}/{nodeID}/stream` | `logs.read` |
-| `DELETE` | `/api/v1/teams/{team}/logs` | `admin` or `logs.delete` |
-| `GET` | `/metrics` | `public` |
 

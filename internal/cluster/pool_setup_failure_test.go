@@ -60,7 +60,7 @@ func TestPooledNodeSetupFailureFinishesTheNodeWithTheError(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	executePooledNode(ctx, ctrl, srv.URL, "", "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
+	executePooledNode(ctx, ctrl, srv.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
 		3*time.Minute, time.Hour, "pool runner", logger, nil, nil)
 
 	got, err := st.GetNode(ctx, "r1", "n1")
@@ -111,7 +111,7 @@ func TestPooledNodeFromARepositoryOutsideTheAllowlistFailsNamingIt(t *testing.T)
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	executePooledNode(ctx, ctrl, srv.URL, "", "", allow, "", claimed, claimed.ClaimedBy,
+	executePooledNode(ctx, ctrl, srv.URL, "", allow, "", claimed, claimed.ClaimedBy,
 		3*time.Minute, time.Hour, "pool runner", logger, nil, nil)
 
 	got, err := st.GetNode(ctx, "r1", "n1")

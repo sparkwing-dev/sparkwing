@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
@@ -238,18 +239,10 @@ func TestOpenArtifactStoreFromSpec_Controller(t *testing.T) {
 }
 
 func TestOpenLogStoreFromSpec_Controller(t *testing.T) {
-	var sawAuth string
+	var sawAuth, sawPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawAuth = r.Header.Get("Authorization")
-		switch r.Method {
-		case http.MethodPost:
-			w.WriteHeader(http.StatusNoContent)
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("logged\n"))
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
+		sawAuth, sawPath = r.Header.Get("Authorization"), r.URL.Path
+		_, _ = w.Write([]byte("logged\n"))
 	}))
 	defer srv.Close()
 
@@ -261,11 +254,15 @@ func TestOpenLogStoreFromSpec_Controller(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := store.Append(context.Background(), "r", "n", []byte("hi\n")); err != nil {
-		t.Fatalf("append: %v", err)
+	got, err := store.Read(context.Background(), "r", "n", storage.ReadOpts{})
+	if err != nil || string(got) != "logged\n" {
+		t.Fatalf("read = %q, %v", got, err)
 	}
-	if sawAuth != "Bearer tok-xyz" {
-		t.Errorf("authorization header = %q, want Bearer tok-xyz", sawAuth)
+	if sawAuth != "Bearer tok-xyz" || sawPath != "/api/v1/runs/r/logs/n" {
+		t.Errorf("request = %s with %q, want the controller's node log route with Bearer tok-xyz", sawPath, sawAuth)
+	}
+	if err := store.Append(context.Background(), "r", "n", []byte("hi\n")); !errors.Is(err, storage.ErrNotSupported) {
+		t.Fatalf("append = %v, want refused: writers upload segments", err)
 	}
 }
 

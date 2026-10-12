@@ -77,7 +77,7 @@ func (r *pipelineRun) materialize(env []string) error {
 		return nil
 	}
 
-	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, r.opts.DigestBackfill)
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, r.opts.Profile, r.opts.DigestBackfill)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (r *pipelineRun) materialize(env []string) error {
 }
 
 func (r *pipelineRun) exec(args, env []string) error {
-	env = withWingdHost(env)
+	env = withWingdHost(handoffProfiles(env, r.opts.Profile))
 	if r.uncachedBinary != "" {
 		r.stopSignals()
 		execDir := r.opts.ExecutionDir
@@ -151,6 +151,7 @@ func pipelineBinary(
 	sparkwingDir, key string,
 	keyParts []bincache.KeyPart,
 	env []string,
+	profileName string,
 	digestBackfill bool,
 ) (*bincache.Lease, string, error) {
 	entry, err := bincache.PipelineEntry(key)
@@ -159,7 +160,7 @@ func pipelineBinary(
 	}
 	source := "cached"
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if cache, lookup := resolveBinaryCacheSpec(); cache != nil {
+		if cache, lookup := resolveBinaryCacheSpec(profileName); cache != nil {
 			if store, openErr := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup); openErr == nil {
 				if fetchErr := bincache.FetchFromArtifactStore(ctx, store, key, tempPath, digestBackfill); fetchErr == nil {
 					source = "artifact-store"
@@ -260,6 +261,10 @@ type compileOptions struct {
 	NoUpdate       bool
 	NoBincache     bool
 	DigestBackfill bool
+
+	// safety: the pipeline process selects its profile from this alone, never
+	// from a value the caller's environment carried in.
+	Profile string
 
 	// safety: every exec path ends in os.Exit to carry the pipeline's status,
 	// which skips defers, so teardown has to travel with the call and run once

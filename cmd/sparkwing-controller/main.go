@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +40,9 @@ func main() {
 	if len(args) > 0 && args[0] == "migrate-outputs" {
 		run = func(args []string) error { return runMigrateOutputs(args[1:], os.Stdout) }
 	}
+	if len(args) > 0 && args[0] == "migrate-logs" {
+		run = func(args []string) error { return runMigrateLogs(args[1:], os.Stdout) }
+	}
 	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing-controller:", err)
 		os.Exit(1)
@@ -57,7 +61,7 @@ func run(args []string) error {
 			strings.Join([]string{
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
-				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey, credLogsDeleteToken,
+				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
 				credBillingToken, credCacheGrantKey,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
@@ -65,11 +69,6 @@ func run(args []string) error {
 		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
 			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
 			"hardcoding it in config.yaml. Empty disables the announcement.")
-	logsURL := fs.String("logs-url", "",
-		"externally-reachable URL of the sparkwing-logs service. Announced via "+
-			"GET /api/v1/services so runners post node log lines to the service that "+
-			"routes them; the controller itself serves no /api/v1/logs. Empty disables "+
-			"the announcement, which is correct only when one process serves both.")
 	dashboardURL := fs.String("dashboard-url", "",
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
@@ -223,10 +222,10 @@ func run(args []string) error {
 		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
 			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
 			"team keeps its own. Empty leaves the cache's counts to its writes alone")
-	logsArchiveStore := fs.String("logs-archive-store", "",
-		"the logs service's --archive-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile "+
-			"what each team's archived logs hold; the logs service keeps its own retention "+
-			"")
+	logRetention := fs.String("log-retention", "",
+		"teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 "+
+			"(without), as team=days[,team=days...]. Each distinct number is a retention class under "+
+			"<cache prefix>/logs/r<days>/ that needs its own lifecycle rule in the cache bucket")
 	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
 		"bytes one team without credits may download in a UTC day: binaries, artifacts, dependency archives "+
 			"and git fetches, through the cache or this controller. Log reads are not counted. Past it the "+
@@ -446,7 +445,6 @@ func run(args []string) error {
 		WithTrustedProxyAddr(*trustedProxyAddr).
 		WithCachePodURL(*cachePodURL).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
-		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
@@ -487,11 +485,7 @@ func run(args []string) error {
 	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 		return err
 	}
-	// safety: the log-deletion credential is a token carrying only
-	// logs.delete, which reads nothing; without one a team deletion with logs
-	// to remove waits and records why.
 	srv.WithTeamStorage(controller.TeamStorage{
-		LogsURL: *logsURL, LogsToken: creds.LogsDeleteToken,
 		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL),
 	})
 	if err := configureGitHubApp(srv, githubAppFlags{
@@ -540,27 +534,27 @@ func run(args []string) error {
 		}
 		srv = srv.WithBucketUsage(bucketStore)
 	}
-	if *cacheBlobStore != "" || *logsArchiveStore != "" {
+	if *cacheBlobStore != "" {
 		cache, err := openTeamStore(ctx, *cacheBlobStore, controller.CacheObjectMaxAge)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: %w", err)
 		}
-		logsStore, err := openTeamStore(ctx, *logsArchiveStore, nil)
-		if err != nil {
-			return fmt.Errorf("--logs-archive-store: %w", err)
-		}
-		srv = srv.WithStoragePass(cache, logsStore)
+		srv = srv.WithStoragePass(cache)
 		privateKey := creds.CloudFrontKey
 		domain, keyPairID := *cloudFrontDomain, *cloudFrontKeyPairID
-		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
-		client, _, _, err := s3store.Open(ctx, rawStore)
+		client, _, _, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("download signer S3: %w", err)
 		}
-		if err := srv.WithSignedDownloads(cache, logsStore, client, domain, keyPairID, privateKey); err != nil {
+		if err := srv.WithSignedDownloads(cache, client, domain, keyPairID, privateKey); err != nil {
 			return err
 		}
 	}
+	retention, err := parseLogRetention(*logRetention)
+	if err != nil {
+		return fmt.Errorf("--log-retention: %w", err)
+	}
+	srv = srv.WithLogRetention(retention)
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
 		client, bucket, prefix, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
@@ -741,8 +735,7 @@ func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) er
 		return nil
 	}
 	return errors.New("the license allows more than one team, so an object store is required: set --bucket-store " +
-		"to the s3:// store the cache (--blob-store) and the logs service " +
-		"(--archive-store) keep their objects in, because free-tier allowances are enforced only there")
+		"to the s3:// store the cache (--blob-store) keeps its objects in, because free-tier allowances are enforced only there")
 }
 
 // safety: no secret is stored as plaintext; a multi-team controller holds other
@@ -856,7 +849,7 @@ func dashboard(p paths.Paths, hsts, insecureCookies bool) controller.Dashboard {
 		Paths:           p,
 		Capabilities: backend.Capabilities{
 			Mode:     "cluster",
-			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "sparkwinglogs", Runs: "controller"},
+			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "segments", Runs: "controller"},
 			Features: []string{"pipelines", "runs", "logs", "secrets", "approvals", "cross-pipeline-refs"},
 		},
 	}
@@ -867,4 +860,21 @@ func dashboard(p paths.Paths, hsts, insecureCookies bool) controller.Dashboard {
 			"dashboard pages answer 503 until a build that ran bin/build-web.sh is deployed")
 	}
 	return d
+}
+
+func parseLogRetention(raw string) (map[store.Team]int, error) {
+	out := map[store.Team]int{}
+	for item := range strings.SplitSeq(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		team, rawDays, ok := strings.Cut(item, "=")
+		days, err := strconv.Atoi(rawDays)
+		if !ok || err != nil || days < 1 || !teamblob.ValidTeam(team) {
+			return nil, fmt.Errorf("%q is not team=days with a team slug and a positive number of days", item)
+		}
+		out[store.Team(team)] = days
+	}
+	return out, nil
 }

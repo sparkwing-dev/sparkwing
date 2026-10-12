@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,9 +94,23 @@ func TestApplyProfileBackends_SQLiteState(t *testing.T) {
 	}
 }
 
+func segmentKeepingController(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/capabilities" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"logs":{"segments":true}}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 func TestApplyProfileBackends_ControllerProfile(t *testing.T) {
 	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"}}
+	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: segmentKeepingController(t), Token: "swu_test"}}
 	opts := Options{}
 	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
 		t.Fatalf("ApplyProfileBackends(controller): %v", err)
@@ -106,9 +122,11 @@ func TestApplyProfileBackends_ControllerProfile(t *testing.T) {
 	if _, ok := opts.State.(*client.Client); !ok {
 		t.Fatalf("State = %T, want *client.Client", opts.State)
 	}
-	if opts.LogStore == nil || opts.ArtifactStore == nil {
-		t.Error("controller profile should route logs + cache through the controller")
+	seg, ok := opts.LogStore.(*segmentLogStore)
+	if !ok || opts.ArtifactStore == nil {
+		t.Fatalf("logs = %T, cache = %T; want segments and the controller cache", opts.LogStore, opts.ArtifactStore)
 	}
+	seg.Close(context.Background())
 }
 
 func TestApplyProfileBackends_LocalOnlyShortCircuits(t *testing.T) {

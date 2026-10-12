@@ -82,7 +82,6 @@ func TestNodeProtocolSpecRoutesMatchTheRegisteredHandlers(t *testing.T) {
 	registered := map[string]bool{}
 	for _, file := range []string{
 		filepath.Join("..", "..", "pkg", "controller", "server.go"),
-		filepath.Join("..", "..", "pkg", "logs", "server.go"),
 	} {
 		routes, err := apiroutes.Parse(file, nil)
 		if err != nil {
@@ -94,12 +93,12 @@ func TestNodeProtocolSpecRoutesMatchTheRegisteredHandlers(t *testing.T) {
 	}
 	for _, r := range nodeProtocolSpecRoutes(t) {
 		key := normalizeRoute(r.method, r.path)
-		brokerServed := strings.HasPrefix(r.path, "/bin/")
+		brokerServed := strings.HasPrefix(r.path, "/bin/") || strings.HasPrefix(r.path, "/api/v1/logs/")
 		switch {
 		case r.reach == "target" && registered[key]:
 			t.Errorf("docs/node-protocol.md marks %s %s as target, but a server registers it; mark it broker or direct", r.method, r.path)
 		case r.reach != "target" && !brokerServed && !registered[key]:
-			t.Errorf("docs/node-protocol.md lists %s %s, which neither the controller nor the logs service registers", r.method, r.path)
+			t.Errorf("docs/node-protocol.md lists %s %s, which the controller does not register and the broker does not serve itself", r.method, r.path)
 		}
 	}
 }

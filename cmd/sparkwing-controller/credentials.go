@@ -22,7 +22,6 @@ const (
 	credGitHubAppKey           = "github-app-key"
 	credGitHubAppWebhookSecret = "github-app-webhook-secret"
 	credCloudFrontKey          = "cloudfront-key"
-	credLogsDeleteToken        = "logs-delete-token"
 	credBillingToken           = "billing-token"
 	credCacheGrantKey          = authwire.CacheGrantKeyCredential
 )
@@ -40,7 +39,6 @@ type controllerCredentials struct {
 	GitHubAppKey           string
 	GitHubAppWebhookSecret string
 	CloudFrontKey          string
-	LogsDeleteToken        string
 	BillingToken           string
 	CacheGrantKey          string
 }
@@ -60,7 +58,6 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credGitHubAppKey:           &c.GitHubAppKey,
 		credGitHubAppWebhookSecret: &c.GitHubAppWebhookSecret,
 		credCloudFrontKey:          &c.CloudFrontKey,
-		credLogsDeleteToken:        &c.LogsDeleteToken,
 		credBillingToken:           &c.BillingToken,
 		credCacheGrantKey:          &c.CacheGrantKey,
 	} {

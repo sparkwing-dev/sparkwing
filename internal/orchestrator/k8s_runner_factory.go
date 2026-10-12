@@ -31,7 +31,6 @@ type K8sRunnerFactoryConfig struct {
 	// runner's broker reaches the controller at a loopback address no pod
 	// can.
 	DispatcherURL    string
-	LogsURL          string
 	ArtifactStoreURL string
 	// GitcacheURL is handed to the pod as SPARKWING_GITCACHE_URL so run-node
 	// can compile a pipeline the image does not carry.
@@ -110,7 +109,6 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		ImagePullSecret:    cfg.ImagePullSecret,
 		ServiceAccountName: cfg.ServiceAccount,
 		ControllerURL:      cfg.ControllerURL,
-		LogsURL:            cfg.LogsURL,
 		ArtifactStoreURL:   cfg.ArtifactStoreURL,
 		GitcacheURL:        cfg.GitcacheURL,
 		DependencyProxyURL: k8srunner.ResolveDependencyProxy(cfg.DependencyProxyURL, cfg.DependencyProxyFallbackURL),

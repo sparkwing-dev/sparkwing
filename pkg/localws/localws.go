@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -151,15 +150,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		defer func() { _ = st.Close() }()
 	}
 
-	var logsSrv *logs.Server
-	if opts.LogStore == nil {
-		var err error
-		logsSrv, err = logs.NewPrivate(paths.Root, nil)
-		if err != nil {
-			return fmt.Errorf("logs server: %w", err)
-		}
-	}
-
 	var ctrl *controller.Server
 	var dashBackend backend.Backend
 	if useS3OnlyReader {
@@ -202,9 +192,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	}
 
 	baseURL := "http://" + opts.Addr
-	if ctrl != nil && logsSrv != nil {
-		ctrl.WithLogsURL(baseURL)
-	}
 	if err := writeDevEnv(paths.Root, baseURL); err != nil {
 		return fmt.Errorf("write dev.env: %w", err)
 	}
@@ -219,7 +206,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		backend:      dashBackend,
 		store:        st,
 		ctrl:         ctrl,
-		logs:         logsSrv,
 		s3OnlyReader: useS3OnlyReader,
 		serveToken:   serveToken,
 	}, bundle)
@@ -265,7 +251,6 @@ type handlerParts struct {
 	backend      backend.Backend
 	store        *store.Store
 	ctrl         *controller.Server
-	logs         *logs.Server
 	s3OnlyReader bool
 	serveToken   string
 }
@@ -282,9 +267,6 @@ func buildHandler(
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	root.Handle("GET /api/v1/queue", queueHandler(parts.paths.Root, opts.Version))
 	registerCronRoutes(root, &cronsAPI{store: parts.store, paths: parts.paths, readOnly: opts.ReadOnly})
-	if parts.logs != nil {
-		root.Handle("/api/v1/logs/", parts.logs.Handler())
-	}
 	if parts.ctrl != nil {
 		// safety: this API has no sign-in, so a masked value never leaves it;
 		// the dashboard lists, writes and deletes rows without reading one.
@@ -319,11 +301,11 @@ func registerObjectStoreDashboard(mux *http.ServeMux, b backend.Backend, version
 	mux.Handle("GET /api/v1/runs", web.ListRunsHandler(b))
 	mux.Handle("GET /api/v1/runs/{id}", web.GetRunHandler(b))
 	mux.Handle("GET /api/v1/runs/{id}/logs", web.RunLogsHandler(b))
-	mux.Handle("GET /api/v1/runs/{id}/logs/search", web.RunLogsSearchHandler(b))
+	mux.Handle("GET /api/v1/runs/{id}/logs/search", web.RunLogsSearchHandler(b, web.SearchBounds{}))
 	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", web.NodeLogsHandler(b))
 	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", web.NodeLogStreamHandler(b))
 	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", web.NodeLogCompletenessHandler(b))
-	mux.Handle("GET /api/v1/runs/grep", web.RunsGrepHandler(b))
+	mux.Handle("GET /api/v1/runs/grep", web.RunsGrepHandler(b, web.SearchBounds{}))
 	mux.Handle("GET /api/v1/runs/{id}/events/stream", web.EventsStreamHandler(b))
 	mux.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(version, false))
 	mux.Handle("/api/", http.NotFoundHandler())
@@ -384,6 +366,6 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 }
 
 func writeDevEnv(root, baseURL string) error {
-	body := fmt.Sprintf("SPARKWING_CONTROLLER_URL=%s\nSPARKWING_LOGS_URL=%s\n", baseURL, baseURL)
+	body := fmt.Sprintf("SPARKWING_CONTROLLER_URL=%s\n", baseURL)
 	return fssecure.WriteFile(filepath.Join(root, "dev.env"), []byte(body))
 }

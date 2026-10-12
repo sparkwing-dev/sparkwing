@@ -6,6 +6,7 @@
 package backends
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -182,6 +183,9 @@ func (s *Spec) ValidateFields(surface string) error {
 			return fmt.Errorf("%s backend type=%s requires url or url_source", surface, s.Type)
 		}
 	case TypeController:
+		if surface == "logs" && s.URL != "" {
+			return errors.New("logs backend type=controller takes no url: the controller keeps node logs itself; name its profile with controller: <profile-name>")
+		}
 		if s.Controller == "" && s.URL == "" {
 			return fmt.Errorf("%s backend type=controller requires controller: <profile-name>", surface)
 		}

@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"math"
 	"mime"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -961,7 +964,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 		if body.Git.Repo == "" {
 			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
-				writeError(w, http.StatusUnprocessableEntity, errors.New("cloud RunAndAwait cannot inherit a working-tree source bundle; run the child locally or rerun sparkwing run <pipeline> --profile <cloud-profile> from the checkout"))
+				writeError(w, http.StatusUnprocessableEntity, errors.New("cloud RunAndAwait cannot inherit a working-tree source bundle; run the child locally or submit a new run with sparkwing pipeline trigger <pipeline> --profile <cloud-profile> --working-tree from the checkout"))
 				return
 			}
 			body.Git.Repo = parent.DeclaredRepo
@@ -1399,6 +1402,19 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	localDir := s.dashboard != nil && s.dashboard.Local && s.dashboard.Paths.Root != ""
+	// safety: a laptop run's directory is named by its id, so an id that is not one path segment is refused
+	// before anything is deleted rather than leaving its row gone and its directory behind.
+	if err := storage.SafeSegment(id); localDir && err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	// safety: the run's log records are the only index of its segments, so
+	// the segments go first.
+	if _, err := s.deleteRunSegments(r.Context(), s.logObjects(), tenant.Team(), id); err != nil {
+		s.writeInternalError(w, r, "delete the run's log segments", err)
+		return
+	}
 	if err := tenant.DeleteRun(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1407,7 +1423,26 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if localDir {
+		if err := removeLocalRunDir(s.dashboard.Paths.RunsDir(), id); err != nil {
+			s.writeInternalError(w, r, "remove the run's directory", err)
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// safety: a laptop dashboard's node logs live in the run's directory on its own disk; os.Root keeps a planted
+// symlink from turning the removal into one outside the runs tree.
+func removeLocalRunDir(runsDir, runID string) error {
+	root, err := os.OpenRoot(runsDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.Join(root.RemoveAll(runID), root.Close())
 }
 
 type claimTriggerReq struct {
@@ -2008,70 +2043,6 @@ func validExecutionAttemptResult(outcome, reason string) bool {
 	}
 }
 
-// safety: an append is authorized by the claim the writer still holds, not by
-// its execution attempt still being open, because a node's closing lines land
-// after the executor closes the attempt.
-func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Request) {
-	hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
-	if hasNodeIdentity && hasTriggerIdentity {
-		writeError(w, http.StatusBadRequest, errors.New("node attempt and trigger identities cannot be combined"))
-		return
-	}
-	if p, ok := PrincipalFromContext(r.Context()); ok && p.HasScope(ScopeAdmin) {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	var held bool
-	var err error
-	if hasNodeIdentity {
-		fence, fenceErr := nodeClaimFenceFromRequest(r)
-		if fenceErr != nil {
-			writeError(w, http.StatusConflict, store.ErrLockHeld)
-			return
-		}
-		ordinal, parseErr := strconv.Atoi(r.Header.Get(store.AttemptOrdinalHeader))
-		if parseErr == nil && ordinal > 0 {
-			held, err = s.store.NodeExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
-		}
-	} else if hasTriggerIdentity {
-		generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
-		if parseErr != nil || generation < 1 {
-			writeError(w, http.StatusConflict, store.ErrLockHeld)
-			return
-		}
-		fence := store.TriggerClaimFence{Claimant: claimIdentity(r), ClaimGeneration: generation}
-		rawOrdinal := r.Header.Get(store.AttemptOrdinalHeader)
-		if rawOrdinal == "" && r.PathValue("nodeID") == "_compile" {
-			held, err = s.store.TriggerClaimFenceIsLive(r.Context(), r.PathValue("id"), claimIdentity(r), generation, time.Now())
-		} else {
-			ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
-			if ordinalErr == nil && ordinal > 0 {
-				held, err = s.store.TriggerExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
-			}
-		}
-	} else {
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if !held {
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	// safety: the logs service files a claim token's write under the team and
-	// attempt this answer names, which for a runner's node claim are the ones
-	// just checked against its live claim.
-	if rc, ok := runnerClaimFromContext(r.Context()); ok && hasNodeIdentity {
-		w.Header().Set(store.ClaimTeamHeader, string(rc.Token.Team))
-		w.Header().Set(store.ClaimGenerationHeader, strconv.FormatInt(rc.Token.Generation, 10))
-		w.Header().Set(store.AttemptOrdinalHeader, r.Header.Get(store.AttemptOrdinalHeader))
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
@@ -2193,7 +2164,20 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.runnerHeartbeats.record(presenceKey{tokenPrefix: fence.Claimant.TokenPrefix, name: presenceName(body.HolderID)}, time.Now())
+	// safety: a runner that predates the watched flag reads any answer but 204 as a refused renewal.
+	if r.Header.Get(store.LogWatchHeader) == "1" {
+		writeJSON(w, http.StatusOK, nodeHeartbeatResp{Watched: s.liveLogs.Watched(runID, nodeID)})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type nodeHeartbeatResp struct {
+	Watched bool `json:"watched"`
+}
+
+type runHeartbeatResp struct {
+	WatchedNodes []string `json:"watched_nodes"`
 }
 
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {
@@ -2486,6 +2470,11 @@ func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request)
 	}
 	if err := tenant.TouchRunHeartbeat(r.Context(), runID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// safety: a dispatcher that predates the watched flag reads any answer but 204 as a failed beat.
+	if r.Header.Get(store.LogWatchHeader) == "1" {
+		writeJSON(w, http.StatusOK, runHeartbeatResp{WatchedNodes: s.liveLogs.WatchedNodes(runID)})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

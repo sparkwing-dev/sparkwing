@@ -2,7 +2,9 @@ package cluster
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,8 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -43,9 +44,26 @@ func runPipelineChildForTest(runID, nodeID string) int {
 		return 2
 	}
 	capability = strings.TrimSpace(capability)
-	base := os.Getenv("SPARKWING_LOGS_URL")
-	ctx := store.WithExecutionAttemptOrdinal(context.Background(), 1)
-	client := logs.NewClientWithToken(base, nil, capability)
+	nodeURL := os.Getenv("SPARKWING_LOGS_URL") + "/api/v1/logs/" + runID + "/" + nodeID
+	post := func(target string, body []byte, headers map[string]string) error {
+		req, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+capability)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			return fmt.Errorf("%s answered HTTP %d", target, resp.StatusCode)
+		}
+		return nil
+	}
 	var descendant *exec.Cmd
 	if string(mode) == "cancel" {
 		descendant = exec.Command("sh", "-c", "exec sleep 300")
@@ -61,11 +79,11 @@ func runPipelineChildForTest(runID, nodeID string) int {
 	}
 	for i := 1; i <= 5; i++ {
 		line := []byte(fmt.Sprintf("{\"msg\":\"step %d\"}\n", i))
-		appendCtx := ctx
+		var headers map[string]string
 		if string(mode) == "sealing" {
-			appendCtx = logs.WithAppendSequence(ctx, "child", int64(i))
+			headers = map[string]string{logseg.LogStreamHeader: "child", logseg.LogSeqHeader: strconv.Itoa(i)}
 		}
-		if err := client.Append(appendCtx, runID, nodeID, line); err != nil {
+		if err := post(nodeURL, line, headers); err != nil {
 			fmt.Fprintln(os.Stderr, "pipeline child: append:", err)
 			return 1
 		}
@@ -81,7 +99,11 @@ func runPipelineChildForTest(runID, nodeID string) int {
 		_ = self.Kill()
 		select {}
 	case "sealing":
-		if err := client.Seal(ctx, runID, nodeID, logs.Seal{Stream: "child", FinalSeq: 5, Lines: 5}); err != nil {
+		seal, err := json.Marshal(logseg.WriterSeal{Stream: "child", FinalSeq: 5})
+		if err != nil {
+			return 2
+		}
+		if err := post(nodeURL+"/seal", seal, nil); err != nil {
 			fmt.Fprintln(os.Stderr, "pipeline child: seal:", err)
 			return 1
 		}
@@ -91,16 +113,17 @@ func runPipelineChildForTest(runID, nodeID string) int {
 
 // A node an agent claims from its pool runs in a child pipeline binary built
 // against the team's pinned SDK, which may predate log seals. The agent's
-// own supervisor carries every log line the child writes, so it numbers and
-// seals them, and a finished node reads complete whatever SDK wrote it.
+// own supervisor keeps every line the child writes as segments through the
+// controller and seals them, so a finished node reads complete whatever SDK
+// wrote it, and a killed child's log reads cut off.
 func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns pipeline child processes")
 	}
 	for _, tc := range []struct{ mode, want string }{
-		{"released", logs.StateComplete},
-		{"sealing", logs.StateComplete},
-		{"killed", logs.StateCutOff},
+		{"released", logseg.StateComplete},
+		{"sealing", logseg.StateComplete},
+		{"killed", logseg.StateCutOff},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			if tc.mode == "killed" && runtime.GOOS == "windows" {
@@ -120,19 +143,6 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			ctrlSrv := httptest.NewServer(controller.New(st, nil).Handler())
 			t.Cleanup(ctrlSrv.Close)
-			logSrv, err := logs.New(t.TempDir(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var seals []string
-			logHandler := logSrv.Handler()
-			logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/seal") {
-					seals = append(seals, r.URL.Path)
-				}
-				logHandler.ServeHTTP(w, r)
-			}))
-			t.Cleanup(logsHTTP.Close)
 			ctrl := client.New(ctrlSrv.URL, nil)
 			ctx := context.Background()
 
@@ -151,15 +161,15 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 			}
 
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			executePooledNode(ctx, ctrl, ctrlSrv.URL, logsHTTP.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
+			executePooledNode(ctx, ctrl, ctrlSrv.URL, "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
 				3*time.Minute, time.Hour, "pool runner", logger, nil, nil)
 
 			if _, err := st.DB().ExecContext(ctx,
 				`UPDATE nodes SET status = 'done', outcome = 'success', started_at = ?, finished_at = ? WHERE run_id = 'r1' AND node_id = 'n1'`,
-				time.Now().Add(-time.Hour).UnixNano(), time.Now().Add(-2*logs.SealGrace).UnixNano()); err != nil {
+				time.Now().Add(-time.Hour).UnixNano(), time.Now().Add(-2*logseg.SealGrace).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
-			b := backend.NewClientBackend(ctrl, sparkwinglogs.New(logsHTTP.URL, nil, ""))
+			b := backend.NewClientBackend(ctrl, ctrl.NodeLogs())
 			node, err := st.GetNode(ctx, "r1", "n1")
 			if err != nil {
 				t.Fatal(err)
@@ -170,9 +180,6 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 			}
 			if got.State != tc.want || got.Lines != 5 {
 				t.Fatalf("verdict = %+v, want %s over 5 lines", got, tc.want)
-			}
-			if tc.mode == "sealing" && len(seals) != 1 {
-				t.Fatalf("a child that seals itself was sealed %d times: %v", len(seals), seals)
 			}
 		})
 	}

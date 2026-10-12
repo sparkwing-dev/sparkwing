@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -24,10 +25,6 @@ const TeamDeletionInterval = time.Minute
 // data, and the operator credentials the controller deletes it with. A
 // service left empty holds nothing for this controller to delete.
 type TeamStorage struct {
-	// LogsURL and LogsToken reach the logs service, which keeps node logs
-	// under bare run ids. LogsToken must carry exactly the logs.delete scope.
-	LogsURL   string
-	LogsToken string
 	// CacheURL reaches the cache service, which keeps each team's artifacts,
 	// binaries and build cache in a tree of its own. The controller deletes a
 	// tree with an operator grant signed by its cache grant key.
@@ -257,10 +254,11 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 // stale cache lands after the rows are gone.
 var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
 
-// safety: a cache grant minted before the deletion is verified by its
-// signature alone and writes into the team's cache tree until it expires, so
-// the tree is deleted once more after the longest-lived grant has lapsed.
-const teamRecheckDelay = authwire.CacheGrantTTL + time.Hour
+// safety: a cache grant or log upload URL issued before the deletion is
+// verified by its signature alone and writes into the team's storage until it
+// expires, so the cache tree and logs are deleted once more after the
+// longest-lived of them has lapsed.
+const teamRecheckDelay = max(authwire.CacheGrantTTL, logSegmentURLTTL) + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute
@@ -333,18 +331,14 @@ func (s *Server) deletionHolder() string {
 	return s.deletionHolderID
 }
 
-// safety: stored objects go before rows, because the run rows are the only
-// index of what the logs service holds for the team.
+// safety: stored objects go before rows, because the team's rows are the
+// only index of some of what the cache holds for it.
 func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) error {
 	op := s.store.AsOperator()
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	runIDs, err := op.TeamRunIDs(ctx, team)
-	if err != nil {
-		return err
-	}
-	if err := s.purgeTeamLogs(ctx, team, runIDs, now); err != nil {
+	if err := s.purgeTeamLogs(ctx, team); err != nil {
 		return err
 	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {
@@ -363,6 +357,12 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
+	if err := s.purgeTeamLogs(ctx, team); err != nil {
+		return err
+	}
+	if err := s.holdDeletion(ctx, team, now); err != nil {
+		return err
+	}
 	if err := s.purgeTeamCache(ctx, team); err != nil {
 		return err
 	}
@@ -372,37 +372,36 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 	return s.store.AsOperator().FinishTeamRecheck(ctx, team, s.deletionHolder(), now)
 }
 
-func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []string, now time.Time) error {
-	ts := s.teamStorage
-	if ts.LogsURL == "" || len(runIDs) == 0 {
-		return nil
-	}
-	if err := s.checkLogsDeleteToken(now); err != nil {
-		return err
-	}
-	// safety: the team route removes the team's archived namespace and every
-	// run the logs service recorded for it in one call; a service without an
-	// archive store answers it 404, and only then are runs deleted one by one.
-	teamTarget := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/teams/" + url.PathEscape(string(team)) + "/logs"
-	err := deleteRemote(ctx, teamTarget, ts.LogsToken)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, errRemoteNotFound) {
-		return fmt.Errorf("delete the team's logs: %w", err)
-	}
-	base := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/logs/"
-	for i, id := range runIDs {
-		if i > 0 && i%100 == 0 {
-			if err := s.holdDeletion(ctx, team, time.Now()); err != nil {
-				return err
-			}
+func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
+	if objs := s.logObjects(); objs != nil {
+		classes, err := s.teamLogClasses(ctx, objs, team)
+		if err != nil {
+			return err
 		}
-		if err := deleteRemote(ctx, base+url.PathEscape(id), ts.LogsToken); err != nil {
-			return fmt.Errorf("delete logs of run %s: %w", id, err)
+		for _, class := range classes {
+			prefix := logseg.ClassPrefix(class) + "teams/" + string(team) + "/"
+			if _, err := objs.deletePrefix(ctx, prefix); err != nil {
+				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
+			}
 		}
 	}
 	return nil
+}
+
+// safety: an attempt keeps the class it was written under, so a class the operator has since retired still holds
+// logs; the store's own class directories name it even once the configuration and the team's records no longer do.
+func (s *Server) teamLogClasses(ctx context.Context, objs logObjectStore, team store.Team) ([]string, error) {
+	classes := s.logClasses()
+	held, err := objs.classes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list the log retention classes: %w", err)
+	}
+	for _, class := range held {
+		if _, valid := logseg.ClassDays(class); valid && !slices.Contains(classes, class) {
+			classes = append(classes, class)
+		}
+	}
+	return classes, nil
 }
 
 func deleteRemote(ctx context.Context, target, bearer string) error {
@@ -422,35 +421,7 @@ func deleteRemote(ctx context.Context, target, bearer string) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		err := fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body)))
-		if resp.StatusCode == http.StatusNotFound {
-			err = fmt.Errorf("%w: %w", errRemoteNotFound, err)
-		}
-		return errors.Join(err, rerr)
-	}
-	return nil
-}
-
-var errRemoteNotFound = errors.New("remote answered 404")
-
-// safety: the logs service lets an admin bearer delete and read every team's
-// logs, so the controller spends only a credential that carries the
-// log-deletion scope and nothing that reads or administers.
-func (s *Server) checkLogsDeleteToken(now time.Time) error {
-	raw := s.teamStorage.LogsToken
-	if raw == "" {
-		return errors.New("a logs service is configured but no log-deletion credential is: " +
-			"mint a token with only the " + ScopeLogsDelete + " scope and put it in the logs-delete-token file of the controller's --credentials-dir")
-	}
-	tok, err := s.store.LookupToken(raw, now)
-	if err != nil {
-		return fmt.Errorf("the log-deletion credential does not authenticate: %w", err)
-	}
-	if !slices.Contains(tok.Scopes, ScopeLogsDelete) || slices.ContainsFunc(tok.Scopes, func(sc string) bool {
-		return sc != ScopeLogsDelete
-	}) {
-		return fmt.Errorf("the log-deletion credential must carry exactly the %s scope; it carries %v",
-			ScopeLogsDelete, tok.Scopes)
+		return errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
 	}
 	return nil
 }

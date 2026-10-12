@@ -4,17 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"maps"
-	"net/http"
-	"net/url"
-	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -39,16 +31,13 @@ type storagePass struct {
 	lastErr error
 }
 
-// WithStoragePass names the buckets the storage pass lists: the cache's
-// blob store, which it also expires, and the logs service's archive. A nil
+// WithStoragePass names the bucket the storage pass lists beside the node
+// log segments: the cache's blob store, which it also expires. A nil
 // store is not listed.
-func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server {
+func (s *Server) WithStoragePass(cache *teamblob.Store) *Server {
 	p := &storagePass{stores: map[store.StorageKind]*teamblob.Store{}}
 	if cache != nil {
 		p.stores[store.StorageCache] = cache
-	}
-	if logs != nil {
-		p.stores[store.StorageLogs] = logs
 	}
 	s.storagePass = p
 	return s
@@ -85,7 +74,15 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if err := s.pruneExpiredOutputs(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("prune expired outputs: %w", err))
 	}
-	for kind, bucket := range p.stores {
+	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
+		bucket := p.stores[kind]
+		var segments logObjectStore
+		if kind == store.StorageLogs {
+			segments = s.logObjects()
+		}
+		if bucket == nil && segments == nil {
+			continue
+		}
 		if kind == store.StorageCache {
 			expired, err := s.store.ClaimExpiredSourceBundles(ctx, now)
 			if err != nil {
@@ -109,14 +106,26 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			errs = append(errs, fmt.Errorf("%s marks: %w", kind, err))
 			continue
 		}
-		m, err := bucket.Measure(ctx)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("list the %s bucket: %w", kind, err))
-			continue
+		listed := map[store.Team]int64{}
+		var m teamblob.Measurement
+		if bucket != nil {
+			if m, err = bucket.Measure(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("list the %s bucket: %w", kind, err))
+				continue
+			}
+			for team, t := range m.Teams {
+				listed[store.Team(team)] = t.Bytes
+			}
 		}
-		listed := make(map[store.Team]int64, len(m.Teams))
-		for team, t := range m.Teams {
-			listed[store.Team(team)] = t.Bytes
+		if segments != nil {
+			counted, err := segments.measure(ctx)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("list the log segments: %w", err))
+				continue
+			}
+			for team, n := range counted {
+				listed[team] += n
+			}
 		}
 		if err := s.store.ReconcileStorage(ctx, kind, listed, marks, now); err != nil {
 			errs = append(errs, fmt.Errorf("reconcile %s: %w", kind, err))
@@ -128,11 +137,11 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			}
 		}
 		if kind == store.StorageLogs {
-			if err := s.pruneLogsOverShare(ctx, bucket, now); err != nil {
+			if err := s.pruneLogsOverShare(ctx, segments, now); err != nil {
 				errs = append(errs, fmt.Errorf("prune logs over a free share: %w", err))
 			}
 		}
-		s.logger.Info("storage pass", "store", string(kind), "teams", len(m.Teams),
+		s.logger.Info("storage pass", "store", string(kind), "teams", len(listed),
 			"expired_objects", m.Expired.Objects, "expired_bytes", m.Expired.Bytes)
 	}
 	utc := now.UTC()
@@ -186,104 +195,55 @@ func (s *Server) storagePassHealth() (map[string]any, []string) {
 }
 
 // safety: a free team's log writes are granted past its share, so this pass is
-// what holds it there, about an hour behind: it deletes the team's least
-// recently written finished runs' logs through the logs service until the
-// team is back under, and never a run still going.
-func (s *Server) pruneLogsOverShare(ctx context.Context, bucket *teamblob.Store, now time.Time) error {
+// what holds it there, about an hour behind: it deletes the segments of the
+// team's least recently written finished runs until the team is back under,
+// and never a run still going.
+func (s *Server) pruneLogsOverShare(ctx context.Context, segments logObjectStore, now time.Time) error {
 	over, err := s.store.TeamsOverFreeLogShare(ctx)
 	if err != nil || len(over) == 0 {
 		return err
 	}
-	if s.teamStorage.LogsURL == "" {
-		return errors.New("teams are past their log share and no logs service is configured to prune them")
-	}
-	if err := s.checkLogsDeleteToken(now); err != nil {
-		return err
-	}
 	var errs []error
 	for _, t := range over {
-		freed, err := s.pruneTeamLogs(ctx, bucket, t)
+		freed, err := s.pruneTeamSegments(ctx, segments, t)
+		errs = append(errs, err)
 		if freed > 0 {
 			errs = append(errs, s.store.CommitStorage(ctx, store.StorageCommit{
 				Team: t.Team, Kind: store.StorageLogs, Bytes: -freed, Now: now,
 			}))
 			s.logger.Info("pruned logs over a free share", "team", string(t.Team), "freed_bytes", freed)
 		}
-		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t store.TeamOverShare) (int64, error) {
-	objs, err := bucket.List(ctx, string(t.Team), "runs/")
-	if err != nil {
-		return 0, err
-	}
-	type archivedRun struct {
-		id   string
-		last time.Time
-	}
-	byID := map[string]*archivedRun{}
-	for _, o := range objs {
-		id, _, ok := strings.Cut(strings.TrimPrefix(o.Rel, "runs/"), "/")
-		if !ok {
-			continue
-		}
-		r := byID[id]
-		if r == nil {
-			r = &archivedRun{id: id}
-			byID[id] = r
-		}
-		if o.LastModified.After(r.last) {
-			r.last = o.LastModified
-		}
-	}
-	runs := slices.SortedFunc(maps.Values(byID), func(a, b *archivedRun) int { return a.last.Compare(b.last) })
-	base := strings.TrimRight(s.teamStorage.LogsURL, "/") + "/api/v1/logs/"
-	var freed int64
-	for _, r := range runs {
-		if freed >= t.OverBytes {
-			break
-		}
-		finished, err := s.store.RunFinished(ctx, t.Team, r.id)
-		if err != nil {
-			return freed, err
-		}
-		if !finished {
-			continue
-		}
-		deleted, err := deleteRunLogs(ctx, base+url.PathEscape(r.id), s.teamStorage.LogsToken)
-		if err != nil {
-			return freed, fmt.Errorf("delete logs of run %s: %w", r.id, err)
-		}
-		freed += deleted
-	}
-	return freed, nil
-}
-
-// safety: only what the logs service says it removed from the archive is
-// taken off the team's count; a refusal or an answer naming nothing frees
-// nothing, and the next pass's listing corrects any count left high.
-func deleteRunLogs(ctx context.Context, target, bearer string) (int64, error) {
-	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	// #nosec G704 -- the request keeps the operator-configured origin
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return 0, errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
-	}
-	deleted, err := strconv.ParseInt(resp.Header.Get(storagequota.ArchivedBytesDeletedHeader), 10, 64)
-	if err != nil || deleted < 0 {
+func (s *Server) pruneTeamSegments(ctx context.Context, segments logObjectStore, t store.TeamOverShare) (int64, error) {
+	if segments == nil {
 		return 0, nil
 	}
-	return deleted, nil
+	var freed int64
+	for freed < t.OverBytes {
+		recs, err := s.store.PrunableNodeLogs(ctx, t.Team, 100)
+		if err != nil || len(recs) == 0 {
+			return freed, err
+		}
+		for _, rec := range recs {
+			if freed >= t.OverBytes {
+				break
+			}
+			run, err := s.store.RunNodeLogs(ctx, t.Team, rec.RunID)
+			if err != nil {
+				return freed, err
+			}
+			if len(run) == 0 {
+				continue
+			}
+			deleted, err := s.deleteRunSegments(ctx, segments, t.Team, rec.RunID)
+			freed += deleted
+			if err != nil {
+				return freed, fmt.Errorf("delete log segments of run %s: %w", rec.RunID, err)
+			}
+		}
+	}
+	return freed, nil
 }

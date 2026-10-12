@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -52,10 +51,10 @@ func TestHandleTriggerRenewsTheClaimWithTheWorkersArgv(t *testing.T) {
 	})
 	cases := map[string]func(id, ctrl string) []string{
 		"cluster worker argv": func(id, ctrl string) []string {
-			return HandleTriggerArgs(id, ctrl, ctrl, 100*time.Millisecond)
+			return HandleTriggerArgs(id, ctrl, 100*time.Millisecond)
 		},
 		"older worker, ID first": func(id, ctrl string) []string {
-			return []string{id, "--controller", ctrl, "--heartbeat", "100ms", "--logs", ctrl}
+			return []string{id, "--controller", ctrl, "--heartbeat", "100ms"}
 		},
 	}
 	n := 0
@@ -68,13 +67,7 @@ func TestHandleTriggerRenewsTheClaimWithTheWorkersArgv(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = st.Close() })
-			logsSrv, err := logs.New(t.TempDir(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			mux := http.NewServeMux()
-			mux.Handle("/api/v1/logs/", logsSrv.Handler())
-			mux.Handle("/", controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+			mux := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
 			id := fmt.Sprintf("renewal-%d-%d", time.Now().UnixNano(), n)
 			renewed := make(chan struct{})
 			renewedRuns.Store(id, renewed)

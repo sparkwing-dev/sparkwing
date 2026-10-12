@@ -19,7 +19,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _, err := tenant.CreateToken(ctx, "private-runner", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeSecretsRead, controller.ScopeLogsWrite}, 0, time.Now())
+		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeSecretsRead}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

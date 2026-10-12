@@ -50,8 +50,8 @@ draws its scopes from exactly one family at mint time:
   token (everything the role holds except `team.admin`). The principal is the
   minter, the lifetime is 90 days fixed, ten live per member, and the token
   dies with the minter's membership or a demotion that drops its scopes.
-- **Machine family:** a subset of `nodes.claim`, `triggers.claim`,
-  `runs.state` and `logs.write` that includes a claim scope.
+- **Machine family:** a subset of `nodes.claim`, `triggers.claim` and
+  `runs.state` that includes a claim scope.
   The minter must be an editor; the token is named (`agent:<name>`, unique in
   the team across old runner tokens and new machine tokens), lists the
   repositories the machine may build, and slides its 90-day lifetime on use.
@@ -76,12 +76,13 @@ a claim and are never mintable from a bearer alone. There are four kinds:
   It authenticates as the runner that made the claim, confined to the claim:
   it reaches the claim's run and the cross-pipeline routes D-SEC-08 below
   names, writes only to its own node, never acts as the trigger claimant, and every request carries the claim's own fence
-  whatever headers it sent. It drops `admin`, keeping only `nodes.claim`,
-  `runs.state` and `logs.write` of what the runner holds. It stops when the
+  whatever headers it sent. It drops `admin`, keeping only `nodes.claim`
+  and `runs.state` of what the runner holds, which is what the node's log
+  segment upload needs. It stops when the
   claim ends (finish, lapse, a later claim of the node) or when the runner's
   own credential is revoked.
 - **`trigger`**: a runner's trigger claim, returned as `claim_token` by both
-  trigger claim routes and stored in `trigger_claim_tokens` (schema v98),
+  trigger claim routes and stored in `trigger_claim_tokens` (schema v99),
   because the run row does not exist when the trigger is claimed. It answers
   the secret route and the source credential route alone and stops with the
   trigger claim.
@@ -201,13 +202,9 @@ source straight from a controller of it.
 
 Three static secrets authenticated services to each other. None was a
 principal in the tokens table, and each granted more than its caller needed.
-The cache operator token is gone (landed); the two logs-service secrets go
-with the logs service.
-
-| Secret | Direction | Used for | Grants |
-|---|---|---|---|
-| logs-delete token (`SPARKWING_LOGS_DELETE_TOKEN`) | controller to logs service | deleting a deleted team's logs | a controller token holding only `logs.delete` |
-| logs service's controller bearer (`controller.tokenSecret` in the runner bundle) | logs service to controller | resolving a caller's credential before serving a log | the scopes of whatever runner token the operator mounted |
+The cache operator token is gone (landed), and the two logs-service secrets,
+the logs-delete token and the logs service's controller bearer, went with the
+logs service.
 
 What landed for the cache operator token, which split by direction into two
 credentials that each do one thing:
@@ -230,8 +227,9 @@ credentials that each do one thing:
   `sparkwing cluster tokens create --type service --principal cache --scope storage.count`
   and mounts it on the cache as the file `controller-token`; the cache refuses
   to start with `--controller` and no such file. The constant-time compare
-  against `SPARKWING_CACHE_TOKEN` in `counterCaller` is gone, and the routes
-  still take a forwarded `logs.write` credential for its own team's logs.
+  against `SPARKWING_CACHE_TOKEN` in `counterCaller` is gone, and the
+  `storage.count` token is the only caller the routes answer, since the
+  controller counts node log segments itself.
 - **People:** nobody holds a cache credential. Operators register mirrors and
   drive the store ceiling through the controller's `admin` routes, which
   forward under the operator grant. `--allow-unauthenticated` still opens a
@@ -241,15 +239,15 @@ The result is no standing shared secret between the two services, a counter
 credential that can be revoked and listed, and no credential that both reads
 every team's cache and moves every team's storage counters.
 
-### What is left after the logs service is removed
+### What is left now the logs service is removed
 
-Once the logs service and its credentials are gone, the service-to-service
+With the logs service and its credentials gone, the service-to-service
 surface is the cache in both directions, the launcher's `claims.launch`
 token, the hosted checkout's `credits.grant` token and the billing callback
 (`SPARKWING_BILLING_TOKEN`). The last three are already ordinary rows in the
 tokens table with a single operator-only scope, which is the shape the cache
-moves to. `logs.write` stays a claim-derived capability for the node's own
-log upload.
+moved to. `logs.write` and `logs.delete` are gone; a node uploads its log
+segments under its claim token's `runs.state`.
 
 ## Enrollment bearers and the assisted-offer protocol (landed)
 
@@ -268,7 +266,7 @@ It was removed whole as one breaking change. Gone are
 `PUT /api/v1/agents/{name}` enrollment, the enrolled executor heartbeat at
 `POST /api/v1/agents/{name}/heartbeat`, offer arbitration by priority,
 `rejectEnrolledLegacyClaim`, the controller authority id, and the foreground
-fleet coordinator. Schema v97 drops the `executors` and `node_claim_offers`
+fleet coordinator. Schema v98 drops the `executors` and `node_claim_offers`
 tables. On the CLI, the `fleet` command group, `run --sw-fleet` and
 `cluster agents enroll` are gone, and a `fleet:` section in `config.yaml`
 fails to parse. The ordinary claim protocol, `POST

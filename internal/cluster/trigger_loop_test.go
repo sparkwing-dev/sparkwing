@@ -30,7 +30,6 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		K8sRunnerSA:   "runner-job",
 		K8sPullSecret: "pull-secret",
 		K8sCtrlURL:    "http://controller:4343",
-		K8sLogsURL:    "http://logs:4344",
 		Kubeconfig:    "/tmp/kubeconfig",
 		ArtifactStore: "http://cache:4344",
 		K8sLabels: []string{
@@ -56,7 +55,6 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		"--runner-sa", "runner-job",
 		"--image-pull-secret", "pull-secret",
 		"--runner-controller-url", "http://controller:4343",
-		"--runner-logs-url", "http://logs:4344",
 		"--kubeconfig", "/tmp/kubeconfig",
 		"--artifact-store", "http://cache:4344",
 		"--image-pull-policy", "Always",

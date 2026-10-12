@@ -33,7 +33,7 @@ func TestRunGrepRemoteFindsOlderRunMatchingSourceBeforeLimit(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"runs": newer})
 		case "/api/v1/runs/older-match/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: older.ID, NodeID: "build"}}})
-		case "/api/v1/logs/older-match/build":
+		case "/api/v1/runs/older-match/logs/build":
 			_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 1, "line": "needle in older log"})
 		default:
 			http.NotFound(w, r)
@@ -43,7 +43,7 @@ func TestRunGrepRemoteFindsOlderRunMatchingSourceBeforeLimit(t *testing.T) {
 	for _, prefix := range []string{"deadbee", "DEADBEE"} {
 		t.Run(prefix, func(t *testing.T) {
 			var output bytes.Buffer
-			err := RunGrepRemote(context.Background(), srv.URL, srv.URL, "", GrepOpts{
+			err := RunGrepRemote(context.Background(), srv.URL, "", GrepOpts{
 				Pattern: "needle", Limit: 1, Quiet: true, Statuses: []string{"failed"},
 				Filter: CompiledFilter{Branches: []string{"rare"}, SHAPrefixes: []string{prefix}},
 			}, &output)
@@ -57,52 +57,36 @@ func TestRunGrepRemoteFindsOlderRunMatchingSourceBeforeLimit(t *testing.T) {
 	}
 }
 
-func TestRunGrepRemoteUsesAnnouncedLogsService(t *testing.T) {
-	logs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/logs/archived/build" || r.Header.Get("Authorization") != "Bearer test-token" {
-			http.NotFound(w, r)
+func TestRunGrepRemoteReadsThroughTheController(t *testing.T) {
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 1, "line": "needle in archived log"})
-	}))
-	t.Cleanup(logs.Close)
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/services":
-			_ = json.NewEncoder(w).Encode(map[string]string{"logs": logs.URL})
 		case "/api/v1/runs":
 			_ = json.NewEncoder(w).Encode(map[string]any{"runs": []*store.Run{{ID: "archived", Pipeline: "build", Status: "failed"}}})
 		case "/api/v1/runs/archived/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: "archived", NodeID: "build"}}})
+		case "/api/v1/runs/archived/logs/build":
+			if q := r.URL.Query(); q.Get("grep") != "needle" || q.Get("line_numbers") != "1" {
+				http.Error(w, "unnumbered grep", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 7, "line": "needle in a segment"})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(controller.Close)
 	var output bytes.Buffer
-	err := RunGrepRemote(context.Background(), controller.URL, "", "test-token",
-		GrepOpts{Pattern: "needle", Quiet: true}, &output)
+	err := RunGrepRemote(context.Background(), controller.URL, "test-token",
+		GrepOpts{Pattern: "needle", JSON: true}, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(output.String()); got != "archived" {
-		t.Fatalf("matching archived run = %q, want archived", got)
-	}
-}
-
-func TestRunGrepRemoteReportsMissingAnnouncedLogs(t *testing.T) {
-	for _, status := range []int{http.StatusNotFound, http.StatusServiceUnavailable} {
-		t.Run(fmt.Sprint(status), func(t *testing.T) {
-			controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(status)
-			}))
-			t.Cleanup(controller.Close)
-			var output bytes.Buffer
-			err := RunGrepRemote(context.Background(), controller.URL, "", "", GrepOpts{Pattern: "failure"}, &output)
-			if err == nil || !strings.Contains(err.Error(), "logs service") {
-				t.Fatalf("logs discovery error = %v", err)
-			}
-		})
+	if got := output.String(); !strings.Contains(got, `"line_no":7`) || !strings.Contains(got, "needle in a segment") {
+		t.Fatalf("grep output = %q", got)
 	}
 }
 

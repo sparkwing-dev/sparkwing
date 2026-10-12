@@ -17,10 +17,14 @@ import (
 // [store.ErrLockHeld] once the claim is lost or its team cannot pay.
 func (c *Client) HeartbeatClaim(ctx context.Context, runID, nodeID string, lease time.Duration) (cancel bool, err error) {
 	var out struct {
-		Cancel bool `json:"cancel"`
+		Cancel  bool  `json:"cancel"`
+		Watched *bool `json:"watched"`
 	}
 	err = c.post(ctx, claimNodePath(runID, nodeID, "heartbeat"),
 		map[string]int{"lease_secs": max(int(lease.Seconds()), 1)}, http.StatusOK, &out)
+	if err == nil && out.Watched != nil {
+		c.reportWatch(WatchReport{RunID: runID, NodeID: nodeID, Watched: *out.Watched})
+	}
 	return out.Cancel, err
 }
 

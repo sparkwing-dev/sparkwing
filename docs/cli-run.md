@@ -9,7 +9,16 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 Invoke a pipeline
 
 Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline.
+with the named pipeline. A run executes on this machine against its local
+store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
+pinned to that controller, and run refuses it.
+
+--profile NAME is accepted only for a profile with no controller whose state
+is an S3 bucket or a Postgres database: the run executes here and records its
+state, logs and cache to that profile's backends. This is a temporary
+exception for teams that coordinate through shared storage, slated for
+removal; a controller profile is refused with the 'sparkwing pipeline
+trigger' command to use instead.
 
 Pipeline-module builds honor the highest go directive in go.mod and an active
 resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
@@ -21,7 +30,7 @@ execution setup. Other arguments pass to the pipeline. Put -- before
 pipeline arguments that resemble runner options; every argument after the
 separator passes through unchanged.
 
-For remote execution on a profile's controller, use
+For execution on a profile's controller, use
 'sparkwing pipeline trigger <name> --profile PROF'.
 
 Output: pretty on a terminal, compact NDJSON otherwise. JSON runs
@@ -83,8 +92,8 @@ The ref resolves when you
 launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.
 
-A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---profile, and the other run-shaping --sw- flags)
+A flag a detached run cannot carry (--sw-index, --sw-dry-run
+and the other run-shaping --sw- flags)
 is refused with the reason instead of ignored; run those in
 the foreground.
 
@@ -133,7 +142,7 @@ is running and exits after five idle minutes; see
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop) |
+| `--profile NAME` | Record the run to the named S3 or Postgres state profile (a temporary exception; controller profiles go through pipeline trigger) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 
 ### Examples

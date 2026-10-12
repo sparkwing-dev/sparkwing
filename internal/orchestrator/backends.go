@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
@@ -52,6 +51,17 @@ type Backends struct {
 	// run's state lives behind it, and empty when the run holds the store
 	// itself. Node subprocesses dial it instead of a loopback controller.
 	APISocket string
+}
+
+// safety: profile:local and profile:controller guards test this. A
+// run this machine dispatches is local whatever store holds its state; a run a
+// controller dispatched is not.
+func (b Backends) dispatchesLocally() bool {
+	if b.LocalCoordination {
+		return true
+	}
+	_, objectStore := canonicalState(b.State).(s3StateAdapter)
+	return objectStore
 }
 
 // RunCoordination is the store surface a run needs for its own
@@ -298,9 +308,6 @@ func (s3StateAdapter) ReconcileOrphanedLocalRuns(context.Context, time.Duration)
 var _ StateBackend = (*client.Client)(nil)
 
 func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
-	if h, ok := logs.(*HTTPLogs); ok {
-		logs = h.WithLiveSink(c)
-	}
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
 	}
@@ -311,25 +318,6 @@ func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore
 		Artifact:    art,
 	}
 }
-
-// DiscoverLogsURL returns the logs service URL the controller announces on
-// GET /api/v1/services, or an error naming the controller when it announces
-// none. Only sparkwing-logs routes /api/v1/logs, so the controller's own URL
-// is never a substitute.
-func DiscoverLogsURL(ctx context.Context, controllerURL, token string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, logsDiscoveryTimeout)
-	defer cancel()
-	svc, err := discovery.ServicesFor(ctx, controllerURL, token)
-	if err != nil {
-		return "", fmt.Errorf("discover the logs service from controller %s: %w; name one with the profile's logs.url or SPARKWING_LOGS_URL", controllerURL, err)
-	}
-	if svc.Logs == "" {
-		return "", fmt.Errorf("controller %s announces no logs service (start it with --logs-url); name one with the profile's logs.url or SPARKWING_LOGS_URL", controllerURL)
-	}
-	return svc.Logs, nil
-}
-
-const logsDiscoveryTimeout = 3 * time.Second
 
 func defaultHTTPClient() *http.Client { return nil }
 

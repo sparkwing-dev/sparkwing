@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -20,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
@@ -135,11 +138,14 @@ func dispatchRun(args []string) error {
 		return err
 	}
 	if flags.profile != "" {
-		if _, profileErr := resolveProfileFlag(flags.profile); profileErr != nil {
+		p, profileErr := resolveProfileFlag(flags.profile)
+		if profileErr != nil {
 			return profileErr
 		}
+		if stateErr := orchestrator.RemoteStateProfile(p); stateErr != nil {
+			return fmt.Errorf("run: %s", strings.Replace(stateErr.Error(), "<pipeline>", pipelineName, 1))
+		}
 	}
-
 	projectStart := ""
 	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
 		projectStart = cwd
@@ -151,6 +157,15 @@ func dispatchRun(args []string) error {
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
+	}
+	if runInvokesAdmission(passthrough) {
+		entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
+		if err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
+		if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
@@ -252,6 +267,7 @@ func dispatchRun(args []string) error {
 		DigestBackfill: flags.digestBackfill,
 		ExecutionDir:   executionDir,
 		AfterChild:     afterChild,
+		Profile:        flags.profile,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
@@ -263,12 +279,6 @@ func dispatchRun(args []string) error {
 	}
 	if flags.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")
-	}
-	if flags.profile != "" {
-		env = setEnv(env, "SPARKWING_PROFILE", flags.profile)
-	}
-	if flags.secrets != "" {
-		env = append(env, "SPARKWING_SECRETS_PROFILE="+flags.secrets)
 	}
 
 	if flags.mode != "" {
@@ -299,6 +309,76 @@ func dispatchRun(args []string) error {
 	}
 	sweepStraySessionsBeforeRun()
 	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
+}
+
+// safety: the pipeline process selects its profile from ProfileEnv, and one
+// built against an older SDK its secrets source from SecretsProfileEnv, so an
+// inherited value would target a remote the invocation never named.
+func handoffProfiles(env []string, profileName string) []string {
+	env = removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
+	if profileName != "" {
+		env = append(env, orchestrator.ProfileEnv+"="+profileName)
+	}
+	return env
+}
+
+func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	if err != nil || cfg == nil {
+		return nil, err
+	}
+	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
+}
+
+// safety: --sw-ref executes another revision, so its sparkwing.yaml, not the
+// checkout's, says whether the pipeline is pinned.
+func pinnedPipelineAt(sparkwingDir, ref, pipelineName string) (*pipelines.Pipeline, error) {
+	if ref == "" {
+		return pinnedPipeline(sparkwingDir, pipelineName)
+	}
+	repoRoot := filepath.Dir(sparkwingDir)
+	commit, err := orchestrator.ResolveRefCommit(context.Background(), repoRoot, ref, slog.Default())
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: %w", ref, err)
+	}
+	path := ".sparkwing/" + projectconfig.Filename
+	// #nosec G204 -- the commit is a resolved object ID and the path a constant.
+	listed, err := exec.Command("git", "-C", repoRoot, "ls-tree", "--name-only", string(commit), "--", path).Output()
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: list %s: %w", ref, path, err)
+	}
+	if strings.TrimSpace(string(listed)) == "" {
+		return nil, nil
+	}
+	// #nosec G204 -- the commit is a resolved object ID and the path a constant.
+	raw, err := exec.Command("git", "-C", repoRoot, "show", string(commit)+":./"+path).Output()
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: read %s: %w", ref, path, err)
+	}
+	cfg, err := projectconfig.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("--sw-ref %s: %s: %w", ref, path, err)
+	}
+	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
+}
+
+func pinnedProfileHere(pipelineName string) (string, error) {
+	if dir, dirErr := findSparkwingDir(); dirErr == nil {
+		entry, err := pinnedPipeline(dir, pipelineName)
+		if err != nil {
+			return "", err
+		}
+		if entry != nil {
+			return entry.Profile, nil
+		}
+	}
+	return "", nil
+}
+
+func printPin(pipelineName string) {
+	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
+		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", pin, pipelineName, pin)
+	}
 }
 
 func removeEnv(env []string, key string) []string {
@@ -511,7 +591,7 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
 		repos := multiFlagVar(fs, "repo", "filter by repository owner/name (repeatable)")
 		rootOnly := fs.Bool("root-only", false, "exclude child runs")
 		wait := fs.Bool("wait", false, "block until at least one run matches")
@@ -633,7 +713,7 @@ func runJobs(args []string) error {
 		outputFormat := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
 		view := fs.String("view", "", "render one view of the run: summary|timeline|receipt|errors|tree")
@@ -706,7 +786,7 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")

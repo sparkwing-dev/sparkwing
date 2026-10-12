@@ -3,11 +3,13 @@ package controller_test
 import (
 	"bufio"
 	"context"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -169,40 +171,6 @@ func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
 	}
 }
 
-func TestDashboardLogReadsCarryTheCallersCredential(t *testing.T) {
-	var mu sync.Mutex
-	var got []string
-	logsSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		got = append(got, r.Header.Get("Authorization")+"|"+r.Header.Get("X-Sparkwing-Runner"))
-		mu.Unlock()
-		_, _ = w.Write([]byte(`{"msg":"from the logs service"}` + "\n"))
-	}))
-	t.Cleanup(logsSvc.Close)
-	f := newBrowserFixture(t, &controller.Dashboard{})
-	f.srv.WithLogsURL(logsSvc.URL)
-	f.h = f.srv.Handler()
-	if err := f.st.CreateRun(context.Background(), store.Run{ID: "r1", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-
-	rec := f.get("/api/v1/runs/r1/logs/n1", &http.Cookie{Name: "__Host-sw_session", Value: f.sessID})
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "from the logs service") {
-		t.Fatalf("cookie log read = %d %s", rec.Code, rec.Body)
-	}
-	bearer := httptest.NewRequest(http.MethodGet, dashOrigin+"/api/v1/runs/r1/logs/n1", nil)
-	bearer.Header.Set("Authorization", "Bearer "+f.token)
-	if rec := f.serve(bearer); rec.Code != http.StatusOK {
-		t.Fatalf("bearer log read = %d", rec.Code)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	want := []string{"Session " + f.sessID + "|dashboard:alice", "Bearer " + f.token + "|"}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("logs service saw %q, want %q", got, want)
-	}
-}
-
 func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
@@ -244,4 +212,44 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 		}
 	}
 	t.Fatalf("stream ended before the late event: %v", scanner.Err())
+}
+
+// A laptop dashboard keeps node logs in the run directory, so deleting the run
+// removes that directory and leaves its neighbors; an id that is not a single
+// path segment is refused rather than resolved under the runs tree.
+func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
+	p := paths.PathsAt(t.TempDir())
+	f := newBrowserFixture(t, &controller.Dashboard{Local: true, Paths: p})
+	ctx := context.Background()
+	for _, id := range []string{"r1", "r2", `a\b`} {
+		if err := f.st.CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(p.RunDir(id), "logs"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	del := func(escaped string) int {
+		req := httptest.NewRequest(http.MethodDelete, dashOrigin+"/api/v1/runs/"+escaped, nil)
+		req.Header.Set("Authorization", "Bearer "+f.token)
+		return f.serve(req).Code
+	}
+	if code := del("r1"); code != http.StatusNoContent {
+		t.Fatalf("delete r1 = %d, want 204", code)
+	}
+	if _, err := os.Stat(p.RunDir("r1")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("r1's directory after the delete: %v, want it gone", err)
+	}
+	if _, err := os.Stat(p.RunDir("r2")); err != nil {
+		t.Fatalf("r2's directory after r1's delete: %v", err)
+	}
+	if code := del(`a%5Cb`); code != http.StatusBadRequest {
+		t.Fatalf("delete a run whose id is not a path segment = %d, want 400", code)
+	}
+	if _, err := os.Stat(p.RunDir(`a\b`)); err != nil {
+		t.Fatalf("the refused id's directory: %v, want it left alone", err)
+	}
+	if _, err := f.st.GetRun(ctx, `a\b`); err != nil {
+		t.Fatalf("the refused id's run row: %v, want it kept", err)
+	}
 }

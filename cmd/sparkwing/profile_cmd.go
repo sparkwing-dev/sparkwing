@@ -94,29 +94,20 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 	switch chain.Source {
 	case profile.ChainSourceFlag:
 		return fmt.Sprintf("flag (--profile %s)", chain.Selected)
-	case profile.ChainSourceEnv:
-		return fmt.Sprintf("no --profile; SPARKWING_PROFILE=%s", chain.Selected)
-	case profile.ChainSourceProjectDefault:
-		return fmt.Sprintf("no --profile; project defaults.profile: %s", chain.Selected)
 	case profile.ChainSourceNone:
-		return "no --profile, and the project names no default (built-in local defaults apply)"
+		return "no --profile (this machine's local store applies)"
 	default:
 		return fmt.Sprintf("%s (%s)", chain.Source, displayConfigPath(cfgPath))
 	}
 }
 
 func chainRows(chain profile.Chain) []profileConsideredJSON {
-	switch chain.Source {
-	case profile.ChainSourceFlag:
+	if chain.Source == profile.ChainSourceFlag {
 		return []profileConsideredJSON{
 			{Source: string(profile.ChainSourceFlag), Name: chain.Selected, Reason: "selected"},
 		}
-	case profile.ChainSourceEnv, profile.ChainSourceProjectDefault:
-		return []profileConsideredJSON{
-			{Source: string(chain.Source), Name: chain.Selected, Reason: "selected"},
-		}
 	}
 	return []profileConsideredJSON{
-		{Source: string(profile.ChainSourceNone), Name: "", Reason: "no --profile passed and the project names no default"},
+		{Source: string(profile.ChainSourceNone), Name: "", Reason: "no --profile passed"},
 	}
 }

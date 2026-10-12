@@ -1,7 +1,7 @@
 // Package projectconfig reads the combined .sparkwing/sparkwing.yaml
 // project file:
 //
-//	defaults: {profile: shared-team}
+//	defaults: {args: { ... }}
 //	profiles: { ... }
 //	pipelines: [ ... ]
 //	sparks: [ ... ]
@@ -83,9 +83,8 @@ type Config struct {
 
 	// Profiles maps profile name to its surface bundle. The same
 	// shape as the profiles section of ~/.config/sparkwing/config.yaml;
-	// project profiles get referenced from inside the project
-	// (pipeline.profile, defaults.profile), user profiles from the
-	// CLI (--profile).
+	// project profiles are selected by pipeline.profile or by the
+	// CLI's --profile, user profiles by --profile alone.
 	Profiles map[string]*profile.Profile `yaml:"profiles,omitempty"`
 
 	Pipelines []pipelines.Pipeline `yaml:"pipelines,omitempty"`
@@ -96,15 +95,6 @@ type Config struct {
 // Resolution rules per field are documented inline; the general
 // principle is "replace, unless the field is independently keyed."
 type Defaults struct {
-	// Profile names the profile that applies when neither --profile
-	// nor pipeline.profile is set. The name resolves against
-	// Config.Profiles first and the user's config.yaml second, so a
-	// repo can default to a connection whose token stays out of the
-	// checkout. Empty means "no default" -- a pipeline without its own
-	// profile: still runs (against the sqlite-only test/dev shape).
-	// Wholesale-replaced by pipeline.profile when set.
-	Profile string `yaml:"profile,omitempty"`
-
 	// Args supplies per-arg default values for every pipeline. Each
 	// key is layered under pipeline.args (pipeline wins per-key),
 	// and the merged map overrides a field's `default` tag while an
@@ -252,38 +242,6 @@ func WriteSparksSection(path string, libs []sparks.Library) error {
 	return writeDocument(path, doc)
 }
 
-// SetDefaultProfile rewrites defaults.profile in the sparkwing.yaml at
-// path to name, preserving every other section, comment, and key order.
-// It creates the file when absent and the defaults: block when the file
-// has none. Like WriteSparksSection this is a surgical yaml.Node edit, so
-// writing a project's default connection cannot perturb its pipelines.
-func SetDefaultProfile(path, name string) error {
-	if strings.TrimSpace(name) == "" {
-		return errors.New("defaults.profile: name must not be empty")
-	}
-	doc, root, err := loadDocument(path)
-	if err != nil {
-		return err
-	}
-	defaults := mappingValue(root, "defaults")
-	if defaults == nil {
-		defaults = &yaml.Node{Kind: yaml.MappingNode}
-		root.Content = append(root.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: "defaults"}, defaults)
-	}
-	if defaults.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s: defaults: is not a mapping", path)
-	}
-	value := &yaml.Node{Kind: yaml.ScalarNode, Value: name}
-	if idx := mappingIndex(defaults, "profile"); idx >= 0 {
-		defaults.Content[idx+1] = value
-	} else {
-		defaults.Content = append(defaults.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: "profile"}, value)
-	}
-	return writeDocument(path, doc)
-}
-
 func loadDocument(path string) (*yaml.Node, *yaml.Node, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -356,14 +314,6 @@ func (c *Config) normalize() error {
 
 	if err := c.Defaults.Guards.Validate("defaults"); err != nil {
 		return err
-	}
-
-	for _, p := range c.Pipelines {
-		if p.Profile != "" {
-			if _, ok := c.Profiles[p.Profile]; !ok {
-				return fmt.Errorf("pipeline %q: profile %q is not declared in project profiles", p.Name, p.Profile)
-			}
-		}
 	}
 
 	for i, lib := range c.Sparks {

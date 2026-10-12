@@ -69,19 +69,6 @@ spec:
           command: ["/usr/local/bin/sparkwing-controller"]
           args:
             - {{ printf "--addr=0.0.0.0:%d" (int .Values.controller.port) | quote }}
-            {{- /*
-              Announced so a client with no logs: surface of its own -- a
-              laptop running `sparkwing run --profile prod` -- posts node
-              log lines to the logs service. The controller accepts no log
-              appends, and without this a client falls back to the
-              controller's URL and every append 404s. The dashboard's log
-              panes read through the same service. The in-cluster runner
-              is unaffected: its Deployment passes --logs directly.
-            */}}
-            {{- $logsURL := include "sparkwing-full.controller.logsURL" . }}
-            {{- if $logsURL }}
-            - {{ printf "--logs-url=%s" $logsURL | quote }}
-            {{- end }}
             {{- with .Values.controller.dashboardURL }}
             - {{ printf "--dashboard-url=%s" . | quote }}
             {{- end }}

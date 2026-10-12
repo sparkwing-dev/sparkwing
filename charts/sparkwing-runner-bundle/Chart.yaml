@@ -2,12 +2,12 @@ apiVersion: v2
 name: sparkwing-runner-bundle
 description: |
   Runner-side bundle for Sparkwing -- deploys sparkwing-runner +
-  sparkwing-cache + sparkwing-logs into a customer-owned namespace.
+  sparkwing-cache into a customer-owned namespace.
   This is the "data plane lives with the runner" Helm chart referenced
   in decision 0001 (open-core tier strategy): when customers run
   self-hosted runners against a remote (cloud or self-hosted)
   controller, this chart bundles every service that needs to live next
-  to the runner so logs / artifacts / git fanout never cross the VPC
+  to the runner so artifacts / git fanout never cross the VPC
   boundary.
   Does NOT include the controller, which also serves the dashboard --
   it ships in the full-self-host chart (sparkwing-full).
@@ -20,7 +20,7 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of the appVersion below. Bump on any user-facing
 # values.yaml change or template structural change.
-version: 0.1.10
+version: 0.1.11
 
 # appVersion is retained as Helm metadata and the empty-tag fallback. The
 # current value is not a compatible public image-set guarantee; operators

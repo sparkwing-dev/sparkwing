@@ -1,6 +1,6 @@
-// Package apiroutes reads the HTTP route table out of the controller and
-// logs-service routing source, so every generated API reference describes
-// the routes and scopes the servers actually register.
+// Package apiroutes reads the HTTP route table out of the controller's
+// routing source, so every generated API reference describes the routes and
+// scopes the server actually registers.
 //
 // Parse recognises the registration form those files use,
 // `mux.Handle("METHOD /path", requireScope(ScopeX, ...))`, and resolves the

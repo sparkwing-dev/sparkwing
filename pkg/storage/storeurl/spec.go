@@ -19,7 +19,6 @@ import (
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/stdoutlogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -94,11 +93,7 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 		if err != nil {
 			return nil, err
 		}
-
-		if spec.URL != "" {
-			url = spec.URL
-		}
-		return sparkwinglogs.New(url, nil, token), nil
+		return client.NewWithToken(url, nil, token).NodeLogs(), nil
 	default:
 		return nil, fmt.Errorf("logs backend type %q is not supported (use filesystem, s3, stdout or controller)", spec.Type)
 	}

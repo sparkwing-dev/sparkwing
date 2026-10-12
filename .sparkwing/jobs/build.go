@@ -12,7 +12,6 @@ var publicBinaries = []string{
 	"sparkwing-cache",
 	"sparkwing-controller",
 	"sparkwing-runner",
-	"sparkwing-logs",
 }
 
 type Build struct{ sparkwing.Base }

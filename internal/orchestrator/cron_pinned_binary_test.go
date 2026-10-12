@@ -150,3 +150,39 @@ func TestDispatchLocalTrigger_RefusesAPinReplacedSinceItWasArmed(t *testing.T) {
 		}
 	}
 }
+
+// A pipeline binary from an older SDK runs handle-trigger without the pin
+// check, so the dispatcher refuses a pinned pipeline before it starts one. The
+// fixture is a script, standing in for such a binary.
+func TestDispatchLocalTrigger_RefusesAPinnedPipelineBeforeStartingTheBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture is a shell script")
+	}
+	for name, config := range map[string]string{
+		"pinned":     "pipelines:\n  - name: nightly\n    entrypoint: Nightly\n    profile: prod\n",
+		"unreadable": "defaults:\n  profile: prod\npipelines:\n  - name: nightly\n    entrypoint: Nightly\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repoDir, cache, logger := cronPinnedFixture(t)
+			if err := os.WriteFile(filepath.Join(repoDir, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			record := filepath.Join(t.TempDir(), "ran")
+			binary := filepath.Join(t.TempDir(), "pipeline")
+			if err := os.WriteFile(binary, []byte("#!/bin/sh\ntouch "+record+"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			err := dispatchLocalTrigger(context.Background(), &store.Trigger{
+				ID:         "run-" + name,
+				Pipeline:   "nightly",
+				TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: binary},
+			}, "", repoDir, cache, logger, nil)
+			if err == nil || (name == "pinned" && !strings.Contains(err.Error(), "pinned to profile prod")) {
+				t.Fatalf("dispatch = %v, want a refusal", err)
+			}
+			if _, statErr := os.Stat(record); statErr == nil {
+				t.Fatal("the pipeline binary started for a pipeline pinned to a controller")
+			}
+		})
+	}
+}

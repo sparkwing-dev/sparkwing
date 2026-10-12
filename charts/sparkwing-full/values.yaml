@@ -154,14 +154,6 @@ controller:
     # larger bucket.
     measurePages: ""
 
-  logs:
-    # The sparkwing-logs service the controller announces to clients
-    # and reads dashboard log panes from. Empty = auto-generate to point
-    # at the bundled sparkwing-runner-bundle's logs Service; if that
-    # sub-chart or its logs component is disabled, the controller
-    # announces no logs service and the dashboard shows no logs.
-    url: ""
-
   cache:
     # Which sparkwing-cache the controller's gitcache proxy forwards
     # to, so off-cluster callers can clone and seed through
@@ -174,7 +166,7 @@ controller:
   # A Secret whose keys are credential file names the controller reads
   # from --credentials-dir: license, oidc-key, oidc-key.published,
   # github-client-secret, google-client-secret, github-app-key,
-  # github-app-webhook-secret, cloudfront-key, logs-delete-token,
+  # github-app-webhook-secret, cloudfront-key,
   # billing-token, and the others below. Every key is mounted under its
   # own name; a key the controller does not know is ignored. The single
   # Secret values below land in the same directory under their fixed
@@ -309,7 +301,7 @@ controller:
 
   # Further controller flags, passed verbatim after the ones above, for a
   # setting with no value of its own here, such as
-  # --object-store-budget, --cache-blob-store, --logs-archive-store,
+  # --object-store-budget, --cache-blob-store,
   # --billing-url or --egress-max-downloads. Run
   # `sparkwing-controller --help` for the list. Never put a secret here;
   # secrets are credential files.

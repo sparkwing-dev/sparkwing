@@ -28,7 +28,6 @@ type Config struct {
 	Contribution string `yaml:"contribution"`
 
 	Controller string `yaml:"controller"`
-	Logs       string `yaml:"logs"`
 	// Gitcache is the git cache source is fetched through. Empty means the
 	// controller's gitcache proxy, unless AllowRepos is set.
 	Gitcache string `yaml:"gitcache"`

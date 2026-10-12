@@ -31,6 +31,9 @@ with the file, line and key named. That includes a `fleet` section left from
 the removed foreground fleet coordinator, which fails with
 `unknown section "fleet"`; delete the section.
 
+A profile in this file is used only by a command that names it with
+`--profile`; no setting here or in the environment makes one the default.
+
 ```yaml
 # ~/.config/sparkwing/config.yaml
 profiles:

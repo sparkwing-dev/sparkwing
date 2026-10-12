@@ -13,9 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -216,19 +214,12 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	return writeRunDetailJSON(ctx, st, runID, label, out)
 }
 
-func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
+func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	ctrl := client.NewWithToken(controllerURL, nil, token)
 	if opts.EventsOnly {
 		return writeEventsViaBackend(ctx, backend.NewClientBackend(ctrl, nil), runID, opts, out)
 	}
-	if logsURL == "" {
-		var err error
-		if logsURL, err = DiscoverLogsURL(ctx, controllerURL, token); err != nil {
-			return err
-		}
-	}
-	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token).
-		WithRunnerIdentity(logs.ProcessIdentity("cli"))
+	var logc storage.LogStore = ctrl.NodeLogs()
 
 	b := backend.NewClientBackend(ctrl, logc)
 	if !opts.Follow {
@@ -285,156 +276,222 @@ func (f *remoteFollowFailures) failed(now time.Time, budget time.Duration) (time
 	return elapsed, elapsed >= budget
 }
 
+// safety: once the run is terminal a node whose stream never carried a line may never have run, so the follow
+// waits this long for it and no longer.
+var followDrain = 600 * time.Millisecond
+
+// safety: the controller follows each node across its attempts in this run and ends its stream once the node is
+// done, so the follow keeps one stream per node, resumes it from the last event id after a transport failure, and
+// ends with an error on a refusal no retry gets past.
 func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.LogStore,
 	runID, nodeFilter string, out io.Writer,
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var writeMu sync.Mutex
-	seen := map[string]struct{}{}
 	var wg sync.WaitGroup
-	var multi atomic.Bool
-
-	spawn := func(nodeID string) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			streamNode(runCtx, logc, runID, nodeID, &multi, &writeMu, out)
-		}()
-	}
-
-	terminal := make(chan struct{})
-
-	var followErr error
-
-	go func() {
-		defer close(terminal)
-		wait := remoteFollowPollInterval
-		consecutive := 0
-
-		var failures remoteFollowFailures
-		for {
-			timer := time.NewTimer(wait)
-			select {
-			case <-runCtx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-				nodes, err := ctrl.ListNodes(runCtx, runID)
-				if client.IsTokenDead(err) {
-					followErr = fmt.Errorf("run %s: %w", runID, err)
-					return
-				}
-				if err == nil {
-					for _, n := range nodes {
-						if nodeFilter != "" && n.NodeID != nodeFilter {
-							continue
-						}
-						if _, ok := seen[n.NodeID]; ok {
-							continue
-						}
-						seen[n.NodeID] = struct{}{}
-						if len(seen) > 1 {
-							multi.Store(true)
-						}
-						spawn(n.NodeID)
-					}
-				}
-				run, err := ctrl.GetRun(runCtx, runID)
-				if err == nil {
-					failures.succeeded()
-					wait, consecutive = remoteFollowPollInterval, 0
-					if isTerminalStatus(run.Status) {
-						return
-					}
-					continue
-				}
-
-				if runCtx.Err() != nil {
-					return
-				}
-				// safety: a dead token never reads the run again, so waiting out the budget only adds load.
-				if client.IsTokenDead(err) {
-					followErr = fmt.Errorf("run %s: %w", runID, err)
-					return
-				}
-				consecutive++
-				wait = remoteFollowBackoff(consecutive)
-				elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget)
-				if exhausted {
-					followErr = fmt.Errorf("run %s: controller status unreadable for %s: %w",
-						runID, elapsed.Round(time.Second), err)
-					return
-				}
-			}
-		}
+	defer func() {
+		cancel()
+		wg.Wait()
 	}()
 
-	<-terminal
-	if len(seen) > 0 {
-		select {
-		case <-time.After(600 * time.Millisecond):
-		case <-ctx.Done():
-		}
-	}
-	cancel()
-	wg.Wait()
-	return followErr
-}
+	var writeMu sync.Mutex
+	var multi atomic.Bool
+	streams := map[string]*followedNode{}
+	refused := make(chan error, 1)
+	segmentsChecked := false
+	var terminalAt time.Time
 
-func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string,
-	multi *atomic.Bool, mu *sync.Mutex, out io.Writer,
-) {
-	failures := 0
+	wait := remoteFollowPollInterval
+	consecutive := 0
+	var failures remoteFollowFailures
 	for {
-		if ctx.Err() != nil {
-			return
+		timer := time.NewTimer(wait)
+		select {
+		case <-runCtx.Done():
+			timer.Stop()
+			return nil
+		case err := <-refused:
+			timer.Stop()
+			return fmt.Errorf("run %s: %w", runID, err)
+		case <-timer.C:
 		}
-		body, err := logc.Stream(ctx, runID, nodeID)
-		if err != nil {
-			failures++
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(remoteFollowBackoff(failures)):
+		nodes, err := ctrl.ListNodes(runCtx, runID)
+		if client.IsTokenDead(err) {
+			return fmt.Errorf("run %s: %w", runID, err)
+		}
+		for _, n := range nodes {
+			if (nodeFilter != "" && n.NodeID != nodeFilter) || streams[n.NodeID] != nil {
+				continue
+			}
+			if !segmentsChecked {
+				keeps, err := ctrl.KeepsLogSegments(runCtx)
+				if err != nil {
+					return fmt.Errorf("run %s: %w", runID, err)
+				}
+				if !keeps {
+					return fmt.Errorf("run %s: the controller keeps no node log segments, so it has no node log stream "+
+						"to follow; it predates them or has no store to keep them in", runID)
+				}
+				segmentsChecked = true
+			}
+			f := &followedNode{done: make(chan struct{})}
+			streams[n.NodeID] = f
+			multi.Store(len(streams) > 1)
+			wg.Add(1)
+			go func(nodeID string) {
+				defer wg.Done()
+				defer close(f.done)
+				if err := f.follow(runCtx, logc, runID, nodeID, func(line string) {
+					writeMu.Lock()
+					defer writeMu.Unlock()
+					if multi.Load() {
+						fmt.Fprintf(out, "%s | %s\n", nodeID, line)
+					} else {
+						fmt.Fprintln(out, line)
+					}
+				}); err != nil && runCtx.Err() == nil {
+					select {
+					case refused <- fmt.Errorf("node %s: %w", nodeID, err):
+					default:
+					}
+				}
+			}(n.NodeID)
+		}
+		run, err := ctrl.GetRun(runCtx, runID)
+		if err == nil {
+			failures.succeeded()
+			wait, consecutive = remoteFollowPollInterval, 0
+			if isTerminalStatus(run.Status) {
+				if terminalAt.IsZero() {
+					terminalAt = time.Now()
+				}
+				if followFinished(streams, time.Since(terminalAt) >= followDrain) {
+					select {
+					case err := <-refused:
+						return fmt.Errorf("run %s: %w", runID, err)
+					default:
+						return nil
+					}
+				}
 			}
 			continue
 		}
-		failures = 0
-		readSSE(ctx, body, func(line string) {
-			mu.Lock()
-			defer mu.Unlock()
-			if multi != nil && multi.Load() {
-				fmt.Fprintf(out, "%s | %s\n", nodeID, line)
-			} else {
-				fmt.Fprintln(out, line)
-			}
-		})
-		body.Close()
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(250 * time.Millisecond):
+		if runCtx.Err() != nil {
+			return nil
+		}
+		// safety: a dead token never reads the run again, so waiting out the budget only adds load.
+		if client.IsTokenDead(err) {
+			return fmt.Errorf("run %s: %w", runID, err)
+		}
+		consecutive++
+		wait = remoteFollowBackoff(consecutive)
+		if elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget); exhausted {
+			return fmt.Errorf("run %s: controller status unreadable for %s: %w", runID, elapsed.Round(time.Second), err)
 		}
 	}
 }
 
-func readSSE(ctx context.Context, body io.Reader, onLine func(string)) {
+type followedNode struct {
+	started atomic.Bool
+	done    chan struct{}
+}
+
+// safety: a node whose stream ended is finished; one whose stream never carried a line may belong to a node that
+// never ran, so once the run is terminal it waits only out the drain.
+func followFinished(streams map[string]*followedNode, drained bool) bool {
+	for _, f := range streams {
+		select {
+		case <-f.done:
+		default:
+			if f.started.Load() || !drained {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// safety: a stream that keeps failing, or keeps closing without sending anything, uses up the node's own budget
+// and ends the follow with an error, since the run's healthy status reads would never stop it.
+func (f *followedNode) follow(ctx context.Context, logc storage.LogStore, runID, nodeID string, onLine func(string)) error {
+	cursor := ""
+	var failures remoteFollowFailures
+	consecutive := 0
+	for ctx.Err() == nil {
+		body, err := logc.Stream(storage.WithLogCursor(ctx, cursor), runID, nodeID)
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case errors.Is(err, client.ErrLogStreamRefused):
+			return err
+		case err == nil && body == nil:
+			return nil
+		case err == nil:
+			from := cursor
+			ended := readSSE(ctx, body, func(id string) {
+				cursor = id
+				f.started.Store(true)
+			}, func(line string) {
+				f.started.Store(true)
+				onLine(line)
+			})
+			_ = body.Close()
+			if ended {
+				return nil
+			}
+			if cursor != from {
+				failures.succeeded()
+				consecutive = 0
+				break
+			}
+			err = errors.New("the log stream closed without sending anything")
+			fallthrough
+		default:
+			consecutive++
+			if elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget); exhausted {
+				return fmt.Errorf("log stream failing for %s: %w", elapsed.Round(time.Second), err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(remoteFollowBackoff(consecutive)):
+		}
+	}
+	return nil
+}
+
+// safety: an event is acted on only once its closing blank line arrives, its lines before its id, so a cut
+// connection never moves the cursor past a line not printed; stream_end means the node will write no more, so the
+// caller stops rather than reconnecting, and that event's payload is framing, not log text.
+func readSSE(ctx context.Context, body io.Reader, onID, onLine func(string)) (ended bool) {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var id string
+	var lines []string
 	for sc.Scan() {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		line := sc.Text()
 		switch {
 		case line == "":
-		case strings.HasPrefix(line, ":"):
+			for _, l := range lines {
+				onLine(l)
+			}
+			if id != "" && onID != nil {
+				onID(id)
+			}
+			id, lines = "", lines[:0]
+		case strings.HasPrefix(line, "event:"):
+			if strings.TrimSpace(strings.TrimPrefix(line, "event:")) == "stream_end" {
+				return true
+			}
+		case strings.HasPrefix(line, "id:"):
+			id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 		case strings.HasPrefix(line, "data: "):
-			onLine(strings.TrimPrefix(line, "data: "))
+			lines = append(lines, strings.TrimPrefix(line, "data: "))
 		case strings.HasPrefix(line, "data:"):
-			onLine(strings.TrimPrefix(line, "data:"))
+			lines = append(lines, strings.TrimPrefix(line, "data:"))
 		}
 	}
+	return false
 }

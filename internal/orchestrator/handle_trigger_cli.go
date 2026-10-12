@@ -17,7 +17,7 @@ func runHandleTriggerCLI(args []string) error {
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
 		"controller URL (env: SPARKWING_CONTROLLER_URL)")
 	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"),
-		"logs service URL (env: SPARKWING_LOGS_URL)")
+		"node log endpoint of the engine process that started this one (env: SPARKWING_LOGS_URL); the engine sets it")
 	token := fs.String("token", agentToken,
 		"bearer token for controller + logs calls (env: SPARKWING_AGENT_TOKEN)")
 	heartbeat := fs.Duration("heartbeat", 0,
@@ -28,7 +28,6 @@ func runHandleTriggerCLI(args []string) error {
 	k8sSA := fs.String("runner-sa", "", "service account name for runner pods (k8s)")
 	k8sPullSecret := fs.String("image-pull-secret", "", "imagePullSecret for runner pods (k8s)")
 	k8sCtrlURL := fs.String("runner-controller-url", "", "controller URL the runner pod should talk to (defaults to --controller)")
-	k8sLogsURL := fs.String("runner-logs-url", "", "logs-service URL the runner pod should talk to (defaults to --logs)")
 	artifactStoreURL := fs.String("artifact-store", os.Getenv("SPARKWING_CACHE_URL"), "artifact/cache store URL passed to runner pods (k8s)")
 	dependencyProxy := fs.String("dependency-proxy", "",
 		"base URL of the in-cluster pull-through package proxy stamped on runner pods as GOPROXY / npm_config_registry / PIP_INDEX_URL; "+
@@ -105,7 +104,6 @@ func runHandleTriggerCLI(args []string) error {
 			ImagePullSecret:            *k8sPullSecret,
 			ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
 			DispatcherURL:              *controllerURL,
-			LogsURL:                    firstNonEmpty(*k8sLogsURL, *logsURL),
 			ArtifactStoreURL:           *artifactStoreURL,
 			GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
 			AgentToken:                 *token,
@@ -143,7 +141,6 @@ func runHandleTriggerCLI(args []string) error {
 				ImagePullSecret:            *k8sPullSecret,
 				ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
 				DispatcherURL:              *controllerURL,
-				LogsURL:                    firstNonEmpty(*k8sLogsURL, *logsURL),
 				ArtifactStoreURL:           *artifactStoreURL,
 				GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
 				AgentToken:                 *token,
@@ -185,12 +182,8 @@ func firstNonEmpty(vals ...string) string {
 // HandleTriggerArgs is the handle-trigger argv a parent that claimed
 // triggerID passes after the verb, flags first. A non-zero heartbeat makes
 // the child renew the claim itself.
-func HandleTriggerArgs(triggerID, controllerURL, logsURL string, heartbeat time.Duration) []string {
-	args := []string{"--controller", controllerURL, "--heartbeat", heartbeat.String()}
-	if logsURL != "" {
-		args = append(args, "--logs", logsURL)
-	}
-	return append(args, triggerID)
+func HandleTriggerArgs(triggerID, controllerURL string, heartbeat time.Duration) []string {
+	return []string{"--controller", controllerURL, "--heartbeat", heartbeat.String(), triggerID}
 }
 
 // safety: an older sparkwing cluster worker put the trigger ID before its

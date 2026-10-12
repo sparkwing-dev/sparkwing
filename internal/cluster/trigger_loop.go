@@ -19,12 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-const CompileLogNode = "_compile"
 
 type TriggerLoopOptions struct {
 	ControllerURL string
@@ -45,7 +42,6 @@ type TriggerLoopOptions struct {
 	K8sRunnerSA     string
 	K8sPullSecret   string
 	K8sCtrlURL      string
-	K8sLogsURL      string
 	Kubeconfig      string
 	ArtifactStore   string
 	K8sLabels       []string
@@ -283,8 +279,10 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
+	compileLog := orchestrator.NewEngineNodeLog(opts.ControllerURL, opts.Token, trigger.ID, store.CompileLogNode, logger)
+	defer compileLog.Close(ctx)
 	if workspaceSource && repoURL != "" {
-		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, logger)
+		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, compileLog, logger)
 	}
 
 	executionDir := filepath.Dir(sparkwingDir)
@@ -326,7 +324,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, opts, grant, trigger.ID, logger)
 	if buildErr != nil {
-		shipCompileOutput(ctx, opts, trigger.ID, buildErr, logger)
+		shipCompileOutput(ctx, compileLog, trigger.ID, buildErr, logger)
 		return awaitHeartbeat(), buildErr
 	}
 	logBinaryReady(logger, trigger.ID, binary)
@@ -341,16 +339,22 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	// through a broker that admits only its run's routes, and the runner's
 	// token stays here. The Jobs a Kubernetes or warm child creates cannot
 	// reach this loopback broker, so they carry their nodes' claim tokens and
-	// the controller's own addresses.
+	// the controller's own address.
 	opts.K8sCtrlURL = cmp.Or(opts.K8sCtrlURL, opts.ControllerURL)
-	opts.K8sLogsURL = cmp.Or(opts.K8sLogsURL, opts.LogsURL)
-	broker, err := orchestrator.StartTriggerBroker(opts.ControllerURL, opts.LogsURL, opts.Token, trigger, logger)
+	broker, err := orchestrator.StartTriggerBroker(opts.ControllerURL, opts.Token, trigger, logger)
 	if err != nil {
 		return fmt.Errorf("start trigger broker: %w", err)
 	}
 	defer broker.Close(ctx)
+	// safety: the child writes its logs on this machine unless the controller keeps segments, because a
+	// controller that does not keeps nothing the broker could hand an append to.
+	segments, err := client.NewWithToken(opts.ControllerURL, nil, opts.Token).KeepsLogSegments(ctx)
+	if err != nil {
+		logger.Warn("trigger loop: could not ask the controller whether it keeps log segments; logs stay local",
+			"run_id", trigger.ID, "err", err)
+	}
 	opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
-	if opts.LogsURL != "" {
+	if segments {
 		opts.LogsURL = broker.URL()
 	}
 	childArgs := handleTriggerArgs(trigger.ID, opts)
@@ -384,8 +388,11 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	cmd.Stderr = os.Stderr
 	logger.Info("trigger loop: exec child",
 		"trigger_id", trigger.ID, "bin", binPath, "dir", workDir)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("child pipeline binary: %w", err)
+	runErr := cmd.Run()
+	var exitErr *exec.ExitError
+	broker.SealLogs(ctx, runErr != nil && (!errors.As(runErr, &exitErr) || !exitErr.Exited()))
+	if runErr != nil {
+		return fmt.Errorf("child pipeline binary: %w", runErr)
 	}
 	return nil
 }
@@ -395,9 +402,6 @@ func handleTriggerArgs(triggerID string, opts TriggerLoopOptions) []string {
 	childArgs := []string{
 		"handle-trigger",
 		"--controller", opts.ControllerURL,
-	}
-	if opts.LogsURL != "" {
-		childArgs = append(childArgs, "--logs", opts.LogsURL)
 	}
 	childArgs = append(childArgs, triggerRunnerArgs(opts)...)
 	childArgs = append(childArgs, triggerID)
@@ -419,7 +423,6 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--runner-sa", opts.K8sRunnerSA)
 	appendFlag("--image-pull-secret", opts.K8sPullSecret)
 	appendFlag("--runner-controller-url", opts.K8sCtrlURL)
-	appendFlag("--runner-logs-url", opts.K8sLogsURL)
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
 	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)
@@ -450,19 +453,12 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	return args
 }
 
-func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID string, buildErr error, logger *slog.Logger) {
-	if opts.LogsURL == "" {
-		return
-	}
+func shipCompileOutput(ctx context.Context, compileLog *orchestrator.EngineNodeLog, runID string, buildErr error, logger *slog.Logger) {
 	var ce *bincache.CompileError
 	if !errors.As(buildErr, &ce) || len(ce.Output) == 0 {
 		return
 	}
-	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token).
-		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
-	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := cli.Append(postCtx, runID, CompileLogNode, ce.Output); err != nil {
+	if err := compileLog.Append(ctx, ce.Output); err != nil {
 		logger.Warn("trigger loop: failed to ship compile output to logs",
 			"run_id", runID, "err", err)
 	}
@@ -491,7 +487,9 @@ func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, tok
 
 var adoptBaselineFn = bincache.AdoptWorkspaceBaseline
 
-func adoptTriggerBaseline(ctx context.Context, opts TriggerLoopOptions, trigger *store.Trigger, checkoutDir, sha, cacheGrant string, logger *slog.Logger) {
+func adoptTriggerBaseline(ctx context.Context, opts TriggerLoopOptions, trigger *store.Trigger, checkoutDir, sha, cacheGrant string,
+	compileLog *orchestrator.EngineNodeLog, logger *slog.Logger,
+) {
 	baseline := bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv)
 	if baseline == (bincache.WorkspaceBaseline{}) {
 		return
@@ -508,7 +506,7 @@ func adoptTriggerBaseline(ctx context.Context, opts TriggerLoopOptions, trigger 
 	default:
 		logger.Warn("trigger loop: baseline unavailable",
 			"run_id", trigger.ID, "ref", baseline.Ref, "sha", baseline.SHA, "err", err)
-		shipBaselineWarning(ctx, opts, trigger.ID, baseline, err, logger)
+		shipBaselineWarning(ctx, compileLog, trigger.ID, baseline, err, logger)
 	}
 }
 
@@ -539,17 +537,10 @@ func adoptBaselineWithRetry(ctx context.Context, checkoutDir, gcURL, token, sha 
 
 // safety: the steps that scope themselves to the baseline report only the ref they cannot
 // resolve, so the reason belongs in the run the reader is looking at.
-func shipBaselineWarning(ctx context.Context, opts TriggerLoopOptions, runID string, baseline bincache.WorkspaceBaseline, cause error, logger *slog.Logger) {
-	if opts.LogsURL == "" {
-		return
-	}
+func shipBaselineWarning(ctx context.Context, compileLog *orchestrator.EngineNodeLog, runID string, baseline bincache.WorkspaceBaseline, cause error, logger *slog.Logger) {
 	line := fmt.Sprintf("sparkwing: %s could not be fetched at %s, so a step that scopes itself to it "+
 		"judges this checkout against nothing: %v\n", baseline.Ref, baseline.SHA, cause)
-	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token).
-		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
-	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := cli.Append(postCtx, runID, CompileLogNode, []byte(line)); err != nil {
+	if err := compileLog.Append(ctx, []byte(line)); err != nil {
 		logger.Warn("trigger loop: failed to ship the baseline warning to logs",
 			"run_id", runID, "err", err)
 	}

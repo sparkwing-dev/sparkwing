@@ -26,8 +26,8 @@
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- if and .Values.logs.enabled (not .Values.controller.tokenSecret.name) (not .Values.logs.allowUnauthenticated) -}}
-{{- fail "sparkwing-runner-bundle: logs.enabled=true requires controller.tokenSecret.name, the Secret whose bearer the logs service resolves against the controller before it serves a log route. Set logs.allowUnauthenticated=true to let anyone who can reach the Service read, forge, and delete every run's logs instead" -}}
+{{- if .Values.logs -}}
+{{- fail "sparkwing-runner-bundle: logs was removed with the sparkwing-logs Deployment; runners upload node logs to the controller now. Unset logs and follow the migration guide section \"The logs service is removed\"" -}}
 {{- end -}}
 {{- if not (has .Values.runner.triggerRunner.kind (list "inprocess" "k8s" "warm")) -}}
 {{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind must be inprocess, k8s, or warm" -}}
@@ -39,7 +39,7 @@
 {{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind k8s or warm requires runner.automountServiceAccountToken=true so the trigger worker can create and inspect fallback Jobs" -}}
 {{- end -}}
 {{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.shareAcrossComponents) -}}
-{{- fail "sparkwing-runner-bundle: serviceAccount.create=false puts the runner, cache, and logs pods on one ServiceAccount; set serviceAccount.shareAcrossComponents=true to accept that, or leave create=true for one account per component" -}}
+{{- fail "sparkwing-runner-bundle: serviceAccount.create=false puts the runner and cache pods on one ServiceAccount; set serviceAccount.shareAcrossComponents=true to accept that, or leave create=true for one account per component" -}}
 {{- end -}}
 {{- if and .Values.resourceQuota.enabled (not .Values.limitRange.enabled) -}}
 {{- fail "sparkwing-runner-bundle: resourceQuota.enabled=true requires limitRange.enabled=true, whose default and defaultRequest give a pod that declares no resources something for the quota to count. Without it the API server rejects every such pod in the namespace" -}}

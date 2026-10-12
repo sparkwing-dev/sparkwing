@@ -80,7 +80,7 @@ func runnerClaimFromContext(ctx context.Context) (store.RunnerClaim, bool) {
 
 // safety: admin is dropped, so the claim's fence binds even when an operator
 // token made the claim; what is left is what a node does under its claim.
-var runnerClaimScopeSet = []string{ScopeNodesClaim, ScopeRunsState, ScopeLogsWrite}
+var runnerClaimScopeSet = []string{ScopeNodesClaim, ScopeRunsState}
 
 func runnerClaimScopes(held []string) []string {
 	admin := false

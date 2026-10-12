@@ -443,15 +443,6 @@ sparkwing-runner-bundle:
     storage:
       enabled: true
       keepOnUninstall: true
-  logs:
-    allowUnauthenticated: true
-    image:
-      repository: ${image_prefix}sparkwing-logs
-      tag: $image_tag
-      pullPolicy: $image_pull_policy
-    storage:
-      enabled: true
-      keepOnUninstall: true
 EOF
 }
 
@@ -472,8 +463,6 @@ sparkwing-runner-bundle:
   cache:
     grantKeySecret:
       name: sparkwing-cache-grant-key
-    allowUnauthenticated: false
-  logs:
     allowUnauthenticated: false
 EOF
 

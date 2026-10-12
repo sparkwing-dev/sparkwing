@@ -15,37 +15,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogStore, err error) {
+func resolveRunsClient(onFlag, cmd string) (*client.Client, error) {
 	if onFlag != "" {
 		prof, perr := resolveProfile(onFlag)
 		if perr != nil {
-			return nil, nil, perr
+			return nil, perr
 		}
 		if perr := requireController(prof, cmd); perr != nil {
-			return nil, nil, perr
+			return nil, perr
 		}
-		c = client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-		logc = sparkwinglogs.New(prof.ControllerURL(), nil, prof.ControllerToken()).
-			WithRunnerIdentity(logs.ProcessIdentity("cli"))
-		return c, logc, nil
+		return client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()), nil
 	}
-	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
+	ctrlURL := orchestrator.LocalDashboardURL("SPARKWING_CONTROLLER_URL")
 	if ctrlURL == "" {
-		return nil, nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
+		return nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
 			"(start it with `sparkwing serve start`, or pass --profile <profile>)", cmd)
 	}
-	c = client.NewWithToken(ctrlURL, nil, orchestrator.LocalServeToken(ctrlURL))
-	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
-		logc = sparkwinglogs.New(logsURL, nil, orchestrator.LocalServeToken(logsURL)).
-			WithRunnerIdentity(logs.ProcessIdentity("cli"))
-	}
-	return c, logc, nil
+	return client.NewWithToken(ctrlURL, nil, orchestrator.LocalServeToken(ctrlURL)), nil
 }
 
 func collectRunIDs(flagIDs []string, stdin io.Reader) ([]string, error) {
@@ -171,7 +160,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		}
 		return fmt.Errorf("retry: %d of %d failed", failures, requested)
 	}
-	c, _, err := resolveRunsClient(*on, cmdJobsRetry.Path)
+	c, err := resolveRunsClient(*on, cmdJobsRetry.Path)
 	if err != nil {
 		return err
 	}
@@ -265,7 +254,7 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		return reportResults(os.Stdout, "cancel", results)
 	}
 
-	c, _, err := resolveRunsClient(*on, cmdJobsCancel.Path)
+	c, err := resolveRunsClient(*on, cmdJobsCancel.Path)
 	if err != nil {
 
 		if len(results) == 0 {
@@ -410,7 +399,7 @@ func runRunsPrune(ctx context.Context, args []string) error {
 	if len(explicitIDs) > 0 && *olderThan > 0 {
 		return errors.New("runs prune: --run and --older-than are mutually exclusive")
 	}
-	c, logc, err := resolveRunsClient(*on, cmdJobsPrune.Path)
+	c, err := resolveRunsClient(*on, cmdJobsPrune.Path)
 	if err != nil {
 		return err
 	}
@@ -448,11 +437,6 @@ func runRunsPrune(ctx context.Context, args []string) error {
 		if err := c.DeleteRun(ctx, id); err != nil {
 			results = append(results, runResult{RunID: id, Error: err.Error()})
 			continue
-		}
-		if logc != nil {
-			if err := logc.DeleteRun(ctx, id); err != nil {
-				fmt.Fprintf(os.Stderr, "warn: logs delete %s: %v\n", id, err)
-			}
 		}
 		results = append(results, runResult{RunID: id, OK: true})
 	}

@@ -4,13 +4,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type sealReader interface {
-	ReadSeals(ctx context.Context, runID, nodeID string) (logs.SealReport, error)
+type segmentCompleteness interface {
+	NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (c logseg.Completeness, found bool, err error)
 }
 
 type logStoreHolder interface {
@@ -22,28 +22,28 @@ func (b *StoreBackend) nodeLogStore() storage.LogStore  { return b.logStore }
 func (b *S3Backend) nodeLogStore() storage.LogStore     { return b.logStore }
 
 // NodeLogCompleteness reports whether n's log is whole. A backend whose
-// log store keeps no seals answers [logs.StateUnknown].
-func NodeLogCompleteness(ctx context.Context, b Backend, runID string, n *store.Node, now time.Time) (logs.Completeness, error) {
-	unknown := logs.Completeness{State: logs.StateUnknown}
+// log store keeps no manifests answers [logseg.StateUnknown].
+func NodeLogCompleteness(ctx context.Context, b Backend, runID string, n *store.Node, now time.Time) (logseg.Completeness, error) {
+	unknown := logseg.Completeness{State: logseg.StateUnknown}
 	holder, ok := b.(logStoreHolder)
 	if !ok {
 		return unknown, nil
 	}
-	reader, ok := holder.nodeLogStore().(sealReader)
+	segs, ok := holder.nodeLogStore().(segmentCompleteness)
 	if !ok {
 		return unknown, nil
 	}
-	report, err := reader.ReadSeals(ctx, runID, n.NodeID)
-	if err != nil {
+	c, found, err := segs.NodeLogCompleteness(ctx, runID, n.NodeID, NodeProgress(n, now), now)
+	if err != nil || !found {
 		return unknown, err
 	}
-	return report.Assess(NodeProgress(n, now), now), nil
+	return c, nil
 }
 
 // NodeProgress is what the controller knows about n that a completeness
 // verdict needs.
-func NodeProgress(n *store.Node, now time.Time) logs.NodeProgress {
-	p := logs.NodeProgress{Started: n.StartedAt != nil, Terminal: n.Status == "done"}
+func NodeProgress(n *store.Node, now time.Time) logseg.NodeProgress {
+	p := logseg.NodeProgress{Started: n.StartedAt != nil, Terminal: n.Status == "done"}
 	if p.Terminal {
 		p.FinishedAt = now
 		if n.FinishedAt != nil {

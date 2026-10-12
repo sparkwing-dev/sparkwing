@@ -20,7 +20,6 @@ const (
 	ScopeTriggersClaim = "triggers.claim"
 	ScopeRunsState     = "runs.state"
 	ScopeSecretsRead   = "secrets.read"
-	ScopeLogsWrite     = "logs.write"
 )
 
 // safety: no role grants deployment administration; unknown roles grant nothing.

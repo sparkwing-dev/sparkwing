@@ -59,8 +59,7 @@ if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 
 `sparkwing pipeline trigger build-deploy --profile prod` runs the pipeline
 in-cluster against your current commit and follows it to a terminal
-state -- streaming full logs when the profile defines a logs URL,
-node-status updates from the controller otherwise. It sends the commit
+state, streaming the run's node logs through the controller. It sends the commit
 SHA to the controller and eagerly refreshes the cache so the runner sees
 your just-pushed commit without the cache having to fetch it mid-clone --
 no waiting on a CI queue between edits.

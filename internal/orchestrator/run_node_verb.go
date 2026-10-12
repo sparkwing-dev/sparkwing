@@ -39,7 +39,7 @@ func RunNodeCommand(args []string) error {
 	defer secrets.StopSharingRegistered()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"), "controller base URL")
-	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"), "logs-service URL")
+	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"), "node log endpoint of the engine process that started this one")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func RunNodeCommand(args []string) error {
 			go func() {
 				defer wg.Done()
 				heartbeatDispatchedClaim(hbCtx,
-					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken),
+					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken).WithWatchObserver(NoteWatch),
 					runID, nodeID, fence, lease, abandon, slog.Default())
 			}()
 		}

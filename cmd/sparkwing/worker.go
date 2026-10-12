@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -66,14 +67,8 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 		prof.Name, prof.ControllerURL(), poll)
 
 	token := prof.ControllerToken()
-	logsURL := prof.ExplicitLogsURL()
-	if logsURL == "" {
-		if logsURL, err = orchestrator.DiscoverLogsURL(ctx, prof.ControllerURL(), token); err != nil {
-			return fmt.Errorf("worker: %w", err)
-		}
-	}
 	cli := client.NewWithToken(prof.ControllerURL(), nil, token).
-		WithRunnerIdentity(logs.ProcessIdentity("worker"))
+		WithRunnerIdentity(client.ProcessIdentity("worker"))
 	shed := client.NewShedLog(client.ShedWarnInterval)
 	pacer := client.NewPacer(poll)
 	for {
@@ -119,7 +114,7 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		if err := dispatchTrigger(ctx, self, trigger, prof.ControllerURL(), logsURL, token, heartbeat); err != nil {
+		if err := dispatchTrigger(ctx, self, trigger, prof.ControllerURL(), token, heartbeat); err != nil {
 			fmt.Fprintf(os.Stderr, "worker: handle-trigger %s: %v\n", trigger.ID, err)
 		}
 	}
@@ -128,19 +123,19 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 // safety: handle-trigger runs the team's pipeline code, so it reaches the
 // controller through a broker that admits only its run's routes, and the
 // profile's token stays in this process.
-func dispatchTrigger(ctx context.Context, self string, trigger *store.Trigger, controllerURL, logsURL, token string, heartbeat time.Duration) error {
-	broker, err := orchestrator.StartTriggerBroker(controllerURL, logsURL, token, trigger, nil)
+func dispatchTrigger(ctx context.Context, self string, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
+	broker, err := orchestrator.StartTriggerBroker(controllerURL, token, trigger, nil)
 	if err != nil {
 		return fmt.Errorf("start trigger broker: %w", err)
 	}
 	defer broker.Close(ctx)
-	if logsURL != "" {
-		logsURL = broker.URL()
-	}
-	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(trigger.ID, broker.URL(), logsURL, heartbeat)...)
+	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(trigger.ID, broker.URL(), heartbeat)...)
 	cmd := exec.CommandContext(ctx, self, args...)
 	// safety: the child reads the capability from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
-	cmd.Env = append(os.Environ(), "SPARKWING_AGENT_TOKEN="+broker.Capability())
+	// safety: the child keeps its node logs through the controller; an inherited engine log endpoint would
+	// send them to whatever process last served one.
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "SPARKWING_LOGS_URL=") })
+	cmd.Env = append(cmd.Env, "SPARKWING_AGENT_TOKEN="+broker.Capability())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {

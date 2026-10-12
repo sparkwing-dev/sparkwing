@@ -38,7 +38,7 @@ func (b *ClientBackend) Capabilities(context.Context) (Capabilities, error) {
 	if b.caps.Mode == "" {
 		return Capabilities{
 			Mode:     "cluster",
-			Storage:  CapabilitiesStorage{Artifacts: "custom", Logs: "sparkwinglogs", Runs: "controller"},
+			Storage:  CapabilitiesStorage{Artifacts: "custom", Logs: "segments", Runs: "controller"},
 			Features: []string{"pipelines", "runs", "logs", "secrets", "approvals", "cross-pipeline-refs"},
 		}, nil
 	}
@@ -74,6 +74,9 @@ func (b *ClientBackend) StreamNodeLog(ctx context.Context, runID, nodeID string)
 	}
 	return b.logStore.Stream(ctx, runID, nodeID)
 }
+
+// Remote returns the controller client and log store b reads through.
+func (b *ClientBackend) Remote() (*client.Client, storage.LogStore) { return b.c, b.logStore }
 
 var _ LiveLogReader = (*ClientBackend)(nil)
 

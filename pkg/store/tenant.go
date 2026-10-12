@@ -297,6 +297,7 @@ var tenantTables = []string{
 	"node_bounces",
 	"node_dispatches",
 	"node_execution_attempts",
+	"node_logs",
 	"node_metrics",
 	"node_outputs",
 	"node_steps",
@@ -339,6 +340,7 @@ var keyedAtCreation = []string{
 	"repos",
 	"card_charges", "card_attempts", "card_refunds", "team_spend_days",
 	"node_outputs", "output_runs", "output_tombstones",
+	"node_logs",
 }
 
 // safety: sparkwing_meta is the deployment's bag, so per-team keys need their own table. A human

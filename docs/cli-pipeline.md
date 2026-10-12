@@ -131,10 +131,9 @@ an installation failure restores prior managed hooks, forwarders, modes,
 and configuration. A rejected installation exits nonzero and reports its
 reason on stderr. --no-prove skips gate execution.
 
-Without --profile, hooks use --sw-local-only. --profile NAME selects shared
-storage. --fleet processes registered repositories and distinguishes installed
-gates, gates that could not execute, and repositories declaring no blocking
-gate.
+Every hook runs its pipelines with --sw-local-only on this machine. --fleet
+processes registered repositories and distinguishes installed gates, gates
+that could not execute, and repositories declaring no blocking gate.
 
 ### Flags
 
@@ -142,7 +141,6 @@ gate.
 |---|---|
 | `--fleet` | Install into every registered repo instead of one |
 | `--no-prove` | Claim core.hooksPath without running the gate first |
-| `--profile NAME` | Pin the hook's runs to this storage profile (default: local-only) |
 
 ### Examples
 
@@ -155,9 +153,6 @@ sparkwing -C /path/to/repo pipeline hooks install
 
 # Arm every registered repo
 sparkwing pipeline hooks install --fleet
-
-# Pin the gate's runs to one store
-sparkwing pipeline hooks install --profile bucket
 ```
 
 ## `sparkwing pipeline hooks status`
@@ -780,9 +775,8 @@ Submit a pipeline to a profile's controller (remote execution)
 Submits a trigger to the controller defined by --profile and
 follows the remote run until it reaches a terminal state.
 
-When the profile defines a logs URL, the follow streams full log
-output; otherwise it shows node-status updates from the
-controller. --detach skips the follow and prints the run id once
+The follow streams the run's node logs through the controller.
+--detach skips the follow and prints the run id once
 the trigger is registered (the trigger POST itself always
 completes before the command exits, so the run is guaranteed
 queued).
@@ -816,8 +810,10 @@ each path and whether it is tracked. Untrack it with
 'git rm --cached', ignore it, or send it anyway by naming it with
 --allow-secret-file PATH once per file; there is no blanket bypass.
 
-Requires a profile with controller: set. For local execution
-against a profile's storage, use 'sparkwing run --profile X'.
+Requires --profile naming a profile with controller: set; there is no
+default. A pipeline whose sparkwing.yaml entry names profile: P is pinned
+to P: trigger refuses any other --profile, and 'sparkwing run' refuses it
+locally.
 
 ### Arguments
 

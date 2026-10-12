@@ -93,9 +93,6 @@ spec:
             {{- if $controllerURL }}
             - {{ printf "--controller=%s" $controllerURL | quote }}
             {{- end }}
-            {{- if .Values.logs.enabled }}
-            - {{ printf "--logs=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.logs.fullname" .) .Release.Namespace | quote }}
-            {{- end }}
             {{- with $gitcache }}
             - {{ printf "--gitcache=%s" . | quote }}
             {{- end }}

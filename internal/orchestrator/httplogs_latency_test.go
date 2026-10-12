@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,7 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -32,7 +33,6 @@ type capturedLogBatch struct {
 	start, end int64
 	body       []byte
 	holder     string
-	attempt    string
 }
 
 func (t *modeledRTTLogTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -52,16 +52,15 @@ func (t *modeledRTTLogTransport) RoundTrip(r *http.Request) (*http.Response, err
 		if err != nil {
 			return nil, err
 		}
-		first, _ := strconv.ParseInt(r.Header.Get(logs.LogSeqHeader), 10, 64)
+		first, _ := strconv.ParseInt(r.Header.Get(logseg.LogSeqHeader), 10, 64)
 		last := first
-		if raw := r.Header.Get(logs.LogSeqEndHeader); raw != "" {
+		if raw := r.Header.Get(logseg.LogSeqEndHeader); raw != "" {
 			last, _ = strconv.ParseInt(raw, 10, 64)
 		}
 		t.mu.Lock()
 		t.batches = append(t.batches, capturedLogBatch{
 			start: first, end: last, body: body,
-			holder:  r.Header.Get(store.ClaimHolderHeader),
-			attempt: r.Header.Get(store.AttemptOrdinalHeader),
+			holder: r.Header.Get(store.ClaimHolderHeader),
 		})
 		t.mu.Unlock()
 	}
@@ -157,15 +156,20 @@ func TestHTTPLogs_BatchesStayWithinClaimAndAttempt(t *testing.T) {
 	if len(transport.batches) != 3 {
 		t.Fatalf("batches = %d, want three claim/attempt partitions", len(transport.batches))
 	}
+	var msgs []string
 	for _, batch := range transport.batches {
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(bytes.TrimSpace(batch.body), &rec); err != nil {
 			t.Fatal(err)
 		}
-		want := batch.holder + batch.attempt
-		if rec.Msg != want {
-			t.Fatalf("claim %s attempt %s contains %q", batch.holder, batch.attempt, rec.Msg)
+		if !strings.HasPrefix(rec.Msg, batch.holder) {
+			t.Fatalf("claim %s contains %q", batch.holder, rec.Msg)
 		}
+		msgs = append(msgs, rec.Msg)
+	}
+	slices.Sort(msgs)
+	if !slices.Equal(msgs, []string{"A1", "A2", "B1"}) {
+		t.Fatalf("batches carried %v, want one per claim and attempt", msgs)
 	}
 }
 

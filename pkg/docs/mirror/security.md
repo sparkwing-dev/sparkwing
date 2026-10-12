@@ -25,8 +25,8 @@ writes: a run's cache and binary entries are written under its own repository
 and ref, as [Cache service](#cache-service) describes.
 
 **Operators and service credentials have separate authority.** `admin` is
-deployment authority. Service scopes such as `credits.grant`, `claims.launch`,
-`storage.count` and `logs.delete` cross teams for their documented operations. Team membership
+deployment authority. Service scopes such as `credits.grant`, `claims.launch`
+and `storage.count` cross teams for their documented operations. Team membership
 does not grant them. Operators who control the database, encryption keys or
 cluster remain trusted with tenant data. See [Authentication](auth.md) for
 individual scope and claim contracts.
@@ -182,7 +182,7 @@ single-user tool on a single-user machine.
 
 ## Authentication and authorization
 
-Controller and logs requests carry a bearer token; each route declares
+Controller requests carry a bearer token; each route declares
 the scope it needs. Tokens are typed (`swu_`/`swr_`/`swt_`/`sws_`), stored as
 argon2id hashes, and never logged in full. The complete model -- token
 kinds, the scope set, per-endpoint enforcement, the unauthenticated
@@ -316,7 +316,7 @@ GitHub token, and the HMAC-verified webhook is what writes them.
 handler and again in the store, so a read-only token cannot ask one
 request to materialize every row with its plan, args, and payload blobs.
 
-`GET /api/v1/services` announces internal cache and logs URLs and needs a
+`GET /api/v1/services` announces internal service URLs and needs a
 bearer; any valid token satisfies it, and every client that consumes it
 already holds one.
 
@@ -977,59 +977,16 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   the next restart. Unmount the Secret (clear
   `controller.bootstrapAdminToken.name`) before revoking, or mint a
   replacement admin token first so the table still holds a live one.
-- **Point the logs service at a controller.** Without `--controller`
-  `sparkwing-logs` resolves no tokens, so
-  anything that reaches its Service can read, forge, and delete every
-  run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
-  and `sparkwing cloud status --cluster` flags the logs probe as a warning. Pass
-  `--require-auth` so the pod refuses to start without an absolute `http(s)` controller URL, which keeps a
-  typo from advertising `"auth": "enabled"` on a service whose every
-  token lookup fails. The runner-bundle chart wires the controller URL
-  from `controller.tokenSecret`, and a logs-enabled install without that
-  Secret fails at render time unless you set
-  `logs.allowUnauthenticated=true`. `cloud status --cluster` warns rather than
-  passing whenever it cannot read the logs service's auth state: no
-  announced logs URL, a health body with no `auth` field (an image
-  older than the report), or a degraded service.
-- **Size the logs service's quotas for your volume.** `sparkwing-logs`
-  caps what one authenticated runner can spend. The service reads these
-  as flags only, and `0` turns that bound off.
-
-  | Flag | Default | Effect |
-  |------------|---------|--------|
-  | `--max-node-bytes` | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
-  | `--max-run-bytes` | 1GiB | Same cap across every node log in one run. |
-  | `--max-inflight-bytes` | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
-  | `--min-free-bytes` | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
-  | `--retention` | 0 (off); 2160h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 90 days unless the operator names another value, zero included. A run of a team without credits keeps its archived logs 30 days at most. |
-  | `--sweep-interval` | 1h | How often the sweeper runs. |
-  | `--search-max-bytes` | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
-  | `--search-timeout` | 10s | How long one search may scan. |
-  | `--max-line-bytes` | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
-  | `--binary-ratio` | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
-  | `--max-store-bytes` | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
-  | `--max-store-objects` | 0 (off) | Same ceiling counted in log files. |
-  | `--warn-store-bytes` | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
-  | `--warn-store-objects` | 0 (off) | Same warning counted in log files. |
-  | `--store-reconcile` | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
-
-  A search that hits either budget, or whose caller disconnects, returns
-  the matches it found with `"truncated": true` and a `reason` naming the
-  limit. Archived runs are scanned from their object-store logs without
-  restoring the run to the local volume. The archive's recorded team is
-  checked before reading a log object. Search also requires
-  `run_id`; a query without one is refused with `400` rather than
-  walking every stored run.
-
-  The runner-bundle chart passes these through as `logs.limits.*`
-  (`maxNodeBytes`, `maxRunBytes`, `maxInflightBytes`, `minFreeBytes`,
-  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`,
-  `maxLineBytes`, `binaryRatio`); an
-  empty value keeps the binary's default. Size them against
-  `logs.storage.size`, because a volume left to fill answers `507` to
-  every append until you turn on retention or delete runs. A malformed
-  or negative value stops the service at startup rather than falling
-  back to the default.
+- **Know the node log bounds.** Node logs reach the controller as
+  segments in its cache bucket or output directory, so they need no
+  service or volume of their own. A runner caps one node attempt's log at
+  64 MiB and stores a truncation marker past it; the controller refuses a
+  segment over 8 MiB and a manifest over 4 MiB. A run's log search and
+  the cross-run grep read at most 256 MiB and scan for at most 10 seconds,
+  and a search requires a run. On a multi-team controller segment bytes
+  count against the team's log share ([Tenant limits](limits.md)), and
+  bucket lifecycle rules expire them
+  ([self-hosting.md](self-hosting.md#node-log-retention)).
 
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.

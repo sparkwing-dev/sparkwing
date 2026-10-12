@@ -1,7 +1,7 @@
-// Package storagequota is how the cache and the logs service ask the
-// controller to count a team's storage and downloads. The controller keeps
-// every count in its database under a row lock, so the services hold no
-// count of their own and any number of replicas of them agree.
+// Package storagequota is how the cache asks the controller to count a
+// team's storage and downloads. The controller keeps every count in its
+// database under a row lock, so the cache holds no count of its own and any
+// number of its replicas agree.
 //
 // A write reserves its size before one byte is read ([Client.Reserve]),
 // commits what it stored ([Client.Commit]) or releases the room when it
@@ -28,11 +28,6 @@ import (
 	"time"
 )
 
-// ArchivedBytesDeletedHeader names, on the logs service's answer to a run
-// deletion, the bytes of the run's archived logs it removed from the object
-// store, which is what the controller takes off the team's count.
-const ArchivedBytesDeletedHeader = "X-Sparkwing-Archived-Bytes-Deleted"
-
 // Tier is what a team may store.
 type Tier string
 
@@ -51,7 +46,6 @@ type Kind string
 
 const (
 	KindCache Kind = "cache"
-	KindLogs  Kind = "logs"
 )
 
 // OperatorTeam is the operator's own team, which no limit applies to.

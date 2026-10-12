@@ -585,7 +585,7 @@ func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		if err := s.WithSignedDownloads(bucket, nil, client, "", "", ""); err != nil {
+		if err := s.WithSignedDownloads(bucket, client, "", "", ""); err != nil {
 			t.Fatal(err)
 		}
 		return s.WithDirectUploads(client, "bucket", "cache")

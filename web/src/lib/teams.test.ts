@@ -326,12 +326,7 @@ describe("mintMachineToken", () => {
     assert.equal(calls[0].url, "/api/v1/team/tokens");
     assert.equal(calls[0].method, "POST");
     assert.deepEqual(JSON.parse(calls[0].body), {
-      scopes: [
-        "nodes.claim",
-        "triggers.claim",
-        "runs.state",
-        "logs.write",
-      ],
+      scopes: ["nodes.claim", "triggers.claim", "runs.state"],
       name: "build-box",
       repos: ["github.com/acme/*", "github.com/acme/app"],
     });

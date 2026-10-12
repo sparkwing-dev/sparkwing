@@ -132,7 +132,7 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 
 func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
 	projectCfg := bindProjectPipelines()
-	prof, _, err := resolveActiveProfile(loadPipelineYAML(pipeline), projectCfg)
+	prof, _, err := resolveActiveProfile(projectCfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("run-node --coordinated: resolve profile: %w", err)
 	}
@@ -191,11 +191,11 @@ func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBacke
 	if prof == nil {
 		return nil, nil
 	}
-	_, logs, _ := profileSurfaceSpecs(prof, "")
+	state, logs, _ := profileSurfaceSpecs(prof, "")
 	if logs == nil {
 		return nil, nil
 	}
-	sink, err := storeurl.OpenLogStoreFromSpec(ctx, *logs, profileControllerLookup(prof))
+	sink, err := openLogStoreFromSpec(ctx, *logs, true, state, profileControllerLookup(prof))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"run-node --coordinated: profile %q declares a %s logs surface this node cannot open: %w",

@@ -105,7 +105,7 @@ func agentPoolConfig(cfg agentconfig.Config) (PoolLoopConfig, error) {
 		}
 	}
 	return PoolLoopConfig{
-		ControllerURL: cfg.Controller, LogsURL: cfg.Logs, GitcacheURL: cfg.Gitcache, AllowRepos: allow,
+		ControllerURL: cfg.Controller, GitcacheURL: cfg.Gitcache, AllowRepos: allow,
 		Token: cfg.Token, HolderPrefix: prefix,
 		Labels: cfg.Labels, MaxConcurrent: cfg.MaxConcurrent, PollInterval: cfg.Poll,
 		Lease: cfg.Lease, HeartbeatInterval: cfg.Heartbeat, SourceName: "agent",

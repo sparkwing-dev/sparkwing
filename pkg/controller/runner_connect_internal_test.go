@@ -11,24 +11,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func TestRunnerConnectArgsShipsLogsOnlyToAnAnnouncedLogsService(t *testing.T) {
+func TestRunnerConnectArgsNamesTheControllerAndRepos(t *testing.T) {
 	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := runnerConnectArgs("https://api.example", "https://logs.example/", "box", allow, store.MachineTokenScopes())
+	got := runnerConnectArgs("https://api.example", "box", allow, store.MachineTokenScopes())
 	want := `sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials"` +
-		" --controller https://api.example --logs https://logs.example" +
-		" --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix box"
-	if got != want {
-		t.Fatalf("runnerConnectArgs = %q\nwant %q", got, want)
-	}
-	got = runnerConnectArgs("https://api.example", "", "box", allow, store.MachineTokenScopes())
-	want = `sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials"` +
 		" --controller https://api.example" +
 		" --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix box"
 	if got != want {
-		t.Fatalf("runnerConnectArgs without a logs service = %q\nwant %q", got, want)
+		t.Fatalf("runnerConnectArgs = %q\nwant %q", got, want)
 	}
 }
 
@@ -48,7 +41,7 @@ func TestRunnerConnectArgsRunsTheLoopsTheScopesAllow(t *testing.T) {
 		{[]string{store.ScopeTriggersClaim, store.ScopeRunsState}, true, true},
 		{store.MachineTokenScopes(), true, false},
 	} {
-		got := runnerConnectArgs("https://api.example", "", "box", allow, tc.scopes)
+		got := runnerConnectArgs("https://api.example", "box", allow, tc.scopes)
 		if strings.Contains(got, " --also-claim-triggers") != tc.triggers ||
 			strings.Contains(got, " --claim-nodes=false") != tc.nodesRefused {
 			t.Errorf("runnerConnectArgs for %v = %q", tc.scopes, got)
@@ -114,7 +107,7 @@ func TestTheConnectCommandStopsWhenItCannotReplaceTheTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", "-c", runnerTokenSetup("swr_new")+" && "+runnerConnectArgs("https://api.example", "", "box", allow, store.MachineTokenScopes()))
+	cmd := exec.Command("sh", "-c", runnerTokenSetup("swr_new")+" && "+runnerConnectArgs("https://api.example", "box", allow, store.MachineTokenScopes()))
 	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("connect command succeeded although it could not remove the old token file:\n%s", out)

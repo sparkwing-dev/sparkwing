@@ -86,7 +86,7 @@ func TestTriggerBrokerReadsSecretsFromAnOpenController(t *testing.T) {
 	}
 	srv := httptest.NewServer(controller.New(st, nil).WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
-	broker, err := orchestrator.StartTriggerBroker(srv.URL, "", "", trig, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	broker, err := orchestrator.StartTriggerBroker(srv.URL, "", trig, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestTriggerBrokerRefusesASecretReadWithoutAClaimTokenWhenAuthenticating(t *
 	}
 	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
-	broker, err := orchestrator.StartTriggerBroker(srv.URL, "", runner,
+	broker, err := orchestrator.StartTriggerBroker(srv.URL, runner,
 		&store.Trigger{ID: "run-a", Pipeline: "build"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

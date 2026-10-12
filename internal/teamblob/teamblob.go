@@ -1,4 +1,4 @@
-// Package teamblob keeps the cache and logs services' bytes in an
+// Package teamblob keeps the cache's bytes in an
 // S3-compatible bucket, one namespace per team.
 //
 // Every object a team writes lives under

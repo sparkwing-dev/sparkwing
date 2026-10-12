@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -44,7 +45,7 @@ func runNodeRemote(
 	ctx context.Context,
 	trigger *store.Trigger,
 	run *store.Run,
-	controllerURL, logsURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
+	controllerURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
 	allow *sourceurl.RepoAllowlist,
 	logger *slog.Logger,
 ) (runner.Result, error) {
@@ -135,7 +136,7 @@ func runNodeRemote(
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.path)
-	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
+	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
 }
 
 // safety: a pooled agent serves many runs from one process, so the cache grant is the node's,
@@ -186,7 +187,7 @@ func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir,
 
 func runNodeIsolated(
 	ctx context.Context,
-	controllerURL, logsURL, runID, nodeID, token, cacheGrant string,
+	controllerURL, runID, nodeID, token, cacheGrant string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	binary, err := os.Executable()
@@ -200,7 +201,7 @@ func runNodeIsolated(
 			return runner.Result{}, fmt.Errorf("resolve runner work directory: %w", err)
 		}
 	}
-	return runNodeChild(ctx, binary, dir, controllerURL, logsURL, token, "", cacheGrant, runID, nodeID, logger)
+	return runNodeChild(ctx, binary, dir, controllerURL, token, "", cacheGrant, runID, nodeID, logger)
 }
 
 var runNodeIsolatedFn = runNodeIsolated
@@ -209,7 +210,7 @@ var runNodeIsolatedFn = runNodeIsolated
 // the run's cache grant and reaches the controller through the broker.
 func runNodeChild(
 	ctx context.Context,
-	binary, dir, controllerURL, logsURL, token, cacheURL, cacheGrant, runID, nodeID string,
+	binary, dir, controllerURL, token, cacheURL, cacheGrant, runID, nodeID string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	fence, _ := store.NodeClaimFenceFromContext(ctx)
@@ -217,13 +218,15 @@ func runNodeChild(
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("open supervisor artifact store: %w", err)
 	}
-	broker, err := startRemoteExecutionBroker(controllerURL, logsURL, token, runID, nodeID, fence, artifact, logger)
+	broker, err := startRemoteExecutionBroker(controllerURL, token, runID, nodeID, fence, artifact, logger)
 	if err != nil {
 		return runner.Result{}, err
 	}
 	defer broker.Close()
 	childLogsURL := ""
-	if logsURL != "" {
+	if sink := openNodeLogSink(ctx, client.NewWithToken(controllerURL, nil, token), runID, nodeID, logger); sink != nil {
+		defer sink.close(ctx, true)
+		broker.logSink = sink
 		childLogsURL = broker.URL()
 	}
 	childBaseEnv, err := remoteExecutionChildEnvironment(os.Environ())

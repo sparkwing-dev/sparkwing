@@ -150,36 +150,6 @@ func TestLogsDropped_MisspelledPolicyStillFails(t *testing.T) {
 	}
 }
 
-func TestLogsDropped_404NamesTheMissingService(t *testing.T) {
-	register("drop404-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
-	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)
-	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 0)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(srv.Close)
-
-	backends, st := dropFailBackends(t, srv.URL)
-	res, err := orchestrator.Run(context.Background(), backends,
-		orchestrator.Options{Pipeline: "drop404-demo"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	nodes, err := st.ListNodes(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("ListNodes: %v", err)
-	}
-	for _, n := range nodes {
-		if n.NodeID != "only" {
-			continue
-		}
-		if !strings.Contains(n.Error, "separate service") {
-			t.Errorf("a 404 should name the missing logs service, got: %q", n.Error)
-		}
-	}
-}
-
 func writeDropPolicy(t *testing.T, policy string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

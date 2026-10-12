@@ -251,7 +251,7 @@ func TestRunLogsSearch_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/r/logs/search?q=needle", nil)
 	req.SetPathValue("id", "r")
 	rec := httptest.NewRecorder()
-	RunLogsSearchHandler(b)(rec, req)
+	RunLogsSearchHandler(b, SearchBounds{})(rec, req)
 	var body struct {
 		Total     int  `json:"total"`
 		Truncated bool `json:"truncated"`
@@ -276,7 +276,7 @@ func TestRunsGrep_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle", nil)
 	rec := httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, req)
+	RunsGrepHandler(b, SearchBounds{})(rec, req)
 	var body struct {
 		Total     int  `json:"total"`
 		Truncated bool `json:"truncated"`
@@ -306,7 +306,7 @@ func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&run_id=included", nil)
 	rec := httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, req)
+	RunsGrepHandler(b, SearchBounds{})(rec, req)
 	if len(read) != 1 || read[0] != "included" {
 		t.Fatalf("log endpoints called for %v, want only included", read)
 	}
@@ -338,7 +338,7 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
 	}
 	rec := httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&branch=rare&limit=200", nil))
+	RunsGrepHandler(b, SearchBounds{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&branch=rare&limit=200", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("search = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -354,7 +354,7 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 		t.Fatalf("branch search matches = %+v, want older-match", body.Matches)
 	}
 	rec = httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=deadbee&limit=200", nil))
+	RunsGrepHandler(b, SearchBounds{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=deadbee&limit=200", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("SHA search = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -365,7 +365,7 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 		t.Fatalf("SHA search matches = %+v, want older-match", body.Matches)
 	}
 	rec = httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=not-a-sha", nil))
+	RunsGrepHandler(b, SearchBounds{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=not-a-sha", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid SHA search = %d, want 400", rec.Code)
 	}
@@ -384,12 +384,34 @@ func TestRunsGrep_StopsAtMatchLimitInRunOrder(t *testing.T) {
 		},
 	}
 	rec := httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
+	RunsGrepHandler(b, SearchBounds{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
 	if len(read) != 1 || read[0] != "newest" {
 		t.Fatalf("read %v, want newest only", read)
 	}
 	if !strings.Contains(rec.Body.String(), `"runs_scanned":1`) || !strings.Contains(rec.Body.String(), `"runs_matching":2`) {
 		t.Fatalf("response: %s", rec.Body.String())
+	}
+}
+
+func TestRunsGrep_StopsAtItsByteBoundAndSaysSo(t *testing.T) {
+	content := []byte("{\"msg\":\"needle\"}\n")
+	b := &fakeBackend{
+		listRuns:    func(store.RunFilter) ([]*store.Run, error) { return []*store.Run{{ID: "r1"}, {ID: "r2"}}, nil },
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return content, nil },
+	}
+	rec := httptest.NewRecorder()
+	RunsGrepHandler(b, SearchBounds{MaxBytes: int64(len(content))})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle", nil))
+	var body struct {
+		Total     int    `json:"total"`
+		Truncated bool   `json:"truncated"`
+		Stopped   string `json:"stopped"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	}
+	if body.Total != 1 || !body.Truncated || !strings.Contains(body.Stopped, "bytes of logs") {
+		t.Fatalf("bounded grep = %s", rec.Body.String())
 	}
 }
 
@@ -430,7 +452,7 @@ func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *t
 	pages := 0
 	for {
 		rec := httptest.NewRecorder()
-		RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, query, nil))
+		RunsGrepHandler(b, SearchBounds{})(rec, httptest.NewRequest(http.MethodGet, query, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("search = %d: %s", rec.Code, rec.Body.String())
 		}
@@ -471,7 +493,7 @@ func TestRunsGrep_ResumesAfterTheRunWhereTheMatchLimitStopped(t *testing.T) {
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte(`{"msg":"needle"}` + "\n"), nil },
 	}
 	rec := httptest.NewRecorder()
-	RunsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
+	RunsGrepHandler(b, SearchBounds{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
 	if !strings.Contains(rec.Body.String(), `"next_cursor":{"after_id":"newest","after_started_at":"3000000000000000123"}`) {
 		t.Fatalf("response: %s", rec.Body.String())
 	}

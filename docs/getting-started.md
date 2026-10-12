@@ -217,10 +217,11 @@ What still wants the network is visible in advance:
   overlay already on disk, or pin exact tags and pay nothing. Without the
   flag an unreachable proxy fails the run and the error names it. The
   resolution rules are in [sparks.md](sparks.md).
-- **A profile with a `controller:` block.** Sparkwing Cloud and any other
-  hosted controller own state, cache, and secrets over HTTPS, so a run
-  under that profile needs the controller. `--sw-local-only` pins one run
-  back to the local surfaces.
+- **A profile.** `sparkwing pipeline trigger <pipeline> --profile NAME`
+  and read verbs that name a controller profile need that controller over
+  HTTPS, and `sparkwing run --profile NAME` with an S3 or Postgres state
+  profile needs that bucket or database. `sparkwing run` without
+  `--profile` reads and writes only local surfaces.
 - **What the pipeline itself does.** A step that pulls an image, fetches a
   ref, or deploys needs whatever that step needs. Sparkwing does not
   change it.
@@ -330,18 +331,23 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 
 ## Run Targets
 
-`sparkwing run` executes locally; `sparkwing pipeline trigger` hands
-execution to a profile's controller. Both take `--profile` to pick where
-state lives and which controller to talk to. `sparkwing run` also takes
+`sparkwing run` executes on this machine and, without `--profile`, records
+to its local store, logs, and cache. `sparkwing pipeline trigger <pipeline> --profile
+NAME` hands execution to that profile's controller. `sparkwing run
+--profile NAME` accepts only a profile with no controller whose state is
+an S3 bucket or a Postgres database, and records the local run there; it
+is a temporary exception slated for removal. `sparkwing run` also takes
 `--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
-tree (trigger runs the source registered with the controller):
+tree (trigger runs the source registered with the controller, or the
+checkout's uncommitted changes with `--working-tree`):
 
 ```bash
-sparkwing run build                              # run locally with local code
-sparkwing run build --profile dev               # local code, state via "dev"
-sparkwing run build --sw-ref main               # build the main ref locally
-sparkwing pipeline trigger build --profile dev  # run on the "dev" cluster
-sparkwing pipeline trigger build --profile prod # run on the "prod" cluster
+sparkwing run build                                    # run locally with local code
+sparkwing run build --sw-ref main                      # build the main ref locally
+sparkwing run build --profile shared                   # local run, state in an S3 profile
+sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
+sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted changes on "dev"
+sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
 ```
 
 Cluster names are profiles. `sparkwing cloud connect` writes one; see
@@ -376,10 +382,8 @@ above) unless you pass `--name`. An existing profile of that
 name is replaced only with `--force`, because the token it holds stays live
 until it is revoked.
 
-Add `--set-default` inside a repository to write `defaults.profile` into its
-`.sparkwing/sparkwing.yaml`, so runs in that checkout select the connection
-with no flag. The name resolves against the project's own `profiles:` block
-first and `config.yaml` second, so the token stays out of the checkout.
+Commands reach the connection only when they name it with `--profile`;
+without the flag they act on this machine's store.
 
 ```bash
 sparkwing cloud status --profile prod        # principal, scopes, and probes
@@ -443,28 +447,30 @@ read it; reach for one of these when you host the state, cache, or
 controller yourself. Each is one profile away, and pipeline code does not
 change between them.
 
+**Self-hosted controller.** The `sparkwing-full` Helm chart deploys the
+controller, dashboard, cache, and Kubernetes runner into a
+cluster you operate. See [Self-hosting](self-hosting.md) and
+[hosted controller](deployment-modes.md#hosted-controller).
+
+**One of your own machines as the controller.** A single-instance
+controller on one box, backed by SQLite and local disk, lets a laptop
+trigger pipelines on a desktop you own. See
+[one of your own machines as the controller](deployment-modes.md#one-of-your-own-machines-as-the-controller).
+
 **Shared object storage.** Runners write run state, cache blobs, and logs
-to one bucket, and coordinate over object-store compare-and-swap with no
-database and no controller. See
-[shared object storage](deployment-modes.md#shared-object-storage-mode-2).
+to one bucket through `sparkwing run --profile NAME`, and coordinate over
+object-store compare-and-swap with no database and no controller. This is
+a temporary exception slated for removal; a controller is the supported
+way to share runs. See
+[shared object storage](deployment-modes.md#shared-object-storage).
 
 **Postgres and object storage.** Run state moves to a shared Postgres so
 cache reservation, triggers, approvals, and debug pauses rest on a row
 lock rather than the bucket's CAS support. Every runner then holds a
-database credential. See
-[Postgres and object storage](deployment-modes.md#postgres-and-object-storage-mode-3).
+database credential. The same temporary exception applies. See
+[Postgres and object storage](deployment-modes.md#postgres-and-object-storage).
 
-**Self-hosted controller.** The `sparkwing-full` Helm chart deploys the
-controller, dashboard, cache, logs service, and Kubernetes runner into a
-cluster you operate. See [Self-hosting](self-hosting.md) and
-[hosted controller](deployment-modes.md#hosted-controller-mode-4).
-
-**One of your own machines as the controller.** A single-instance
-controller on one box, backed by SQLite and local disk, lets a laptop
-point its profile at a desktop you own. See
-[one of your own machines as the controller](deployment-modes.md#one-of-your-own-machines-as-the-controller).
-
-**Profile surface YAML.** The `state` / `cache` / `logs` triple every
-advanced shape selects is documented in
+**Profile surface YAML.** The `controller:` block and the `state` /
+`cache` / `logs` triple are documented in
 [Storage backends](backends.md), and the full field list in
 [config-reference.md](config-reference.md).

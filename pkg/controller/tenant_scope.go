@@ -105,22 +105,11 @@ func (s *Server) requestTenant(w http.ResponseWriter, r *http.Request) (*store.T
 	return nil, false
 }
 
-// safety: these routes name a run id in their path but are answered for a
-// caller other than the run's team, so the boundary leaves them to their own
-// gate. Each entry says what that gate is.
-var teamBoundaryExempt = map[string]string{
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate": "the logs service asks whether a runner's " +
-		"log-write claim is live; the claim it validates is bound to the claimant's own team",
-}
-
 // safety: the mux unescapes every segment before matching, so /api/v1/%72uns/x
 // reaches a /api/v1/runs/{id} handler. Reading the id by position, unescaped
 // as the mux does, keeps the run checked here the run the handler is handed,
 // and a path too short to name one is still checked rather than passed on.
 func teamBoundaryRunID(pattern string, r *http.Request) (string, bool) {
-	if _, exempt := teamBoundaryExempt[pattern]; exempt {
-		return "", false
-	}
 	_, path, _ := strings.Cut(pattern, " ")
 	if !strings.HasPrefix(path, "/api/v1/runs/{id}") && !strings.HasPrefix(path, "/api/v1/triggers/{id}") {
 		return "", false
@@ -176,12 +165,6 @@ func writeClaimTeamRefusal(w http.ResponseWriter, err error) bool {
 		Message: "this credential carries no team, so it can claim no work; use a token minted for a team",
 	})
 	return true
-}
-
-// safety: the team boundary in front of the mux already answered 404 for another team's run, so
-// reaching here is the yes.
-func handleRunLogAccess(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // safety: repeats the team boundary's check because a grant it feeds opens that team's namespace

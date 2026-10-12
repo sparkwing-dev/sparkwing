@@ -10,7 +10,7 @@ run under `~/.sparkwing/`. `sparkwing serve start` spawns a detached
 local web server (`pkg/localws`, embedded in the CLI); it owns the
 SQLite store, the log files, and the dashboard on one port (default
 `http://127.0.0.1:4343`) - no controller pod, no cache, no runner
-pods, no separate logs service. See [native-mode.md](native-mode.md).
+pods. See [native-mode.md](native-mode.md).
 
 The rest of this page is about the in-cluster shape you deploy once per
 team, not once per developer.
@@ -18,8 +18,8 @@ team, not once per developer.
 ---
 
 Sparkwing (prod deployment) is a self-hosted CI/CD platform that runs on
-Kubernetes. The stack is four pods: a controller, which also serves the
-dashboard, cache, runner, and logs. Building container images (Docker-in-Docker) and hosting an
+Kubernetes. The stack is three pods: a controller, which also serves the
+dashboard and node logs, a cache, and a runner. Building container images (Docker-in-Docker) and hosting an
 image registry, when a pipeline needs them, are external infrastructure
 the chart does not deploy.
 
@@ -36,12 +36,12 @@ the chart does not deploy.
 │  │  + dashboard)│  │   + pkg proxy│                               │
 │  └──────┬───────┘  └──────────────┘                               │
 │         │                                                          │
-│  ┌──────┴───────┐  ┌──────────────┐                               │
-│  │  Runner      │  │   Logs       │                               │
-│  │  (warm pool, │  │  (log store) │                               │
-│  │   polls +    │  │              │                               │
-│  │   claims)    │  │              │                               │
-│  └──────────────┘  └──────────────┘                               │
+│  ┌──────┴───────┐                                                 │
+│  │  Runner      │                                                 │
+│  │  (warm pool, │                                                 │
+│  │   polls +    │                                                 │
+│  │   claims)    │                                                 │
+│  └──────────────┘                                                 │
 └──────────────────────────────────────────────────────────────────┘
          ▲                    ▲
          │                    │
@@ -51,8 +51,7 @@ the chart does not deploy.
     └─────────┘          └─────────┘
 ```
 
-Four pods: sparkwing-controller, sparkwing-cache, sparkwing-runner, and
-sparkwing-logs.
+Three pods: sparkwing-controller, sparkwing-cache and sparkwing-runner.
 
 ### Controller
 
@@ -121,11 +120,11 @@ See [Cache](gitcache.md) for endpoints and configuration.
 Next.js web app showing pipeline runs, logs, node status, and
 documentation. The controller embeds the bundle and serves it on its API
 port; `sparkwing serve` serves the same bundle locally. Log panes read
-through the controller, which forwards each read to the logs service with
-the viewer's own credential.
+through the controller, which serves a node from the log segments its
+runner uploaded.
 
 The Fleet page shows the team's runners and queue activity. Operators can
-check controller and logs health through their own service endpoints.
+check controller and cache health through their own service endpoints.
 
 ### DinD (Docker-in-Docker)
 
@@ -141,11 +140,14 @@ that build images push them to a registry you provide - an in-cluster one
 you run yourself, or an external service (ECR, GCR, Docker Hub, etc.).
 That is up to the pipeline author.
 
-### Logs
+### Node logs
 
-Dedicated log storage and streaming service. Runners send step output via
-HTTP; the controller reads them for the dashboard, which streams live
-logs via SSE.
+The controller stores node logs; there is no separate log service. A
+runner uploads each node's log as gzip segments through URLs the
+controller issues, into the controller's cache bucket or output
+directory, and pushes live lines to the controller while someone watches
+the node. The dashboard streams them via SSE. See
+[observability.md](observability.md#node-logs-kept-as-segments).
 
 ## Component Communication
 
@@ -160,11 +162,11 @@ GitHub ────────► Controller        push webhook (HMAC verified
 Runner ────────► k8s API           create / watch per-node Jobs
 Runner ────────► Controller        claim node; heartbeat; report finish; fetch details
 Runner ────────► Cache             clone repo, download code + packages
-Runner ────────► Logs              stream step output
+Runner ────────► Controller        node log segment URLs; live lines while watched
+Runner ────────► Object store      node log segments (presigned PUT)
 Runner ────────► DinD              Docker builds (tcp://localhost:2375)
 Runner ────────► Registry          docker push (localhost:30500)
 Dashboard ─────► Controller        pages, runs / agents / pipelines, log reads (SSE)
-Controller ────► Logs              dashboard log reads, with the viewer's credential
 
 Cache ─────────► GitHub            git fetch (background, every 30s)
 
@@ -181,7 +183,6 @@ ingress, each component needs these allow rules:
 | Controller | External (webhooks, dashboard, API), Runners |
 | Cache | Controller, Runners |
 | DinD | Runners |
-| Logs | Runners, Controller |
 | Registry | Runners, Nodes (image pulls) |
 
 ### Internal service addresses
@@ -192,7 +193,6 @@ All components discover each other via k8s DNS. No hardcoded IPs.
 |---------|-----------------|------|
 | Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 4344 |
 | Cache | `sparkwing-cache.sparkwing.svc.cluster.local` | 80 -> 8090 |
-| Logs | `sparkwing-logs.sparkwing.svc.cluster.local` | 80 -> 4345 |
 | DinD | `dind.sparkwing.svc.cluster.local` | 2375 |
 | Registry | `registry.registry.svc.cluster.local` | 5000 (NodePort 30500) |
 
@@ -203,11 +203,10 @@ These are set on every runner pod:
 | Variable | Purpose |
 |----------|---------|
 | `SPARKWING_CONTROLLER_URL` | Controller base URL |
-| `SPARKWING_LOGS_URL` | Logs service URL |
 | `SPARKWING_RUN_ID` | The run this node belongs to |
 | `SPARKWING_NODE_ID` | The node being executed |
 | `SPARKWING_HOME` | State / cache / logs root |
-| `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller + logs calls; job-body children receive a scoped loopback capability instead |
+| `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller calls; job-body children receive a scoped loopback capability instead |
 
 ### Environment variables set on a local node process
 
@@ -279,7 +278,7 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
   5. a runner polls the controller and claims the run
   6. runner fetches the exact SHA from origin
   7. runner compiles and runs the pipeline binary
-  8. runner streams logs to logs service
+  8. runner uploads node log segments through the controller
   9. runner sends periodic heartbeats to controller to hold its claim
   10. runner reports completion to controller
   11. sparkwing pipeline trigger follows controller state and displays result
@@ -307,9 +306,9 @@ git push origin main
 | Component | Storage | Contents |
 |-----------|---------|----------|
 | Controller | SQLite at `/data/state.db` | Run state, metadata, secrets, tokens, audit log |
+| Controller | `--cache-blob-store` bucket, or its output directory | Node log segments and manifests |
 | Cache | PVC at `/data/` | Bare repos, uploads, artifacts, binary cache, dependency cache, package proxy |
 | DinD | PVC | Docker layers and build cache |
-| Logs | PVC at `/data/` | Append-only log files per run |
 | Registry | PVC | Container images |
 
 ## Cluster Setup
@@ -339,7 +338,6 @@ profiles:
       token: <api-token>
 ```
 
-Select it per run with `--profile prod`, or make it the project default
-by setting `defaults.profile: prod` in `.sparkwing/sparkwing.yaml`. The
+Select it per command with `--profile prod`. The
 same pipelines run against any sparkwing controller without changes;
 only the profile and registries differ.
