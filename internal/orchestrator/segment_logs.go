@@ -59,7 +59,7 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 	n = &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger, freshDone: make(chan struct{})}
 	opts := logseg.Options{Run: runID, Node: nodeID, Logger: logger}
 	if live {
-		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, logger)
+		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, up.LiveAttempt(), logger)
 		opts.Live = n.live.push
 	}
 	sink, err := logseg.NewSink(nodeCtx, up, opts)
@@ -157,9 +157,9 @@ const (
 // safety: the live view is a convenience and the segments are the log, so a
 // slow or failing controller costs live lines, never a blocked writer.
 type livePusher struct {
-	ctrl          *client.Client
-	runID, nodeID string
-	logger        *slog.Logger
+	ctrl                   *client.Client
+	runID, nodeID, attempt string
+	logger                 *slog.Logger
 
 	mu     sync.Mutex
 	buf    []byte
@@ -170,9 +170,9 @@ type livePusher struct {
 	closed bool
 }
 
-func startLivePusher(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) *livePusher {
+func startLivePusher(ctx context.Context, ctrl *client.Client, runID, nodeID, attempt string, logger *slog.Logger) *livePusher {
 	p := &livePusher{
-		ctrl: ctrl, runID: runID, nodeID: nodeID, logger: logger,
+		ctrl: ctrl, runID: runID, nodeID: nodeID, attempt: attempt, logger: logger,
 		kick: make(chan struct{}, 1), done: make(chan struct{}),
 	}
 	go p.loop(ctx)
@@ -230,7 +230,7 @@ func (p *livePusher) flush(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), livePushTimeout)
 	defer cancel()
-	err := p.ctrl.AppendNodeLiveLogAt(ctx, p.runID, p.nodeID, off, data)
+	err := p.ctrl.AppendNodeLiveLogAt(ctx, p.runID, p.nodeID, p.attempt, off, data)
 	p.mu.Lock()
 	first := err != nil && !p.failed
 	p.failed = p.failed || err != nil

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -109,6 +110,45 @@ func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]
 		out.Write(body)
 	}
 	return opts.Apply(out.Bytes())
+}
+
+// CheckPresent lists the attempt and sets Broken to the first segment
+// its manifest names that the store no longer holds, so a verdict taken
+// without reading every segment still sees one that went missing.
+func (l *Log) CheckPresent(ctx context.Context, objs Objects) error {
+	if l.Manifest == nil || l.Broken != 0 {
+		return nil
+	}
+	keys, err := objs.List(ctx, l.Prefix)
+	if err != nil {
+		return err
+	}
+	held := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		held[k] = true
+	}
+	for _, seg := range l.Segments {
+		if !held[SegmentKey(l.Prefix, seg.N)] {
+			l.Broken = seg.N
+			return nil
+		}
+	}
+	return nil
+}
+
+// LossLine is an NDJSON record naming the segment a read stopped at, or
+// empty when nothing was lost, for a reader to append after the lines it
+// got so the gap shows where the log is read.
+func (l *Log) LossLine() []byte {
+	if l.Broken == 0 {
+		return nil
+	}
+	c := l.Completeness(NodeProgress{}, time.Time{})
+	line, err := json.Marshal(map[string]string{"level": "error", "msg": c.SyntheticLine()})
+	if err != nil {
+		return nil
+	}
+	return append(line, '\n')
 }
 
 func tailOnly(opts storage.ReadOpts) (int, bool) {

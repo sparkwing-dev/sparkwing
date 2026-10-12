@@ -218,7 +218,7 @@ func TestSegmentStreamJoinsTheLiveRingByOffset(t *testing.T) {
 	stored := make(chan int, 64)
 	s, err := logseg.NewSink(ctx, signalUploader{LogSegmentUploader: up, stored: stored}, logseg.Options{
 		Run: "run-d", Node: "a", SpoolDir: t.TempDir(), SegmentBytes: 16,
-		Live: func(off int64, data []byte) { f.srv.liveLogs.AppendAt("run-d", "a", off, data) },
+		Live: func(off int64, data []byte) { f.srv.liveLogs.AppendAt("run-d", "a", up.LiveAttempt(), off, data) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -536,5 +536,165 @@ func TestPruningATeamOverItsShareDeletesOnlyFinishedRunsSegments(t *testing.T) {
 	}
 	if recs, err := f.st.RunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil || len(recs) != 0 {
 		t.Fatalf("log records after the prune = %v, %v; want none", recs, err)
+	}
+}
+
+// A sealed log that lost a segment must not read, or report, as whole:
+// the reader gets the lines before the gap and a loss marker, and
+// completeness says incomplete.
+func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	for i := 1; i <= 4; i++ {
+		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs := f.srv.logObjects()
+	if _, err := objs.deletePrefix(ctx, logseg.SegmentKey(rec.Prefix, 2)); err != nil {
+		t.Fatal(err)
+	}
+	logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: objs}
+	body, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), logLine(1)) || strings.Contains(string(body), logLine(4)) ||
+		!strings.Contains(string(body), "segment 2 is missing") {
+		t.Fatalf("read of a log missing segment 2 = %q, want line 1 then a loss marker", body)
+	}
+	c, found, err := logs.NodeLogCompleteness(ctx, "run-d", "a", logseg.NodeProgress{Started: true}, time.Now())
+	if err != nil || !found || c.State != logseg.StateIncomplete {
+		t.Fatalf("completeness of a log missing segment 2 = %+v, %v, %v; want incomplete", c, found, err)
+	}
+}
+
+// A charge the team's storage refuses leaves the attempt uncharged, so the
+// writer's retry is refused again rather than granted on the strength of
+// a checkpoint that never reached the team's count.
+func TestARefusedLogChargeStaysRefusedOnRetry(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	f.srv.WithLicense(license.Resolve(licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMultiTeam}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	}), pub, now, nil))
+	ctx := t.Context()
+	rec, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: "slotless", RunID: "run-x", NodeID: "a", Attempt: 1, Generation: 1, Prefix: "logs/r30/teams/slotless/runs/run-x/a/a1-g1/"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for try := 1; try <= 2; try++ {
+		if err := f.srv.chargeNodeLog(ctx, rec, 100, now); err == nil {
+			t.Fatalf("charge %d for a team with no storage succeeded", try)
+		}
+		got, err := f.st.GetNodeLog(ctx, rec.Team, rec.RunID, rec.NodeID, rec.Attempt, rec.Generation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ChargedBytes != 0 {
+			t.Fatalf("after refused charge %d the attempt records %d charged bytes, want 0", try, got.ChargedBytes)
+		}
+		rec = got
+	}
+}
+
+// A team's logs written under a retention class the controller no longer
+// configures still go when the team is deleted.
+func TestTeamDeletionReachesARetiredRetentionClass(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	f.srv.WithLogRetention(map[store.Team]int{store.DefaultTeam: 365})
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	if err := s.Append([]byte(logLine(1)), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r365/") {
+		t.Fatalf("record = %+v, %v; want the r365 class", rec, err)
+	}
+	f.srv.WithLogRetention(nil)
+	if err := f.srv.purgeTeamLogs(ctx, store.DefaultTeam); err != nil {
+		t.Fatal(err)
+	}
+	if left, err := f.srv.logObjects().List(ctx, rec.Prefix); err != nil || len(left) != 0 {
+		t.Fatalf("after the purge the retired class still holds %v, %v", left, err)
+	}
+}
+
+// A new attempt's sink numbers its bytes from zero again, so the live ring
+// must start over for it instead of taking its first lines for the old
+// attempt's and dropping them.
+func TestTheLiveRingStartsOverForANewAttempt(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	admin := f.admin(t)
+	push := func(attempt, line string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-d/nodes/a/logs", strings.NewReader(line))
+		req.Header.Set("Authorization", "Bearer "+admin)
+		req.Header.Set("Content-Type", "application/octet-stream")
+		req.Header.Set("X-Sparkwing-Log-Offset", "0")
+		req.Header.Set("X-Sparkwing-Log-Attempt", attempt)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("live push = %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	push("a1-g1", "first attempt\n")
+	push("a2-g2", "second attempt\n")
+	chunk, ok := f.srv.liveLogs.Read("run-d", "a", 0)
+	if !ok || string(chunk.Data) != "second attempt\n" {
+		t.Fatalf("live ring after a second attempt = %q, %v; want only the second attempt's line", chunk.Data, ok)
+	}
+}
+
+// Pruning stops once the bytes it actually deleted cover the overage, even
+// for attempts never charged: the oldest finished run goes, the next stays.
+func TestPruningCountsTheBytesItDeletes(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	objs := f.srv.logObjects()
+	base := time.Now().Add(-time.Hour)
+	prefixes := map[string]string{}
+	for i, runID := range []string{"r-old", "r-new"} {
+		at := base.Add(time.Duration(i) * time.Minute)
+		if err := f.st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "success", StartedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+		prefix := "logs/r90/teams/default/runs/" + runID + "/a/a1-g1/"
+		if _, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: store.DefaultTeam, RunID: runID, NodeID: "a", Attempt: 1, Generation: 1, Prefix: prefix}, at); err != nil {
+			t.Fatal(err)
+		}
+		if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), bytes.Repeat([]byte("x"), 100)); err != nil {
+			t.Fatal(err)
+		}
+		prefixes[runID] = prefix
+	}
+	freed, err := f.srv.pruneTeamSegments(ctx, objs, store.TeamOverShare{Team: store.DefaultTeam, OverBytes: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if freed != 100 {
+		t.Fatalf("freed %d bytes, want the 100 the oldest run held", freed)
+	}
+	for runID, want := range map[string]int{"r-old": 0, "r-new": 1} {
+		if left, err := objs.List(ctx, prefixes[runID]); err != nil || len(left) != want {
+			t.Fatalf("%s holds %v after the prune, %v; want %d object(s)", runID, left, err, want)
+		}
 	}
 }

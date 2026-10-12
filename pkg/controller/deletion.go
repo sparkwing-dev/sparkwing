@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -366,14 +367,36 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
 	if objs := s.logObjects(); objs != nil {
-		for _, class := range s.logClasses() {
+		classes, err := s.teamLogClasses(ctx, team)
+		if err != nil {
+			return err
+		}
+		for _, class := range classes {
 			prefix := logseg.ClassPrefix(class) + "teams/" + string(team) + "/"
-			if err := objs.deletePrefix(ctx, prefix); err != nil {
+			if _, err := objs.deletePrefix(ctx, prefix); err != nil {
 				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
 			}
 		}
 	}
 	return nil
+}
+
+// safety: an attempt keeps the class it was written under, so a class the operator has since retired still holds
+// logs; the team's records name it even when the configuration no longer does.
+func (s *Server) teamLogClasses(ctx context.Context, team store.Team) ([]string, error) {
+	classes := s.logClasses()
+	starts, err := s.store.NodeLogClassPrefixes(ctx, team)
+	if err != nil {
+		return nil, fmt.Errorf("list the team's log classes: %w", err)
+	}
+	for _, start := range starts {
+		rest, ok := strings.CutPrefix(start, "logs/")
+		class, _, cut := strings.Cut(rest, "/")
+		if _, valid := logseg.ClassDays(class); ok && cut && valid && !slices.Contains(classes, class) {
+			classes = append(classes, class)
+		}
+	}
+	return classes, nil
 }
 
 func deleteRemote(ctx context.Context, target, bearer string) error {

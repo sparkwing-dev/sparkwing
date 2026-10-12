@@ -432,3 +432,39 @@ func TestSinkPushesLiveOnlyWhileWatched(t *testing.T) {
 		t.Fatalf("live view got %q at %v, want line 3 at %d then line 4 at %d", pushed, offsets, 2*n, 3*n)
 	}
 }
+
+type stalledUploader struct {
+	*memUploader
+	started chan struct{}
+}
+
+func (u stalledUploader) PutSegment(ctx context.Context, _ logseg.Segment, _ []byte) error {
+	select {
+	case u.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// An upload that never answers must not hold Close past its context: the
+// close budget is what bounds how long a finishing node waits on its log.
+func TestCloseGivesUpOnAStalledUploadWhenItsContextEnds(t *testing.T) {
+	up := stalledUploader{memUploader: newMemUploader(newMemObjects(), testPrefix), started: make(chan struct{}, 1)}
+	timer := &manualTimer{}
+	s := newSink(t, up, logseg.Options{SegmentBytes: int64(len(line(0))), AfterFunc: timer.after})
+	if err := s.Append([]byte(line(1)), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	<-up.started
+	ctx, cancel := context.WithCancel(context.Background())
+	closed := make(chan logseg.Manifest, 1)
+	go func() {
+		m, _ := s.Close(ctx, logseg.End{})
+		closed <- m
+	}()
+	cancel()
+	if m := <-closed; m.Status != logseg.StatusIncomplete || m.Reason != logseg.ReasonUploadFailed || len(m.Segments) != 0 {
+		t.Fatalf("manifest after a stalled upload = %+v, want incomplete with the segment missing", m)
+	}
+}

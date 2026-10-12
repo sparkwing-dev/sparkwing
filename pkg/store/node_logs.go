@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -103,6 +104,27 @@ func (s *Store) ChargeNodeLog(ctx context.Context, l NodeLog, charged int64) (bo
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
+}
+
+// NodeLogClassPrefixes returns the start of every log prefix the team's
+// records name, cut to the first 12 bytes so it holds the class directory
+// (logs/r<days>/) for any class of up to four digits. A purge sweeps these
+// beside the classes the controller configures today.
+func (s *Store) NodeLogClassPrefixes(ctx context.Context, team Team) (_ []string, err error) {
+	rows, err := s.query(ctx, `SELECT DISTINCT substr(prefix, 1, 12) FROM node_logs WHERE team = ?`, string(team))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, rows.Close()) }()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // PrunableNodeLogs lists a team's log records of finished runs, least
@@ -235,6 +257,17 @@ func collectNodeLogs(rows *sql.Rows) (out []NodeLog, err error) {
 // which a live log append begins. A writer that keeps its log as
 // segments sends it, so a reader can join the live view to the segments.
 const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
+
+// LiveLogAttemptHeader names, beside [LiveLogOffsetHeader], the attempt
+// whose bytes the offsets count, as "a<attempt>-g<generation>". Each
+// attempt numbers its log from zero, so a new attempt starts the live
+// view over.
+const LiveLogAttemptHeader = "X-Sparkwing-Log-Attempt"
+
+// LiveLogAttempt is the [LiveLogAttemptHeader] value for one attempt.
+func LiveLogAttempt(attempt, generation int64) string {
+	return fmt.Sprintf("a%d-g%d", attempt, generation)
+}
 
 // LogWatchHeader is the request header that, sent as "1" on a node claim
 // or run heartbeat, asks the controller to answer which of the run's

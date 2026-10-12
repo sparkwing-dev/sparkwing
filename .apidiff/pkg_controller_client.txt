@@ -58,7 +58,7 @@ func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (c *Client) AppendNodeLiveLog(ctx context.Context, runID, nodeID string, data []byte) error
-func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID string, off int64, data []byte) error
+func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID, attempt string, off int64, data []byte) error
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
@@ -338,6 +338,7 @@ func LoadSignal(err error) (time.Duration, bool)
 type LogSegmentUploader struct {
 }
 func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error))
+func (u *LogSegmentUploader) LiveAttempt() string
 func (u *LogSegmentUploader) OnWatched(fn func(bool))
 func (u *LogSegmentUploader) Open(ctx context.Context) error
 func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error

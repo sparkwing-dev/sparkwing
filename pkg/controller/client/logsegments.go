@@ -149,6 +149,17 @@ type LogSegmentUploader struct {
 
 var _ logseg.Uploader = (*LogSegmentUploader)(nil)
 
+// LiveAttempt names the attempt the controller granted, as
+// [store.LiveLogAttempt] spells it for the live view; empty before Open.
+func (u *LogSegmentUploader) LiveAttempt() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.grant.Attempt == 0 {
+		return ""
+	}
+	return store.LiveLogAttempt(u.grant.Attempt, u.grant.Generation)
+}
+
 // NewLogSegmentUploader returns an uploader for one node's log. Every
 // request it makes carries the values of base, such as the node's claim
 // fence; base's cancellation is not inherited.

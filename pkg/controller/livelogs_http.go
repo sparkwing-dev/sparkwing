@@ -71,7 +71,7 @@ func (s *Server) handleAppendNodeLiveLog(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, fmt.Errorf("%s must be a non-negative byte offset", store.LiveLogOffsetHeader))
 			return
 		}
-		s.liveLogs.AppendAt(runID, nodeID, off, data)
+		s.liveLogs.AppendAt(runID, nodeID, r.Header.Get(store.LiveLogAttemptHeader), off, data)
 	} else {
 		s.liveLogs.Append(runID, nodeID, data)
 	}

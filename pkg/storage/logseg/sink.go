@@ -142,9 +142,11 @@ type Sink struct {
 	closed    bool
 	watched   bool
 
-	upMu sync.Mutex
-	work chan struct{}
-	done chan struct{}
+	upMu     sync.Mutex
+	work     chan struct{}
+	done     chan struct{}
+	loopCtx  context.Context
+	stopLoop context.CancelFunc
 }
 
 // NewSink opens a spool file and starts the uploader. Close it to write
@@ -162,6 +164,7 @@ func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error) {
 		streams: map[string]*writerStream{},
 		work:    make(chan struct{}, 1), done: make(chan struct{}),
 	}
+	s.loopCtx, s.stopLoop = context.WithCancel(s.ctx)
 	go s.uploadLoop()
 	return s, nil
 }
@@ -327,7 +330,7 @@ func (s *Sink) cutLocked() {
 func (s *Sink) uploadLoop() {
 	defer close(s.done)
 	for range s.work {
-		s.drain(s.ctx)
+		s.drain(s.loopCtx)
 	}
 }
 
@@ -412,7 +415,15 @@ func (s *Sink) Close(ctx context.Context, end End) (Manifest, error) {
 	s.cutLocked()
 	close(s.work)
 	s.mu.Unlock()
-	<-s.done
+	// safety: an upload in flight when Close's context ends is cancelled, so a stalled store costs the
+	// caller its close budget and no more; the manifest then records the segments that never landed.
+	select {
+	case <-s.done:
+	case <-ctx.Done():
+		s.stopLoop()
+		<-s.done
+	}
+	s.stopLoop()
 	allUploaded := s.drain(ctx)
 
 	s.mu.Lock()

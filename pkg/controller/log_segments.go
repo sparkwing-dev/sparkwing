@@ -38,7 +38,7 @@ var errLogsUnavailable = errors.New("this controller has no object store or outp
 type logObjectStore interface {
 	logseg.Objects
 	putIfAbsent(ctx context.Context, key string, body []byte) error
-	deletePrefix(ctx context.Context, prefix string) error
+	deletePrefix(ctx context.Context, prefix string) (int64, error)
 	presignPut(ctx context.Context, r *http.Request, team store.Team, key string, manifest bool) (string, map[string]string, error)
 	measure(ctx context.Context) (map[store.Team]int64, error)
 }
@@ -86,8 +86,32 @@ func (o s3LogObjects) putIfAbsent(ctx context.Context, key string, body []byte) 
 	return sealedOnConflict(o.objs.PutIfAbsent(ctx, key, bytes.NewReader(body)))
 }
 
-func (o s3LogObjects) deletePrefix(ctx context.Context, prefix string) error {
-	return deleteListed(ctx, o.objs, prefix)
+// safety: the listing carries each object's size, so the bytes reported are the ones removed, which is what a
+// prune counts against a team's overage.
+func (o s3LogObjects) deletePrefix(ctx context.Context, prefix string) (int64, error) {
+	root := o.d.prefix + "/"
+	var deleted int64
+	var errs []error
+	var token *string
+	for {
+		page, err := o.d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(o.d.bucket), Prefix: aws.String(root + prefix), ContinuationToken: token,
+		})
+		if err != nil {
+			return deleted, errors.Join(append(errs, err)...)
+		}
+		for _, obj := range page.Contents {
+			if err := o.objs.Delete(ctx, strings.TrimPrefix(aws.ToString(obj.Key), root)); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			deleted += aws.ToInt64(obj.Size)
+		}
+		if !aws.ToBool(page.IsTruncated) {
+			return deleted, errors.Join(errs...)
+		}
+		token = page.NextContinuationToken
+	}
 }
 
 func (o s3LogObjects) measure(ctx context.Context) (map[store.Team]int64, error) {
@@ -148,7 +172,7 @@ func (o fsLogObjects) putIfAbsent(ctx context.Context, key string, body []byte) 
 	return sealedOnConflict(o.objs.PutIfAbsent(ctx, key, bytes.NewReader(body)))
 }
 
-func (o fsLogObjects) deletePrefix(ctx context.Context, prefix string) error {
+func (o fsLogObjects) deletePrefix(ctx context.Context, prefix string) (int64, error) {
 	return deleteListed(ctx, o.objs, prefix)
 }
 
@@ -199,18 +223,41 @@ func sealedOnConflict(_ storage.ETag, err error) error {
 	return err
 }
 
-func deleteListed(ctx context.Context, objs storage.ArtifactStore, prefix string) error {
+// safety: each object's size is read before it goes, so the bytes reported are the ones removed.
+func deleteListed(ctx context.Context, objs storage.ArtifactStore, prefix string) (int64, error) {
 	keys, err := objs.List(ctx, prefix)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	var deleted int64
 	var errs []error
 	for _, k := range keys {
+		size, err := objectSize(ctx, objs, k)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		if err := objs.Delete(ctx, k); err != nil {
 			errs = append(errs, err)
+			continue
+		}
+		deleted += size
+	}
+	return deleted, errors.Join(errs...)
+}
+
+func objectSize(ctx context.Context, objs storage.ArtifactStore, key string) (int64, error) {
+	body, err := objs.Get(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = body.Close() }()
+	if f, ok := body.(interface{ Stat() (os.FileInfo, error) }); ok {
+		if info, err := f.Stat(); err == nil {
+			return info.Size(), nil
 		}
 	}
-	return errors.Join(errs...)
+	return io.Copy(io.Discard, body)
 }
 
 // safety: the attempt is the one the node's claim holds now, and a writer naming an older one is refused, so a
@@ -347,8 +394,9 @@ func (s *Server) openNodeLog(w http.ResponseWriter, r *http.Request, want store.
 }
 
 // safety: the writer reports what it stored, and the delta is claimed in the
-// record before it is committed, so two requests never charge it twice; the
-// hourly storage pass corrects a count left wrong by a failed commit.
+// record before it is committed, so two requests never charge it twice; a
+// commit the team's storage refuses hands the claim back, so a retry is
+// refused again instead of passing on the checkpoint.
 func (s *Server) chargeNodeLog(ctx context.Context, rec store.NodeLog, stored int64, now time.Time) error {
 	if !s.MultiTeam() || stored <= rec.ChargedBytes {
 		return nil
@@ -357,9 +405,18 @@ func (s *Server) chargeNodeLog(ctx context.Context, rec store.NodeLog, stored in
 	if err != nil || !claimed {
 		return err
 	}
-	return s.store.CommitStorage(ctx, store.StorageCommit{
+	err = s.store.CommitStorage(ctx, store.StorageCommit{
 		Team: rec.Team, Kind: store.StorageLogs, Bytes: stored - rec.ChargedBytes, Now: now,
 	})
+	if err == nil {
+		return nil
+	}
+	charged := rec
+	charged.ChargedBytes = stored
+	if _, rerr := s.store.ChargeNodeLog(context.WithoutCancel(ctx), charged, rec.ChargedBytes); rerr != nil {
+		return errors.Join(err, fmt.Errorf("hand back the log charge: %w", rerr))
+	}
+	return err
 }
 
 func (s *Server) writeStorageRefusal(w http.ResponseWriter, r *http.Request, err error) {

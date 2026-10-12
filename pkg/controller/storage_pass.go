@@ -238,11 +238,10 @@ func (s *Server) pruneTeamSegments(ctx context.Context, segments logObjectStore,
 			if len(run) == 0 {
 				continue
 			}
-			if err := s.deleteRunSegments(ctx, segments, t.Team, rec.RunID); err != nil {
+			deleted, err := s.deleteRunSegments(ctx, segments, t.Team, rec.RunID)
+			freed += deleted
+			if err != nil {
 				return freed, fmt.Errorf("delete log segments of run %s: %w", rec.RunID, err)
-			}
-			for _, r := range run {
-				freed += r.ChargedBytes
 			}
 		}
 	}

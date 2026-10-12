@@ -40,6 +40,7 @@ type liveKey struct {
 }
 
 type liveRing struct {
+	attempt string
 	buf     []byte
 	start   int64
 	done    bool
@@ -164,7 +165,10 @@ func (l *liveLogs) Append(runID, nodeID string, data []byte) {
 // to the log's durable segments by offset: bytes the ring already holds
 // are skipped, and an offset past the ring's end starts the ring over
 // there, which a reader sees as a gap.
-func (l *liveLogs) AppendAt(runID, nodeID string, off int64, data []byte) {
+//
+// attempt names the writer's attempt: bytes of another attempt than the
+// ring holds start the ring over, because each attempt counts from zero.
+func (l *liveLogs) AppendAt(runID, nodeID, attempt string, off int64, data []byte) {
 	if len(data) == 0 || off < 0 {
 		return
 	}
@@ -176,8 +180,12 @@ func (l *liveLogs) AppendAt(runID, nodeID string, off int64, data []byte) {
 	r := l.nodes[key]
 	if r == nil {
 		l.makeRoomLocked()
-		r = &liveRing{start: off, updated: make(chan struct{})}
+		r = &liveRing{attempt: attempt, start: off, updated: make(chan struct{})}
 		l.nodes[key] = r
+	}
+	if attempt != r.attempt {
+		l.total -= int64(len(r.buf))
+		r.attempt, r.buf, r.start, r.done = attempt, r.buf[:0], off, false
 	}
 	end := r.start + int64(len(r.buf))
 	switch {
@@ -215,10 +223,11 @@ func (l *liveLogs) Finish(runID, nodeID string) {
 }
 
 type liveChunk struct {
-	Start int64
-	Next  int64
-	Data  []byte
-	Done  bool
+	Attempt string
+	Start   int64
+	Next    int64
+	Data    []byte
+	Done    bool
 }
 
 // Read returns everything buffered after since. The second result is
@@ -244,7 +253,7 @@ func (l *liveLogs) readLocked(key liveKey, since int64) (liveChunk, bool) {
 		since = end
 	}
 	data := bytes.Clone(r.buf[since-r.start:])
-	return liveChunk{Start: since, Next: end, Data: data, Done: r.done}, true
+	return liveChunk{Attempt: r.attempt, Start: since, Next: end, Data: data, Done: r.done}, true
 }
 
 // Wait blocks until the node has bytes after since, has finished, or

@@ -56,7 +56,9 @@ func (c *Client) AppendNodeLiveLog(ctx context.Context, runID, nodeID string, da
 // AppendNodeLiveLogAt is [Client.AppendNodeLiveLog] for a writer that
 // numbers its bytes: data begins at byte offset off of the node's whole
 // log, which lets a reader join the live view to the log's segments.
-func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID string, off int64, data []byte) error {
+// attempt names the attempt the offsets count, as [store.LiveLogAttempt]
+// spells it.
+func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID, attempt string, off int64, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -67,6 +69,7 @@ func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID string, 
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set(store.LiveLogOffsetHeader, fmt.Sprint(off))
+	req.Header.Set(store.LiveLogAttemptHeader, attempt)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {

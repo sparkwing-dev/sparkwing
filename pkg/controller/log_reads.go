@@ -54,7 +54,11 @@ func (l segmentLogs) Read(ctx context.Context, runID, nodeID string, opts storag
 	if err != nil {
 		return nil, err
 	}
-	return log.Read(ctx, l.objs, opts)
+	body, err := log.Read(ctx, l.objs, opts)
+	if err != nil {
+		return nil, err
+	}
+	return append(body, log.LossLine()...), nil
 }
 
 func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) {
@@ -91,6 +95,7 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) 
 		}
 		fmt.Fprintf(&out, "=== %s ===\n", nodeID)
 		out.Write(body)
+		out.Write(log.LossLine())
 	}
 	return out.Bytes(), nil
 }
@@ -173,7 +178,7 @@ func tailLiveRing(ctx context.Context, live *liveLogs, rec store.NodeLog, off *i
 		switch {
 		case !time.Now().Before(deadline):
 			return nil
-		case ok && chunk.Start <= *off && chunk.Next > *off:
+		case ok && chunk.Attempt == store.LiveLogAttempt(rec.Attempt, rec.Generation) && chunk.Start <= *off && chunk.Next > *off:
 			if err := writeSSELines(out, chunk.Data); err != nil {
 				return err
 			}
@@ -198,7 +203,8 @@ func writeSSELines(out io.Writer, data []byte) error {
 }
 
 func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error {
-	return l.s.deleteRunSegments(ctx, l.objs, l.team, runID)
+	_, err := l.s.deleteRunSegments(ctx, l.objs, l.team, runID)
+	return err
 }
 
 // NodeLogCompleteness reports the segment verdict for a node with a
@@ -216,6 +222,9 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 	if err != nil {
 		return logseg.Completeness{}, true, err
 	}
+	if err := log.CheckPresent(ctx, l.objs); err != nil {
+		return logseg.Completeness{}, true, err
+	}
 	if log.Manifest == nil && node.Terminal && now.Sub(node.FinishedAt) >= logseg.SealGrace {
 		if log.Manifest, err = l.s.sealNodeLog(ctx, l.objs, rec, now); err != nil {
 			return logseg.Completeness{}, true, err
@@ -225,30 +234,36 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 }
 
 // safety: the records are the only index of a run's segments, so they go only after every object did.
-func (s *Server) deleteRunSegments(ctx context.Context, objs logObjectStore, team store.Team, runID string) error {
+// It returns the bytes it removed.
+func (s *Server) deleteRunSegments(ctx context.Context, objs logObjectStore, team store.Team, runID string) (int64, error) {
 	recs, err := s.store.RunNodeLogs(ctx, team, runID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if objs == nil {
 		if len(recs) > 0 {
-			return errLogsUnavailable
+			return 0, errLogsUnavailable
 		}
-		return nil
+		return 0, nil
 	}
+	var deleted int64
 	for _, rec := range recs {
-		if err := objs.deletePrefix(ctx, rec.Prefix); err != nil {
-			return err
+		n, err := objs.deletePrefix(ctx, rec.Prefix)
+		deleted += n
+		if err != nil {
+			return deleted, err
 		}
 	}
 	for _, class := range s.logClasses() {
 		prefix, err := logseg.RunPrefix(class, string(team), runID)
 		if err != nil {
-			return err
+			return deleted, err
 		}
-		if err := objs.deletePrefix(ctx, prefix); err != nil {
-			return err
+		n, err := objs.deletePrefix(ctx, prefix)
+		deleted += n
+		if err != nil {
+			return deleted, err
 		}
 	}
-	return s.store.DeleteRunNodeLogs(ctx, team, runID)
+	return deleted, s.store.DeleteRunNodeLogs(ctx, team, runID)
 }
