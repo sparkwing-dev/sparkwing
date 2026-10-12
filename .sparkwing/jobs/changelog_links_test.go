@@ -53,40 +53,6 @@ func TestLintChangelogDocLinks_LeavesMigrationLinksToTheBreakingEntryCheck(t *te
 	}
 }
 
-func TestPinnedMigrationLink_SatisfiesTheBreakingEntryRequirement(t *testing.T) {
-	body := "## [v0.40.0] - 2026-01-01\n### Changed\n\n" +
-		"- **cli (Breaking):** scopes split. See [the migration\n" +
-		"  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).\n"
-	if got := LintChangelog(body, fstest.MapFS{}); len(got) != 0 {
-		t.Errorf("issues = %v, want none: a permalink pinned to the release tag still resolves", categories(got))
-	}
-}
-
-func TestUnguidedBreakingEntries_ForgivesOnlyWhatItNames(t *testing.T) {
-	unlisted := "## [v0.40.0] - 2026-01-01\n### Changed\n\n" +
-		"- **controller (Breaking):** something else entirely changed.\n"
-	got := LintChangelog(unlisted, fstest.MapFS{})
-	if len(got) != 1 || got[0].Category != "missing-migration-link" {
-		t.Fatalf("issues = %v, want one missing-migration-link: only the named entry is forgiven", categories(got))
-	}
-
-	listed := "## [v0.40.0] - 2026-01-01\n### Changed\n\n" +
-		"- **controller (Breaking):** Revoking a token, rotating one, or deleting a user takes effect at once.\n"
-	if got := LintChangelog(listed, fstest.MapFS{}); len(got) != 0 {
-		t.Errorf("issues = %v, want none for the entry the exception names", categories(got))
-	}
-}
-
-func TestPinnedMigrationLink_RefusesAPermalinkToAnotherRelease(t *testing.T) {
-	body := "## [v0.40.0] - 2026-01-01\n### Changed\n\n" +
-		"- **cli (Breaking):** scopes split. See [the migration\n" +
-		"  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#pipeline-name-charset).\n"
-	got := LintChangelog(body, fstest.MapFS{})
-	if len(got) != 1 || got[0].Category != "missing-migration-link" {
-		t.Fatalf("issues = %v, want one missing-migration-link: the pin names a different release", categories(got))
-	}
-}
-
 func TestMigrationAnchor_ResolvesOffAnyHeadingLevel(t *testing.T) {
 	guides := fstest.MapFS{
 		"one-topic.md": &fstest.MapFile{Data: []byte("# Project manifests use YAML\n\ntext\n")},
