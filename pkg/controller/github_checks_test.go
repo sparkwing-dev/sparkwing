@@ -759,3 +759,53 @@ func TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion(t *testing.T) {
 		t.Fatalf("check run writes = %+v, want the last one to stay completed timed_out", calls)
 	}
 }
+
+// A check run GitHub created whose id the store lost is found by its external
+// id and adopted, so the next update edits it rather than creating another.
+func TestGitHubAppAdoptsACheckRunWhoseRecordWasLost(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	f.drainChecks()
+	if _, err := f.store.DB().Exec(`UPDATE triggers SET github_check_run_id = 0 WHERE id = ?`, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	f.startRun(olga, runID)
+	f.drainChecks()
+	calls := f.app.CheckRunCalls()
+	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != calls[0].ID || calls[1].Status != "in_progress" {
+		t.Fatalf("check run writes = %+v, want the lost check run updated, not a second create", calls)
+	}
+	var recorded int64
+	if err := f.store.DB().QueryRow(`SELECT github_check_run_id FROM triggers WHERE id = ?`, runID).Scan(&recorded); err != nil || recorded != calls[0].ID {
+		t.Fatalf("recorded check run = %d, %v; want the adopted %d", recorded, err, calls[0].ID)
+	}
+}
+
+// A queued update another controller delivers after the run started is dropped,
+// so the check run stays in_progress.
+func TestGitHubAppDelayedQueuedUpdateLeavesARunningCheck(t *testing.T) {
+	f := newAppFixture(t)
+	other, _ := f.replica()
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	f.startRun(olga, runID)
+	f.drainChecks()
+
+	ctx := context.Background()
+	controller.ReportGitHubRunState(ctx, other, runID, "pending")
+	drain, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := controller.DrainGitHubChecks(drain, other); err != nil {
+		t.Fatalf("drain the second controller: %v", err)
+	}
+	calls := f.app.CheckRunCalls()
+	if last := calls[len(calls)-1]; last.Status != "in_progress" {
+		t.Fatalf("check run writes = %+v, want the last one to stay in_progress", calls)
+	}
+}

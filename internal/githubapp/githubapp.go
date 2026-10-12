@@ -607,6 +607,42 @@ func (c *Client) CreateCheckRun(ctx context.Context, token, owner, repo string, 
 	return created.ID, nil
 }
 
+// FindCheckRun returns the id of this App's check run named name on commit
+// sha whose external id is externalID, or 0 when there is none.
+func (c *Client) FindCheckRun(ctx context.Context, token, owner, repo, sha, name, externalID string) (int64, error) {
+	q := url.Values{
+		"check_name": {name}, "filter": {"all"}, "per_page": {"100"},
+		"app_id": {strconv.FormatInt(c.cfg.AppID, 10)},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.APIURL+"/repos/"+url.PathEscape(owner)+"/"+
+		url.PathEscape(repo)+"/commits/"+url.PathEscape(sha)+"/check-runs?"+q.Encode(), nil)
+	if err != nil {
+		return 0, err
+	}
+	c.apiHeaders(req, "token "+token)
+	var found struct {
+		CheckRuns []struct {
+			ID         int64  `json:"id"`
+			ExternalID string `json:"external_id"`
+		} `json:"check_runs"`
+	}
+	status, err := c.do(req, &found)
+	switch {
+	case err != nil:
+		return 0, err
+	case status == http.StatusForbidden:
+		return 0, fmt.Errorf("%w: find check run answered 403", ErrPermissionMissing)
+	case status < 200 || status >= 300:
+		return 0, &APIError{Op: "find check run", Status: status}
+	}
+	for _, run := range found.CheckRuns {
+		if run.ExternalID == externalID && run.ID > 0 {
+			return run.ID, nil
+		}
+	}
+	return 0, nil
+}
+
 // UpdateCheckRun updates check run id on owner/repo. GitHub keeps the name
 // and head commit the run was created with.
 func (c *Client) UpdateCheckRun(ctx context.Context, token, owner, repo string, id int64, run CheckRun) error {

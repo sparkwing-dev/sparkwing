@@ -316,8 +316,18 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 			return 0, nil
 		}
 		check := r.checkRun(ctx, tenant, u, run)
+		adopted := int64(0)
+		if id == 0 {
+			// safety: a create GitHub took whose record rolled back left a check
+			// run carrying this run's id, so it is adopted rather than doubled.
+			found, err := r.client.FindCheckRun(ctx, tok.Token, u.owner, u.repo, u.sha, check.Name, u.runID)
+			if err != nil {
+				return 0, err
+			}
+			id, adopted = found, found
+		}
 		if id != 0 {
-			return 0, r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
+			return adopted, r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
 		}
 		id, err := r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
 		created = id
@@ -329,16 +339,15 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 	return err
 }
 
-// safety: a run's status only moves forward and its final update is sent by
-// whoever finished it, so a non-final update read under the report lock after
-// the run finished is dropped; repeating the stored status instead would
-// overwrite a reported conclusion, such as timed_out, the store keeps as failed.
+// safety: a run's status only moves forward, so an update ranked below it is
+// one another controller already passed and is dropped under the report lock.
+// A final update is sent as it is, since the store keeps a timed_out run as failed.
 func staleForRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) (*store.Run, bool) {
 	run, err := tenant.GetRun(ctx, u.runID)
 	if err != nil {
 		return nil, false
 	}
-	return run, u.phase() != githubCheckCompleted && githubCheckPhaseFor(run.Status) == githubCheckCompleted
+	return run, u.phase() < githubCheckPhaseFor(run.Status)
 }
 
 // safety: a check run GitHub created but the store did not record is not

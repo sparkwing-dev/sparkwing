@@ -1469,12 +1469,9 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 }
 
 // safety: a controller that dies mid-sweep keeps the others from sweeping for
-// at most reaperLeaseTTL, and a live sweep stops reaperLeaseMargin before that,
-// so it never runs on after another process may have taken the lease.
-const (
-	reaperLeaseTTL    = time.Minute
-	reaperLeaseMargin = 10 * time.Second
-)
+// at most this long. A live sweep can outlast it and overlap the next holder's,
+// which the sweeps' conditional writes and the per-run GitHub lock absorb.
+const reaperLeaseTTL = time.Minute
 
 // safety: controllers overlap on one store while a deploy rolls, so one at a
 // time sweeps: a stale run is reported to GitHub once and a waiting node is
@@ -1483,9 +1480,7 @@ const (
 func (s *Server) reapLeased(ctx context.Context, interval time.Duration) bool {
 	ran, err := s.store.RunReaperLeased(ctx, s.measureHolder(), interval/2, reaperLeaseTTL,
 		func(ctx context.Context) error {
-			sweep, cancel := context.WithTimeout(ctx, reaperLeaseTTL-reaperLeaseMargin)
-			defer cancel()
-			s.reap(sweep)
+			s.reap(ctx)
 			return nil
 		})
 	if err != nil {
