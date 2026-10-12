@@ -109,7 +109,7 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 	defer cancel()
 
 	var writeMu sync.Mutex
-	seen := map[string]struct{}{}
+	follows := newNodeFollows()
 	var wg sync.WaitGroup
 	var multi atomic.Bool
 
@@ -117,6 +117,7 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer follows.ended(nodeID)
 			streamNodeViaBackend(runCtx, b, runID, nodeID, &multi, &writeMu, out)
 		}()
 	}
@@ -138,11 +139,10 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 						if nodeFilter != "" && n.NodeID != nodeFilter {
 							continue
 						}
-						if _, ok := seen[n.NodeID]; ok {
+						if !follows.start(n) {
 							continue
 						}
-						seen[n.NodeID] = struct{}{}
-						if len(seen) > 1 {
+						if follows.count() > 1 {
 							multi.Store(true)
 						}
 						spawn(n.NodeID)

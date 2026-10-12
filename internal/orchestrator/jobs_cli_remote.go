@@ -283,7 +283,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	defer cancel()
 
 	var writeMu sync.Mutex
-	seen := map[string]struct{}{}
+	follows := newNodeFollows()
 	var wg sync.WaitGroup
 	var multi atomic.Bool
 
@@ -291,6 +291,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer follows.ended(nodeID)
 			streamNode(runCtx, logc, runID, nodeID, &multi, &writeMu, out)
 		}()
 	}
@@ -322,11 +323,10 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 						if nodeFilter != "" && n.NodeID != nodeFilter {
 							continue
 						}
-						if _, ok := seen[n.NodeID]; ok {
+						if !follows.start(n) {
 							continue
 						}
-						seen[n.NodeID] = struct{}{}
-						if len(seen) > 1 {
+						if follows.count() > 1 {
 							multi.Store(true)
 						}
 						spawn(n.NodeID)
@@ -363,7 +363,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	}()
 
 	<-terminal
-	if len(seen) > 0 {
+	if follows.count() > 0 {
 		select {
 		case <-time.After(600 * time.Millisecond):
 		case <-ctx.Done():
@@ -372,6 +372,43 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	cancel()
 	wg.Wait()
 	return followErr
+}
+
+// safety: a node's log stream ends when its attempt's log seals, and a retry or a later claim writes a new
+// attempt, so a node is streamed again once it runs under another attempt or claim than the one it was streamed for.
+type nodeFollows struct {
+	mu    sync.Mutex
+	nodes map[string]*nodeFollow
+}
+
+type nodeFollow struct {
+	attempt string
+	active  bool
+}
+
+func newNodeFollows() *nodeFollows { return &nodeFollows{nodes: map[string]*nodeFollow{}} }
+
+func (f *nodeFollows) start(n *store.Node) bool {
+	attempt := fmt.Sprintf("%d/%d", n.AttemptsConsumed, n.ClaimGeneration)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if cur, ok := f.nodes[n.NodeID]; ok && (cur.active || cur.attempt == attempt || n.Status != "running") {
+		return false
+	}
+	f.nodes[n.NodeID] = &nodeFollow{attempt: attempt, active: true}
+	return true
+}
+
+func (f *nodeFollows) ended(nodeID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nodes[nodeID].active = false
+}
+
+func (f *nodeFollows) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.nodes)
 }
 
 func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string,
