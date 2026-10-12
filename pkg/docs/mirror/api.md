@@ -99,8 +99,11 @@ The controller serves node logs, which runners upload as segments (see
 - `GET /api/v1/runs/{id}/logs` reads the whole run.
 - `GET /api/v1/runs/{id}/logs/{node}` reads one node, filtered by `tail`,
   `head`, `lines` or `grep`.
-- `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node over SSE and
-  holds the node's live-view watch while open.
+- `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node's newest
+  attempt over SSE, ending with a `stream_end` event once its log is
+  sealed, and holds the node's live-view watch while open. With
+  `attempt=N&generation=G` it follows that attempt's log alone and answers
+  404 while that attempt has none.
 - `GET /api/v1/runs/{id}/logs/{node}/completeness` returns the node's
   completeness verdict.
 - `GET /api/v1/runs/{id}/logs/search` searches one run, and

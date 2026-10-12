@@ -11,6 +11,9 @@ type ArtifactStore interface {
 
 	List(ctx context.Context, prefix string) ([]string, error)
 }
+type AttemptLogStreamer interface {
+	StreamAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error)
+}
 func Conditional(store ArtifactStore) (ConditionalWriter, bool)
 type ConditionalWriter interface {
 	GetWithETag(ctx context.Context, key string) (io.ReadCloser, ETag, error)

@@ -75,6 +75,15 @@ func (b *ClientBackend) StreamNodeLog(ctx context.Context, runID, nodeID string)
 	return b.logStore.Stream(ctx, runID, nodeID)
 }
 
+// StreamNodeLogAttempt streams one attempt's log, as
+// [StoreBackend.StreamNodeLogAttempt] does.
+func (b *ClientBackend) StreamNodeLogAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error) {
+	return streamAttempt(ctx, b.logStore, runID, nodeID, attempt, generation)
+}
+
+// Remote returns the controller client and log store b reads through.
+func (b *ClientBackend) Remote() (*client.Client, storage.LogStore) { return b.c, b.logStore }
+
 var _ LiveLogReader = (*ClientBackend)(nil)
 
 // safety: a node with no buffer is the ordinary case once it finishes, so

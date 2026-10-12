@@ -2,13 +2,15 @@ package orchestrator
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
@@ -234,7 +236,7 @@ func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, token, runID st
 		target = filterNodesBySince(target, opts.Since)
 		return writeLogsViaBackend(ctx, b, runID, target, opts, out)
 	}
-	return followLogsRemote(ctx, ctrl, logc, runID, opts.Node, out)
+	return followLogsRemote(ctx, ctrl, ctrl.NodeLogs(), runID, opts.Node, out)
 }
 
 func filterTarget(nodes []*store.Node, want, runID string) ([]*store.Node, error) {
@@ -276,178 +278,160 @@ func (f *remoteFollowFailures) failed(now time.Time, budget time.Duration) (time
 	return elapsed, elapsed >= budget
 }
 
-func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.LogStore,
+func followLogsRemote(ctx context.Context, ctrl *client.Client, logs storage.AttemptLogStreamer,
 	runID, nodeFilter string, out io.Writer,
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	f := &attemptFollower{logs: logs, runID: runID, out: out, state: map[logIdentity]followState{}, nodes: map[string]bool{}}
+	defer f.wg.Wait()
 
-	var writeMu sync.Mutex
-	follows := newNodeFollows()
-	var wg sync.WaitGroup
-	var multi atomic.Bool
-
-	spawn := func(nodeID string) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer follows.ended(nodeID)
-			streamNode(runCtx, logc, runID, nodeID, &multi, &writeMu, out)
-		}()
-	}
-
-	terminal := make(chan struct{})
-
-	var followErr error
-
-	go func() {
-		defer close(terminal)
-		wait := remoteFollowPollInterval
-		consecutive := 0
-
-		var failures remoteFollowFailures
-		for {
-			timer := time.NewTimer(wait)
-			select {
-			case <-runCtx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-				nodes, err := ctrl.ListNodes(runCtx, runID)
-				if client.IsTokenDead(err) {
-					followErr = fmt.Errorf("run %s: %w", runID, err)
-					return
-				}
-				if err == nil {
-					for _, n := range nodes {
-						if nodeFilter != "" && n.NodeID != nodeFilter {
-							continue
-						}
-						if !follows.start(n) {
-							continue
-						}
-						if follows.count() > 1 {
-							multi.Store(true)
-						}
-						spawn(n.NodeID)
-					}
-				}
-				run, err := ctrl.GetRun(runCtx, runID)
-				if err == nil {
-					failures.succeeded()
-					wait, consecutive = remoteFollowPollInterval, 0
-					if isTerminalStatus(run.Status) {
-						return
-					}
-					continue
-				}
-
-				if runCtx.Err() != nil {
-					return
-				}
-				// safety: a dead token never reads the run again, so waiting out the budget only adds load.
-				if client.IsTokenDead(err) {
-					followErr = fmt.Errorf("run %s: %w", runID, err)
-					return
-				}
-				consecutive++
-				wait = remoteFollowBackoff(consecutive)
-				elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget)
-				if exhausted {
-					followErr = fmt.Errorf("run %s: controller status unreadable for %s: %w",
-						runID, elapsed.Round(time.Second), err)
-					return
-				}
-			}
-		}
-	}()
-
-	<-terminal
-	if follows.count() > 0 {
-		select {
-		case <-time.After(600 * time.Millisecond):
-		case <-ctx.Done():
-		}
-	}
-	cancel()
-	wg.Wait()
-	return followErr
-}
-
-// safety: a node's log stream ends when its attempt's log seals, and a retry or a later claim writes a new
-// attempt, so a node is streamed again once it runs under another attempt or claim than the one it was streamed for.
-type nodeFollows struct {
-	mu    sync.Mutex
-	nodes map[string]*nodeFollow
-}
-
-type nodeFollow struct {
-	attempt string
-	active  bool
-}
-
-func newNodeFollows() *nodeFollows { return &nodeFollows{nodes: map[string]*nodeFollow{}} }
-
-func (f *nodeFollows) start(n *store.Node) bool {
-	attempt := fmt.Sprintf("%d/%d", n.AttemptsConsumed, n.ClaimGeneration)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if cur, ok := f.nodes[n.NodeID]; ok && (cur.active || cur.attempt == attempt || n.Status != "running") {
-		return false
-	}
-	f.nodes[n.NodeID] = &nodeFollow{attempt: attempt, active: true}
-	return true
-}
-
-func (f *nodeFollows) ended(nodeID string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.nodes[nodeID].active = false
-}
-
-func (f *nodeFollows) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.nodes)
-}
-
-func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string,
-	multi *atomic.Bool, mu *sync.Mutex, out io.Writer,
-) {
-	failures := 0
+	wait := remoteFollowPollInterval
+	consecutive := 0
+	var failures remoteFollowFailures
 	for {
-		if ctx.Err() != nil {
-			return
+		timer := time.NewTimer(wait)
+		select {
+		case <-runCtx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
 		}
-		body, err := logc.Stream(ctx, runID, nodeID)
-		if err != nil {
-			failures++
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(remoteFollowBackoff(failures)):
+		nodes, err := ctrl.ListNodes(runCtx, runID)
+		if client.IsTokenDead(err) {
+			return fmt.Errorf("run %s: %w", runID, err)
+		}
+		run, rerr := ctrl.GetRun(runCtx, runID)
+		if rerr == nil {
+			failures.succeeded()
+			wait, consecutive = remoteFollowPollInterval, 0
+			if err == nil && f.poll(runCtx, nodes, nodeFilter, isTerminalStatus(run.Status)) {
+				return nil
 			}
 			continue
 		}
-		failures = 0
-		ended := readSSE(ctx, body, func(line string) {
-			mu.Lock()
-			defer mu.Unlock()
-			if multi != nil && multi.Load() {
-				fmt.Fprintf(out, "%s | %s\n", nodeID, line)
-			} else {
-				fmt.Fprintln(out, line)
+		if runCtx.Err() != nil {
+			return nil
+		}
+		// safety: a dead token never reads the run again, so waiting out the budget only adds load.
+		if client.IsTokenDead(rerr) {
+			return fmt.Errorf("run %s: %w", runID, rerr)
+		}
+		consecutive++
+		wait = remoteFollowBackoff(consecutive)
+		if elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget); exhausted {
+			return fmt.Errorf("run %s: controller status unreadable for %s: %w", runID, elapsed.Round(time.Second), rerr)
+		}
+	}
+}
+
+type logIdentity struct {
+	node                string
+	attempt, generation int64
+}
+
+// safety: the node row lists every attempt it ran as well as the one it runs now, so an attempt that started and
+// finished between two polls is still followed; an in-process retry writes on under its first attempt's log, so
+// some listed attempts never get a log of their own.
+func nodeLogIdentities(n *store.Node) []logIdentity {
+	var out []logIdentity
+	add := func(attempt, generation int64) {
+		id := logIdentity{node: n.NodeID, attempt: attempt, generation: generation}
+		if attempt > 0 && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	for _, a := range n.ExecutionAttempts {
+		add(int64(a.Attempt), a.ClaimGeneration)
+	}
+	if n.Status == "running" {
+		add(int64(n.AttemptsConsumed)+1, n.ClaimGeneration)
+	}
+	return out
+}
+
+type followState int
+
+const (
+	followDue followState = iota
+	followStreaming
+	followDone
+)
+
+// safety: each attempt's log is streamed by its identity and marked done only once streamed to its end, one
+// attempt of a node at a time and in order, so a retry's log is neither skipped nor replaced by another attempt's.
+type attemptFollower struct {
+	logs  storage.AttemptLogStreamer
+	runID string
+	out   io.Writer
+	wg    sync.WaitGroup
+
+	mu    sync.Mutex
+	state map[logIdentity]followState
+	nodes map[string]bool
+}
+
+// safety: it reports the follow finished only when the run is terminal and every identity it saw is done.
+func (f *attemptFollower) poll(ctx context.Context, nodes []*store.Node, nodeFilter string, terminal bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, n := range nodes {
+		if nodeFilter != "" && n.NodeID != nodeFilter {
+			continue
+		}
+		for _, id := range nodeLogIdentities(n) {
+			if _, seen := f.state[id]; !seen {
+				f.state[id], f.nodes[id.node] = followDue, true
 			}
-		})
-		body.Close()
-		if ended {
-			return
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(250 * time.Millisecond):
+	}
+	ids := slices.SortedFunc(maps.Keys(f.state), func(a, b logIdentity) int {
+		return cmp.Or(strings.Compare(a.node, b.node), cmp.Compare(a.attempt, b.attempt), cmp.Compare(a.generation, b.generation))
+	})
+	busy := map[string]bool{}
+	finished := terminal
+	for _, id := range ids {
+		st := f.state[id]
+		if st == followDue && !busy[id.node] {
+			f.state[id], st = followStreaming, followStreaming
+			f.wg.Add(1)
+			go f.stream(ctx, id, terminal)
 		}
+		if st == followStreaming {
+			busy[id.node] = true
+		}
+		finished = finished && st == followDone
+	}
+	return finished
+}
+
+// safety: an attempt with no log once the run is terminal never gets one, as when an in-process retry wrote on
+// under its first attempt's log, so it is done; before then it is asked for again at the next poll.
+func (f *attemptFollower) stream(ctx context.Context, id logIdentity, terminal bool) {
+	defer f.wg.Done()
+	next := followDue
+	body, err := f.logs.StreamAttempt(ctx, f.runID, id.node, id.attempt, id.generation)
+	switch {
+	case errors.Is(err, storage.ErrNotSupported), terminal && errors.Is(err, storage.ErrNotFound):
+		next = followDone
+	case err == nil:
+		if readSSE(ctx, body, func(line string) { f.print(id.node, line) }) {
+			next = followDone
+		}
+		_ = body.Close()
+	}
+	f.mu.Lock()
+	f.state[id] = next
+	f.mu.Unlock()
+}
+
+func (f *attemptFollower) print(nodeID, line string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.nodes) > 1 {
+		fmt.Fprintf(f.out, "%s | %s\n", nodeID, line)
+	} else {
+		fmt.Fprintln(f.out, line)
 	}
 }
 

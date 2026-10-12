@@ -23,7 +23,10 @@ import (
 //	data, err := c.NodeLogs().Read(ctx, runID, nodeID, storage.ReadOpts{Tail: 100})
 type NodeLogs struct{ c *Client }
 
-var _ storage.LogStore = NodeLogs{}
+var (
+	_ storage.LogStore           = NodeLogs{}
+	_ storage.AttemptLogStreamer = NodeLogs{}
+)
 
 // NodeLogs returns the reader for this controller's node logs.
 func (c *Client) NodeLogs() NodeLogs { return NodeLogs{c: c} }
@@ -122,8 +125,24 @@ func (l NodeLogs) Grep(ctx context.Context, runID, nodeID, pattern string, maxMa
 // raw log record, and returns (nil, nil) when the controller has no live
 // read of the node.
 func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {
+	body, err := l.openStream(ctx, runID, nodeID, "")
+	if errors.Is(err, storage.ErrNotSupported) {
+		return nil, nil
+	}
+	return body, err
+}
+
+// StreamAttempt opens one attempt's log as [NodeLogs.Stream] does the
+// newest. It returns an error wrapping storage.ErrNotFound while the
+// attempt has no log, and storage.ErrNotSupported when the controller
+// keeps no attempt's log apart.
+func (l NodeLogs) StreamAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error) {
+	return l.openStream(ctx, runID, nodeID, fmt.Sprintf("&attempt=%d&generation=%d", attempt, generation))
+}
+
+func (l NodeLogs) openStream(ctx context.Context, runID, nodeID, query string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		l.c.baseURL+l.logPath(runID, nodeID)+"/stream?format=raw", nil)
+		l.c.baseURL+l.logPath(runID, nodeID)+"/stream?format=raw"+query, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,16 +157,21 @@ func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadClos
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == http.StatusNotImplemented {
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return resp.Body, nil
+	case http.StatusNotImplemented:
 		closeDrained(resp.Body)
-		return nil, nil
-	}
-	if resp.StatusCode != http.StatusOK {
+		return nil, storage.ErrNotSupported
+	case http.StatusNotFound:
+		err := readHTTPError(resp)
+		closeDrained(resp.Body)
+		return nil, fmt.Errorf("%w: %w", storage.ErrNotFound, err)
+	default:
 		err := readHTTPError(resp)
 		closeDrained(resp.Body)
 		return nil, err
 	}
-	return resp.Body, nil
 }
 
 // NodeLogCompleteness asks the controller whether a node's log is

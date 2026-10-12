@@ -19,15 +19,51 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string) {
+	if r.URL.Query().Has("attempt") {
+		serveAttemptLogStream(b, w, r, runID, nodeID)
+		return
+	}
 	body, err := b.StreamNodeLog(r.Context(), runID, nodeID)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
+	serveLogBody(b, w, r, runID, nodeID, body)
+}
+
+// safety: a follower names the attempt it wants, so an attempt with no log yet answers 404 rather than another
+// attempt's log, and no live view stands in for it.
+func serveAttemptLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string) {
+	attempt, aerr := strconv.ParseInt(r.URL.Query().Get("attempt"), 10, 64)
+	generation, gerr := strconv.ParseInt(r.URL.Query().Get("generation"), 10, 64)
+	if aerr != nil || gerr != nil || attempt < 1 || generation < 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("attempt must be a number from 1 and generation one from 0"))
+		return
+	}
+	streamer, ok := b.(backend.AttemptLogStreamer)
+	if !ok {
+		writeErr(w, http.StatusNotImplemented, fmt.Errorf("this backend keeps no node attempt's log apart"))
+		return
+	}
+	body, err := streamer.StreamNodeLogAttempt(r.Context(), runID, nodeID, attempt, generation)
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		writeErr(w, http.StatusNotFound, err)
+	case errors.Is(err, storage.ErrNotSupported):
+		writeErr(w, http.StatusNotImplemented, err)
+	case err != nil:
+		writeErr(w, http.StatusBadGateway, err)
+	default:
+		serveLogBody(b, w, r, runID, nodeID, body)
+	}
+}
+
+func serveLogBody(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string, body io.ReadCloser) {
 	if body == nil {
 		// safety: an object-store logs surface has no live read, so the
 		// controller's in-memory ring is the only live view of a node

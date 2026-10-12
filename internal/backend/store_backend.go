@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 
@@ -122,6 +123,31 @@ func (b *StoreBackend) StreamNodeLog(ctx context.Context, runID, nodeID string) 
 		return b.logStore.Stream(ctx, runID, nodeID)
 	}
 	return nil, nil
+}
+
+// AttemptLogStreamer is a [Backend] that streams one node attempt's log,
+// as [storage.AttemptLogStreamer] describes.
+type AttemptLogStreamer interface {
+	StreamNodeLogAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error)
+}
+
+var (
+	_ AttemptLogStreamer = (*StoreBackend)(nil)
+	_ AttemptLogStreamer = (*ClientBackend)(nil)
+)
+
+// StreamNodeLogAttempt streams one attempt's log, or answers
+// storage.ErrNotSupported when the log store keeps no attempt apart.
+func (b *StoreBackend) StreamNodeLogAttempt(ctx context.Context, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error) {
+	return streamAttempt(ctx, b.logStore, runID, nodeID, attempt, generation)
+}
+
+func streamAttempt(ctx context.Context, logs storage.LogStore, runID, nodeID string, attempt, generation int64) (io.ReadCloser, error) {
+	s, ok := logs.(storage.AttemptLogStreamer)
+	if !ok {
+		return nil, fmt.Errorf("%w: this log store keeps no node attempt's log apart", storage.ErrNotSupported)
+	}
+	return s.StreamAttempt(ctx, runID, nodeID, attempt, generation)
 }
 
 func toStorageReadOpts(o ReadOpts) storage.ReadOpts {

@@ -714,3 +714,36 @@ func TestPruningCountsTheBytesItDeletes(t *testing.T) {
 		}
 	}
 }
+
+// A follower streams an attempt by its identity: that attempt's log to its
+// end, and not found for an attempt with no log rather than another
+// attempt's log.
+func TestStreamAttemptServesOnlyTheNamedAttempt(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	if err := s.Append([]byte(logLine(1)), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: f.srv.logObjects()}
+	if _, err := logs.StreamAttempt(ctx, "run-d", "a", rec.Attempt, rec.Generation+1); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("a later claim with no log = %v, want not found", err)
+	}
+	body, err := logs.StreamAttempt(ctx, "run-d", "a", rec.Attempt, rec.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = body.Close() }()
+	got, err := io.ReadAll(body)
+	if err != nil || !strings.Contains(string(got), "line 01") || !strings.Contains(string(got), "event: stream_end") {
+		t.Fatalf("attempt stream = %q, %v; want its line and the end", got, err)
+	}
+}

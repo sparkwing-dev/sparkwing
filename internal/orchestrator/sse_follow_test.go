@@ -8,7 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -70,59 +69,105 @@ func TestCopySSEStream_StopsOnACancelledFollow(t *testing.T) {
 	}
 }
 
-type oneStreamLogs struct {
-	storage.LogStore
-	opened atomic.Int32
+type attemptLogs struct {
+	mu     sync.Mutex
+	logs   map[logIdentity]string
+	opened map[logIdentity]int
 }
 
-func (l *oneStreamLogs) Stream(context.Context, string, string) (io.ReadCloser, error) {
-	l.opened.Add(1)
-	return io.NopCloser(strings.NewReader("data: line 1\n\nevent: stream_end\ndata: {}\n\n")), nil
+func (l *attemptLogs) put(id logIdentity, body string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.logs[id] = body
 }
 
-// A node whose log stream ended is sealed while the run goes on, so the
-// follow stops there rather than reconnecting and printing it again.
-func TestStreamNode_StopsAtTheEndOfASealedNodesLog(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	logs := &oneStreamLogs{}
+func (l *attemptLogs) StreamAttempt(_ context.Context, _, nodeID string, attempt, generation int64) (io.ReadCloser, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	id := logIdentity{node: nodeID, attempt: attempt, generation: generation}
+	l.opened[id]++
+	body, ok := l.logs[id]
+	if !ok {
+		return nil, storage.ErrNotFound
+	}
+	return io.NopCloser(strings.NewReader(body + "event: stream_end\ndata: {}\n\n")), nil
+}
+
+func newAttemptFollow(logs *attemptLogs, out io.Writer) *attemptFollower {
+	return &attemptFollower{logs: logs, runID: "run-1", out: out, state: map[logIdentity]followState{}, nodes: map[string]bool{}}
+}
+
+func pollAndWait(t *testing.T, f *attemptFollower, terminal bool, nodes ...*store.Node) bool {
+	t.Helper()
+	finished := f.poll(context.Background(), nodes, "", terminal)
+	f.wg.Wait()
+	return finished
+}
+
+func attemptOf(attempt int, generation int64) store.ExecutionAttempt {
+	return store.ExecutionAttempt{Attempt: attempt, ClaimGeneration: generation}
+}
+
+// A replacement claim seen running before its log exists is asked for
+// again at the next poll, never answered with the earlier claim's log, and
+// its own log is streamed once it appears.
+func TestAttemptFollower_WaitsForAReplacementClaimsOwnLog(t *testing.T) {
+	first, second := logIdentity{"a", 1, 1}, logIdentity{"a", 1, 2}
+	logs := &attemptLogs{logs: map[logIdentity]string{first: "data: first claim\n\n"}, opened: map[logIdentity]int{}}
 	var out bytes.Buffer
-	var multi atomic.Bool
-	streamNode(ctx, logs, "run-1", "a", &multi, &sync.Mutex{}, &out)
-	if ctx.Err() != nil || logs.opened.Load() != 1 || out.String() != "line 1\n" {
-		t.Fatalf("follow opened the stream %d times and wrote %q (ctx %v); want once, line 1 alone",
-			logs.opened.Load(), out.String(), ctx.Err())
+	f := newAttemptFollow(logs, &out)
+	reclaimed := &store.Node{
+		NodeID: "a", Status: "running", ClaimGeneration: 2,
+		ExecutionAttempts: []store.ExecutionAttempt{attemptOf(1, 1), attemptOf(1, 2)},
+	}
+
+	pollAndWait(t, f, false, reclaimed)
+	pollAndWait(t, f, false, reclaimed)
+	if logs.opened[second] == 0 || out.String() != "first claim\n" {
+		t.Fatalf("before the new claim's log exists: opened %v, wrote %q", logs.opened, out.String())
+	}
+	logs.put(second, "data: second claim\n\n")
+	pollAndWait(t, f, false, reclaimed)
+	if finished := pollAndWait(t, f, true, reclaimed); !finished {
+		t.Fatal("follow not finished with the run terminal and both claims streamed")
+	}
+	if out.String() != "first claim\nsecond claim\n" || logs.opened[first] != 1 {
+		t.Fatalf("wrote %q, opened %v; want each claim's log once, in order", out.String(), logs.opened)
 	}
 }
 
-// A follow streams a node again when a retry or a later claim runs it
-// under a new attempt after the last attempt's log ended, and not while a
-// stream is open, between attempts, or once the node is done.
-func TestNodeFollows_StreamsEachAttemptOfANodeOnce(t *testing.T) {
-	f := newNodeFollows()
-	node := func(status string, consumed int, generation int64) *store.Node {
-		return &store.Node{NodeID: "a", Status: status, AttemptsConsumed: consumed, ClaimGeneration: generation}
+// A retry that started and finished between two polls is first seen done,
+// and its log is still streamed; an attempt that never got a log of its
+// own, as an in-process retry does not, ends the follow once the run is
+// terminal.
+func TestAttemptFollower_StreamsARetryFirstSeenDone(t *testing.T) {
+	logs := &attemptLogs{logs: map[logIdentity]string{
+		{"a", 1, 1}: "data: attempt 1\n\n",
+		{"a", 2, 2}: "data: attempt 2\n\n",
+	}, opened: map[logIdentity]int{}}
+	var out bytes.Buffer
+	f := newAttemptFollow(logs, &out)
+
+	pollAndWait(t, f, false, &store.Node{
+		NodeID: "a", Status: "running", ClaimGeneration: 1,
+		ExecutionAttempts: []store.ExecutionAttempt{attemptOf(1, 1)},
+	})
+	done := &store.Node{
+		NodeID: "a", Status: "done", AttemptsConsumed: 3, ClaimGeneration: 2,
+		ExecutionAttempts: []store.ExecutionAttempt{attemptOf(1, 1), attemptOf(2, 2), attemptOf(3, 2)},
 	}
-	for i, step := range []struct {
-		node  *store.Node
-		ended bool
-		want  bool
-	}{
-		{node("running", 0, 1), false, true},
-		{node("running", 0, 1), false, false},
-		{node("pending", 1, 1), true, false},
-		{node("running", 1, 2), false, true},
-		{node("running", 1, 3), true, true},
-		{node("done", 2, 3), true, false},
-	} {
-		if step.ended {
-			f.ended("a")
-		}
-		if got := f.start(step.node); got != step.want {
-			t.Fatalf("step %d: start(%+v) = %v, want %v", i, *step.node, got, step.want)
+	if finished := pollAndWait(t, f, true, done); finished {
+		t.Fatal("follow finished before the retry's log was streamed")
+	}
+	for range 3 {
+		if pollAndWait(t, f, true, done) {
+			break
 		}
 	}
-	if f.count() != 1 {
-		t.Fatalf("count = %d, want one node", f.count())
+	if !pollAndWait(t, f, true, done) {
+		t.Fatalf("follow never finished; states %v", f.state)
+	}
+	if out.String() != "attempt 1\nattempt 2\n" {
+		t.Fatalf("wrote %q, want both attempts once", out.String())
 	}
 }
