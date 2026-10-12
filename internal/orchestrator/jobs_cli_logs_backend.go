@@ -244,7 +244,7 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 }
 
 // safety: every body that reaches here is a server-sent-events stream --
-// the logs service's and the controller's live ring both frame that way --
+// the controller's segment stream and live ring both frame that way --
 // so the framing is stripped rather than printed at the reader.
 func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) {
 	scanner := bufio.NewScanner(rc)

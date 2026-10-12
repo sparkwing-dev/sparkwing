@@ -1,7 +1,7 @@
-// Package storagequota is how the cache and the logs service ask the
-// controller to count a team's storage and downloads. The controller keeps
-// every count in its database under a row lock, so the services hold no
-// count of their own and any number of replicas of them agree.
+// Package storagequota is how the cache asks the controller to count a
+// team's storage and downloads. The controller keeps every count in its
+// database under a row lock, so the cache holds no count of its own and any
+// number of its replicas agree.
 //
 // A write reserves its size before one byte is read ([Client.Reserve]),
 // commits what it stored ([Client.Commit]) or releases the room when it

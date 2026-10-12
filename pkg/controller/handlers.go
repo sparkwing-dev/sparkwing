@@ -1447,6 +1447,13 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	localDir := s.dashboard != nil && s.dashboard.Local && s.dashboard.Paths.Root != ""
+	// safety: a laptop run's directory is named by its id, so an id that is not one path segment is refused
+	// before anything is deleted rather than leaving its row gone and its directory behind.
+	if err := storage.SafeSegment(id); localDir && err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	// safety: the run's log records are the only index of its segments, so
 	// the segments go first.
 	if err := s.deleteRunSegments(r.Context(), s.logObjects(), tenant.Team(), id); err != nil {
@@ -1461,7 +1468,7 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if s.dashboard != nil && s.dashboard.Local && s.dashboard.Paths.Root != "" {
+	if localDir {
 		if err := removeLocalRunDir(s.dashboard.Paths.RunsDir(), id); err != nil {
 			s.writeInternalError(w, r, "remove the run's directory", err)
 			return
@@ -1473,9 +1480,6 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 // safety: a laptop dashboard's node logs live in the run's directory on its own disk; os.Root keeps a planted
 // symlink from turning the removal into one outside the runs tree.
 func removeLocalRunDir(runsDir, runID string) error {
-	if err := storage.SafeSegment(runID); err != nil {
-		return err
-	}
 	root, err := os.OpenRoot(runsDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil

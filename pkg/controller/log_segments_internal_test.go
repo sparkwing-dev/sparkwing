@@ -497,3 +497,44 @@ func TestStoragePassCountsLogSegments(t *testing.T) {
 		t.Fatalf("reconciled log storage = %+v, %v; want %d used", usage[store.StorageLogs], err, want)
 	}
 }
+
+// A team past its free log share loses its finished runs' segments and
+// records, and never a run still going.
+func TestPruningATeamOverItsShareDeletesOnlyFinishedRunsSegments(t *testing.T) {
+	f := newLogSegmentFixture(t)
+	ctx := t.Context()
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	s, _ := f.sink(t, tok, "a")
+	for i := 1; i <= 4; i++ {
+		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(ctx, logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs := f.srv.logObjects()
+	over := store.TeamOverShare{Team: store.DefaultTeam, OverBytes: 1}
+	if _, err := f.srv.pruneTeamSegments(ctx, objs, over); err != nil {
+		t.Fatal(err)
+	}
+	if keys, err := objs.List(ctx, rec.Prefix); err != nil || len(keys) == 0 {
+		t.Fatalf("a running run's segments after the prune = %v, %v; want them kept", keys, err)
+	}
+	if _, err := f.st.DB().ExecContext(ctx, `UPDATE runs SET status = 'success' WHERE id = 'run-d'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.srv.pruneTeamSegments(ctx, objs, over); err != nil {
+		t.Fatal(err)
+	}
+	if keys, err := objs.List(ctx, rec.Prefix); err != nil || len(keys) != 0 {
+		t.Fatalf("a finished run's segments after the prune = %v, %v; want none", keys, err)
+	}
+	if recs, err := f.st.RunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil || len(recs) != 0 {
+		t.Fatalf("log records after the prune = %v, %v; want none", recs, err)
+	}
+}

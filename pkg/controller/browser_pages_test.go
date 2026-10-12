@@ -243,10 +243,13 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 	if _, err := os.Stat(p.RunDir("r2")); err != nil {
 		t.Fatalf("r2's directory after r1's delete: %v", err)
 	}
-	if code := del(`a%5Cb`); code != http.StatusInternalServerError {
-		t.Fatalf("delete a run whose id is not a path segment = %d, want 500", code)
+	if code := del(`a%5Cb`); code != http.StatusBadRequest {
+		t.Fatalf("delete a run whose id is not a path segment = %d, want 400", code)
 	}
 	if _, err := os.Stat(p.RunDir(`a\b`)); err != nil {
 		t.Fatalf("the refused id's directory: %v, want it left alone", err)
+	}
+	if _, err := f.st.GetRun(ctx, `a\b`); err != nil {
+		t.Fatalf("the refused id's run row: %v, want it kept", err)
 	}
 }

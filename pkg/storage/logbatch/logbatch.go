@@ -15,9 +15,8 @@
 // object, naming how many it dropped.
 //
 // Wrap only backends whose Append is one object. A filesystem store
-// appends to an open file and a logs service takes a streaming append,
-// so neither gains anything from batching and both lose the immediacy
-// their readers rely on.
+// appends to an open file, so it gains nothing from batching and loses
+// the immediacy its readers rely on.
 package logbatch
 
 import (

@@ -1152,7 +1152,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
 	mux.Handle("DELETE /api/v1/github-app/installations/{installation_id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorGitHubAppUnbind)))
 
-	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
+	// safety: service discovery names the internal cache URL, so any bearer will do but anonymity will not.
 	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
 
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
@@ -1217,8 +1217,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its operator token and the logs
-	// service with the caller's forwarded credential, which these handlers check.
+	// safety: the cache proves itself with its operator token, which these
+	// handlers check.
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
 	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
