@@ -43,6 +43,9 @@ func main() {
 	if len(args) > 0 && args[0] == "migrate-logs" {
 		run = func(args []string) error { return runMigrateLogs(args[1:], os.Stdout) }
 	}
+	if len(args) > 0 && args[0] == "admin" {
+		run = func(args []string) error { return runAdmin(args[1:], os.Stdout, os.Stderr) }
+	}
 	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing-controller:", err)
 		os.Exit(1)
@@ -62,7 +65,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCacheGrantKey,
+				credBillingToken, credCreditsToken, credCacheGrantKey,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	cachePodURL := fs.String("cache-pod-url", "",
@@ -434,6 +437,19 @@ func run(args []string) error {
 			fmt.Fprintln(os.Stderr,
 				"sparkwing-controller: bootstrap admin token skipped: the tokens table already holds a token")
 		}
+	}
+
+	switch created, err := controller.EnsureCheckoutToken(ctx, st, creds.CreditsToken, time.Now().UTC()); {
+	case errors.Is(err, store.ErrSeededTokenRevoked):
+		// safety: a revoked credential is never seeded again; the controller
+		// starts without a checkout token so selling credits stops visibly.
+		fmt.Fprintln(os.Stderr, "sparkwing-controller: ERROR: the "+credCreditsToken+
+			" credential holds a checkout token that was revoked; it is not seeded again. "+
+			"Write a new sws_ value to the credential and to the checkout service, then restart.")
+	case err != nil:
+		return fmt.Errorf("%s credential: %w", credCreditsToken, err)
+	case created:
+		fmt.Fprintln(os.Stderr, "sparkwing-controller: checkout service token created from the "+credCreditsToken+" credential")
 	}
 
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {

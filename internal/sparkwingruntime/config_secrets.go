@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/swtags"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -14,6 +15,24 @@ import (
 func WithPipelineSecrets(ctx context.Context, v any) context.Context {
 	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.PipelineSecrets, v)
 }
+
+// MissingSecretsError names every required secret of a pipeline's Secrets()
+// declaration that its secret source does not hold.
+type MissingSecretsError struct {
+	Pipeline string
+	Names    []string
+}
+
+func (e *MissingSecretsError) Error() string {
+	noun := "secrets"
+	if len(e.Names) == 1 {
+		noun = "secret"
+	}
+	return fmt.Sprintf("pipeline %q secrets: no value for required %s %s", e.Pipeline, noun, strings.Join(e.Names, ", "))
+}
+
+// Unwrap lets a caller match the miss as [sparkwing.ErrSecretMissing].
+func (e *MissingSecretsError) Unwrap() error { return sparkwing.ErrSecretMissing }
 
 func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ *pipelines.Pipeline) (any, error) {
 	if reg == nil {
@@ -52,52 +71,45 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ 
 		}
 	}
 
-	requiredNames := map[string]struct{}{}
-	optionalNames := map[string]struct{}{}
+	required := map[string]bool{}
+	var order []string
 	for _, s := range specs {
-		if s.Required {
-			requiredNames[s.Name] = struct{}{}
-			delete(optionalNames, s.Name)
-		} else if s.Optional {
-			if _, alreadyReq := requiredNames[s.Name]; !alreadyReq {
-				optionalNames[s.Name] = struct{}{}
-			}
+		if _, seen := required[s.Name]; !seen {
+			order = append(order, s.Name)
 		}
+		required[s.Name] = required[s.Name] || s.Required
 	}
 
-	if (len(requiredNames) > 0 || len(optionalNames) > 0) && resolver == nil {
+	if len(order) > 0 && resolver == nil {
 		return nil, fmt.Errorf("pipeline %q secrets: declared but no SecretResolver installed on ctx", reg.Name)
 	}
 
-	specByName := map[string]swtags.FieldSpec{}
+	values := map[string]string{}
+	missing := &MissingSecretsError{Pipeline: reg.Name}
+	// safety: every required secret is resolved before the first node, and all
+	// that are missing are reported together, so one fix pass covers them.
+	for _, name := range order {
+		v, _, err := resolver.Resolve(ctx, name)
+		switch {
+		case err == nil:
+			values[name] = v
+		case errors.Is(err, sparkwing.ErrSecretMissing) && required[name]:
+			missing.Names = append(missing.Names, name)
+		case errors.Is(err, sparkwing.ErrSecretMissing):
+		default:
+			return nil, fmt.Errorf("pipeline %q secrets: %q: %w", reg.Name, name, err)
+		}
+	}
+	if len(missing.Names) > 0 {
+		return nil, missing
+	}
 	for _, s := range specs {
-		specByName[s.Name] = s
-	}
-
-	// safety: resolve required secrets first so the run fails before any optional resolution begins.
-	for name := range requiredNames {
-		v, _, err := resolver.Resolve(ctx, name)
-		if err != nil {
-			return nil, fmt.Errorf("pipeline %q secrets: %q: %w", reg.Name, name, err)
+		v, ok := values[s.Name]
+		if !ok {
+			continue
 		}
-		if s, ok := specByName[name]; ok {
-			if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), v, s.Field.Name); err != nil {
-				return nil, fmt.Errorf("pipeline %q secrets: field %s expects %s", reg.Name, s.Field.Name, s.Field.Type)
-			}
-		}
-	}
-	for name := range optionalNames {
-		v, _, err := resolver.Resolve(ctx, name)
-		if err != nil {
-			if errors.Is(err, sparkwing.ErrSecretMissing) {
-				continue
-			}
-			return nil, fmt.Errorf("pipeline %q secrets: %q: %w", reg.Name, name, err)
-		}
-		if s, ok := specByName[name]; ok {
-			if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), v, s.Field.Name); err != nil {
-				return nil, fmt.Errorf("pipeline %q secrets: field %s expects %s", reg.Name, s.Field.Name, s.Field.Type)
-			}
+		if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), v, s.Field.Name); err != nil {
+			return nil, fmt.Errorf("pipeline %q secrets: field %s expects %s", reg.Name, s.Field.Name, s.Field.Type)
 		}
 	}
 

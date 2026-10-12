@@ -31,6 +31,9 @@ export interface OperatorTeam {
     trust_at?: number;
     trust_reason?: string;
     limit_override_cents?: number;
+    daily_cap_cents?: number;
+    rung_cents?: number;
+    runner_cap?: number;
     purchase_limit_cents: number;
     purchased_30d_cents: number;
   };
@@ -47,7 +50,8 @@ export type ActionKind =
   | "clear-limit"
   | "grant-credits"
   | "freeze"
-  | "unfreeze";
+  | "unfreeze"
+  | "release-hold";
 
 export const actionLabels: Record<ActionKind, string> = {
   "grant-trust": "Trust",
@@ -58,7 +62,19 @@ export const actionLabels: Record<ActionKind, string> = {
   "grant-credits": "Grant credits",
   freeze: "Freeze",
   unfreeze: "Unfreeze",
+  "release-hold": "Release a dispute hold",
 };
+
+// ActionExtra carries the inputs only some actions take: the optional
+// overrides of set-limit, as typed, and the hold release-hold names.
+export interface ActionExtra {
+  daily?: string;
+  rung?: string;
+  runners?: string;
+  hold?: string;
+}
+
+export const maxRunnerCap = 10_000;
 
 export const maxOperatorCents = 500_000;
 
@@ -72,11 +88,24 @@ export function needsAmount(kind: ActionKind): boolean {
   return kind === "set-limit" || kind === "grant-credits";
 }
 
+function optionalCents(raw: string | undefined): number | null {
+  if (!raw?.trim()) return 0;
+  const cents = parseDollars(raw);
+  return cents === null || cents <= 0 || cents > maxOperatorCents ? null : cents;
+}
+
+function optionalRunners(raw: string | undefined): number | null {
+  if (!raw?.trim()) return 0;
+  const n = Number(raw.trim());
+  return Number.isInteger(n) && n > 0 && n <= maxRunnerCap ? n : null;
+}
+
 // actionProblem says why the action cannot be reviewed yet, or "" when it can.
 export function actionProblem(
   kind: ActionKind,
   reason: string,
   amount: string,
+  extra: ActionExtra = {},
 ): string {
   if (needsAmount(kind)) {
     const cents = parseDollars(amount);
@@ -84,9 +113,18 @@ export function actionProblem(
       return `Enter an amount from $0.01 to ${fmtCents(maxOperatorCents)}.`;
     }
   }
+  if (kind === "set-limit") {
+    if (optionalCents(extra.daily) === null || optionalCents(extra.rung) === null) {
+      return `Leave a daily cap or rung empty, or enter $0.01 to ${fmtCents(maxOperatorCents)}.`;
+    }
+    if (optionalRunners(extra.runners) === null) {
+      return `Leave the node cap empty, or enter a whole number from 1 to ${maxRunnerCap.toLocaleString("en-US")}.`;
+    }
+  }
   if (reason.trim() === "")
     return "Give a reason; it is recorded with the action.";
   if (reason.trim().length > 500) return "Keep the reason to 500 characters.";
+  if (kind === "release-hold" && !extra.hold) return "Choose the hold to release.";
   return "";
 }
 
@@ -95,20 +133,29 @@ export function actionEffect(
   team: OperatorTeam,
   kind: ActionKind,
   amount: string,
+  extra: ActionExtra = {},
 ): string {
   const cents = parseDollars(amount) ?? 0;
   const name = team.display_name || team.team;
   switch (kind) {
     case "grant-trust":
-      return `${name} becomes trusted and may buy ${fmtCents(50_000)} every 30 days, whatever the automatic rule says. Any limit override is cleared.`;
+      return `${name} becomes trusted and may buy ${fmtCents(50_000)} every 30 days, whatever the automatic rule says. Every override is cleared.`;
     case "revoke-trust":
-      return `${name} is held to the new-team limit of ${fmtCents(5_000)} every 30 days, whatever the automatic rule says. Any limit override is cleared.`;
+      return `${name} is held to the new-team limit of ${fmtCents(5_000)} every 30 days, whatever the automatic rule says. Every override is cleared.`;
     case "reset-trust":
-      return `${name} returns to the automatic rule and any limit override is cleared.`;
-    case "set-limit":
-      return `${name} becomes trusted and may buy ${fmtCents(cents)} every 30 days.`;
+      return `${name} returns to the automatic rule and every override is cleared.`;
+    case "set-limit": {
+      const parts = [`may buy ${fmtCents(cents)} every 30 days`];
+      const daily = optionalCents(extra.daily);
+      const rung = optionalCents(extra.rung);
+      const runners = optionalRunners(extra.runners);
+      if (daily) parts.push(`spends up to ${fmtCents(daily)} a day`);
+      if (rung) parts.push(`has its card charged at ${fmtCents(rung)} of debt`);
+      if (runners) parts.push(`holds up to ${runners} Cloud nodes at once`);
+      return `${name} becomes trusted and ${parts.join(", ")}. Every override left empty returns to its default.`;
+    }
     case "clear-limit":
-      return `${name} stays trusted and returns to the trusted limit of ${fmtCents(50_000)} every 30 days.`;
+      return `${name} stays trusted and returns to the trusted limit of ${fmtCents(50_000)} every 30 days, and every other override returns to its default.`;
     case "grant-credits":
       return `${name} receives ${fmtCents(cents)} of free credit.`;
     case "freeze":
@@ -117,7 +164,17 @@ export function actionEffect(
       const disputes = team.holds.length - operatorHolds(team).length;
       return `The ${operatorHolds(team).length} operator hold(s) on ${name} are released.${disputes ? ` ${disputes} dispute hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
     }
+    case "release-hold": {
+      const left = team.holds.filter((h) => h !== extra.hold).length;
+      return `The dispute hold ${extra.hold} on ${name} is released.${left ? ` ${left} other hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
+    }
   }
+}
+
+// disputeHolds are the holds a payment dispute placed, which the console
+// releases one at a time once the dispute is settled.
+export function disputeHolds(team: OperatorTeam): string[] {
+  return team.holds.filter((h) => !h.startsWith("operator-"));
 }
 
 // operatorHolds are the holds the console placed; a payment dispute's hold is
@@ -136,6 +193,7 @@ export function availableActions(team: OperatorTeam): ActionKind[] {
   if (b.trust !== "automatic") out.push("reset-trust");
   if (b.limit_override_cents) out.push("clear-limit");
   out.push("grant-credits", operatorHolds(team).length ? "unfreeze" : "freeze");
+  if (disputeHolds(team).length) out.push("release-hold");
   return out;
 }
 
@@ -146,6 +204,7 @@ export function actionRequest(
   reason: string,
   amount: string,
   key: string,
+  extra: ActionExtra = {},
 ): { path: string; body: Record<string, unknown> } {
   const base = `/api/v1/operator/teams/${encodeURIComponent(team)}`;
   const cents = parseDollars(amount) ?? 0;
@@ -157,11 +216,20 @@ export function actionRequest(
       return { path: `${base}/trust`, body: { trust: "revoked", reason } };
     case "reset-trust":
       return { path: `${base}/trust`, body: { trust: "automatic", reason } };
-    case "set-limit":
-      return {
-        path: `${base}/trust`,
-        body: { trust: "granted", reason, limit_cents: cents },
+    case "set-limit": {
+      const body: Record<string, unknown> = {
+        trust: "granted",
+        reason,
+        limit_cents: cents,
       };
+      const daily = optionalCents(extra.daily);
+      const rung = optionalCents(extra.rung);
+      const runners = optionalRunners(extra.runners);
+      if (daily) body.daily_cap_cents = daily;
+      if (rung) body.rung_cents = rung;
+      if (runners) body.runner_cap = runners;
+      return { path: `${base}/trust`, body };
+    }
     case "clear-limit":
       return {
         path: `${base}/trust`,
@@ -176,6 +244,8 @@ export function actionRequest(
       return { path: `${base}/freeze`, body: { reason } };
     case "unfreeze":
       return { path: `${base}/unfreeze`, body: { reason } };
+    case "release-hold":
+      return { path: `${base}/unfreeze`, body: { reason, hold: extra.hold } };
   }
 }
 

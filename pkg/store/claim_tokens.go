@@ -51,6 +51,11 @@ const (
 	// ClaimResult routes commit the claim's one result and answer with a
 	// status only; an ended claim still authorizes, to replay it.
 	ClaimResult
+	// ClaimLogTail routes upload and seal the node attempt's log: a live
+	// claim authorizes, and so does a launcher's or runner's node claim
+	// whose attempt ended less than [NodeLogSealGrace] ago while no later
+	// claim holds the node, for that attempt alone.
+	ClaimLogTail
 )
 
 var (
@@ -75,9 +80,13 @@ type ClaimToken struct {
 	Generation int64
 	Kind       ClaimTokenKind
 	ExpiresAt  time.Time
-	// Ended is set only by a [ClaimResult] authorization, whose route then
-	// replays the committed result instead of committing one.
+	// Ended is set only by a [ClaimResult] or [ClaimLogTail]
+	// authorization: a result route then replays the committed result
+	// instead of committing one, and a log route writes only Attempt.
 	Ended bool
+	// Attempt is, for an ended [ClaimLogTail] claim, the attempt ordinal
+	// whose log it may still finish.
+	Attempt int64
 }
 
 const claimTokensTable = `CREATE TABLE IF NOT EXISTS claim_tokens (
@@ -249,12 +258,12 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 	}
 	live := status.Valid && status.String != nodeStatusDone && claimedBy.Valid &&
 		lease.Valid && lease.Int64 > now.UnixNano() && nodeGen.Int64 == tok.Generation
-	if tok.Kind == ClaimTokenNode && live {
+	if tok.Kind == ClaimTokenNode && (live || class == ClaimLogTail) {
 		if err := s.claimantLive(ctx, claimant.String, now); err != nil {
 			return ClaimToken{}, err
 		}
 	}
-	return s.applyClaimClass(ctx, tok, live, class)
+	return s.applyClaimClass(ctx, tok, live, class, now)
 }
 
 // safety: a runner's claim token acts as the runner's credential confined to
@@ -277,11 +286,16 @@ func (s *Store) claimantLive(ctx context.Context, prefix string, now time.Time) 
 	return nil
 }
 
-func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, class ClaimRouteClass) (ClaimToken, error) {
+func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, class ClaimRouteClass, now time.Time) (ClaimToken, error) {
 	switch class {
 	case ClaimResult:
 		tok.Ended = !live
 		return tok, nil
+	case ClaimLogTail:
+		if live {
+			return tok, nil
+		}
+		return s.claimLogTail(ctx, tok, now)
 	case ClaimReporting, ClaimSensitive:
 		if !live {
 			return ClaimToken{}, ErrClaimNotLive
@@ -299,6 +313,48 @@ func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, 
 	default:
 		return ClaimToken{}, fmt.Errorf("unknown claim route class %d", class)
 	}
+}
+
+// safety: the claim's attempt rows name the attempts it ran, so only the first of them, which its writer keeps across
+// in-process retries, only for the grace after the later of its last attempt's end and its node's, and only while no
+// later claim holds the node, may still finish its log. A launcher's work claim and a runner's node claim end when
+// their node reports, before the process that holds the log seals it; no other kind does.
+func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
+	if tok.Kind != ClaimTokenWork && tok.Kind != ClaimTokenNode {
+		return ClaimToken{}, ErrClaimNotLive
+	}
+	var (
+		first, attemptEnd, nodeEnd sql.NullInt64
+		consumed                   int64
+		status                     string
+	)
+	err := s.queryRow(ctx, `SELECT MIN(a.attempt_ordinal), MAX(a.finished_at), n.attempts_consumed, n.status, n.finished_at
+  FROM nodes n
+  LEFT JOIN node_execution_attempts a ON a.team = n.team AND a.run_id = n.run_id AND a.node_id = n.node_id
+   AND a.claim_generation = n.claim_generation
+ WHERE n.team = ? AND n.run_id = ? AND n.node_id = ? AND n.claim_generation = ?
+ GROUP BY n.attempts_consumed, n.status, n.finished_at`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&first, &attemptEnd, &consumed, &status, &nodeEnd)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClaimToken{}, ErrClaimNotLive
+	}
+	if err != nil {
+		return ClaimToken{}, err
+	}
+	// safety: after-run hooks, cache saves and artifact publication follow the attempt's end and still log, so the
+	// grace runs from whichever ended later.
+	ended := attemptEnd
+	if status == nodeStatusDone && nodeEnd.Valid && (!ended.Valid || nodeEnd.Int64 > ended.Int64) {
+		ended = nodeEnd
+	}
+	if !ended.Valid || now.Sub(time.Unix(0, ended.Int64)) >= NodeLogSealGrace {
+		return ClaimToken{}, ErrClaimNotLive
+	}
+	tok.Attempt, tok.Ended = consumed+1, true
+	if first.Valid {
+		tok.Attempt = first.Int64
+	}
+	return tok, nil
 }
 
 // safety: a sensitive route that writes calls this inside its writing transaction. The run row is locked

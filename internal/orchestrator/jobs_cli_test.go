@@ -880,3 +880,38 @@ func TestJobStatus_ReportsTheComputeGuardThatRefusedWork(t *testing.T) {
 		t.Fatalf("json should carry the guard, got %v", payload["compute_guard"])
 	}
 }
+
+func TestJobStatus_ShowsTheSecretPreflightRefusal(t *testing.T) {
+	p := newPathsWithStore(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-secrets", Pipeline: "deploy", Status: "failed", StartedAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	detail := "pipeline \"deploy\" did not start: it declares 1 required secret this run cannot read.\n- DEPLOY_KEY is not set"
+	raw, _ := json.Marshal(map[string]string{"message": detail})
+	if _, err := st.AppendEvent(ctx, "run-secrets", store.PlanNodeID, store.EventKindSecretPreflightRefused, raw); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	var status bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-secrets", orchestrator.StatusOpts{}, &status); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	if !strings.Contains(status.String(), "it declares 1 required secret this run cannot read.\n           - DEPLOY_KEY is not set") {
+		t.Fatalf("status should show the preflight refusal, got:\n%s", status.String())
+	}
+	var asJSON bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-secrets", orchestrator.StatusOpts{JSON: true}, &asJSON); err != nil {
+		t.Fatalf("JobStatus json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(asJSON.Bytes(), &payload); err != nil || payload["secret_preflight"] != detail {
+		t.Fatalf("json should carry the refusal, got %v (%v)", payload["secret_preflight"], err)
+	}
+}

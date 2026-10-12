@@ -203,6 +203,7 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat":                resRun,
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs":                      resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/logs":                     resRun,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest":             resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments":             resRun,
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream":               resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready":               resRun,
@@ -240,10 +241,8 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/services": resNone,
 
-	"GET /api/v1/signups":                   resNone,
-	"PUT /api/v1/signups":                   resNone,
-	"GET /api/v1/signups/waitlist":          resNone,
-	"POST /api/v1/signups/waitlist/approve": resNone,
+	"GET /api/v1/signups": resNone,
+	"PUT /api/v1/signups": resNone,
 
 	"GET /api/v1/storage":                              resNone,
 	"PUT /api/v1/storage/quotas/{principal}":           resStorageQuota,
@@ -295,8 +294,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/teams":                                     resNone,
 	"DELETE /api/v1/teams/{team}":                            resTeam,
 	"PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch": resTeam,
-	"GET /api/v1/teams/{team}/trust":                         resTeam,
-	"POST /api/v1/teams/{team}/trust":                        resTeam,
 
 	"GET /api/v1/team/tokens":                          resNone,
 	"POST /api/v1/team/tokens":                         resNone,
