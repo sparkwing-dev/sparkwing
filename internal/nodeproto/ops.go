@@ -217,9 +217,10 @@ func (r RunResult) Validate() error {
 // EvalResult is the result of a successful eval reply. Value's type depends
 // on the closure's kind: a boolean for skip_if, a string or null for
 // cache_key, null for before_run, verify and after_run, and an array of node
-// documents for a generator. Error is set when the closure returned an error
-// or threw, which is still a successful reply.
+// documents for a generator. Error is non-nil when the closure returned an
+// error or threw, which is still a successful reply; it is a pointer so an
+// error with an empty message still reads as a failure.
 type EvalResult struct {
 	Value json.RawMessage `json:"value"`
-	Error string          `json:"error,omitempty"`
+	Error *string         `json:"error,omitempty"`
 }

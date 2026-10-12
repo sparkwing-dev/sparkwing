@@ -80,41 +80,69 @@ func TestReplyDecode(t *testing.T) {
 	}
 	f, _ = ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"value":null,"error":"503 from /ready"}}`))
 	var ev EvalResult
-	if err := f.Reply.Decode(&ev); err != nil || ev.Error != "503 from /ready" || string(ev.Value) != "null" {
+	if err := f.Reply.Decode(&ev); err != nil || ev.Error == nil || *ev.Error != "503 from /ready" || string(ev.Value) != "null" {
 		t.Fatalf("eval decode = %+v, %v", ev, err)
 	}
 }
 
-func readAll(t *testing.T, r *Reader) (lines []string, tooLong int) {
+func TestEvalEmptyErrorStillFails(t *testing.T) {
+	f, err := ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"value":null,"error":""}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev EvalResult
+	if err := f.Reply.Decode(&ev); err != nil || ev.Error == nil {
+		t.Fatalf("empty error lost: %+v, %v", ev, err)
+	}
+	empty := ""
+	enc, err := json.Marshal(EvalResult{Error: &empty})
+	if err != nil || string(enc) != `{"value":null,"error":""}` {
+		t.Fatalf("encode = %s, %v", enc, err)
+	}
+}
+
+func readAll(t *testing.T, r *Reader) ([]string, error) {
 	t.Helper()
+	var lines []string
 	for {
 		line, err := r.ReadLine()
-		switch {
-		case errors.Is(err, io.EOF):
-			return lines, tooLong
-		case errors.Is(err, ErrLineTooLong):
-			tooLong++
-		case err != nil:
-			t.Fatal(err)
-		default:
-			lines = append(lines, string(line))
+		if err != nil {
+			return lines, err
 		}
+		lines = append(lines, string(line))
 	}
 }
 
 func TestReaderLineBound(t *testing.T) {
-	long := strings.Repeat("x", 10000)
-	in := "a\r\n" + long + "\nb\n" + strings.Repeat("y", 63) + "\n" + strings.Repeat("y", 64) + "\nlast"
+	in := "a\r\n" + strings.Repeat("y", 63) + "\n" + strings.Repeat("y", 64) + "\nnever read\n"
 	r := NewReader(strings.NewReader(in))
 	r.max = 64
-	lines, tooLong := readAll(t, r)
-	if want := []string{"a", "b", strings.Repeat("y", 63), "last"}; strings.Join(lines, "|") != strings.Join(want, "|") || tooLong != 2 {
-		t.Fatalf("lines %q, too long %d", lines, tooLong)
+	lines, err := readAll(t, r)
+	if want := []string{"a", strings.Repeat("y", 63)}; strings.Join(lines, "|") != strings.Join(want, "|") || !errors.Is(err, ErrLineTooLong) {
+		t.Fatalf("lines %q, err %v", lines, err)
 	}
-	r = NewReader(strings.NewReader("ok\n" + long))
-	r.max = 64
-	if lines, tooLong = readAll(t, r); len(lines) != 1 || tooLong != 1 {
-		t.Fatalf("unterminated long tail: lines %q, too long %d", lines, tooLong)
+	if _, err := r.ReadLine(); !errors.Is(err, ErrLineTooLong) {
+		t.Fatalf("read after a long line: %v", err)
+	}
+}
+
+type endless struct{}
+
+func (endless) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
+}
+
+func TestReaderFailsLongLineWithoutNewline(t *testing.T) {
+	r := NewReader(endless{})
+	r.max = 10000
+	if _, err := r.Next(); !errors.Is(err, ErrLineTooLong) {
+		t.Fatalf("err = %v, want ErrLineTooLong", err)
+	}
+	if len(r.buf) > r.max+4096 {
+		t.Fatalf("buffered %d bytes past a %d byte bound", len(r.buf), r.max)
 	}
 }
 
@@ -255,40 +283,27 @@ func FuzzReader(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte, max uint8) {
 		r := NewReader(bytes.NewReader(in))
 		r.max = int(max)
-		var got []string
-		tooLong := 0
-		for {
-			line, err := r.ReadLine()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if errors.Is(err, ErrLineTooLong) {
-				tooLong++
-				continue
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
+		got, err := readAll(t, r)
+		for _, line := range got {
 			if len(line)+1 > r.max {
 				t.Fatalf("line of %d bytes passed max %d", len(line), r.max)
 			}
-			got = append(got, string(line))
 		}
 		var want []string
-		wantLong := 0
+		wantErr := io.EOF
 		parts := strings.Split(string(in), "\n")
 		if parts[len(parts)-1] == "" {
 			parts = parts[:len(parts)-1]
 		}
 		for _, p := range parts {
 			if len(p)+1 > r.max {
-				wantLong++
-				continue
+				wantErr = ErrLineTooLong
+				break
 			}
 			want = append(want, strings.TrimSuffix(p, "\r"))
 		}
-		if strings.Join(got, "\n") != strings.Join(want, "\n") || len(got) != len(want) || tooLong != wantLong {
-			t.Fatalf("got %q (%d too long), want %q (%d too long)", got, tooLong, want, wantLong)
+		if strings.Join(got, "\n") != strings.Join(want, "\n") || len(got) != len(want) || !errors.Is(err, wantErr) {
+			t.Fatalf("got %q (%v), want %q (%v)", got, err, want, wantErr)
 		}
 	})
 }

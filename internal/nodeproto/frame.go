@@ -12,9 +12,8 @@ import (
 )
 
 var (
-	// ErrLineTooLong reports a line longer than [MaxLineBytes]. A [Reader]
-	// has already skipped the rest of the line, so the next read continues
-	// with the following one.
+	// ErrLineTooLong reports a line longer than [MaxLineBytes]. It ends a
+	// [Reader]: the rest of the line is never read.
 	ErrLineTooLong = errors.New("nodeproto: line exceeds the maximum size")
 	// ErrMalformed reports a request or frame that does not have the
 	// protocol's shape.
@@ -201,6 +200,7 @@ type Reader struct {
 	br  *bufio.Reader
 	buf []byte
 	max int
+	err error
 }
 
 // NewReader reads lines from r.
@@ -209,43 +209,42 @@ func NewReader(r io.Reader) *Reader {
 }
 
 // ReadLine returns the next line without its newline or a trailing carriage
-// return. A line of more than [MaxLineBytes], newline included, fails with
-// [ErrLineTooLong]. The slice is valid until the next read. A final line without a
-// newline is still returned; io.EOF follows it.
+// return. The slice is valid until the next read. A final line without a
+// newline is still returned; io.EOF follows it. A line of more than
+// [MaxLineBytes], newline included, fails with [ErrLineTooLong] as soon as
+// the bound is crossed, without waiting for the newline, and every later
+// read fails the same way.
 func (r *Reader) ReadLine() ([]byte, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	r.buf = r.buf[:0]
-	tooLong := false
 	for {
 		chunk, err := r.br.ReadSlice('\n')
-		if !tooLong {
-			if len(r.buf)+len(chunk) > r.max+1 {
-				// perf: drop what was buffered so an over-long line costs at
-				// most the bound in memory, never its full length.
-				tooLong, r.buf = true, r.buf[:0]
-			} else {
-				r.buf = append(r.buf, chunk...)
-			}
+		r.buf = append(r.buf, chunk...)
+		if errors.Is(err, io.EOF) && len(r.buf) == 0 {
+			return nil, io.EOF
+		}
+		size := len(r.buf)
+		if !bytes.HasSuffix(r.buf, []byte("\n")) {
+			size++
+		}
+		if size > r.max {
+			r.err = ErrLineTooLong
+			return nil, r.err
 		}
 		switch {
 		case errors.Is(err, bufio.ErrBufferFull):
 			continue
 		case err != nil && !errors.Is(err, io.EOF):
 			return nil, err
-		case tooLong:
-			return nil, ErrLineTooLong
-		case err != nil && len(r.buf) == 0:
-			return nil, io.EOF
 		}
-		line := bytes.TrimSuffix(r.buf, []byte("\n"))
-		if len(line)+1 > r.max {
-			return nil, ErrLineTooLong
-		}
-		return bytes.TrimSuffix(line, []byte("\r")), nil
+		return bytes.TrimSuffix(bytes.TrimSuffix(r.buf, []byte("\n")), []byte("\r")), nil
 	}
 }
 
-// Next reads and parses the next frame-pipe line with [ParseFrame]. [ErrLineTooLong] and
-// [ErrMalformed] leave the reader at the following line.
+// Next reads and parses the next frame-pipe line with [ParseFrame].
+// [ErrMalformed] leaves the reader at the following line.
 func (r *Reader) Next() (Frame, error) {
 	line, err := r.ReadLine()
 	if err != nil {
