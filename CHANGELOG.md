@@ -62,6 +62,8 @@ unlock.
 ### Fixed
 - **controller:** A node waiting for an agent no longer reports that no agent of its team can run it when the agent's token expires
   Claim attention listed only tokens that never expire, because it compared their expiry in seconds against the clock in nanoseconds, so every runner and machine token dropped out; it also read an offline agent's last use as a 1970 date. Both now read seconds.
+- **orchestrator:** A `RetryAuto` node reads pending, not failed, while it waits out its retry backoff
+  The dispatcher now resets the node before the backoff instead of after it, as the store's own retry already did, so on every execution path a node recorded as done will not run again in its run. A run cancelled during the backoff records the node as cancelled.
 
 ### Removed
 - **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `pkg/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
