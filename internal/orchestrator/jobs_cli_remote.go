@@ -393,7 +393,7 @@ func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string
 			continue
 		}
 		failures = 0
-		readSSE(ctx, body, func(line string) {
+		ended := readSSE(ctx, body, func(line string) {
 			mu.Lock()
 			defer mu.Unlock()
 			if multi != nil && multi.Load() {
@@ -403,6 +403,9 @@ func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string
 			}
 		})
 		body.Close()
+		if ended {
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -411,21 +414,26 @@ func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string
 	}
 }
 
-func readSSE(ctx context.Context, body io.Reader, onLine func(string)) {
+// safety: stream_end means the node's log is sealed, so the caller stops rather than reconnecting, which would
+// replay the whole log; that event's payload is framing, not log text.
+func readSSE(ctx context.Context, body io.Reader, onLine func(string)) (ended bool) {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		line := sc.Text()
 		switch {
-		case line == "":
-		case strings.HasPrefix(line, ":"):
+		case strings.HasPrefix(line, "event:"):
+			if strings.TrimSpace(strings.TrimPrefix(line, "event:")) == "stream_end" {
+				return true
+			}
 		case strings.HasPrefix(line, "data: "):
 			onLine(strings.TrimPrefix(line, "data: "))
 		case strings.HasPrefix(line, "data:"):
 			onLine(strings.TrimPrefix(line, "data:"))
 		}
 	}
+	return false
 }

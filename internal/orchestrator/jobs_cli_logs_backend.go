@@ -1,14 +1,12 @@
 package orchestrator
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -197,9 +195,9 @@ func streamNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID 
 			_ = live.Close()
 			return
 		}
-		copySSEStream(ctx, rc, nodeID, multi, mu, out)
+		ended := copySSEStream(ctx, rc, nodeID, multi, mu, out)
 		_ = rc.Close()
-		if ctx.Err() != nil {
+		if ended || ctx.Err() != nil {
 			return
 		}
 		select {
@@ -246,38 +244,13 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 // safety: every body that reaches here is a server-sent-events stream --
 // the controller's segment stream and live ring both frame that way --
 // so the framing is stripped rather than printed at the reader.
-func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) {
-	scanner := bufio.NewScanner(rc)
-	scanner.Buffer(make([]byte, 0, 64*1024), sseMaxLine)
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			return
-		}
-		payload, ok := sseData(scanner.Text())
-		if !ok {
-			continue
-		}
+func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) (ended bool) {
+	return readSSE(ctx, rc, func(payload string) {
 		mu.Lock()
+		defer mu.Unlock()
 		if multi.Load() {
 			fmt.Fprintf(out, "[%s] ", nodeID)
 		}
-		fmt.Fprint(out, payload)
-		fmt.Fprintln(out)
-		mu.Unlock()
-	}
-}
-
-const sseMaxLine = 1 << 20
-
-// safety: only a data field carries log text; the comments, the id and
-// event fields, and the blank line between events carry framing.
-func sseData(line string) (string, bool) {
-	if line == "" || strings.HasPrefix(line, ":") {
-		return "", false
-	}
-	rest, ok := strings.CutPrefix(line, "data:")
-	if !ok {
-		return "", false
-	}
-	return strings.TrimPrefix(rest, " "), true
+		fmt.Fprintln(out, payload)
+	})
 }
