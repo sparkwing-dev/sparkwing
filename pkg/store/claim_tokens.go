@@ -52,9 +52,9 @@ const (
 	// status only; an ended claim still authorizes, to replay it.
 	ClaimResult
 	// ClaimLogTail routes upload and seal the node attempt's log: a live
-	// claim authorizes, and so does one whose attempt ended less than
-	// [NodeLogSealGrace] ago while no later claim holds the node, for that
-	// attempt alone.
+	// claim authorizes, and so does a launcher's or runner's node claim
+	// whose attempt ended less than [NodeLogSealGrace] ago while no later
+	// claim holds the node, for that attempt alone.
 	ClaimLogTail
 )
 
@@ -258,7 +258,7 @@ func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, cl
 	}
 	live := status.Valid && status.String != nodeStatusDone && claimedBy.Valid &&
 		lease.Valid && lease.Int64 > now.UnixNano() && nodeGen.Int64 == tok.Generation
-	if tok.Kind == ClaimTokenNode && live {
+	if tok.Kind == ClaimTokenNode && (live || class == ClaimLogTail) {
 		if err := s.claimantLive(ctx, claimant.String, now); err != nil {
 			return ClaimToken{}, err
 		}
@@ -315,26 +315,43 @@ func (s *Store) applyClaimClass(ctx context.Context, tok ClaimToken, live bool, 
 	}
 }
 
-// safety: the attempt row is the claim's own report, so only the attempt that claim ran, only for the grace
-// after it ended, and only while no later claim holds the node, may still finish its log. A launcher's work
-// claim is the one that ends before its log is sealed; every other kind stays refused.
+// safety: the claim's attempt rows name the attempts it ran, so only the first of them, which its writer keeps
+// across in-process retries, only for the grace after the claim's last attempt or its node ended, and only while
+// no later claim holds the node, may still finish its log. A launcher's work claim and a runner's node claim end
+// when their node reports, before the process that holds the log seals it; no other kind does.
 func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
-	if tok.Kind != ClaimTokenWork {
+	if tok.Kind != ClaimTokenWork && tok.Kind != ClaimTokenNode {
 		return ClaimToken{}, ErrClaimNotLive
 	}
-	var finished sql.NullInt64
-	err := s.queryRow(ctx, `SELECT a.attempt_ordinal, a.finished_at FROM node_execution_attempts a
-  JOIN nodes n ON n.team = a.team AND n.run_id = a.run_id AND n.node_id = a.node_id
- WHERE a.team = ? AND a.run_id = ? AND a.node_id = ? AND a.claim_generation = ? AND n.claim_generation = ?
- ORDER BY a.attempt_ordinal DESC LIMIT 1`,
-		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, tok.Generation).Scan(&tok.Attempt, &finished)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && (!finished.Valid || now.Sub(time.Unix(0, finished.Int64)) >= NodeLogSealGrace)) {
+	var (
+		first, attemptEnd, nodeEnd sql.NullInt64
+		consumed                   int64
+		status                     string
+	)
+	err := s.queryRow(ctx, `SELECT MIN(a.attempt_ordinal), MAX(a.finished_at), n.attempts_consumed, n.status, n.finished_at
+  FROM nodes n
+  LEFT JOIN node_execution_attempts a ON a.team = n.team AND a.run_id = n.run_id AND a.node_id = n.node_id
+   AND a.claim_generation = n.claim_generation
+ WHERE n.team = ? AND n.run_id = ? AND n.node_id = ? AND n.claim_generation = ?
+ GROUP BY n.attempts_consumed, n.status, n.finished_at`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&first, &attemptEnd, &consumed, &status, &nodeEnd)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimToken{}, ErrClaimNotLive
 	}
 	if err != nil {
 		return ClaimToken{}, err
 	}
-	tok.Ended = true
+	ended := attemptEnd
+	if !ended.Valid && status == nodeStatusDone {
+		ended = nodeEnd
+	}
+	if !ended.Valid || now.Sub(time.Unix(0, ended.Int64)) >= NodeLogSealGrace {
+		return ClaimToken{}, ErrClaimNotLive
+	}
+	tok.Attempt, tok.Ended = consumed+1, true
+	if first.Valid {
+		tok.Attempt = first.Int64
+	}
 	return tok, nil
 }
 

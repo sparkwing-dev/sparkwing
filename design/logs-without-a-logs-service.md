@@ -290,8 +290,9 @@ POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest
   segment against the size and SHA-256 it signed and writes it with the
   conditional create the abandoned-attempt seal uses. No manifest URL
   exists.
-- A launcher pod's child reports the node's outcome before the trusted
-  process seals the log, and reporting ends the claim. An ended claim may
+- A launcher pod's child, and a runner's brokered child, report the node's
+  outcome before the process that holds the log seals it, and reporting
+  ends the claim token's claim. An ended claim may
   still sign its own attempt's segments and post its manifest for
   `SealGrace` (60 s) after the attempt ended, while no later claim holds
   the node; it may not touch any other attempt.

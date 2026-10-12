@@ -123,8 +123,8 @@ trigger claim for one URL signed for that segment's exact size and
 Content-MD5, and puts the segment there. It seals the attempt by posting
 the manifest to `POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest`,
 which the controller checks against the segments it signed. A launcher
-pod's claim may finish both for 60 seconds after its node reports its
-outcome. The routes and their scopes are in
+pod's claim or a runner's node claim may finish both for its own attempt
+for 60 seconds after its node reports its outcome. The routes and their scopes are in
 [api-reference.md](api-reference.md).
 
 ## Run coordination
