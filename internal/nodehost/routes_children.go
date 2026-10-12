@@ -82,19 +82,23 @@ func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *gran
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the run id, node or wait_ms is malformed")
 		return
 	}
-	claim, ctx, done, ok := s.forward(w, r, g)
-	if !ok {
+	if g.Claim == nil {
+		s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "this node has no controller to forward to")
 		return
 	}
-	defer done()
 	// safety: only a child this claim started is reachable; the controller
-	// checks the same, and the host refuses before asking it.
-	if !claim.startedChild(child) {
+	// checks the same, and the host refuses before asking it or admitting the wait.
+	if !g.Claim.startedChild(child) {
 		s.logger.Warn("audit", "event", "child_unknown", "run", g.RunID, "node", g.NodeID, "child", child)
 		s.writeError(w, http.StatusNotFound, "unknown_child", "node "+quote(g.NodeID)+" did not start run "+quote(child))
 		return
 	}
-	run, status, err := awaitChild(ctx, claim, g.RunID, child, wait)
+	claim, ctx, done, ok := s.admit(w, r, g, g.Claim.awaitSlots, "child-run awaits")
+	if !ok {
+		return
+	}
+	defer done()
+	run, status, err := claim.await(ctx, g, child, wait)
 	switch {
 	case err != nil:
 		s.upstreamFailed(w, g, "await", status, err)
@@ -135,27 +139,95 @@ type childRun struct {
 	Error  string `json:"error"`
 }
 
-func awaitChild(ctx context.Context, claim *Claim, runID, child string, wait time.Duration) (childRun, int, error) {
+// safety: one poller per child serves every await of it, so the
+// controller's load grows with the children a node waits on, not its awaits.
+type childWatch struct {
+	waiters int
+	polled  bool
+	run     childRun
+	status  int
+	err     error
+	changed chan struct{}
+	stop    context.CancelFunc
+}
+
+func terminalRun(status string) bool {
+	return status == "success" || status == "failed" || status == "cancelled"
+}
+
+// safety: the poller runs under the grant's context, so revoking the grant or
+// closing the server stops it.
+func (c *Claim) await(ctx context.Context, g *grant, child string, wait time.Duration) (childRun, int, error) {
+	c.mu.Lock()
+	cw := c.watches[child]
+	if cw == nil {
+		pctx, stop := context.WithCancel(g.ctx)
+		cw = &childWatch{changed: make(chan struct{}), stop: stop}
+		c.watches[child] = cw
+		//nolint:contextcheck // the poller outlives any one await, so it runs under the grant's context.
+		go c.poll(pctx, g.RunID, child, cw)
+	}
+	cw.waiters++
+	c.mu.Unlock()
+	defer c.leave(child, cw)
+
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
-	poll := time.NewTicker(awaitPoll)
-	defer poll.Stop()
+	expired := false
 	for {
-		var run childRun
-		status, _, err := claim.call(ctx, http.MethodGet, runPath(runID, "children", child), nil, &run)
-		if err != nil || status != http.StatusOK {
+		c.mu.Lock()
+		run, status, err, polled, changed := cw.run, cw.status, cw.err, cw.polled, cw.changed
+		c.mu.Unlock()
+		if polled && (err != nil || status != http.StatusOK || terminalRun(run.Status) || expired) {
 			return run, status, err
-		}
-		switch run.Status {
-		case "success", "failed", "cancelled":
-			return run, status, nil
 		}
 		select {
 		case <-ctx.Done():
 			return run, 0, ctx.Err()
 		case <-deadline.C:
-			return run, status, nil
-		case <-poll.C:
+			expired = true
+		case <-changed:
+		}
+	}
+}
+
+func (c *Claim) leave(child string, cw *childWatch) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cw.waiters--
+	if cw.waiters == 0 {
+		cw.stop()
+		if c.watches[child] == cw {
+			delete(c.watches, child)
+		}
+	}
+}
+
+func (c *Claim) poll(ctx context.Context, runID, child string, cw *childWatch) {
+	defer cw.stop()
+	tick := time.NewTicker(awaitPoll)
+	defer tick.Stop()
+	for {
+		var run childRun
+		status, _, err := c.call(ctx, http.MethodGet, runPath(runID, "children", child), nil, &run)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		c.mu.Lock()
+		cw.run, cw.status, cw.err, cw.polled = run, status, err, true
+		close(cw.changed)
+		cw.changed = make(chan struct{})
+		end := err != nil || status != http.StatusOK || terminalRun(run.Status)
+		if end && c.watches[child] == cw {
+			delete(c.watches, child)
+		}
+		c.mu.Unlock()
+		if end {
+			return
+		}
+		select {
+		case <-ctx.Done():
+		case <-tick.C:
 		}
 	}
 }

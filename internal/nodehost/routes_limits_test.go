@@ -11,8 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
-func openAwait(ctx context.Context, s interface{ URL() string }, bearer string, done chan<- int) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL()+"/node/v1/children/child-1/await?wait_ms=60000", nil)
+func openRequest(ctx context.Context, s interface{ URL() string }, method, path, bearer, body string, done chan<- int) {
+	req, _ := http.NewRequestWithContext(ctx, method, s.URL()+path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := http.DefaultClient.Do(req)
@@ -26,40 +26,46 @@ func openAwait(ctx context.Context, s interface{ URL() string }, bearer string, 
 
 func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 	s, _ := start(t)
-	c := newChildController(t, started("child-1"))
-	polled := make(chan struct{}, 64)
-	c.handle("GET /api/v1/runs/run-1/children/child-1", func(w http.ResponseWriter, r *http.Request) {
-		polled <- struct{}{}
-		answer(http.StatusOK, map[string]string{"status": "pending"})(w, r)
+	c := newChildController(t)
+	entered, release := make(chan struct{}, 8), make(chan struct{})
+	c.handle("POST /api/v1/runs/run-1/oidc-token", func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		answer(http.StatusNotFound, map[string]string{"error": "no key"})(w, r)
 	})
-	c.handle("POST /api/v1/runs/run-1/oidc-token", answer(http.StatusNotFound, map[string]string{"error": "no key"}))
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 	other, _ := admitClaim(t, s, "notify", claimFor(t, c.fakeController))
-	send(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 4)
 	for range 4 {
-		go openAwait(ctx, s, bearer, done)
+		go openRequest(ctx, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`, done)
 	}
 	for range 4 {
-		<-polled
+		<-entered
 	}
 	before := len(c.asked())
 	big := `{"pipeline":"build","args":{"a":"` + strings.Repeat("x", 1<<20) + `"}}`
 	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/children", bearer, big), http.StatusTooManyRequests, "too_many_requests")
 	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`), http.StatusTooManyRequests, "too_many_requests")
 	wantRefusal(t, send(t, s, http.MethodGet, "/node/v1/nodes/build/output", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
-	for _, p := range c.asked()[before:] {
-		if !strings.HasSuffix(p, "/children/child-1") {
-			t.Fatalf("a refused request reached the controller: %s", p)
-		}
+	wantRefusal(t, send(t, s, http.MethodGet, "/node/v1/pipelines/p/latest?node=n", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
+	if asked := c.asked()[before:]; len(asked) != 0 {
+		t.Fatalf("a refused request reached the controller: %v", asked)
 	}
-	wantRefusal(t, send(t, s, http.MethodPost, "/node/v1/oidc-token", other, `{"audience":"a"}`), http.StatusNotFound, "oidc_unavailable")
+	go openRequest(context.Background(), s, http.MethodPost, "/node/v1/oidc-token", other, `{"audience":"a"}`, done)
+	<-entered
 
 	cancel()
 	for range 4 {
 		<-done
+	}
+	close(release)
+	if got := <-done; got != http.StatusNotFound {
+		t.Fatalf("another node's request answered %d while this node was full", got)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -68,7 +74,7 @@ func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("disconnected awaits kept their places: status %d body %v", got.status, got.body)
+			t.Fatalf("disconnected requests kept their places: status %d body %v", got.status, got.body)
 		}
 	}
 }

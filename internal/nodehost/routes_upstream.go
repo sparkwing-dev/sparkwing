@@ -27,9 +27,13 @@ const upstreamTimeout = 60 * time.Second
 
 const maxUpstreamReply = 1 << 20
 
-// safety: a node holds at most this many forwards at once, awaits included,
-// so it bounds the host's handlers, buffers and controller polls per node.
+// safety: a node holds at most this many forwards at once, so it bounds the
+// host's handlers and buffers per node.
 const forwardLimit = 4
+
+// safety: awaits share one poller per child, so this bounds only the
+// handlers a node holds open, not the controller's load.
+const awaitLimit = 64
 
 // Claim is one claimed node attempt's controller credential. The host holds
 // it and forwards node routes with it; the node process never sees it. Make
@@ -40,7 +44,8 @@ type Claim struct {
 	token string
 	http  *http.Client
 
-	slots chan struct{}
+	slots      chan struct{}
+	awaitSlots chan struct{}
 	// safety: one output in memory at a time, so a node holds at most one
 	// 64 MiB output in the host however many reads it opens.
 	outputSlot chan struct{}
@@ -50,6 +55,7 @@ type Claim struct {
 	nextChild int64
 	mu        sync.Mutex
 	children  map[string]bool
+	watches   map[string]*childWatch
 }
 
 // NewClaim binds a claim token to the controller at controllerURL. Only a
@@ -64,6 +70,7 @@ func NewClaim(controllerURL, token string) (*Claim, error) {
 	}
 	return &Claim{
 		base: strings.TrimRight(base.String(), "/"), token: token, children: map[string]bool{},
+		watches: map[string]*childWatch{}, awaitSlots: make(chan struct{}, awaitLimit),
 		slots: make(chan struct{}, forwardLimit), outputSlot: make(chan struct{}, 1), childSlot: make(chan struct{}, 1),
 		http: &http.Client{Timeout: upstreamTimeout, Transport: otelutil.WrapTransport(nil)},
 	}, nil
@@ -202,16 +209,20 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, g *grant) (*Cla
 		s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "this node has no controller to forward to")
 		return nil, nil, nil, false
 	}
+	return s.admit(w, r, g, g.Claim.slots, "controller requests")
+}
+
+func (s *Server) admit(w http.ResponseWriter, r *http.Request, g *grant, slots chan struct{}, what string) (*Claim, context.Context, func(), bool) {
 	select {
-	case g.Claim.slots <- struct{}{}:
+	case slots <- struct{}{}:
 	default:
 		s.writeError(w, http.StatusTooManyRequests, "too_many_requests",
-			fmt.Sprintf("a node has at most %d controller requests open at once; retry after one ends", forwardLimit))
+			fmt.Sprintf("a node has at most %d %s open at once; retry after one ends", cap(slots), what))
 		return nil, nil, nil, false
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	stop := context.AfterFunc(g.ctx, cancel)
-	return g.Claim, ctx, func() { stop(); cancel(); <-g.Claim.slots }, true
+	return g.Claim, ctx, func() { stop(); cancel(); <-slots }, true
 }
 
 func acquire(ctx context.Context, slot chan struct{}) bool {
