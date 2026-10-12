@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -332,24 +331,6 @@ type waitlistedJSON struct {
 
 // perf: bounds one read of the list and one bulk approval, since each approval creates a team.
 const maxWaitlistPage = 1000
-
-func (s *Server) handleListWaitlist(w http.ResponseWriter, r *http.Request) {
-	limit := maxWaitlistPage
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n <= 0 || n > maxWaitlistPage {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("limit is 1 to %d", maxWaitlistPage))
-			return
-		}
-		limit = n
-	}
-	waiting, err := s.store.WaitlistedAccounts(r.Context(), limit)
-	if err != nil {
-		s.writeInternalError(w, r, "waitlist", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": waitlistBody(waiting)})
-}
 
 func waitlistBody(waiting []store.WaitlistedAccount) []waitlistedJSON {
 	out := make([]waitlistedJSON, 0, len(waiting))

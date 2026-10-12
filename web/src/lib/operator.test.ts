@@ -109,10 +109,58 @@ describe("review", () => {
       "reset-trust",
       "grant-credits",
       "unfreeze",
+      "release-hold",
     ]);
     assert.ok(lib.availableActions(team).includes("set-limit"));
     const disputed = { ...team, holds: ["dp_1"] };
-    assert.deepEqual(lib.availableActions(disputed).slice(-1), ["freeze"]);
+    assert.deepEqual(lib.availableActions(disputed).slice(-2), [
+      "freeze",
+      "release-hold",
+    ]);
+    const clear = { ...team, holds: [] };
+    assert.ok(!lib.availableActions(clear).includes("release-hold"));
+  });
+
+  it("releases one dispute hold by name", () => {
+    assert.match(
+      lib.actionProblem("release-hold", "won", "", {}),
+      /Choose the hold/,
+    );
+    assert.equal(lib.actionProblem("release-hold", "won", "", { hold: "dp_1" }), "");
+    assert.match(
+      lib.actionEffect(team, "release-hold", "", { hold: "dp_1" }),
+      /The dispute hold dp_1 on Acme is released\. 1 other hold\(s\) stay/,
+    );
+    assert.deepEqual(
+      lib.actionRequest("acme", "release-hold", "won", "", "", { hold: "dp_1" }),
+      {
+        path: "/api/v1/operator/teams/acme/unfreeze",
+        body: { reason: "won", hold: "dp_1" },
+      },
+    );
+  });
+
+  it("sets a trusted team's optional overrides with its limit", () => {
+    const extra = { daily: "300", rung: "150", runners: "250" };
+    assert.equal(lib.actionProblem("set-limit", "vip", "2500", extra), "");
+    for (const bad of [{ daily: "0" }, { rung: "5000.01" }, { runners: "1.5" }, { runners: "10001" }]) {
+      assert.notEqual(lib.actionProblem("set-limit", "vip", "2500", bad), "", JSON.stringify(bad));
+    }
+    assert.deepEqual(
+      lib.actionRequest("acme", "set-limit", "vip", "2500", "", extra).body,
+      {
+        trust: "granted",
+        reason: "vip",
+        limit_cents: 250_000,
+        daily_cap_cents: 30_000,
+        rung_cents: 15_000,
+        runner_cap: 250,
+      },
+    );
+    assert.match(
+      lib.actionEffect(team, "set-limit", "2500", extra),
+      /\$300 a day, has its card charged at \$150 of debt, holds up to 250 Cloud nodes/,
+    );
   });
 
   it("truncates the balance to cents", () => {

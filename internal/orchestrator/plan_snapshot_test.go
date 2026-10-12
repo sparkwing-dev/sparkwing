@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -36,7 +38,7 @@ func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestMarshalPlanSnapshot_IncludesBothExecutionTimeouts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -119,7 +121,7 @@ func TestMarshalPlanSnapshot_PipelineRequirementsAffectProvenance(t *testing.T) 
 	if reflect.DeepEqual(local, cloud) {
 		t.Fatal("changing pipeline requirements did not change the immutable plan snapshot")
 	}
-	var snapshot planSnapshot
+	var snapshot nodeproto.PlanDoc
 	if err := json.Unmarshal(local, &snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +138,7 @@ func TestMarshalPlanSnapshot_EmbedsWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -177,7 +179,7 @@ func TestMarshalPlanSnapshot_EmitsStepGroupsInDeclarationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -207,7 +209,7 @@ func TestMarshalPlanSnapshot_EmitsStepGroupsInDeclarationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-marshal: %v", err)
 	}
-	var roundTrip planSnapshot
+	var roundTrip nodeproto.PlanDoc
 	if err := json.Unmarshal(again, &roundTrip); err != nil {
 		t.Fatalf("round-trip unmarshal: %v", err)
 	}
@@ -228,7 +230,7 @@ func TestMarshalPlanSnapshot_CarriesResourceHints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
-	var snap planSnapshot
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -243,7 +245,7 @@ func TestMarshalPlanSnapshot_CarriesResourceHints(t *testing.T) {
 		t.Errorf("plan MemoryBytes = %d, want %d", snap.Resources.MemoryBytes, want)
 	}
 
-	byID := map[string]snapshotNode{}
+	byID := map[string]nodeproto.PlanNode{}
 	for _, n := range snap.Nodes {
 		byID[n.ID] = n
 	}
@@ -282,7 +284,7 @@ func TestMarshalPlanSnapshot_OptionalDependenciesAffectProvenance(t *testing.T) 
 	if string(withRaw) == string(withoutRaw) {
 		t.Fatal("adding an optional dependency did not change retry provenance")
 	}
-	var snapshot planSnapshot
+	var snapshot nodeproto.PlanDoc
 	if err := json.Unmarshal(withRaw, &snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -326,6 +328,20 @@ func TestMarshalPlanSnapshot_CarriesAdmissionClass(t *testing.T) {
 	}
 	if got.AdmissionClass != sparkwing.AdmissionInteractive {
 		t.Fatalf("admission class = %q", got.AdmissionClass)
+	}
+}
+
+func TestMarshalPlanSnapshot_CarriesProtocol(t *testing.T) {
+	raw, err := marshalPlanSnapshot(sparkwing.NewPlan(), sparkwing.RunContext{Pipeline: "demo", RunID: "run"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got nodeproto.PlanDoc
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Protocol != authwire.NodeProtocolVersion {
+		t.Fatalf("protocol = %q, want %q", got.Protocol, authwire.NodeProtocolVersion)
 	}
 }
 

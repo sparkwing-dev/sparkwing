@@ -139,6 +139,9 @@ type operatorActionReq struct {
 	AmountCents int64  `json:"amount_cents,omitempty"`
 	// safety: a retried grant carries the same key and finds the grant it already made.
 	Key string `json:"key,omitempty"`
+	// safety: an unfreeze naming a hold releases that one, a payment dispute's
+	// included; one naming none releases only the console's own holds.
+	Hold string `json:"hold,omitempty"`
 }
 
 func decodeOperatorAction(w http.ResponseWriter, r *http.Request) (operatorActionReq, bool) {
@@ -147,11 +150,23 @@ func decodeOperatorAction(w http.ResponseWriter, r *http.Request) (operatorActio
 		writeError(w, http.StatusBadRequest, err)
 		return req, false
 	}
-	if req.Reason = strings.TrimSpace(req.Reason); req.Reason == "" || len(req.Reason) > 500 {
-		writeError(w, http.StatusBadRequest, errors.New("reason is required, up to 500 characters"))
+	reason, err := OperatorReason(req.Reason)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return req, false
 	}
+	req.Reason = reason
 	return req, true
+}
+
+// OperatorReason trims the reason an operator gives for acting on a team and
+// refuses an empty one or one over 500 characters. The console and the
+// sparkwing-controller admin command record it on the action's business event.
+func OperatorReason(reason string) (string, error) {
+	if reason = strings.TrimSpace(reason); reason == "" || len(reason) > 500 {
+		return "", errors.New("reason is required, up to 500 characters")
+	}
+	return reason, nil
 }
 
 func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +225,18 @@ func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, err := t.ReleaseOperatorHolds(r.Context(), operatorActor(r), req.Reason, time.Now()); err != nil {
+	var err error
+	if hold := strings.TrimSpace(req.Hold); hold != "" {
+		var n int64
+		n, err = s.store.ReleaseCreditFreezes(r.Context(), t.Team(), hold, operatorActor(r), req.Reason, time.Now())
+		if err == nil && n == 0 {
+			writeError(w, http.StatusNotFound, fmt.Errorf("team %s holds no hold %q", t.Team(), hold))
+			return
+		}
+	} else {
+		_, err = t.ReleaseOperatorHolds(r.Context(), operatorActor(r), req.Reason, time.Now())
+	}
+	if err != nil {
 		s.writeInternalError(w, r, "operator unfreeze", err)
 		return
 	}

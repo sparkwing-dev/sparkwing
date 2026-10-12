@@ -1,11 +1,13 @@
 package controller_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -54,11 +56,9 @@ func TestOperatorConsole_RefusesEveryCallerButTheListedOperatorsSession(t *testi
 		t.Errorf("the operator's session = %d want 200", code)
 	}
 
-	var trust struct {
-		Trust string `json:"trust"`
-	}
-	if code := f.call("GET", "/api/v1/teams/"+owner.team+"/trust", "Bearer "+f.admin, nil, &trust); code != http.StatusOK || trust.Trust != "automatic" {
-		t.Errorf("an owner's refused self-trust changed the team: %d %+v", code, trust)
+	var team operatorTeam
+	if code := f.call("GET", "/api/v1/operator/teams/"+owner.team, operator.auth, nil, &team); code != http.StatusOK || team.Billing.Trust != "automatic" {
+		t.Errorf("a refused trust change changed the team: %d %+v", code, team)
 	}
 
 	f.srv.WithOperatorAccounts(nil)
@@ -78,6 +78,10 @@ type operatorTeam struct {
 		TrustBy            string `json:"trust_by"`
 		TrustReason        string `json:"trust_reason"`
 		PurchaseLimitCents int64  `json:"purchase_limit_cents"`
+		LimitOverrideCents int64  `json:"limit_override_cents"`
+		DailyCapCents      int64  `json:"daily_cap_cents"`
+		RungCents          int64  `json:"rung_cents"`
+		RunnerCap          int64  `json:"runner_cap"`
 	} `json:"billing"`
 	Events []struct {
 		Kind  string         `json:"kind"`
@@ -188,10 +192,8 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Errorf("a limit after trust is restored = %d want 200", code)
 	}
 
-	if code := f.call("POST", "/api/v1/credits/freezes", "Bearer "+f.admin, map[string]any{
-		"team": owner.team, "dispute_id": "dp_1", "reason": "chargeback",
-	}, nil); code != http.StatusOK {
-		t.Fatalf("dispute hold = %d", code)
+	if _, err := f.store.HoldTeamForDispute(context.Background(), store.Team(owner.team), "dp_1", "", "chargeback", time.Now()); err != nil {
+		t.Fatalf("dispute hold: %v", err)
 	}
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse"}, nil); code != http.StatusOK {
 		t.Fatalf("freeze = %d", code)
@@ -199,6 +201,83 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "done"}, &team); code != http.StatusOK ||
 		!team.Frozen || !slices.Equal(team.Holds, []string{"dp_1"}) {
 		t.Errorf("unfreeze = %d %+v, want only the dispute hold left", code, team)
+	}
+	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"hold": "dp_9", "reason": "won"}, nil); code != http.StatusNotFound {
+		t.Errorf("releasing a hold the team does not hold = %d want 404", code)
+	}
+	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"hold": "dp_1", "reason": "dispute won"}, &team); code != http.StatusOK ||
+		team.Frozen || len(team.Holds) != 0 {
+		t.Errorf("releasing the dispute hold = %d %+v, want the team released", code, team)
+	}
+	if f.call("GET", base, operator.auth, nil, &team); team.Events[0].Kind != store.BusinessEventTeamUnfrozen ||
+		team.Events[0].Actor != "korey@example.com" || team.Events[0].Attrs["reason"] != "dispute won" {
+		t.Errorf("the dispute release's event = %+v", team.Events[0])
+	}
+}
+
+// The console sets and shows every override a granted team's trust carries,
+// and a grant that names none returns each to its default.
+func TestOperatorConsole_SetsATrustedTeamsOverrides(t *testing.T) {
+	f, operator, owner := operatorFixture(t)
+	base := "/api/v1/operator/teams/" + owner.team
+	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{
+		"trust": "granted", "reason": "enterprise", "limit_cents": 300_000,
+		"daily_cap_cents": 50_000, "rung_cents": 20_000, "runner_cap": 250,
+	}, nil); code != http.StatusOK {
+		t.Fatalf("trust with overrides = %d", code)
+	}
+	var team operatorTeam
+	f.call("GET", base, operator.auth, nil, &team)
+	if b := team.Billing; b.LimitOverrideCents != 300_000 || b.DailyCapCents != 50_000 || b.RungCents != 20_000 || b.RunnerCap != 250 {
+		t.Errorf("overrides = %+v", b)
+	}
+	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "back to defaults"}, nil); code != http.StatusOK {
+		t.Fatalf("plain grant = %d", code)
+	}
+	var after operatorTeam
+	f.call("GET", base, operator.auth, nil, &after)
+	if b := after.Billing; b.LimitOverrideCents+b.DailyCapCents+b.RungCents+b.RunnerCap != 0 {
+		t.Errorf("overrides after a plain grant = %+v, want none", b)
+	}
+}
+
+// The admin token reaches no operator power: the console routes, the
+// checkout service's routes and the retired admin routes all refuse it.
+func TestAdminTokenReachesNoOperatorPower(t *testing.T) {
+	f, operator, owner := operatorFixture(t)
+	admin := "Bearer " + f.admin
+	cent := int64(store.MicroCreditsPerCent)
+	for _, route := range [][2]string{
+		{"POST", "/api/v1/credits/grants"},
+		{"POST", "/api/v1/credits/reversals"},
+		{"POST", "/api/v1/credits/freezes"},
+		{"POST", "/api/v1/credits/checkouts/closed"},
+		{"POST", "/api/v1/credits/cards"},
+		{"POST", "/api/v1/credits/card-payments"},
+		{"POST", "/api/v1/credits/warnings"},
+		{"POST", "/api/v1/credits/card-refunds"},
+		{"GET", "/api/v1/credits/units"},
+		{"GET", "/api/v1/credits/payments/pi_1"},
+	} {
+		body := map[string]any{"kind": "free", "amount_micro": 500 * cent, "team": owner.team}
+		if code := f.call(route[0], route[1], admin, body, nil); code != http.StatusForbidden {
+			t.Errorf("admin token: %s %s = %d want 403", route[0], route[1], code)
+		}
+	}
+	for _, route := range [][2]string{
+		{"GET", "/api/v1/teams/" + owner.team + "/trust"},
+		{"POST", "/api/v1/teams/" + owner.team + "/trust"},
+		{"GET", "/api/v1/signups/waitlist"},
+		{"POST", "/api/v1/signups/waitlist/approve"},
+	} {
+		if code := f.call(route[0], route[1], admin, map[string]any{"trust": "granted", "reason": "x", "oldest": 1}, nil); code != http.StatusNotFound {
+			t.Errorf("retired route %s %s = %d want 404", route[0], route[1], code)
+		}
+	}
+	var team operatorTeam
+	f.call("GET", "/api/v1/operator/teams/"+owner.team, operator.auth, nil, &team)
+	if team.BalanceMicro != 0 || team.Frozen || team.Billing.Trust != "automatic" {
+		t.Errorf("the admin token's refused calls changed the team: %+v", team)
 	}
 }
 

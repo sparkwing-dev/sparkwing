@@ -198,6 +198,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v99 adds the trigger claim token table and no column; an older
 	// binary never mints into it, and a token it holds no row for is refused.
 	99: nil,
+	// safety: v100 adds a table older binaries never read or write.
+	100: nil,
 }
 
 func columnSpecMaps() []map[string]string {

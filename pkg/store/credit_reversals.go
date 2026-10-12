@@ -280,11 +280,16 @@ func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, st
 	return Team(team), payment, err == nil, err
 }
 
-// ReleaseCreditFreezes releases holds on team and reports how many it
-// released: the one hold of disputeID, or every hold when disputeID is empty.
-// [Store.DisputeTeam] finds the team of a dispute named alone.
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error) {
-	return s.releaseFreezes(ctx, team, disputeID, false, "", "", now)
+// ReleaseCreditFreezes releases the one hold disputeID names on team, on
+// actor's word, and reports whether it released it (1) or found none (0). An
+// empty disputeID is refused rather than read as every hold, so a blank input
+// can never release a payment dispute's hold. The release and its business
+// event, naming actor and reason, commit together.
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error) {
+	if strings.TrimSpace(disputeID) == "" {
+		return 0, fmt.Errorf("%w: a release names the hold it releases", ErrInvalidInput)
+	}
+	return s.releaseFreezes(ctx, team, disputeID, false, actor, reason, now)
 }
 
 // ReleaseOperatorHolds releases every hold an operator placed on t, and never
@@ -347,17 +352,6 @@ func releasedDisputesTx(ctx context.Context, tx *storeTx, query string, args ...
 		released = append(released, id)
 	}
 	return released, rows.Err()
-}
-
-// DisputeTeam returns the team a dispute's hold is on.
-func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error) {
-	var team string
-	err := s.queryRow(ctx, `SELECT team FROM credit_freezes WHERE dispute_id = ? LIMIT 1`,
-		strings.TrimSpace(disputeID)).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	return Team(team), err == nil, err
 }
 
 // CreditFreeze reports whether t's cloud usage is held.
