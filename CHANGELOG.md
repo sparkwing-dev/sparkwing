@@ -42,9 +42,6 @@ unlock.
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
 
-- **cli:** A run against a remote profile keeps each node's log as segments the controller stores
-  When the profile's state lives on a controller that advertises `logs.segments`, `sparkwing run` and the `run-node --coordinated` children it starts upload each node's log as segments from the laptop and read it back through the controller, instead of appending to the logs service the controller announces, and push live lines only while a viewer watches the node instead of mirroring every line to the live ring. A profile whose state stays local keeps its logs surface as before. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
-
 - **runner + controller:** A node's lines reach the live ring only while a viewer watches it
   The dashboard's log stream and `runs logs --follow` hold a 30-second watch on the node. The controller reports it in the launched pod's claim heartbeat reply (`watched`), in a runner's node claim heartbeat and run heartbeat replies when the request sends `X-Sparkwing-Log-Watch: 1` (answered `200` with `watched` or `watched_nodes` instead of `204`), and in each `log-segments` reply. A runner that keeps the node's log as segments pushes everything after its last uploaded segment when a watch starts and stops when it lapses, so an unwatched node sends nothing live. `Client.WithWatchObserver` hands a process the reports its heartbeats carry.
 
@@ -66,7 +63,7 @@ unlock.
 - **runner (Breaking):** `--logs` on `sparkwing-runner runner` and `launch`, `--trigger-runner-logs-url`, `handle-trigger --runner-logs-url`, the agent config's `logs:` key and `SPARKWING_LOGS_EGRESS_*` are removed
   Runners upload node logs as segments through the controller and need no logs URL. An agent `config.yaml` with `logs:` fails to load with `field logs not found`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
-- **cli (Breaking):** `sparkwing cluster runners add --logs` and the profile's `logs.url` are removed, and a `logs: {type: controller}` surface needs the profile's state on that controller
+- **cli (Breaking):** `sparkwing cluster runners add --logs` and the profile's `logs.url` are removed
   A url on a controller logs surface is refused. `sparkwing serve` runs no logs service and writes only `SPARKWING_CONTROLLER_URL` to `dev.env`; its dashboard reads node logs from the run directories, and deleting a run there removes its directory. `sparkwing pipeline trigger` always follows the run's logs through the controller. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **helm chart (Breaking):** `sparkwing-runner-bundle` (0.1.11) no longer deploys `sparkwing-logs`, and `sparkwing-full` drops `controller.logs.url` and `--logs-url`
@@ -74,6 +71,12 @@ unlock.
 
 - **release (Breaking):** Releases no longer build, sign or publish `ghcr.io/sparkwing-dev/sparkwing-logs` or the `sparkwing-logs` binaries
   See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **cli (Breaking):** `sparkwing run --profile` and S3 and Postgres state profiles are removed; a run records to this machine's store
+  `run --profile P` fails before compiling, naming `sparkwing pipeline trigger <pipeline> --profile P`. A profile whose `state:` is `s3` or `postgres`, or that sets `url_source`, fails to load naming the key and the migration section, and `mirror_local` and `cache.binaries` fail as unknown fields. `sparkwing serve start` drops `--profile` and `--no-local-store`, `run` drops `--sw-artifact-digest-backfill`, the `profile:name=` guard token fails to load, a run no longer dumps `runs/<id>/state.ndjson` into its cache directory, and a pipeline binary refuses a run an older CLI started with `--profile`. A controller on PostgreSQL is unchanged. See [migration guide](docs/migrations/_unreleased.md#s3-and-postgres-state-profiles-are-removed).
+
+- **sdk + storage (Breaking):** `pkg/storage/s3state` and the controller's run loopback (`controller.Loopback`, `LoopbackState`, `LoopbackConcurrency`, `NewLoopback`) are removed
+  `backends.TypePostgres`, `Spec.Binaries`, `Surfaces.BinaryCache`, `localws.Options.NoLocalStore`, `pipelines.KindProfileName` and `GuardContext.ProfileName` are gone, `backends.MigrationGuideURL` is added, and `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only. The controller's health drops `object_store.stalled`. See [migration guide](docs/migrations/_unreleased.md#s3-and-postgres-state-profiles-are-removed).
 
 
 ## [v0.67.0] - 2026-10-12

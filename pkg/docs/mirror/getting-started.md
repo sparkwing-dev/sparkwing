@@ -220,9 +220,7 @@ What still wants the network is visible in advance:
   resolution rules are in [sparks.md](sparks.md).
 - **A profile.** `sparkwing pipeline trigger <pipeline> --profile NAME`
   and read verbs that name a controller profile need that controller over
-  HTTPS, and `sparkwing run --profile NAME` with an S3 or Postgres state
-  profile needs that bucket or database. `sparkwing run` without
-  `--profile` reads and writes only local surfaces.
+  HTTPS. `sparkwing run` reads and writes only local surfaces.
 - **What the pipeline itself does.** A step that pulls an image, fetches a
   ref, or deploys needs whatever that step needs. Sparkwing does not
   change it.
@@ -332,12 +330,9 @@ composition (parallel, sequence, needs, modifiers), use the `Plan`.
 
 ## Run Targets
 
-`sparkwing run` executes on this machine and, without `--profile`, records
-to its local store, logs, and cache. `sparkwing pipeline trigger <pipeline> --profile
-NAME` hands execution to that profile's controller. `sparkwing run
---profile NAME` accepts only a profile with no controller whose state is
-an S3 bucket or a Postgres database, and records the local run there; it
-is a temporary exception slated for removal. `sparkwing run` also takes
+`sparkwing run` executes on this machine and records to its local store,
+logs, and cache. `sparkwing pipeline trigger <pipeline> --profile
+NAME` hands execution to that profile's controller. `sparkwing run` also takes
 `--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
 tree (trigger runs the source registered with the controller, or the
 checkout's uncommitted changes with `--working-tree`):
@@ -345,7 +340,6 @@ checkout's uncommitted changes with `--working-tree`):
 ```bash
 sparkwing run build                                    # run locally with local code
 sparkwing run build --sw-ref main                      # build the main ref locally
-sparkwing run build --profile shared                   # local run, state in an S3 profile
 sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
 sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted changes on "dev"
 sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
@@ -458,20 +452,7 @@ controller on one box, backed by SQLite and local disk, lets a laptop
 trigger pipelines on a desktop you own. See
 [one of your own machines as the controller](deployment-modes.md#one-of-your-own-machines-as-the-controller).
 
-**Shared object storage.** Runners write run state, cache blobs, and logs
-to one bucket through `sparkwing run --profile NAME`, and coordinate over
-object-store compare-and-swap with no database and no controller. This is
-a temporary exception slated for removal; a controller is the supported
-way to share runs. See
-[shared object storage](deployment-modes.md#shared-object-storage).
-
-**Postgres and object storage.** Run state moves to a shared Postgres so
-cache reservation, triggers, approvals, and debug pauses rest on a row
-lock rather than the bucket's CAS support. Every runner then holds a
-database credential. The same temporary exception applies. See
-[Postgres and object storage](deployment-modes.md#postgres-and-object-storage).
-
 **Profile surface YAML.** The `controller:` block and the `state` /
-`cache` / `logs` triple are documented in
+`cache` / `logs` surfaces are documented in
 [Storage backends](backends.md), and the full field list in
 [config-reference.md](config-reference.md).

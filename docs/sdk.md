@@ -820,8 +820,8 @@ emitted text.
 Redaction is applied when a run is read, not when it is written. The
 run row keeps the plaintext argument, because the masker derives its
 redaction set from it and retrying or replaying a run re-executes with
-it. Treat the state database, its backups, and the `state.ndjson` run
-dumps as holding the value in the clear, and protect them accordingly.
+it. Treat the state database and its backups as holding the value in the
+clear, and protect them accordingly.
 
 Limits worth knowing:
 

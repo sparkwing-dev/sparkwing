@@ -321,14 +321,3 @@ To skip the binary cache entirely for one invocation, pass
 `--sw-no-bincache`; sparkwing builds a temporary binary with debug
 symbols, then runs it with your original environment. The Go toolchain floor
 adjustment applies only while building.
-
-### The shared artifact store
-
-A filesystem, bucket, or controller `cache:` backend shares pipeline
-binaries across machines. The publisher writes a `.sha256` sidecar, and
-a fetch discards a binary whose digest differs. Store write permissions
-determine who can publish binaries.
-
-A missing sidecar causes the run to compile from source. Pass
-`sparkwing run --sw-artifact-digest-backfill` only for a trusted store to
-accept blobs without sidecars and write digests from the downloaded bytes.

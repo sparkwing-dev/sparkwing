@@ -11,14 +11,9 @@ Invoke a pipeline
 Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline. A run executes on this machine against its local
 store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
-pinned to that controller, and run refuses it.
-
---profile NAME is accepted only for a profile with no controller whose state
-is an S3 bucket or a Postgres database: the run executes here and records its
-state, logs and cache to that profile's backends. This is a temporary
-exception for teams that coordinate through shared storage, slated for
-removal; a controller profile is refused with the 'sparkwing pipeline
-trigger' command to use instead.
+pinned to that controller, and run refuses it. run takes no --profile; it
+refuses one with the 'sparkwing pipeline trigger' command that runs the
+pipeline on that profile's controller.
 
 Pipeline-module builds honor the highest go directive in go.mod and an active
 resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
@@ -136,7 +131,6 @@ is running and exits after five idle minutes; see
 | `--sw-no-update` | Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve |
 | `--sw-no-bincache` | Build a temporary pipeline binary with debug symbols instead of using the binary cache |
 | `--sw-hash-all-files` | Hash files Git ignores into the binary cache key, for a build that embeds them |
-| `--sw-artifact-digest-backfill` | Accept a shared-store binary with no digest sidecar and write the sidecar; use only with a trusted store |
 | `--sw-allow-unadmitted` | Run without the admission daemon even when the pipeline reserves host capacity |
 | `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
@@ -144,7 +138,6 @@ is running and exits after five idle minutes; see
 | `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--profile NAME` | Record the run to the named S3 or Postgres state profile (a temporary exception; controller profiles go through pipeline trigger) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 
 ### Examples
