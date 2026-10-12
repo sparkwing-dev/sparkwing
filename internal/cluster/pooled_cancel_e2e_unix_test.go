@@ -53,7 +53,6 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 	started := make(chan struct{})
 	var once, viewing sync.Once
 	viewCtx, stopViewing := context.WithCancel(context.Background())
-	t.Cleanup(stopViewing)
 	var ctrlHTTP *httptest.Server
 	ctrlHandler := controller.New(st, nil).Handler()
 	ctrlHTTP = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +65,9 @@ func testPooledNodeStop(t *testing.T, terminateAgent bool) {
 		}
 	}))
 	t.Cleanup(ctrlHTTP.Close)
+	// safety: a node's stream stays open until the node settles, which a node left for lease recovery never does
+	// here, so the viewer is stopped before the server, whose Close waits out every open request.
+	t.Cleanup(stopViewing)
 	ctrl := client.New(ctrlHTTP.URL, nil).WithWatchObserver(orchestrator.NoteWatch)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
