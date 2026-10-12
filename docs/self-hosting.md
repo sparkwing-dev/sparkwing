@@ -183,7 +183,8 @@ grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
 no credit or team billing routes, and gives teams unlimited room in the
 controller's storage-tier checks. Operator-set storage quotas still apply.
 The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
-metering can contact Korey for help running sparkwing-ops. See
+metering can contact Korey for help running the operator console and
+sparkwing-ops. See
 [Credits](auth.md#credits) for the licensed behavior.
 
 ### Storage class

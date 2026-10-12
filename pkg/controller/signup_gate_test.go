@@ -59,6 +59,22 @@ func (f *identityFixture) setSignUp(body map[string]any) signUpStatus {
 	return st
 }
 
+// safety: a waitlisted account reaches no team, so the operator is admitted
+// before the controller lists it.
+func (f *identityFixture) operatorAuth() string {
+	f.t.Helper()
+	op := person("g-operator", "korey@example.com", "Korey")
+	out := f.signIn(op)
+	if out.Waitlisted {
+		if _, err := f.store.ApproveWaitlisted(context.Background(), []string{out.User.ID}, "test", time.Now()); err != nil {
+			f.t.Fatal(err)
+		}
+		out = f.signIn(op)
+	}
+	f.srv.WithOperatorAccounts([]string{out.User.ID})
+	return sessionAuth(out.SessionID)
+}
+
 func (f *identityFixture) me(auth string) meBody {
 	f.t.Helper()
 	var me meBody
@@ -81,8 +97,6 @@ func TestSignUpGateRoutesAreTheOperators(t *testing.T) {
 	for _, r := range []struct{ method, path string }{
 		{"GET", "/api/v1/signups"},
 		{"PUT", "/api/v1/signups"},
-		{"GET", "/api/v1/signups/waitlist"},
-		{"POST", "/api/v1/signups/waitlist/approve"},
 	} {
 		if code := f.call(r.method, r.path, auth, map[string]any{"mode": "open"}, nil); code != http.StatusForbidden {
 			t.Errorf("%s %s as a team owner = %d, want 403", r.method, r.path, code)
@@ -93,8 +107,9 @@ func TestSignUpGateRoutesAreTheOperators(t *testing.T) {
 			t.Errorf("PUT %v = %d, want 400", body, code)
 		}
 	}
+	operator := f.operatorAuth()
 	for _, body := range []map[string]any{{}, {"oldest": 1, "account_ids": []string{"x"}}} {
-		if code := f.call("POST", "/api/v1/signups/waitlist/approve", "Bearer "+f.admin, body, nil); code != http.StatusBadRequest {
+		if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator, body, nil); code != http.StatusBadRequest {
 			t.Errorf("approve %v = %d, want 400", body, code)
 		}
 	}
@@ -107,6 +122,7 @@ func TestSignUpGateRoutesAreTheOperators(t *testing.T) {
 func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.signIn(person("g-o", "owner@example.com", "Owner"))
+	operator := f.operatorAuth()
 	st := f.setSignUp(map[string]any{"mode": "waitlist", "reason": "launch"})
 	if st.State != "waitlist" || st.Source != store.WaitlistReasonOperator || !strings.Contains(st.SetBy, "root") {
 		t.Fatalf("status after closing = %+v", st)
@@ -139,7 +155,7 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 			Reason string `json:"reason"`
 		} `json:"accounts"`
 	}
-	f.call("GET", "/api/v1/signups/waitlist", "Bearer "+f.admin, nil, &list)
+	f.call("GET", "/api/v1/operator/waitlist", operator, nil, &list)
 	if len(list.Accounts) != 1 || list.Accounts[0].ID != newcomer.User.ID || list.Accounts[0].Reason != "operator" {
 		t.Fatalf("waitlist = %+v", list)
 	}
@@ -161,7 +177,7 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 			ActiveTeam string `json:"active_team"`
 		} `json:"approved"`
 	}
-	if code := f.call("POST", "/api/v1/signups/waitlist/approve", "Bearer "+f.admin,
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator,
 		map[string]any{"account_ids": []string{later.User.ID}}, &approved); code != http.StatusOK {
 		t.Fatalf("approve = %d", code)
 	}
@@ -189,6 +205,7 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 			return nil
 		})
 	}})
+	operator := f.operatorAuth()
 	for i := range 3 {
 		out := f.signIn(person(fmt.Sprintf("g-%d", i), fmt.Sprintf("p%d@example.com", i), "P"))
 		if !out.Waitlisted {
@@ -199,7 +216,7 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 		st.Counts.Waitlisted != 3 {
 		t.Fatalf("status = %+v", st)
 	}
-	if code := f.call("POST", "/api/v1/signups/waitlist/approve", "Bearer "+f.admin,
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator,
 		map[string]any{"oldest": 2}, nil); code != http.StatusOK {
 		t.Fatalf("approve oldest = %d", code)
 	}
@@ -322,7 +339,7 @@ func TestYoungGitHubAccountsAreWaitlistedAtSignIn(t *testing.T) {
 			Reason string `json:"reason"`
 		} `json:"accounts"`
 	}
-	f.call("GET", "/api/v1/signups/waitlist", "Bearer "+f.admin, nil, &list)
+	f.call("GET", "/api/v1/operator/waitlist", f.operatorAuth(), nil, &list)
 	if len(list.Accounts) != 1 || list.Accounts[0].Reason != store.WaitlistReasonGitHubAge {
 		t.Fatalf("waitlist = %+v", list)
 	}

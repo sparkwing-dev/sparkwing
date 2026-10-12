@@ -29,8 +29,9 @@ func main() {
 	b.WriteString("Every route the controller registers, with the " +
 		"scope each requires, generated from the routing code. All paths are under " +
 		"the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and " +
-		"the token model are in [auth.md](auth.md); `admin` is the superset that " +
-		"satisfies any scope check. `public` routes run with no bearer check (the " +
+		"the token model are in [auth.md](auth.md); `admin` satisfies any scope " +
+		"check except `credits.grant`, which only the checkout service's own token " +
+		"passes. `public` routes run with no bearer check (the " +
 		"GitHub webhook is HMAC-verified instead); `authenticated` routes take any " +
 		"valid bearer and check no further scope. `claim` routes answer the claim " +
 		"token of one node claim, and only for that claim's own run and node. " +

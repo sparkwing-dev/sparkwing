@@ -21,6 +21,11 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
+  It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
+- **controller + web:** The operator console sets a trusted team's daily cap, card rung and Cloud node cap, and releases a payment dispute's hold
+  `POST /api/v1/operator/teams/{team}/unfreeze` takes `hold` to release that one hold, a dispute's included, and `GET /api/v1/operator/teams/{team}` reports `daily_cap_cents`, `rung_cents` and `runner_cap` in `billing`.
+
 - **controller:** `sparkwing-controller migrate-logs --root DIR [--archive-store URL] [--cache-blob-store URL] [--credentials-dir DIR] [--default-team T] [--dry-run]` converts a `sparkwing-logs` service's stored node logs into segments the controller reads
   It reads the service's volume and archive directly, so the service need not run, records each converted log in the controller's state database so it is pruned and deleted with its run, skips attempts it already converted so it can run again, and with `--dry-run` prints the runs, attempts and bytes it would convert. A run it cannot convert whole, such as one the state database does not hold, is named and left unconverted. Run it with the controller stopped: it opens and upgrades the state database, which a dry run leaves unopened. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
@@ -39,6 +44,9 @@ unlock.
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 
 ### Changed
+- **store + controller (Breaking):** `Store.ReleaseCreditFreezes` takes the actor and reason its business events record, and `Store.DisputeTeam` is removed
+  `BillingStanding` reports `DailyCapOverrideCents`, `RungOverrideCents` and `RunnerCapOverride`, and `controller.OperatorReason` checks the reason the console and the break-glass command record. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
+
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.
 
@@ -57,6 +65,8 @@ unlock.
   A new attempt's log goes under `logs/r90/` for a team with credits or a single-team install, `logs/r30/` for a team without credits, or the class `--log-retention` maps the team to; the class is chosen when the attempt's first upload URLs are issued. The controller reads the cache bucket's lifecycle rules and issues no upload URLs into a class without an enabled rule that expires its prefix after its days, so the runner keeps that log as it would without segments; it needs `s3:GetLifecycleConfiguration`. On a multi-team controller each attempt's stored bytes are committed to the team's log storage as its runner reports them, a team whose storage is paused gets no URLs (`402`), and the hourly storage pass counts the segments and deletes a team's oldest finished runs' segments while it is past its free log share. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
 
 ### Removed
+- **controller (Breaking):** Operator powers answer only the operator console; the admin token no longer reaches them
+  `GET`/`POST /api/v1/teams/{team}/trust`, `GET /api/v1/signups/waitlist` and `POST /api/v1/signups/waitlist/approve` are removed. `POST /api/v1/credits/grants` records `paid` grants only, `POST /api/v1/credits/freezes` holds by payment only, and every `credits.grant` route answers `403` to an admin token. Trust, free grants, holds, releases and the waitlist go through `/api/v1/operator/`, which a listed operator's own session reaches. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
 - **logs (Breaking):** `sparkwing-logs`, its image and release binaries, `pkg/logs` and `pkg/storage/sparkwinglogs` are removed; the controller keeps node logs as segments
   Convert the service's logs with `sparkwing-controller migrate-logs` before retiring it, or they become unreadable. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 

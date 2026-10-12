@@ -92,9 +92,10 @@ const (
 	// grants it.
 	ScopeAdmin = "admin"
 	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
-	// paid grant for a verified payment, reverses a payment, holds or releases
-	// the team a payment funded, and reads the ledger's units, and reaches
-	// nothing else. Only the operator mints it; no team's token may carry it.
+	// paid grant for a verified payment, reverses a payment, holds the team a
+	// payment funded, and reads the ledger's units, and reaches nothing else.
+	// Only the operator mints it; no team's token may carry it, and the admin
+	// scope does not stand in for it.
 	ScopeCreditsGrant = "credits.grant"
 	// ScopeClaimsLaunch is the launcher's scope. It claims any team's ready
 	// node of a controller-dispatched run, and the claim's token, for the Job
@@ -628,6 +629,24 @@ func requireScope(scope string, next http.Handler, alternatives ...string) http.
 			Principal:    p.label(),
 			Message:      "token lacks required scope: " + scope,
 		})
+	})
+}
+
+// safety: the checkout service's scope reaches money, so only a token minted
+// with it passes; the admin scope that satisfies requireScope does not, and an
+// operator acts on a team's ledger through the console instead.
+func requireServiceScope(scope string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(scope) {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:         "missing_scope",
+				MissingScope: scope,
+				Principal:    p.label(),
+				Message:      "only a token carrying " + scope + " itself reaches this route; an admin token does not",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

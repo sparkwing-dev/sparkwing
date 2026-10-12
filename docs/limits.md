@@ -159,8 +159,8 @@ held over a disputed payment still starts runs, which its own machines
 execute. A metered claim on cloud capacity needs credits and is refused while
 the team is held.
 
-Sparkwing Cloud operators admit a team through the private `sparkwing-ops`
-tool. To oversubscribe, raise `--free-team-slots`. A sign-up gate reads the tier as
+Sparkwing Cloud operators admit a waitlisted account from the operator
+console's Waitlist tab. To oversubscribe, raise `--free-team-slots`. A sign-up gate reads the tier as
 closed once every slot is taken.
 
 A multi-team controller refuses to start without `--bucket-store`, because the

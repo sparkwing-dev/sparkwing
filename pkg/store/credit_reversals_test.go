@@ -94,7 +94,7 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 		t.Fatalf("an unmetered claim on a frozen team: %v", err)
 	}
 
-	if _, err := s.ReleaseCreditFreezes(ctx, store.DefaultTeam, "", now); err != nil {
+	if _, err := s.ReleaseCreditFreezes(ctx, store.DefaultTeam, "", "", "", now); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil || n == nil {
@@ -129,7 +129,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	if f := frozen(); !f.Frozen || len(f.Disputes) != 2 {
 		t.Fatalf("freeze = %+v, want two disputes holding the team", f)
 	}
-	if n, err := s.ReleaseCreditFreezes(ctx, "acme", "dp_1", now); err != nil || n != 1 {
+	if n, err := s.ReleaseCreditFreezes(ctx, "acme", "dp_1", "", "", now); err != nil || n != 1 {
 		t.Fatalf("release dp_1 = %d, %v", n, err)
 	}
 	if f := frozen(); !f.Frozen || len(f.Disputes) != 1 || f.Disputes[0] != "dp_2" {
@@ -141,11 +141,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	if f := frozen(); len(f.Disputes) != 1 {
 		t.Fatalf("a replay re-held a released dispute: %+v", f)
 	}
-	team, found, err := s.DisputeTeam(ctx, "dp_2")
-	if err != nil || !found || team != "acme" {
-		t.Fatalf("dispute team = %q, %v, %v", team, found, err)
-	}
-	if n, err := s.ReleaseCreditFreezes(ctx, team, "dp_2", now); err != nil || n != 1 {
+	if n, err := s.ReleaseCreditFreezes(ctx, "acme", "dp_2", "", "", now); err != nil || n != 1 {
 		t.Fatalf("release dp_2 = %d, %v", n, err)
 	}
 	if f := frozen(); f.Frozen {
@@ -193,7 +189,7 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 	if got, err := globex.CreditBalanceMicro(ctx); err != nil || got != 100*store.MicroCreditsPerCent {
 		t.Fatalf("globex balance = %d, %v; the refused reversal moved it", got, err)
 	}
-	if n, err := s.ReleaseCreditFreezes(ctx, "acme", "dp_1", now); err != nil || n != 1 {
+	if n, err := s.ReleaseCreditFreezes(ctx, "acme", "dp_1", "", "", now); err != nil || n != 1 {
 		t.Fatalf("release by dispute = %d, %v; want exactly the one row", n, err)
 	}
 }

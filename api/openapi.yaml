@@ -2097,54 +2097,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first)."}
 
-  /api/v1/teams/{team}/trust:
-    parameters:
-      - {name: team, in: path, required: true, schema: {type: string}}
-    get:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Read a team's billing trust and 30-day purchase limit.
-      responses:
-        "200":
-          description: The team's billing trust.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/BillingTrust"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-    post:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Grant or revoke a team's billing trust on the operator's word.
-      description: >-
-        A granted team buys and spends up to $500 over 30 days, or `limit_cents` when given, and spends up to $200 in a UTC day, or `daily_cap_cents`, whatever the automatic rule says. With a card on file it is charged each time its debt reaches $100, or `rung_cents`, and `runner_cap` sets the Cloud nodes it holds at once in place of `max_concurrent_runners`. Each override is only for `granted`, and zero keeps the default. A revoked team is held to the new-team $50 over 30 days and $25 a day even when the rule would trust it, and `automatic` returns the team to the rule. A team under a hold of any cause is untrusted, even when granted, until the hold is released. The change records the operator, the reason, the overrides, and the trust before and after as a business event.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.billingTrustReq
-              type: object
-              required: [trust, reason]
-              properties:
-                trust: {type: string, enum: [granted, revoked, automatic], description: "`automatic` returns the team to the automatic rule."}
-                reason: {type: string}
-                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit and spend ceiling, up to $5,000; only with `granted`."}
-                daily_cap_cents: {type: integer, format: int64, description: "Replaces the granted team's daily spend cap, up to $5,000; only with `granted`."}
-                rung_cents: {type: integer, format: int64, description: "Replaces the debt at which the granted team's card is charged, from 50 cents up to $5,000; only with `granted`."}
-                runner_cap: {type: integer, format: int64, description: "Sets the Cloud nodes the granted team holds at once, up to 10,000; only with `granted`."}
-      responses:
-        "200":
-          description: The team's billing trust after the change.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/BillingTrust"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
   /api/v1/teams/{team}/repos/{owner}/{name}/dispatch:
     parameters:
       - {name: team, in: path, required: true, schema: {type: string}}
@@ -3965,44 +3917,29 @@ paths:
     post:
       x-sparkwing-scope: credits.grant
       tags: [credits]
-      summary: Add free or paid credits to the ledger, or reverse a paid grant.
+      summary: Record a verified payment's paid credits on the ledger.
       description: |
-        Records who granted the credits, which kind they are, and the
-        payment `reference` they came from. A grant that lifts the balance
-        above zero lets metered runners claim again and stops the
-        cancellation of nodes running on an empty balance.
+        The checkout service's route: only its own token reaches it, and no
+        other credential stands in. It writes a `paid` grant and refuses any
+        other `kind` with 400. An operator's
+        free grant goes through `POST /api/v1/operator/teams/{team}/grants`,
+        and a refund through `POST /api/v1/credits/reversals`.
+
+        A grant records who granted the credits and the payment `reference`
+        they came from. A grant that lifts the balance above zero lets
+        metered runners claim again and stops the cancellation of nodes
+        running on an empty balance.
 
         A non-empty `reference` is idempotent: a second request naming the
-        same `kind` and `reference` returns the grant already written with
-        200, so a payment webhook may redeliver. An empty reference writes
-        a new grant every time.
+        same `reference` returns the grant already written with 200, so a
+        payment webhook may redeliver. A replay must carry the terms it
+        carried the first time: one naming a `reference` another grant holds
+        under a different `amount_micro` is refused with 409.
 
-        A `reversal` takes a refunded payment back out. It carries a
-        negative `amount_micro`, its own `reference` (the refund id, so
-        partial refunds each land), and `reverses` naming the paid grant's
-        reference. A reversal whose `reverses` matches no paid grant is
-        refused, as is one that with the reversals already written would take
-        back more than the payment paid; one that takes the balance below
-        zero stops new metered claims. A reversal may omit `team`: the
-        payment it reverses was granted to exactly one team, and the
-        reversal lands there.
-
-        A replay must carry the terms it carried the first time: a request
-        naming a `kind` and `reference` another grant holds under a different
-        `amount_micro` or `reverses` is refused with 409.
-
-        A new `free` grant that would lift the team's balance above $5,000
-        is refused with 409 and `"code": "balance_cap"`, naming the balance,
-        the amount and the cap. A `paid` grant is never refused by the cap,
-        because its payment already went through and the cap was held when
-        its checkout opened; it is at most one purchase, $500, and names the
-        Checkout Session it settles in `checkout`. A replay of a grant
-        already written is answered as usual, so a redelivered payment still
-        succeeds.
-
-        A caller holding only the checkout service's scope records `paid`
-        grants and is answered 403 for any other kind; a `free` grant or a
-        reversal is the operator's.
+        A `paid` grant is never refused by the team balance cap, because its
+        payment already went through and the cap was held when its checkout
+        opened; it is at most one purchase, $500, and names the Checkout
+        Session it settles in `checkout`.
       requestBody:
         required: true
         content:
@@ -4022,7 +3959,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "409":
           description: >-
-            Another grant holds this kind and reference under different terms, the payment drew an early fraud warning and is refunded rather than granted (`payment_warned`), or the grant would lift the balance above the cap (`balance_cap`, with `balance_micro`, `cap_micro` and `amount_micro`).
+            Another grant holds this reference under different terms, or the payment drew an early fraud warning and is refunded rather than granted (`payment_warned`).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
@@ -4038,11 +3975,11 @@ paths:
         the payment funded. A positive `amount_micro` smaller than that takes
         back only that much, as a partial refund does. The balance may go below zero, which stops the
         team's new metered claims. `reference` names the reversal, such as
-        `refund:<payment id>` for an operator's refund or the dispute id for
-        a lost chargeback; a repeat under it answers 200 with the reversal
-        already written, and a payment already taken back whole answers 200
-        with no `grant`. The controller never moves money: an operator's
-        refund is issued in the Stripe dashboard.
+        the refund id for a refund or the dispute id for a lost chargeback;
+        a repeat under it answers 200 with the reversal already written, and
+        a payment already taken back whole answers 200 with no `grant`. The
+        controller never moves money: an operator issues a refund in the
+        Stripe dashboard, and the checkout service reverses it here.
       requestBody:
         required: true
         content:
@@ -4075,19 +4012,18 @@ paths:
     post:
       x-sparkwing-scope: credits.grant
       tags: [credits]
-      summary: Hold a team's cloud usage for a dispute, or release holds.
+      summary: Hold the team a disputed payment funded.
       description: |
         A hold is one per dispute, and a team is held while any of its holds
         stands: its metered claims are refused with 402 and
         `"code": "credits_frozen"`, so no new cloud work starts, while work
         already running finishes. A hold names the team by `payment_id`, a
-        payment it made, or by `team`, and names the `dispute_id`. A dispute
-        is bound to the payment and team its first hold named: holding it
-        again for them, released or not, writes nothing, and holding it for
-        another payment is refused with 409.
-        `release` lifts the hold of `dispute_id`, or every hold on the team
-        when no dispute is named. Naming a team and releasing are the
-        operator's; the checkout service holds by payment and never releases.
+        payment it made, and names the `dispute_id`. A dispute is bound to
+        the payment and team its first hold named: holding it again for
+        them, released or not, writes nothing, and holding it for another
+        payment is refused with 409. The checkout service holds and never
+        releases; the operator releases a dispute's hold through
+        `POST /api/v1/operator/teams/{team}/unfreeze`.
       requestBody:
         required: true
         content:
@@ -4095,12 +4031,11 @@ paths:
             schema:
               x-sparkwing-go-type: pkg/controller.creditFreezeReq
               type: object
+              required: [payment_id, dispute_id]
               properties:
                 payment_id: {type: string}
-                team: {type: string}
                 dispute_id: {type: string, description: The dispute the hold is for.}
                 reason: {type: string}
-                release: {type: boolean, description: "Lift the dispute's hold, or every hold on the team."}
       responses:
         "200":
           description: The team's holds as they now stand.
@@ -4114,10 +4049,9 @@ paths:
                   team: {type: string}
                   frozen: {type: boolean}
                   disputes: {type: array, items: {type: string}, description: The disputes still holding the team.}
-                  released: {type: integer, format: int64, description: How many holds a release lifted.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
+        "404": {description: "No paid grant carries the payment id, or the team is not registered."}
         "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
 
   /api/v1/credits/checkouts/closed:
@@ -6151,85 +6085,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/signups/waitlist:
-    get:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: List waitlisted users, oldest first.
-      parameters:
-        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}, description: At most this many; defaults to 1000.}
-      responses:
-        "200":
-          description: The waitlist.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [accounts]
-                properties:
-                  accounts:
-                    type: array
-                    items:
-                      x-sparkwing-go-type: pkg/controller.waitlistedJSON
-                      type: object
-                      required: [id, email, name, reason, provider, created_at, waitlisted_at]
-                      properties:
-                        id: {type: string}
-                        email: {type: string}
-                        name: {type: string}
-                        reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
-                        provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
-                        created_at: {type: integer, format: int64, description: Unix seconds.}
-                        waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/signups/waitlist/approve:
-    post:
-      x-sparkwing-scope: admin
-      tags: [users]
-      summary: Admit waitlisted users by id, or the oldest n.
-      description: >-
-        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. Each admission and its account.admitted business event, naming the caller, commit together. The controller runs the deployment's approval notifier for each admission.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.approveWaitlistReq
-              type: object
-              description: Name exactly one of `account_ids` and `oldest`, at most 1000.
-              properties:
-                account_ids:
-                  type: array
-                  items: {type: string}
-                oldest: {type: integer, minimum: 1}
-      responses:
-        "200":
-          description: The users admitted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [approved]
-                properties:
-                  approved:
-                    type: array
-                    items:
-                      x-sparkwing-go-type: pkg/controller.approvedJSON
-                      type: object
-                      required: [id, email, active_team]
-                      properties:
-                        id: {type: string}
-                        email: {type: string}
-                        active_team: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /internal/storage/reserve:
     post:
       x-sparkwing-scope: public
@@ -7009,7 +6864,7 @@ paths:
       tags: [operator]
       summary: Grant, revoke or reset a team's billing trust from the operator console.
       description: >-
-        Takes the body and answers the shape of POST /api/v1/teams/{team}/trust, and records the operator's account as the actor. A limit, daily cap, rung or runner cap on a revoked team is refused until trust is granted without one.
+        A granted team buys and spends up to $500 over 30 days, or `limit_cents` when given, and spends up to $200 in a UTC day, or `daily_cap_cents`, whatever the automatic rule says. With a card on file it is charged each time its debt reaches $100, or `rung_cents`, and `runner_cap` sets the Cloud nodes it holds at once in place of `max_concurrent_runners`. Each override is only for `granted`, and zero or absent returns it to the default. A revoked team is held to the new-team $50 over 30 days and $25 a day even when the rule would trust it, and `automatic` returns the team to the rule. A team under a hold of any cause is untrusted, even when granted, until the hold is released. A limit, daily cap, rung or runner cap on a revoked team is refused until trust is granted without one. The change records the operator's account, the reason, the overrides, and the trust before and after as a business event.
       requestBody:
         required: true
         content:
@@ -7046,7 +6901,7 @@ paths:
       tags: [operator]
       summary: Release a team's holds.
       description: >-
-        Releases every hold the operator console placed, and never a payment dispute's hold. Each release and its team.unfrozen business event, naming the operator and reason, commit together.
+        With no `hold`, releases every hold the operator console or the controller's break-glass command placed, and never a payment dispute's hold. With `hold`, releases that one hold of the team's, a payment dispute's included, and answers 404 when the team holds no such hold. Each release and its team.unfrozen business event, naming the operator and reason, commit together.
       requestBody:
         required: true
         content:
@@ -7057,6 +6912,7 @@ paths:
               required: [reason]
               properties:
                 reason: {type: string, description: "Why, up to 500 characters; recorded with the action."}
+                hold: {type: string, description: "The one hold to release, as the team's `holds` name it."}
       responses:
         "200":
           description: The team's holds after the change.
@@ -8539,6 +8395,9 @@ components:
         trust_at: {type: integer, format: int64, description: Unix seconds.}
         trust_reason: {type: string}
         limit_override_cents: {type: integer, format: int64}
+        daily_cap_cents: {type: integer, format: int64, description: "The granted team's daily spend cap override; absent is the default."}
+        rung_cents: {type: integer, format: int64, description: "The debt at which the granted team's card is charged; absent is the default."}
+        runner_cap: {type: integer, format: int64, description: "The Cloud nodes the granted team holds at once; absent is the default."}
         purchase_limit_cents: {type: integer, format: int64}
         purchased_30d_cents: {type: integer, format: int64}
     CreditGrant:
@@ -8586,11 +8445,10 @@ components:
       type: object
       required: [kind, amount_micro]
       properties:
-        kind: {type: string, description: "free, paid or reversal."}
-        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; 100,000 is one credit and 1,000,000 one cent, and one grant may not exceed 10^15."}
-        reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
-        reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
-        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller except on a reversal, which lands in the team its payment was granted to; defaults to the default team otherwise."}
+        kind: {type: string, enum: [paid]}
+        amount_micro: {type: integer, format: int64, description: "Micro-credits to add; 100,000 is one credit and 1,000,000 one cent, and one grant may not exceed 10^15."}
+        reference: {type: string, description: "The payment id. A non-empty one is idempotent."}
+        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller; defaults to the default team otherwise."}
         checkout: {type: string, description: "Checkout Session id a paid grant settles, so the checkout it opened stops counting against the team's balance cap."}
     PaymentReversal:
       x-sparkwing-go-type: pkg/controller.reversePaymentJSON

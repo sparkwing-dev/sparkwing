@@ -13,15 +13,16 @@ type creditBalance struct {
 	BalanceMicro int64 `json:"balance_micro"`
 }
 
-func TestCreditsGrant_FundsTheTeamTheOperatorNames(t *testing.T) {
+func TestCreditsGrant_FundsTheTeamTheServiceNames(t *testing.T) {
 	f := newIdentityFixture(t)
 	admin := "Bearer " + f.admin
+	service := f.creditsGrantToken()
 	signed := f.signIn(person("sub-demo", "demo@example.test", "Demo"))
 	team := signed.ActiveTeam.Slug
 	grant := func(body map[string]any) int {
 		t.Helper()
-		body["kind"], body["amount_micro"] = "free", int64(5_000_000)
-		return f.call("POST", "/api/v1/credits/grants", admin, body, nil)
+		body["kind"], body["amount_micro"], body["reference"] = "paid", int64(5_000_000), "pi_demo"
+		return f.call("POST", "/api/v1/credits/grants", service, body, nil)
 	}
 
 	if code := grant(map[string]any{}); code != http.StatusBadRequest {
@@ -30,7 +31,7 @@ func TestCreditsGrant_FundsTheTeamTheOperatorNames(t *testing.T) {
 	if code := grant(map[string]any{"team": "no-such-team"}); code != http.StatusNotFound {
 		t.Errorf("a grant to an unregistered team = %d want 404", code)
 	}
-	if code := grant(map[string]any{"team": team, "reference": "demo-1"}); code != http.StatusCreated {
+	if code := grant(map[string]any{"team": team}); code != http.StatusCreated {
 		t.Fatalf("a grant to %s = %d want 201", team, code)
 	}
 
@@ -58,8 +59,8 @@ func TestCreditsGrant_ASingleTeamControllerStillFundsDefault(t *testing.T) {
 	})
 	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
 	admin := "Bearer " + f.admin
-	if code := f.call("POST", "/api/v1/credits/grants", admin,
-		map[string]any{"kind": "free", "amount_micro": int64(1_000_000)}, nil); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/credits/grants", f.creditsGrantToken(),
+		map[string]any{"kind": "paid", "amount_micro": int64(1_000_000), "reference": "pi_1"}, nil); code != http.StatusCreated {
 		t.Fatalf("an unnamed grant on a single-team controller = %d want 201", code)
 	}
 	var bal creditBalance

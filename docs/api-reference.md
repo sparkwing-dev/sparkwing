@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes answer only the signed-in session of an account the controller lists with --operator-accounts; no token reaches them.
+Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check except `credits.grant`, which only the checkout service's own token passes. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes answer only the signed-in session of an account the controller lists with --operator-accounts; no token reaches them.
 
 ## Controller
 
@@ -192,8 +192,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/services` | `authenticated` |
 | `GET` | `/api/v1/signups` | `admin` |
 | `PUT` | `/api/v1/signups` | `admin` |
-| `GET` | `/api/v1/signups/waitlist` | `admin` |
-| `POST` | `/api/v1/signups/waitlist/approve` | `admin` |
 | `GET` | `/api/v1/storage` | `runs.read` |
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
@@ -242,8 +240,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `DELETE` | `/api/v1/teams/{team}` | `admin` |
 | `PUT` | `/api/v1/teams/{team}/repos/{owner}/{name}/dispatch` | `admin` |
-| `GET` | `/api/v1/teams/{team}/trust` | `admin` |
-| `POST` | `/api/v1/teams/{team}/trust` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

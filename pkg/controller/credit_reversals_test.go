@@ -47,17 +47,17 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 		{"kind": "free", "amount_micro": 500 * cent, "team": owner.team},
 		{"kind": "reversal", "amount_micro": -100 * cent, "reference": "re_1", "reverses": "pi_1"},
 	} {
-		if code := f.call("POST", "/api/v1/credits/grants", grant, body, nil); code != http.StatusForbidden {
-			t.Errorf("a %s grant with credits.grant = %d want 403", body["kind"], code)
+		if code := f.call("POST", "/api/v1/credits/grants", grant, body, nil); code != http.StatusBadRequest {
+			t.Errorf("a %s grant with credits.grant = %d want 400", body["kind"], code)
 		}
 	}
 	if code := f.call("POST", "/api/v1/credits/freezes", grant,
-		map[string]any{"team": owner.team, "dispute_id": "dp_x"}, nil); code != http.StatusForbidden {
-		t.Errorf("freezing a named team with credits.grant = %d want 403", code)
+		map[string]any{"team": owner.team, "dispute_id": "dp_x"}, nil); code != http.StatusBadRequest {
+		t.Errorf("freezing a named team with credits.grant = %d want 400", code)
 	}
 	if code := f.call("POST", "/api/v1/credits/freezes", grant,
-		map[string]any{"payment_id": "pi_1", "release": true}, nil); code != http.StatusForbidden {
-		t.Errorf("releasing with credits.grant = %d want 403", code)
+		map[string]any{"payment_id": "pi_1", "release": true}, nil); code != http.StatusBadRequest {
+		t.Errorf("releasing with credits.grant = %d want 400", code)
 	}
 	if code := f.call("GET", "/api/v1/credits/units", grant, nil, nil); code != http.StatusOK {
 		t.Errorf("units = %d want 200", code)
@@ -169,13 +169,15 @@ func TestCreditsGrantScopeIsTheOperatorsToMint(t *testing.T) {
 	}
 }
 
-// An operator's refund and a lost chargeback reverse what a payment still
-// has, in the team it funded. A hold named by payment holds that team per
-// dispute, replaying it changes nothing, and only the operator releases it.
+// A refund and a lost chargeback reverse what a payment still has, in the
+// team it funded. A hold named by payment holds that team per dispute,
+// replaying it changes nothing, and only the operator's console releases it.
 func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
 	other := f.user("x", "xena@example.com")
+	operator := f.user("op", "korey@example.com")
+	f.srv.WithOperatorAccounts([]string{operator.id})
 	grant := f.creditsGrantToken()
 	cent := int64(store.MicroCreditsPerCent)
 	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
@@ -241,26 +243,28 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	}, &rev); code != http.StatusOK || rev.Created {
 		t.Errorf("a replayed reversal = %d %+v, want 200 with nothing written", code, rev)
 	}
-	if code := f.call("POST", "/api/v1/credits/reversals", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/reversals", grant, map[string]any{
 		"payment_id": "pi_1", "reference": "refund:pi_1",
 	}, &rev); code != http.StatusOK || rev.Created {
 		t.Errorf("a refund of a payment already reversed = %d %+v, want 200 with nothing written", code, rev)
 	}
-	if code := f.call("POST", "/api/v1/credits/reversals", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/reversals", grant, map[string]any{
 		"payment_id": "pi_unknown", "reference": "refund:pi_unknown",
 	}, nil); code != http.StatusNotFound {
 		t.Errorf("an unknown payment = %d want 404", code)
 	}
 
-	if code := f.call("POST", "/api/v1/credits/freezes", "Bearer "+f.admin, map[string]any{
-		"dispute_id": "dp_1", "release": true,
-	}, &frozen); code != http.StatusOK || !frozen.Frozen || len(frozen.Disputes) != 1 {
-		t.Fatalf("release of one dispute = %d %+v, want dp_2 still holding the team", code, frozen)
+	unfreeze := "/api/v1/operator/teams/" + owner.team + "/unfreeze"
+	var held struct {
+		Frozen bool     `json:"frozen"`
+		Holds  []string `json:"holds"`
 	}
-	if code := f.call("POST", "/api/v1/credits/freezes", "Bearer "+f.admin, map[string]any{
-		"team": owner.team, "release": true,
-	}, &frozen); code != http.StatusOK || frozen.Frozen {
-		t.Fatalf("release of the team = %d %+v", code, frozen)
+	if code := f.call("POST", unfreeze, operator.auth, map[string]any{"hold": "dp_1", "reason": "dispute won"}, &held); code != http.StatusOK ||
+		!held.Frozen || len(held.Holds) != 1 {
+		t.Fatalf("release of one dispute = %d %+v, want dp_2 still holding the team", code, held)
+	}
+	if code := f.call("POST", unfreeze, operator.auth, map[string]any{"hold": "dp_2", "reason": "dispute won"}, &held); code != http.StatusOK || held.Frozen {
+		t.Fatalf("release of the last dispute = %d %+v", code, held)
 	}
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
 	if b.Frozen {
@@ -346,7 +350,7 @@ func TestAReversalOfAnUnknownPaymentAnswersOnly404(t *testing.T) {
 	logs := &lockedBuffer{}
 	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, logger: slog.New(slog.NewJSONHandler(logs, nil))})
 	var body map[string]any
-	if code := f.call("POST", "/api/v1/credits/reversals", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/reversals", f.creditsGrantToken(), map[string]any{
 		"payment_id": "pi_unknown", "reference": "refund:pi_unknown",
 	}, &body); code != http.StatusNotFound || body["error"] == nil {
 		t.Fatalf("unknown payment = %d %+v, want one 404 error document", code, body)

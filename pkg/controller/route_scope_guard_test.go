@@ -146,7 +146,7 @@ func routeScope(handler ast.Expr) (string, bool) {
 	// which is narrower than any scope.
 	case name == "requireOperator":
 		return "operator", true
-	case name != "requireScope":
+	case name != "requireScope" && name != "requireServiceScope":
 		return "", false
 	}
 	scope, ok := call.Args[0].(*ast.Ident)

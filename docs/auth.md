@@ -158,9 +158,10 @@ a reservation a node did not use; each names the run, node, token prefix, and
 seconds it covered, and the class and rate it was billed at, so a later change
 to the table never reprices a charge already written.
 
-Sparkwing Cloud operators read balances and history, change pricing, and grant
-credits through the private `sparkwing-ops` tool. The controller's credit API
-routes remain the authority.
+Sparkwing Cloud operators read balances and history and change pricing through
+the private `sparkwing-ops` tool, and grant credits from the
+[operator console](#operator-console). The controller's credit API routes
+remain the authority.
 
 ## Buying credits
 
@@ -184,7 +185,8 @@ redelivered webhook grants once. The service holds a token carrying only
 `credits.grant`, which the operator mints with
 `sparkwing cluster tokens create --type service --principal checkout-service --scope credits.grant`; it records paid
 grants, holds by payment, and reads the ledger's units, and every
-other route refuses it. A controller with no `--billing-url` sells no credits
+other route refuses it. Those routes answer only a token carrying
+`credits.grant` itself: an admin token gets `403`. A controller with no `--billing-url` sells no credits
 and answers the checkout route with `503` and
 `"code": "checkout_unavailable"`.
 
@@ -212,15 +214,13 @@ just before expiry is granted when its webhook arrives, and Stripe retries a
 webhook for up to three days. A team earns trust when its
 oldest unrefunded payment is at least 30 days old, it has spent at least $50,
 and it has never been held over a dispute. The operator grants or revokes
-trust, with a reason, through `POST /api/v1/teams/{team}/trust`; a grant may
+trust, with a reason, from the [operator console](#operator-console); a grant may
 raise the limit to $5,000, and a revocation holds the team to the new-team
 limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
 remains of it.
 
-Purchases are final, so a refund is the operator's decision. The private
-`sparkwing-ops` refund command still takes back what a purchase has on the
-ledger and prints the Stripe dashboard page for the refund. A refund issued
-in Stripe also reaches the ledger: the checkout service answers
+Purchases are final, so a refund is the operator's decision, issued in the
+Stripe dashboard. The refund reaches the ledger: the checkout service answers
 `charge.refunded` by reversing exactly what each refund returned, under the
 refund's id, through `POST /api/v1/credits/reversals` with `amount_micro`. A
 reversal never takes back more than its payment has left, and replaying it
@@ -276,8 +276,8 @@ lost reverses the purchase the way a refund does and holds the team too, so a
 lost dispute holds it even when Stripe delivered the close before the open. A
 dispute won logs `alert=dispute_won` and changes nothing: the checkout service
 never releases a team, because one dispute's outcome says nothing about
-another's. The operator uses the private `sparkwing-ops` tool to release one
-dispute's hold or every hold on a team. Replaying any
+another's. The operator releases a settled dispute's hold from the
+[operator console](#operator-console). Replaying any
 dispute event changes nothing, and a replayed hold never undoes a release. A
 dispute is bound to the one payment and team its first hold named: a hold or
 a lost-dispute reversal that names the same dispute for another payment is
@@ -288,10 +288,19 @@ so no claim that read the team as not held commits after the hold.
 ## Operator console
 
 The dashboard's `/operator` page lets the operator look up a team and act on
-its billing from a browser: grant, revoke or reset trust, set or clear the
-purchase-limit override, grant free credits up to $5,000, and hold or release
-the team. Each action takes a reason and a confirmation step naming the team
-and the effect.
+its billing from a browser: grant, revoke or reset trust, set or clear a
+trusted team's overrides (the 30-day purchase limit, and optionally its daily
+spend cap, the debt at which its card is charged and its Cloud node cap),
+grant free credits up to $5,000, hold or release the team, and release a
+payment dispute's hold once the dispute is settled. Its Waitlist tab lists the
+accounts waiting on the [sign-up gate](#sign-up-gate), newest first, and
+admits them. Each team action takes a reason and a confirmation step naming
+the team and the effect.
+
+Trust, overrides, free grants, holds and the waitlist are reachable only here.
+No bearer token reaches them, an admin token included, and the checkout
+service's `credits.grant` routes refuse every other credential, so a
+standing credential grants no credit, changes no trust and releases no hold.
 
 Only the operator's own signed-in account reaches it. The controller lists
 operator accounts by account id with `--operator-accounts`
@@ -309,10 +318,35 @@ operator and the reason: `billing.trust_changed` for trust and the limit,
 `credit.granted` for a grant, `team.frozen` and `team.unfrozen` for holds. A
 grant carries a key, and a retried grant with the same key grants once. A limit
 on a revoked team is refused until trust is granted again without one, so
-raising a limit never undoes a revocation. The console places holds of its own
-and releases only those; a payment dispute's hold stays until it is released
-outside the console. A console hold is a hold like a dispute's, so it also ends
-the team's automatic trust.
+raising a limit never undoes a revocation. Each trust change replaces every
+override, so one left empty returns to its default. Unfreeze releases the
+console's own holds and never a dispute's; a dispute's hold is released by
+name with `hold` on `POST /api/v1/operator/teams/{team}/unfreeze`. A console
+hold is a hold like a dispute's, so it also ends the team's automatic trust.
+
+### Break-glass
+
+When console sign-in is down, the operator holds or releases a team with the
+controller binary itself, run in the controller pod:
+
+```bash
+kubectl exec -n "$NAMESPACE" "deploy/$CONTROLLER" -- \
+  sparkwing-controller admin freeze --team acme --reason "abuse in progress"
+kubectl exec -n "$NAMESPACE" "deploy/$CONTROLLER" -- \
+  sparkwing-controller admin unfreeze --team acme --reason "resolved"
+```
+
+`unfreeze --hold ID` releases that one hold, a payment dispute's included.
+
+It acts on the controller's state database directly, beside the running
+controller, so the cluster access that reaches the pod is the credential and
+the cluster's own audit log records who used it. Pass the
+`--credentials-dir` the controller runs with when its state is in
+PostgreSQL. `freeze` and `unfreeze` behave as the console's actions do and
+commit the same `team.frozen` and `team.unfrozen` business events, with
+`sparkwing-controller admin` as the actor and the reason given; each also
+writes an `audit` line to stderr with `"principal_kind":"break-glass"`. Trust,
+grants and the waitlist wait for the console.
 
 ## Retained storage
 
@@ -490,8 +524,9 @@ already finished still occupies the budget until it ages out of the hour.
 its tokens claimed it, so minting more runner tokens gives a team no more
 concurrency than its spend limits assume. It always applies: unset or zero
 means 100 per team, never unlimited. An operator raises one granted team
-past it with `runner_cap` on `POST /api/v1/teams/{team}/trust`
-(`sparkwing-ops teams trust --runners N`), up to 10,000. Schema v87 replaced the
+past it with the Cloud node cap override in the
+[operator console](#operator-console) (`runner_cap` on
+`POST /api/v1/operator/teams/{team}/trust`), up to 10,000. Schema v87 replaced the
 per-principal cap that scaled with recent payments, and deleted its
 `runner_scale_*` settings. Only an operator sees the controller-wide runner
 count, per-principal counts and `runner_alarm` state; team readers receive
@@ -534,11 +569,13 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
-| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, and only the operator mints it; no team's token may carry it |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, the card routes under `/api/v1/credits/`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route, only the operator mints it, and no team's token may carry it. These routes answer only a token carrying it; `admin` does not stand in |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
-scope check passes if the principal carries `admin`.
+scope check passes if the principal carries `admin` -- except on the
+`credits.grant` routes and the [operator console](#operator-console)'s
+routes, which no admin token reaches.
 
 A runner needs `nodes.claim`, `triggers.claim`, `runs.state` and
 `secrets.read`. That set claims work, drives the run it claimed from plan to
@@ -1020,14 +1057,20 @@ controller with none logs `signup.free_tier_unwired` once at startup and
 treats the free tier as open. Google states no account age, so the age
 check applies to GitHub alone.
 
-The operator routes need the `admin` scope:
+The gate's settings need the `admin` scope:
 
 | Route | Does |
 |-------|------|
 | `GET /api/v1/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
 | `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
-| `GET /api/v1/signups/waitlist` | waitlisted users, oldest first, with the reason each was waitlisted; `?limit=` reads at most 1000 |
-| `POST /api/v1/signups/waitlist/approve` | admits `{"account_ids": [...]}` or `{"oldest": n}`, at most 1000 at a time; each admitted user without a team gets its personal space, and approving an admitted user again does nothing |
+
+The operator lists and admits waitlisted users from the
+[operator console](#operator-console)'s Waitlist tab, which no token reaches.
+`GET /api/v1/operator/waitlist` lists them newest first, with the reason each
+was waitlisted, 50 at a time (`?limit=` up to 1000, `?offset=`), and
+`POST /api/v1/operator/waitlist/approve` admits `{"account_ids": [...]}` or
+`{"oldest": n}`, at most 1000 at a time; each admitted user without a team
+gets its personal space, and approving an admitted user again does nothing.
 
 An admitted user's open session moves into its new space on its next
 `GET /api/v1/me`. The controller logs `signup.approved` for each admission and

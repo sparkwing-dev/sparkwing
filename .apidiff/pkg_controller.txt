@@ -252,6 +252,7 @@ type ObjectStoreBreakerResponse struct {
 	Thawed bool
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
+func OperatorReason(reason string) (string, error)
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 const PaymentWarnedCode = "payment_warned"
 type Principal struct {
