@@ -100,6 +100,10 @@ unlock.
 - **controller + cli (Breaking):** Password users are removed; the dashboard signs in with Google, GitHub or an operator token
   `POST /api/v1/auth/login`, `GET`/`POST`/`DELETE /api/v1/users`, the `/login/bootstrap` first-admin form and `sparkwing cluster users add|list|delete` are gone, with the client's `CreateUser`, `ListUsers` and `DeleteUser`. The `/login` form takes a user token holding `admin`, such as the bootstrap admin token, and the session follows that token, so revoking it signs its browsers out. Schema v96 drops the users table and ends every password session. Configure an identity provider or hold an admin token before upgrading. See [migration guide](docs/migrations/_unreleased.md#password-users-are-removed).
 
+### Security
+- **controller:** The team boundary reads each authenticated route's tenant resource from one route table and refuses a route the table does not list
+  Every route is declared by what its path names: none, run, trigger, secret, cron, member, invitation, token, pipeline, concurrency key, git credential, GitHub binding, or for operator routes a row of any team. A run or trigger of another team answers `404` as before, a name keyed inside a team needs the caller's team to resolve (`403 no_team` otherwise), and a route that names any team's row must demand `admin`, the operator's session or a service scope. A route missing from the table answers `500`, and a test fails until it is listed. [Security](docs/security.md#team-boundary-route-table) states which names bound anything inside a team: repository and git ref for cache writes, and a secret's pipeline or shared scope for what a claim reads.
+
 
 ## [v0.67.0] - 2026-10-12
 ### Added

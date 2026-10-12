@@ -19,10 +19,19 @@ Run lists use that team, and a run belonging to another team is answered as
 not found. See [Teams and sign-in](auth.md#teams-and-sign-in).
 
 Within a team, scopes and member roles decide which operations a caller may
-perform. Repository and environment names do not create separate tenant
-boundaries inside that team. Repository and git ref do bound a run's cache
-writes: a run's cache and binary entries are written under its own repository
-and ref, as [Cache service](#cache-service) describes.
+perform. The team is the only tenant boundary. Inside a team, two kinds of
+name bound something, and nothing else does:
+
+- **Repository and git ref (branch) bound cache writes.** A run's cache and
+  binary entries are written under its own repository and ref, as
+  [Cache service](#cache-service) describes.
+- **A secret's pipeline or shared scope bounds which secrets a run's claim
+  token reads**, as the run's own plan declares them.
+
+Environment, pipeline (outside secrets), cron, concurrency key, git host and
+every other name are labels inside the team. Scopes, roles and claims decide
+who reaches them, not the name, and a service that reads these names must not
+treat one as a boundary.
 
 **Operators and service credentials have separate authority.** `admin` is
 deployment authority. Service scopes such as `credits.grant`, `claims.launch`
@@ -189,6 +198,35 @@ kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
 scope is the superset.
+
+### Team boundary route table
+
+Every route behind authentication is listed in one table in the controller
+(`tenantRoutes` in `pkg/controller/tenant_routes.go`) by the tenant resource
+its path names: none, run, trigger, secret, cron, member, invitation, token,
+pipeline, concurrency key, git credential, GitHub runner binding or App
+installation, or for operator routes a team, account, token or other row of
+any team. The team boundary looks up the route the router matched, never
+the raw path, and acts on its owner:
+
+- **Run and trigger:** the `{id}` must be a run or trigger of the caller's
+  team. Another team's answers `404` as a missing run.
+- **Names keyed inside a team** (secret, cron, member, invitation, team
+  token, pipeline, concurrency key, git credential, GitHub binding): the
+  caller's team must resolve, or the request is refused `403 no_team`. The
+  handler then reads the name through that team's handle, so another team's
+  row under the same name is never reached.
+- **The signed-in account's own rows** (a sign-in identity, an invitation
+  to accept): the handler admits only a signed-in account.
+- **Rows of any team** (operator team, account and token routes): a test
+  holds each such route to `admin`, the operator's session or a service
+  scope.
+
+A route missing from the table answers `500` before its handler runs, and a
+test fails while `server.go` registers a route the table lacks. Below the
+routes, every store statement that touches a tenant-owned table carries a
+team predicate unless it is a named, reviewed cross-team exception, such as
+a reaper or a schema step, with its reason.
 
 ### Request audit log
 
